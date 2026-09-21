@@ -23,7 +23,10 @@ use zeroshot_engine::native_v2_target_authority::{
     TargetOecpSession, TargetRunReceipt, TargetRunRequest,
 };
 
-use super::contract::{ControllerDescriptor, authority_error, read_success_json};
+use super::contract::{
+    ControllerDescriptor, authority_error, read_success_json, require_response_route,
+};
+use super::access::AccessToken;
 use super::{HostedLogin, TargetHttpControlAuthority};
 use crate::native_v2_target::{
     TargetAccess, TargetAuthorityError, TargetControlAuthority, TargetOecpAccess, TargetRecord,
@@ -34,7 +37,7 @@ impl TargetHttpControlAuthority {
         &self,
         target: &TargetRecord,
         request: &openengine_cluster_protocol::TargetOecpSessionRequest,
-        controller_access: (ControllerDescriptor, Option<String>),
+        controller_access: (ControllerDescriptor, Option<AccessToken>),
     ) -> Result<TargetOecpAccess, TargetAuthorityError> {
         let (controller, access) = controller_access;
         let response = self
@@ -49,6 +52,9 @@ impl TargetHttpControlAuthority {
             .map_err(|error| {
                 TargetAuthorityError::request_failed("target session request", &error)
             })?;
+        require_response_route(&response, &controller.session_url)?;
+        self.invalidate_rejected_access(&response, access.as_ref())
+            .await;
         let session: TargetOecpSession =
             read_success_json(response, &controller.session_url, "target OECP session").await?;
         TargetOecpAccess::new(session.endpoint, session.bearer_token, &target.access)
@@ -70,6 +76,8 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
             .access
             .device_token()
             .ok_or_else(|| authority_error("direct target does not use login"))?;
+        let mut cached = self.hosted_access.lock().await;
+        *cached = None;
         let (auth, controller) = self.descriptors(target).await?;
         let _refresh_guard = self.lock_refresh_family(&target.id).await?;
         self.login_inner(HostedLogin {
@@ -97,6 +105,9 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
             .send()
             .await
             .map_err(|error| TargetAuthorityError::request_failed("target run request", &error))?;
+        require_response_route(&response, &controller.run_url)?;
+        self.invalidate_rejected_access(&response, access.as_ref())
+            .await;
         let receipt: TargetRunReceipt =
             read_success_json(response, &controller.run_url, "target run").await?;
         Ok(RunSubmitResult {

@@ -11,6 +11,8 @@ use super::super::{
     controller_authority::{TargetCredentialStore, credentials::CredentialStorePreparation},
 };
 
+#[path = "hosted_authority/access_cache.rs"]
+mod access_cache;
 #[path = "hosted_authority/connections.rs"]
 mod connections;
 pub(super) use connections::test_authority;
@@ -125,6 +127,7 @@ fn authority_response(
         return response;
     }
     match (request.method.as_str(), request.path.as_str()) {
+        ("POST", "/native-v2/profiles/list") => json!({"profiles": []}).to_string(),
         ("GET", "/oauth/metadata") => oauth_metadata(origin),
         ("GET", "/.well-known/zeroshot-native-v2") => hosted_discovery(origin),
         ("POST", "/oauth/device") => json!({
@@ -267,6 +270,18 @@ fn hosted_discovery(origin: &str) -> String {
             "cachePolicy": "no-store"
         },
         "extensions": {
+            "run_profiles": {
+                "kind": "zeroshot.run-profiles/v1",
+                "baseUrl": origin,
+                "routeTemplates": {
+                    "list": "/native-v2/profiles/list",
+                    "show": "/native-v2/profiles/show",
+                    "set": "/native-v2/profiles/set",
+                    "delete": "/native-v2/profiles/delete",
+                    "default": "/native-v2/profiles/default",
+                    "run": "/native-v2/profiles/run"
+                }
+            },
             "hosted_runs": {
                 "kind": "zeroshot.hosted-runs/v1",
                 "base_url": origin,

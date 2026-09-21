@@ -6,13 +6,14 @@ use reqwest::header::{ACCEPT, CACHE_CONTROL};
 
 use super::contract::{ConnectionsDescriptor, authority_error};
 use super::TargetHttpControlAuthority;
+use super::access::AccessToken;
 use crate::native_v2_target::{TargetAccess, TargetAuthorityError, TargetRecord};
 
 impl TargetHttpControlAuthority {
     async fn connection_access(
         &self,
         target: &TargetRecord,
-    ) -> Result<(ConnectionsDescriptor, String), TargetAuthorityError> {
+    ) -> Result<(ConnectionsDescriptor, AccessToken), TargetAuthorityError> {
         if matches!(target.access, TargetAccess::Direct) {
             return Err(authority_error(
                 "direct target does not advertise connection management",
@@ -39,7 +40,8 @@ impl TargetHttpControlAuthority {
             .header(ACCEPT, "application/json")
             .header(CACHE_CONTROL, "no-store")
             .json(&request);
-        self.hosted_json(builder, "connection list", None).await
+        self.hosted_json((builder, &access), "connection list", None)
+            .await
     }
 
     pub(super) async fn connection_set(
@@ -53,7 +55,8 @@ impl TargetHttpControlAuthority {
             .header(ACCEPT, "application/json")
             .header(CACHE_CONTROL, "no-store")
             .json(&request);
-        self.hosted_json(builder, "connection set", None).await
+        self.hosted_json((builder, &access), "connection set", None)
+            .await
     }
 
     pub(super) async fn connection_delete(
@@ -67,6 +70,7 @@ impl TargetHttpControlAuthority {
             .header(ACCEPT, "application/json")
             .header(CACHE_CONTROL, "no-store")
             .json(&request);
-        self.hosted_json(builder, "connection delete", None).await
+        self.hosted_json((builder, &access), "connection delete", None)
+            .await
     }
 }

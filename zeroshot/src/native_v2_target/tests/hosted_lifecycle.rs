@@ -16,7 +16,7 @@ use super::hosted_authority::*;
 #[tokio::test]
 async fn hosted_lifecycle_stays_cloud_owned_from_queue_through_completion() {
     let root = temp_root();
-    let (origin, server) = spawn_target_authority(50).await;
+    let (origin, server) = spawn_target_authority(32).await;
     let (credentials, authority) = test_authority(&root);
     let target = hosted_target("prod", origin);
     credentials
@@ -133,7 +133,14 @@ where
 }
 
 fn assert_cloud_requests(requests: &[CapturedHttpRequest]) {
-    assert_eq!(requests.len(), 50);
+    assert_eq!(requests.len(), 32);
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.path == "/oauth/token")
+            .count(),
+        1
+    );
     assert!(
         requests
             .iter()

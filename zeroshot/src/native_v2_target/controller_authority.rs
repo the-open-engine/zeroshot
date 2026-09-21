@@ -1,3 +1,4 @@
+mod access;
 mod connections;
 mod contract;
 mod control;
@@ -27,6 +28,7 @@ use self::credentials::{
 };
 use super::registry::default_target_registry_path;
 use super::{TargetAccess, TargetAuthorityError, TargetRecord};
+use self::access::{AccessToken, CachedHostedAccess};
 
 const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const SESSION_KIND: &str = "openengine.target-session/v1";
@@ -45,13 +47,6 @@ struct IssuedAccessToken {
     reusable_until: Instant,
 }
 
-struct CachedMergePlanAccess {
-    target: TargetRecord,
-    routes: MergePlansDescriptor,
-    access_token: String,
-    reusable_until: Instant,
-}
-
 /// One named-target HTTP authority. Hosted access retains the existing OAuth refresh-family flow;
 /// explicit direct access never touches hosted discovery, the credential store, or Authorization.
 #[derive(Clone)]
@@ -61,7 +56,7 @@ pub struct TargetHttpControlAuthority {
     credentials: Arc<dyn TargetCredentialStore>,
     notifier: Arc<dyn DeviceCodeNotifier>,
     refresh_lock_directory: PathBuf,
-    merge_plan_access: Arc<tokio::sync::Mutex<Option<CachedMergePlanAccess>>>,
+    hosted_access: Arc<tokio::sync::Mutex<Option<CachedHostedAccess>>>,
 }
 
 impl TargetHttpControlAuthority {
@@ -93,7 +88,7 @@ impl TargetHttpControlAuthority {
             credentials,
             notifier: Arc::new(StderrDeviceCodeNotifier),
             refresh_lock_directory,
-            merge_plan_access: Arc::new(tokio::sync::Mutex::new(None)),
+            hosted_access: Arc::new(tokio::sync::Mutex::new(None)),
         })
     }
 
@@ -115,7 +110,7 @@ impl TargetHttpControlAuthority {
             credentials,
             notifier,
             refresh_lock_directory,
-            merge_plan_access: Arc::new(tokio::sync::Mutex::new(None)),
+            hosted_access: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -285,15 +280,6 @@ async fn read_token_poll(
 }
 
 impl TargetHttpControlAuthority {
-    async fn access_token(
-        &self,
-        target: &TargetRecord,
-        auth: &HostedAuthDescriptor,
-        audience: &str,
-    ) -> Result<String, TargetAuthorityError> {
-        Ok(self.issue_access_token(target, auth, audience).await?.value)
-    }
-
     async fn issue_access_token(
         &self,
         target: &TargetRecord,
@@ -373,14 +359,14 @@ impl TargetHttpControlAuthority {
     async fn controller_access(
         &self,
         target: &TargetRecord,
-    ) -> Result<(ControllerDescriptor, Option<String>), TargetAuthorityError> {
+    ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
         self.controller_access_inner(target, false).await
     }
 
     async fn workspace_recovery_controller_access(
         &self,
         target: &TargetRecord,
-    ) -> Result<(ControllerDescriptor, Option<String>), TargetAuthorityError> {
+    ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
         self.controller_access_inner(target, true).await
     }
 
@@ -388,7 +374,7 @@ impl TargetHttpControlAuthority {
         &self,
         target: &TargetRecord,
         require_workspace_recovery: bool,
-    ) -> Result<(ControllerDescriptor, Option<String>), TargetAuthorityError> {
+    ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
         match &target.access {
             TargetAccess::Hosted { .. } => {
                 let (auth, controller) = self

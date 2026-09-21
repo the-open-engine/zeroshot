@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use openengine_cluster_protocol::{MergePlan, MergePlanId, MergePlanSubmitRequest};
 use reqwest::header::ACCEPT;
 
@@ -7,7 +5,7 @@ use super::{
     CACHE_CONTROL, MergePlansDescriptor, TargetAccess, TargetAuthorityError,
     TargetHttpControlAuthority, TargetRecord, authority_error,
 };
-use super::super::CachedMergePlanAccess;
+use super::super::access::{AccessToken, HostedAccess};
 
 const MAX_MERGE_PLAN_RESPONSE_BYTES: usize = 1024 * 1024;
 
@@ -22,49 +20,39 @@ impl TargetHttpControlAuthority {
     async fn require_merge_plan_access(
         &self,
         target: &TargetRecord,
-    ) -> Result<(MergePlansDescriptor, String), TargetAuthorityError> {
+    ) -> Result<(MergePlansDescriptor, AccessToken), TargetAuthorityError> {
         if matches!(target.access, TargetAccess::Direct) {
             return Err(authority_error(
                 "direct target does not support hosted merge plans",
             ));
         }
-        let mut cached = self.merge_plan_access.lock().await;
+        let mut cached = self.hosted_access.lock().await;
         if let Some(access) = cached.as_ref()
-            && access.target == *target
-            && Instant::now() < access.reusable_until
+            && let Some(access) = access.merge_plan_access(target)
         {
-            return Ok((access.routes.clone(), access.access_token.clone()));
+            return Ok(access);
         }
         let (auth, controller) = self.descriptors(target).await?;
         let routes = auth.merge_plans.clone().ok_or_else(|| {
             authority_error("hosted target does not advertise zeroshot.merge-plans/v1")
         })?;
         let access = self
-            .issue_access_token(target, &auth, &controller.audience)
+            .access_token_locked(
+                &mut cached,
+                HostedAccess {
+                    target,
+                    auth: &auth,
+                    audience: &controller.audience,
+                },
+            )
             .await?;
-        *cached = Some(CachedMergePlanAccess {
-            target: target.clone(),
-            routes: routes.clone(),
-            access_token: access.value.clone(),
-            reusable_until: access.reusable_until,
-        });
-        Ok((routes, access.value))
-    }
-
-    async fn invalidate_merge_plan_access(&self, target: &TargetRecord, access_token: &str) {
-        let mut cached = self.merge_plan_access.lock().await;
-        if cached
-            .as_ref()
-            .is_some_and(|access| access.target == *target && access.access_token == access_token)
-        {
-            *cached = None;
-        }
+        Ok((routes, access))
     }
 
     async fn execute_merge_plan_operation(
         &self,
         routes: &MergePlansDescriptor,
-        access: &str,
+        access: &AccessToken,
         operation: MergePlanHttpOperation<'_>,
     ) -> Result<MergePlan, TargetAuthorityError> {
         let (request, label) = match operation {
@@ -93,8 +81,12 @@ impl TargetHttpControlAuthority {
                 (request, "merge-plan force-stop")
             }
         };
-        self.hosted_json(request, label, Some(MAX_MERGE_PLAN_RESPONSE_BYTES))
-            .await
+        self.hosted_json(
+            (request, access),
+            label,
+            Some(MAX_MERGE_PLAN_RESPONSE_BYTES),
+        )
+        .await
     }
 
     async fn execute_merge_plan_with_access(
@@ -110,7 +102,6 @@ impl TargetHttpControlAuthority {
                 .await
             {
                 Err(error) if error.is_http_auth_rejection() => {
-                    self.invalidate_merge_plan_access(target, &access).await;
                     if retried {
                         return Err(error);
                     }

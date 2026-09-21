@@ -72,6 +72,10 @@ impl ProviderProcessRunners {
         }
     }
 
+    pub(crate) const fn is_hosted(self) -> bool {
+        matches!(self, Self::Hosted(_))
+    }
+
     pub(crate) fn turn_process(
         self,
         root: &Path,

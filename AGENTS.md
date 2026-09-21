@@ -75,10 +75,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   transport selectors cannot contradict an explicitly selected OpenRouter, Bedrock, or gateway lane.
 - Codex inherits harness settings for web search and sandbox network access. Runtime arguments
   select the admitted model, optional effort, and response contract; they must not override unrelated
-  user preferences. Local and hosted workers and verifiers use approval/sandbox bypass only when the
-  harness's native configuration query proves no authored permission policy. Configured or unavailable policy
-  keeps native behavior. Explicit cached Codex web search also prevents bypass because native full
-  access can promote cached search to live. Configuration probes have a separate ten-second/4 MiB budget, never send a
+  user preferences. Hosted workers and verifiers always use the harness's maximum approval/sandbox
+  bypass inside their disposable capsule and do not query native permission policy. Local workers and
+  verifiers use bypass only when the native configuration query proves no authored policy; configured
+  or unavailable policy keeps native behavior. Explicit cached Codex web search also prevents local
+  bypass because native full access can promote cached search to live. Configuration probes have a
+  separate ten-second/4 MiB budget, never send a
   model prompt, suppress Claude hooks/auth helpers, and require confirmed process cleanup before the
   model turn. They do not rewrite settings files; normal native startup state may still be updated.
   Verifier nodes use the same permission handling as workers across all harnesses. The shared prompt
@@ -95,6 +97,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   approval-review features count as authored policy.
 - The local target registry initializes `cloud` at `https://api.cloud.zeroshot.sh` with a persistent hosted device identity.
 - Named targets store only endpoint, access mode, and login identity. Named runs resolve repository, branch, exact remote revision, and worktree dirtiness client-side from the invoking Git worktree plus per-run overrides; target records never bind repositories.
+- Hosted HTTP authority clones share one bounded in-memory OAuth access-token slot across all
+  hosted operations, including merge-plan discovery routes. Reuse requires the same target, login,
+  OAuth endpoints/client, and audience with more than thirty seconds of token lifetime remaining.
+  Cache misses and login serialize under the shared cache lock before the cross-process refresh-family
+  lock; tokens enter the cache only after session verification and rotated refresh-token persistence.
+  Login clears the slot before attempting authentication. HTTP authentication rejection invalidates
+  only the exact cached issuance, never a newer concurrent token; only merge plans retain their
+  existing one-retry policy. Access tokens remain memory-only, and transport grant expiry continues
+  to use durable observation reconnect/cursors without extending any lifetime.
 - Direct-target submissions keep a separate secret-free local authorization for each run's connection field requirements. Resume must match target-reported requirements to that original authorization before reading the caller environment, constrain outgoing values to those fields, carry the authorization to the successor, and revoke it after workspace discard.
 - Portable worker bindings resolve through the generic `WorkerRegistry` boundary. External binding
   protocol, version, and profile values are bounded opaque strings; the protocol crate must not

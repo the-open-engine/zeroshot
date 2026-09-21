@@ -12,6 +12,7 @@ use super::contract::{
     read_success_json_with_limit, require_response_route,
 };
 use super::TargetHttpControlAuthority;
+use super::access::AccessToken;
 use zeroshot_engine::native_v2_cli::oecp::BoxedSubscription;
 use zeroshot_engine::native_v2_cli::{
     CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
@@ -116,7 +117,7 @@ impl TargetHttpControlAuthority {
     async fn require_hosted_run_access(
         &self,
         target: &TargetRecord,
-    ) -> Result<(HostedRunsDescriptor, String), TargetAuthorityError> {
+    ) -> Result<(HostedRunsDescriptor, AccessToken), TargetAuthorityError> {
         if matches!(target.access, TargetAccess::Direct) {
             return Err(TargetAuthorityError::new(
                 "direct target does not use hosted run lifecycle",
@@ -132,10 +133,11 @@ impl TargetHttpControlAuthority {
 
     pub(super) async fn hosted_json<T: DeserializeOwned>(
         &self,
-        request: RequestBuilder,
+        request: (RequestBuilder, &AccessToken),
         operation: &'static str,
         maximum_bytes: Option<usize>,
     ) -> Result<T, TargetAuthorityError> {
+        let (request, access) = request;
         let request = request.build().map_err(|_| {
             TargetAuthorityError::disconnected(format!("{operation} request failed"))
         })?;
@@ -145,6 +147,9 @@ impl TargetHttpControlAuthority {
             .execute(request)
             .await
             .map_err(|error| TargetAuthorityError::request_failed(operation, &error))?;
+        require_response_route(&response, &expected)?;
+        self.invalidate_rejected_access(&response, Some(access))
+            .await;
         if let Some(maximum_bytes) = maximum_bytes {
             read_success_json_with_limit(response, &expected, operation, maximum_bytes).await
         } else {
@@ -155,20 +160,20 @@ impl TargetHttpControlAuthority {
     pub(super) async fn hosted_get_json<T: DeserializeOwned>(
         &self,
         url: Url,
-        access: &str,
+        access: &AccessToken,
         operation: &'static str,
     ) -> Result<T, TargetAuthorityError> {
         let request = self
             .authorized(self.client.get(url.clone()), access)?
             .header(ACCEPT, "application/json")
             .header(CACHE_CONTROL, "no-store");
-        self.hosted_json(request, operation, None).await
+        self.hosted_json((request, access), operation, None).await
     }
 
     async fn hosted_stream<E>(
         &self,
         url: Url,
-        access: &str,
+        access: &AccessToken,
         operation: &'static str,
     ) -> Result<BoxedSubscription<E>, TargetAuthorityError>
     where
@@ -182,6 +187,8 @@ impl TargetHttpControlAuthority {
             .await
             .map_err(|error| TargetAuthorityError::request_failed(operation, &error))?;
         require_response_route(&response, &url)?;
+        self.invalidate_rejected_access(&response, Some(access))
+            .await;
         if !response.status().is_success() {
             return Err(http_error(response, operation).await);
         }
@@ -247,7 +254,8 @@ impl TargetHttpControlAuthority {
             .header(ACCEPT, "application/json")
             .header(CONTENT_TYPE, "application/json")
             .body("{}");
-        self.hosted_json(request, "hosted run force", None).await
+        self.hosted_json((request, &access), "hosted run force", None)
+            .await
     }
 }
 

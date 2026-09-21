@@ -19,10 +19,11 @@ impl NativeV2CodexAdapter {
         command: &mut ProcessSessionCommand,
         control: &DriverControl,
     ) -> Result<(), NodeRunnerError> {
-        if self
-            .inspect_permission_policy(files, command.clone(), control)
-            .await?
-            == PermissionPolicy::Unset
+        if self.runners.is_hosted()
+            || self
+                .inspect_permission_policy(files, command.clone(), control)
+                .await?
+                == PermissionPolicy::Unset
         {
             command
                 .argv

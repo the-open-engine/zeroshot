@@ -14,7 +14,7 @@ use super::hosted_authority::{spawn_target_authority, test_authority};
 #[tokio::test]
 async fn hosted_connection_crud_uses_only_the_advertised_authenticated_routes() {
     let root = temp_root();
-    let (origin, server) = spawn_target_authority(15).await;
+    let (origin, server) = spawn_target_authority(11).await;
     let (credentials, authority) = test_authority(&root);
     let target = hosted_target("local", origin);
     credentials
