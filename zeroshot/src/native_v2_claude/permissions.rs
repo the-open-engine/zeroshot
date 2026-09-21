@@ -25,11 +25,14 @@ impl ClaudeAdapter {
         command: &mut ProcessSessionCommand,
         control: &DriverControl,
     ) -> Result<(), NodeRunnerError> {
-        if self
-            .inspect_permission_policy(files, command.clone(), control)
-            .await?
-            == PermissionPolicy::Unset
-        {
+        let permissive = if self.runners.is_hosted() {
+            true
+        } else {
+            self.inspect_permission_policy(files, command.clone(), control)
+                .await?
+                == PermissionPolicy::Unset
+        };
+        if permissive {
             command
                 .argv
                 .push("--dangerously-skip-permissions".to_owned());

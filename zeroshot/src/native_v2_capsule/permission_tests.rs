@@ -1,4 +1,4 @@
-//! Exercises actual hosted adapters, including their configuration probes and private copies.
+//! Exercises hosted permission defaults and verifier private copies.
 #![cfg(unix)]
 
 use std::{collections::BTreeMap, fs, sync::Arc};
@@ -19,7 +19,7 @@ use crate::native_v2_runner::{NativeNodeRunner, NodeRunner};
 use crate::worker_catalog::ModelId;
 
 #[tokio::test]
-async fn root_hosted_harness_permission_defaults_preserve_policy_and_verifier_copies() {
+async fn root_hosted_harnesses_always_bypass_without_configuration_inspection() {
     // SAFETY: geteuid only observes process identity.
     if unsafe { libc::geteuid() } != 0 {
         return;
@@ -33,11 +33,11 @@ async fn root_hosted_harness_permission_defaults_preserve_policy_and_verifier_co
     }
 }
 
-// Real configuration control traffic only: the fixture intercepts every model invocation.
-// Run explicitly as root with the pinned CLI executable paths in these two variables.
+// Supplying real native CLIs makes any accidental hosted configuration query observable while the
+// fixture continues to intercept every model invocation.
 #[tokio::test]
 #[ignore = "requires root and ZEROSHOT_TEST_CODEX_EXECUTABLE/ZEROSHOT_TEST_CLAUDE_EXECUTABLE"]
-async fn root_hosted_native_configuration_preserves_policy_through_correction() {
+async fn root_hosted_corrections_never_query_native_configuration() {
     // SAFETY: geteuid only observes process identity.
     assert_eq!(
         unsafe { libc::geteuid() },
@@ -156,7 +156,7 @@ async fn hosted_case(harness: &str, verifier: bool, policy: &str, native: Option
         "{harness} verifier={verifier} policy={policy}: {logs}"
     );
     assert!(!logs.contains("private-config-sentinel"));
-    assert_eq!(workspace.join("inspection-proof").exists(), !verifier);
+    assert!(!workspace.join("inspection-proof").exists());
     assert_eq!(workspace.join("model-proof").exists(), !verifier);
     runner.close_run(&RunId::new("permission-test")).await;
 }
@@ -323,16 +323,14 @@ if probe:
                 'subtype':'success','request_id':request['request_id'],'response':result}}
         print(json.dumps(response), flush=True)
     sys.exit(0)
-assert pathlib.Path('inspection-proof').read_text() == 'inspected'
+assert not pathlib.Path('inspection-proof').exists()
 flag = '--dangerously-bypass-approvals-and-sandbox' if harness == 'codex' else '--dangerously-skip-permissions'
-assert (flag in sys.argv) == (policy == 'unset'), sys.argv
+assert flag in sys.argv, sys.argv
 assert '--sandbox' not in sys.argv and '--permission-mode' not in sys.argv, sys.argv
 native = os.environ.get('NATIVE_CONFIGURATION_CLI')
 count = 0
 if native:
-    proof = json.loads(pathlib.Path('native-config-proof').read_text())
-    assert pathlib.Path(proof['path']).read_text() == proof['content'], 'settings changed before turn'
-    assert proof['home'] == os.environ['HOME'] and proof['uid'] == os.getuid(), 'probe identity changed'
+    assert not pathlib.Path('native-config-proof').exists()
     assert not pathlib.Path('helper-ran').exists() and not pathlib.Path('hook-ran').exists()
     counter = pathlib.Path('model-count')
     count = int(counter.read_text()) if counter.exists() else 0

@@ -75,10 +75,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   transport selectors cannot contradict an explicitly selected OpenRouter, Bedrock, or gateway lane.
 - Codex inherits harness settings for web search and sandbox network access. Runtime arguments
   select the admitted model, optional effort, and response contract; they must not override unrelated
-  user preferences. Local and hosted workers and verifiers use approval/sandbox bypass only when the
-  harness's native configuration query proves no authored permission policy. Configured or unavailable policy
-  keeps native behavior. Explicit cached Codex web search also prevents bypass because native full
-  access can promote cached search to live. Configuration probes have a separate ten-second/4 MiB budget, never send a
+  user preferences. Hosted workers and verifiers always use the harness's maximum approval/sandbox
+  bypass inside their disposable capsule and do not query native permission policy. Local workers and
+  verifiers use bypass only when the native configuration query proves no authored policy; configured
+  or unavailable policy keeps native behavior. Explicit cached Codex web search also prevents local
+  bypass because native full access can promote cached search to live. Configuration probes have a
+  separate ten-second/4 MiB budget, never send a
   model prompt, suppress Claude hooks/auth helpers, and require confirmed process cleanup before the
   model turn. They do not rewrite settings files; normal native startup state may still be updated.
   Verifier nodes use the same permission handling as workers across all harnesses. The shared prompt
