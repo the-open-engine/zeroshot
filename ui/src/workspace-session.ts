@@ -17,6 +17,7 @@ export type EditorState = {
   busy: boolean;
   loading: boolean;
   validation: { state: 'checking' | 'valid' | 'invalid'; message?: string };
+  createProfile(templateId: string): Document;
   adopt(document: Document, saved?: Document, revision?: string): void;
   acknowledge(value: NonNullable<ReturnType<typeof acknowledgeProfileSave>>): void;
   discard(): void;
@@ -200,23 +201,25 @@ export class WorkspaceSession {
     this.reply(command);
   }
   private open(command: HostCommand & { type: 'open_profile' | 'open_run' }) {
+    const next = command.type === 'open_profile' ? this.profile(command) : undefined;
     this.protect(command);
-    if (command.type === 'open_profile') {
-      this.read().adopt(
-        command.profile,
-        command.revision ? command.profile : undefined,
-        command.revision
-      );
+    if (command.type === 'open_profile' && next) {
+      this.read().adopt(next, command.revision ? next : undefined, command.revision);
       this.profileDocumentId = command.nextDocumentId;
       this.runId = undefined;
       this.showingRun = false;
-    } else {
+    } else if (command.type === 'open_run') {
       this.runId = command.runId;
       this.showingRun = true;
     }
     this.documentId = command.nextDocumentId;
     this.changed();
     this.reply(command);
+  }
+  private profile(command: HostCommand & { type: 'open_profile' }): Document {
+    return command.templateId !== undefined
+      ? this.read().createProfile(command.templateId)
+      : command.profile;
   }
   private switchSection(command: HostCommand & { type: 'navigate' }) {
     this.protect(command);

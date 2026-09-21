@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WorkspaceSession, type EditorState } from './workspace-session';
+import { createHostedProfile } from './use-host-workspace';
 import type { HostCommand, WorkspaceBridge } from './workspace-bridge';
 import type { Document } from './domain';
 
@@ -28,6 +29,11 @@ function setup() {
     busy: false,
     loading: false,
     validation: { state: 'valid' },
+    createProfile(templateId) {
+      if (templateId !== 'blank' && templateId !== 'review-template')
+        throw new Error('Unknown template');
+      return profile(templateId === 'blank' ? '' : 'template');
+    },
     adopt(document, saved, revision) {
       this.document = structuredClone(document);
       this.revision = revision;
@@ -180,4 +186,49 @@ test('imported profiles start without the earlier document revision, and runs ca
   );
   await state.session.receive(state.command({ type: 'request_save' }));
   assert.equal(state.problem(), 'profile_required');
+});
+
+test('template opens use the editor factory and drop previous revisions', async () => {
+  const state = setup();
+  await state.session.receive(
+    state.command({ type: 'open_profile', nextDocumentId: 'new-profile', templateId: 'blank' })
+  );
+  assert.equal(state.editor.document?.name, '');
+  assert.equal(state.editor.revision, undefined);
+  assert.equal(state.editor.dirty, true);
+  assert.equal(state.session.documentId, 'new-profile');
+});
+test('template switches protect dirty drafts and unknown templates cannot discard them', async () => {
+  const state = setup();
+  state.editor.dirty = true;
+  await state.session.receive(
+    state.command({
+      type: 'open_profile',
+      nextDocumentId: 'new-profile',
+      templateId: 'review-template',
+    })
+  );
+  assert.equal(state.problem(), 'unsaved_changes');
+  await state.session.receive(
+    state.command({
+      type: 'open_profile',
+      nextDocumentId: 'new-profile',
+      templateId: 'unknown',
+      discard: true,
+    })
+  );
+  assert.equal(state.session.documentId, 'profile-1');
+  assert.equal(state.editor.document?.name, 'review');
+  assert.equal(state.editor.dirty, true);
+});
+
+test('hosted creation selects existing blank/template factories without adopting a revision', () => {
+  const template = { name: 'review', id: 'review-id', graph: profile().graph };
+  const blank = createHostedProfile([template], 'blank');
+  assert.deepEqual(blank.graph.initialInput, { kind: 'record', fields: {} });
+  assert.deepEqual(blank.runtime.nodes, {});
+  const selected = createHostedProfile([template], 'review-id');
+  assert.deepEqual(selected.graph, template.graph);
+  assert.notEqual(selected.graph, template.graph);
+  assert.throws(() => createHostedProfile([template], 'unknown'), { code: 'unknown_template' });
 });

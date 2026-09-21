@@ -21,7 +21,7 @@ Executed checks:
 - Native observer regressions: 11 passed; one existing 1 GiB stress exercise ignored.
 - Combined standalone HTTP/history/control/status suite: 39 passed, including
   runtime failure followed later by the durable terminal record.
-- UI unit suite: 336 passed; TypeScript and Vite build passed.
+- UI unit suite: 340 passed; TypeScript and Vite build passed.
 - Workspace and UI-feature Clippy with warnings denied: passed.
 - Workspace Rust documentation with warnings denied: passed.
 - Repository lint, tooling tests and distribution contract: passed (61 tests,
@@ -35,6 +35,12 @@ Cloud's first dependency build exposed a catalog helper still gated on `ui` or
 `test`. Its gate now follows `workspace`, and CI explicitly checks the non-test
 library with only that feature enabled. That library check and all 44 authoring
 tests pass after the correction.
+
+The host can also open a new blank/template profile through `open_profile` with
+`templateId`. This reuses the existing shared UI factory, rejects mixed profile
+and template payloads, and validates the template before discarding a draft.
+Senior review approved the follow-up; the 340-test UI suite, build and rebuilt
+native UI smoke pass.
 
 Local Cloud/provider/browser, canonical release, released-source repin, dev
 deployment and deployed browser tests have not yet run.

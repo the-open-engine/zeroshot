@@ -21,13 +21,14 @@ export type WorkspaceInit = {
 };
 export type HostCommand = Envelope &
   (
-    | {
+    | ({
         type: 'open_profile';
         nextDocumentId: string;
-        profile: Document;
-        revision?: string;
         discard?: boolean;
-      }
+      } & (
+        | { profile: Document; revision?: string; templateId?: never }
+        | { templateId: string; profile?: never; revision?: never }
+      ))
     | { type: 'open_run'; nextDocumentId: string; runId: string; discard?: boolean }
     | { type: 'request_save'; name?: string }
     | {
@@ -184,6 +185,11 @@ function readCommand(value: Record<string, unknown>, workspaceId: string): HostC
 function readProfileCommand(value: Record<string, unknown>): HostCommand | undefined {
   if (!token(value.nextDocumentId) || (value.revision !== undefined && !token(value.revision)))
     return;
+  if (value.templateId !== undefined) {
+    return token(value.templateId) && value.profile === undefined && value.revision === undefined
+      ? (value as HostCommand)
+      : undefined;
+  }
   try {
     assertDocument(value.profile);
   } catch {

@@ -33,7 +33,7 @@ import { GuardEditor } from './GuardEditor';
 import { Field, Inspector } from './Inspector';
 import { type Bootstrap, type Summary } from './api';
 import type { WorkspaceServices } from './workspace-services';
-import { useHostWorkspace } from './use-host-workspace';
+import { createHostedProfile, useHostWorkspace } from './use-host-workspace';
 import { workspaceStorageKeys } from './workspace-storage';
 import { acknowledgeProfileSave, snapshotProfileSave } from './profile-save';
 import { createNumericDrafts, NumericDraftProvider } from './numeric-drafts';
@@ -256,6 +256,7 @@ export function App({
     busy,
     loading,
     validation,
+    createProfile: (templateId) => createHostedProfile(bootstrap.templates, templateId),
     adopt,
     acknowledge: acceptSaved,
     discard: () => {

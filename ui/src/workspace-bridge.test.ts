@@ -164,3 +164,23 @@ test('disposed bridges ignore incoming commands and cannot send host state', () 
   assert.equal(state.sent.length, sent);
   assert.equal(state.commands.length, 0);
 });
+
+test('template open messages cannot also supply a profile or a foreign revision', () => {
+  const state = setup();
+  state.emit(state.init);
+  const command = {
+    version: 1,
+    type: 'open_profile',
+    workspaceId: state.init.workspaceId,
+    requestId: 'new-profile',
+    documentId: null,
+    generation: 0,
+    nextDocumentId: 'draft',
+    templateId: 'blank',
+  };
+  state.emit({ ...command, profile: {} });
+  state.emit({ ...command, revision: 'foreign' });
+  assert.equal(state.commands.length, 0);
+  state.emit(command);
+  assert.deepEqual(state.commands, [command]);
+});

@@ -101,12 +101,16 @@ The workspace rejects stale document generations. A document switch may change b
 
 | Host message   | Payload in addition to the envelope                                                                                           |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `open_profile` | `nextDocumentId`, `profile: {name, graph, runtime}`, optional `revision` and `discard`. New/imported documents omit revision. |
+| `open_profile` | `nextDocumentId`, optional `discard`, and either `profile: {name, graph, runtime}` with optional `revision`, or `templateId`. |
 | `open_run`     | `nextDocumentId`, `runId`, optional `discard`. History is fetched through the API.                                            |
 | `request_save` | Optional `name` for save-as. The current identity must be a profile.                                                          |
 | `save_ack`     | The snapshot's request ID and generation, with either `saved: {profile, revision}` or `problem: {code, message, details?}`.   |
 | `theme`        | `theme: "light"` or `"dark"`.                                                                                                 |
 | `navigate`     | `action: "profiles"`, `"runs"` or `"leave"`, optional `discard`.                                                              |
+
+`templateId: "blank"` creates an empty profile using the existing editor factory; otherwise use a
+bootstrap template's `id` (or `name` when it has no ID). Template opens cannot carry a profile or
+revision. New/imported full documents omit revision. Cloud never constructs graph bindings.
 
 Dirty or unresolved drafts refuse switches with `unsaved_changes`; an explicit host confirmation
 may resend with `discard: true`. Pending saves refuse switches even with discard. The host waits
