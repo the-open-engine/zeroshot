@@ -13,6 +13,14 @@ const {
   summaryFromBody,
 } = require('../../scripts/release-notes');
 
+// Git hooks export repository-local variables. A fixture must not inherit the parent
+// worktree's Git directory or index, including when release-note reads spawn Git.
+const localGitVariables = childProcess
+  .execFileSync('git', ['rev-parse', '--local-env-vars'], { encoding: 'utf8' })
+  .trim()
+  .split('\n');
+for (const name of localGitVariables) delete process.env[name];
+
 const commit = (hash, subject, body) => ({ hash: hash.repeat(40), subject, body });
 const git = (repository, ...arguments_) =>
   childProcess.execFileSync('git', arguments_, { cwd: repository, encoding: 'utf8' }).trim();
