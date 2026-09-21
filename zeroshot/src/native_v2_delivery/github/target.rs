@@ -140,8 +140,7 @@ async fn require_completed_integration(
         || !is_ancestor(context, candidate, &head).await?
         || !is_ancestor(context, target_revision, &head).await?
     {
-        return Err(GitHubAuthorityError::api(
-            None,
+        return Err(GitHubAuthorityError::repairable(
             "Git merge reported success without a clean, completed integration preserving both \
              the candidate and captured target ancestry; inspect the preserved workspace",
         ));

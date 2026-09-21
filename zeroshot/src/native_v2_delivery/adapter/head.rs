@@ -154,7 +154,9 @@ impl NativeV2DeliveryAdapter {
             {
                 Ok(outcome) => return Ok(outcome),
                 // Observe an ambiguous mutation before issuing it again, even for a transport error.
-                Err(error) if !error.authentication_failed() => return Err(error.into()),
+                Err(error) if !error.authentication_failed() => {
+                    return Err(recovery::uncertain_authority(error));
+                }
                 Err(error) => {
                     self.retry_operation(error, drive.operation_context(&mut refreshed))
                         .await?
@@ -296,7 +298,7 @@ impl NativeV2DeliveryAdapter {
                 wait_for_poll(drive.control, self.config.poll.interval).await?;
                 Ok(ReviewStep::Continue)
             }
-            _ => Err(DeliveryStop::Repair(failure)),
+            _ => Err(recovery::finish_uncertain_authority(failure)),
         }
     }
 }

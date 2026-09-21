@@ -231,6 +231,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Supporting checks never acquire merge authority, and unavailable or omitted logs are explicit.
   Job-log reads opt into raw terminal sequences only inside bounded pipe capture, then remove
   controls before feedback; older GitHub CLI versions retry without the unsupported opt-in flag.
+- GitHub API permission, schema, and policy failures are delivery execution errors, never candidate
+  repair. Authentication rejection remains an explicit refusal. Review synchronization retries only
+  explicitly transient failures and bounded visibility races; an ordinary statusless failure or HTTP
+  403 is not presumed transient. Only typed CI/feedback/conflict outcomes, Git command failures, or
+  verified repository/workspace reconciliation may request an agent repair.
 - Delivery-enabled software-change templates make the acceptance verifier the sole author of the
   current change title and description after every review pass. Git delivery uses that manifest for
   commits and reviews, refreshes only its marker-delimited body section while preserving surrounding

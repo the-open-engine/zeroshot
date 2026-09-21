@@ -4,6 +4,7 @@ pub(super) struct RepairFailure {
     pub(super) diagnostic: String,
     pub(super) retryable: bool,
     review: Option<Box<GitHubReviewReceipt>>,
+    authority: Option<GitHubAuthorityError>,
 }
 
 pub(super) fn repair(diagnostic: impl Into<String>) -> DeliveryStop {
@@ -11,7 +12,24 @@ pub(super) fn repair(diagnostic: impl Into<String>) -> DeliveryStop {
         diagnostic: diagnostic.into(),
         retryable: false,
         review: None,
+        authority: None,
     })
+}
+
+pub(super) fn uncertain_authority(error: GitHubAuthorityError) -> DeliveryStop {
+    DeliveryStop::Repair(RepairFailure {
+        diagnostic: error.to_string(),
+        retryable: error.retryable_operation(),
+        review: None,
+        authority: Some(error),
+    })
+}
+
+pub(super) fn finish_uncertain_authority(mut failure: RepairFailure) -> DeliveryStop {
+    match failure.authority.take() {
+        Some(error) => error.into(),
+        None => DeliveryStop::Repair(failure),
+    }
 }
 
 impl From<GitHubAuthorityError> for DeliveryStop {
@@ -20,12 +38,15 @@ impl From<GitHubAuthorityError> for DeliveryStop {
             Self::Outcome(WorkerOutcome::declared_failure(WorkerErrorCode::Refusal))
         } else if error.authentication_failed() {
             Self::Outcome(WorkerOutcome::authentication_refusal())
+        } else if error.retryable_operation() {
+            Self::Retry(error)
+        } else if matches!(
+            error,
+            GitHubAuthorityError::Repairable(_) | GitHubAuthorityError::Command(_)
+        ) {
+            repair(error.to_string())
         } else {
-            let mut stop = repair(error.to_string());
-            if let Self::Repair(failure) = &mut stop {
-                failure.retryable = error.retryable_operation();
-            }
-            stop
+            Self::Outcome(WorkerOutcome::declared_failure(WorkerErrorCode::Crash))
         }
     }
 }

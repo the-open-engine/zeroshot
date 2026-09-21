@@ -113,15 +113,15 @@ impl NativeV2DeliveryAdapter {
     ) -> Result<GitHubReviewReceipt, DeliveryStop> {
         let mut retry = preflight::OperationRetry::default();
         loop {
-            let failure = match self
+            let error = match self
                 .synchronize_review_batch(request, credentials, control)
                 .await
             {
-                Err(DeliveryStop::Repair(failure)) if failure.retryable => failure,
+                Err(DeliveryStop::Retry(error)) => error,
                 result => return result,
             };
             self.retry_operation(
-                GitHubAuthorityError::Unavailable.with_context(failure.diagnostic),
+                error,
                 preflight::OperationContext {
                     credentials,
                     control,

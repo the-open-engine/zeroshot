@@ -20,21 +20,19 @@ async fn provider_receipt_survives_a_transient_local_adoption_failure() {
 }
 
 #[tokio::test]
-async fn failed_head_adoption_routes_repair_without_repeating_the_remote_mutation() {
+async fn failed_head_adoption_stops_without_repeating_the_remote_mutation() {
     for (script, expected_attempts) in [
         (Script::HeadAdoptionRejected, 1),
         (Script::HeadAdoptionUnavailable, 3),
     ] {
         let (repo, authority) = delivery_harness(script);
         let outcome = run_delivery(&repo, authority.clone(), 3, DeliveryMode::Merge).await;
-        if matches!(script, Script::HeadAdoptionUnavailable) {
-            assert_eq!(
-                outcome,
-                WorkerOutcome::declared_failure(WorkerErrorCode::Timeout)
-            );
+        let expected = if matches!(script, Script::HeadAdoptionUnavailable) {
+            WorkerErrorCode::Timeout
         } else {
-            assert_delivery_signal(&outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
-        }
+            WorkerErrorCode::Crash
+        };
+        assert_eq!(outcome, WorkerOutcome::declared_failure(expected));
         assert_eq!(authority.head_updates.load(Ordering::SeqCst), 1);
         assert_eq!(
             authority.head_sync_attempts.load(Ordering::SeqCst),

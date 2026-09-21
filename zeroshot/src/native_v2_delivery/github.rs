@@ -597,7 +597,7 @@ async fn configure_delivery_identity(
 fn git_error(error: super::git::GitError) -> GitHubAuthorityError {
     match error {
         super::git::GitError::Command(failure) => GitHubAuthorityError::Command(failure),
-        error => GitHubAuthorityError::api(None, error.to_string()),
+        error => GitHubAuthorityError::repairable(error.to_string()),
     }
 }
 

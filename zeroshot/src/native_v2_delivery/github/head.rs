@@ -177,14 +177,11 @@ async fn require_local_head(
     if head.trim() == expected && status.is_empty() {
         return Ok(());
     }
-    Err(GitHubAuthorityError::api(
-        None,
-        format!(
-            "Local Git state cannot adopt the authorized head: expected HEAD {expected}, actual HEAD {}\n\
+    Err(GitHubAuthorityError::repairable(format!(
+        "Local Git state cannot adopt the authorized head: expected HEAD {expected}, actual HEAD {}\n\
              git status --porcelain=v1 --untracked-files=all:\n{status}",
-            head.trim()
-        ),
-    ))
+        head.trim()
+    )))
 }
 
 async fn adopt_local_head(

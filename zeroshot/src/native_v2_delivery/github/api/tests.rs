@@ -50,12 +50,18 @@ fn api_error_parser_preserves_bounded_provider_status_and_reason() {
 }
 
 #[test]
-fn unfamiliar_errors_and_rate_limits_remain_repairable() {
-    let error = github_api_error(b"gh: unusual remote refusal (HTTP 403)\nPlease try again later.");
-    assert!(!error.authentication_failed());
-    assert!(error.retryable_review_sync());
-    assert!(error.to_string().contains("unusual remote refusal"));
-    assert!(error.to_string().contains("Please try again later."));
+fn only_typed_transient_api_failures_are_retryable_during_review_sync() {
+    let forbidden =
+        github_api_error(b"gh: unusual remote refusal (HTTP 403)\nPlease try again later.");
+    assert!(!forbidden.authentication_failed());
+    assert!(!forbidden.retryable_review_sync());
+    assert!(forbidden.to_string().contains("unusual remote refusal"));
+    assert!(forbidden.to_string().contains("Please try again later."));
+
+    let statusless = GitHubAuthorityError::api(None, "GitHub returned an invalid response");
+    assert!(!statusless.retryable_review_sync());
+    assert!(statusless.clone().temporary().retryable_review_sync());
+    assert!(GitHubAuthorityError::api(Some(429), "rate limited").retryable_review_sync());
 }
 
 fn authority(program: PathBuf, deadline: Duration) -> GhCliDeliveryAuthority {
@@ -95,7 +101,7 @@ async fn missing_api_executable_preserves_os_error_and_redacts_command() {
     assert!(diagnostic.contains("repos/acme/project/pulls"));
     assert!(!diagnostic.contains("test-token"));
     assert_eq!(error.api_status(), None);
-    assert!(error.retryable_review_sync());
+    assert!(!error.retryable_review_sync());
     assert!(!error.authentication_failed());
 }
 
@@ -125,7 +131,33 @@ async fn nonexecutable_api_program_preserves_permission_error() {
         .assert_value();
     assert!(error.to_string().contains("could not start command:"));
     assert!(error.to_string().contains(&expected));
-    assert!(error.retryable_review_sync());
+    assert!(!error.retryable_review_sync());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn explicit_rate_limit_403s_are_temporary_but_permission_403_is_terminal() {
+    for (message, retryable) in [
+        ("API rate limit exceeded for user ID 123.", true),
+        (
+            "You have exceeded a secondary rate limit. Please wait a few minutes before you try again.",
+            true,
+        ),
+        ("Resource not accessible by integration", false),
+    ] {
+        let root = TemporaryDirectory::for_test("github-api-rate-limit");
+        let source = format!("printf '%s\\n' 'gh: {message} (HTTP 403)' >&2\nexit 1\n");
+        let program = script(root.as_path(), &source);
+        let error = authority(program, Duration::from_secs(10))
+            .api_output(&[], GitHubCredential("test-token"))
+            .await
+            .err()
+            .assert_value();
+
+        assert_eq!(error.api_status(), Some(403));
+        assert_eq!(error.retryable_review_sync(), retryable);
+        assert_eq!(error.retryable_operation(), retryable);
+    }
 }
 
 #[cfg(unix)]
@@ -257,7 +289,7 @@ async fn api_pipe_failure_preserves_stream_and_partial_output_with_redaction() {
         )));
         assert!(diagnostic.contains("partial secret:"));
         assert!(!diagnostic.contains("test-to"));
-        assert!(failure.retryable_review_sync());
+        assert!(!failure.retryable_review_sync());
         assert!(!failure.authentication_failed());
     }
 }

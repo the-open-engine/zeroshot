@@ -424,6 +424,35 @@ async fn merge_delivery_repairs_recoverable_outcomes_then_returns_the_receipt() 
     }
 }
 
+#[tokio::test]
+async fn delivery_infrastructure_failure_never_dispatches_code_repair() {
+    let (verified, initial_input) = verified_software_template(TemplateDelivery::Merge).await;
+    let mut history = accepted_review_history(TemplateDelivery::Merge);
+    history.push(settled_failure(
+        SettledExecutionSpec {
+            execution: 4,
+            node_instance: 4,
+            node: DELIVERY_NODE,
+            settled_at: 4,
+            input: delivery_input(),
+        },
+        WorkerErrorCode::Crash,
+    ));
+
+    let reduction = reduce(&verified, &initial_input, &history);
+    assert_eq!(
+        reduction.terminal,
+        Some(TerminalProjection::Failed {
+            reason: "delivery_failed".parse().assert_value()
+        })
+    );
+    assert!(reduction.decisions.iter().all(|decision| !matches!(
+        decision,
+        Decision::Dispatch { occurrence, .. }
+            if occurrence.node.as_str() == "delivery_repair"
+    )));
+}
+
 async fn assert_recoverable_delivery(recoverable: &str) {
     let delivery_feedback = format!(
         "sourceRevision: {}\nreviewBaseRevision: {}\ntrusted delivery reported {recoverable}",
