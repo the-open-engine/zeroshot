@@ -31,6 +31,11 @@ Executed checks:
 - Full Zeroshot UI-feature suite: 1,068 passed; 10 existing ignored tests.
 - Rebuilt native UI binary and packaged HTTP/static-asset/shutdown smoke: passed.
 
+Cloud's first dependency build exposed a catalog helper still gated on `ui` or
+`test`. Its gate now follows `workspace`, and CI explicitly checks the non-test
+library with only that feature enabled. That library check and all 44 authoring
+tests pass after the correction.
+
 Local Cloud/provider/browser, canonical release, released-source repin, dev
 deployment and deployed browser tests have not yet run.
 
@@ -48,6 +53,8 @@ It reports missing documentation ownership bindings for `ui/src/api.ts` and
 personal analysis tooling state external. `ui/README.md` documents the changed
 contracts and senior review checked them manually. Sense also has partial Rust
 interface coverage. Neither limitation is reported as a passing Sense check.
+The legacy `opcore check --changed` also ran and reported `rust.function-metrics`;
+it is not counted as passing coverage.
 
 ### Worktree recovery
 

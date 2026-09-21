@@ -175,6 +175,7 @@ jobs:
         shell: bash
         run: |
           cargo clippy --workspace --all-targets -- -D warnings
+          cargo check --locked --package zeroshot --lib --features workspace
           cargo clippy --package zeroshot --all-targets --features ui -- -D warnings
 
       - name: Run workspace tests

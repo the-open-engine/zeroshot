@@ -54,7 +54,7 @@ impl BuiltinGraphTemplate {
         }
     }
 
-    #[cfg(any(test, feature = "ui"))]
+    #[cfg(any(test, feature = "workspace"))]
     pub(crate) fn delivery_runtime_binding(
         self,
         delivery: TemplateDelivery,
