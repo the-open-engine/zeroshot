@@ -35,13 +35,13 @@ backend origin. The development proxy adapts its known loopback origin; producti
 
 ## Ownership
 
-| Owner                                            | Responsibility                                                                   |
-| ------------------------------------------------ | -------------------------------------------------------------------------------- |
-| `App.tsx`, `workspace-services.ts`               | Standalone menu/navigation and injected profile, authoring, and history services |
-| `WorkflowCanvas`, editor                         | Shared graph presentation, draft/undo, and read-only observation                 |
-| `profile_ui.rs`, `profile_ui/{data,outcomes}.rs` | Native catalog, draft transformations, admission, and conditional profile saves  |
-| `profile_ui/server.rs`                           | Embedded assets, browser origin checks, and server/observer lifetime             |
-| `profile_ui/runs.rs`, `run-history-source.ts`    | Admitted run definitions, paged history, and resumable live observation          |
+| Owner                                                       | Responsibility                                                                  |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `App.tsx`, `workspace-services.ts`                          | Shared editor and injected profile, authoring, and history services             |
+| `WorkflowCanvas`, editor                                    | Shared graph presentation, draft/undo, and read-only observation                |
+| `profile_ui.rs`, `profile_ui/{data,outcomes}.rs`            | Native catalog, draft transformations, admission, and conditional profile saves |
+| `profile_ui/server.rs`                                      | Embedded assets, browser origin checks, and server/observer lifetime            |
+| `native_v2_observability::history`, `run-history-source.ts` | Admitted definitions, native control projection and resumable observation       |
 
 `/ui/api/data` and `/ui/api/authoring` return drafts. Save validates through native admission and
 checks both the content revision and persisted workspace identity. The browser acknowledges only
@@ -58,10 +58,94 @@ Omit `after` to begin. SSE resumes from `Last-Event-ID` and closes after the ter
 
 ## Cloud integration
 
-Local and direct Docker hosts are implemented. [Zero-cloud #301](https://github.com/the-open-engine/zero-cloud/issues/301)
-tracks embedding: Zeroshot still needs a shell-less entry point, host bridge, authenticated
-run-definition/history export, and structured stream errors. Zero-cloud owns menus/auth,
-profile revision checks, and live/archive adapters. The standalone `/ui/api` is not the hosted API.
+Build `ui/dist` from Cloud's exact pinned Zeroshot source revision and mount it on the
+Cloud origin independently of run containers. The shell-less entry is `embed.html`;
+`index.html` retains the standalone toolbar. Both entries use the same editor and viewer.
+Cloud must permit its same-origin frame and the workspace's bundled assets/ELK worker in CSP.
+
+The API-gateway can call `zeroshot_engine::workspace::{catalog, author, data, validate_profile}`
+with Cargo's `workspace` feature; this does not embed UI assets. Authenticated private targets
+export native definition/history pages separately from the standalone UI. See the
+[approved implementation plan](../planning/plans/cloud-workspace-ui-301.md).
+
+### Bridge version 1
+
+`workspace-bridge.ts` defines the wire types. All messages use `postMessage` with the exact
+same origin and expected parent/iframe window. The iframe first sends
+`{version: 1, type: "ready", requestId}`. Reply with `init` using that request ID:
+
+```json
+{
+  "version": 1,
+  "type": "init",
+  "requestId": "ready-request-id",
+  "workspaceId": "opaque-user-org-scope-workspace-id",
+  "authority": { "userId": "user-id", "organizationId": "org-id", "scope": "user" },
+  "apiBase": "/_bff/orgs/org-id/workspace/user/",
+  "theme": "light",
+  "csrf": { "cookieName": "__Host-zsc-csrf", "headerName": "X-Zeroshot-CSRF" }
+}
+```
+
+The authenticated bootstrap must return `version: 1` and
+`workspace: {kind: "cloud", id: workspaceId}`. Bind this ID to user, organization and profile
+scope. Recreating the iframe binds a different authority; protect the old draft before doing so.
+Optional CSRF configuration contains names only. The iframe reads the existing cookie for each
+service POST and rejects missing/duplicate cookies. Cloud omits this configuration only for its
+server-selected local authentication mode. Credentials never enter messages.
+
+After `init`, every message carries `version`, `workspaceId`, `documentId`, `generation` and
+`requestId`. Wait for `state` with `loading: false` before opening a document. Use the latest
+state's document ID/generation, including any recovered draft; the initial document ID is null.
+The workspace rejects stale document generations. A document switch may change both values.
+
+| Host message   | Payload in addition to the envelope                                                                                           |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `open_profile` | `nextDocumentId`, `profile: {name, graph, runtime}`, optional `revision` and `discard`. New/imported documents omit revision. |
+| `open_run`     | `nextDocumentId`, `runId`, optional `discard`. History is fetched through the API.                                            |
+| `request_save` | Optional `name` for save-as. The current identity must be a profile.                                                          |
+| `save_ack`     | The snapshot's request ID and generation, with either `saved: {profile, revision}` or `problem: {code, message, details?}`.   |
+| `theme`        | `theme: "light"` or `"dark"`.                                                                                                 |
+| `navigate`     | `action: "profiles"`, `"runs"` or `"leave"`, optional `discard`.                                                              |
+
+Dirty or unresolved drafts refuse switches with `unsaved_changes`; an explicit host confirmation
+may resend with `discard: true`. Pending saves refuse switches even with discard. The host waits
+for the correlated `state` acknowledgement before changing outer navigation or removing the frame.
+
+`save_snapshot` replies contain `profile: {name, graph, runtime, expectedRevision}`, the captured
+`authority`, and the original request/document/generation envelope. Valid focused field edits commit
+before capture; unresolved edits return a structured problem. The host performs the conditional
+write with the captured authority/workspace/revision and returns `save_ack`. An acknowledgement
+only settles its captured snapshot, preserving later edits. A save-as name drops the old revision.
+
+Unsolicited `state` messages report `dirty`, `pending`, `validation`, `saving`, `loading` and profile
+`name`. Command replies report `accepted` or a structured `problem`. `navigate` messages from the
+workspace request the host's `save` or `defaults` action. The host keeps selection and outer menus.
+
+### Authenticated service paths and history lifecycle
+
+`apiBase` must be a same-origin absolute path ending with `/`. The embedded workspace uses these
+paths beneath it; its profile load/save work passes through the host bridge instead:
+
+| Request                              | Response                                                                 |
+| ------------------------------------ | ------------------------------------------------------------------------ |
+| `GET bootstrap`                      | Existing workspace bootstrap with templates, workers and runtime schema. |
+| `POST validate`                      | Native validation of `{graph, runtime}`.                                 |
+| `POST authoring`, `POST data`        | Native draft transform of `{graph, runtime, action}`.                    |
+| `GET runs/{id}`                      | Version 1 admitted definition with projection version 1.                 |
+| `GET runs/{id}/history?after=CURSOR` | Existing ordered native history page.                                    |
+| `GET runs/{id}/events?after=CURSOR`  | SSE `history` pages and structured `history_error` problems.             |
+
+The shared fetch SSE reader retains HTTP/stream problem codes and details, reconnects network
+interruptions using the last accepted `Last-Event-ID`, and cancels readers/timers on disposal.
+Frames have an 8 MiB browser limit. HTTP denials and invalid history stop automatic reconnect.
+
+Definition wrappers and pages may carry
+`observation: {state: "active" | "collecting" | "complete" | "incomplete" | "expired" | "unavailable", code?}`.
+This metadata describes retained observation; current run termination remains separate.
+A `finished` run can still follow `active` or `collecting` observation. Completion closes the stream
+only after `page.complete` drains the observed head. Cloud retains these execution cursors and native
+control records across archive handoff; Cloud status cursors never enter graph playback.
 
 ## Verification
 

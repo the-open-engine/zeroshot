@@ -30,3 +30,7 @@ pub mod observability;
 /// Local browser profile editor, served from the native binary.
 #[cfg(feature = "ui")]
 pub mod profile_ui;
+
+/// Shared native workspace catalog, authoring and validation without browser assets.
+#[cfg(feature = "workspace")]
+pub mod workspace;

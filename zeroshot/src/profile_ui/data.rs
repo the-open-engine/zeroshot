@@ -7,7 +7,7 @@ use openengine_cluster_protocol::{FieldName, GraphSpec, NodeName, PayloadType};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::ApiError;
+use super::WorkspaceError as ApiError;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

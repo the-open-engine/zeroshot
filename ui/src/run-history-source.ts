@@ -5,6 +5,7 @@ import {
   invalidRuntimeFailure,
   readPageRuntimeFailure,
   readRuntimeFailure,
+  readObservation,
 } from './history-contract';
 import type { HistoryEvent, HistoryPage, RunDetail, RunSummary } from './run-history';
 
@@ -36,6 +37,7 @@ export function readRunDetail(value: unknown, requestedRunId: string): RunDetail
       'run_identity_mismatch',
       'The server returned a different run. Reload to try again.'
     );
+  readObservation(detail.observation);
   const failure = readRuntimeFailure(detail.runtimeFailure, detail.history?.cursor);
   if (
     failure &&
@@ -49,7 +51,11 @@ export function readRunDetail(value: unknown, requestedRunId: string): RunDetail
   return detail as RunDetail;
 }
 
-export function createRunHistorySource(api: ApiClient, base: URL): RunHistorySource {
+export function createRunHistorySource(
+  api: ApiClient,
+  base: URL,
+  fetcher: typeof fetch = fetch
+): RunHistorySource {
   return {
     list: (after, signal) =>
       api(`runs${after ? `?after=${encodeURIComponent(after)}` : ''}`, undefined, signal),
@@ -62,13 +68,15 @@ export function createRunHistorySource(api: ApiClient, base: URL): RunHistorySou
         signal
       );
       readPageRuntimeFailure(page);
+      readObservation(page.observation);
       return page;
     },
     watch: (id, after, observer, signal) =>
       watchHistoryEvents(
         new URL(`runs/${encodeURIComponent(id)}/events?after=${encodeURIComponent(after)}`, base),
         observer,
-        signal
+        signal,
+        fetcher
       ),
   };
 }

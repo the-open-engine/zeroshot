@@ -34,6 +34,8 @@ use crate::v2_run_ledger::{
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 const LOG_TARGET: &str = "agent";
 
+pub mod history;
+
 mod runtime;
 use runtime::RuntimeObservation;
 
@@ -50,6 +52,7 @@ mod tests;
 #[derive(Clone)]
 pub struct NativeV2Observability {
     ledger: Arc<dyn RunLedger>,
+    history_control: history::control::ControlCache,
     live: LiveRegistry,
     runtime: RuntimeObservation,
     next_subscription: Arc<AtomicU64>,
@@ -60,10 +63,21 @@ impl NativeV2Observability {
     pub fn new(ledger: Arc<dyn RunLedger>) -> Self {
         Self {
             ledger,
+            history_control: history::control::ControlCache::default(),
             live: LiveRegistry::default(),
             runtime: RuntimeObservation::default(),
             next_subscription: Arc::new(AtomicU64::new(1)),
         }
+    }
+
+    /// Shares the existing ledger and projector; never initializes or recovers a controller.
+    #[must_use]
+    pub fn history(&self) -> history::RunHistoryService {
+        history::RunHistoryService::with_sources(
+            self.ledger.clone(),
+            self.history_control.clone(),
+            Some(history::status::RuntimeStatusReader::Target(self.clone())),
+        )
     }
 
     pub async fn status(

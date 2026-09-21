@@ -1,11 +1,12 @@
 //! Current runtime failure is observation metadata, never a replacement for retained history.
+#[cfg(feature = "ui")]
 use std::path::PathBuf;
 use std::time::Duration;
 
 use openengine_cluster_protocol::{
     Cursor, RunId, RunStatus, RunStatusParams, RunStatusResult, TerminalResult,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::native_v2_observability::NativeV2Observability;
@@ -14,28 +15,39 @@ use crate::v2_run_ledger::{cursor_for, cursor_sequence, RunSnapshot};
 const STATUS_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
-pub(super) enum RuntimeStatusReader {
+pub(crate) enum RuntimeStatusReader {
+    #[cfg(feature = "ui")]
     Local(PathBuf),
     Target(NativeV2Observability),
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct RuntimeFailure {
-    at_cursor: Cursor,
-    reason: &'static str,
+pub struct RuntimeFailure {
+    pub at_cursor: Cursor,
+    pub reason: String,
 }
 
 impl RuntimeFailure {
-    pub(super) fn apply(&self, value: &mut Value) {
+    pub(crate) fn apply(&self, value: &mut Value) {
         value["phase"] = json!("finished");
         value["terminal"] = json!({"status":"failed", "reason":self.reason});
         value["runtimeFailure"] = json!(self);
     }
 }
 
+pub(crate) async fn runtime_observation(
+    reader: Option<&RuntimeStatusReader>,
+    snapshot: &RunSnapshot,
+) -> Result<Option<RuntimeFailure>, ()> {
+    match reader {
+        Some(reader) => reader.failure(snapshot).await,
+        None => Ok(None),
+    }
+}
+
 impl RuntimeStatusReader {
-    pub(super) async fn failure(
+    pub(crate) async fn failure(
         &self,
         snapshot: &RunSnapshot,
     ) -> Result<Option<RuntimeFailure>, ()> {
@@ -58,6 +70,7 @@ impl RuntimeStatusReader {
         Ok(confirmed_failure(snapshot, status))
     }
 
+    #[cfg(feature = "ui")]
     fn local_owner_is_live(&self, id: &RunId) -> bool {
         let Self::Local(root) = self else {
             return false;
@@ -73,18 +86,24 @@ impl RuntimeStatusReader {
             .unwrap_or(false)
     }
 
+    #[cfg(not(feature = "ui"))]
+    fn local_owner_is_live(&self, _id: &RunId) -> bool {
+        false
+    }
+
     async fn status(&self, id: &RunId) -> Option<RunStatusResult> {
         match self {
             Self::Target(observability) => observability
                 .status(RunStatusParams { run_id: id.clone() })
                 .await
                 .ok(),
+            #[cfg(feature = "ui")]
             Self::Local(root) => local_status(root, id).await,
         }
     }
 }
 
-pub(super) fn confirmed_failure(
+pub(crate) fn confirmed_failure(
     snapshot: &RunSnapshot,
     status: RunStatusResult,
 ) -> Option<RuntimeFailure> {
@@ -102,7 +121,7 @@ pub(super) fn confirmed_failure(
             ..
         } if reason.as_str() == "runtime_failed" => Some(RuntimeFailure {
             at_cursor: status.at_cursor,
-            reason: "runtime_failed",
+            reason: "runtime_failed".into(),
         }),
         _ => None,
     }
@@ -114,7 +133,7 @@ fn valid_status(snapshot: &RunSnapshot, status: &RunStatusResult) -> bool {
             .is_ok_and(|at| at <= i64::MAX as u64 && cursor_for(at) == status.at_cursor)
 }
 
-#[cfg(any(unix, windows))]
+#[cfg(all(feature = "ui", any(unix, windows)))]
 async fn local_status(root: &std::path::Path, id: &RunId) -> Option<RunStatusResult> {
     use crate::native_v2_portable_controller::{connect_transport, read_ready, PortableControllerPaths};
     use openengine_cluster_client::ClusterClient;
@@ -132,7 +151,7 @@ async fn local_status(root: &std::path::Path, id: &RunId) -> Option<RunStatusRes
         .ok()
 }
 
-#[cfg(not(any(unix, windows)))]
+#[cfg(all(feature = "ui", not(any(unix, windows))))]
 async fn local_status(_root: &std::path::Path, _id: &RunId) -> Option<RunStatusResult> {
     None
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, ChevronDown, ChevronRight, Menu, RefreshCw, Search } from 'lucide-react';
 import { AppHeader } from './AppHeader';
+import { RunHistoryBoundary } from './RunHistoryBoundary';
 import { RunHistoryView } from './RunHistoryView';
 import { createExampleRunHistory } from './run-history-source';
 import { humanize, type RunSummary } from './run-history';
@@ -38,13 +39,15 @@ function selectedRun() {
 }
 
 /** Standalone navigation owns the run list and hash. Hosts can mount RunHistoryView directly. */
-export function StandaloneRuns({
-  services,
-  bootstrap,
-}: {
-  services: WorkspaceServices;
-  bootstrap: Bootstrap;
-}) {
+type StandaloneRunsProps = { services: WorkspaceServices; bootstrap: Bootstrap };
+export function StandaloneRuns(props: StandaloneRunsProps) {
+  return (
+    <RunHistoryBoundary workspace={props.bootstrap.workspace}>
+      <StandaloneRunsContent {...props} />
+    </RunHistoryBoundary>
+  );
+}
+function StandaloneRunsContent({ services, bootstrap }: StandaloneRunsProps) {
   const history = services.history;
   const exampleSource = useMemo(() => createExampleRunHistory(services.mount), [services.mount]);
   const [selection, setSelection] = useState(selectedRun);

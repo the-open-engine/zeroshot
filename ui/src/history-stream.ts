@@ -1,5 +1,6 @@
 import type { HistoryPage } from './run-history';
-import { readPageRuntimeFailure } from './history-contract';
+import { observationEnded } from './history-contract';
+import { readHistoryProblem, readHistoryResponse } from './history-response';
 
 export type HistoryConnection = 'connecting' | 'connected' | 'reconnecting';
 export type HistoryObserver = {
@@ -8,135 +9,107 @@ export type HistoryObserver = {
   error(error: Error): void;
 };
 
-type HistoryEventStream = {
-  readonly readyState: number;
-  addEventListener(type: string, listener: EventListener): void;
-  removeEventListener(type: string, listener: EventListener): void;
-  close(): void;
-};
-type EventStreamFactory = (url: URL) => HistoryEventStream;
-
-/** The browser retains Last-Event-ID across reconnects; invalid history never reconnects. */
+/** Each follow owns one reader, reconnect timer and last successfully accepted cursor. */
 export function watchHistoryEvents(
   url: URL,
   observer: HistoryObserver,
   signal?: AbortSignal,
-  create: EventStreamFactory = (url) => new EventSource(url)
+  fetcher: typeof fetch = fetch
 ): () => void {
-  let source: HistoryEventStream | undefined;
-  let closed = false;
-  let status: HistoryConnection | undefined;
-  const dispose = () => {
-    if (closed) return;
-    closed = true;
-    signal?.removeEventListener('abort', dispose);
-    if (source) {
-      source.removeEventListener('open', onOpen);
-      source.removeEventListener('error', onDisconnect);
-      source.removeEventListener('history', onHistory);
-      source.removeEventListener('history_error', onHistoryError);
-      source.close();
-    }
-  };
-  const fail = (cause: unknown) => {
-    if (closed) return;
-    dispose();
-    observer.error(cause instanceof Error ? cause : new Error('Live history is unavailable.'));
-  };
-  const reportStatus = (next: HistoryConnection) => {
-    if (closed || next === status) return;
-    status = next;
-    try {
-      observer.status(next);
-    } catch (error) {
-      fail(error);
-    }
-  };
-  const onOpen = () => reportStatus('connected');
-  const onDisconnect = () => {
-    // HTTP/protocol rejection closes EventSource permanently; only CONNECTING retries.
-    if (source?.readyState === 2)
-      fail(new Error('Live history connection closed. Reconnect to try again.'));
-    else reportStatus('reconnecting');
-  };
-  const onHistory: EventListener = (event) => {
-    if (closed) return;
-    try {
-      const page = readHistoryPage(event as MessageEvent);
-      observer.page(page);
-      if (page.complete && page.finished) dispose();
-    } catch (error) {
-      fail(error);
-    }
-  };
-  const onHistoryError: EventListener = (event) => {
-    if (closed) return;
-    let message = 'Live history is unavailable. Reload to try again.';
-    try {
-      const problem: unknown = JSON.parse((event as MessageEvent).data);
-      if (isRecord(problem) && typeof problem.message === 'string' && problem.message.trim())
-        message = problem.message;
-    } catch {
-      // The transport's safe fallback also covers a malformed error response.
-    }
-    fail(new Error(message));
-  };
-
-  if (signal?.aborted) return dispose;
-  signal?.addEventListener('abort', dispose, { once: true });
-  reportStatus('connecting');
-  if (closed) return dispose;
-  try {
-    source = create(url);
-    if (closed) {
-      source.close();
-      return dispose;
-    }
-    source.addEventListener('open', onOpen);
-    source.addEventListener('error', onDisconnect);
-    source.addEventListener('history', onHistory);
-    source.addEventListener('history_error', onHistoryError);
-  } catch (error) {
-    fail(error);
-  }
-  return dispose;
+  const watch = new HistoryWatch(url, observer, signal, fetcher);
+  watch.start();
+  return watch.dispose;
 }
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function readHistoryPage(event: MessageEvent): HistoryPage {
-  let page: unknown;
-  try {
-    page = JSON.parse(event.data);
-  } catch {
-    throw invalidHistory();
-  }
-  if (
-    !isRecord(page) ||
-    !Array.isArray(page.events) ||
-    page.events.length > 256 ||
-    !page.events.every(
-      (record: unknown) =>
-        isRecord(record) &&
-        typeof record.cursor === 'string' &&
-        isRecord(record.event) &&
-        typeof record.event.kind === 'string'
-    ) ||
-    typeof page.nextCursor !== 'string' ||
-    typeof page.headCursor !== 'string' ||
-    typeof page.complete !== 'boolean' ||
-    (page.finished !== undefined && typeof page.finished !== 'boolean') ||
-    event.lastEventId !== page.nextCursor
+class HistoryWatch {
+  private readonly controller = new AbortController();
+  private cursor: string;
+  private status?: HistoryConnection;
+  private timer?: ReturnType<typeof setTimeout>;
+  private wake?: () => void;
+  constructor(
+    private readonly url: URL,
+    private readonly observer: HistoryObserver,
+    private readonly signal: AbortSignal | undefined,
+    private readonly fetcher: typeof fetch
   ) {
-    throw invalidHistory();
+    this.cursor = url.searchParams.get('after') ?? 'v2:0';
   }
-  const result = page as HistoryPage;
-  readPageRuntimeFailure(result);
-  return result;
-}
-
-function invalidHistory(): Error {
-  return new Error('Live history contains an invalid page. Reload to try again.');
+  start() {
+    if (this.signal?.aborted) return this.dispose();
+    this.signal?.addEventListener('abort', this.dispose, { once: true });
+    this.report('connecting');
+    void this.connect().catch((cause) => this.fail(cause));
+  }
+  readonly dispose = () => {
+    if (this.controller.signal.aborted) return;
+    this.controller.abort();
+    this.signal?.removeEventListener('abort', this.dispose);
+    if (this.timer) clearTimeout(this.timer);
+    this.wake?.();
+  };
+  private fail(cause: unknown) {
+    if (this.controller.signal.aborted) return;
+    this.dispose();
+    this.observer.error(cause instanceof Error ? cause : new Error('History is unavailable.'));
+  }
+  private report(next: HistoryConnection) {
+    if (this.controller.signal.aborted || this.status === next) return;
+    this.status = next;
+    try {
+      this.observer.status(next);
+    } catch (cause) {
+      this.fail(cause);
+    }
+  }
+  private async reconnect() {
+    if (this.controller.signal.aborted) return;
+    this.report('reconnecting');
+    if (this.controller.signal.aborted) return;
+    await new Promise<void>((resolve) => {
+      this.wake = resolve;
+      this.timer = setTimeout(resolve, 500);
+    });
+    this.timer = undefined;
+    this.wake = undefined;
+  }
+  private async request(): Promise<Response | undefined> {
+    try {
+      return await this.fetcher(this.url, {
+        headers: { Accept: 'text/event-stream', 'Last-Event-ID': this.cursor },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        redirect: 'error',
+        signal: this.controller.signal,
+      });
+    } catch {
+      return undefined;
+    }
+  }
+  private readonly page = (page: HistoryPage) => {
+    this.observer.page(page);
+    this.cursor = page.nextCursor;
+    if (page.complete && observationEnded(page.observation, page.finished === true)) this.dispose();
+  };
+  private async connect() {
+    const signal = this.controller.signal;
+    while (!signal.aborted) {
+      const response = await this.request();
+      if (signal.aborted) {
+        await response?.body?.cancel().catch(() => {});
+        return;
+      }
+      if (!response) {
+        await this.reconnect();
+        continue;
+      }
+      if (!response.ok) throw await readHistoryProblem(response, signal);
+      this.report('connected');
+      if (signal.aborted) {
+        await response.body?.cancel().catch(() => {});
+        return;
+      }
+      await readHistoryResponse(response, signal, this.page);
+      await this.reconnect();
+    }
+  }
 }

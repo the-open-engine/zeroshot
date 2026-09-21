@@ -37,9 +37,12 @@ export interface WorkspaceServices {
 /** The standalone shell composes services; graph components never choose storage or URLs. */
 export function createWorkspaceServices(
   mount: URL,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  apiBase?: URL
 ): WorkspaceServices {
-  const base = new URL('./api/', mount);
+  const base = apiBase ?? new URL('./api/', mount);
+  if (base.origin !== mount.origin)
+    throw new ApiError(403, 'foreign_service', 'Workspace services must use the host origin.');
   const api = createApiClient(base, fetcher);
   let workspaceId: string | undefined;
   async function author(
@@ -92,6 +95,6 @@ export function createWorkspaceServices(
       outcome: (document, action, signal) => author('authoring', document, action, signal),
       data: (document, action, signal) => author('data', document, action, signal),
     },
-    history: createRunHistorySource(api, base),
+    history: createRunHistorySource(api, base, fetcher),
   };
 }

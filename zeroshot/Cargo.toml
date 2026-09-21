@@ -15,7 +15,8 @@ name = "zeroshot"
 path = "src/main.rs"
 
 [features]
-ui = ["dep:axum", "dep:hyper", "dep:hyper-util", "dep:include_dir", "dep:schemars"]
+workspace = ["dep:schemars"]
+ui = ["workspace", "dep:axum", "dep:hyper", "dep:hyper-util", "dep:include_dir"]
 
 [dependencies]
 agent-client-protocol = { version = "=0.10.4", features = [

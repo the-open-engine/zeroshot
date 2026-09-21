@@ -3,7 +3,7 @@ use super::*;
 
 /// The data edit and this lowering form one draft transaction. Existing custom recovery is never
 /// replaced: only a complete first error-to-Fail branch can move before a new required consumer.
-pub(in crate::profile_ui) fn ensure_required_output(
+pub(in crate::workspace) fn ensure_required_output(
     graph: &mut GraphSpec,
     runtime: &Value,
     source: &NodeName,

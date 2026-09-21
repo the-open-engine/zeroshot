@@ -420,9 +420,21 @@ async fn common_choice_outputs_are_safe_only_after_selected_branch_succeeds() {
         "choose",
         "packet",
     );
-    super::super::admit(&serde_json::from_value(source.clone()).assert_value(),&serde_json::from_value(json!({"harness":"codex","provider":"openai","size":"small","nodes":{
-        "router":{"kind":"agent","model":"opaque-model"},"left":{"kind":"agent","model":"opaque-model"},"right":{"kind":"agent","model":"opaque-model"},"packet":{"kind":"agent","model":"opaque-model"}
-    }})).assert_value()).await.map_err(|error|error.message).assert_value();
+    super::super::validate_profile(
+        &serde_json::from_value(source.clone()).assert_value(),
+        &serde_json::from_value(json!({
+            "harness":"codex", "provider":"openai", "size":"small", "nodes": {
+                "router":{"kind":"agent","model":"opaque-model"},
+                "left":{"kind":"agent","model":"opaque-model"},
+                "right":{"kind":"agent","model":"opaque-model"},
+                "packet":{"kind":"agent","model":"opaque-model"}
+            }
+        }))
+        .assert_value(),
+    )
+    .await
+    .map_err(|error| error.message)
+    .assert_value();
     let verified = verify(source).await;
     assert!(verified.is_ok(), "{verified:?}");
     let verified = verified.assert_value();

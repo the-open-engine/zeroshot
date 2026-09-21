@@ -38,6 +38,9 @@ use http_fixture::{TestHttpRequest, http};
 #[path = "tests/lifecycle.rs"]
 mod lifecycle;
 
+#[path = "tests/history.rs"]
+mod history;
+
 struct Claim;
 impl ExclusiveControllerClaim for Claim {}
 

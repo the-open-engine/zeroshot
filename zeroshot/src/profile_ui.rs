@@ -15,15 +15,11 @@ use openengine_cluster_protocol::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
+use crate::workspace;
 use crate::native_v2_cli::{
-    profile_revision, BuiltinGraphTemplate, LocalRunProfileStore, NativeV2CliError,
-    ProfileSaveConflict, TemplateDelivery,
+    profile_revision, LocalRunProfileStore, NativeV2CliError, ProfileSaveConflict,
 };
 
-mod catalog;
-mod data;
-mod outcomes;
 mod runs;
 mod server;
 pub use server::{serve, UiService};
@@ -89,9 +85,10 @@ fn router(state: UiState) -> Router {
 }
 
 async fn bootstrap(State(state): State<UiState>) -> Result<Json<Value>, ApiError> {
-    Ok(Json(
-        json!({"version":1,"workspace":state.workspace,"templates":catalog::templates()?,"workers":catalog::workers()?,"runtimeSchema":schemars::schema_for!(RuntimePlan)}),
-    ))
+    let mut catalog = workspace::catalog()?;
+    catalog["workspace"] = serde_json::to_value(state.workspace)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    Ok(Json(catalog))
 }
 async fn list(State(state): State<UiState>) -> Result<Json<Value>, ApiError> {
     blocking(move || {
@@ -141,12 +138,12 @@ async fn validate(
 async fn author(
     bytes: Result<Bytes, axum::extract::rejection::BytesRejection>,
 ) -> Result<Json<Value>, ApiError> {
-    encoded(outcomes::apply(decode(bytes)?)?)
+    Ok(Json(workspace::author(decode(bytes)?)?))
 }
 async fn data_author(
     bytes: Result<Bytes, axum::extract::rejection::BytesRejection>,
 ) -> Result<Json<Value>, ApiError> {
-    encoded(data::apply(decode(bytes)?)?)
+    Ok(Json(workspace::data(decode(bytes)?)?))
 }
 async fn save(
     State(state): State<UiState>,
@@ -189,10 +186,9 @@ fn workspace_changed() -> ApiError {
     }
 }
 async fn admit(graph: &GraphSpec, runtime: &RuntimePlan) -> Result<(), ApiError> {
-    NativeV2Admission
-        .validate_profile(graph, runtime, DeliveryPolicy::Optional)
+    workspace::validate_profile(graph, runtime)
         .await
-        .map_err(|e| ApiError::invalid(e.to_string()))
+        .map_err(Into::into)
 }
 fn decode<T: serde::de::DeserializeOwned>(
     bytes: Result<Bytes, axum::extract::rejection::BytesRejection>,
@@ -243,6 +239,15 @@ impl ApiError {
         }
     }
 }
+impl From<workspace::WorkspaceError> for ApiError {
+    fn from(error: workspace::WorkspaceError) -> Self {
+        Self {
+            status: StatusCode::from_u16(error.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+            code: error.code,
+            message: error.message,
+        }
+    }
+}
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         problem(self.status, self.code, &self.message)
@@ -255,6 +260,7 @@ fn problem(status: StatusCode, code: &str, message: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::native_v2_cli::{BuiltinGraphTemplate, TemplateDelivery};
     use openengine_cluster_testkit::assertions::AssertValue;
     struct Server {
         url: String,

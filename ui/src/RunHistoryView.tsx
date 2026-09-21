@@ -39,6 +39,7 @@ import {
   type Invocation,
   type RunDetail,
 } from './run-history';
+import { canFollowHistory, observationEnded } from './history-contract';
 import './run-history.css';
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -111,7 +112,7 @@ export function RunHistoryView({
       moments.findIndex((moment) => moment.index === Math.min(cursorIndex, events.length - 1))
     ),
     moment = moments[safePosition];
-  const isLiveRun = !!run && !run.example && run.phase !== 'finished' && !run.terminal;
+  const isLiveRun = !!run && canFollowHistory(run);
   const projection = useMemo(
     () => document && projectHistory(document, events, moment.index, control),
     [document, events, moment.index, control]
@@ -152,7 +153,7 @@ export function RunHistoryView({
       setRun(detail);
       if (reset) {
         setSelected(detail.graph.root.name);
-        follow(!!dataSource.watch && !detail.terminal && detail.phase !== 'finished');
+        follow(!!dataSource.watch && canFollowHistory(detail));
       }
       const initialIntent = cursorIntent.current;
       let collected = retained.current;
@@ -174,6 +175,7 @@ export function RunHistoryView({
         setLoadedHead(complete);
         if ((reset && cursorIntent.current === initialIntent) || followLatest.current)
           setCursorIndex(collected.length - 1);
+        acceptObservation(id, page);
         if (page.complete && page.finished) finishRun(id, collected, page);
       }
     } catch (error) {
@@ -227,6 +229,12 @@ export function RunHistoryView({
     followLatest.current = value;
     setFollowing(value);
   }
+  function acceptObservation(id: string, page: HistoryPage) {
+    if (page.observation)
+      setRun((previous) =>
+        previous?.runId === id ? { ...previous, observation: page.observation } : previous
+      );
+  }
   function finishRun(id: string, collected: HistoryEvent[], page: HistoryPage) {
     setRun((previous) =>
       previous?.runId === id ? finishRunHistory(previous, collected, page) : previous
@@ -265,8 +273,9 @@ export function RunHistoryView({
             retainEvents(collected);
             if (followLatest.current) setCursorIndex(collected.length - 1);
           }
-          if (page.complete && page.finished) {
-            finishRun(id, collected, page);
+          acceptObservation(id, page);
+          if (page.complete && page.finished) finishRun(id, collected, page);
+          if (page.complete && observationEnded(page.observation, page.finished === true)) {
             setConnection('idle');
           } else if (count >= 5000 || bytes >= 8 * 1024 * 1024) {
             controller.abort();
@@ -392,6 +401,19 @@ export function RunHistoryView({
               </span>
             </div>
           </div>
+          {run.observation && !['active', 'complete'].includes(run.observation.state) && (
+            <div className="history-error" role="status" data-problem-code={run.observation.code}>
+              <span>
+                {run.observation.state === 'collecting'
+                  ? 'Collecting archived history. Playback will continue as records arrive.'
+                  : run.observation.state === 'expired'
+                    ? 'This archive has expired.'
+                    : run.observation.state === 'unavailable'
+                      ? 'This run has no retained workspace history.'
+                      : 'This archive is incomplete. The retained history remains available.'}
+              </span>
+            </div>
+          )}
           {run.runtimeFailure && (
             <div className="history-error" role="alert">
               <AlertCircle size={16} />

@@ -1104,3 +1104,10 @@ h2 {
   margin: 4px 0 0;
   overflow-wrap: anywhere;
 }
+
+.embedded-app {
+  min-height: 0;
+}
+.embedded-app > .app-body {
+  flex: 1;
+}

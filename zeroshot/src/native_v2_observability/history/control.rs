@@ -8,6 +8,8 @@ use openengine_cluster_server::admission::VerifiedGraph;
 use tokio::sync::Mutex;
 
 use super::*;
+use serde::{Deserialize, Serialize};
+use crate::v2_run_ledger::StoredRun;
 use crate::full_v1_reducer::{FullV1Reducer, ReductionInput, StructuralTrace, StructuralTraceState};
 use crate::native_v2_contract::AdmittedRun;
 use crate::native_v2_supervisor::{durable_history, next_execution, next_node_instance};
@@ -23,20 +25,31 @@ const MAX_CONTROL_BYTES: usize = 4 * 1024 * 1024;
 const PROJECTION_FAILED: &str = "control_projection_unavailable";
 const PROJECTION_LIMIT: &str = "control_projection_limit";
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct ControlRecord {
+pub struct ControlRecord {
     pub cursor: Cursor,
     pub node: String,
     pub map_indices: Vec<u64>,
     pub visit_id: String,
-    pub state: &'static str,
+    pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present_output",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub output: Option<Value>,
+}
+
+// An explicit null output is authored data; an absent output means this visit has no output.
+fn present_output<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(deserializer).map(Some)
 }
 
 impl ControlRecord {
@@ -54,7 +67,8 @@ impl ControlRecord {
                 StructuralTraceState::Completed => "completed",
                 StructuralTraceState::Succeeded => "succeeded",
                 StructuralTraceState::Failed => "failed",
-            },
+            }
+            .into(),
             branch: trace.branch.map(|name| name.as_str().to_owned()),
             detail: trace.detail,
             output: trace.output,
@@ -72,7 +86,7 @@ impl ControlRecord {
     }
 }
 
-pub(super) struct ControlPage {
+pub(crate) struct ControlPage {
     pub records: Vec<ControlRecord>,
     pub error: Option<String>,
 }
@@ -82,7 +96,7 @@ type SharedReplay = Arc<Mutex<Option<ControlReplay>>>;
 /// A small shared cache makes ordinary pagination, live delivery and reconnects incremental.
 /// Eviction changes performance only: replaying the immutable prefix produces identical updates.
 #[derive(Clone, Default)]
-pub(super) struct ControlCache {
+pub(crate) struct ControlCache {
     runs: Arc<Mutex<VecDeque<(RunId, SharedReplay)>>>,
 }
 
@@ -103,9 +117,9 @@ impl ControlCache {
         replay
     }
 
-    pub(super) async fn project(
+    pub(crate) async fn project(
         &self,
-        ledger: &SqliteRunLedger,
+        ledger: &dyn RunLedger,
         id: &RunId,
         range: Range<u64>,
     ) -> ControlPage {
@@ -120,7 +134,7 @@ impl ControlCache {
 
     async fn project_inner(
         &self,
-        ledger: &SqliteRunLedger,
+        ledger: &dyn RunLedger,
         id: &RunId,
         range: Range<u64>,
     ) -> Result<ControlPage, &'static str> {
@@ -227,7 +241,11 @@ impl ControlReplay {
             return Err(PROJECTION_LIMIT);
         }
         apply_event(&mut self.snapshot, &stored.event, sequence).map_err(|_| PROJECTION_FAILED)?;
-        match stored.event {
+        self.project_event(stored.event)
+    }
+
+    fn project_event(&mut self, event: RunEvent) -> Result<(), &'static str> {
+        match event {
             RunEvent::SafeLog { .. } | RunEvent::TokenUsageObserved { .. } => Ok(()),
             RunEvent::ForceStopRequested | RunEvent::Terminal { .. } => self.stop_pending(None),
             _ if self.snapshot.force_stop_requested => Ok(()),
@@ -307,7 +325,7 @@ impl ControlReplay {
             .collect::<Vec<_>>();
         for mut record in stopped {
             record.cursor = self.snapshot.cursor.clone();
-            record.state = "stopped";
+            record.state = "stopped".into();
             self.record(record)?;
         }
         Ok(())

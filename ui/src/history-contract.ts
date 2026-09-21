@@ -1,5 +1,5 @@
 import { ApiError } from './api';
-import type { HistoryPage, RuntimeFailure } from './run-history';
+import type { HistoryPage, RunDetail, RuntimeFailure } from './run-history';
 
 export function historyCursorSequence(cursor: unknown): bigint {
   if (typeof cursor !== 'string' || !/^v2:(0|[1-9][0-9]*)$/.test(cursor))
@@ -39,4 +39,37 @@ export function readPageRuntimeFailure(
   const failure = readRuntimeFailure(page.runtimeFailure, page.headCursor);
   if (failure && page.finished !== true) throw invalidRuntimeFailure();
   return failure;
+}
+
+export type HistoryObservation = {
+  state: 'active' | 'collecting' | 'complete' | 'incomplete' | 'expired' | 'unavailable';
+  code?: string;
+};
+/** Observation may continue while a terminal run's archive is still collecting. */
+export function readObservation(value: unknown): HistoryObservation | undefined {
+  if (value === undefined) return undefined;
+  const result = value as Partial<HistoryObservation> | null;
+  const states = ['active', 'collecting', 'complete', 'incomplete', 'expired', 'unavailable'];
+  if (
+    !result ||
+    !states.includes(result.state ?? '') ||
+    (result.code !== undefined && typeof result.code !== 'string')
+  )
+    throw new ApiError(
+      200,
+      'invalid_observation',
+      'History availability is invalid. Reload to try again.'
+    );
+  return result as HistoryObservation;
+}
+export function observationEnded(
+  observation: HistoryObservation | undefined,
+  fallback: boolean
+): boolean {
+  return observation ? !['active', 'collecting'].includes(observation.state) : fallback;
+}
+export function canFollowHistory(run: RunDetail): boolean {
+  return (
+    !run.example && !observationEnded(run.observation, run.history.complete || !!run.runtimeFailure)
+  );
 }

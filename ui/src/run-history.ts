@@ -1,3 +1,4 @@
+import type { HistoryObservation } from './history-contract';
 import { allNodes, children, isGroup, pathTo, type Document, type GraphNode } from './domain';
 import { projectControlHistory, type ControlRecord } from './control-history';
 import type { WorkflowNodeObservation } from './workflow-observation';
@@ -15,6 +16,7 @@ export type RunSummary = {
   runtimeFailure?: RuntimeFailure;
   createdAt?: number | null;
   historyAvailable: boolean;
+  observation?: HistoryObservation;
   source?: Record<string, unknown>;
   example?: boolean;
 };
@@ -61,6 +63,7 @@ export type HistoryEvent = {
   };
 };
 export type HistoryPage = {
+  observation?: HistoryObservation;
   events: HistoryEvent[];
   nextCursor: string;
   headCursor: string;
@@ -75,7 +78,7 @@ export type HistoryPage = {
 export function finishRunHistory(
   run: RunDetail,
   events: readonly HistoryEvent[],
-  page: Pick<HistoryPage, 'headCursor' | 'runtimeFailure'>
+  page: Pick<HistoryPage, 'headCursor' | 'runtimeFailure' | 'observation'>
 ): RunDetail {
   let recordedTerminal: RunTerminal | undefined;
   for (let index = events.length - 1; index >= 0; index--) {
@@ -87,6 +90,7 @@ export function finishRunHistory(
   const runtimeFailure = recordedTerminal ? undefined : (page.runtimeFailure ?? run.runtimeFailure);
   return {
     ...run,
+    observation: page.observation ?? run.observation,
     phase: 'finished',
     cursor: page.headCursor,
     terminal:

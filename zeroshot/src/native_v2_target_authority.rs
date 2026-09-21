@@ -168,6 +168,16 @@ impl NativeV2TargetAuthority {
         self.factory.supports_workspace_recovery()
     }
 
+    /// Reads only an existing controller. History must never trigger reconciliation or recovery.
+    async fn history(&self) -> Option<crate::native_v2_observability::history::RunHistoryService> {
+        self.state
+            .lock()
+            .await
+            .controller
+            .as_ref()
+            .map(|controller| controller.observations().history())
+    }
+
     /// Activates exactly one controller and returns the same authority for every target session.
     pub async fn controller(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
         let mut state = self.state.lock().await;

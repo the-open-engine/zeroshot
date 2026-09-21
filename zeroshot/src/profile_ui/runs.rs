@@ -9,8 +9,9 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
 use futures_util::{stream, Stream, StreamExt};
-use openengine_cluster_protocol::{is_canonical_uuid_v7, Cursor, GraphSpec, RunId};
-use serde::{Deserialize, Serialize};
+use openengine_cluster_protocol::{is_canonical_uuid_v7, Cursor, RunId};
+use serde::Deserialize;
+use std::sync::Arc;
 use serde_json::{json, Value};
 
 use super::{ApiError, UiState};
@@ -20,41 +21,34 @@ use crate::v2_run_ledger::{
     cursor_sequence, initial_cursor, RunLedger, RunLedgerError, RunSnapshot, StoredRun,
 };
 
-mod control;
-use control::{ControlCache, ControlRecord};
-mod status;
+use crate::native_v2_observability::history::{
+    control, status, created_at, HistoryError, HistoryPage, ObservationState, RunHistoryService,
+};
+use control::ControlCache;
 use status::{RuntimeFailure, RuntimeStatusReader};
+
+impl From<HistoryError> for ApiError {
+    fn from(error: HistoryError) -> Self {
+        Self {
+            status: StatusCode::from_u16(error.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+            code: error.code,
+            message: error.message,
+        }
+    }
+}
 
 const LIST_PAGE_SIZE: usize = 50;
 const LIVE_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct HistoryPage {
-    events: Vec<Value>,
-    next_cursor: Cursor,
-    head_cursor: Cursor,
-    complete: bool,
-    finished: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    runtime_failure: Option<RuntimeFailure>,
-    #[serde(skip)]
-    runtime_available: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    control: Vec<ControlRecord>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    control_error: Option<String>,
-}
-
 struct LiveHistory {
-    ledger: SqliteRunLedger,
+    service: RunHistoryService,
     id: RunId,
     after: Cursor,
     first: Option<HistoryPage>,
     at_head: bool,
     done: bool,
     unavailable: bool,
-    source: NativeRunHistory,
+    last_runtime_failure: Option<RuntimeFailure>,
 }
 
 impl LiveHistory {
@@ -73,23 +67,27 @@ impl LiveHistory {
                 if self.at_head {
                     tokio::time::sleep(LIVE_POLL_INTERVAL).await;
                 }
-                match read_page(&self.ledger, &self.id, self.after.clone(), &self.source).await {
+                match self.service.page(&self.id, Some(self.after.clone())).await {
                     Ok(page)
-                        if page.events.is_empty() && !page.finished && page.runtime_available =>
+                        if page.events.is_empty()
+                            && page.observation.state == ObservationState::Active
+                            && page.runtime_failure == self.last_runtime_failure =>
                     {
                         continue;
                     }
                     Ok(page) => page,
                     Err(error) => {
                         self.done = true;
-                        return Some(Err(error));
+                        return Some(Err(error.into()));
                     }
                 }
             };
+            self.last_runtime_failure = page.runtime_failure.clone();
             self.after = page.next_cursor.clone();
             self.at_head = page.complete;
-            self.done = page.complete && page.finished;
-            self.unavailable = page.complete && !page.finished && !page.runtime_available;
+            self.done = page.complete && page.observation.state == ObservationState::Complete;
+            self.unavailable =
+                page.complete && page.observation.state == ObservationState::Incomplete;
             return Some(Ok(page));
         }
     }
@@ -201,16 +199,6 @@ impl NativeRunHistory {
             .ok_or_else(not_found)
     }
 
-    async fn runtime_observation(
-        &self,
-        snapshot: &RunSnapshot,
-    ) -> Result<Option<RuntimeFailure>, ()> {
-        match &self.status {
-            Some(reader) => reader.failure(snapshot).await,
-            None => Ok(None),
-        }
-    }
-
     async fn list(&self, after: Option<RunId>) -> Result<Value, ApiError> {
         let ids = self.ids(after.as_ref()).await?;
         let mut remaining = ids.into_iter();
@@ -225,7 +213,9 @@ impl NativeRunHistory {
                 match self.stored(&id).await {
                     Ok(stored) => {
                         let mut value = summary(&stored.snapshot);
-                        if let Ok(Some(failure)) = self.runtime_observation(&stored.snapshot).await
+                        if let Ok(Some(failure)) =
+                            status::runtime_observation(self.status.as_ref(), &stored.snapshot)
+                                .await
                         {
                             failure.apply(&mut value);
                         }
@@ -244,50 +234,22 @@ impl NativeRunHistory {
         Ok(json!({"runs":runs,"nextCursor":next}))
     }
 
+    async fn service(&self, id: &RunId) -> Result<RunHistoryService, ApiError> {
+        Ok(RunHistoryService::with_sources(
+            Arc::new(self.open(id).await?),
+            self.control.clone(),
+            self.status.clone(),
+        ))
+    }
+
     async fn detail(&self, id: &RunId) -> Result<Value, ApiError> {
-        let stored = self.stored(id).await?;
-        let runtime_failure = self
-            .runtime_observation(&stored.snapshot)
-            .await
-            .ok()
-            .flatten();
-        let graph = GraphSpec {
-            profile: stored.admitted.graph.profile,
-            initial_input: stored.admitted.graph.initial_input,
-            policy: stored.admitted.graph.policy,
-            root: stored.admitted.graph.root,
-        };
-        let mut snapshot = serde_json::to_value(&stored.snapshot).map_err(|_| unavailable())?;
-        if let Some(executions) = snapshot["executions"].as_object_mut() {
-            for node in executions.values_mut() {
-                stringify_reference(&mut node["reference"]);
-            }
-        }
-        let mut detail = json!({
-            "version":1, "projectionVersion":1,
-            "runId":id, "title":stored.admitted.title, "createdAt":created_at(id),
-            "phase":stored.snapshot.phase,"cursor":stored.snapshot.cursor,
-            "terminal":stored.snapshot.terminal,"historyAvailable":true,
-            "graph":graph, "runtime":stored.admitted.runtime,
-            "initialInput":stored.admitted.initial_input,"source":stored.admitted.source,
-            "snapshot":snapshot,
-            "history":{
-                "initialCursor":initial_cursor(),"cursor":stored.snapshot.cursor,
-                "complete":stored.snapshot.terminal.is_some(),
-                "limitations":["control_flow_projected_by_reducer","retained_provider_output_only"]
-            }
-        });
-        if let Some(failure) = runtime_failure {
-            failure.apply(&mut detail);
-        }
-        Ok(detail)
+        let definition = self.service(id).await?.definition(id).await?;
+        serde_json::to_value(definition).map_err(|_| unavailable())
     }
 
     async fn page(&self, id: &RunId, after: Option<Cursor>) -> Result<Value, ApiError> {
-        let ledger = self.open(id).await?;
-        read_page(&ledger, id, after.unwrap_or_else(initial_cursor), self)
-            .await
-            .and_then(|page| serde_json::to_value(page).map_err(|_| unavailable()))
+        let page = self.service(id).await?.page(id, after).await?;
+        serde_json::to_value(page).map_err(|_| unavailable())
     }
 
     async fn subscribe(
@@ -296,18 +258,18 @@ impl NativeRunHistory {
         after: Option<Cursor>,
     ) -> Result<impl Stream<Item = Result<HistoryPage, ApiError>> + Send + 'static + use<>, ApiError>
     {
-        let ledger = self.open(&id).await?;
+        let service = self.service(&id).await?;
         let after = after.unwrap_or_else(initial_cursor);
-        let first = read_page(&ledger, &id, after.clone(), self).await?;
+        let first = service.page(&id, Some(after.clone())).await?;
         let state = LiveHistory {
-            ledger,
+            service,
             id,
             after,
             first: Some(first),
             at_head: false,
             done: false,
             unavailable: false,
-            source: self.clone(),
+            last_runtime_failure: None,
         };
         // The response owns the reader and timer. Disconnecting drops both; there is no
         // producer task or event queue that can outlive the HTTP subscription.
@@ -317,97 +279,12 @@ impl NativeRunHistory {
     }
 }
 
-async fn read_page(
-    ledger: &SqliteRunLedger,
-    id: &RunId,
-    after: Cursor,
-    source: &NativeRunHistory,
-) -> Result<HistoryPage, ApiError> {
-    let start = cursor_sequence(&after).map_err(ledger_error)?;
-    let observation = ledger
-        .snapshot_and_tail(id, Some(&after))
-        .await
-        .map_err(ledger_error)?;
-    let head = cursor_sequence(&observation.snapshot.cursor).map_err(ledger_error)?;
-    let mut next = after;
-    let mut sequence = start;
-    let mut events = Vec::with_capacity(observation.events.len());
-    for stored in observation.events {
-        let event_sequence = cursor_sequence(&stored.cursor).map_err(ledger_error)?;
-        // Another controller may append between the ledger's snapshot and event reads.
-        // Keep this page pinned to the head that was actually observed.
-        if event_sequence > head {
-            break;
-        }
-        if event_sequence != sequence + 1 {
-            return Err(history_gap());
-        }
-        sequence = event_sequence;
-        next = stored.cursor.clone();
-        let mut value = serde_json::to_value(stored).map_err(|_| unavailable())?;
-        project_event(&mut value["event"]);
-        events.push(value);
-    }
-    if events.is_empty() && sequence < head {
-        return Err(history_gap());
-    }
-    let controls = source.control.project(ledger, id, start..sequence).await;
-    let runtime = source.runtime_observation(&observation.snapshot).await;
-    let runtime_available = runtime.is_ok();
-    let runtime_failure = runtime.ok().flatten();
-    let finished = observation.snapshot.terminal.is_some() || runtime_failure.is_some();
-    Ok(HistoryPage {
-        events,
-        next_cursor: next,
-        head_cursor: observation.snapshot.cursor,
-        complete: sequence == head,
-        finished,
-        runtime_failure,
-        runtime_available,
-        control: controls.records,
-        control_error: controls.error,
-    })
-}
-
 fn summary(snapshot: &RunSnapshot) -> Value {
     json!({
         "runId":snapshot.run_id,"title":snapshot.title,"phase":snapshot.phase,
         "cursor":snapshot.cursor,"terminal":snapshot.terminal,"source":snapshot.source,
         "createdAt":created_at(&snapshot.run_id),"historyAvailable":true
     })
-}
-
-fn created_at(id: &RunId) -> Option<u64> {
-    let (seconds, nanos) = uuid::Uuid::parse_str(id.as_str())
-        .ok()?
-        .get_timestamp()?
-        .to_unix();
-    seconds
-        .checked_mul(1000)?
-        .checked_add(u64::from(nanos / 1_000_000))
-}
-
-// Execution identifiers are opaque strings in the browser. Native u64 values must never pass
-// through a JavaScript number, even though current short runs usually have small identities.
-fn stringify_reference(reference: &mut Value) {
-    for key in ["execution", "nodeInstance"] {
-        if let Some(id) = reference[key].as_u64() {
-            reference[key] = Value::String(id.to_string());
-        }
-    }
-}
-
-fn project_event(event: &mut Value) {
-    match event["kind"].as_str() {
-        Some("node_started" | "execution_voided") => stringify_reference(&mut event["reference"]),
-        Some("node_completed") => stringify_reference(&mut event["completion"]["reference"]),
-        Some("safe_log" | "token_usage_observed") => {
-            if let Some(id) = event["execution"].as_u64() {
-                event["execution"] = Value::String(id.to_string());
-            }
-        }
-        _ => {}
-    }
 }
 
 #[derive(Default, Deserialize)]
@@ -534,49 +411,20 @@ fn file_error(error: std::io::Error) -> ApiError {
 }
 
 fn ledger_error(error: RunLedgerError) -> ApiError {
-    match error {
-        RunLedgerError::RunNotFound => not_found(),
-        RunLedgerError::InvalidCursor | RunLedgerError::CursorAhead => invalid_cursor(),
-        _ => unavailable(),
-    }
+    crate::native_v2_observability::history::ledger_error(error).into()
 }
 
 fn not_found() -> ApiError {
-    ApiError {
-        status: StatusCode::NOT_FOUND,
-        code: "run_not_found",
-        message: "This run has no retained history.".into(),
-    }
+    crate::native_v2_observability::history::not_found().into()
 }
 fn unavailable() -> ApiError {
-    ApiError {
-        status: StatusCode::SERVICE_UNAVAILABLE,
-        code: "history_unavailable",
-        message: "This run's history is unavailable or uses an unsupported format.".into(),
-    }
+    crate::native_v2_observability::history::unavailable().into()
 }
 fn runtime_unavailable() -> ApiError {
-    ApiError {
-        status: StatusCode::SERVICE_UNAVAILABLE,
-        code: "runtime_unavailable",
-        message:
-            "The run controller is unavailable. Retained history is shown; retry to reconnect."
-                .into(),
-    }
-}
-fn history_gap() -> ApiError {
-    ApiError {
-        status: StatusCode::CONFLICT,
-        code: "history_gap",
-        message: "The retained history has a gap; replay cannot continue.".into(),
-    }
+    crate::native_v2_observability::history::runtime_unavailable().into()
 }
 fn invalid_cursor() -> ApiError {
-    ApiError {
-        status: StatusCode::BAD_REQUEST,
-        code: "invalid_cursor",
-        message: "The history cursor is invalid or ahead of this run.".into(),
-    }
+    crate::native_v2_observability::history::invalid_cursor().into()
 }
 
 #[cfg(test)]

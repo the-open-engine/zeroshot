@@ -70,7 +70,12 @@ async fn confirmed_failure_reports_current_state_without_fabricating_history() {
             .iter()
             .all(|event| event["event"]["kind"] != "terminal")
     );
-    assert!(stream.next().await.is_none());
+    assert_eq!(page.observation.state, ObservationState::Active);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(25), stream.next())
+            .await
+            .is_err()
+    );
     let after = fixture
         .ledger
         .get(&fixture.id)
@@ -147,7 +152,12 @@ async fn failed_runtime_drains_all_retained_pages_and_reconnects_at_the_same_cur
     let second = stream.next().await.assert_value().assert_value();
     assert!(second.complete && second.finished);
     assert_eq!(second.events.len(), 5);
-    assert!(stream.next().await.is_none());
+    assert_eq!(second.observation.state, ObservationState::Active);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(25), stream.next())
+            .await
+            .is_err()
+    );
     let resumed = source
         .page(&fixture.id, Some(first.next_cursor))
         .await
@@ -188,6 +198,28 @@ async fn caught_up_stream_reports_later_runtime_failure_without_an_extra_event()
     assert!(failure.events.is_empty());
     assert_eq!(failure.next_cursor, first.next_cursor);
     assert!(failure.complete && failure.finished && failure.runtime_failure.is_some());
+    assert_eq!(failure.observation.state, ObservationState::Active);
+    // Failure metadata is emitted once; follow remains available for durable completion.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(550), stream.next())
+            .await
+            .is_err()
+    );
+    fixture
+        .ledger
+        .append(
+            &fixture.id,
+            vec![live::completed(&fixture, 1), live::terminal()],
+        )
+        .await
+        .assert_value();
+    let terminal = tokio::time::timeout(Duration::from_secs(2), stream.next())
+        .await
+        .assert_value()
+        .assert_value()
+        .assert_value();
+    assert_eq!(terminal.observation.state, ObservationState::Complete);
+    assert!(terminal.runtime_failure.is_none());
     assert!(stream.next().await.is_none());
 }
 

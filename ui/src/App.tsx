@@ -33,6 +33,7 @@ import { GuardEditor } from './GuardEditor';
 import { Field, Inspector } from './Inspector';
 import { type Bootstrap, type Summary } from './api';
 import type { WorkspaceServices } from './workspace-services';
+import { useHostWorkspace } from './use-host-workspace';
 import { workspaceStorageKeys } from './workspace-storage';
 import { acknowledgeProfileSave, snapshotProfileSave } from './profile-save';
 import { createNumericDrafts, NumericDraftProvider } from './numeric-drafts';
@@ -61,7 +62,6 @@ import {
 } from './domain';
 import { AppHeader } from './AppHeader';
 import { StandaloneRuns } from './StandaloneRuns';
-import { RunHistoryBoundary } from './RunHistoryBoundary';
 import { DefaultsPage } from './DefaultsPage';
 import { createReviewLoop } from './review-loop';
 import {
@@ -89,16 +89,25 @@ function loadDraft(key: string) {
 export function App({
   services,
   bootstrap,
+  host,
+  renderRun,
 }: {
   services: WorkspaceServices;
   bootstrap: Bootstrap;
+  host?: Parameters<typeof useHostWorkspace>[0];
+  renderRun?: (runId?: string) => React.ReactNode;
 }) {
   const storage = workspaceStorageKeys(services.mount, bootstrap.workspace);
   const [numericDrafts] = useState(createNumericDrafts);
   useEffect(() => () => numericDrafts.clear(), [numericDrafts]);
-  const [historyPage, setHistoryPage] = useState(() => window.location.hash.startsWith('#runs'));
-  const [defaultsPage, setDefaultsPage] = useState(() => window.location.hash === '#defaults');
+  const [historyPage, setHistoryPage] = useState(
+    () => !host && window.location.hash.startsWith('#runs')
+  );
+  const [defaultsPage, setDefaultsPage] = useState(
+    () => !host && window.location.hash === '#defaults'
+  );
   useEffect(() => {
+    if (host) return;
     const changed = () => {
       setDefaultsPage(window.location.hash === '#defaults');
       setHistoryPage(window.location.hash.startsWith('#runs'));
@@ -157,6 +166,8 @@ export function App({
     action: () => void;
   } | null>(null);
   const current = useRef(doc);
+  const currentRevision = useRef(revision);
+  currentRevision.current = revision;
   const documentGeneration = useRef(0);
   const savePending = useRef(false);
   current.current = doc;
@@ -206,7 +217,9 @@ export function App({
   function adopt(next: Document, saved?: Document, rev?: string, layout?: Positions) {
     numericDrafts.clear();
     documentGeneration.current++;
-    setDoc(content(next));
+    current.current = content(next);
+    currentRevision.current = rev;
+    setDoc(current.current);
     setBase(saved ? content(saved) : undefined);
     setRevision(rev);
     setPast([]);
@@ -228,7 +241,63 @@ export function App({
     setPositions(stored);
     editTime.current = { key: '', time: 0 };
   }
+  const hosted = useHostWorkspace(host, {
+    get document() {
+      return current.current;
+    },
+    get revision() {
+      return currentRevision.current;
+    },
+    get generation() {
+      return documentGeneration.current;
+    },
+    dirty,
+    pending: pendingEdits || jsonDirty,
+    busy,
+    loading,
+    validation,
+    adopt,
+    acknowledge: acceptSaved,
+    discard: () => {
+      setModal(null);
+      if (base) adopt(base, base, revision);
+      else {
+        numericDrafts.clear();
+        documentGeneration.current++;
+        current.current = undefined;
+        setDoc(undefined);
+      }
+      try {
+        sessionStorage.removeItem(storage.draft);
+      } catch {
+        /* optional recovery */
+      }
+    },
+  });
+  function acceptSaved(acknowledged: NonNullable<ReturnType<typeof acknowledgeProfileSave>>) {
+    current.current = acknowledged.document;
+    currentRevision.current = acknowledged.revision;
+    setDoc(acknowledged.document);
+    setBase(acknowledged.base);
+    setRevision(acknowledged.revision);
+    setModal((active) => (active === 'save' ? null : active));
+    setNotice(
+      !acknowledged.changed && !hasPendingEdits()
+        ? 'Profile saved'
+        : 'Earlier changes saved. Newer edits are unsaved.'
+    );
+  }
   useEffect(() => {
+    if (host) {
+      const draft = loadDraft(storage.draft);
+      if (draft) {
+        adopt(draft.document, draft.base, draft.revision, draft.positions);
+        hosted.restore(draft.documentId);
+        setNotice('Draft restored');
+      }
+      setLoading(false);
+      return;
+    }
     let live = true;
     const controller = new AbortController();
     services.profiles
@@ -270,7 +339,13 @@ export function App({
       if (dirty)
         sessionStorage.setItem(
           storage.draft,
-          stringify({ document: doc, base, revision, positions })
+          stringify({
+            document: doc,
+            base,
+            revision,
+            positions,
+            documentId: hosted.profileDocumentId,
+          })
         );
       else sessionStorage.removeItem(storage.draft);
     } catch {
@@ -335,6 +410,10 @@ export function App({
     editTime.current = { key: '', time: 0 };
   }
   async function saveDialog(asCopy = false) {
+    if (host) {
+      hosted.requestSave();
+      return;
+    }
     if (!doc || busy || loading) return;
     const generation = documentGeneration.current;
     try {
@@ -353,7 +432,7 @@ export function App({
   }
   useEffect(() => {
     function shortcut(e: KeyboardEvent) {
-      if (modal || confirm || defaultsPage || historyPage) return;
+      if (modal || confirm || defaultsPage || historyPage || hosted.showingRun) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         saveAction.current();
@@ -425,15 +504,7 @@ export function App({
         result
       );
       if (!acknowledged) return;
-      setDoc(acknowledged.document);
-      setBase(acknowledged.base);
-      setRevision(acknowledged.revision);
-      setModal((active) => (active === 'save' ? null : active));
-      setNotice(
-        !acknowledged.changed && !hasPendingEdits()
-          ? 'Profile saved'
-          : 'Earlier changes saved. Newer edits are unsaved.'
-      );
+      acceptSaved(acknowledged);
       await refresh().catch(() => setNotice('Profile saved. Reload to refresh the profile list.'));
     } catch (e) {
       setModalError(message(e));
@@ -646,85 +717,92 @@ export function App({
   return (
     <NumericDraftProvider value={numericDrafts}>
       <AuthoringProvider value={services.authoring}>
-        <div className="app" hidden={defaultsPage || historyPage}>
-          <AppHeader
-            section="profiles"
-            workspace={bootstrap.workspace}
-            navigate={(section) => {
-              if (section === 'runs') window.location.hash = 'runs';
-            }}
-          >
-            <button
-              className="icon-button sidebar-toggle"
-              title="Profiles"
-              aria-label="Profiles"
-              onClick={() => setSidebar(!sidebar)}
+        <div
+          className={`app ${host ? 'embedded-app' : ''}`}
+          hidden={defaultsPage || historyPage || hosted.showingRun}
+        >
+          {!host && (
+            <AppHeader
+              section="profiles"
+              workspace={bootstrap.workspace}
+              navigate={(section) => {
+                if (section === 'runs') window.location.hash = 'runs';
+              }}
             >
-              <Menu size={19} />
-            </button>
-          </AppHeader>
+              <button
+                className="icon-button sidebar-toggle"
+                title="Profiles"
+                aria-label="Profiles"
+                onClick={() => setSidebar(!sidebar)}
+              >
+                <Menu size={19} />
+              </button>
+            </AppHeader>
+          )}
           <div className="app-body">
-            <nav className={`profile-sidebar ${sidebar ? 'visible' : ''}`} aria-label="Profiles">
-              <div className="sidebar-heading">
-                <span className="eyebrow">PROFILES</span>
+            {!host && (
+              <nav className={`profile-sidebar ${sidebar ? 'visible' : ''}`} aria-label="Profiles">
+                <div className="sidebar-heading">
+                  <span className="eyebrow">PROFILES</span>
+                  <button
+                    className="icon-button"
+                    title="New profile"
+                    aria-label="New profile"
+                    disabled={busy || loading}
+                    onClick={() =>
+                      guard(() => {
+                        setName('');
+                        setModalError('');
+                        setModal('new');
+                      })
+                    }
+                  >
+                    <Plus size={17} />
+                  </button>
+                </div>
+                <div className="profile-list">
+                  {profiles.map((p) => (
+                    <button
+                      key={p.id}
+                      disabled={busy || loading}
+                      className={`profile-item ${doc?.name === p.name && !!base ? 'active' : ''}`}
+                      onClick={() => guard(() => void load(p.name))}
+                    >
+                      <Braces size={16} />
+                      <span>{p.name}</span>
+                      {p.isDefault && (
+                        <span className="default-mark" title="Default profile">
+                          •
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                  {!profiles.length && !loading && (
+                    <div className="no-profiles">No saved profiles</div>
+                  )}
+                  {doc && !base && (
+                    <div className="draft-item">
+                      <FilePlus2 size={16} />
+                      <span>{doc.name || 'Untitled profile'}</span>
+                      <span className="draft-dot" title="Unsaved" />
+                    </div>
+                  )}
+                </div>
                 <button
-                  className="icon-button"
-                  title="New profile"
-                  aria-label="New profile"
+                  className="text-button import-button"
                   disabled={busy || loading}
                   onClick={() =>
                     guard(() => {
-                      setName('');
+                      setJson('');
                       setModalError('');
-                      setModal('new');
+                      setModal('import');
                     })
                   }
                 >
-                  <Plus size={17} />
+                  <Upload size={16} /> Import JSON
                 </button>
-              </div>
-              <div className="profile-list">
-                {profiles.map((p) => (
-                  <button
-                    key={p.id}
-                    disabled={busy || loading}
-                    className={`profile-item ${doc?.name === p.name && !!base ? 'active' : ''}`}
-                    onClick={() => guard(() => void load(p.name))}
-                  >
-                    <Braces size={16} />
-                    <span>{p.name}</span>
-                    {p.isDefault && (
-                      <span className="default-mark" title="Default profile">
-                        •
-                      </span>
-                    )}
-                  </button>
-                ))}
-                {!profiles.length && !loading && (
-                  <div className="no-profiles">No saved profiles</div>
-                )}
-                {doc && !base && (
-                  <div className="draft-item">
-                    <FilePlus2 size={16} />
-                    <span>{doc.name || 'Untitled profile'}</span>
-                    <span className="draft-dot" title="Unsaved" />
-                  </div>
-                )}
-              </div>
-              <button
-                className="text-button import-button"
-                disabled={busy || loading}
-                onClick={() =>
-                  guard(() => {
-                    setJson('');
-                    setModalError('');
-                    setModal('import');
-                  })
-                }
-              >
-                <Upload size={16} /> Import JSON
-              </button>
-            </nav>
+              </nav>
+            )}
             <main className="workspace" inert={loading} aria-busy={loading}>
               {doc ? (
                 <>
@@ -766,21 +844,25 @@ export function App({
                       >
                         <Download size={18} />
                       </button>
-                      <button
-                        className="button save-copy"
-                        disabled={busy}
-                        onClick={() => saveDialog(true)}
-                      >
-                        Save as
-                      </button>
-                      <button
-                        className="button primary"
-                        disabled={busy || (!dirty && !pendingEdits && !!base)}
-                        onClick={() => saveDialog()}
-                      >
-                        {busy ? <Loader2 className="spin" size={16} /> : <Check size={16} />}{' '}
-                        {busy ? 'Saving' : 'Save profile'}
-                      </button>
+                      {!host && (
+                        <button
+                          className="button save-copy"
+                          disabled={busy}
+                          onClick={() => saveDialog(true)}
+                        >
+                          Save as
+                        </button>
+                      )}
+                      {!host && (
+                        <button
+                          className="button primary"
+                          disabled={busy || (!dirty && !pendingEdits && !!base)}
+                          onClick={() => saveDialog()}
+                        >
+                          {busy ? <Loader2 className="spin" size={16} /> : <Check size={16} />}{' '}
+                          {busy ? 'Saving' : 'Save profile'}
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className={`editor-body ${inspector ? '' : 'inspector-closed'}`}>
@@ -815,7 +897,8 @@ export function App({
                         runtime={() => setModal('runtime')}
                         json={() => openJson('graph')}
                         info={() => {
-                          window.location.hash = 'defaults';
+                          if (host) hosted.navigate('defaults');
+                          else window.location.hash = 'defaults';
                         }}
                         inspectorHidden={!inspector}
                         showInspector={() => setInspector(true)}
@@ -1350,11 +1433,10 @@ export function App({
             </Modal>
           )}
         </div>
-        {historyPage && (
-          <RunHistoryBoundary workspace={bootstrap.workspace}>
-            <StandaloneRuns services={services} bootstrap={bootstrap} />
-          </RunHistoryBoundary>
+        {host && hosted.showingRun && (
+          <div className="app embedded-app">{renderRun?.(hosted.runId)}</div>
         )}
+        {!host && historyPage && <StandaloneRuns services={services} bootstrap={bootstrap} />}
         {defaultsPage && (
           <DefaultsPage
             back={() => {

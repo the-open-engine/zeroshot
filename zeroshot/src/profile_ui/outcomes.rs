@@ -11,8 +11,9 @@ use openengine_cluster_protocol::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::ApiError;
+use super::WorkspaceError as ApiError;
 
+#[path = "outcomes/required.rs"]
 mod required;
 pub(super) use required::ensure_required_output;
 
@@ -1034,7 +1035,7 @@ mod tests {
             json!({"kind":"protect","node":"write"}),
         )
         .assert_value();
-        super::super::admit(
+        super::super::validate_profile(
             &serde_json::from_value(protected["graph"].clone()).assert_value(),
             &serde_json::from_value(json!({"harness":"codex","provider":"openai","size":"small","nodes":{"write":{"kind":"agent","model":"opaque-model"}}})).assert_value(),
         ).await.map_err(|error| error.message).assert_value();
@@ -1101,7 +1102,7 @@ mod tests {
     }
 
     async fn admit_graph(graph: Value, nodes: Value) {
-        super::super::admit(
+        super::super::validate_profile(
             &serde_json::from_value(graph).assert_value(),
             &serde_json::from_value(
                 json!({"harness":"codex","provider":"openai","size":"small","nodes":nodes}),

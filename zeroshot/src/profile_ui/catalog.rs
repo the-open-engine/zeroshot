@@ -10,7 +10,7 @@ use crate::native_v2_contract::{
     GIT_DELIVERY_PUSH_WORKER_REF,
 };
 
-use super::{ApiError, BuiltinGraphTemplate, TemplateDelivery};
+use super::{WorkspaceError as ApiError, BuiltinGraphTemplate, TemplateDelivery};
 
 pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
     let mut result = Vec::new();
@@ -231,7 +231,9 @@ mod tests {
                 json!({"harness":"codex","provider":"openai","size":"small","nodes":bindings}),
             )
             .assert_value();
-            super::super::admit(&graph, &runtime).await.assert_value();
+            super::super::validate_profile(&graph, &runtime)
+                .await
+                .assert_value();
         }
     }
 }

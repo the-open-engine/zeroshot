@@ -32,6 +32,8 @@ use super::{
 use crate::native_v2_cloud::NativeV2CloudController;
 use super::private_access::{PrivateTargetAccess, TargetBootstrapKey};
 
+#[path = "transport_history.rs"]
+mod history;
 #[path = "transport_http.rs"]
 mod http;
 use http::{
@@ -262,6 +264,9 @@ impl NativeV2TargetServer {
             ("GET", path) if is_operator_diagnostics_path(path) => {
                 self.handle_operator_diagnostics(request).await
             }
+            ("POST", history::DEFINITION_PATH | history::PAGE_PATH) => {
+                self.handle_history(request).await
+            }
             ("POST", RUN_PATH) => self.handle_run(request).await,
             ("POST", SESSION_PATH) => self.handle_session(request).await,
             _ => not_found_response(),
@@ -269,11 +274,8 @@ impl NativeV2TargetServer {
     }
 
     async fn handle_operator_diagnostics(&self, request: HttpRequest) -> HttpResponse {
-        if !matches!(self.access, TargetServerAccess::Private { .. }) {
-            return not_found_response();
-        }
-        if let Err(error) = self.authenticate_control(&request.head).await {
-            return authority_error_response(error);
+        if let Err(response) = self.authenticate_private_control(&request.head).await {
+            return response;
         }
         if !request.body.is_empty() {
             return invalid_request_response("operator diagnostic request is malformed");
@@ -373,6 +375,16 @@ impl NativeV2TargetServer {
                 },
             ),
         }
+    }
+
+    async fn authenticate_private_control(&self, head: &RequestHead) -> Result<(), HttpResponse> {
+        if !matches!(self.access, TargetServerAccess::Private { .. }) {
+            return Err(not_found_response());
+        }
+        self.authenticate_control(head)
+            .await
+            .map(|_| ())
+            .map_err(authority_error_response)
     }
 
     async fn authenticate_control(

@@ -356,10 +356,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 | CI classifier                 | `.github/ci-path-classifier.js`                                                                                                                                                                   |
 | Repository tooling tests      | `tests/tooling/`                                                                                                                                                                                  |
 
-## Standalone workspace UI
+## Shared workspace UI
 
-- `ui/` owns React/Vite; `zeroshot/src/profile_ui.rs` owns native services, with browser lifecycle
-  in `profile_ui/server.rs`. Build `ui/dist` before enabling Cargo's optional `ui` feature.
+- `ui/` owns React/Vite; `zeroshot/src/workspace.rs` owns shared catalog, authoring and validation
+  behind the `workspace` feature, without static assets. `profile_ui.rs` adapts these services to
+  standalone HTTP, with browser lifecycle in `profile_ui/server.rs`. Build `ui/dist` before enabling
+  Cargo's optional `ui` feature.
   Releases and target images embed it. Build, development, and feature checks: [ui/README.md](ui/README.md).
 - `zeroshot ui` serves local CLI profiles and ledgers at `http://127.0.0.1:4173/ui/` by default;
   `--listen` accepts loopback only. Direct `target serve` mounts `/ui/` on its existing listener,
@@ -386,9 +388,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Normal authoring exposes Inputs and Outputs. Run inputs/results and runtime settings belong in
   the toolbar. Do not restore state, mapping, promotion, join-strategy, or error-policy panels.
   Keep defaults/restriction prose on the info icon's `#defaults` page, preserving the mounted editor.
-- `/ui/api/data` (`profile_ui/data.rs`) creates typed bindings/promotions; `/ui/api/authoring`
-  (`profile_ui/outcomes.rs`) creates ordinary completion/error nodes. Both return drafts without
-  saving or running. Required sources need native success proof; source selection and error
+- `/ui/api/data` creates typed bindings/promotions; `/ui/api/authoring` creates ordinary
+  completion/error nodes. Their existing `profile_ui/data.rs` and `profile_ui/outcomes.rs` helpers
+  compile under `workspace`; both return drafts without saving or running. Required sources need native success proof; source selection and error
   protection form one transaction, preserving custom recovery, reasons, priority, and terminal scope.
 - Optional promotions preserve absence; required reads still need availability proof. Promote only
   current-scope writes, never stale results from a prior loop iteration. Required incoming state
@@ -406,15 +408,24 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Artifact-producing work uses writing Agents; Verifiers perform independent checks/classification.
   Parallel/Map writers remain writers. Examples pass file paths and compact decisions, with separate
   files per writer and fresh directories per mapped item. Authors coordinate overlapping edits.
-- Runtime schemas/workers come from `profile_ui/catalog.rs` native contracts. Git delivery keeps its
-  fixed contracts and explicit pull-request/merge modes. Model suggestions are non-authoritative;
+- Runtime schemas/workers come from native contracts in `profile_ui/catalog.rs`, compiled under
+  `workspace`. Git delivery keeps its fixed contracts and explicit pull-request/merge modes. Model suggestions are non-authoritative;
   identifiers remain opaque. Missing harness/provider links to runtime settings. JSON stays lossless.
-- `profile_ui/runs.rs` reads ledgers without creating, repairing, or recovering them. Definitions
-  come from admission snapshots. Preserve ordered cursors, explicit gaps, bounded pages, and string
+- `native_v2_observability::history` owns admitted definitions, bounded native pages and canonical
+  control records without the `ui` feature. Observer clones share its bounded projection cache.
+  `profile_ui/runs.rs` supplies local filesystem/list/SSE adapters; observation never creates, repairs
+  or recovers a ledger or controller. Preserve ordered execution cursors, explicit gaps and string
   u64 IDs. SSE resumes after `Last-Event-ID` and drains through the terminal cursor before closing.
+- Private targets export capability-authenticated `POST /native-v2/history/definition` and
+  `POST /native-v2/history/page` over their already-owned observer. Direct and hosted access modes
+  cannot use these private exports; Cloud applies per-run authorization before using its capability.
+  Request bodies carry run identity and cursor, keeping the target query surface unchanged.
 - Status reads query only an already-owned controller. Unpersisted runtime failure stays separate
   from durable snapshots/events and marks history incomplete. Missing authority drains retained
   history before an explicit error. Never invent completion; a durable terminal record takes precedence.
+  History observation availability is separate from terminal run status: an available runtime failure
+  can be emitted at the same cursor while following continues toward the final durable record.
+  Cloud may remain `collecting` through target/archive handoff; `finished` alone cannot end follow.
 - `run-history.ts` projects only the selected history prefix. Rust's canonical reducer supplies
   structural visits/decisions with source cursors and stable identities; JavaScript never evaluates
   guards or invents worker executions. Keep loop visits, retries, and Map items distinct. Projection
@@ -425,9 +436,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Initial/live batches stop at 5,000 events or 8 MiB until explicit continuation. Simulated histories
   remain separate from real runs and profile storage; scenarios/evidence live under `ui/qa/`.
 - Visual tokens/fonts follow `zero-cloud/frontend/VISUAL_DESIGN.md`; bundle all runtime assets.
-  Cloud embedding is pending [zero-cloud #301](https://github.com/the-open-engine/zero-cloud/issues/301):
-  Zeroshot still needs a shell-less entry, host bridge, authenticated definition/history export,
-  and structured stream errors. Cloud owns menus, auth, profile CAS, and live/archive adapters.
+  `embed.html` mounts the same editor/viewer without standalone menus. Its version-1 bridge
+  validates the parent window and exact origin, binds workspace authority, and correlates document
+  generations and save snapshots. Host service URLs remain same-origin; optional CSRF configuration
+  carries cookie/header names only. Cloud owns menus, authentication, profile CAS and live/archive
+  adapters ([zero-cloud #301](https://github.com/the-open-engine/zero-cloud/issues/301)).
+- Shared fetch-based SSE preserves HTTP and stream problem codes, accepted execution cursors,
+  bounded frame buffering and owned reader cancellation. A host source change must preserve the
+  viewer's history prefix and playback position; it never changes native graph projection.
 
 ## Development conventions
 

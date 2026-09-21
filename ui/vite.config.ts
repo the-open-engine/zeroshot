@@ -4,6 +4,7 @@ const target = process.env.ZEROSHOT_UI_TARGET ?? 'http://127.0.0.1:4173';
 export default defineConfig(({ command }) => ({
   base: command === 'serve' ? '/ui/' : './',
   plugins: [react()],
+  build: { rollupOptions: { input: { standalone: 'index.html', workspace: 'embed.html' } } },
   server: {
     host: '127.0.0.1',
     port: 5173,

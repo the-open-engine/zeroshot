@@ -73,8 +73,11 @@ stream response path through the same BFF authorization and fixed egress boundar
    scope. Every later message carries the bridge version, workspace identity and a request ID;
    document operations also carry a document ID/generation. Validate
    `event.source === parent` or the selected iframe window, exact same origin,
-   expected message shape and current identities. `init` supplies only same-origin
-   service paths, authority scope and theme. It contains no target URL or token.
+   expected message shape and current identities. `init` supplies same-origin service
+   paths, authority scope and theme, with optional CSRF cookie/header names for the
+   existing host request boundary. The embedded transport reads the same-origin
+   cookie at request time; no token value crosses the bridge. Initialization contains
+   no target URL or token.
 2. Reuse the existing draft/save helpers for profile opens and snapshot requests.
    Flush valid pending edits; answer unresolved edits without saving. The host
    performs the conditional write and acknowledges the exact snapshot/request.

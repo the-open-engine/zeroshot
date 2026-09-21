@@ -1,37 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { ApiError } from './api';
 import { watchHistoryEvents, type HistoryConnection, type HistoryObserver } from './history-stream';
 import { appendHistory } from './run-history-source';
-import type { HistoryEvent, HistoryPage } from './run-history';
+import { canFollowHistory } from './history-contract';
+import type { HistoryEvent, HistoryPage, RunDetail } from './run-history';
 
-class FakeEventSource {
-  readonly listeners = new Map<string, Set<EventListener>>();
-  closed = 0;
-  readyState = 0;
-  addEventListener(type: string, listener: EventListener) {
-    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
-    this.listeners.get(type)!.add(listener);
-  }
-  removeEventListener(type: string, listener: EventListener) {
-    this.listeners.get(type)?.delete(listener);
-  }
-  close() {
-    this.closed++;
-    this.readyState = 2;
-  }
-  emit(type: string, data = '', lastEventId = '') {
-    if (type === 'open') this.readyState = 1;
-    if (type === 'error' && this.readyState !== 2) this.readyState = 0;
-    const event = new MessageEvent(type, { data, lastEventId });
-    for (const listener of [...(this.listeners.get(type) ?? [])]) listener(event);
-  }
-  history(page: HistoryPage) {
-    this.emit('history', JSON.stringify(page), page.nextCursor);
-  }
-  get listenerCount() {
-    return [...this.listeners.values()].reduce((count, listeners) => count + listeners.size, 0);
-  }
-}
 const page = (values: Partial<HistoryPage> = {}): HistoryPage => ({
   events: [],
   nextCursor: 'v2:0',
@@ -40,14 +14,53 @@ const page = (values: Partial<HistoryPage> = {}): HistoryPage => ({
   finished: false,
   ...values,
 });
-function setup(overrides: Partial<HistoryObserver> = {}, signal?: AbortSignal) {
-  const source = new FakeEventSource();
-  const pages: HistoryPage[] = [];
-  const states: HistoryConnection[] = [];
-  const errors: Error[] = [];
-  let created = 0;
+const frame = (value: HistoryPage, id = value.nextCursor) =>
+  `event: history\nid: ${id}\ndata: ${JSON.stringify(value)}\n\n`;
+async function until(predicate: () => boolean) {
+  for (let attempt = 0; attempt < 100 && !predicate(); attempt++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(predicate(), 'the expected stream transition did not occur');
+}
+function channel() {
+  let output!: ReadableStreamDefaultController<Uint8Array>;
+  let cancelled = false;
+  const response = new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        output = controller;
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }),
+    { headers: { 'Content-Type': 'text/event-stream' } }
+  );
+  return {
+    response,
+    send(value: string) {
+      output.enqueue(new TextEncoder().encode(value));
+    },
+    disconnect() {
+      output.error(new Error('connection lost'));
+    },
+    close() {
+      output.close();
+    },
+    get cancelled() {
+      return cancelled;
+    },
+  };
+}
+function setup(
+  fetcher: typeof fetch,
+  overrides: Partial<HistoryObserver> = {},
+  signal?: AbortSignal
+) {
+  const pages: HistoryPage[] = [],
+    states: HistoryConnection[] = [],
+    errors: Error[] = [];
   const dispose = watchHistoryEvents(
-    new URL('http://localhost/ui/api/runs/example/events?after=v2%3A0'),
+    new URL('https://example.test/ui/api/runs/run/events?after=v2%3A0'),
     {
       page: (value) => pages.push(value),
       status: (value) => states.push(value),
@@ -55,273 +68,204 @@ function setup(overrides: Partial<HistoryObserver> = {}, signal?: AbortSignal) {
       ...overrides,
     },
     signal,
-    () => {
-      created++;
-      return source;
-    }
+    fetcher
   );
-  return {
-    source,
-    pages,
-    states,
-    errors,
-    dispose,
-    get created() {
-      return created;
-    },
-  };
+  return { pages, states, errors, dispose };
 }
 
-test('network reconnect keeps the browser-owned source and resumes delivering pages', () => {
-  const stream = setup();
-  assert.deepEqual(stream.states, ['connecting']);
-  stream.source.emit('open');
-  stream.source.history(page());
-  stream.source.emit('error');
-  stream.source.emit('error');
-  stream.source.emit('open');
-  stream.source.history(page());
+test('network read failure resumes after the last accepted execution cursor', async (t) => {
+  const first = channel(),
+    second = channel();
+  const requests: RequestInit[] = [];
+  const stream = setup(async (_url, init) => {
+    requests.push(init!);
+    return requests.length === 1 ? first.response : second.response;
+  });
+  t.after(stream.dispose);
+  await until(() => stream.states.includes('connected'));
+  first.send(
+    frame(
+      page({
+        events: [{ cursor: 'v2:1', event: { kind: 'run_started' } }],
+        nextCursor: 'v2:1',
+        headCursor: 'v2:1',
+      })
+    )
+  );
+  await until(() => stream.pages.length === 1);
+  first.disconnect();
+  await until(() => requests.length === 2);
+  assert.equal(new Headers(requests[1].headers).get('Last-Event-ID'), 'v2:1');
   assert.deepEqual(stream.states, ['connecting', 'connected', 'reconnecting', 'connected']);
-  assert.equal(stream.created, 1);
-  assert.equal(stream.pages.length, 2);
   assert.equal(stream.errors.length, 0);
-  assert.equal(stream.source.closed, 0);
-  stream.dispose();
 });
-
-test('permanently closed connections report a recoverable error instead of waiting for automatic reconnect', () => {
-  for (const connected of [false, true]) {
-    const stream = setup();
-    if (connected) stream.source.emit('open');
-    stream.source.readyState = 2;
-    stream.source.emit('error');
-    stream.source.emit('error');
-    stream.source.history(page());
+test('HTTP denials retain status, problem code and details without reconnecting', async () => {
+  for (const status of [401, 403, 410, 503]) {
+    let calls = 0;
+    const stream = setup(async () => {
+      calls++;
+      return Response.json(
+        { code: `problem_${status}`, message: 'History access ended.', details: { status } },
+        { status }
+      );
+    });
+    await until(() => stream.errors.length === 1);
+    const error = stream.errors[0];
+    assert.ok(error instanceof ApiError);
+    assert.equal(error.status, status);
+    assert.equal(error.code, `problem_${status}`);
+    assert.deepEqual(error.details, { status });
+    assert.equal(calls, 1);
     stream.dispose();
-    assert.equal(stream.source.closed, 1);
-    assert.equal(stream.source.listenerCount, 0);
-    assert.equal(stream.pages.length, 0);
-    assert.deepEqual(stream.states, connected ? ['connecting', 'connected'] : ['connecting']);
-    assert.deepEqual(
-      stream.errors.map(({ message }) => message),
-      ['Live history connection closed. Reconnect to try again.']
-    );
   }
 });
-
-test('caught-up live pages stay connected and finished history closes only after it is drained', () => {
-  const stream = setup();
-  stream.source.emit('open');
-  stream.source.history(page());
-  stream.source.history(page({ headCursor: 'v2:1', complete: false, finished: true }));
-  assert.equal(stream.source.closed, 0);
-  stream.source.history(page({ finished: true }));
+test('collecting after runtime failure stays open and completion drains before closing', async (t) => {
+  const source = channel();
+  const stream = setup(async () => source.response);
+  t.after(stream.dispose);
+  source.send(
+    frame(
+      page({
+        finished: true,
+        runtimeFailure: { atCursor: 'v2:0', reason: 'runtime_failed' },
+        observation: { state: 'collecting' },
+      })
+    )
+  );
+  await until(() => stream.pages.length === 1);
+  assert.equal(source.cancelled, false);
+  source.send(
+    frame(
+      page({
+        complete: false,
+        headCursor: 'v2:1',
+        finished: true,
+        observation: { state: 'complete' },
+      })
+    )
+  );
+  await until(() => stream.pages.length === 2);
+  assert.equal(source.cancelled, false);
+  source.send(frame(page({ finished: true, observation: { state: 'complete' } })));
+  await until(() => source.cancelled);
   assert.equal(stream.pages.length, 3);
-  assert.equal(stream.source.closed, 1);
-  assert.equal(stream.source.listenerCount, 0);
-  stream.source.emit('error');
-  stream.source.history(page());
-  stream.dispose();
-  assert.deepEqual(stream.states, ['connecting', 'connected']);
-  assert.equal(stream.pages.length, 3);
-  assert.equal(stream.source.closed, 1);
+  assert.equal(stream.errors.length, 0);
 });
-
-test('runtime failure drains retained pages and closes without adding a terminal event', () => {
+test('SSE framing handles split CRLF and bounds incomplete frames', async (t) => {
+  const source = channel();
+  const stream = setup(async () => source.response);
+  t.after(stream.dispose);
+  for (const character of frame(page()).replaceAll('\n', '\r\n')) source.send(character);
+  await until(() => stream.pages.length === 1);
+  source.send('data: ' + 'x'.repeat(8 * 1024 * 1024));
+  await until(() => stream.errors.length === 1);
+  assert.match(stream.errors[0].message, /8 MiB/);
+  assert.equal(source.cancelled, true);
+});
+test('structured stream errors preserve problem codes and stop follow', async () => {
+  const source = channel();
+  const stream = setup(async () => source.response);
+  source.send(
+    'event: history_error\ndata: {"code":"archive_expired","message":"Archive expired.","details":{"days":30}}\n\n'
+  );
+  await until(() => stream.errors.length === 1);
+  assert.ok(stream.errors[0] instanceof ApiError);
+  assert.equal(stream.errors[0].code, 'archive_expired');
+  assert.deepEqual(stream.errors[0].details, { days: 30 });
+  assert.equal(source.cancelled, true);
+});
+test('observer cursor gaps retain the valid prefix; malformed pages cannot enter replay', async () => {
+  const source = channel();
   let retained: HistoryEvent[] = [];
-  const stream = setup({
+  const stream = setup(async () => source.response, {
     page: (incoming) => {
       retained = appendHistory(retained, incoming);
     },
   });
-  const runtimeFailure = { atCursor: 'v2:2', reason: 'runtime_failed' } as const;
-  const records: HistoryEvent[] = [1, 2, 3].map((value) => ({
-    cursor: `v2:${value}`,
-    event: { kind: 'safe_log', line: `Retained ${value}` },
-  }));
-  stream.source.history(
-    page({
-      events: records.slice(0, 1),
-      nextCursor: 'v2:1',
-      headCursor: 'v2:3',
-      complete: false,
-      finished: true,
-      runtimeFailure,
-    })
+  source.send(
+    frame(
+      page({
+        events: [{ cursor: 'v2:1', event: { kind: 'run_started' } }],
+        nextCursor: 'v2:1',
+        headCursor: 'v2:1',
+      })
+    )
   );
-  assert.equal(stream.source.closed, 0);
+  source.send(
+    frame(
+      page({
+        events: [{ cursor: 'v2:3', event: { kind: 'run_started' } }],
+        nextCursor: 'v2:3',
+        headCursor: 'v2:3',
+      })
+    )
+  );
+  await until(() => stream.errors.length === 1);
   assert.equal(retained.length, 1);
-  stream.source.history(
-    page({
-      events: records.slice(1),
-      nextCursor: 'v2:3',
-      headCursor: 'v2:3',
-      complete: true,
-      finished: true,
-      runtimeFailure,
-    })
-  );
-  assert.equal(stream.source.closed, 1);
-  assert.deepEqual(retained, records);
-  assert.equal(stream.errors.length, 0);
-});
-
-test('malformed runtime failure metadata cannot reach a live observer', () => {
-  for (const runtimeFailure of [
-    null,
-    {},
-    { atCursor: 'v2:0', reason: 'unknown' },
-    { atCursor: 'v2:1', reason: 'runtime_failed' },
-    { atCursor: 'v2:00', reason: 'runtime_failed' },
-  ]) {
-    const stream = setup();
-    stream.source.emit(
-      'history',
-      JSON.stringify({ ...page(), finished: true, runtimeFailure }),
-      'v2:0'
-    );
-    assert.equal(stream.pages.length, 0);
-    assert.equal(stream.source.closed, 1);
-    assert.match(stream.errors[0]?.message ?? '', /inconsistent with retained history/);
+  assert.match(stream.errors[0].message, /gap or inconsistent cursor/);
+  for (const input of ['event: history\ndata: null\n\n', frame(page(), 'v2:8')]) {
+    const invalid = channel();
+    const rejected = setup(async () => invalid.response);
+    invalid.send(input);
+    await until(() => rejected.errors.length === 1);
+    assert.equal(rejected.pages.length, 0);
+    assert.ok(rejected.errors[0] instanceof ApiError);
   }
 });
-
-test('abort and explicit disposal detach every listener and do not surface intentional shutdown', () => {
-  for (const abort of [true, false]) {
-    const controller = new AbortController();
-    const stream = setup({}, controller.signal);
-    if (abort) controller.abort();
-    else stream.dispose();
-    stream.source.emit('open');
-    stream.source.emit('history_error', '{"message":"too late"}');
-    stream.source.history(page());
-    controller.abort();
-    stream.dispose();
-    assert.equal(stream.source.closed, 1);
-    assert.equal(stream.source.listenerCount, 0);
-    assert.deepEqual(stream.states, ['connecting']);
-    assert.equal(stream.pages.length, 0);
+test('abort including during a page callback cancels readers without false errors', async () => {
+  for (const duringPage of [false, true]) {
+    const source = channel(),
+      controller = new AbortController();
+    const stream = setup(
+      async () => source.response,
+      duringPage ? { page: () => controller.abort() } : {},
+      controller.signal
+    );
+    await until(() => stream.states.includes('connected'));
+    if (duringPage) source.send(frame(page()));
+    else controller.abort();
+    await until(() => source.cancelled);
     assert.equal(stream.errors.length, 0);
+    stream.dispose();
   }
   const controller = new AbortController();
   controller.abort();
-  const stream = setup({}, controller.signal);
-  assert.equal(stream.created, 0);
-  assert.deepEqual(stream.states, []);
-});
-
-test('malformed pages and mismatched resume IDs fail closed before entering the replay', () => {
-  for (const [data, id] of [
-    ['not json', 'v2:0'],
-    ['null', 'v2:0'],
-    [JSON.stringify(page({ events: [null] as unknown as HistoryEvent[] })), 'v2:0'],
-    [
-      JSON.stringify(
-        page({ events: [{ cursor: 'v2:1', event: null }] as unknown as HistoryEvent[] })
-      ),
-      'v2:0',
-    ],
-    [JSON.stringify({ ...page(), complete: 'yes' }), 'v2:0'],
-    [JSON.stringify({ ...page(), finished: 'yes' }), 'v2:0'],
-    [JSON.stringify(page()), 'v2:9'],
-    [JSON.stringify(page()), ''],
-  ]) {
-    const stream = setup();
-    stream.source.emit('history', data, id);
-    assert.equal(stream.pages.length, 0);
-    assert.equal(stream.source.closed, 1);
-    assert.equal(stream.source.listenerCount, 0);
-    assert.match(stream.errors[0]?.message ?? '', /invalid page/);
-  }
-});
-
-test('a fatal server error closes the stream and surfaces its safe message', () => {
-  for (const [data, expected] of [
-    [
-      '{"code":"SOURCE_UNAVAILABLE","message":"Retained history is unavailable."}',
-      'Retained history is unavailable.',
-    ],
-    ['not json', 'Live history is unavailable. Reload to try again.'],
-    ['{"message":null}', 'Live history is unavailable. Reload to try again.'],
-  ]) {
-    const stream = setup();
-    stream.source.emit('history_error', data);
-    stream.source.emit('error');
-    assert.equal(stream.source.closed, 1);
-    assert.equal(stream.source.listenerCount, 0);
-    assert.deepEqual(
-      stream.errors.map(({ message }) => message),
-      [expected]
-    );
-    assert.deepEqual(stream.states, ['connecting']);
-  }
-});
-
-test('cursor validation errors from the observer stop reconnection and preserve the valid prefix', () => {
-  let events: HistoryEvent[] = [];
-  const stream = setup({
-    page: (incoming) => {
-      events = appendHistory(events, incoming);
+  let called = false;
+  setup(
+    async () => {
+      called = true;
+      throw new Error('must not fetch');
     },
-  });
-  stream.source.history(
-    page({
-      events: [{ cursor: 'v2:1', event: { kind: 'run_started' } }],
-      nextCursor: 'v2:1',
-      headCursor: 'v2:1',
-    })
+    {},
+    controller.signal
   );
-  stream.source.history(
-    page({
-      events: [{ cursor: 'v2:3', event: { kind: 'run_started' } }],
-      nextCursor: 'v2:3',
-      headCursor: 'v2:3',
-    })
-  );
-  stream.source.emit('error');
-  assert.equal(events.length, 1);
-  assert.equal(stream.source.closed, 1);
-  assert.equal(stream.source.listenerCount, 0);
-  assert.match(stream.errors[0]?.message ?? '', /gap or inconsistent cursor/);
+  assert.equal(called, false);
 });
-
-test('status callback errors and constructor failures close and surface exactly once', () => {
-  const stream = setup({
-    status: (state) => {
-      if (state === 'connected') throw new Error('status failed');
-    },
+test('incomplete EOF reconnects without advancing the resume cursor', async (t) => {
+  const source = channel(),
+    resumed = channel();
+  let calls = 0,
+    lastId: string | null = null;
+  const stream = setup(async (_url, init) => {
+    calls++;
+    lastId = new Headers(init?.headers).get('Last-Event-ID');
+    return calls === 1 ? source.response : resumed.response;
   });
-  stream.source.emit('open');
-  stream.source.emit('error');
-  assert.equal(stream.source.closed, 1);
-  assert.deepEqual(
-    stream.errors.map(({ message }) => message),
-    ['status failed']
-  );
-
-  const initial = setup({
-    status: () => {
-      throw new Error('initial status failed');
-    },
-  });
-  assert.equal(initial.created, 0);
-  assert.deepEqual(
-    initial.errors.map(({ message }) => message),
-    ['initial status failed']
-  );
-
-  const errors: Error[] = [];
-  const dispose = watchHistoryEvents(
-    new URL('http://localhost/ui/api/runs/example/events?after=v2%3A0'),
-    { page() {}, status() {}, error: (error) => errors.push(error) },
-    undefined,
-    () => {
-      throw new Error('constructor failed');
-    }
-  );
-  dispose();
-  assert.deepEqual(
-    errors.map(({ message }) => message),
-    ['constructor failed']
-  );
+  t.after(stream.dispose);
+  source.send('event: history\nid: v2:7\ndata: {');
+  source.close();
+  await until(() => calls === 2);
+  assert.equal(lastId, 'v2:0');
+  assert.equal(stream.pages.length, 0);
+});
+test('terminal run status does not end collecting observation', () => {
+  const run = {
+    phase: 'finished',
+    terminal: { status: 'failed', reason: 'runtime_failed' },
+    history: { complete: false },
+    observation: { state: 'collecting' },
+  } as RunDetail;
+  assert.equal(canFollowHistory(run), true);
+  for (const state of ['complete', 'incomplete', 'expired', 'unavailable'] as const)
+    assert.equal(canFollowHistory({ ...run, observation: { state } }), false);
 });
