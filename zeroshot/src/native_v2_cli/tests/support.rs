@@ -2,10 +2,12 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use openengine_cluster_protocol::{
-    MergePlan, MergePlanState, RunAttachEventNotification, RunAttachParams,
-    RunConnectionRequirements, RunConnectionValues, RunForceParams, RunId, RunListParams,
-    RunLogEventNotification, RunLogsParams, RunProfile, RunProfileName, RunProfileScope,
-    RunResumeParams, RunStatusParams, RunSubmitResult, RunTitle, RunWatchParams, RuntimePlan,
+    MergePlan, MergePlanState, NodeName, PositiveInteger, RunAttachEventNotification,
+    RunAttachParams, RunCheckpoint, RunCheckpointsParams, RunCheckpointsResult,
+    UnixTimestampMillis, RunConnectionRequirements, RunConnectionValues, RunForceParams, RunId,
+    RunListParams, RunLogEventNotification, RunLogsParams, RunProfile, RunProfileName,
+    RunProfileScope, RunResumeParams, RunStatusParams, RunSubmitResult, RunTitle, RunWatchParams,
+    RuntimePlan,
 };
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{json, Value};
@@ -72,6 +74,10 @@ pub(super) enum Call {
     Resume {
         target: Option<String>,
         params: RunResumeParams,
+    },
+    Checkpoints {
+        target: Option<String>,
+        params: RunCheckpointsParams,
     },
 }
 
@@ -660,6 +666,29 @@ impl NativeV2CliBackend for FakeBackend {
             ));
         }
         Ok(trusted.clone())
+    }
+
+    async fn run_checkpoints(
+        &self,
+        target: Option<&str>,
+        params: RunCheckpointsParams,
+    ) -> Result<RunCheckpointsResult, NativeV2CliError> {
+        self.calls.lock().assert_value().push(Call::Checkpoints {
+            target: target.map(str::to_owned),
+            params: params.clone(),
+        });
+        Ok(RunCheckpointsResult {
+            run_id: params.run_id,
+            checkpoints: vec![RunCheckpoint {
+                checkpoint_id: CheckpointId::new("entry-8").assert_value(),
+                sequence: PositiveInteger::new(8).assert_value(),
+                node: NodeName::new("repair").assert_value(),
+                map_indices: vec![2, 1],
+                loop_iterations: vec![3],
+                created_at: UnixTimestampMillis::new(42).assert_value(),
+            }],
+            next_after: Some(CheckpointId::new("entry-8").assert_value()),
+        })
     }
 
     async fn run_resume(

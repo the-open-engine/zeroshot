@@ -50,6 +50,15 @@ impl ClusterBackend for PortableRunController {
         ClusterBackend::run_list(self.inner.as_ref(), context, params).await
     }
 
+    async fn run_checkpoints(
+        &self,
+        context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunCheckpointsParams,
+    ) -> Result<openengine_cluster_protocol::RunCheckpointsResult, BackendError> {
+        self.require_run(&params.run_id)?;
+        ClusterBackend::run_checkpoints(self.inner.as_ref(), context, params).await
+    }
+
     async fn run_status(
         &self,
         context: &ConnectionContext,

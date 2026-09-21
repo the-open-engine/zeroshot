@@ -141,6 +141,7 @@ async fn unconfirmed_retained_cleanup_stays_nonterminal_until_reconstruction() {
 
     let error = controller
         .resume(RunResumeParams {
+            from: None,
             run_id: source_run_id,
             successor_run_id: successor_run_id.clone(),
             connections: BTreeMap::from([(

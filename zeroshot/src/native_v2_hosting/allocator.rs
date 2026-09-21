@@ -8,11 +8,12 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use fs2::FileExt;
-use openengine_cluster_protocol::RunId;
+use openengine_cluster_protocol::{CheckpointId, RunCheckpointsParams, RunCheckpointsResult, RunId};
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, watch};
 
 use crate::execution::process::{HostedProcessIdentity, HostedProcessPool, HostedProcessScope};
+use crate::native_v2_admission::writer_nodes;
 use crate::native_v2_candidate::{
     NativeV2CandidateConfig, NativeV2HarnessConfig, build_native_v2_candidate,
 };
@@ -34,6 +35,9 @@ use crate::native_v2_delivery::{
 use crate::native_v2_delivery::DeliveryTarget;
 use crate::native_v2_portable_controller::WorkspaceIdentity;
 use crate::native_v2_supervisor::RunRuntimeExit;
+use crate::native_v2_supervisor::checkpoints::{
+    self, CheckpointError, CheckpointRestore, FilesystemCheckpointStore,
+};
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
 use serde::{Deserialize, Serialize};
 
@@ -125,6 +129,7 @@ struct RetainedAllocationClaim {
 
 struct CleanupRunRequest<'a> {
     run_root: &'a Path,
+    checkpoint_directory: &'a Path,
     recovery_path: &'a Path,
     run_id: &'a RunId,
     delivery_run_id: &'a RunId,
@@ -212,6 +217,7 @@ impl ProductionCapsuleAllocator {
         let state = Arc::new(ProductionCapsuleState {
             endpoint: OnceLock::new(),
             run_root: run_directory(&self.config.storage_root, request.run_id),
+            checkpoint_directory: checkpoint_directory(&self.config.storage_root, request.run_id),
             run_root_identity: OnceLock::new(),
             recovery_path: recovery_path(&self.config.storage_root, request.run_id),
             delivery_run_id: request.delivery_run_id.clone(),
@@ -295,6 +301,11 @@ impl ProductionCapsuleAllocator {
             .set(endpoint)
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let loss = state._loss_sender.subscribe();
+        let checkpoints = Arc::new(FilesystemCheckpointStore::new(
+            checkpoint_directory(&self.config.storage_root, run_id),
+            filesystem.workspace.clone(),
+            writer_nodes(request.admitted),
+        ));
         monitor_workspace_identity(
             filesystem.workspace,
             workspace_identity,
@@ -309,7 +320,33 @@ impl ProductionCapsuleAllocator {
             runner,
             cleanup,
             loss,
+            checkpoints: Some(checkpoints),
+            execution_seed: Vec::new(),
         })
+    }
+
+    async fn build_retained_capsule(
+        &self,
+        request: CapsuleBuildRequest<'_>,
+        source_run_id: &RunId,
+        checkpoint_id: Option<&CheckpointId>,
+    ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
+        let execution_seed = match checkpoint_id {
+            Some(checkpoint_id) => checkpoints::restore(
+                &CheckpointRestore {
+                    directory: checkpoint_directory(&self.config.storage_root, source_run_id),
+                    checkpoint_id: checkpoint_id.clone(),
+                },
+                &CapsuleBuildPaths::new(&self.config.storage_root, request.run_id).workspace,
+            )
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
+            None => Vec::new(),
+        };
+        // Restore while the allocation lock owns the moved workspace, before a writer UID
+        // receives it. There is no cancellable background restore that could outlive cleanup.
+        let mut capsule = self.build_capsule(request).await?;
+        capsule.execution_seed = execution_seed;
+        Ok(capsule)
     }
 
     fn prepare_capsule_workspace(
@@ -358,6 +395,21 @@ impl ProductionCapsuleAllocator {
             error.record_diagnostic(request.run_id, &self.config.operator_diagnostics);
             CapsuleAllocationUnavailable::SourceCheckout
         })
+    }
+
+    fn validate_retained_checkpoint(
+        &self,
+        source_run_id: &RunId,
+        checkpoint_id: Option<&CheckpointId>,
+    ) -> Result<(), CapsuleAllocationUnavailable> {
+        if let Some(checkpoint_id) = checkpoint_id {
+            checkpoints::validate_selection(&CheckpointRestore {
+                directory: checkpoint_directory(&self.config.storage_root, source_run_id),
+                checkpoint_id: checkpoint_id.clone(),
+            })
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        }
+        Ok(())
     }
 
     fn claim_retained_allocation(
@@ -558,6 +610,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
             } else {
                 cleanup_run_directory(CleanupRunRequest {
                     run_root: &path,
+                    checkpoint_directory: &checkpoint_directory(&self.config.storage_root, run_id),
                     recovery_path: &recovery_path(&self.config.storage_root, run_id),
                     run_id,
                     delivery_run_id: run_id,
@@ -574,27 +627,33 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
         request: RetainedAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, RetainedAllocationUnavailable> {
         let RetainedAllocationRequest {
+            checkpoint_id,
             source_run_id,
             run_id,
             admitted,
             github_token,
         } = request;
         let _turn = self.allocation_turn.lock().await;
+        self.validate_retained_checkpoint(source_run_id, checkpoint_id)?;
         let paths = RetainedAllocationPaths::new(&self.config.storage_root, source_run_id, run_id);
         let claim = self.claim_retained_allocation(source_run_id, run_id, &paths)?;
         if std::fs::rename(&paths.source_root, &paths.run_root).is_err() {
             return Err(retained_claim_failure(&paths, &claim.original_source));
         }
         let allocation = self
-            .build_capsule(CapsuleBuildRequest {
-                run_id,
-                delivery_run_id: &claim.delivery_run_id,
-                adopt_existing_delivery: true,
-                admitted,
-                github_token,
-                install_source: false,
-                transfer_retained_workspace: true,
-            })
+            .build_retained_capsule(
+                CapsuleBuildRequest {
+                    run_id,
+                    delivery_run_id: &claim.delivery_run_id,
+                    adopt_existing_delivery: true,
+                    admitted,
+                    github_token,
+                    install_source: false,
+                    transfer_retained_workspace: true,
+                },
+                source_run_id,
+                checkpoint_id,
+            )
             .await;
         match allocation {
             Ok(capsule) => {
@@ -610,6 +669,10 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                     }
                     None => cleanup_run_directory(CleanupRunRequest {
                         run_root: &paths.run_root,
+                        checkpoint_directory: &checkpoint_directory(
+                            &self.config.storage_root,
+                            run_id,
+                        ),
                         recovery_path: &paths.run_recovery,
                         run_id,
                         delivery_run_id: &claim.delivery_run_id,
@@ -623,6 +686,16 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                 }
             }
         }
+    }
+
+    async fn checkpoints(
+        &self,
+        params: RunCheckpointsParams,
+    ) -> Result<RunCheckpointsResult, CheckpointError> {
+        checkpoints::list(
+            &checkpoint_directory(&self.config.storage_root, &params.run_id),
+            params,
+        )
     }
 
     async fn workspace_recovery(
@@ -654,6 +727,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
         if !document.recoverable {
             return Ok(false);
         }
+        remove_run_directory(&checkpoint_directory(&self.config.storage_root, run_id))?;
         remove_run_directory(&root)?;
         document.recoverable = false;
         write_recovery(&metadata_path, &document)?;
@@ -677,6 +751,7 @@ struct PendingCapsule<'a> {
 struct ProductionCapsuleState {
     endpoint: OnceLock<Arc<NativeCapsuleNodeEndpoint>>,
     run_root: PathBuf,
+    checkpoint_directory: PathBuf,
     run_root_identity: OnceLock<WorkspaceIdentity>,
     recovery_path: PathBuf,
     delivery_run_id: RunId,
@@ -730,6 +805,7 @@ impl ProductionCapsuleState {
         }
         cleanup_run_directory(CleanupRunRequest {
             run_root: &self.run_root,
+            checkpoint_directory: &self.checkpoint_directory,
             recovery_path: &self.recovery_path,
             run_id,
             delivery_run_id: &self.delivery_run_id,
@@ -841,13 +917,24 @@ fn cleanup_run_directory(request: CleanupRunRequest<'_>) -> Result<(), CapsuleCl
             RunRuntimeExit::Failed | RunRuntimeExit::RuntimeLost
         )
     {
-        return remove_run_directory(request.run_root);
+        return dispose_run_directory(request);
     }
     match failed_run_directory_state(request.run_root)? {
-        FailedRunDirectoryState::Absent => Ok(()),
-        FailedRunDirectoryState::Disposable => remove_run_directory(request.run_root),
+        FailedRunDirectoryState::Absent | FailedRunDirectoryState::Disposable => {
+            dispose_run_directory(request)
+        }
         FailedRunDirectoryState::Retained => retain_failed_workspace(request),
     }
+}
+
+fn dispose_run_directory(request: CleanupRunRequest<'_>) -> Result<(), CapsuleCleanupUnavailable> {
+    remove_run_directory(request.run_root)?;
+    let ancestor = read_recovery(request.recovery_path)
+        .is_some_and(|recovery| recovery.successor_run_id.is_some());
+    if !ancestor {
+        remove_run_directory(request.checkpoint_directory)?;
+    }
+    Ok(())
 }
 
 fn failed_run_directory_state(
@@ -1102,6 +1189,14 @@ fn run_directory(root: &Path, run_id: &RunId) -> PathBuf {
     digest.update(b"zeroshot/native-v2/workspace/v1\0");
     digest.update(run_id.as_str().as_bytes());
     root.join("runs").join(format!("{:x}", digest.finalize()))
+}
+
+fn checkpoint_directory(root: &Path, run_id: &RunId) -> PathBuf {
+    let mut digest = Sha256::new();
+    digest.update(b"zeroshot/native-v2/workspace-checkpoints/v1\0");
+    digest.update(run_id.as_str().as_bytes());
+    root.join("checkpoints")
+        .join(format!("{:x}", digest.finalize()))
 }
 
 fn controller_lock_path(root: &Path, run_id: &RunId) -> PathBuf {

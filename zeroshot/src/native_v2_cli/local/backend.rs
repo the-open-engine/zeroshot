@@ -24,6 +24,21 @@ impl LocalCliBackend {
         self.start_local_successor(params, recovery).await
     }
 
+    fn checkpoint_selection(
+        &self,
+        params: &openengine_cluster_protocol::RunResumeParams,
+    ) -> Result<Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>, NativeV2CliError>
+    {
+        use crate::native_v2_supervisor::checkpoints::{CheckpointRestore, selected_checkpoint};
+        let directory = self.paths(&params.run_id)?.storage().join("checkpoints");
+        Ok(
+            selected_checkpoint(params.from.as_ref()).map(|checkpoint_id| CheckpointRestore {
+                directory,
+                checkpoint_id: checkpoint_id.clone(),
+            }),
+        )
+    }
+
     async fn start_local_successor(
         &self,
         params: openengine_cluster_protocol::RunResumeParams,
@@ -34,6 +49,7 @@ impl LocalCliBackend {
             .bootstrap_values();
         let environment = RunEnvironment::exact(&recovery.submission.runtime, connections)
             .map_err(local_error)?;
+        let checkpoint = self.checkpoint_selection(&params)?;
         recovery.successor_run_id = Some(params.successor_run_id.clone());
         self.write_recovery_document(&params.run_id, &recovery)?;
         let prepared = PreparedLocalRun {
@@ -45,7 +61,11 @@ impl LocalCliBackend {
             workspace: recovery.workspace,
         };
         if let Err(error) = self
-            .start_prepared_controller_with_lineage(prepared, Some(params.run_id.clone()))
+            .start_prepared_controller_with_lineage(
+                prepared,
+                Some(params.run_id.clone()),
+                checkpoint,
+            )
             .await
         {
             self.reconcile_local_resume_claim(&params.run_id).await?;
@@ -215,6 +235,23 @@ impl NativeV2CliBackend for LocalCliBackend {
     ) -> Result<CliRunForceResult, NativeV2CliError> {
         require_local(target)?;
         self.force_local(params).await.map(Into::into)
+    }
+
+    async fn run_checkpoints(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::RunCheckpointsParams,
+    ) -> Result<openengine_cluster_protocol::RunCheckpointsResult, NativeV2CliError> {
+        require_local(target)?;
+        self.status_local(RunStatusParams {
+            run_id: params.run_id.clone(),
+        })
+        .await?;
+        crate::native_v2_supervisor::checkpoints::list(
+            &self.paths(&params.run_id)?.storage().join("checkpoints"),
+            params,
+        )
+        .map_err(local_error)
     }
 
     async fn run_resume(

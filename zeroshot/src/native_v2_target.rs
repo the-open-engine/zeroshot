@@ -133,9 +133,11 @@ pub struct NativeV2TargetConnector<R, A, D> {
     dialer: D,
 }
 
+#[derive(Clone, Copy)]
 enum TargetSessionPurpose {
     General,
     WorkspaceRecovery,
+    WorkspaceCheckpoints,
 }
 
 impl<R, A, D> NativeV2TargetConnector<R, A, D> {
@@ -412,6 +414,19 @@ where
             .await
     }
 
+    async fn connect_workspace_checkpoints(
+        &self,
+        name: &str,
+        run_id: openengine_cluster_protocol::RunId,
+    ) -> Result<Arc<Self::Transport>, NativeV2CliError> {
+        self.connect_session(
+            name,
+            Some(run_id),
+            TargetSessionPurpose::WorkspaceCheckpoints,
+        )
+        .await
+    }
+
     fn authorize_workspace_recovery_requirements(
         &self,
         name: &str,
@@ -565,6 +580,11 @@ where
             TargetSessionPurpose::WorkspaceRecovery => {
                 self.authority
                     .workspace_recovery_session(&target, &request)
+                    .await
+            }
+            TargetSessionPurpose::WorkspaceCheckpoints => {
+                self.authority
+                    .workspace_checkpoints_session(&target, &request)
                     .await
             }
         }

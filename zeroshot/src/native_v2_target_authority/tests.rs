@@ -6,8 +6,9 @@ use async_trait::async_trait;
 use openengine_cluster_client::{ClientError, ClusterClient};
 use openengine_cluster_client::websocket::{DialedWebSocketTransport, WebSocketTransport};
 use openengine_cluster_protocol::{
-    IdempotencyKey, ResolvedSource, RunDiscardWorkspaceParams, RunId, RunListParams,
-    RunResumeParams, RunSize, RunSubmission, RunTitle, RuntimePlan, SourceBranchId, INVALID_PARAMS,
+    CheckpointId, IdempotencyKey, ResolvedSource, RunCheckpointsParams, RunDiscardWorkspaceParams,
+    RunId, RunListParams, RunResumeFrom, NOT_FOUND, WORKSPACE_CHECKPOINTS_KIND, RunResumeParams,
+    RunSize, RunSubmission, RunTitle, RuntimePlan, SourceBranchId, INVALID_PARAMS,
     SCHEMA_VIOLATION, SourceRepositoryId, SourceRevisionId, TargetPrivateBootstrapRequest,
     WORKSPACE_RECOVERY_KIND,
 };
@@ -82,6 +83,7 @@ async fn test_controller() -> Result<Arc<NativeV2CloudController>, TargetAuthori
 
 #[derive(Default)]
 struct FakeFactory {
+    workspace_checkpoints: bool,
     controllers: AtomicUsize,
     submissions: AtomicUsize,
     active_submissions: AtomicUsize,
@@ -92,6 +94,10 @@ struct FakeFactory {
 impl TargetControllerFactory for FakeFactory {
     fn supports_workspace_recovery(&self) -> bool {
         true
+    }
+
+    fn supports_workspace_checkpoints(&self) -> bool {
+        self.workspace_checkpoints
     }
 
     async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
@@ -392,16 +398,92 @@ async fn direct_target_remains_auth_free_without_private_bootstrap() {
 }
 
 #[tokio::test]
+async fn target_oecp_checkpoint_capability_enables_bounded_query_routing() {
+    let factory = FakeFactory {
+        workspace_checkpoints: true,
+        ..FakeFactory::default()
+    };
+    let (address, endpoint, task) = direct_test_server(Arc::new(factory)).await;
+    let document = target_discovery(address).await;
+    assert_eq!(
+        document
+            .extensions
+            .workspace_checkpoints
+            .as_ref()
+            .map(|capability| capability.kind.as_str()),
+        Some(WORKSPACE_CHECKPOINTS_KIND)
+    );
+    let client = connect_client(&endpoint, None).await;
+    let error = client
+        .run_checkpoints(RunCheckpointsParams {
+            run_id: run_id(),
+            after: None,
+            limit: Some(1),
+        })
+        .await
+        .expect_err("unknown run must reach the controller");
+    let ClientError::Rpc(error) = error else {
+        panic!("expected a controller response");
+    };
+    assert_eq!(
+        error.data.as_ref().map(|data| data.code.as_str()),
+        Some(NOT_FOUND)
+    );
+    let error = client
+        .run_checkpoints(RunCheckpointsParams {
+            run_id: RunId::new("not-a-run-id"),
+            after: None,
+            limit: Some(1),
+        })
+        .await
+        .expect_err("noncanonical checkpoint run IDs must be rejected");
+    assert_recovery_run_id_rejected(error);
+    task.abort();
+}
+
+#[tokio::test]
 async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
     let (address, endpoint, task) = direct_test_server(Arc::new(FakeFactory::default())).await;
     let document = target_discovery(address).await;
     assert_workspace_recovery_capability(&document, true);
     let client = connect_client(&endpoint, None).await;
+    assert!(document.extensions.workspace_checkpoints.is_none());
+    let errors = [
+        client
+            .run_checkpoints(RunCheckpointsParams {
+                run_id: run_id(),
+                after: None,
+                limit: None,
+            })
+            .await
+            .expect_err("unsupported checkpoint query must be rejected"),
+        client
+            .run_resume(RunResumeParams {
+                run_id: run_id(),
+                successor_run_id: other_run_id(),
+                from: Some(RunResumeFrom::Checkpoint {
+                    checkpoint_id: CheckpointId::new("entry-1").assert_value(),
+                }),
+                connections: BTreeMap::new(),
+                connection_resolver: None,
+                github_token: None,
+            })
+            .await
+            .expect_err("unsupported checkpoint resume must be rejected"),
+    ];
+    for error in errors {
+        assert!(
+            error
+                .to_string()
+                .contains("does not support native-v2 workspace checkpoints")
+        );
+    }
 
     let error = client
         .run_resume(RunResumeParams {
             run_id: run_id(),
             successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992"),
+            from: None,
             connections: BTreeMap::new(),
             connection_resolver: None,
             github_token: None,
@@ -419,6 +501,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
         RunResumeParams {
             run_id: RunId::new("not-a-run-id"),
             successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992"),
+            from: None,
             connections: BTreeMap::new(),
             connection_resolver: None,
             github_token: None,
@@ -426,6 +509,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
         RunResumeParams {
             run_id: run_id(),
             successor_run_id: RunId::new("not-a-run-id"),
+            from: None,
             connections: BTreeMap::new(),
             connection_resolver: None,
             github_token: None,
@@ -749,6 +833,7 @@ async fn assert_workspace_recovery(endpoint: &str, bearer: Option<&str>, adverti
             .run_resume(RunResumeParams {
                 run_id: run_id(),
                 successor_run_id: other_run_id(),
+                from: None,
                 connections: BTreeMap::new(),
                 connection_resolver: None,
                 github_token: None,

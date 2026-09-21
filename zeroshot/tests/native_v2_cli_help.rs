@@ -38,6 +38,9 @@ const HELP_PATHS: &[&[&str]] = &[
     &["logs"],
     &["attach"],
     &["force-stop"],
+    &["resume"],
+    &["checkpoints"],
+    &["discard-workspace"],
 ];
 
 #[test]
@@ -59,6 +62,24 @@ fn help_subcommand_reaches_every_group_and_operational_command() {
             .collect::<Vec<_>>();
         assert_help(&arguments, path);
     }
+}
+
+#[test]
+fn recovery_help_distinguishes_restart_from_checkpoint_continuation() {
+    let resume = successful_stdout(&["resume", "--help"]);
+    assert_prose(
+        &resume,
+        &[
+            "latest retained workspace",
+            "--from-checkpoint",
+            "saved graph boundary",
+        ],
+    );
+    let checkpoints = successful_stdout(&["checkpoints", "--help"]);
+    assert_prose(
+        &checkpoints,
+        &["one page", "--after", "--limit", "1 to 100"],
+    );
 }
 
 #[test]

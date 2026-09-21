@@ -416,6 +416,21 @@ where
         )
     }
 
+    async fn run_checkpoints(
+        &self,
+        target: Option<&str>,
+        params: openengine_cluster_protocol::RunCheckpointsParams,
+    ) -> Result<openengine_cluster_protocol::RunCheckpointsResult, NativeV2CliError> {
+        let transport = self
+            .connector
+            .connect_workspace_checkpoints(require_named_target(target)?, params.run_id.clone())
+            .await?;
+        ClusterClient::new(transport.as_ref())
+            .run_checkpoints(params)
+            .await
+            .map_err(protocol_error)
+    }
+
     async fn run_resume(
         &self,
         target: Option<&str>,
@@ -424,10 +439,15 @@ where
         let target = require_named_target(target)?;
         self.connector
             .prepare_workspace_recovery_resume(target, &params)?;
-        let transport = self
-            .connector
-            .connect_workspace_recovery(target, params.run_id.clone())
-            .await?;
+        let transport = if params.from.is_some() {
+            self.connector
+                .connect_workspace_checkpoints(target, params.run_id.clone())
+                .await?
+        } else {
+            self.connector
+                .connect_workspace_recovery(target, params.run_id.clone())
+                .await?
+        };
         ClusterClient::new(transport.as_ref())
             .run_resume(params)
             .await

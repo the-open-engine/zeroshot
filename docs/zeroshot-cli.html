@@ -61,6 +61,7 @@ section { margin-block: 2.5rem; }
 <li><a href="#zeroshot-attach"><code>zeroshot attach</code></a></li>
 <li><a href="#zeroshot-force-stop"><code>zeroshot force-stop</code></a></li>
 <li><a href="#zeroshot-resume"><code>zeroshot resume</code></a></li>
+<li><a href="#zeroshot-checkpoints"><code>zeroshot checkpoints</code></a></li>
 <li><a href="#zeroshot-discard-workspace"><code>zeroshot discard-workspace</code></a></li>
 <li><a href="#zeroshot-version"><code>zeroshot version</code></a></li>
 <li><a href="#zeroshot-help"><code>zeroshot help</code></a></li>
@@ -88,7 +89,8 @@ Commands:
   logs               Follow a run&#39;s log stream as NDJSON
   attach             Attach to an execution&#39;s interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
-  resume             Start a new attempt from a failed run&#39;s retained workspace
+  resume             Start a new attempt from a failed run&#39;s retained workspace or a saved checkpoint
+  checkpoints        List one page of a run&#39;s saved workspace checkpoints as JSON
   discard-workspace  Permanently delete an abandoned retained target workspace
   version            Print the Zeroshot version
   help               Print this message or the help of the given subcommand(s)
@@ -904,7 +906,9 @@ Options:
   -h, --help
           Print help</code></pre></section>
 <section id="zeroshot-resume"><h3><code>zeroshot resume</code></h3>
-<pre><code>Start a new attempt from a failed run&#39;s retained workspace
+<pre><code>Start a new attempt from a failed run&#39;s retained workspace or a saved checkpoint.
+
+By default, restart the original graph using its latest retained workspace. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`.
 
 Usage: zeroshot resume [OPTIONS] &lt;RUN_ID&gt;
 
@@ -916,8 +920,34 @@ Options:
       --target &lt;NAME&gt;
           Use this named target. If omitted, use the local controller
 
+      --from-checkpoint &lt;ID&gt;
+          Restore this checkpoint and continue from its saved graph boundary
+
   -h, --help
-          Print help</code></pre></section>
+          Print help (see a summary with &#39;-h&#39;)</code></pre></section>
+<section id="zeroshot-checkpoints"><h3><code>zeroshot checkpoints</code></h3>
+<pre><code>List one page of a run&#39;s saved workspace checkpoints as JSON.
+
+Each entry restores the workspace and graph state before its named node or outer parallel/map group. Select its checkpointId with `zeroshot resume RUN_ID --from-checkpoint ID`. When nextAfter is present, pass it as --after to fetch the next page.
+
+Usage: zeroshot checkpoints [OPTIONS] &lt;RUN_ID&gt;
+
+Arguments:
+  &lt;RUN_ID&gt;
+          Public run ID
+
+Options:
+      --target &lt;NAME&gt;
+          Use this named target. If omitted, use the local controller
+
+      --after &lt;ID&gt;
+          List checkpoints strictly after this checkpoint ID
+
+      --limit &lt;COUNT&gt;
+          Maximum checkpoints to return, from 1 to 100. Defaults to 50
+
+  -h, --help
+          Print help (see a summary with &#39;-h&#39;)</code></pre></section>
 <section id="zeroshot-discard-workspace"><h3><code>zeroshot discard-workspace</code></h3>
 <pre><code>Permanently delete an abandoned retained target workspace
 
@@ -962,7 +992,8 @@ Commands:
   logs               Follow a run&#39;s log stream as NDJSON
   attach             Attach to an execution&#39;s interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
-  resume             Start a new attempt from a failed run&#39;s retained workspace
+  resume             Start a new attempt from a failed run&#39;s retained workspace or a saved checkpoint
+  checkpoints        List one page of a run&#39;s saved workspace checkpoints as JSON
   discard-workspace  Permanently delete an abandoned retained target workspace
   version            Print the Zeroshot version
   help               Print this message or the help of the given subcommand(s)</code></pre></section>

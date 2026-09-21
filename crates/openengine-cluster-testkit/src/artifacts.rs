@@ -10,12 +10,13 @@ use openengine_cluster_protocol::{
     GraphSpec, InitializeParams, InitializeResult, JsonRpcNotification, JsonRpcRequest,
     JsonRpcResponse, LogEventNotification, LogsClosedNotification, LogsParams, LogsResult,
     PlanParams, PlanResult, ResubmitParams, ResubmitResult, RetryParams, RetryResult, StopParams,
-    RunAttachEventNotification, RunAttachParams, RunAttachResult, RunDiscardWorkspaceParams,
-    RunDiscardWorkspaceResult, RunForceParams, RunForceResult, RunListParams, RunListResult,
-    RunLogEventNotification, RunLogsParams, RunLogsResult, RunResumeParams, RunResumeResult,
-    RunStatusParams, RunStatusResult, RunSubmitParams, RunSubmitResult, RunWatchEventNotification,
-    RunWatchParams, RunWatchResult, StopResult, StructuralBounds, SubscriptionCancelParams,
-    SubscriptionClosedNotification, UpdateParams, UpdateResult, WatchParams, WatchResult,
+    RunAttachEventNotification, RunAttachParams, RunAttachResult, RunCheckpointsParams,
+    RunCheckpointsResult, RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunForceParams,
+    RunForceResult, RunListParams, RunListResult, RunLogEventNotification, RunLogsParams,
+    RunLogsResult, RunResumeParams, RunResumeResult, RunStatusParams, RunStatusResult,
+    RunSubmitParams, RunSubmitResult, RunWatchEventNotification, RunWatchParams, RunWatchResult,
+    StopResult, StructuralBounds, SubscriptionCancelParams, SubscriptionClosedNotification,
+    UpdateParams, UpdateResult, WatchParams, WatchResult,
 };
 use openengine_cluster_server::{ConnectionContext, Dispatcher};
 use schemars::{schema_for, JsonSchema};
@@ -106,6 +107,8 @@ pub struct ImplementedProtocolSchema {
     pub run_attach_event_notification: JsonRpcNotification<RunAttachEventNotification>,
     pub run_force_request: JsonRpcRequest<RunForceParams>,
     pub run_force_response: JsonRpcResponse<RunForceResult>,
+    pub run_checkpoints_request: JsonRpcRequest<RunCheckpointsParams>,
+    pub run_checkpoints_response: JsonRpcResponse<RunCheckpointsResult>,
     pub run_resume_request: JsonRpcRequest<RunResumeParams>,
     pub run_resume_response: JsonRpcResponse<RunResumeResult>,
     pub run_discard_workspace_request: JsonRpcRequest<RunDiscardWorkspaceParams>,

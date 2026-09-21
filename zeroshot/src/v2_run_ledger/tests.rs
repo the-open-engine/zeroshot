@@ -492,3 +492,63 @@ fn unique_database_path() -> PathBuf {
 }
 
 use openengine_cluster_testkit::assertions::{AssertAt, AssertError, AssertValue};
+
+#[tokio::test]
+async fn prerequisites_are_replayable_but_never_counted_as_new_work() {
+    use crate::full_v1_reducer::{DurableExecution, DurableExecutionState, HistoryPosition};
+    let ledger = FakeRunLedger::new();
+    let run = RunId::new("seeded-ledger");
+    ledger
+        .create_or_get(create(run.as_str(), "seeded-ledger", '7'))
+        .await
+        .assert_value();
+    let original = reference(&run, 1);
+    let prior = DurableExecution {
+        dispatch_position: HistoryPosition::new(1).assert_value(),
+        node_instance: original.node_instance,
+        execution: original.execution,
+        occurrence: StructuralOccurrence {
+            node: original.node,
+            map_indices: Vec::new(),
+        },
+        attempt: PositiveInteger::new(1).assert_value(),
+        input: Value::Null,
+        state: DurableExecutionState::Settled {
+            position: HistoryPosition::new(2).assert_value(),
+            outcome: WorkerOutcome::Verified {
+                output: json!({"saved": true}),
+                artifacts: Vec::new(),
+            },
+        },
+    };
+    let seed = RunEvent::PriorExecution {
+        execution: prior.clone(),
+    };
+    let stored = ledger.append(&run, vec![seed.clone()]).await.assert_value();
+    assert_eq!(stored.snapshot.execution_seed, vec![prior]);
+    assert!(stored.snapshot.executions.is_empty());
+    assert!(stored.snapshot.token_usage.is_none());
+    assert!(ledger.append(&run, vec![seed.clone()]).await.is_err());
+    ledger
+        .append(&run, vec![RunEvent::RunStarted])
+        .await
+        .assert_value();
+    assert!(ledger.append(&run, vec![seed]).await.is_err());
+    assert!(
+        ledger
+            .append(&run, vec![started(reference(&run, 1))])
+            .await
+            .is_err()
+    );
+    let fresh = ledger
+        .append(&run, vec![started(reference(&run, 2))])
+        .await
+        .assert_value();
+    assert_eq!(fresh.snapshot.executions.len(), 1);
+    let encoded = serde_json::to_vec(&fresh.snapshot).assert_value();
+    let decoded: super::RunSnapshot = serde_json::from_slice(&encoded).assert_value();
+    assert_eq!(decoded, fresh.snapshot);
+}
+
+#[path = "tests/checkpoint_bytes.rs"]
+mod checkpoint_bytes;

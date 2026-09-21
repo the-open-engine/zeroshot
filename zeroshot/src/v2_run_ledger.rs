@@ -1,8 +1,9 @@
 //! Aggressively lean durable run history for the native-v2 product.
 //!
 //! This is intentionally a fresh store boundary. It records only the facts needed to identify,
-//! observe, reduce, and stop one admitted run. Execution recovery, retries, fencing, proofs,
-//! effect receipts, hash chains, and controller takeover do not belong here.
+//! observe, reduce, and stop one admitted run. Selected workspace checkpoints import settled
+//! prerequisite executions without importing provider sessions or usage. Fencing, proofs, hash
+//! chains, and controller takeover do not belong here.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -32,10 +33,13 @@ pub(crate) use state::{apply_event, cursor_for, cursor_sequence, initial_cursor,
 pub const INITIAL_CURSOR: &str = "v2:0";
 pub const MAX_ADMITTED_RUN_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_EVENT_BYTES: usize = 1024 * 1024;
+/// A prerequisite combines two independently bounded source events plus a small envelope.
+pub const MAX_PRIOR_EXECUTION_BYTES: usize = 2 * MAX_EVENT_BYTES + 1024;
 pub const MAX_SAFE_LOG_BYTES: usize = 16 * 1024;
 /// Bounds one replay read independently of the size of retained history.
 pub const MAX_REPLAY_EVENTS: usize = 256;
-pub const MAX_REPLAY_BYTES: usize = 1024 * 1024;
+// Every accepted event must fit in an otherwise empty replay page.
+pub const MAX_REPLAY_BYTES: usize = MAX_PRIOR_EXECUTION_BYTES;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -102,6 +106,8 @@ pub struct RunSnapshot {
     pub phase: RunPhase,
     pub force_stop_requested: bool,
     pub executions: BTreeMap<ExecutionId, NodeSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
     pub terminal: Option<TerminalResult>,
     pub token_usage: Option<TokenUsage>,
 }
@@ -118,6 +124,7 @@ impl RunSnapshot {
             phase: RunPhase::Admitted,
             force_stop_requested: false,
             executions: BTreeMap::new(),
+            execution_seed: Vec::new(),
             terminal: None,
             token_usage: None,
         }
@@ -135,6 +142,7 @@ impl RunSnapshot {
             phase: RunPhase::Admitted,
             force_stop_requested: false,
             executions: BTreeMap::new(),
+            execution_seed: Vec::new(),
             terminal: None,
             token_usage: None,
         }
@@ -185,6 +193,10 @@ pub enum NodeState {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum RunEvent {
+    /// Completed prerequisite work imported before this attempt starts. It contributes no usage.
+    PriorExecution {
+        execution: crate::full_v1_reducer::DurableExecution,
+    },
     RunStarted,
     NodeStarted {
         reference: ExecutionRef,

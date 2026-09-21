@@ -37,6 +37,12 @@ pub(super) struct ActiveDispatches {
     pub(super) pending_voids: BTreeMap<ExecutionId, ExecutionVoidReason>,
 }
 
+impl ActiveDispatches {
+    pub(super) fn is_quiescent(&self, snapshot: &RunSnapshot) -> bool {
+        self.tasks.is_empty() && snapshot.active_executions().next().is_none()
+    }
+}
+
 pub(super) struct Dispatch {
     pub(super) reference: ExecutionRef,
     pub(super) occurrence: crate::full_v1_reducer::StructuralOccurrence,
@@ -261,13 +267,47 @@ pub(super) fn reduce(
 pub(crate) fn durable_history(
     snapshot: &RunSnapshot,
 ) -> Result<Vec<DurableExecution>, NativeV2SupervisorError> {
+    let offset = snapshot
+        .execution_seed
+        .iter()
+        .fold(0, |maximum, execution| {
+            let end = match &execution.state {
+                DurableExecutionState::Settled { position, .. }
+                | DurableExecutionState::Voided { position, .. } => position.get(),
+                DurableExecutionState::Active => execution.dispatch_position.get(),
+            };
+            maximum.max(end).max(execution.dispatch_position.get())
+        });
     let mut executions = snapshot
         .executions
         .values()
-        .map(durable_execution)
-        .collect::<Result<Vec<_>, _>>()?;
+        .map(|node| {
+            let mut execution = durable_execution(node)?;
+            execution.dispatch_position = offset_position(execution.dispatch_position, offset)?;
+            match &mut execution.state {
+                DurableExecutionState::Settled { position, .. }
+                | DurableExecutionState::Voided { position, .. } => {
+                    *position = offset_position(*position, offset)?;
+                }
+                DurableExecutionState::Active => {}
+            }
+            Ok(execution)
+        })
+        .collect::<Result<Vec<_>, NativeV2SupervisorError>>()?;
+    executions.extend(snapshot.execution_seed.iter().cloned());
     executions.sort_by_key(|execution| (execution.dispatch_position, execution.execution));
     Ok(executions)
+}
+
+fn offset_position(
+    position: HistoryPosition,
+    offset: u64,
+) -> Result<HistoryPosition, NativeV2SupervisorError> {
+    position
+        .get()
+        .checked_add(offset)
+        .and_then(|value| HistoryPosition::new(value).ok())
+        .ok_or(NativeV2SupervisorError::InvalidState)
 }
 
 pub(super) fn durable_execution(

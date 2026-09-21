@@ -390,6 +390,8 @@ impl CapsuleAllocator for DeliveryAllocator {
         let (sender, loss) = watch::channel(false);
         self.lifecycle.losses.lock().assert_value().push(sender);
         Ok(AllocatedCapsule {
+            checkpoints: None,
+            execution_seed: Vec::new(),
             runner: Arc::new(runner),
             loss,
             cleanup: Arc::new(ImmediateCleanup),

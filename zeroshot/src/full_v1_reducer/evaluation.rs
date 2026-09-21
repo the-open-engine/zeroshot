@@ -10,6 +10,22 @@ impl Engine<'_> {
         context: &mut Context,
         traversal: Traversal<'_>,
     ) -> Result<Status, ReducerError> {
+        let group_boundary = if traversal.boundary.is_none()
+            && matches!(node, GraphNode::Par(_) | GraphNode::Map(_))
+        {
+            Some(ExecutionBoundary {
+                node: node.name().clone(),
+                map_indices: traversal.map_indices.to_vec(),
+                loop_iterations: traversal.loop_iterations.to_vec(),
+                attempt: 0,
+            })
+        } else {
+            None
+        };
+        let traversal = Traversal {
+            boundary: traversal.boundary.or(group_boundary.as_ref()),
+            ..traversal
+        };
         let trace = self.trace_enter(node, traversal)?;
         let status = match node {
             GraphNode::Step(_) | GraphNode::Verifier(_) => {
@@ -154,9 +170,7 @@ impl Engine<'_> {
             // Optional outputs describe this iteration; required state still carries across rounds.
             local.local_writes.clear();
             let mut loop_iterations = traversal.loop_iterations.to_vec();
-            if self.trace.is_some() {
-                loop_iterations.push(iteration);
-            }
+            loop_iterations.push(iteration);
             match self.eval(
                 &group.body,
                 &mut local,
@@ -406,6 +420,7 @@ impl Engine<'_> {
                 allocated
             }
         };
+        self.record_boundary(&spec, traversal, visit.attempt.get())?;
         let execution = self.allocate_execution()?;
         self.decisions.push(Decision::Dispatch {
             node_instance,
@@ -439,6 +454,7 @@ impl Engine<'_> {
             .and_then(|value| {
                 PositiveInteger::new(value).map_err(|_| ReducerError::IdentityOutOfRange)
             })?;
+        self.record_boundary(&spec, traversal, attempt.get())?;
         let execution = self.allocate_execution()?;
         self.decisions.push(Decision::Dispatch {
             node_instance: previous.node_instance,
@@ -449,6 +465,32 @@ impl Engine<'_> {
             input,
         });
         Ok(Status::Pending)
+    }
+
+    fn record_boundary(
+        &mut self,
+        spec: &ExecutableSpec<'_>,
+        traversal: Traversal<'_>,
+        attempt: u64,
+    ) -> Result<(), ReducerError> {
+        let boundary = traversal
+            .boundary
+            .cloned()
+            .unwrap_or_else(|| ExecutionBoundary {
+                node: spec.name.clone(),
+                map_indices: traversal.map_indices.to_vec(),
+                loop_iterations: traversal.loop_iterations.to_vec(),
+                attempt,
+            });
+        if self
+            .boundary
+            .as_ref()
+            .is_some_and(|current| current != &boundary)
+        {
+            return Err(ReducerError::InconsistentHistory);
+        }
+        self.boundary = Some(boundary);
+        Ok(())
     }
 
     fn allocate_execution(&mut self) -> Result<ExecutionId, ReducerError> {

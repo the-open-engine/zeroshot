@@ -221,7 +221,7 @@ impl LocalCliBackend {
         &self,
         prepared: PreparedLocalRun,
     ) -> Result<RunId, NativeV2CliError> {
-        self.start_prepared_controller_with_lineage(prepared, None)
+        self.start_prepared_controller_with_lineage(prepared, None, None)
             .await
     }
 
@@ -229,6 +229,7 @@ impl LocalCliBackend {
         &self,
         prepared: PreparedLocalRun,
         resumed_from: Option<RunId>,
+        checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
     ) -> Result<RunId, NativeV2CliError> {
         let adopt_existing_delivery = resumed_from.is_some();
         let paths = self.paths(&prepared.run_id)?;
@@ -246,6 +247,7 @@ impl LocalCliBackend {
         let workspace_lease = self.workspace_lease(&prepared.workspace)?;
         let bootstrap_path = storage.join(BOOTSTRAP_FILE);
         let bootstrap = PortableControllerBootstrap {
+            checkpoint,
             run_id: prepared.run_id.clone(),
             delivery_run_id: prepared.delivery_run_id,
             adopt_existing_delivery,

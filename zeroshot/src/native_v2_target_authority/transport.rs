@@ -5,11 +5,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
     GetParams, GetResult, InitializeParams, InitializeResult, RunAttachParams, RunAttachResult,
-    RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunForceParams, RunForceResult,
-    RunListParams, RunListResult, RunLogsParams, RunLogsResult, RunResumeParams, RunResumeResult,
-    RunStatusParams, RunStatusResult, RunSubmitParams, RunSubmitResult, RunWatchParams,
-    RunWatchResult, TargetOecpSessionRequest, TargetPrivateBootstrapRequest, INVALID_PHASE,
-    RUN_CONFLICT, SCHEMA_VIOLATION, TARGET_PRIVATE_BOOTSTRAP_PATH, is_canonical_uuid_v7,
+    RunCheckpointsParams, RunCheckpointsResult, RunDiscardWorkspaceParams,
+    RunDiscardWorkspaceResult, RunForceParams, RunForceResult, RunListParams, RunListResult,
+    RunLogsParams, RunLogsResult, RunResumeParams, RunResumeResult, RunStatusParams,
+    RunStatusResult, RunSubmitParams, RunSubmitResult, RunWatchParams, RunWatchResult,
+    TargetOecpSessionRequest, TargetPrivateBootstrapRequest, INVALID_PHASE, RUN_CONFLICT,
+    SCHEMA_VIOLATION, TARGET_PRIVATE_BOOTSTRAP_PATH, is_canonical_uuid_v7,
 };
 use openengine_cluster_server::admission::CancellationSignal;
 use openengine_cluster_server::identity::{
@@ -247,6 +248,7 @@ impl NativeV2TargetServer {
             Arc::new(TargetOecpBackend {
                 controller,
                 workspace_recovery: self.workspace_recovery(),
+                workspace_checkpoints: self.workspace_checkpoints(),
             }),
             StaticConnectionIdentityResolver::new(identity),
             SystemConnectionTime,
@@ -398,10 +400,19 @@ impl NativeV2TargetServer {
         self.access.permits_workspace_recovery() && self.target.supports_workspace_recovery()
     }
 
+    fn workspace_checkpoints(&self) -> bool {
+        self.workspace_recovery() && self.target.supports_workspace_checkpoints()
+    }
+
     fn discovery_document(&self) -> TargetDiscoveryDocument {
         let document = TargetDiscoveryDocument::direct(self.access.authentication());
-        if self.workspace_recovery() {
+        let document = if self.workspace_recovery() {
             document.with_workspace_recovery()
+        } else {
+            document
+        };
+        if self.workspace_checkpoints() {
+            document.with_workspace_checkpoints()
         } else {
             document
         }
@@ -483,6 +494,7 @@ enum BearerPurpose {
 struct TargetOecpBackend {
     controller: Arc<NativeV2CloudController>,
     workspace_recovery: bool,
+    workspace_checkpoints: bool,
 }
 
 #[async_trait]
@@ -563,6 +575,20 @@ impl ClusterBackend for TargetOecpBackend {
         ClusterBackend::run_force(self.controller.as_ref(), context, params).await
     }
 
+    async fn run_checkpoints(
+        &self,
+        context: &ConnectionContext,
+        params: RunCheckpointsParams,
+    ) -> Result<RunCheckpointsResult, BackendError> {
+        if !self.workspace_checkpoints {
+            return Err(workspace_checkpoints_unavailable());
+        }
+        if !is_canonical_uuid_v7(&params.run_id) {
+            return Err(workspace_recovery_invalid_run_id());
+        }
+        ClusterBackend::run_checkpoints(self.controller.as_ref(), context, params).await
+    }
+
     async fn run_resume(
         &self,
         context: &ConnectionContext,
@@ -570,6 +596,9 @@ impl ClusterBackend for TargetOecpBackend {
     ) -> Result<RunResumeResult, BackendError> {
         if !self.workspace_recovery {
             return Err(workspace_recovery_unavailable());
+        }
+        if params.from.is_some() && !self.workspace_checkpoints {
+            return Err(workspace_checkpoints_unavailable());
         }
         if !is_canonical_uuid_v7(&params.run_id) || !is_canonical_uuid_v7(&params.successor_run_id)
         {
@@ -591,6 +620,14 @@ impl ClusterBackend for TargetOecpBackend {
         }
         ClusterBackend::run_discard_workspace(self.controller.as_ref(), context, params).await
     }
+}
+
+fn workspace_checkpoints_unavailable() -> BackendError {
+    BackendError::application(
+        INVALID_PHASE,
+        "Backend does not support native-v2 workspace checkpoints",
+        None,
+    )
 }
 
 fn workspace_recovery_unavailable() -> BackendError {

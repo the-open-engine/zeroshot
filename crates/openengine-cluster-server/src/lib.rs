@@ -350,6 +350,18 @@ pub trait ClusterBackend: Send + Sync + 'static {
         ))
     }
 
+    async fn run_checkpoints(
+        &self,
+        _context: &ConnectionContext,
+        _params: openengine_cluster_protocol::RunCheckpointsParams,
+    ) -> Result<openengine_cluster_protocol::RunCheckpointsResult, BackendError> {
+        Err(BackendError::application(
+            INVALID_PHASE,
+            "Backend does not support native-v2 workspace checkpoints",
+            None,
+        ))
+    }
+
     async fn run_resume(
         &self,
         _context: &ConnectionContext,

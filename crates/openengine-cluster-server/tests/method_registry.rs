@@ -34,6 +34,7 @@ const EXPECTED_METHODS: &[&str] = &[
     "run/logs",
     "run/attach",
     "run/force",
+    "run/checkpoints",
     "run/resume",
     "run/discard_workspace",
 ];
@@ -61,6 +62,7 @@ const EXPECTED_UNARY: &[&str] = &[
     "run/list",
     "run/status",
     "run/force",
+    "run/checkpoints",
     "run/resume",
     "run/discard_workspace",
 ];

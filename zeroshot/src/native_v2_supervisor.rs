@@ -44,6 +44,9 @@ use crate::v2_run_ledger::{
 #[path = "native_v2_supervisor/tests.rs"]
 mod tests;
 
+#[path = "native_v2_checkpoints.rs"]
+pub mod checkpoints;
+
 const FIRST_IDENTITY: u64 = 1;
 
 /// Optional live-observation seam. The supervisor retains cancellation and completion ownership;
@@ -103,6 +106,8 @@ pub enum NativeV2SupervisorError {
     #[error(transparent)]
     RuntimeCleanup(#[from] RuntimeCleanupUnavailable),
     #[error(transparent)]
+    Checkpoint(#[from] checkpoints::CheckpointError),
+    #[error(transparent)]
     Ledger(#[from] RunLedgerError),
     #[error(transparent)]
     Reducer(#[from] ReducerError),
@@ -119,6 +124,7 @@ pub struct NativeV2Supervisor {
     delivery_policy: DeliveryPolicy,
     live_output: Option<Arc<dyn LiveOutputRegistrar>>,
     runtime_cleanup: Option<Arc<dyn RunRuntimeCleanup>>,
+    checkpoints: Option<Arc<dyn checkpoints::RunCheckpointStore>>,
     runtime_lost: Arc<AtomicBool>,
     force_requested: Arc<AtomicBool>,
     resolution_stop: watch::Sender<bool>,
@@ -141,6 +147,7 @@ impl NativeV2Supervisor {
             delivery_policy: DeliveryPolicy::Optional,
             live_output: None,
             runtime_cleanup: None,
+            checkpoints: None,
             runtime_lost: Arc::new(AtomicBool::new(false)),
             force_requested: Arc::new(AtomicBool::new(false)),
             resolution_stop: watch::channel(false).0,
@@ -163,6 +170,15 @@ impl NativeV2Supervisor {
     #[must_use]
     pub fn with_runtime_cleanup(mut self, cleanup: Arc<dyn RunRuntimeCleanup>) -> Self {
         self.runtime_cleanup = Some(cleanup);
+        self
+    }
+
+    #[must_use]
+    pub fn with_checkpoints(
+        mut self,
+        store: Option<Arc<dyn checkpoints::RunCheckpointStore>>,
+    ) -> Self {
+        self.checkpoints = store;
         self
     }
 
@@ -270,7 +286,7 @@ impl NativeV2Supervisor {
             return Ok(None);
         }
         if let Some(terminal) = reduction.terminal {
-            if snapshot.active_executions().next().is_some() || !active.tasks.is_empty() {
+            if !active.is_quiescent(snapshot) {
                 return Err(NativeV2SupervisorError::InvalidState);
             }
             return self
@@ -278,6 +294,8 @@ impl NativeV2Supervisor {
                 .await
                 .map(Some);
         }
+        self.checkpoint_boundary(reduction.boundary.as_ref(), snapshot, active)
+            .await?;
         let dispatches = dispatch_decisions(&self.run_id, reduction.decisions);
         if !dispatches.is_empty() {
             self.dispatch(program, dispatches, active).await?;
@@ -285,6 +303,21 @@ impl NativeV2Supervisor {
         }
         self.await_completion(active).await?;
         Ok(None)
+    }
+
+    async fn checkpoint_boundary(
+        &self,
+        boundary: Option<&crate::full_v1_reducer::ExecutionBoundary>,
+        snapshot: &RunSnapshot,
+        active: &ActiveDispatches,
+    ) -> Result<(), NativeV2SupervisorError> {
+        if !active.is_quiescent(snapshot) {
+            return Ok(());
+        }
+        if let (Some(store), Some(boundary)) = (&self.checkpoints, boundary) {
+            store.enter(boundary, &durable_history(snapshot)?).await?;
+        }
+        Ok(())
     }
 
     async fn finish_reduction(
@@ -296,6 +329,9 @@ impl NativeV2Supervisor {
         let terminal =
             enforce_delivery_terminal(self.delivery_policy, admitted, snapshot, terminal)?;
         self.runner.close_run(&self.run_id).await;
+        if let Some(store) = &self.checkpoints {
+            store.finish(&durable_history(snapshot)?).await?;
+        }
         let exit = if matches!(terminal, TerminalResult::Succeeded { .. }) {
             RunRuntimeExit::Completed
         } else {
@@ -428,41 +464,45 @@ fn has_required_delivery_receipt(
         return false;
     };
     let writers = writer_nodes(admitted);
-    let Some(last_writer) = snapshot
-        .executions
-        .values()
-        .filter(|execution| writers.contains(&execution.reference.node))
+    let Ok(history) = durable_history(snapshot) else {
+        return false;
+    };
+    let Some(last_writer) = history
+        .iter()
+        .filter(|execution| writers.contains(&execution.occurrence.node))
         .filter_map(|execution| match &execution.state {
-            NodeState::Completed { at, .. } => cursor_sequence(at).ok().map(|at| (at, execution)),
-            NodeState::Active | NodeState::Voided { .. } => None,
+            DurableExecutionState::Settled { position, .. } => Some((position, execution)),
+            DurableExecutionState::Active | DurableExecutionState::Voided { .. } => None,
         })
-        .max_by_key(|(at, _)| *at)
+        .max_by_key(|(position, _)| *position)
         .map(|(_, execution)| execution)
     else {
         return false;
     };
-    if last_writer.reference.node != node {
+    if last_writer.occurrence.node != node {
         return false;
     }
-    let Some(WorkerOutcome::Verifier { output, .. }) = last_writer.outcome() else {
+    let DurableExecutionState::Settled {
+        outcome: WorkerOutcome::Verifier { output, .. },
+        ..
+    } = &last_writer.state
+    else {
         return false;
     };
-    let Ok(delivery_start) = cursor_sequence(&last_writer.started_at) else {
-        return false;
-    };
-    // A receipt can certify the candidate only after every other writer has stopped mutating it.
-    // Completion order alone is insufficient when a writer overlaps the delivery execution.
-    let writers_settled = snapshot.executions.values().all(|execution| {
-        if execution.reference.execution == last_writer.reference.execution
-            || !writers.contains(&execution.reference.node)
+    // A receipt certifies the candidate only after every other writer has stopped mutating it,
+    // including prerequisite executions restored with a workspace checkpoint.
+    let writers_settled = history.iter().all(|execution| {
+        if execution.execution == last_writer.execution
+            || !writers.contains(&execution.occurrence.node)
         {
             return true;
         }
         match &execution.state {
-            NodeState::Completed { at, .. } | NodeState::Voided { at, .. } => {
-                cursor_sequence(at).is_ok_and(|at| at < delivery_start)
+            DurableExecutionState::Settled { position, .. }
+            | DurableExecutionState::Voided { position, .. } => {
+                *position < last_writer.dispatch_position
             }
-            NodeState::Active => false,
+            DurableExecutionState::Active => false,
         }
     });
     writers_settled

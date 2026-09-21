@@ -1,3 +1,4 @@
+use openengine_cluster_protocol::{TargetAuthentication, TargetDiscoveryDocument};
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::json;
 use tokio::net::TcpListener;
@@ -86,20 +87,12 @@ fn response(
 }
 
 fn discovery() -> String {
-    json!({
-        "kind": "zeroshot.native-v2-target/v2",
-        "authentication": "none",
-        "runPath": "/native-v2/run",
-        "sessionPath": "/native-v2/oecp-session",
-        "oecpPath": "/native-v2/oecp",
-        "audience": "controller",
-        "extensions": {
-            "workspace_recovery": {
-                "kind": "openengine.workspace-recovery/v1"
-            }
-        }
-    })
-    .to_string()
+    serde_json::to_string(
+        &TargetDiscoveryDocument::direct(TargetAuthentication::None)
+            .with_workspace_recovery()
+            .with_workspace_checkpoints(),
+    )
+    .assert_value()
 }
 
 fn run_submission_response(response: &RunResponse) -> (&'static str, String) {

@@ -3,20 +3,21 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use openengine_cluster_protocol::{
-    ConnectionKey, ConnectionScope, Cursor, EnvironmentVariableName, ExecutionRef, IdempotencyKey,
-    RunTitle, SourceBranchId, SourceRepositoryId, SourceRevisionId,
+    CheckpointId, RunResumeFrom, ConnectionKey, ConnectionScope, Cursor, EnvironmentVariableName,
+    ExecutionRef, IdempotencyKey, RunTitle, SourceBranchId, SourceRepositoryId, SourceRevisionId,
 };
 
 use super::{
     AcpArgs, AttachArgs, Cli, CliCommand, ConnectionCommand, ConnectionScopeArg, PlanCommand,
-    PlanSelectorArgs, PlanSubmitArgs, RunArgs, RunLogsArgs, RunSelectorArgs, RunWatchArgs,
-    TargetCommand, TemplateCommand, TemplateName, UtilityCommand,
+    PlanSelectorArgs, PlanSubmitArgs, RunArgs, RunCheckpointsArgs, RunResumeArgs, RunLogsArgs,
+    RunSelectorArgs, RunWatchArgs, TargetCommand, TemplateCommand, TemplateName, UtilityCommand,
 };
 use crate::native_v2_cli::{
     BuiltinGraphTemplate, ConnectionInput, ConnectionRoute, ConnectionSetCommand,
     MergePlanSelector, MergePlanSubmitCommand, NativeV2CliCommand, NativeV2CliError,
     ProfileQualifier, ProfileReference, RunCommand, RunGraph, RunLogsCommand, RunRuntime,
-    RunSelection, RunSelector, RunWatchCommand, TargetAdd, TargetServe, TemplateDelivery,
+    RunSelection, RunSelector, RunResumeCommand, RunCheckpointsCommand, RunWatchCommand, TargetAdd,
+    TargetServe, TemplateDelivery,
 };
 
 #[path = "convert/profile_commands.rs"]
@@ -163,7 +164,7 @@ impl UtilityCommand {
             Self::Logs(args) => args.into_command(),
             Self::Attach(args) => args.into_command(),
             Self::ForceStop(args) => args.into_selector().map(NativeV2CliCommand::ForceStop),
-            recovery @ (Self::Resume(_) | Self::DiscardWorkspace(_)) => {
+            recovery @ (Self::Resume(_) | Self::Checkpoints(_) | Self::DiscardWorkspace(_)) => {
                 recovery.into_recovery_command()
             }
             Self::Version => Ok(NativeV2CliCommand::Version),
@@ -172,12 +173,43 @@ impl UtilityCommand {
 
     fn into_recovery_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         match self {
-            Self::Resume(args) => args.into_selector().map(NativeV2CliCommand::Resume),
+            Self::Resume(args) => args.into_command(),
+            Self::Checkpoints(args) => args.into_command(),
             Self::DiscardWorkspace(args) => args
                 .into_selector()
                 .map(NativeV2CliCommand::DiscardWorkspace),
             _ => unreachable!("recovery command was checked by the caller"),
         }
+    }
+}
+
+impl RunResumeArgs {
+    fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
+        let from = self
+            .from_checkpoint
+            .map(CheckpointId::new)
+            .transpose()
+            .map_err(|error| usage(format!("invalid --from-checkpoint: {error}")))?
+            .map(|checkpoint_id| RunResumeFrom::Checkpoint { checkpoint_id });
+        Ok(NativeV2CliCommand::Resume(RunResumeCommand {
+            run: self.run.into_selector()?,
+            from,
+        }))
+    }
+}
+
+impl RunCheckpointsArgs {
+    fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
+        let after = self
+            .after
+            .map(CheckpointId::new)
+            .transpose()
+            .map_err(|error| usage(format!("invalid --after: {error}")))?;
+        Ok(NativeV2CliCommand::Checkpoints(RunCheckpointsCommand {
+            run: self.run.into_selector()?,
+            after,
+            limit: self.limit,
+        }))
     }
 }
 

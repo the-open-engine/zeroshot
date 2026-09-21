@@ -96,6 +96,7 @@ impl PortableControllerPaths {
 }
 
 pub struct PortableControllerBootstrap {
+    pub checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
     pub run_id: RunId,
     pub delivery_run_id: RunId,
     pub adopt_existing_delivery: bool,

@@ -127,11 +127,11 @@ impl CapsuleAllocator for ImmediateAllocator {
         .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let (loss, receiver) = watch::channel(false);
         self.losses.lock().assert_value().push(loss);
-        Ok(AllocatedCapsule {
-            runner: Arc::new(runner),
-            loss: receiver,
-            cleanup: Arc::new(ImmediateCleanup),
-        })
+        Ok(AllocatedCapsule::new(
+            Arc::new(runner),
+            receiver,
+            Arc::new(ImmediateCleanup),
+        ))
     }
 
     async fn destroy_or_confirm_absent(

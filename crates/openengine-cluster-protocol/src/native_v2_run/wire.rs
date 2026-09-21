@@ -103,6 +103,9 @@ pub struct RunSubmitResult {
 pub struct RunResumeParams {
     pub run_id: RunId,
     pub successor_run_id: RunId,
+    /// Omission preserves restarting from the latest retained workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<super::RunResumeFrom>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub connections: RunConnectionValues,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -117,6 +120,7 @@ impl std::fmt::Debug for RunResumeParams {
             .debug_struct("RunResumeParams")
             .field("run_id", &self.run_id)
             .field("successor_run_id", &self.successor_run_id)
+            .field("from", &self.from)
             .field("connections", &self.connections.keys().collect::<Vec<_>>())
             .field("connection_resolver", &self.connection_resolver)
             .field(

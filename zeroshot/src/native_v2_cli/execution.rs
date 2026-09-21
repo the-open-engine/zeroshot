@@ -4,16 +4,16 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use openengine_cluster_protocol::{
-    Cursor, RunAttachParams, RunDiscardWorkspaceParams, RunForceParams, RunId, RunListParams,
-    RunLogEventNotification, RunLogsParams, RunResumeParams, RunStatus, RunStatusParams,
-    RunWatchParams, SubscriptionCloseReason, TerminalResult,
+    Cursor, RunAttachParams, RunCheckpointsParams, RunDiscardWorkspaceParams, RunForceParams,
+    RunId, RunListParams, RunLogEventNotification, RunLogsParams, RunResumeParams, RunStatus,
+    RunStatusParams, RunWatchParams, SubscriptionCloseReason, TerminalResult,
 };
 use serde::Serialize;
 
 use super::{
     CliOutcome, CliRunStatus, CliRunWatchEventNotification, CliSubscription, CliSubscriptionItem,
     DetachSignal, NativeV2CliBackend, NativeV2CliCommand, NativeV2CliError, RunCommand,
-    RunLogsCommand, RunSelector, RunWatchCommand,
+    RunCheckpointsCommand, RunResumeCommand, RunLogsCommand, RunSelector, RunWatchCommand,
 };
 #[path = "execution/attach.rs"]
 mod attach;
@@ -127,6 +127,9 @@ where
         NativeV2CliCommand::Resume(run) => {
             return execute_resume(run, context, output).await;
         }
+        NativeV2CliCommand::Checkpoints(command) => {
+            return execute_checkpoints(command, backend, output).await;
+        }
         NativeV2CliCommand::DiscardWorkspace(run) => {
             return execute_discard_workspace(run, backend, output).await;
         }
@@ -142,7 +145,7 @@ where
 }
 
 async fn execute_resume<B, W>(
-    run: RunSelector,
+    command: RunResumeCommand,
     context: &CliExecutionContext<'_, B>,
     output: &mut W,
 ) -> Result<CliOutcome, NativeV2CliError>
@@ -150,6 +153,7 @@ where
     B: NativeV2CliBackend,
     W: Write,
 {
+    let run = command.run;
     let status = context
         .backend
         .run_status(
@@ -189,9 +193,33 @@ where
             RunResumeParams {
                 run_id: run.run_id,
                 successor_run_id: RunId::new(uuid::Uuid::now_v7().to_string()),
+                from: command.from,
                 connections,
                 connection_resolver: None,
                 github_token,
+            },
+        )
+        .await?;
+    write_json(output, &result)?;
+    Ok(CliOutcome::Completed)
+}
+
+async fn execute_checkpoints<B, W>(
+    command: RunCheckpointsCommand,
+    backend: &B,
+    output: &mut W,
+) -> Result<CliOutcome, NativeV2CliError>
+where
+    B: NativeV2CliBackend,
+    W: Write,
+{
+    let result = backend
+        .run_checkpoints(
+            command.run.target.as_deref(),
+            RunCheckpointsParams {
+                run_id: command.run.run_id,
+                after: command.after,
+                limit: command.limit,
             },
         )
         .await?;

@@ -44,6 +44,15 @@ pub trait TargetControlAuthority: Send + Sync {
             "target does not advertise workspace recovery",
         ))
     }
+    async fn workspace_checkpoints_session(
+        &self,
+        _target: &TargetRecord,
+        _request: &TargetOecpSessionRequest,
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise workspace checkpoints",
+        ))
+    }
     async fn connection_list(
         &self,
         target: &TargetRecord,

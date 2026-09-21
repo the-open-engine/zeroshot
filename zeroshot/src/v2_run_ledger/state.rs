@@ -3,8 +3,8 @@ use serde::Serialize;
 
 use super::{
     CreateRun, ExecutionId, ExecutionRef, ExecutionVoidReason, MAX_ADMITTED_RUN_BYTES,
-    MAX_EVENT_BYTES, NodeCompletion, NodeSnapshot, NodeState, RunEvent, RunLedgerError, RunPhase,
-    RunSnapshot, TokenUsageDelta, INITIAL_CURSOR,
+    MAX_EVENT_BYTES, MAX_PRIOR_EXECUTION_BYTES, NodeCompletion, NodeSnapshot, NodeState, RunEvent,
+    RunLedgerError, RunPhase, RunSnapshot, TokenUsageDelta, INITIAL_CURSOR,
 };
 
 pub(crate) fn initial_cursor() -> Cursor {
@@ -29,7 +29,11 @@ pub(crate) fn validate_create(request: &CreateRun) -> Result<(), RunLedgerError>
 }
 
 pub(crate) fn validate_event(event: &RunEvent) -> Result<(), RunLedgerError> {
-    bounded_json(event, MAX_EVENT_BYTES).map_err(|_| RunLedgerError::EventTooLarge)
+    let maximum = match event {
+        RunEvent::PriorExecution { .. } => MAX_PRIOR_EXECUTION_BYTES,
+        _ => MAX_EVENT_BYTES,
+    };
+    bounded_json(event, maximum).map_err(|_| RunLedgerError::EventTooLarge)
 }
 
 fn bounded_json(value: &impl Serialize, maximum: usize) -> Result<(), ()> {
@@ -57,6 +61,7 @@ fn apply_event_kind(
     sequence: u64,
 ) -> Result<(), RunLedgerError> {
     match event {
+        RunEvent::PriorExecution { execution } => apply_prior_execution(snapshot, execution),
         RunEvent::RunStarted => apply_run_started(snapshot),
         RunEvent::NodeStarted { .. } => apply_node_started(snapshot, event, sequence),
         RunEvent::NodeCompleted { completion } => {
@@ -72,6 +77,26 @@ fn apply_event_kind(
         RunEvent::ForceStopRequested => apply_force_stop(snapshot),
         RunEvent::Terminal { result } => apply_terminal(snapshot, result),
     }
+}
+
+fn apply_prior_execution(
+    snapshot: &mut RunSnapshot,
+    execution: &crate::full_v1_reducer::DurableExecution,
+) -> Result<(), RunLedgerError> {
+    use crate::full_v1_reducer::DurableExecutionState;
+    if snapshot.phase != RunPhase::Admitted
+        || matches!(execution.state, DurableExecutionState::Active)
+        || snapshot.execution_seed.last().is_some_and(|previous| {
+            previous.execution >= execution.execution
+                || previous.dispatch_position >= execution.dispatch_position
+        })
+    {
+        return Err(RunLedgerError::InvalidEvent(
+            "invalid prerequisite execution",
+        ));
+    }
+    snapshot.execution_seed.push(execution.clone());
+    Ok(())
 }
 
 fn apply_run_started(snapshot: &mut RunSnapshot) -> Result<(), RunLedgerError> {
@@ -124,7 +149,12 @@ fn require_new_dispatch(
             "cannot dispatch after force-stop",
         ));
     }
-    if snapshot.executions.contains_key(&reference.execution) {
+    if snapshot.executions.contains_key(&reference.execution)
+        || snapshot
+            .execution_seed
+            .iter()
+            .any(|prior| prior.execution == reference.execution)
+    {
         return Err(RunLedgerError::InvalidEvent(
             "execution was already dispatched",
         ));

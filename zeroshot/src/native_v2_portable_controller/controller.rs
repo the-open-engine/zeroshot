@@ -13,9 +13,9 @@ use tokio::sync::{Mutex, watch};
 
 use crate::native_v2_admission::NativeV2Admission;
 use crate::native_v2_cloud::{
-    AllocatedCapsule, CapsuleAllocationUnavailable, CapsuleAllocator, CapsuleCleanupUnavailable,
-    CapsuleDestroyed, ControllerClaimUnavailable, ExclusiveControllerClaim,
-    NativeV2CloudController,
+    AllocatedCapsule, CapsuleAllocationUnavailable, CapsuleAllocator, CapsuleCleanup,
+    CapsuleCleanupUnavailable, CapsuleDestroyed, ControllerClaimUnavailable,
+    ExclusiveControllerClaim, NativeV2CloudController,
 };
 use crate::native_v2_contract::AdmittedRun;
 use crate::native_v2_supervisor::{RunEnvironment, RunRuntimeExit};
@@ -82,7 +82,12 @@ impl PortableRunController {
         if !validate_existing_run(ledger.as_ref(), &run_id).await? {
             return Err(PortableControllerError::DurableIdentity);
         }
-        let allocator = Arc::new(SingleRunAllocator::new(run_id.clone(), None, lease.clone()));
+        let allocator = Arc::new(SingleRunAllocator::new(
+            run_id.clone(),
+            None,
+            lease.clone(),
+            paths.storage().join("checkpoints"),
+        ));
         let inner = Arc::new(NativeV2CloudController::new(ledger, allocator).await?);
         Ok(Self {
             run_id,
@@ -107,6 +112,7 @@ impl PortableRunController {
             bootstrap.run_id.clone(),
             prepared_runtime.runtime,
             prepared.lease.clone(),
+            prepared.paths.storage().join("checkpoints"),
         ));
         let inner = Arc::new(
             NativeV2CloudController::new_with_delivery_policy(
@@ -273,8 +279,27 @@ where
     if !workspace_identity.is_current(&bootstrap.workspace) {
         return Err(PortableControllerError::Workspace);
     }
-    let runtime = runtime_factory(&prepared.admitted)
+    let execution_seed = match &bootstrap.checkpoint {
+        Some(selection) => {
+            crate::native_v2_supervisor::checkpoints::restore(selection, &bootstrap.workspace)
+                .map_err(|error| PortableControllerError::Io(error.0))?
+        }
+        None => Vec::new(),
+    };
+    let mut runtime = runtime_factory(&prepared.admitted)
         .map_err(|_| PortableControllerError::RuntimeUnavailable)?;
+    runtime.execution_seed = execution_seed;
+    runtime.cleanup = Arc::new(PortableCheckpointCleanup {
+        inner: runtime.cleanup,
+        directory: prepared.paths.storage().join("checkpoints"),
+    });
+    runtime.checkpoints = Some(Arc::new(
+        crate::native_v2_supervisor::checkpoints::FilesystemCheckpointStore::new(
+            prepared.paths.storage().join("checkpoints"),
+            bootstrap.workspace.clone(),
+            crate::native_v2_admission::writer_nodes(&prepared.admitted),
+        ),
+    ));
     Ok(PreparedRuntime {
         runtime: Some(runtime),
         workspace_identity: Some(workspace_identity),
@@ -282,7 +307,32 @@ where
     })
 }
 
+struct PortableCheckpointCleanup {
+    inner: Arc<dyn CapsuleCleanup>,
+    directory: PathBuf,
+}
+
+#[async_trait]
+impl CapsuleCleanup for PortableCheckpointCleanup {
+    async fn destroy_or_confirm_absent(
+        &self,
+        exit: RunRuntimeExit,
+    ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable> {
+        let destroyed = self.inner.destroy_or_confirm_absent(exit).await?;
+        // Local failed attempts, including force-stopped ones, retain their user-owned workspace.
+        if exit == RunRuntimeExit::Completed {
+            match std::fs::remove_dir_all(&self.directory) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(_) => return Err(CapsuleCleanupUnavailable),
+            }
+        }
+        Ok(destroyed)
+    }
+}
+
 struct SingleRunAllocator {
+    checkpoint_directory: PathBuf,
     run_id: RunId,
     runtime: Mutex<Option<PortableRuntime>>,
     lease: Arc<ControllerLease>,
@@ -291,9 +341,15 @@ struct SingleRunAllocator {
 }
 
 impl SingleRunAllocator {
-    fn new(run_id: RunId, runtime: Option<PortableRuntime>, lease: Arc<ControllerLease>) -> Self {
+    fn new(
+        run_id: RunId,
+        runtime: Option<PortableRuntime>,
+        lease: Arc<ControllerLease>,
+        checkpoint_directory: PathBuf,
+    ) -> Self {
         let (loss_sender, loss_receiver) = watch::channel(false);
         Self {
+            checkpoint_directory,
             run_id,
             runtime: Mutex::new(runtime),
             lease,
@@ -339,10 +395,22 @@ impl CapsuleAllocator for SingleRunAllocator {
             .take()
             .ok_or(CapsuleAllocationUnavailable::Runtime)?;
         Ok(AllocatedCapsule {
+            checkpoints: runtime.checkpoints,
+            execution_seed: runtime.execution_seed,
             runner: runtime.runner,
             loss: self.loss_receiver.clone(),
             cleanup: runtime.cleanup,
         })
+    }
+
+    async fn checkpoints(
+        &self,
+        params: openengine_cluster_protocol::RunCheckpointsParams,
+    ) -> Result<
+        openengine_cluster_protocol::RunCheckpointsResult,
+        crate::native_v2_supervisor::checkpoints::CheckpointError,
+    > {
+        crate::native_v2_supervisor::checkpoints::list(&self.checkpoint_directory, params)
     }
 
     async fn destroy_or_confirm_absent(

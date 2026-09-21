@@ -91,6 +91,7 @@ fn bootstrap(
     let environment = RunEnvironment::exact(&submission.runtime, BTreeMap::new())
         .assert_value_with("exact empty environment");
     PortableControllerBootstrap {
+        checkpoint: None,
         delivery_run_id: run_id.clone(),
         adopt_existing_delivery: false,
         run_id,
@@ -135,6 +136,7 @@ async fn one_run_server_is_ready_reconnectable_and_rejects_external_submission()
     let workspace = root.child("workspace");
     let storage = root.child("state");
     std::fs::create_dir(&workspace).assert_value_with("workspace");
+    std::fs::write(workspace.join("user.txt"), "keep local workspace").assert_value();
     let run_id = RunId::new("run-portable-server");
     let submitted = submission("portable-server");
     let controller = Arc::new(
@@ -193,6 +195,12 @@ async fn one_run_server_is_ready_reconnectable_and_rejects_external_submission()
             TerminalResult::Succeeded { .. }
         ));
     }
+
+    assert!(!storage.join("checkpoints").exists());
+    assert_eq!(
+        std::fs::read_to_string(root.child("workspace").join("user.txt")).assert_value(),
+        "keep local workspace"
+    );
 
     let second_transport = connect_transport(controller.paths())
         .await

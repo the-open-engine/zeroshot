@@ -75,8 +75,20 @@ pub enum Decision {
 
 pub type TerminalProjection = TerminalResult;
 
+/// One executable visit, or the outermost parallel/map visit containing it.
+/// All dispatches inside an atomic group share this identity across concurrency batches.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ExecutionBoundary {
+    pub node: NodeName,
+    pub map_indices: Vec<u64>,
+    pub loop_iterations: Vec<u64>,
+    pub attempt: u64,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Reduction {
+    pub boundary: Option<ExecutionBoundary>,
     pub decisions: Vec<Decision>,
     pub terminal: Option<TerminalResult>,
 }
@@ -165,6 +177,7 @@ impl<'a> FullV1Reducer<'a> {
             Traversal {
                 map_indices: &[],
                 loop_iterations: &[],
+                boundary: None,
                 item: None,
                 mode: EvalMode::Decide,
                 cutoff: HistoryPosition::MAX,
@@ -181,6 +194,7 @@ impl<'a> FullV1Reducer<'a> {
         }
         Ok(TracedReduction {
             reduction: Reduction {
+                boundary: engine.boundary,
                 decisions: engine.decisions,
                 terminal,
             },
@@ -240,6 +254,7 @@ enum EvalMode {
 struct Traversal<'a> {
     map_indices: &'a [u64],
     loop_iterations: &'a [u64],
+    boundary: Option<&'a ExecutionBoundary>,
     item: Option<&'a Value>,
     mode: EvalMode,
     cutoff: HistoryPosition,
@@ -351,6 +366,7 @@ struct VoidCutoff {
 }
 
 struct Engine<'a> {
+    boundary: Option<ExecutionBoundary>,
     executions: &'a [DurableExecution],
     next_node_instance: u64,
     next_execution: u64,
@@ -386,6 +402,7 @@ impl<'a> Engine<'a> {
             return Err(ReducerError::InconsistentHistory);
         }
         Ok(Self {
+            boundary: None,
             executions: input.executions,
             next_node_instance: input.next_node_instance,
             next_execution: input.next_execution,

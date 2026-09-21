@@ -6,11 +6,12 @@
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunAttachEventNotification,
-    RunAttachParams, RunAttachResult, RunForceParams, RunForceResult, RunListParams, RunListResult,
-    RunLogEventNotification, RunLogsParams, RunLogsResult, RunResumeParams, RunResumeResult,
-    RunStatusParams, RunStatusResult, RunSubmitParams, RunSubmitResult, RunWatchEventNotification,
-    RunWatchParams, RunWatchResult, SubscriptionCloseReason,
+    RunCheckpointsParams, RunCheckpointsResult, RunDiscardWorkspaceParams,
+    RunDiscardWorkspaceResult, RunAttachEventNotification, RunAttachParams, RunAttachResult,
+    RunForceParams, RunForceResult, RunListParams, RunListResult, RunLogEventNotification,
+    RunLogsParams, RunLogsResult, RunResumeParams, RunResumeResult, RunStatusParams,
+    RunStatusResult, RunSubmitParams, RunSubmitResult, RunWatchEventNotification, RunWatchParams,
+    RunWatchResult, SubscriptionCloseReason,
 };
 
 use crate::{BackendError, ClusterBackend, Dispatcher};
@@ -107,6 +108,20 @@ where
 
     pub async fn run_force(&self, params: RunForceParams) -> Result<RunForceResult, BackendError> {
         self.backend().run_force(self.context(), params).await
+    }
+
+    pub async fn run_checkpoints(
+        &self,
+        params: RunCheckpointsParams,
+    ) -> Result<RunCheckpointsResult, BackendError> {
+        params.validate().map_err(|error| {
+            BackendError::invalid_params(
+                openengine_cluster_protocol::SCHEMA_VIOLATION,
+                error.to_string(),
+                None,
+            )
+        })?;
+        self.backend().run_checkpoints(self.context(), params).await
     }
 
     pub async fn run_resume(

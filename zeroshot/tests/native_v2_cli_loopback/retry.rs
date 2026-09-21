@@ -90,11 +90,11 @@ impl CapsuleAllocator for RetryAllocator {
         };
         let (loss, receiver) = watch::channel(false);
         self.losses.lock().assert_value().push(loss);
-        Ok(AllocatedCapsule {
+        Ok(AllocatedCapsule::new(
             runner,
-            loss: receiver,
-            cleanup: Arc::new(ImmediateCleanup),
-        })
+            receiver,
+            Arc::new(ImmediateCleanup),
+        ))
     }
 
     async fn destroy_or_confirm_absent(

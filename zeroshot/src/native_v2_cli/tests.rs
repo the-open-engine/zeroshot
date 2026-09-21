@@ -13,6 +13,8 @@ use super::*;
 
 #[path = "tests/attach.rs"]
 mod attach_tests;
+#[path = "tests/checkpoints.rs"]
+mod checkpoint_tests;
 #[path = "tests/connections.rs"]
 mod connection_tests;
 #[path = "tests/environment.rs"]

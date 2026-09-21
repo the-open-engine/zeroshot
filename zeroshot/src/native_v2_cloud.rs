@@ -74,6 +74,8 @@ pub enum NativeV2CloudError {
     #[error(transparent)]
     Allocation(#[from] CapsuleAllocationUnavailable),
     #[error(transparent)]
+    Checkpoint(#[from] crate::native_v2_supervisor::checkpoints::CheckpointError),
+    #[error(transparent)]
     Supervisor(#[from] NativeV2SupervisorError),
     #[error(transparent)]
     Environment(#[from] RunEnvironmentError),
@@ -332,23 +334,36 @@ impl NativeV2CloudController {
         start: AllocatedRunStart,
     ) -> Result<CloudRunReceipt, NativeV2CloudError> {
         let AllocatedRunStart {
-            stored,
+            mut stored,
             environment,
             controller_claim,
             capsule,
         } = start;
         let run_id = stored.snapshot.run_id.clone();
-        self.observability.track_runtime(&stored.snapshot)?;
         let AllocatedCapsule {
+            checkpoints,
+            execution_seed,
             runner,
             loss,
             cleanup,
         } = capsule;
+        if let Err(error) = self.initialize_allocated(&mut stored, execution_seed).await {
+            // Runtime-loss cleanup preserves the restored workspace and its recovery lineage.
+            cleanup
+                .destroy_or_confirm_absent(RunRuntimeExit::RuntimeLost)
+                .await
+                .map_err(|_| NativeV2SupervisorError::RuntimeCleanup(RuntimeCleanupUnavailable))?;
+            self.append_unavailable(&run_id, "runtime_unavailable")
+                .await?;
+            return Err(error);
+        }
+        let mut runtime = PortableRuntime::with_cleanup(runner, cleanup);
+        runtime.checkpoints = checkpoints;
         let engine = PortableRunEngine::start(PortableRunEngineBootstrap {
             run_id: run_id.clone(),
             ledger: self.ledger.clone(),
             environment: environment.as_ref().clone(),
-            runtime: PortableRuntime::with_cleanup(runner, cleanup),
+            runtime,
             loss,
             controller_claim,
             delivery_policy: self.delivery_policy,
@@ -366,12 +381,33 @@ impl NativeV2CloudController {
         })
     }
 
+    async fn initialize_allocated(
+        &self,
+        stored: &mut StoredRun,
+        execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
+    ) -> Result<(), NativeV2CloudError> {
+        if !execution_seed.is_empty() {
+            let events = execution_seed
+                .into_iter()
+                .map(|execution| RunEvent::PriorExecution { execution })
+                .collect();
+            stored.snapshot = self
+                .ledger
+                .append(&stored.snapshot.run_id, events)
+                .await?
+                .snapshot;
+        }
+        self.observability.track_runtime(&stored.snapshot)?;
+        Ok(())
+    }
+
     pub async fn resume(
         &self,
         params: RunResumeParams,
     ) -> Result<RunResumeResult, NativeV2CloudError> {
         let _turn = self.submission_turn.lock().await;
         let RunResumeParams {
+            from,
             run_id,
             successor_run_id,
             connections,
@@ -401,6 +437,9 @@ impl NativeV2CloudController {
             .await?;
         let capsule = self
             .allocate_retained_capsule(RetainedAllocationRequest {
+                checkpoint_id: crate::native_v2_supervisor::checkpoints::selected_checkpoint(
+                    from.as_ref(),
+                ),
                 source_run_id: &run_id,
                 run_id: &successor_run_id,
                 admitted: &admitted,
@@ -467,6 +506,16 @@ impl NativeV2CloudController {
                 Err(NativeV2SupervisorError::RuntimeCleanup(RuntimeCleanupUnavailable).into())
             }
         }
+    }
+
+    pub async fn checkpoints(
+        &self,
+        params: openengine_cluster_protocol::RunCheckpointsParams,
+    ) -> Result<openengine_cluster_protocol::RunCheckpointsResult, NativeV2CloudError> {
+        if self.ledger.get(&params.run_id).await?.is_none() {
+            return Err(RunLedgerError::RunNotFound.into());
+        }
+        Ok(self.allocator.checkpoints(params).await?)
     }
 
     pub async fn discard_workspace(

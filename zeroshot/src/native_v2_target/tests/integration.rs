@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use openengine_cluster_protocol::{
     ConnectionKey, EnvironmentVariableName, RunConnectionRequirements, RunDiscardWorkspaceParams,
-    RunId, RunResumeParams,
+    RunCheckpointsParams, RunId, RunResumeParams,
 };
 use openengine_cluster_testkit::assertions::{AssertAt, AssertError, AssertValue};
 use tokio::net::TcpListener;
@@ -380,6 +380,7 @@ async fn direct_connector_constrains_resume_values_and_propagates_authorization(
         connections: BTreeMap::from([(fixture.key.clone(), untrusted_values)]),
         connection_resolver: None,
         github_token: None,
+        from: None,
     };
     assert!(
         fixture
@@ -403,6 +404,7 @@ async fn direct_connector_constrains_resume_values_and_propagates_authorization(
             source_connection: None,
         }),
         github_token: None,
+        from: None,
     };
     assert!(
         fixture
@@ -461,7 +463,7 @@ fn assert_recovery_unavailable(fixture: &DirectRecoveryFixture, run_id: &RunId) 
 }
 
 #[tokio::test]
-async fn named_target_workspace_recovery_requires_advertisement_before_dialing() {
+async fn named_target_recovery_and_checkpoints_require_advertisement_before_dialing() {
     let registry = MemoryRegistry::default();
     registry.insert(target()).assert_value();
     let authority = FakeAuthority::new("wss://target.example/oecp");
@@ -483,6 +485,7 @@ async fn named_target_workspace_recovery_requires_advertisement_before_dialing()
                     connections: BTreeMap::new(),
                     connection_resolver: None,
                     github_token: None,
+                    from: None,
                 },
             )
             .await
@@ -491,7 +494,7 @@ async fn named_target_workspace_recovery_requires_advertisement_before_dialing()
             .run_discard_workspace(
                 Some("prod"),
                 RunDiscardWorkspaceParams {
-                    run_id: source_run_id,
+                    run_id: source_run_id.clone(),
                 },
             )
             .await
@@ -503,6 +506,22 @@ async fn named_target_workspace_recovery_requires_advertisement_before_dialing()
                 .contains("target does not advertise workspace recovery")
         );
     }
+    let error = backend
+        .run_checkpoints(
+            Some("prod"),
+            RunCheckpointsParams {
+                run_id: source_run_id,
+                after: None,
+                limit: None,
+            },
+        )
+        .await
+        .assert_error();
+    assert!(
+        error
+            .to_string()
+            .contains("target does not advertise workspace checkpoints")
+    );
     assert!(authority.calls().is_empty());
     assert!(dialer.sessions.lock().assert_value().is_empty());
 }
@@ -510,7 +529,7 @@ async fn named_target_workspace_recovery_requires_advertisement_before_dialing()
 #[tokio::test]
 async fn hosted_authority_uses_unified_discovery_and_run_scoped_oecp() {
     let root = temp_root();
-    let (origin, server) = spawn_target_authority(14).await;
+    let (origin, server) = spawn_target_authority(15).await;
     let credentials = Arc::new(MemoryCredentialStore::default());
     let notifier = Arc::new(MemoryDeviceCodeNotifier::default());
     let authority = TargetHttpControlAuthority::with_dependencies(
@@ -562,8 +581,22 @@ async fn hosted_authority_uses_unified_discovery_and_run_scoped_oecp() {
         "target does not advertise workspace recovery"
     );
 
+    assert_eq!(
+        authority
+            .workspace_checkpoints_session(
+                &target,
+                &TargetOecpSessionRequest {
+                    run_id: Some(request.run_id.clone())
+                },
+            )
+            .await
+            .assert_error()
+            .to_string(),
+        "target does not advertise workspace checkpoints"
+    );
+
     let requests = server.await.assert_value();
-    assert_eq!(requests.len(), 14);
+    assert_eq!(requests.len(), 15);
     assert!(
         requests
             .iter()
@@ -576,7 +609,7 @@ async fn hosted_authority_uses_unified_discovery_and_run_scoped_oecp() {
 #[tokio::test]
 async fn direct_authority_skips_hosted_auth_and_all_authorization_headers() {
     let root = temp_root();
-    let (origin, server) = spawn_direct_target_authority(7).await;
+    let (origin, server) = spawn_direct_target_authority(9).await;
     let credentials = Arc::new(MemoryCredentialStore::default());
     let notifier = Arc::new(MemoryDeviceCodeNotifier::default());
     let authority = TargetHttpControlAuthority::with_dependencies(
@@ -611,6 +644,15 @@ async fn direct_authority_skips_hosted_auth_and_all_authorization_headers() {
         .assert_value();
     authority
         .workspace_recovery_session(
+            &target,
+            &TargetOecpSessionRequest {
+                run_id: Some(request.run_id.clone()),
+            },
+        )
+        .await
+        .assert_value();
+    authority
+        .workspace_checkpoints_session(
             &target,
             &TargetOecpSessionRequest {
                 run_id: Some(request.run_id),

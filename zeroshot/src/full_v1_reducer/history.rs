@@ -62,7 +62,7 @@ pub enum ExecutionVoidReason {
     MapTerminal,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum DurableExecutionState {
     Active,
     Settled {
@@ -79,7 +79,7 @@ pub enum DurableExecutionState {
 ///
 /// Run ownership and storage details are outside this value: a reducer instance evaluates exactly
 /// one verified graph and one run-local history.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DurableExecution {
     pub dispatch_position: HistoryPosition,
     pub node_instance: NodeInstanceId,

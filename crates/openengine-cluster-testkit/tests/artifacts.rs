@@ -163,6 +163,11 @@ async fn openrpc_recovery_methods_match_the_authoritative_schema() {
     let definitions = schema.assert_key("$defs");
 
     for (method_name, params_type, result_type) in [
+        (
+            "run/checkpoints",
+            "RunCheckpointsParams",
+            "RunCheckpointsResult",
+        ),
         ("run/resume", "RunResumeParams", "RunResumeResult"),
         (
             "run/discard_workspace",

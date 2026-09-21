@@ -35,6 +35,8 @@ impl AllocatorCore {
             .unwrap_or_else(PoisonError::into_inner)
             .push(loss);
         Ok(AllocatedCapsule {
+            checkpoints: None,
+            execution_seed: Vec::new(),
             runner: Arc::new(runner),
             loss: receiver,
             cleanup: self.cleanup.clone(),

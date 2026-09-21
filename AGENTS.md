@@ -152,6 +152,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   attempt's delivery identity so every successor reuses the same delivery branch and pull request.
   Successor composition explicitly authorizes a fresh delivery adapter to adopt that lineage-owned
   branch; ordinary fresh adapters still reject unexplained existing run branches.
+- `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
+  retained workspace recovery. Default resume starts a fresh graph on the latest retained workspace;
+  checkpoint resume restores a private input snapshot and settled prerequisite executions. Neither
+  imports old provider sessions, secrets, or token usage. Checkpoint IDs never become filesystem paths.
+  The reducer owns boundaries: an outer parallel or mapped group is one unit across all nested work
+  and dispatch waves. The supervisor captures only after all live executions and cleanup have settled;
+  read-only boundaries reuse bytes. Local/direct storage publishes private immutable filesystem
+  snapshots and catalogs atomically, using reflinks where supported, behind `RunCheckpointStore`.
+  Hosted factories advertise checkpoints only when they implement storage and restore. Snapshot
+  restore requires exclusive workspace ownership and preserves the checkout root and Git identity.
 - Durable observation replay reads bounded ledger pages and retains its scan cursor across pages.
   A finished snapshot closes a subscription only after replay reaches its durable cursor.
 - Bulk replay uses the WebSocket client's opt-in subscription backpressure on a dedicated

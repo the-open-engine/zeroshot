@@ -27,7 +27,7 @@ use self::credentials::{
     credential_service, open_refresh_lock, production_target_credential_store,
 };
 use super::registry::default_target_registry_path;
-use super::{TargetAccess, TargetAuthorityError, TargetRecord};
+use super::{TargetAccess, TargetAuthorityError, TargetRecord, TargetSessionPurpose};
 use self::access::{AccessToken, CachedHostedAccess};
 
 const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
@@ -130,19 +130,20 @@ impl TargetHttpControlAuthority {
         &self,
         target: &TargetRecord,
     ) -> Result<(HostedAuthDescriptor, ControllerDescriptor), TargetAuthorityError> {
-        self.descriptors_inner(target, false).await
+        self.descriptors_inner(target, TargetSessionPurpose::General)
+            .await
     }
 
     async fn descriptors_inner(
         &self,
         target: &TargetRecord,
-        require_workspace_recovery: bool,
+        purpose: TargetSessionPurpose,
     ) -> Result<(HostedAuthDescriptor, ControllerDescriptor), TargetAuthorityError> {
         let (origin, wire) = self.discovery(target).await?;
         let auth = build_auth_descriptor(&origin, &wire)?;
         let controller =
             build_controller_descriptor(&origin, wire, target.access.authentication())?;
-        require_workspace_recovery_capability(&controller, require_workspace_recovery)?;
+        require_session_capability(&controller, purpose)?;
         let metadata: OAuthMetadataWire =
             self.get_json(&auth.metadata_url, "OAuth metadata").await?;
         validate_metadata_routes(&origin, &auth, &metadata)?;
@@ -360,26 +361,34 @@ impl TargetHttpControlAuthority {
         &self,
         target: &TargetRecord,
     ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
-        self.controller_access_inner(target, false).await
+        self.controller_access_inner(target, TargetSessionPurpose::General)
+            .await
     }
 
     async fn workspace_recovery_controller_access(
         &self,
         target: &TargetRecord,
     ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
-        self.controller_access_inner(target, true).await
+        self.controller_access_inner(target, TargetSessionPurpose::WorkspaceRecovery)
+            .await
+    }
+
+    async fn workspace_checkpoints_controller_access(
+        &self,
+        target: &TargetRecord,
+    ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
+        self.controller_access_inner(target, TargetSessionPurpose::WorkspaceCheckpoints)
+            .await
     }
 
     async fn controller_access_inner(
         &self,
         target: &TargetRecord,
-        require_workspace_recovery: bool,
+        purpose: TargetSessionPurpose,
     ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
         match &target.access {
             TargetAccess::Hosted { .. } => {
-                let (auth, controller) = self
-                    .descriptors_inner(target, require_workspace_recovery)
-                    .await?;
+                let (auth, controller) = self.descriptors_inner(target, purpose).await?;
                 let access = self
                     .access_token(target, &auth, &controller.audience)
                     .await?;
@@ -387,7 +396,7 @@ impl TargetHttpControlAuthority {
             }
             TargetAccess::Direct => {
                 let controller = self.controller_descriptor(target).await?;
-                require_workspace_recovery_capability(&controller, require_workspace_recovery)?;
+                require_session_capability(&controller, purpose)?;
                 Ok((controller, None))
             }
         }
@@ -436,16 +445,18 @@ impl TargetHttpControlAuthority {
     }
 }
 
-fn require_workspace_recovery_capability(
+fn require_session_capability(
     controller: &ControllerDescriptor,
-    required: bool,
+    purpose: TargetSessionPurpose,
 ) -> Result<(), TargetAuthorityError> {
-    if required && !controller.workspace_recovery {
-        Err(authority_error(
-            "target does not advertise workspace recovery",
-        ))
-    } else {
-        Ok(())
+    match purpose {
+        TargetSessionPurpose::WorkspaceRecovery if !controller.workspace_recovery => Err(
+            authority_error("target does not advertise workspace recovery"),
+        ),
+        TargetSessionPurpose::WorkspaceCheckpoints if !controller.workspace_checkpoints => Err(
+            authority_error("target does not advertise workspace checkpoints"),
+        ),
+        _ => Ok(()),
     }
 }
 

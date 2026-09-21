@@ -396,6 +396,13 @@
       ],
       "type": "object"
     },
+    "CheckpointId": {
+      "description": "Opaque run-scoped checkpoint identity. Clients must not interpret its spelling.",
+      "maxLength": 256,
+      "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+      "type": "string"
+    },
     "ChoiceBranch": {
       "additionalProperties": false,
       "properties": {
@@ -2327,7 +2334,7 @@
           "type": "string"
         },
         "params": {
-          "$ref": "#/$defs/RunResumeParams"
+          "$ref": "#/$defs/RunCheckpointsParams"
         }
       },
       "required": [
@@ -2339,6 +2346,29 @@
       "type": "object"
     },
     "JsonRpcRequest21": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/RunResumeParams"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "JsonRpcRequest22": {
       "properties": {
         "id": {
           "$ref": "#/$defs/RequestId"
@@ -2662,6 +2692,16 @@
         }
       ]
     },
+    "JsonRpcResponse22": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonRpcSuccess22"
+        },
+        {
+          "$ref": "#/$defs/JsonRpcErrorResponse"
+        }
+      ]
+    },
     "JsonRpcResponse3": {
       "anyOf": [
         {
@@ -2969,7 +3009,7 @@
           "type": "string"
         },
         "result": {
-          "$ref": "#/$defs/RunResumeResult"
+          "$ref": "#/$defs/RunCheckpointsResult"
         }
       },
       "required": [
@@ -2980,6 +3020,25 @@
       "type": "object"
     },
     "JsonRpcSuccess21": {
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/RunResumeResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "type": "object"
+    },
+    "JsonRpcSuccess22": {
       "properties": {
         "id": {
           "$ref": "#/$defs/RequestId"
@@ -3946,6 +4005,120 @@
       ],
       "type": "object"
     },
+    "RunCheckpoint": {
+      "additionalProperties": false,
+      "description": "A durable entry point immediately before the named node or outer concurrent group starts.\nParallel and mapped groups are atomic: their children and all map waves share one entry point.\nWorkspace bytes, storage locations, execution seeds, and credentials remain target-private.",
+      "properties": {
+        "checkpointId": {
+          "$ref": "#/$defs/CheckpointId"
+        },
+        "createdAt": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "loopIterations": {
+          "items": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "mapIndices": {
+          "items": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "node": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": "string"
+        },
+        "sequence": {
+          "description": "Positive JavaScript-safe sequence, increasing within this run's checkpoint inventory.",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "checkpointId",
+        "sequence",
+        "node",
+        "mapIndices",
+        "loopIterations",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "RunCheckpointsParams": {
+      "additionalProperties": false,
+      "description": "Lists retained entry checkpoints in increasing sequence order. `after` is exclusive and must\nidentify a checkpoint in this run. Omitted `limit` means 50; accepted limits are 1 through 100.",
+      "properties": {
+        "after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckpointId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "maximum": 100,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId"
+      ],
+      "type": "object"
+    },
+    "RunCheckpointsResult": {
+      "additionalProperties": false,
+      "description": "One bounded page. `nextAfter` is the last returned checkpoint identity only when more remain.",
+      "properties": {
+        "checkpoints": {
+          "items": {
+            "$ref": "#/$defs/RunCheckpoint"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "nextAfter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckpointId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId",
+        "checkpoints"
+      ],
+      "type": "object"
+    },
     "RunDiscardWorkspaceParams": {
       "additionalProperties": false,
       "properties": {
@@ -4159,6 +4332,41 @@
       },
       "type": "object"
     },
+    "RunResumeFrom": {
+      "description": "A new successor either restarts the graph on the latest workspace or continues from an entry\ncheckpoint with its matching predecessor outputs. Provider sessions are never resumed.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "restart",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "checkpointId": {
+              "$ref": "#/$defs/CheckpointId"
+            },
+            "kind": {
+              "const": "checkpoint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "checkpointId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "RunResumeParams": {
       "additionalProperties": false,
       "properties": {
@@ -4180,6 +4388,17 @@
             }
           },
           "type": "object"
+        },
+        "from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunResumeFrom"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Omission preserves restarting from the latest retained workspace."
         },
         "githubToken": {
           "type": [
@@ -5543,11 +5762,17 @@
     "run_attach_response": {
       "$ref": "#/$defs/JsonRpcResponse18"
     },
+    "run_checkpoints_request": {
+      "$ref": "#/$defs/JsonRpcRequest20"
+    },
+    "run_checkpoints_response": {
+      "$ref": "#/$defs/JsonRpcResponse20"
+    },
     "run_discard_workspace_request": {
-      "$ref": "#/$defs/JsonRpcRequest21"
+      "$ref": "#/$defs/JsonRpcRequest22"
     },
     "run_discard_workspace_response": {
-      "$ref": "#/$defs/JsonRpcResponse21"
+      "$ref": "#/$defs/JsonRpcResponse22"
     },
     "run_force_request": {
       "$ref": "#/$defs/JsonRpcRequest19"
@@ -5571,10 +5796,10 @@
       "$ref": "#/$defs/JsonRpcResponse17"
     },
     "run_resume_request": {
-      "$ref": "#/$defs/JsonRpcRequest20"
+      "$ref": "#/$defs/JsonRpcRequest21"
     },
     "run_resume_response": {
-      "$ref": "#/$defs/JsonRpcResponse20"
+      "$ref": "#/$defs/JsonRpcResponse21"
     },
     "run_status_request": {
       "$ref": "#/$defs/JsonRpcRequest15"
@@ -5672,6 +5897,8 @@
     "run_attach_event_notification",
     "run_force_request",
     "run_force_response",
+    "run_checkpoints_request",
+    "run_checkpoints_response",
     "run_resume_request",
     "run_resume_response",
     "run_discard_workspace_request",

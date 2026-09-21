@@ -31,10 +31,11 @@ use openengine_cluster_protocol::{
     ApplyParams, ApplyResult, DeleteParams, DeleteResult, GetParams, GetResult, InitializeParams,
     InitializeResult, JsonRpcError, JsonRpcErrorResponse, JsonRpcRequest, JsonRpcSuccess,
     PlanParams, PlanResult, RequestId, ResubmitParams, ResubmitResult, RetryParams, RetryResult,
-    RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunForceParams, RunForceResult,
-    RunListParams, RunListResult, RunResumeParams, RunResumeResult, RunStatusParams,
-    RunStatusResult, RunSubmitParams, RunSubmitResult, StopParams, StopResult, SubscriptionId,
-    UpdateParams, UpdateResult, JSON_RPC_VERSION, PROTOCOL_VERSION, RUN_DISCARD_WORKSPACE_METHOD,
+    RunCheckpointsParams, RunCheckpointsResult, RunDiscardWorkspaceParams,
+    RunDiscardWorkspaceResult, RunForceParams, RunForceResult, RunListParams, RunListResult,
+    RunResumeParams, RunResumeResult, RunStatusParams, RunStatusResult, RunSubmitParams,
+    RunSubmitResult, StopParams, StopResult, SubscriptionId, UpdateParams, UpdateResult,
+    JSON_RPC_VERSION, PROTOCOL_VERSION, RUN_DISCARD_WORKSPACE_METHOD, RUN_CHECKPOINTS_METHOD,
     RUN_FORCE_METHOD, RUN_LIST_METHOD, RUN_RESUME_METHOD, RUN_STATUS_METHOD, RUN_SUBMIT_METHOD,
 };
 use openengine_cluster_server::{ClusterBackend, Dispatcher};
@@ -354,6 +355,13 @@ where
 
     pub async fn run_force(&self, params: RunForceParams) -> Result<RunForceResult, ClientError> {
         self.call(RUN_FORCE_METHOD, params).await
+    }
+
+    pub async fn run_checkpoints(
+        &self,
+        params: RunCheckpointsParams,
+    ) -> Result<RunCheckpointsResult, ClientError> {
+        self.call(RUN_CHECKPOINTS_METHOD, params).await
     }
 
     pub async fn run_resume(

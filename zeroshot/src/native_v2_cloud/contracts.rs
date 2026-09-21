@@ -71,12 +71,32 @@ pub trait CapsuleCleanup: Send + Sync {
 }
 
 pub struct AllocatedCapsule {
+    pub checkpoints: Option<Arc<dyn crate::native_v2_supervisor::checkpoints::RunCheckpointStore>>,
+    pub execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
     pub runner: Arc<dyn NodeRunner>,
     pub loss: watch::Receiver<bool>,
     pub cleanup: Arc<dyn CapsuleCleanup>,
 }
 
+impl AllocatedCapsule {
+    #[must_use]
+    pub fn new(
+        runner: Arc<dyn NodeRunner>,
+        loss: watch::Receiver<bool>,
+        cleanup: Arc<dyn CapsuleCleanup>,
+    ) -> Self {
+        Self {
+            runner,
+            loss,
+            cleanup,
+            checkpoints: None,
+            execution_seed: Vec::new(),
+        }
+    }
+}
+
 pub struct RetainedAllocationRequest<'a> {
+    pub checkpoint_id: Option<&'a openengine_cluster_protocol::CheckpointId>,
     pub source_run_id: &'a RunId,
     pub run_id: &'a RunId,
     pub admitted: &'a AdmittedRun,
@@ -128,6 +148,21 @@ pub trait CapsuleAllocator: Send + Sync {
         _run_id: &RunId,
     ) -> openengine_cluster_protocol::WorkspaceRecovery {
         Default::default()
+    }
+
+    async fn checkpoints(
+        &self,
+        _params: openengine_cluster_protocol::RunCheckpointsParams,
+    ) -> Result<
+        openengine_cluster_protocol::RunCheckpointsResult,
+        crate::native_v2_supervisor::checkpoints::CheckpointError,
+    > {
+        Err(crate::native_v2_supervisor::checkpoints::CheckpointError(
+            std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "workspace checkpoints are unavailable",
+            ),
+        ))
     }
 
     async fn discard_workspace(&self, _run_id: &RunId) -> Result<bool, CapsuleCleanupUnavailable> {

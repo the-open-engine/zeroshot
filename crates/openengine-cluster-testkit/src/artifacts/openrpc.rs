@@ -2,10 +2,11 @@ use crate::fixture::*;
 
 use openengine_cluster_protocol::{
     AgentAttachParams, ApplyParams, DeleteParams, ResubmitParams, RetryParams, RunAttachParams,
-    RunDiscardWorkspaceParams, RunForceParams, RunLogsParams, RunResumeParams, RunStatusParams,
-    RunSubmitParams, RunWatchParams, StopParams, UpdateParams, RUN_ATTACH_METHOD,
-    RUN_DISCARD_WORKSPACE_METHOD, RUN_FORCE_METHOD, RUN_LIST_METHOD, RUN_LOGS_METHOD,
-    RUN_RESUME_METHOD, RUN_STATUS_METHOD, RUN_SUBMIT_METHOD, RUN_WATCH_METHOD,
+    RunCheckpointsParams, RunDiscardWorkspaceParams, RunForceParams, RunLogsParams,
+    RunResumeParams, RunStatusParams, RunSubmitParams, RunWatchParams, StopParams, UpdateParams,
+    RUN_ATTACH_METHOD, RUN_CHECKPOINTS_METHOD, RUN_DISCARD_WORKSPACE_METHOD, RUN_FORCE_METHOD,
+    RUN_LIST_METHOD, RUN_LOGS_METHOD, RUN_RESUME_METHOD, RUN_STATUS_METHOD, RUN_SUBMIT_METHOD,
+    RUN_WATCH_METHOD,
 };
 use openengine_cluster_server::method_registry::{MethodDescriptor, MethodKind, METHOD_REGISTRY};
 use schemars::schema_for;
@@ -126,6 +127,7 @@ fn native_v2_method(name: &str) -> Option<Value> {
 
 fn native_v2_recovery_method(name: &str) -> Option<Value> {
     match name {
+        RUN_CHECKPOINTS_METHOD => run_checkpoints_method(),
         RUN_RESUME_METHOD => run_resume_method(),
         RUN_DISCARD_WORKSPACE_METHOD => run_discard_workspace_method(),
         _ => return None,
@@ -409,14 +411,42 @@ fn run_discard_workspace_method() -> Value {
     )
 }
 
+fn run_checkpoints_method() -> Value {
+    let schema = serde_json::to_value(schema_for!(RunCheckpointsParams))
+        .assert_value_with("checkpoint parameter JSON Schema serialization must succeed");
+    json!({
+        "summary": "List retained node and atomic-group entry checkpoints",
+        "description": "Lists checkpoints in increasing sequence order. The after cursor is exclusive. \
+            Omitted limit means 50; accepted limits are 1 through 100. Concurrent groups, including \
+            every map wave and nested child, expose one entry point. Storage and execution seeds \
+            remain private to the target.",
+        "paramStructure": "by-name",
+        "params": [
+            {"name": "runId", "required": true, "schema": property_schema(&schema, "runId")},
+            {"name": "after", "required": false, "schema": property_schema(&schema, "after")},
+            {"name": "limit", "required": false, "schema": property_schema(&schema, "limit")}
+        ],
+        "result": {
+            "name": "runCheckpointsResult",
+            "schema": { "$ref": "schema.json#/$defs/RunCheckpointsResult" }
+        }
+    })
+}
+
 fn run_resume_method() -> Value {
     let schema = serde_json::to_value(schema_for!(RunResumeParams))
         .assert_value_with("run resume parameter JSON Schema serialization must succeed");
     json!({
+        "summary": "Admit a successor from a retained workspace or entry checkpoint",
+        "description": "Omitting from or selecting restart starts the graph at its root on the latest \
+            retained workspace. Selecting checkpoint restores the matching workspace and predecessor \
+            outputs and reruns the named node or atomic concurrent group. Original admission and \
+            delivery metadata remain fixed; provider sessions are not resumed.",
         "paramStructure": "by-name",
         "params": [
             {"name": "runId", "required": true, "schema": property_schema(&schema, "runId")},
             {"name": "successorRunId", "required": true, "schema": property_schema(&schema, "successorRunId")},
+            {"name": "from", "required": false, "schema": property_schema(&schema, "from")},
             {"name": "connections", "required": false, "schema": property_schema(&schema, "connections")},
             {"name": "connectionResolver", "required": false, "schema": property_schema(&schema, "connectionResolver")},
             {"name": "githubToken", "required": false, "schema": property_schema(&schema, "githubToken")}

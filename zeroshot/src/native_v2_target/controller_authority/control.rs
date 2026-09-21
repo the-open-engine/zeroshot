@@ -135,6 +135,16 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
             .await
     }
 
+    async fn workspace_checkpoints_session(
+        &self,
+        target: &TargetRecord,
+        request: &openengine_cluster_protocol::TargetOecpSessionRequest,
+    ) -> Result<TargetOecpAccess, TargetAuthorityError> {
+        let controller_access = self.workspace_checkpoints_controller_access(target).await?;
+        self.issue_oecp_session(target, request, controller_access)
+            .await
+    }
+
     async fn connection_list(
         &self,
         target: &TargetRecord,

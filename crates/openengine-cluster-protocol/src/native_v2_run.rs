@@ -22,6 +22,7 @@ pub const RUN_WATCH_METHOD: &str = "run/watch";
 pub const RUN_LOGS_METHOD: &str = "run/logs";
 pub const RUN_ATTACH_METHOD: &str = "run/attach";
 pub const RUN_FORCE_METHOD: &str = "run/force";
+pub const RUN_CHECKPOINTS_METHOD: &str = "run/checkpoints";
 pub const RUN_RESUME_METHOD: &str = "run/resume";
 pub const RUN_DISCARD_WORKSPACE_METHOD: &str = "run/discard_workspace";
 
@@ -428,6 +429,9 @@ pub enum SessionScope {
 
 mod runtime;
 pub use runtime::{DeclaredConnections, DeclaredEnvironment, NodeRuntimeBinding, PullRequestFeedback};
+
+mod checkpoints;
+pub use checkpoints::*;
 
 mod wire;
 pub use wire::{

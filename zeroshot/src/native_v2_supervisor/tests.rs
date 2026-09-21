@@ -421,3 +421,8 @@ mod startup;
 
 #[path = "tests/terminalization.rs"]
 mod terminalization;
+
+#[path = "tests/checkpoint_seed.rs"]
+mod checkpoint_seed;
+#[path = "tests/checkpoints.rs"]
+mod checkpoint_tests;

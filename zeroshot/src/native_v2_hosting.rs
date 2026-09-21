@@ -132,6 +132,10 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
         true
     }
 
+    fn supports_workspace_checkpoints(&self) -> bool {
+        true
+    }
+
     async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
         self.create_controller()
             .await

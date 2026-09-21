@@ -352,7 +352,26 @@ fn copy_entry(
     destination: &Path,
     specification: &ExecutionFilesystemSpec,
 ) -> io::Result<()> {
-    check_cancelled(&specification.cancellation)?;
+    let copy = CopySpecification {
+        identity: specification.identity,
+        cancellation: &specification.cancellation,
+    };
+    copy_owned_entry(source, destination, &copy)
+}
+
+#[cfg(target_os = "linux")]
+struct CopySpecification<'a> {
+    identity: Option<HostedProcessIdentity>,
+    cancellation: &'a DriverCancellation,
+}
+
+#[cfg(target_os = "linux")]
+fn copy_owned_entry(
+    source: fs::File,
+    destination: &Path,
+    specification: &CopySpecification<'_>,
+) -> io::Result<()> {
+    check_cancelled(specification.cancellation)?;
     let metadata = source.metadata()?;
     copy_contents(&source, destination, &metadata, specification)?;
     set_owner(destination, specification.identity)?;
@@ -364,7 +383,7 @@ fn copy_contents(
     source: &fs::File,
     destination: &Path,
     metadata: &fs::Metadata,
-    specification: &ExecutionFilesystemSpec,
+    specification: &CopySpecification<'_>,
 ) -> io::Result<()> {
     if metadata.file_type().is_symlink() {
         return std::os::unix::fs::symlink(read_copy_symlink(source)?, destination);
@@ -377,7 +396,7 @@ fn copy_contents(
             "candidate contains an unsupported filesystem entry",
         ));
     }
-    copy_file(source, destination, &specification.cancellation)?;
+    copy_file(source, destination, specification.cancellation)?;
     fs::set_permissions(destination, metadata.permissions())
 }
 
@@ -386,17 +405,17 @@ fn copy_directory(
     source: &fs::File,
     destination: &Path,
     metadata: &fs::Metadata,
-    specification: &ExecutionFilesystemSpec,
+    specification: &CopySpecification<'_>,
 ) -> io::Result<()> {
     use std::os::fd::AsRawFd;
 
     create_private_directory(destination)?;
     for entry in fs::read_dir(copy_source_path(source))? {
-        check_cancelled(&specification.cancellation)?;
+        check_cancelled(specification.cancellation)?;
         let name = entry?.file_name();
         // Resolve only this child against the pinned parent; a renamed ancestor is never followed.
         let child = open_copy_source(source.as_raw_fd(), Path::new(&name))?;
-        copy_entry(child, &destination.join(name), specification)?;
+        copy_owned_entry(child, &destination.join(name), specification)?;
     }
     fs::set_permissions(destination, metadata.permissions())
 }
@@ -476,6 +495,118 @@ fn preserve_times(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// Copies one entry into a new, caller-owned private destination without sharing mutable inodes.
+/// The caller owns source quiescence and ensures the destination lies outside the source tree.
+#[cfg(target_os = "linux")]
+pub(crate) fn copy_workspace_entry(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let source = std::path::absolute(source)?;
+    let parent = open_copy_root(
+        source
+            .parent()
+            .ok_or_else(|| io::Error::other("workspace entry has no parent"))?,
+    )?;
+    let name = source
+        .file_name()
+        .ok_or_else(|| io::Error::other("workspace entry has no name"))?;
+    let pinned = open_copy_source(parent.as_raw_fd(), Path::new(name))?;
+    let (_signal, receiver) = tokio::sync::watch::channel(false);
+    let cancellation = DriverCancellation::new(receiver);
+    copy_owned_entry(
+        pinned,
+        destination,
+        &CopySpecification {
+            identity: None,
+            cancellation: &cancellation,
+        },
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn copy_workspace_entry(source: &Path, destination: &Path) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(source)?;
+    if metadata.file_type().is_symlink() {
+        return copy_workspace_symlink(source, destination, &metadata);
+    }
+    if metadata.is_dir() {
+        return copy_workspace_directory(source, destination, &metadata);
+    }
+    if !metadata.is_file() {
+        return Err(io::Error::other(
+            "workspace contains an unsupported filesystem entry",
+        ));
+    }
+    copy_workspace_file(source, destination, &metadata)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn copy_workspace_directory(
+    source: &Path,
+    destination: &Path,
+    metadata: &fs::Metadata,
+) -> io::Result<()> {
+    create_private_directory(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        copy_workspace_entry(&entry.path(), &destination.join(entry.file_name()))?;
+    }
+    fs::set_permissions(destination, metadata.permissions())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn copy_workspace_file(
+    source: &Path,
+    destination: &Path,
+    metadata: &fs::Metadata,
+) -> io::Result<()> {
+    let mut input = crate::execution::platform::open_identity(source)?;
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)?;
+    io::copy(&mut input, &mut output)?;
+    output.set_permissions(metadata.permissions())?;
+    preserve_workspace_file_times(&output, metadata)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn preserve_workspace_file_times(output: &fs::File, metadata: &fs::Metadata) -> io::Result<()> {
+    let mut times = fs::FileTimes::new();
+    if let Ok(modified) = metadata.modified() {
+        times = times.set_modified(modified);
+    }
+    if let Ok(accessed) = metadata.accessed() {
+        times = times.set_accessed(accessed);
+    }
+    output.set_times(times)
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn copy_workspace_symlink(
+    source: &Path,
+    destination: &Path,
+    _metadata: &fs::Metadata,
+) -> io::Result<()> {
+    std::os::unix::fs::symlink(fs::read_link(source)?, destination)
+}
+
+#[cfg(windows)]
+fn copy_workspace_symlink(
+    source: &Path,
+    destination: &Path,
+    metadata: &fs::Metadata,
+) -> io::Result<()> {
+    use std::os::windows::fs::MetadataExt;
+
+    let target = fs::read_link(source)?;
+    if metadata.file_attributes() & 0x10 != 0 {
+        std::os::windows::fs::symlink_dir(target, destination)
+    } else {
+        std::os::windows::fs::symlink_file(target, destination)
+    }
 }
 
 #[cfg(all(test, target_os = "linux"))]

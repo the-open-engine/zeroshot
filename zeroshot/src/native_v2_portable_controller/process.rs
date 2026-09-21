@@ -30,6 +30,8 @@ const READY_KIND: &str = "zeroshot.portable-controller-ready/v1";
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct PortableBootstrapDocument {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
     run_id: RunId,
     delivery_run_id: RunId,
     adopt_existing_delivery: bool,
@@ -50,6 +52,7 @@ impl PortableBootstrapDocument {
         require_absolute(&self.storage)?;
         let environment = RunEnvironment::exact(&self.submission.runtime, self.connections)?;
         Ok(PortableControllerBootstrap {
+            checkpoint: self.checkpoint,
             run_id: self.run_id,
             delivery_run_id: self.delivery_run_id,
             adopt_existing_delivery: self.adopt_existing_delivery,
@@ -170,6 +173,7 @@ fn encode_bootstrap(
         .environment
         .for_runtime(&bootstrap.submission.runtime)?;
     let document = PortableBootstrapDocument {
+        checkpoint: bootstrap.checkpoint.clone(),
         run_id: bootstrap.run_id.clone(),
         delivery_run_id: bootstrap.delivery_run_id.clone(),
         adopt_existing_delivery: bootstrap.adopt_existing_delivery,

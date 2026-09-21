@@ -108,7 +108,7 @@ fn parser_exposes_workspace_recovery_commands() {
         parse_native_v2_args(args(&["resume", "run-7", "--target", "docker"])).assert_value();
     assert!(matches!(
         resume,
-        NativeV2CliCommand::Resume(RunSelector { target, run_id })
+        NativeV2CliCommand::Resume(RunResumeCommand { run: RunSelector { target, run_id }, from: None })
             if target.as_deref() == Some("docker") && run_id.as_str() == "run-7"
     ));
 
@@ -119,6 +119,69 @@ fn parser_exposes_workspace_recovery_commands() {
         NativeV2CliCommand::DiscardWorkspace(RunSelector { target, run_id })
             if target.as_deref() == Some("docker") && run_id.as_str() == "run-8"
     ));
+}
+
+#[test]
+fn checkpoint_selection_and_bounded_listing_preserve_opaque_ids() {
+    let resume = parse_native_v2_args(args(&[
+        "resume",
+        "run-7",
+        "--from-checkpoint",
+        "entry:opaque-2",
+        "--target",
+        "docker",
+    ]))
+    .assert_value();
+    assert!(matches!(
+        resume,
+        NativeV2CliCommand::Resume(RunResumeCommand {
+            run: RunSelector { target, run_id },
+            from: Some(RunResumeFrom::Checkpoint { checkpoint_id }),
+        }) if target.as_deref() == Some("docker")
+            && run_id.as_str() == "run-7" && checkpoint_id.as_str() == "entry:opaque-2"
+    ));
+    let listing = parse_native_v2_args(args(&[
+        "checkpoints",
+        "run-7",
+        "--target",
+        "docker",
+        "--after",
+        "entry:opaque-1",
+        "--limit",
+        "1",
+    ]))
+    .assert_value();
+    assert!(matches!(
+        listing,
+        NativeV2CliCommand::Checkpoints(RunCheckpointsCommand {
+            run: RunSelector { target, run_id }, after: Some(after), limit: Some(1),
+        }) if target.as_deref() == Some("docker")
+            && run_id.as_str() == "run-7" && after.as_str() == "entry:opaque-1"
+    ));
+    let local = parse_native_v2_args(args(&["checkpoints", "run-7"])).assert_value();
+    assert!(matches!(
+        local,
+        NativeV2CliCommand::Checkpoints(RunCheckpointsCommand {
+            run: RunSelector { target: None, .. },
+            after: None,
+            limit: None,
+        })
+    ));
+}
+
+#[test]
+fn checkpoint_arguments_reject_invalid_ids_and_out_of_range_pages() {
+    let too_long = "x".repeat(257);
+    for id in ["", "entry\n2", too_long.as_str()] {
+        for (command, flag) in [("resume", "--from-checkpoint"), ("checkpoints", "--after")] {
+            assert!(parse_native_v2_args(args(&[command, "run-7", flag, id])).is_err());
+        }
+    }
+    for limit in ["0", "101", "-1", "many"] {
+        assert!(parse_native_v2_args(args(&["checkpoints", "run-7", "--limit", limit])).is_err());
+    }
+    assert!(parse_native_v2_args(args(&["checkpoints", "run-7", "--limit", "100"])).is_ok());
+    assert!(parse_native_v2_args(args(&["resume", "run-7", "--after", "entry-1"])).is_err());
 }
 
 #[test]

@@ -35,7 +35,9 @@ async fn foreground_run_reports_a_terminal_failure_after_printing_it() {
 
 #[tokio::test]
 async fn named_target_resume_resolves_current_values_for_original_requirements() {
-    assert_resume_resolves_current_values(Some("docker")).await;
+    for checkpoint in [None, Some("entry-2")] {
+        assert_resume_resolves_current_values(Some("docker"), checkpoint).await;
+    }
 }
 
 #[tokio::test]
@@ -50,26 +52,34 @@ async fn named_target_resume_rejects_target_selected_environment_fields_before_l
         std::collections::BTreeMap::from([(key.clone(), vec![selected])]),
         std::collections::BTreeMap::from([(key, vec![trusted])]),
     );
-    let command =
-        parse_native_v2_args(args(&["resume", "run-failed", "--target", "docker"])).assert_value();
-    let accessed = std::sync::Mutex::new(Vec::new());
-    let environment = |name: &str| {
-        accessed.lock().assert_value().push(name.to_owned());
-        Some(OsString::from("must-not-be-read"))
-    };
-    let error = execute_resume_expect_error(command, &backend, &environment).await;
+    for extra in [vec![], vec!["--from-checkpoint", "entry-2"]] {
+        let mut values = vec!["resume", "run-failed", "--target", "docker"];
+        values.extend(extra);
+        let command = parse_native_v2_args(args(&values)).assert_value();
+        let accessed = std::sync::Mutex::new(Vec::new());
+        let environment = |name: &str| {
+            accessed.lock().assert_value().push(name.to_owned());
+            Some(OsString::from("must-not-be-read"))
+        };
+        let error = execute_resume_expect_error(command, &backend, &environment).await;
 
-    assert!(error.to_string().contains("do not match the original run"));
-    assert!(accessed.lock().assert_value().is_empty());
-    assert_no_resume_call(&backend);
+        assert!(error.to_string().contains("do not match the original run"));
+        assert!(accessed.lock().assert_value().is_empty());
+        assert_no_resume_call(&backend);
+    }
 }
 
 #[tokio::test]
 async fn local_resume_resolves_current_values_for_original_requirements() {
-    assert_resume_resolves_current_values(None).await;
+    for checkpoint in [None, Some("entry-2")] {
+        assert_resume_resolves_current_values(None, checkpoint).await;
+    }
 }
 
-async fn assert_resume_resolves_current_values(expected_target: Option<&str>) {
+async fn assert_resume_resolves_current_values(
+    expected_target: Option<&str>,
+    checkpoint: Option<&str>,
+) {
     let key = openengine_cluster_protocol::ConnectionKey::new("openai").assert_value();
     let field =
         openengine_cluster_protocol::EnvironmentVariableName::new("OPENAI_API_KEY").assert_value();
@@ -77,10 +87,13 @@ async fn assert_resume_resolves_current_values(expected_target: Option<&str>) {
         key.clone(),
         vec![field.clone()],
     )]));
-    let command_args = match expected_target {
+    let mut command_args = match expected_target {
         Some(target) => vec!["resume", "run-failed", "--target", target],
         None => vec!["resume", "run-failed"],
     };
+    if let Some(id) = checkpoint {
+        command_args.extend(["--from-checkpoint", id]);
+    }
     let command = parse_native_v2_args(args(&command_args)).assert_value();
     let environment = |name: &str| match name {
         "OPENAI_API_KEY" => Some(OsString::from("fresh-openai-token")),
@@ -98,6 +111,14 @@ async fn assert_resume_resolves_current_values(expected_target: Option<&str>) {
         panic!("resume call was not recorded");
     };
     assert_eq!(target.as_deref(), expected_target);
+    assert_eq!(
+        params.from,
+        checkpoint.map(|id| RunResumeFrom::Checkpoint {
+            checkpoint_id: CheckpointId::new(id).assert_value(),
+        })
+    );
+    assert_ne!(params.run_id, params.successor_run_id);
+    assert!(params.connection_resolver.is_none());
     assert_eq!(
         params.connections[&key]
             .as_map()

@@ -532,3 +532,26 @@ async fn cancellation_delivery_supervisor(
         ledger,
     )
 }
+
+#[tokio::test]
+async fn restored_delivery_receipt_remains_valid_until_a_new_writer_runs() {
+    let admitted = admitted_with_delivery().await;
+    let receipt = delivery_receipt();
+    let mut restored = snapshot(
+        &admitted,
+        [
+            ("worker", worker_outcome()),
+            ("deliver", delivery_outcome(receipt.clone())),
+        ],
+    );
+    restored.execution_seed = super::super::durable_history(&restored).assert_value();
+    restored.executions.clear();
+    assert!(super::super::has_required_delivery_receipt(
+        &admitted, &restored, &receipt
+    ));
+    let new_writer = snapshot(&admitted, [("worker", worker_outcome())]);
+    restored.executions = new_writer.executions;
+    assert!(!super::super::has_required_delivery_receipt(
+        &admitted, &restored, &receipt
+    ));
+}

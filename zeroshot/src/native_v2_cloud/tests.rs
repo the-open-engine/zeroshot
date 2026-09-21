@@ -404,3 +404,6 @@ use openengine_cluster_testkit::assertions::{AssertValue};
 
 #[path = "tests/runtime_failure.rs"]
 mod runtime_failure;
+
+#[path = "tests/initialization.rs"]
+mod initialization;

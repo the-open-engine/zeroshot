@@ -68,6 +68,38 @@ zeroshot attach RUN_ID EXECUTION_REF
 
 Closing the attachment stream does not cancel the execution.
 
+## Restart or resume a failed run
+
+Failed local runs and direct targets retain their workspace. Restart the original graph using its
+latest files with:
+
+```console
+zeroshot resume RUN_ID
+```
+
+To resume at an earlier node, list its available input checkpoints and select one:
+
+```console
+zeroshot checkpoints RUN_ID
+zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID
+```
+
+Add `--target NAME` to both commands for a direct target. Checkpoint listings are paginated; use
+`--after CHECKPOINT_ID` with the returned `nextAfter` value to fetch the next page.
+
+A selected checkpoint restores the files from immediately before its node and the completed
+prerequisite outputs. The selected node runs again. Parallel and mapped groups have one checkpoint
+for the whole outer group, including nested groups and all mapped batches; individual concurrent
+writers do not have separate snapshots. Read-only boundaries can share the same workspace bytes.
+
+Both modes create a new run ID, keep the original graph, input, source, and delivery lineage, and
+resolve fresh credentials. Provider sessions and previous token usage are not carried into the new
+attempt. Selecting a checkpoint replaces later workspace edits, including untracked and ignored
+files. Local workspaces must be idle while they are restored.
+
+Local and Docker targets keep checkpoints beside their run storage. Cloud targets require the
+`openengine.workspace-checkpoints/v1` capability before selected checkpoint resume is available.
+
 ## Stop only with explicit intent
 
 `force-stop` is the destructive run-lifetime command:

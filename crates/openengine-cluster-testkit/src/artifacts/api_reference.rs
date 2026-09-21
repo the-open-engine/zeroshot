@@ -85,6 +85,10 @@ fn render_method(method: &Value, output: &mut String) {
 
     writeln!(output, "### {}\n", code(name))
         .assert_value_with("writing generated method heading must succeed");
+    if let Some(description) = method.get("description").and_then(Value::as_str) {
+        writeln!(output, "{description}\n")
+            .assert_value_with("writing generated method description must succeed");
+    }
     output.push_str(
         "| Parameter structure | Transport | Server push | Inbound notifications |\n\
          | --- | --- | --- | --- |\n",

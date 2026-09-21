@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
+    CheckpointId, RunCheckpointsParams, RunCheckpointsResult, RunResumeFrom,
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionKey, ConnectionListRequest,
     ConnectionListResult, ConnectionMutationResult, ConnectionScope, ConnectionSetRequest, Cursor,
     EnvironmentVariableName, ExecutionRef, IdempotencyKey, MergePlan, MergePlanId,
@@ -219,6 +220,19 @@ pub struct RunSelector {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunResumeCommand {
+    pub run: RunSelector,
+    pub from: Option<RunResumeFrom>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunCheckpointsCommand {
+    pub run: RunSelector,
+    pub after: Option<CheckpointId>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunWatchCommand {
     pub run: RunSelector,
     pub after: Option<Cursor>,
@@ -291,7 +305,8 @@ pub enum NativeV2CliCommand {
         execution: ExecutionRef,
     },
     ForceStop(RunSelector),
-    Resume(RunSelector),
+    Resume(RunResumeCommand),
+    Checkpoints(RunCheckpointsCommand),
     DiscardWorkspace(RunSelector),
 }
 
@@ -612,6 +627,15 @@ pub trait NativeV2CliBackend: Send + Sync {
             ));
         }
         Ok(requirements)
+    }
+    async fn run_checkpoints(
+        &self,
+        _target: Option<&str>,
+        _params: RunCheckpointsParams,
+    ) -> Result<RunCheckpointsResult, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not support workspace checkpoints".to_owned(),
+        ))
     }
     async fn run_resume(
         &self,

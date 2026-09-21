@@ -97,6 +97,11 @@ pub trait TargetControllerFactory: Send + Sync {
         false
     }
 
+    /// Reports whether controllers can list checkpoints and resume their saved graph boundaries.
+    fn supports_workspace_checkpoints(&self) -> bool {
+        false
+    }
+
     async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError>;
 
     async fn submit(
@@ -166,6 +171,10 @@ impl NativeV2TargetAuthority {
 
     fn supports_workspace_recovery(&self) -> bool {
         self.factory.supports_workspace_recovery()
+    }
+
+    fn supports_workspace_checkpoints(&self) -> bool {
+        self.factory.supports_workspace_checkpoints()
     }
 
     /// Reads only an existing controller. History must never trigger reconciliation or recovery.

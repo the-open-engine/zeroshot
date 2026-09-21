@@ -1,4 +1,4 @@
-use openengine_cluster_protocol::WORKSPACE_RECOVERY_KIND;
+use openengine_cluster_protocol::{WORKSPACE_CHECKPOINTS_KIND, WORKSPACE_RECOVERY_KIND};
 use reqwest::Url;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -51,6 +51,7 @@ pub(super) struct ControllerDescriptor {
     pub(super) session_url: Url,
     pub(super) audience: String,
     pub(super) workspace_recovery: bool,
+    pub(super) workspace_checkpoints: bool,
 }
 
 pub(super) fn build_controller_descriptor(
@@ -60,11 +61,13 @@ pub(super) fn build_controller_descriptor(
 ) -> Result<ControllerDescriptor, TargetAuthorityError> {
     validate_controller_discovery(&wire, authentication)?;
     let workspace_recovery = parse_workspace_recovery(&wire)?;
+    let workspace_checkpoints = parse_workspace_checkpoints(&wire)?;
     Ok(ControllerDescriptor {
         run_url: same_origin_path(origin, &wire.run_path)?,
         session_url: same_origin_path(origin, &wire.session_path)?,
         audience: wire.audience,
         workspace_recovery,
+        workspace_checkpoints,
     })
 }
 
@@ -90,6 +93,20 @@ fn parse_workspace_recovery(wire: &TargetDiscoveryDocument) -> Result<bool, Targ
         Some(_) => {
             return Err(authority_error(
                 "workspace-recovery discovery is incompatible",
+            ));
+        }
+        None => false,
+    })
+}
+
+fn parse_workspace_checkpoints(
+    wire: &TargetDiscoveryDocument,
+) -> Result<bool, TargetAuthorityError> {
+    Ok(match wire.extensions.workspace_checkpoints.as_ref() {
+        Some(capability) if capability.kind == WORKSPACE_CHECKPOINTS_KIND => true,
+        Some(_) => {
+            return Err(authority_error(
+                "workspace-checkpoints discovery is incompatible",
             ));
         }
         None => false,
@@ -540,6 +557,38 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "workspace-recovery discovery is incompatible"
+        );
+    }
+
+    #[test]
+    fn controller_descriptor_requires_the_exact_checkpoint_capability_version() {
+        let origin = Url::parse("http://127.0.0.1:8080").assert_value();
+        let document = TargetDiscoveryDocument::direct(TargetAuthentication::None)
+            .with_workspace_checkpoints();
+        let advertised =
+            build_controller_descriptor(&origin, document.clone(), TargetAuthentication::None)
+                .assert_value();
+        assert!(advertised.workspace_checkpoints);
+        assert!(!advertised.workspace_recovery);
+        let absent = build_controller_descriptor(
+            &origin,
+            TargetDiscoveryDocument::direct(TargetAuthentication::None).with_workspace_recovery(),
+            TargetAuthentication::None,
+        )
+        .assert_value();
+        assert!(!absent.workspace_checkpoints);
+        let mut incompatible = document;
+        incompatible
+            .extensions
+            .workspace_checkpoints
+            .as_mut()
+            .assert_value()
+            .kind = "openengine.workspace-checkpoints/v2".to_owned();
+        let error = build_controller_descriptor(&origin, incompatible, TargetAuthentication::None)
+            .assert_error();
+        assert_eq!(
+            error.to_string(),
+            "workspace-checkpoints discovery is incompatible"
         );
     }
 }

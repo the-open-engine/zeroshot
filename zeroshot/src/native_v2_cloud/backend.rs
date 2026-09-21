@@ -100,6 +100,14 @@ impl ClusterBackend for NativeV2CloudController {
         self.force(params).await.map_err(cloud_backend_error)
     }
 
+    async fn run_checkpoints(
+        &self,
+        _context: &ConnectionContext,
+        params: openengine_cluster_protocol::RunCheckpointsParams,
+    ) -> Result<openengine_cluster_protocol::RunCheckpointsResult, BackendError> {
+        self.checkpoints(params).await.map_err(cloud_backend_error)
+    }
+
     async fn run_resume(
         &self,
         _context: &ConnectionContext,

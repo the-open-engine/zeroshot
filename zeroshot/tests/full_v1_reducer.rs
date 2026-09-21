@@ -225,3 +225,6 @@ mod map_collections;
 mod trace;
 
 use openengine_cluster_testkit::assertions::{AssertValue};
+
+#[path = "full_v1_reducer/checkpoints.rs"]
+mod checkpoints;

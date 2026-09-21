@@ -389,7 +389,31 @@ This method has no parameters.
 | --- | --- |
 | <code>runForceResult</code> | <a href="../schema.json#/$defs/RunForceResult"><code>schema.json#/$defs/RunForceResult</code></a> |
 
+### <code>run/checkpoints</code>
+
+Lists checkpoints in increasing sequence order. The after cursor is exclusive. Omitted limit means 50; accepted limits are 1 through 100. Concurrent groups, including every map wave and nested child, expose one entry point. Storage and execution seeds remain private to the target.
+
+| Parameter structure | Transport | Server push | Inbound notifications |
+| --- | --- | --- | --- |
+| <code>by-name</code> | Unary | No | No |
+
+#### Parameters
+
+| Name | Required | Schema |
+| --- | --- | --- |
+| <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>after</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/CheckpointId&quot;},{&quot;type&quot;:&quot;null&quot;}]}</code> |
+| <code>limit</code> | No | <code>{&quot;format&quot;:&quot;uint32&quot;,&quot;maximum&quot;:100,&quot;minimum&quot;:1,&quot;type&quot;:[&quot;integer&quot;,&quot;null&quot;]}</code> |
+
+#### Result
+
+| Name | Schema |
+| --- | --- |
+| <code>runCheckpointsResult</code> | <a href="../schema.json#/$defs/RunCheckpointsResult"><code>schema.json#/$defs/RunCheckpointsResult</code></a> |
+
 ### <code>run/resume</code>
+
+Omitting from or selecting restart starts the graph at its root on the latest retained workspace. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Original admission and delivery metadata remain fixed; provider sessions are not resumed.
 
 | Parameter structure | Transport | Server push | Inbound notifications |
 | --- | --- | --- | --- |
@@ -401,6 +425,7 @@ This method has no parameters.
 | --- | --- | --- |
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>successorRunId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
+| <code>from</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/RunResumeFrom&quot;},{&quot;type&quot;:&quot;null&quot;}],&quot;description&quot;:&quot;Omission preserves restarting from the latest retained workspace.&quot;}</code> |
 | <code>connections</code> | No | <code>{&quot;additionalProperties&quot;:false,&quot;patternProperties&quot;:{&quot;^[^\\u0000-\\u001f\\u007f-\\u009f]+$&quot;:{&quot;$ref&quot;:&quot;#/$defs/StaticConnectionValues&quot;}},&quot;type&quot;:&quot;object&quot;}</code> |
 | <code>connectionResolver</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/TargetConnectionResolver&quot;},{&quot;type&quot;:&quot;null&quot;}]}</code> |
 | <code>githubToken</code> | No | <code>{&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |

@@ -131,8 +131,9 @@ fn run_operation_is_local(command: &NativeV2CliCommand) -> bool {
     match command {
         NativeV2CliCommand::Status(run)
         | NativeV2CliCommand::ForceStop(run)
-        | NativeV2CliCommand::Resume(run)
         | NativeV2CliCommand::DiscardWorkspace(run) => run.target.is_none(),
+        NativeV2CliCommand::Resume(command) => command.run.target.is_none(),
+        NativeV2CliCommand::Checkpoints(command) => command.run.target.is_none(),
         NativeV2CliCommand::Watch(command) => command.run.target.is_none(),
         NativeV2CliCommand::Logs(command) => command.run.target.is_none(),
         NativeV2CliCommand::Attach { run, .. } => run.target.is_none(),

@@ -124,8 +124,18 @@ enum UtilityCommand {
     /// Force a run to stop and write the result as JSON.
     ForceStop(RunSelectorArgs),
 
-    /// Start a new attempt from a failed run's retained workspace.
-    Resume(RunSelectorArgs),
+    /// Start a new attempt from a failed run's retained workspace or a saved checkpoint.
+    ///
+    /// By default, restart the original graph using its latest retained workspace.
+    /// Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`.
+    Resume(RunResumeArgs),
+
+    /// List one page of a run's saved workspace checkpoints as JSON.
+    ///
+    /// Each entry restores the workspace and graph state before its named node or outer
+    /// parallel/map group. Select its checkpointId with `zeroshot resume RUN_ID --from-checkpoint ID`.
+    /// When nextAfter is present, pass it as --after to fetch the next page.
+    Checkpoints(RunCheckpointsArgs),
 
     /// Permanently delete an abandoned retained target workspace.
     DiscardWorkspace(RunSelectorArgs),
@@ -546,6 +556,30 @@ struct RunSelectorArgs {
     /// Use this named target. If omitted, use the local controller.
     #[arg(long, value_name = "NAME")]
     target: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct RunResumeArgs {
+    #[command(flatten)]
+    run: RunSelectorArgs,
+
+    /// Restore this checkpoint and continue from its saved graph boundary.
+    #[arg(long, value_name = "ID")]
+    from_checkpoint: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct RunCheckpointsArgs {
+    #[command(flatten)]
+    run: RunSelectorArgs,
+
+    /// List checkpoints strictly after this checkpoint ID.
+    #[arg(long, value_name = "ID")]
+    after: Option<String>,
+
+    /// Maximum checkpoints to return, from 1 to 100. Defaults to 50.
+    #[arg(long, value_name = "COUNT", value_parser = clap::value_parser!(u32).range(1..=100))]
+    limit: Option<u32>,
 }
 
 #[derive(Debug, Args)]
