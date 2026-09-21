@@ -510,7 +510,7 @@ async fn named_target_workspace_recovery_requires_advertisement_before_dialing()
 #[tokio::test]
 async fn hosted_authority_uses_unified_discovery_and_run_scoped_oecp() {
     let root = temp_root();
-    let (origin, server) = spawn_target_authority(16).await;
+    let (origin, server) = spawn_target_authority(14).await;
     let credentials = Arc::new(MemoryCredentialStore::default());
     let notifier = Arc::new(MemoryDeviceCodeNotifier::default());
     let authority = TargetHttpControlAuthority::with_dependencies(
@@ -546,7 +546,7 @@ async fn hosted_authority_uses_unified_discovery_and_run_scoped_oecp() {
     );
     assert_eq!(
         credentials.get(&target.id).await.assert_value().as_deref(),
-        Some("refresh-3")
+        Some("refresh-2")
     );
     assert_eq!(
         authority
@@ -563,7 +563,7 @@ async fn hosted_authority_uses_unified_discovery_and_run_scoped_oecp() {
     );
 
     let requests = server.await.assert_value();
-    assert_eq!(requests.len(), 16);
+    assert_eq!(requests.len(), 14);
     assert!(
         requests
             .iter()
@@ -706,7 +706,7 @@ fn assert_submit_and_session_requests(requests: &[CapturedHttpRequest], run_id: 
         .iter()
         .find(|request| request.path == "/native-v2/oecp-session")
         .assert_value();
-    assert_eq!(session.authorization.as_deref(), Some("Bearer access-3"));
+    assert_eq!(session.authorization.as_deref(), Some("Bearer access-2"));
     let session_request: serde_json::Value = serde_json::from_str(&session.body).assert_value();
     assert_eq!(
         session_request.pointer("/runId").assert_value(),

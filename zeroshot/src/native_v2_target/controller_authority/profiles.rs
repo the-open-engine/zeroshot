@@ -7,6 +7,7 @@ use reqwest::header::{ACCEPT, CACHE_CONTROL};
 
 use super::contract::{RunProfilesDescriptor, authority_error};
 use super::TargetHttpControlAuthority;
+use super::access::AccessToken;
 use crate::native_v2_target::{TargetAccess, TargetAuthorityError, TargetRecord};
 
 enum ProfileOperation {
@@ -46,7 +47,7 @@ impl TargetHttpControlAuthority {
     async fn profile_access(
         &self,
         target: &TargetRecord,
-    ) -> Result<(RunProfilesDescriptor, String), TargetAuthorityError> {
+    ) -> Result<(RunProfilesDescriptor, AccessToken), TargetAuthorityError> {
         if matches!(target.access, TargetAccess::Direct) {
             return Err(authority_error(
                 "direct target does not advertise profile management",
@@ -79,7 +80,8 @@ impl TargetHttpControlAuthority {
             .header(ACCEPT, "application/json")
             .header(CACHE_CONTROL, "no-store")
             .json(input);
-        self.hosted_json(builder, operation.label(), None).await
+        self.hosted_json((builder, &access), operation.label(), None)
+            .await
     }
 
     pub(super) async fn profile_list(

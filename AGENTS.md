@@ -95,6 +95,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   approval-review features count as authored policy.
 - The local target registry initializes `cloud` at `https://api.cloud.zeroshot.sh` with a persistent hosted device identity.
 - Named targets store only endpoint, access mode, and login identity. Named runs resolve repository, branch, exact remote revision, and worktree dirtiness client-side from the invoking Git worktree plus per-run overrides; target records never bind repositories.
+- Hosted HTTP authority clones share one bounded in-memory OAuth access-token slot across all
+  hosted operations, including merge-plan discovery routes. Reuse requires the same target, login,
+  OAuth endpoints/client, and audience with more than thirty seconds of token lifetime remaining.
+  Cache misses and login serialize under the shared cache lock before the cross-process refresh-family
+  lock; tokens enter the cache only after session verification and rotated refresh-token persistence.
+  Login clears the slot before attempting authentication. HTTP authentication rejection invalidates
+  only the exact cached issuance, never a newer concurrent token; only merge plans retain their
+  existing one-retry policy. Access tokens remain memory-only, and transport grant expiry continues
+  to use durable observation reconnect/cursors without extending any lifetime.
 - Direct-target submissions keep a separate secret-free local authorization for each run's connection field requirements. Resume must match target-reported requirements to that original authorization before reading the caller environment, constrain outgoing values to those fields, carry the authorization to the successor, and revoke it after workspace discard.
 - Portable worker bindings resolve through the generic `WorkerRegistry` boundary. External binding
   protocol, version, and profile values are bounded opaque strings; the protocol crate must not
