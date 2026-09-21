@@ -795,8 +795,8 @@ case "$endpoint:$method" in
       '"id":"PR_node_17","number":17,"state":"OPEN","merged":false,"mergeCommit":null,' \
       '"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false,' \
       '"isInMergeQueue":false,"isMergeQueueEnabled":false,"baseRefName":"main",' \
-      '"baseRef":{"name":"main","branchProtectionRule":{"requiresDeployments":false},' \
-      '"refUpdateRule":{"requiredApprovingReviewCount":0,"requiredStatusCheckContexts":[],' \
+      '"baseRef":{"name":"main","refUpdateRule":{"requiredApprovingReviewCount":0,' \
+      '"requiredStatusCheckContexts":[],' \
       '"requiresCodeOwnerReviews":false,"requiresConversationResolution":false,' \
       '"requiresLinearHistory":false,"requiresSignatures":false}},' \
       '"headRefName":"zeroshot/v2-test",' \
