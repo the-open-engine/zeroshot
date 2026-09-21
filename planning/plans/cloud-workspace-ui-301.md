@@ -230,3 +230,13 @@ Keep a short evidence record with each gate's command, result and limitation.
    active/archived run playback against dev. Verify the deployed source/asset pin
    and replay availability after container removal. Record any environment blocker
    separately; don't label an unexecuted deployed test as passed.
+
+## Embedded empty-state follow-up, 2026-09-21
+
+Local Cloud browser checks exposed a misleading load-failure message before the
+host selected a document. The embedded editor now says “Select or create a
+profile to start.” The standalone failure message and Retry action remain intact.
+Senior review approved the two-line change. All 340 UI tests, TypeScript/Vite
+build and formatting passed. Opcore Verify passed; Sense reported partial
+coverage with no introduced findings. Cloud will repin the pushed source before
+its next provider/reconnect browser check.

@@ -1004,6 +1004,8 @@ export function App({
                     <>
                       <Loader2 className="spin" /> Loading profiles
                     </>
+                  ) : host ? (
+                    <span>Select or create a profile to start.</span>
                   ) : (
                     <>
                       <AlertCircle /> Could not open profiles.
