@@ -26,17 +26,21 @@ fn workspace_and_verifier_guidance_are_runtime_owned() {
     };
     let prompt = render_agent_prompt(&instructions, &input, &verifier).assert_value();
     assert!(prompt.contains(instructions.as_str()));
-    assert!(prompt.contains("Runtime-owned workspace setup guidance:"));
-    assert!(prompt.contains("manifest/lockfile dependencies in the checkout"));
-    assert!(prompt.contains("Wait for setup to finish and check exit status"));
-    assert!(prompt.contains("`$HOME/.local`, not `/tmp`"));
-    assert!(prompt.contains("Do not modify source, tests, configuration"));
+    assert!(!prompt.contains("Runtime-owned workspace setup guidance:"));
+    assert!(prompt.contains("Do not run setup or dependency-install commands"));
+    assert!(prompt.contains("local verifiers may run concurrently"));
+    assert!(prompt.contains("Do not modify reviewed material"));
     assert!(prompt.contains("create artifacts"));
-    assert!(prompt.contains("A missing declared dependency is not an unavailable check"));
+    assert!(prompt.contains("missing declared dependency is a setup failure"));
+    assert!(prompt.contains("reject with evidence"));
     assert!(prompt.contains(&input.to_string()));
     assert!(prompt.contains(&serde_json::to_string(&verifier).assert_value()));
     let worker = render_agent_prompt(&instructions, &input, &worker_contract()).assert_value();
     assert!(worker.contains("Runtime-owned workspace setup guidance:"));
+    assert!(worker.contains("manifest/lockfile dependencies in the checkout"));
+    assert!(worker.contains("Wait for setup to finish and check exit status"));
+    assert!(worker.contains("`$HOME/.local`, not"));
+    assert!(worker.contains("`/tmp` (possibly `noexec`)"));
     assert!(!worker.contains("Runtime-owned verifier guidance:"));
 }
 

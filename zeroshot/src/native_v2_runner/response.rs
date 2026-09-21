@@ -9,6 +9,9 @@ use serde_json::{Map, Value, json};
 
 use super::{DriverControl, LiveOutput, LiveOutputStream, NodeRunnerError};
 
+#[path = "response/guidance.rs"]
+mod guidance;
+
 const MAX_RESPONSE_ERROR_BYTES: usize = 8 * 1024;
 const MAX_OUTPUT_CORRECTIONS: usize = 2;
 const OPENAI_OPTIONAL_NULL_OMISSION: &str = "__zeroshot_omitted_optional_null__";
@@ -448,27 +451,14 @@ pub fn render_agent_prompt(
     input: &Value,
     response: &NodeResponseContract,
 ) -> Result<String, NodeRunnerError> {
-    let workspace_setup_guidance = "Runtime-owned workspace setup guidance:\n\
-         Follow repository setup and install manifest/lockfile dependencies in the checkout, not from an ad hoc \
-         unpinned list. Wait for setup to finish and check exit status. Leave ignored dependencies there. Put \
-         standalone tools under an executable user path such as `$HOME/.local`, not `/tmp` (possibly `noexec`).\n";
-    let verifier_guidance = match response {
-        NodeResponseContract::Verifier { .. } => {
-            "Runtime-owned verifier guidance:\n\
-             Verify. Do not modify source, tests, configuration, or reviewed material; do not implement repairs. \
-             Run checks and create artifacts. Report failures accurately. A missing declared dependency is not an \
-             unavailable check: run repository setup here and retry; reject unless a real external blocker remains.\n"
-        }
-        NodeResponseContract::Worker { .. } => "",
-    };
+    let runtime_guidance = guidance::runtime_guidance(response);
     let instructions = instructions.as_str();
     let input = serde_json::to_string(input).map_err(|_| NodeRunnerError::Driver)?;
     let response = serde_json::to_string(response).map_err(|_| NodeRunnerError::Driver)?;
     Ok(format!(
         "Execute this graph node using the shared workspace.\n\
          Authored instructions:\n{instructions}\n\
-         {workspace_setup_guidance}\
-         {verifier_guidance}\
+         {runtime_guidance}\
          Input JSON:\n{input}\n\
          Runtime-owned response contract:\n{response}\n\
          The response contract describes the required type; never return the contract itself. \
