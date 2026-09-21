@@ -38,7 +38,8 @@ use output::{DurableEventSender, durable_event_channel, durable_output_event};
 pub use response::{render_agent_prompt, NodeResponseContract};
 pub(crate) use response::ProviderSchemaDialect;
 pub(crate) use response::{
-    AgentResponse, AgentResponseState, resolve_agent_response, resolve_agent_response_with_dialect,
+    AgentResponse, AgentResponseState, VerifierWorkspace, render_agent_prompt_for,
+    resolve_agent_response, resolve_agent_response_with_dialect,
 };
 pub(crate) use remote::{RemoteNodeHandleBridge, remote_node_handle};
 

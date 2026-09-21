@@ -24,7 +24,14 @@ fn workspace_and_verifier_guidance_are_runtime_owned() {
         signals: BTreeMap::new(),
         diagnostic: PayloadType::Null,
     };
-    let prompt = render_agent_prompt(&instructions, &input, &verifier).assert_value();
+    let isolated = render_agent_prompt(&instructions, &input, &verifier).assert_value();
+    assert!(isolated.contains("Verify in this isolated checkout"));
+    assert!(isolated.contains("install manifest/lockfile dependencies in this checkout"));
+    assert!(isolated.contains("run setup and retry"));
+    assert!(!isolated.contains("local verifiers may run concurrently"));
+    let prompt =
+        render_agent_prompt_for(&instructions, &input, &verifier, VerifierWorkspace::Shared)
+            .assert_value();
     assert!(prompt.contains(instructions.as_str()));
     assert!(!prompt.contains("Runtime-owned workspace setup guidance:"));
     assert!(prompt.contains("Do not run setup or dependency-install commands"));

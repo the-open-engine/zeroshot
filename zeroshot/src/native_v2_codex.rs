@@ -27,9 +27,9 @@ use crate::native_v2_capsule::provider_process::{
 };
 use crate::native_v2_contract::CodexProvider;
 use crate::native_v2_runner::{
-    AgentResponse, AgentResponseState, render_agent_prompt, resolve_agent_response_with_dialect,
-    DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeRunnerError,
-    ProviderSchemaDialect, ResolvedEnvironment,
+    AgentResponse, AgentResponseState, DriverControl, DriverInvocation, LiveOutput,
+    LiveOutputStream, NodeRunnerError, ProviderSchemaDialect, ResolvedEnvironment,
+    render_agent_prompt_for, resolve_agent_response_with_dialect,
 };
 
 use command::{
@@ -236,10 +236,11 @@ impl NativeV2CodexAdapter {
             control: &control,
             execution: &execution,
         };
-        let prompt = render_agent_prompt(
+        let prompt = render_agent_prompt_for(
             invocation.agent_instructions()?,
             &invocation.node.input,
             &invocation.response,
+            self.runners.verifier_workspace(),
         )
         .map_err(|error| with_driver_detail(error, "Codex prompt could not be serialized"))?;
         let mut state = CodexRunState::new(

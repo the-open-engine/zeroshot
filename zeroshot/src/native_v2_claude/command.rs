@@ -4,7 +4,8 @@ use crate::native_v2_contract::ClaudeProvider;
 use crate::native_v2_capsule::gateway;
 use crate::native_v2_capsule::provider_process::{effort_token, with_driver_detail};
 use crate::native_v2_runner::{
-    render_agent_prompt, DriverInvocation, NodeRunnerError, ResolvedEnvironment,
+    DriverInvocation, NodeRunnerError, ResolvedEnvironment, VerifierWorkspace,
+    render_agent_prompt_for,
 };
 use crate::worker_catalog::ReasoningEffort;
 
@@ -132,11 +133,15 @@ pub(super) fn configure_openrouter(
     Ok(())
 }
 
-pub(super) fn prompt(invocation: &DriverInvocation) -> Result<String, NodeRunnerError> {
-    render_agent_prompt(
+pub(super) fn prompt(
+    invocation: &DriverInvocation,
+    verifier_workspace: VerifierWorkspace,
+) -> Result<String, NodeRunnerError> {
+    render_agent_prompt_for(
         invocation.agent_instructions()?,
         &invocation.node.input,
         &invocation.response,
+        verifier_workspace,
     )
     .map_err(|error| with_driver_detail(error, "Claude prompt could not be serialized"))
 }

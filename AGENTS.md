@@ -83,12 +83,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   model turn. They do not rewrite settings files; normal native startup state may still be updated.
   Verifier nodes use the same permission handling as workers across all harnesses. The shared prompt
   renderer tells workers to use repository-declared setup in the checkout, await terminal command
-  status, and keep standalone executable tools out of `/tmp`. Verifiers use the prepared checkout
-  without running setup or dependency installs that can rewrite it, because local verifiers may run
-  concurrently. They may run checks and create artifacts but cannot edit reviewed material or make
-  repairs. A missing declared dependency is a setup failure that rejects the change, not an
-  unavailable check. Hosted verifiers retain private copies. This local review boundary is
-  instructional, not filesystem enforcement.
+  status, and keep standalone executable tools out of `/tmp`. Hosted verifiers receive private copies
+  and may perform repository setup there. Local verifiers share the candidate and may run concurrently,
+  so their prompt prohibits setup or dependency installs that rewrite it. Verifiers may run checks and
+  create artifacts but cannot edit reviewed material or make repairs. A missing declared dependency
+  requires setup and retry in a private copy, but rejects from a shared checkout rather than becoming
+  an unavailable check. This local review boundary is instructional, not filesystem enforcement.
   Shared inspection owns bounded JSONL exchange and process cleanup. Each harness owns its native
   policy parser and `apply_permission_default` entry point; `PermissionPolicy` distinguishes unset,
   configured, and unavailable inspection results. Codex browser/computer access controls and explicit

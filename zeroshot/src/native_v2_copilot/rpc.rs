@@ -11,7 +11,7 @@ use crate::native_v2_capsule::provider_process::{
 };
 use crate::native_v2_runner::{
     AgentResponseState, DriverControl, DriverInvocation, NodeRunnerError, ProviderSchemaDialect,
-    render_agent_prompt, resolve_agent_response_with_dialect,
+    VerifierWorkspace, render_agent_prompt_for, resolve_agent_response_with_dialect,
 };
 use super::{auth, command, events, framing::Frames, session::CopilotSession};
 
@@ -53,6 +53,7 @@ pub(super) struct CopilotRpc<'a> {
     frames: Frames,
     pub(super) invocation: &'a DriverInvocation,
     pub(super) control: &'a DriverControl,
+    verifier_workspace: VerifierWorkspace,
     sender: Option<mpsc::Sender<Value>>,
     next_id: u64,
     pending: BTreeSet<u64>,
@@ -67,12 +68,14 @@ impl<'a> CopilotRpc<'a> {
         stdout: ProcessStdout,
         invocation: &'a DriverInvocation,
         control: &'a DriverControl,
+        verifier_workspace: VerifierWorkspace,
     ) -> Self {
         Self {
             stdout,
             frames: Frames::default(),
             invocation,
             control,
+            verifier_workspace,
             sender: None,
             next_id: 0,
             pending: BTreeSet::new(),
@@ -147,10 +150,11 @@ impl<'a> CopilotRpc<'a> {
     }
 
     async fn run_response(&mut self) -> Result<WorkerOutcome, NodeRunnerError> {
-        let prompt = render_agent_prompt(
+        let prompt = render_agent_prompt_for(
             self.invocation.agent_instructions()?,
             &self.invocation.node.input,
             &self.invocation.response,
+            self.verifier_workspace,
         )?;
         let mut response = AgentResponseState::new(prompt);
         loop {

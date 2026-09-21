@@ -79,7 +79,12 @@ impl CopilotAdapter {
         let mut process = open_provider_process(files.clone(), command, control)
             .await?
             .map_err(rpc::process_error)?;
-        let mut connection = rpc::CopilotRpc::new(process.detach_stdout(), invocation, control);
+        let mut connection = rpc::CopilotRpc::new(
+            process.detach_stdout(),
+            invocation,
+            control,
+            self.runners.verifier_workspace(),
+        );
         let (sender, receiver) = tokio::sync::mpsc::channel(16);
         let outcome = {
             let exchange = connection.run(sender, session, &files);
