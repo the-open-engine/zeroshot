@@ -42,12 +42,39 @@ and template payloads, and validates the template before discarding a draft.
 Senior review approved the follow-up; the 340-test UI suite, build and rebuilt
 native UI smoke pass.
 
-Local Cloud/provider/browser, canonical release, released-source repin, dev
-deployment and deployed browser tests have not yet run.
+## Local Cloud validation
+
+The local Cloud static, unit, integration, interface and full-stack API/CLI e2e
+ladder passed. Nine editor browser cases passed, including stale-save CAS 409,
+late edits during a delayed save acknowledgement, unresolved edits during
+navigation, and import authority scope.
+
+The first real Sonnet 4.6 provider run,
+`01a0c5a3-512e-7d42-9195-d3854ec130a0`, succeeded at native cursor `v2:18`.
+After the target was removed, the archived viewer reloaded with identical admitted
+graph, runtime, input, source and event/control prefix, and rendered provider output.
+
+Strict cursor reconnect and expired/partial history checks remain pending on the
+final candidate. Canonical release, released-source repin, dev deployment and
+deployed browser tests also remain pending.
+
+## Main integration
+
+Main commits `2ef8d806` and `f8a0bf38` merged without conflicts. Native source paths
+do not overlap the workspace implementation; `AGENTS.md` retains both sets of
+guidance. On the combined source, 1,467 workspace tests and 1,081 UI-feature tests
+passed, with 11 and 10 existing ignored tests respectively. The 48 target/auth tests,
+hosted permission fixture under root, both Clippy lanes, the standalone workspace
+feature check and Rust documentation build also passed.
+
+One unchanged delivery fixture failed its expected-error assertion in the first
+full run. Its isolated retry passed, followed by the complete workspace and
+UI-feature suites with four test threads. The original failure remains recorded
+in the local merge evidence.
 
 ### Analysis coverage
 
-Opcore Verify has no native-source diagnostics. The final UI findings are reviewed
+Phase 1 Opcore Verify has no native-source diagnostics. The final UI findings are reviewed
 unchanged code or parser grouping: the existing App modal callback is byte-identical
 to HEAD; the renamed standalone content function retains its previous body; a bridge
 function-length range spans six separate top-level helpers. They are not reported
@@ -61,6 +88,13 @@ contracts and senior review checked them manually. Sense also has partial Rust
 interface coverage. Neither limitation is reported as a passing Sense check.
 The legacy `opcore check --changed` also ran and reported `rust.function-metrics`;
 it is not counted as passing coverage.
+
+The main merge imports one test-helper complexity finding and 11 duplicate test
+regions from the already merged access-token tests. Those files match main
+byte-for-byte; no conflict resolution added them. Staged checks retain these
+findings rather than reporting an automated pass. Exact hypothetical and staged
+Sense checks found no introduced cycles or interface findings; partial Rust
+interface coverage still applies.
 
 ### Worktree recovery
 
