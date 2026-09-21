@@ -523,11 +523,15 @@ async fn http_known_remote_update_retries_a_real_fetch_503_without_graph_repair(
 
 #[tokio::test]
 async fn http_lost_update_receipt_fetches_remote_head_and_requires_existing_work_loop() {
-    let (_repo, _server, authority, execution) =
-        updated_delivery(Update::LostResponse, false).await;
+    let (repo, _server, authority, execution) = updated_delivery(Update::LostResponse, false).await;
 
     assert_delivery_signal(&execution.outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
     assert_eq!(authority.pushes.load(Ordering::SeqCst), 1);
+    assert_eq!(authority.updates.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        git_output(&repo.workspace, &["rev-parse", "HEAD"]),
+        reference(&repo.remote, &delivery_branch(RUN)).assert_value()
+    );
     assert!(!authority.merged.load(Ordering::SeqCst));
     assert!(
         outcome_diagnostic(&execution.outcome).contains("update response lost after server commit")
