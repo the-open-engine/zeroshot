@@ -89,7 +89,7 @@ fn new_file_writes_are_exclusive_and_complete() {
 
 #[tokio::test]
 #[cfg(unix)]
-async fn natural_exit_preserves_stdout_after_the_old_drain_deadline() {
+async fn natural_exit_reaps_descendants_without_truncating_slow_stdout() {
     let bytes = PROCESS_STDOUT_CAPACITY * PROCESS_OUTPUT_CHUNK_BYTES + 1;
     let (_cancel, mut process) = stdout_saturating_process(bytes).await;
 
@@ -105,6 +105,7 @@ async fn natural_exit_preserves_stdout_after_the_old_drain_deadline() {
 
     assert_eq!(received, bytes);
     assert_eq!(completion.exit_code, Some(0));
+    assert_eq!(completion.cleanup, ProcessCleanupEvidence::Reaped);
     assert_eq!(completion.post_launch_error, None);
 }
 
@@ -128,58 +129,69 @@ async fn unix_signal_exit_is_distinct_from_an_ordinary_missing_status() {
 
 #[tokio::test]
 #[cfg(unix)]
-async fn natural_root_exit_cannot_leave_inherited_stdout_open_past_command_deadline() {
-    let started = tokio::time::Instant::now();
-    let (cancel, mut process) =
-        inherited_stdout_process(started + std::time::Duration::from_millis(500)).await;
-
-    let (stdout, completion) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        let mut stdout = Vec::new();
-        while let Some(chunk) = process.recv_stdout().await {
-            stdout.extend_from_slice(chunk.as_slice());
-        }
-        (stdout, process.wait().await.assert_value())
-    })
-    .await
-    .assert_value();
-    drop(cancel);
+async fn natural_root_exit_reaps_descendants_before_draining_inherited_streams() {
+    let (_cancel, mut process) = inherited_stream_process("").await;
+    let (stdout, completion) = drain_and_wait(&mut process).await;
 
     assert_eq!(stdout, b"root-exited\n");
+    assert_eq!(completion.stderr_tail, b"root-stderr\n");
     assert_eq!(completion.exit_code, Some(0));
-    assert!(completion.timed_out);
     assert_eq!(completion.cleanup, ProcessCleanupEvidence::Reaped);
-    assert!(
-        completion
-            .post_launch_error
-            .as_deref()
-            .is_some_and(|detail| detail.contains("process I/O drain timed out"))
-    );
-}
-
-#[tokio::test]
-#[cfg(unix)]
-async fn cancellation_interrupts_natural_drain_after_root_exit() {
-    let (cancel, mut process) = natural_drain_process().await;
-    cancel.send_replace(true);
-
-    let completion = wait_for_process(&mut process).await;
-
-    assert!(completion.cancelled);
-    assert!(completion.cleanup.proves_tree_empty());
-}
-
-#[tokio::test]
-#[cfg(unix)]
-async fn release_interrupts_natural_drain_after_root_exit() {
-    let (_cancel, mut process) = natural_drain_process().await;
-
-    let completion = tokio::time::timeout(std::time::Duration::from_secs(3), process.release())
-        .await
-        .assert_value()
-        .assert_value();
-
     assert!(!completion.timed_out);
-    assert!(completion.cleanup.proves_tree_empty());
+    assert_eq!(completion.post_launch_error, None);
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn root_crash_reaps_descendants_and_preserves_exit_diagnostics() {
+    let (_cancel, mut process) = inherited_stream_process("kill -TERM $$").await;
+    let (stdout, completion) = drain_and_wait(&mut process).await;
+
+    assert_eq!(stdout, b"root-exited\n");
+    assert_eq!(completion.stderr_tail, b"root-stderr\n");
+    assert_eq!(completion.exit_code, None);
+    assert_eq!(completion.termination_signal, Some(libc::SIGTERM));
+    assert_eq!(completion.cleanup, ProcessCleanupEvidence::Reaped);
+    assert!(!completion.timed_out);
+    assert_eq!(completion.post_launch_error, None);
+}
+
+#[tokio::test]
+#[cfg(target_os = "linux")]
+async fn root_writer_exit_reaps_detached_descendants_without_stopping_peer() {
+    // SAFETY: geteuid only inspects the test process identity.
+    if unsafe { libc::geteuid() } != 0 {
+        eprintln!("root-only writer cleanup gate skipped outside the capsule identity");
+        return;
+    }
+    let pool = HostedProcessPool::new(191_002, 191_002, 192_000, 192_000).assert_value();
+    let (cancel, _) = tokio::sync::watch::channel(false);
+    let mut peer = writer_process(
+        pool,
+        2,
+        "printf ready; read finish; printf peer-alive",
+        &cancel,
+    )
+    .await;
+    assert_eq!(receive_root_output(&mut peer).await, b"ready");
+    let script = "/usr/bin/setsid /bin/sh -c 'printf detached-ready; exec /bin/sleep 30' & \
+        read finish; printf parent-done";
+    let mut process = writer_process(pool, 1, script, &cancel).await;
+    assert_eq!(receive_root_output(&mut process).await, b"detached-ready");
+    finish_input(&mut process).await;
+
+    let (stdout, completion) = drain_and_wait(&mut process).await;
+    assert_eq!(stdout, b"parent-done");
+    assert_eq!(completion.exit_code, Some(0));
+    assert_eq!(completion.cleanup, ProcessCleanupEvidence::Reaped);
+    assert_eq!(completion.post_launch_error, None);
+
+    finish_input(&mut peer).await;
+    let (stdout, completion) = drain_and_wait(&mut peer).await;
+    assert_eq!(stdout, b"peer-alive");
+    assert_eq!(completion.exit_code, Some(0));
+    assert!(!completion.cancelled);
+    assert_eq!(completion.cleanup, ProcessCleanupEvidence::Reaped);
 }
 
 #[tokio::test]
@@ -312,7 +324,7 @@ async fn stdout_saturating_process(
     bytes: usize,
 ) -> (tokio::sync::watch::Sender<bool>, ProcessSession) {
     shell_process(
-        format!("/usr/bin/head -c {bytes} /dev/zero"),
+        format!("sleep 30 & /usr/bin/head -c {bytes} /dev/zero"),
         tokio::time::Instant::now() + std::time::Duration::from_secs(15),
     )
     .await
@@ -335,27 +347,63 @@ async fn shell_process(
 }
 
 #[cfg(unix)]
-async fn inherited_stdout_process(
-    deadline: tokio::time::Instant,
+async fn inherited_stream_process(
+    ending: &str,
 ) -> (tokio::sync::watch::Sender<bool>, ProcessSession) {
     shell_process(
-        "trap '' HUP; sleep 30 & printf 'root-exited\\n'".to_owned(),
-        deadline,
+        format!(
+            "trap '' HUP; sleep 30 & printf 'root-exited\\n'; printf 'root-stderr\\n' >&2; {ending}"
+        ),
+        tokio::time::Instant::now() + std::time::Duration::from_secs(30),
     )
     .await
 }
 
 #[cfg(unix)]
-async fn natural_drain_process() -> (tokio::sync::watch::Sender<bool>, ProcessSession) {
-    let (cancel, mut process) =
-        inherited_stdout_process(tokio::time::Instant::now() + std::time::Duration::from_secs(30))
-            .await;
-    assert_eq!(receive_root_output(&mut process).await, b"root-exited\n");
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    (cancel, process)
+async fn drain_and_wait(process: &mut ProcessSession) -> (Vec<u8>, ProcessSessionOutput) {
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        let mut stdout = Vec::new();
+        while let Some(chunk) = process.recv_stdout().await {
+            stdout.extend_from_slice(chunk.as_slice());
+        }
+        (stdout, process.wait().await.assert_value())
+    })
+    .await
+    .assert_value()
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
+async fn writer_process(
+    pool: HostedProcessPool,
+    execution: u64,
+    script: &str,
+    cancellation: &tokio::sync::watch::Sender<bool>,
+) -> ProcessSession {
+    let identity = pool
+        .identity(HostedProcessScope::WriterExecution(execution))
+        .assert_value();
+    let mut command = process_command_with_deadline(
+        "/bin/sh",
+        vec!["-c".to_owned(), script.to_owned()],
+        tokio::time::Instant::now() + std::time::Duration::from_secs(30),
+    );
+    command.workspace.current_dir = std::env::temp_dir();
+    identity
+        .runner()
+        .open(command, DriverCancellation::new(cancellation.subscribe()))
+        .await
+        .assert_value()
+}
+
+#[cfg(target_os = "linux")]
+async fn finish_input(process: &mut ProcessSession) {
+    process
+        .send(super::ProcessFrame::new(b"finish\n".to_vec()).assert_value())
+        .await
+        .assert_value();
+}
+
+#[cfg(target_os = "linux")]
 async fn receive_root_output(process: &mut ProcessSession) -> Vec<u8> {
     tokio::time::timeout(std::time::Duration::from_secs(2), process.recv_stdout())
         .await

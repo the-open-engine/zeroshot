@@ -196,8 +196,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Hosted source checkout retries only its fresh platform-owned staging workspace, within one
   allocation and one total deadline. Preserve the exact admitted revision before starting any
   graph node; terminal Git details remain redacted and private operator diagnostics.
-- Contained provider sessions bound post-exit I/O draining by any explicit command deadline and a ten-minute
-  ceiling while still observing cancellation and cleanup.
+- Contained provider sessions clean up surviving descendants immediately after the main process exits,
+  before draining inherited output streams. Buffered output still drains under any explicit command
+  deadline and a ten-minute ceiling while observing cancellation; cleanup stays scoped to its session.
 - Git delivery owns authenticated repository operations and observes the run PR and branch before
   staging. It pushes the captured candidate SHA, preserves published ancestry and local work, and
   recognizes confirmed remote success after a lost response. Authorized branch updates may advance

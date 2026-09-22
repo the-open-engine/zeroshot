@@ -136,13 +136,15 @@ async fn handle_io_failure(
 
 async fn finish_supervision(request: &mut SupervisorRequest, state: &mut SessionState) {
     request.writer_stop.send_replace(true);
-    let drain_timed_out = drain_io_tasks(request, state).await;
+    // Descendants must stop before their inherited streams can hold output draining open.
+    // Keep draining buffered output separately so slow consumers retain the complete result.
+    ensure_containment(request, state).await;
+    drain_io_tasks(request, state).await;
     drain_io_failures(
         &mut request.io_failures,
         &mut state.errors,
         *request.release.borrow(),
     );
-    ensure_containment(request, state, drain_timed_out).await;
     let stderr_tail = request
         .stderr_tail
         .lock()
@@ -199,16 +201,12 @@ fn join_errors(errors: Vec<String>) -> Option<String> {
     (!errors.is_empty()).then(|| errors.join("; "))
 }
 
-async fn ensure_containment(
-    request: &mut SupervisorRequest,
-    state: &mut SessionState,
-    drain_timed_out: bool,
-) {
+async fn ensure_containment(request: &mut SupervisorRequest, state: &mut SessionState) {
     if state.cleanup != ProcessCleanupEvidence::NotRequired {
         return;
     }
     let tree_has_live_members = inspect_tree(&request.process_tree, &mut state.errors);
-    if drain_timed_out || tree_has_live_members {
+    if tree_has_live_members {
         state
             .terminate(request, "process final containment cleanup failed")
             .await;
