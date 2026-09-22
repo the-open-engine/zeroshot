@@ -27,6 +27,34 @@ shell settings. Explicit gateway selections use their `GATEWAY_BASE_URL` connect
 `bedrock`, and `gateway` selections retain their provider setup and reject declared transport flags
 that would route to an incompatible provider.
 
+Local Copilot runs use the current user's `COPILOT_HOME` and system credential store. Ambient
+`COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` values are selected in native precedence and
+sent through private RPC rather than the Copilot process or its tools. Copilot endpoint, proxy,
+certificate, and custom-provider environment settings are inherited locally. Static BYOK endpoint,
+credential, header, wire, and model-mapping settings are materialized into the private Copilot RPC
+session and removed from agent tool environments. `COPILOT_PROVIDER_API_KEY_COMMAND` crosses the
+singular private provider contract, which lets the pinned CLI refresh rotating keys for each request.
+Eligible helper-only invoking-shell fields are all marked through Copilot's `--secret-env-vars`, so
+they remain available to the internal provider command but are not inherited by agent shell or MCP
+environments. Runtime, auth, provider, and parent-process loader controls are excluded.
+That filtering is not a separate OS identity boundary against adversarial same-UID processes.
+A bounded `COPILOT_PROVIDERS_CONFIG` or default `COPILOT_HOME/providers.json` registry crosses as
+protocol provider/model values because the headless server does not import that path into sessions;
+a nonempty registry wins over legacy provider variables. An explicit declared token suppresses
+ambient BYOK and offline controls. Declared endpoint and credential fields cannot accidentally retain
+ambient credentials for a different route. The runtime model remains the process-level registry
+selection while provider `modelId` capability and wire-model mappings stay intact. A registry
+command translated to the singular RPC contract uses its authored `modelId` as that session's model.
+Contained targets use a private Copilot home and require the canonical `COPILOT_GITHUB_TOKEN`
+connection instead.
+
+The local target intentionally has the same-user trust boundary as running the harness CLI directly:
+native config, user files, and credential-store access remain subject to that harness's own sandbox
+and tool policy. Zeroshot transfers the invoking shell through a private, one-shot bootstrap and
+deletes it before the controller performs run effects; the detached controller itself receives only
+minimal platform environment. A later local CLI startup removes a bootstrap orphaned beyond the
+controller handoff window. This snapshot is never written to a run ledger or sent to a hosted target.
+
 Hosted Codex and Claude workers and verifiers always run with
 `--dangerously-bypass-approvals-and-sandbox` or `--dangerously-skip-permissions`, respectively.
 Zeroshot does not inspect the harness's native permission policy for hosted turns; the disposable
@@ -58,10 +86,13 @@ otherwise promote cached search to live search under full access. Hosted turns a
 bypass inside the disposable capsule, so Codex may promote cached search to live. Command network
 access follows the selected sandbox policy locally; hosted command isolation comes from the capsule.
 
-Declare any environment variables required by a custom provider's `env_key` or environment-based
-headers in the runtime's connections. A declared `OPENAI_API_KEY` remains available under that name
-for custom providers. Zeroshot also supplies `CODEX_API_KEY` for native OpenAI authentication when
-that variable isn't already declared. See [Runtimes and connections](runtimes-and-connections.md).
+For local Codex, Zeroshot reads the active provider's `env_key` and environment-based header names
+from Codex's resolved configuration, then forwards only those values from the invoking shell to the
+model process. This lets custom OpenAI-compatible gateways keep using their existing Codex setup.
+Declared connection values take precedence, and a declared `OPENAI_API_KEY` remains available under
+that name. Zeroshot also supplies `CODEX_API_KEY` for native OpenAI authentication when needed.
+Values discovered from local configuration are not persisted or sent to hosted targets. See
+[Runtimes and connections](runtimes-and-connections.md).
 
 ## Direct target
 

@@ -33,6 +33,12 @@ async fn root_copilot_uses_the_hosted_process_boundary() {
         executable,
         workspace,
         runtime_home,
+        local_user: None,
+        base_environment: BTreeMap::new(),
+        local_command_environment: BTreeMap::from([(
+            "HOST_ONLY_SECRET".to_owned(),
+            "must-not-reach-hosted-copilot".to_owned(),
+        )]),
         search_path: "/usr/bin:/bin".to_owned(),
         process_pool,
     }));

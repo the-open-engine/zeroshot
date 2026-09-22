@@ -10,6 +10,7 @@ mod transport;
 mod tests;
 
 use std::fmt;
+use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -101,6 +102,7 @@ pub struct PortableControllerBootstrap {
     pub adopt_existing_delivery: bool,
     pub submission: RunSubmission,
     pub environment: RunEnvironment,
+    pub native_environment: BTreeMap<String, String>,
     pub github_token: Option<String>,
     pub workspace: PathBuf,
     pub workspace_lease: PathBuf,
@@ -116,6 +118,7 @@ impl fmt::Debug for PortableControllerBootstrap {
             .field("delivery_run_id", &self.delivery_run_id)
             .field("submission", &self.submission)
             .field("environment", &self.environment)
+            .field("native_environment_fields", &self.native_environment.len())
             .field(
                 "github_token",
                 &self.github_token.as_ref().map(|_| "[REDACTED]"),

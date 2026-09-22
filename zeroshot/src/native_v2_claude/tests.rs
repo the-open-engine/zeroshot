@@ -173,6 +173,7 @@ async fn runner_with_command(
             workspace: workspace.path().to_owned(),
             runtime_home: workspace.path().to_owned(),
             local_user_home: None,
+            native_environment: Default::default(),
             base_environment,
             process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
         })

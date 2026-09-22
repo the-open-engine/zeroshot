@@ -23,6 +23,46 @@ fn local_and_managed_openai_auth_preserve_explicit_codex_keys() {
 }
 
 #[test]
+fn declared_codex_auth_family_suppresses_every_ambient_alias() {
+    let directory = TestDirectory::new("codex-auth-precedence");
+    let mut configuration = scripted_adapter(&directory, CodexProvider::OpenAi)
+        .config
+        .clone();
+    configuration.local_user = Some(NativeV2CodexUser {
+        home: directory.child("home"),
+        codex_home: directory.child("codex-home"),
+    });
+    let mut adapter = NativeV2CodexAdapter::new_for_test(configuration);
+
+    for (declared_name, ambient_name) in [
+        ("OPENAI_API_KEY", "CODEX_API_KEY"),
+        ("CODEX_API_KEY", "OPENAI_API_KEY"),
+    ] {
+        adapter.local_environment = BTreeMap::from([
+            (declared_name.to_owned(), "ambient-shadow".to_owned()),
+            (ambient_name.to_owned(), "ambient-conflict".to_owned()),
+        ]);
+        let binding = binding(SessionScope::Execution, &[declared_name]);
+        let environment = ResolvedEnvironment::exact(
+            &binding,
+            BTreeMap::from([(environment_name(declared_name), "declared-key".to_owned())]),
+        )
+        .assert_value();
+        let values = adapter
+            .provider_environment(&environment, &directory.child("runtime"))
+            .assert_value();
+        assert_eq!(values["CODEX_API_KEY"], "declared-key");
+        assert!(
+            values
+                .get("OPENAI_API_KEY")
+                .is_none_or(|value| value == "declared-key")
+        );
+        assert!(!values.values().any(|value| value == "ambient-conflict"));
+        assert!(!values.values().any(|value| value == "ambient-shadow"));
+    }
+}
+
+#[test]
 fn local_codex_user_reuses_native_homes_without_an_openai_api_key() {
     let directory = TestDirectory::new("codex-local-user");
     let runtime_home = directory.child("runtime");
@@ -37,6 +77,7 @@ fn local_codex_user_reuses_native_homes_without_an_openai_api_key() {
             home: home.clone(),
             codex_home: codex_home.clone(),
         }),
+        native_environment: Default::default(),
         search_path: "/usr/bin:/bin".to_owned(),
         process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
     });

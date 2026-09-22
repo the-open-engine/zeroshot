@@ -19,17 +19,7 @@ fn adapter_with_paths(
     executable: PathBuf,
     runtime_home: PathBuf,
 ) -> Arc<NativeV2CodexAdapter> {
-    let workspace = directory.child("workspace");
-    fs::create_dir_all(&workspace).assert_value();
-    Arc::new(NativeV2CodexAdapter::new_for_test(NativeV2CodexConfig {
-        provider: CodexProvider::OpenAi,
-        executable,
-        workspace,
-        runtime_home,
-        local_user: None,
-        search_path: "/usr/bin:/bin".to_owned(),
-        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
-    }))
+    adapter_with_configuration(directory, CodexProvider::OpenAi, executable, runtime_home)
 }
 
 async fn failed_with_logs(

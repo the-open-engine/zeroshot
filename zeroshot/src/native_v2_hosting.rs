@@ -22,6 +22,7 @@ use thiserror::Error;
 
 use crate::execution::process::HostedProcessPool;
 use crate::native_v2_admission::DeliveryPolicy;
+use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
 use crate::native_v2_claude::ClaudeProcessEnvironment;
 use crate::native_v2_cloud::{NativeV2CloudController, NativeV2CloudError};
 use crate::native_v2_cloud::submission_digest;
@@ -145,11 +146,13 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
     ) -> Result<TargetRunReceipt, TargetAuthorityError> {
         let TargetRunRequest {
             run_id,
-            submission,
+            mut submission,
             connections,
             connection_resolver,
             github_token,
         } = request;
+        materialize_provider_access(&mut submission.runtime, ProviderAccessPlacement::Contained)
+            .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
         let digest = submission_digest(&submission)
             .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
         if let Some(receipt) = controller

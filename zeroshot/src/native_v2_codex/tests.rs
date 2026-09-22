@@ -151,8 +151,17 @@ fn scripted_adapter_with(
 ) -> Arc<NativeV2CodexAdapter> {
     let executable = directory.write_executable(name, script);
     let runtime_home = directory.child("runtime-home");
-    let workspace = directory.child("workspace");
     fs::create_dir_all(&runtime_home).assert_value();
+    adapter_with_configuration(directory, provider, executable, runtime_home)
+}
+
+fn adapter_with_configuration(
+    directory: &TestDirectory,
+    provider: CodexProvider,
+    executable: PathBuf,
+    runtime_home: PathBuf,
+) -> Arc<NativeV2CodexAdapter> {
+    let workspace = directory.child("workspace");
     fs::create_dir_all(&workspace).assert_value();
     Arc::new(NativeV2CodexAdapter::new_for_test(NativeV2CodexConfig {
         provider,
@@ -160,6 +169,7 @@ fn scripted_adapter_with(
         workspace,
         runtime_home,
         local_user: None,
+        native_environment: Default::default(),
         search_path: "/usr/bin:/bin".to_owned(),
         process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
     }))

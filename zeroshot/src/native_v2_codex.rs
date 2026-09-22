@@ -22,8 +22,8 @@ use crate::execution::driver::WorkspaceCapability;
 use crate::execution::process::{HostedProcessPool, ProcessSessionCommand};
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderFailure, ProviderFailureRetry, ProviderProcessRunners,
-    ProviderExecution, ProviderFilesystemConfig, CODEX_LOCAL_ENVIRONMENT, local_environment,
-    agent_workspace_access, provider_redactions, with_driver_detail,
+    ProviderExecution, ProviderFilesystemConfig, CODEX_LOCAL_ENVIRONMENT, LocalHarnessEnvironment,
+    agent_workspace_access, provider_redactions, redaction_values, with_driver_detail,
 };
 use crate::native_v2_contract::CodexProvider;
 use crate::native_v2_runner::{
@@ -51,6 +51,8 @@ pub struct NativeV2CodexConfig {
     pub runtime_home: PathBuf,
     /// Current-user homes are available only to the built-in local target.
     pub local_user: Option<NativeV2CodexUser>,
+    /// Invoking-shell snapshot available only to the built-in local target.
+    pub native_environment: LocalHarnessEnvironment,
     /// Explicit executable search path for Codex and commands launched by the agent.
     pub search_path: String,
     pub process_pool: HostedProcessPool,
@@ -75,6 +77,7 @@ impl NativeV2CodexAdapter {
     #[must_use]
     pub fn new(mut config: NativeV2CodexConfig) -> Self {
         config.local_user = None;
+        config.native_environment = LocalHarnessEnvironment::default();
         let process_pool = config.process_pool;
         Self {
             config,
@@ -87,7 +90,11 @@ impl NativeV2CodexAdapter {
 
     #[must_use]
     pub fn new_local(config: NativeV2CodexConfig) -> Self {
-        let local_environment = local_environment(CODEX_LOCAL_ENVIRONMENT);
+        let mut local_environment = config.native_environment.selected(CODEX_LOCAL_ENVIRONMENT);
+        if config.provider != CodexProvider::OpenAi {
+            local_environment
+                .retain(|name, _| !matches!(name.as_str(), "CODEX_API_KEY" | "OPENAI_API_KEY"));
+        }
         Self {
             config,
             runners: ProviderProcessRunners::local(),
@@ -197,9 +204,7 @@ impl NativeV2CodexAdapter {
                 "Codex declared environment conflicts with reserved runtime configuration",
             )
         })?;
-        for (name, value) in &self.local_environment {
-            values.entry(name.clone()).or_insert_with(|| value.clone());
-        }
+        merge_local_environment(&mut values, environment, &self.local_environment);
         configure_provider_auth(
             &mut values,
             self.config.provider,
@@ -259,7 +264,11 @@ impl NativeV2CodexAdapter {
         turn: &CodexTurn<'_>,
         state: &mut CodexRunState,
     ) -> Result<Option<WorkerOutcome>, NodeRunnerError> {
-        match self.advance_turn(turn, state.response.prompt()).await {
+        let advance = {
+            let CodexRunState { response, retry } = state;
+            self.advance_turn(turn, response.prompt(), retry).await
+        };
+        match advance {
             Ok(CodexTurnAdvance::Response(response)) => state.accept_response(turn, response).await,
             Ok(CodexTurnAdvance::ProviderFailure(detail)) => {
                 state.retry_provider_failure(turn, Some(&detail)).await?;
@@ -281,12 +290,22 @@ impl NativeV2CodexAdapter {
         &self,
         turn: &CodexTurn<'_>,
         prompt: &str,
+        retry: &mut ProviderFailureRetry,
     ) -> Result<CodexTurnAdvance, NodeRunnerError> {
         turn.session
             .core
             .ensure_live(ClosedSessionFailure::Driver)?;
         let resume = turn.session.thread_id.lock().await.clone();
-        let output = self.execute_turn(turn, resume.as_deref(), prompt).await?;
+        let output = self
+            .execute_turn(
+                turn,
+                CodexTurnExecution {
+                    resume: resume.as_deref(),
+                    prompt,
+                    retry,
+                },
+            )
+            .await?;
         if let Err(detail) = turn
             .session
             .record_attempt_thread(&output, resume.as_deref())
@@ -300,23 +319,35 @@ impl NativeV2CodexAdapter {
     async fn execute_turn(
         &self,
         turn: &CodexTurn<'_>,
-        resume: Option<&str>,
-        prompt: &str,
+        execution: CodexTurnExecution<'_>,
     ) -> Result<CodexOutput, NodeRunnerError> {
-        let mut turn_process = match self.open_turn_process(turn, resume).await? {
+        let mut turn_process = match self
+            .open_turn_process(turn, execution.resume, execution.retry)
+            .await?
+        {
             CodexTurnProcessOpen::Ready(process) => process,
             CodexTurnProcessOpen::ProviderFailure(detail) => {
                 return Ok(CodexOutput::provider_failure(detail));
             }
         };
-        let redactions = provider_redactions(&turn.invocation.environment, &self.local_environment);
-        exchange_turn(&mut turn_process.process, prompt, turn.control, &redactions).await
+        let mut redactions =
+            provider_redactions(&turn.invocation.environment, &self.local_environment);
+        redactions.extend(turn_process.native_redactions.iter().cloned());
+        let redactions = redaction_values(redactions.iter().map(String::as_str));
+        exchange_turn(
+            &mut turn_process.process,
+            execution.prompt,
+            turn.control,
+            &redactions,
+        )
+        .await
     }
 
     async fn open_turn_process(
         &self,
         turn: &CodexTurn<'_>,
         resume: Option<&str>,
+        retry: &mut ProviderFailureRetry,
     ) -> Result<CodexTurnProcessOpen, NodeRunnerError> {
         let files = match turn.execution.prepare(turn.control).await {
             Ok(resources) => resources,
@@ -346,8 +377,10 @@ impl NativeV2CodexAdapter {
                 schema_path: schema.path(),
             },
         )?;
-        self.apply_permission_default(files.clone(), &mut command, turn.control)
+        let native_redactions = self
+            .apply_permission_default(files.clone(), &mut command, turn.control)
             .await?;
+        retry.extend_redactions(&native_redactions);
         let process = match open_process(files, command, turn.control).await? {
             ProcessOpen::Ready(process) => process,
             ProcessOpen::ProviderFailure(detail) => {
@@ -356,8 +389,24 @@ impl NativeV2CodexAdapter {
         };
         Ok(CodexTurnProcessOpen::Ready(CodexTurnProcess {
             process,
+            native_redactions,
             _schema: schema,
         }))
+    }
+}
+
+fn merge_local_environment(
+    values: &mut BTreeMap<String, String>,
+    declared: &ResolvedEnvironment,
+    local: &BTreeMap<String, String>,
+) {
+    let declared_auth = declared
+        .iter()
+        .any(|(name, _)| matches!(name.as_str(), "CODEX_API_KEY" | "OPENAI_API_KEY"));
+    for (name, value) in local {
+        if !declared_auth || !matches!(name.as_str(), "CODEX_API_KEY" | "OPENAI_API_KEY") {
+            values.entry(name.clone()).or_insert_with(|| value.clone());
+        }
     }
 }
 
@@ -366,6 +415,12 @@ struct CodexTurn<'a> {
     session: &'a CodexSession,
     control: &'a DriverControl,
     execution: &'a ProviderExecution<'a>,
+}
+
+struct CodexTurnExecution<'a> {
+    resume: Option<&'a str>,
+    prompt: &'a str,
+    retry: &'a mut ProviderFailureRetry,
 }
 
 struct CodexRunState {

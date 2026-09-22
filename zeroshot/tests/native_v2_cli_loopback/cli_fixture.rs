@@ -163,7 +163,10 @@ pub(crate) fn cli_command(invocation: CliInvocation<'_>) -> tokio::process::Comm
         .arg(invocation.runtime)
         .arg(invocation.graph)
         .arg(invocation.input)
-        .env("ZEROSHOT_CONFIG_DIR", invocation.config);
+        .env("ZEROSHOT_CONFIG_DIR", invocation.config)
+        // Non-live loopback runtimes use the contained OpenAI lane. Placement materialization
+        // now makes that provider access explicit before the request reaches the target.
+        .env("OPENAI_API_KEY", "loopback-provider-secret");
     if let Some(extra) = invocation.extra {
         command.arg(extra);
     }

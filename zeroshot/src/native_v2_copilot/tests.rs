@@ -28,8 +28,12 @@ const INSTRUCTIONS: &str = "Return answer 42 using the required schema.";
 const SCRIPT: &str = include_str!("tests/runtime.py");
 
 fn binding(names: impl Iterator<Item = String>) -> NodeRuntimeBinding {
+    binding_for_model(names, "auto")
+}
+
+fn binding_for_model(names: impl Iterator<Item = String>, model: &str) -> NodeRuntimeBinding {
     NodeRuntimeBinding::Agent {
-        model: crate::worker_catalog::ModelId::new("auto").assert_value(),
+        model: crate::worker_catalog::ModelId::new(model).assert_value(),
         effort: None,
         session_scope: SessionScope::NodeInstance,
         connections: DeclaredConnections::single(
@@ -82,6 +86,28 @@ struct Fixture {
     values: BTreeMap<String, String>,
 }
 
+struct FixturePrompt<'a> {
+    instructions: &'static str,
+    model: &'a str,
+}
+
+fn fixture_values(directory: &TestDirectory, mode: &str) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("TEST_MODE".to_owned(), mode.to_owned()),
+        (
+            "CAPTURE_PATH".to_owned(),
+            directory.child("capture").display().to_string(),
+        ),
+    ])
+}
+
+fn local_user(directory: &TestDirectory) -> CopilotLocalUser {
+    CopilotLocalUser {
+        home: directory.child("user-home"),
+        copilot_home: directory.child("copilot-home"),
+    }
+}
+
 impl Fixture {
     async fn new(mode: &str) -> Self {
         Self::with_values(mode, BTreeMap::new()).await
@@ -90,14 +116,8 @@ impl Fixture {
     async fn with_values(mode: &str, extra: BTreeMap<String, String>) -> Self {
         let directory = TestDirectory::new("copilot");
         let executable = directory.write_executable("copilot", SCRIPT);
-        let mut values = BTreeMap::from([
-            (auth::TOKEN.to_owned(), "gho_fake-secret".to_owned()),
-            ("TEST_MODE".to_owned(), mode.to_owned()),
-            (
-                "CAPTURE_PATH".to_owned(),
-                directory.child("capture").display().to_string(),
-            ),
-        ]);
+        let mut values = fixture_values(&directory, mode);
+        values.insert(auth::TOKEN.to_owned(), "gho_fake-secret".to_owned());
         values.extend(extra);
         Self::with_executable(directory, executable, values, INSTRUCTIONS).await
     }
@@ -108,16 +128,272 @@ impl Fixture {
         values: BTreeMap<String, String>,
         instructions: &'static str,
     ) -> Self {
-        let binding = binding(values.keys().cloned());
-        let admitted = admitted(binding.clone(), instructions).await;
+        Self::with_configuration(
+            (directory, executable),
+            values,
+            instructions,
+            (None, BTreeMap::new()),
+        )
+        .await
+    }
+
+    async fn native() -> Self {
+        Self::with_local_context(
+            "native",
+            BTreeMap::from([("NATIVE_CONTEXT".to_owned(), "preserved".to_owned())]),
+        )
+        .await
+    }
+
+    async fn ambient_token() -> Self {
+        Self::with_local_context(
+            "success",
+            BTreeMap::from([("GH_TOKEN".to_owned(), "gho_fake-secret".to_owned())]),
+        )
+        .await
+    }
+
+    async fn custom_provider() -> Self {
+        Self::with_local_provider("provider", BTreeMap::new(), custom_provider_environment()).await
+    }
+
+    async fn provider_key_command() -> Self {
+        Self::with_local_provider(
+            "provider_command",
+            BTreeMap::from([(
+                "COPILOT_PROVIDER_API_KEY_COMMAND".to_owned(),
+                "provider-key-helper --fresh".to_owned(),
+            )]),
+            custom_provider_environment(),
+        )
+        .await
+    }
+
+    async fn invalid_command_environment(name: &str, value: String) -> Self {
+        let mut base = custom_provider_environment();
+        base.remove("COPILOT_PROVIDER_API_KEY");
+        base.insert(
+            "COPILOT_PROVIDER_API_KEY_COMMAND".to_owned(),
+            "provider-key-helper --fresh".to_owned(),
+        );
+        base.insert(name.to_owned(), value);
+        Self::with_local_provider("provider_command", BTreeMap::new(), base).await
+    }
+
+    async fn with_local_provider(
+        mode: &str,
+        extra_values: BTreeMap<String, String>,
+        base_environment: BTreeMap<String, String>,
+    ) -> Self {
+        let directory = TestDirectory::new("copilot-provider");
+        let executable = directory.write_executable("copilot", SCRIPT);
+        let mut values = fixture_values(&directory, mode);
+        values.extend(extra_values);
+        let local_user = local_user(&directory);
+        Self::with_configuration(
+            (directory, executable),
+            values,
+            INSTRUCTIONS,
+            (Some(local_user), base_environment),
+        )
+        .await
+    }
+
+    async fn declared_token_over_provider() -> Self {
+        let mut base = custom_provider_environment();
+        base.insert("COPILOT_OFFLINE".to_owned(), "true".to_owned());
+        base.insert(
+            "COPILOT_PROVIDERS_CONFIG".to_owned(),
+            "/unreadable/provider-registry.json".to_owned(),
+        );
+        Self::with_local_provider(
+            "declared_token",
+            BTreeMap::from([(auth::TOKEN.to_owned(), "declared-copilot-token".to_owned())]),
+            base,
+        )
+        .await
+    }
+
+    async fn declared_provider_overlay() -> Self {
+        let mut base = custom_provider_environment();
+        base.insert(
+            "COPILOT_PROVIDER_MODEL_ID".to_owned(),
+            "ambient-capability-model".to_owned(),
+        );
+        base.insert(
+            "COPILOT_PROVIDER_API_KEY_COMMAND".to_owned(),
+            "ambient-key-helper".to_owned(),
+        );
+        base.insert(
+            "COPILOT_PROVIDER_BEARER_TOKEN".to_owned(),
+            "ambient-bearer".to_owned(),
+        );
+        Self::with_local_provider(
+            "provider_overlay",
+            BTreeMap::from([
+                (
+                    "COPILOT_PROVIDER_BASE_URL".to_owned(),
+                    "https://declared.example/v1".to_owned(),
+                ),
+                (
+                    "COPILOT_PROVIDER_API_KEY".to_owned(),
+                    "declared-provider-key".to_owned(),
+                ),
+                (
+                    "COPILOT_PROVIDER_WIRE_MODEL".to_owned(),
+                    "declared-wire-model".to_owned(),
+                ),
+            ]),
+            base,
+        )
+        .await
+    }
+
+    async fn declared_native_setting_overlay() -> Self {
+        let mut base = custom_provider_environment();
+        base.insert("COPILOT_OFFLINE".to_owned(), "false".to_owned());
+        Self::with_local_provider(
+            "settings",
+            BTreeMap::from([("COPILOT_OFFLINE".to_owned(), "true".to_owned())]),
+            base,
+        )
+        .await
+    }
+
+    async fn registry(explicit: bool, command: bool) -> Self {
+        let directory = TestDirectory::new("copilot-registry");
+        let executable = directory.write_executable("copilot", SCRIPT);
+        let copilot_home = directory.child("copilot-home");
+        std::fs::create_dir_all(&copilot_home).assert_value();
+        let registry = if command {
+            json!({
+                "providers":[{
+                    "name":"gateway", "type":"openai",
+                    "baseUrl":"https://registry.example/v1",
+                    "apiKeyCommand":"registry-key-helper --fresh",
+                    "wireApi":"responses"
+                }],
+                "models":[{
+                    "id":"fixture", "provider":"gateway",
+                    "modelId":"gpt-5.6-sol", "wireModel":"wire-registry-model"
+                }]
+            })
+        } else {
+            json!({
+                "providers":[{
+                    "name":"gateway", "type":"openai",
+                    "baseUrl":"https://registry.example/v1",
+                    "apiKey":"registry-sensitive-value", "wireApi":"responses"
+                }],
+                "models":[{
+                    "id":"fixture", "provider":"gateway",
+                    "modelId":"gpt-5.6-sol", "wireModel":"wire-registry-model"
+                }]
+            })
+        };
+        let registry_path = if explicit {
+            directory.write("explicit-providers.json", &registry.to_string())
+        } else {
+            let path = copilot_home.join("providers.json");
+            std::fs::write(&path, registry.to_string()).assert_value();
+            path
+        };
+        let mut base = custom_provider_environment();
+        if explicit {
+            base.insert(
+                "COPILOT_PROVIDERS_CONFIG".to_owned(),
+                registry_path.display().to_string(),
+            );
+        }
+        let mode = if command {
+            "registry_command"
+        } else {
+            "registry"
+        };
+        let values = fixture_values(&directory, mode);
+        let local_user = local_user(&directory);
+        Self::with_model_configuration(
+            (directory, executable),
+            values,
+            FixturePrompt {
+                instructions: INSTRUCTIONS,
+                model: "gateway/fixture",
+            },
+            (Some(local_user), base),
+        )
+        .await
+    }
+
+    async fn invalid_registry(contents: &[u8]) -> Self {
+        let directory = TestDirectory::new("copilot-invalid-registry");
+        let executable = directory.write_executable("copilot", SCRIPT);
+        let registry_path = directory.child("providers.json");
+        std::fs::write(&registry_path, contents).assert_value();
+        let values = fixture_values(&directory, "native");
+        let local_user = local_user(&directory);
+        Self::with_configuration(
+            (directory, executable),
+            values,
+            INSTRUCTIONS,
+            (
+                Some(local_user),
+                BTreeMap::from([(
+                    "COPILOT_PROVIDERS_CONFIG".to_owned(),
+                    registry_path.display().to_string(),
+                )]),
+            ),
+        )
+        .await
+    }
+
+    async fn with_local_context(mode: &str, base_environment: BTreeMap<String, String>) -> Self {
+        Self::with_local_provider(mode, BTreeMap::new(), base_environment).await
+    }
+
+    async fn with_configuration(
+        source: (TestDirectory, PathBuf),
+        values: BTreeMap<String, String>,
+        instructions: &'static str,
+        native: (Option<CopilotLocalUser>, BTreeMap<String, String>),
+    ) -> Self {
+        Self::with_model_configuration(
+            source,
+            values,
+            FixturePrompt {
+                instructions,
+                model: "auto",
+            },
+            native,
+        )
+        .await
+    }
+
+    async fn with_model_configuration(
+        source: (TestDirectory, PathBuf),
+        values: BTreeMap<String, String>,
+        prompt: FixturePrompt<'_>,
+        native: (Option<CopilotLocalUser>, BTreeMap<String, String>),
+    ) -> Self {
+        let (directory, executable) = source;
+        let (local_user, base_environment) = native;
+        let binding = binding_for_model(values.keys().cloned(), prompt.model);
+        let admitted = admitted(binding.clone(), prompt.instructions).await;
         let workspace = directory.child("workspace");
         let runtime_home = directory.child("runtime");
         std::fs::create_dir_all(&workspace).assert_value();
         std::fs::create_dir_all(&runtime_home).assert_value();
+        let mut local_command_environment = base_environment.clone();
+        local_command_environment.insert(
+            "COMMAND_DEPENDENCY".to_owned(),
+            "private-command-context".to_owned(),
+        );
         let adapter = Arc::new(CopilotAdapter::new_local(CopilotConfig {
             executable,
             workspace,
             runtime_home,
+            local_user,
+            base_environment,
+            local_command_environment,
             search_path: "/usr/bin:/bin".to_owned(),
             process_pool: HostedProcessPool::hosted_default(),
         }));
@@ -126,7 +402,7 @@ impl Fixture {
             directory,
             runtime,
             binding,
-            instructions,
+            instructions: prompt.instructions,
             values,
         }
     }
@@ -164,6 +440,130 @@ impl Fixture {
             .map(|line| serde_json::from_str(line).assert_value())
             .collect()
     }
+}
+
+fn custom_provider_environment() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (
+            "COPILOT_PROVIDER_BASE_URL".to_owned(),
+            "https://gateway.example/v1".to_owned(),
+        ),
+        ("COPILOT_PROVIDER_TYPE".to_owned(), "openai".to_owned()),
+        (
+            "COPILOT_PROVIDER_API_KEY".to_owned(),
+            "provider-sensitive-value".to_owned(),
+        ),
+        (
+            "COPILOT_PROVIDER_WIRE_API".to_owned(),
+            "responses".to_owned(),
+        ),
+        (
+            "COPILOT_PROVIDER_WIRE_MODEL".to_owned(),
+            "gateway-model".to_owned(),
+        ),
+        (
+            "COPILOT_PROVIDER_MAX_OUTPUT_TOKENS".to_owned(),
+            "4096".to_owned(),
+        ),
+        (
+            "COPILOT_PROVIDER_HEADERS".to_owned(),
+            "X-Tenant: alpha\\nX-Route: beta".to_owned(),
+        ),
+    ])
+}
+
+#[tokio::test]
+async fn native_local_login_and_context_need_no_declared_token() {
+    let fixture = Fixture::native().await;
+    verified(complete(fixture.start(1).await).await.1);
+}
+
+#[tokio::test]
+async fn ambient_local_token_crosses_private_rpc_only() {
+    let fixture = Fixture::ambient_token().await;
+    verified(complete(fixture.start(1).await).await.1);
+}
+
+#[tokio::test]
+async fn local_custom_provider_configuration_crosses_private_rpc_only() {
+    let fixture = Fixture::custom_provider().await;
+    verified(complete(fixture.start(1).await).await.1);
+}
+
+#[tokio::test]
+async fn local_provider_key_command_crosses_private_rpc() {
+    let fixture = Fixture::provider_key_command().await;
+    verified(complete(fixture.start(1).await).await.1);
+}
+
+#[tokio::test]
+async fn unsupported_or_oversized_command_environments_fail_before_launch() {
+    for fixture in [
+        Fixture::invalid_command_environment("UNREPRESENTABLE,FIELD", "value".to_owned()).await,
+        Fixture::invalid_command_environment("OVERSIZED_FIELD", "x".repeat(4 * 1024 * 1024 + 1))
+            .await,
+    ] {
+        rejected_before_launch(&fixture).await;
+    }
+}
+
+#[tokio::test]
+async fn default_provider_registry_takes_precedence_over_legacy_environment() {
+    let fixture = Fixture::registry(false, false).await;
+    verified(complete(fixture.start(1).await).await.1);
+    verified(complete(fixture.start(2).await).await.1);
+    let capture = fixture.capture();
+    for message in capture.iter().filter(|message| {
+        matches!(
+            message["method"].as_str(),
+            Some("session.create" | "session.resume")
+        )
+    }) {
+        assert_eq!(message["params"]["providers"][0]["name"], "gateway");
+        assert_eq!(message["params"]["models"][0]["provider"], "gateway");
+    }
+}
+
+#[tokio::test]
+async fn explicit_registry_command_is_translated_to_the_working_singular_protocol() {
+    let fixture = Fixture::registry(true, true).await;
+    verify_two_turns(&fixture).await;
+}
+
+#[tokio::test]
+async fn malformed_and_oversized_provider_registries_fail_closed() {
+    for contents in [
+        b"{not-json".to_vec(),
+        vec![b' '; provider::MAX_REGISTRY_BYTES as usize + 1],
+    ] {
+        let fixture = Fixture::invalid_registry(&contents).await;
+        rejected_before_launch(&fixture).await;
+    }
+}
+
+#[tokio::test]
+async fn declared_copilot_token_suppresses_ambient_provider_configuration() {
+    let fixture = Fixture::declared_token_over_provider().await;
+    verified(complete(fixture.start(1).await).await.1);
+    let created = fixture
+        .capture()
+        .into_iter()
+        .find(|message| message["method"] == "session.create")
+        .assert_value();
+    assert_eq!(created["params"]["gitHubToken"], "declared-copilot-token");
+    assert!(created["params"].get("provider").is_none());
+}
+
+#[tokio::test]
+async fn declared_provider_fields_keep_model_selection_separate_from_capability_mapping() {
+    let fixture = Fixture::declared_provider_overlay().await;
+    verified(complete(fixture.start(1).await).await.1);
+}
+
+#[tokio::test]
+async fn declared_native_settings_overlay_ambient_settings() {
+    let fixture = Fixture::declared_native_setting_overlay().await;
+    verified(complete(fixture.start(1).await).await.1);
 }
 
 async fn complete(
@@ -212,6 +612,18 @@ fn verified(outcome: Result<WorkerOutcome, NodeRunnerError>) {
     assert!(
         matches!(outcome.assert_value(), WorkerOutcome::Verified { output, .. } if output == json!({"answer":42}))
     );
+}
+
+async fn rejected_before_launch(fixture: &Fixture) {
+    let (events, outcome) = complete(fixture.start(1).await).await;
+    assert!(outcome.is_err(), "safe events: {events:?}");
+    assert!(!fixture.directory.child("capture").exists());
+}
+
+async fn verify_two_turns(fixture: &Fixture) {
+    for execution in [1, 2] {
+        verified(complete(fixture.start(execution).await).await.1);
+    }
 }
 
 #[tokio::test]
@@ -311,8 +723,7 @@ async fn live_user_auth_and_schema() {
         INSTRUCTIONS,
     )
     .await;
-    verified(complete(fixture.start(1).await).await.1);
-    verified(complete(fixture.start(2).await).await.1);
+    verify_two_turns(&fixture).await;
 }
 
 #[tokio::test]

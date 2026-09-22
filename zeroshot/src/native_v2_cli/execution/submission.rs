@@ -19,6 +19,7 @@ use super::super::{
 };
 use super::{CliExecutionContext, write_json};
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission, executable_runtime_roles};
+use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
 use crate::native_v2_delivery::GITHUB_TOKEN_ENV;
 
 #[path = "submission/profiles.rs"]
@@ -118,12 +119,19 @@ fn execute_template_show(
 
 fn prepare_submission_with_environment<F>(
     run: &RunCommand,
-    resolved: ResolvedRunProfile,
+    mut resolved: ResolvedRunProfile,
     available: F,
 ) -> Result<PreparedRunRequest, NativeV2CliError>
 where
     F: Fn(&str) -> Option<OsString>,
 {
+    let placement = if run.target.is_some() {
+        ProviderAccessPlacement::Contained
+    } else {
+        ProviderAccessPlacement::Local
+    };
+    materialize_provider_access(&mut resolved.runtime, placement)
+        .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
     let intent = prepare_intent(run, resolved.graph, resolved.runtime)?;
     let connections = select_connections(&intent.runtime, &available)?;
     let github_token = run
@@ -410,7 +418,7 @@ impl UniformRuntimePlan {
         let connections = self
             .connections
             .clone()
-            .map_or_else(|| default_connections(self.provider), Ok)?;
+            .unwrap_or_else(DeclaredConnections::empty);
         let mut nodes = BTreeMap::new();
         for (name, delivery) in executable_runtime_roles(&graph.root) {
             nodes.insert(
@@ -492,18 +500,6 @@ impl UniformProvider {
             _ => None,
         }
     }
-}
-
-fn default_connections(provider: UniformProvider) -> Result<DeclaredConnections, NativeV2CliError> {
-    let (key, names): (&str, &[&str]) = match provider {
-        UniformProvider::Github => ("github", &["COPILOT_GITHUB_TOKEN"]),
-        UniformProvider::OpenAi => ("openai", &["OPENAI_API_KEY"]),
-        UniformProvider::OpenRouter => ("openrouter", &["OPENROUTER_API_KEY"]),
-        UniformProvider::Gateway => ("gateway", &["GATEWAY_BASE_URL", "GATEWAY_API_KEY"]),
-        UniformProvider::Anthropic => ("anthropic", &["ANTHROPIC_API_KEY"]),
-        UniformProvider::Bedrock => ("bedrock", &["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"]),
-    };
-    connection(key, names)
 }
 
 fn git_delivery_binding(

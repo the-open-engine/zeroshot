@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use crate::execution::process::{HostedProcessPool, ProcessSessionCommand, ProcessStdout};
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderExecution, ProviderExecutionFiles, ProviderProcessRunners,
-    CLAUDE_LOCAL_ENVIRONMENT, agent_workspace_access, local_environment, provider_redactions,
+    CLAUDE_LOCAL_ENVIRONMENT, LocalHarnessEnvironment, agent_workspace_access, provider_redactions,
     with_driver_detail,
 };
 use crate::native_v2_contract::{ClaudeProvider, NodeRuntimeBinding};
@@ -124,6 +124,8 @@ pub struct ClaudeAdapterConfig {
     pub runtime_home: PathBuf,
     /// Current-user home is available only to the built-in local target.
     pub local_user_home: Option<PathBuf>,
+    /// Invoking-shell snapshot available only to the built-in local target.
+    pub native_environment: LocalHarnessEnvironment,
     pub base_environment: ClaudeProcessEnvironment,
     pub process_pool: HostedProcessPool,
 }
@@ -131,24 +133,28 @@ pub struct ClaudeAdapterConfig {
 impl ClaudeAdapter {
     pub fn new(mut configuration: ClaudeAdapterConfig) -> Result<Self, ClaudeAdapterConfigError> {
         configuration.local_user_home = None;
+        configuration.native_environment = LocalHarnessEnvironment::default();
         let runners = ProviderProcessRunners::hosted(configuration.process_pool);
         Self::configured(configuration, runners)
     }
 
     pub fn new_local(configuration: ClaudeAdapterConfig) -> Result<Self, ClaudeAdapterConfigError> {
         let inherit_selectors = configuration.provider == ClaudeProvider::Anthropic;
+        let local_environment = configuration
+            .native_environment
+            .selected(CLAUDE_LOCAL_ENVIRONMENT);
         let mut adapter = Self::configured(configuration, ProviderProcessRunners::local())?;
-        adapter.local_environment = local_environment(CLAUDE_LOCAL_ENVIRONMENT);
-        if let Some(path) = adapter
-            .local_environment
-            .get_mut("CLAUDE_CONFIG_DIR")
-            .filter(|path| !path.is_empty())
-        {
-            *path = std::path::absolute(&*path)
-                .map_err(|_| ClaudeAdapterConfigError::InvalidEnvironment)?
-                .into_os_string()
-                .into_string()
-                .map_err(|_| ClaudeAdapterConfigError::InvalidEnvironment)?;
+        adapter.local_environment = local_environment;
+        if !inherit_selectors {
+            adapter.local_environment.retain(|name, _| {
+                !matches!(
+                    name.as_str(),
+                    "ANTHROPIC_API_KEY"
+                        | "ANTHROPIC_AUTH_TOKEN"
+                        | "CLAUDE_CODE_OAUTH_TOKEN"
+                        | "CLAUDE_CODE_OAUTH_REFRESH_TOKEN"
+                )
+            });
         }
         if !inherit_selectors {
             adapter
@@ -274,7 +280,27 @@ impl ClaudeAdapter {
                 "Claude declared environment conflicts with reserved process configuration",
             )
         })?;
+        let declared_auth = resolved.iter().any(|(name, _)| {
+            matches!(
+                name.as_str(),
+                "ANTHROPIC_API_KEY"
+                    | "ANTHROPIC_AUTH_TOKEN"
+                    | "CLAUDE_CODE_OAUTH_TOKEN"
+                    | "CLAUDE_CODE_OAUTH_REFRESH_TOKEN"
+            )
+        });
         for (name, value) in &self.local_environment {
+            if declared_auth
+                && matches!(
+                    name.as_str(),
+                    "ANTHROPIC_API_KEY"
+                        | "ANTHROPIC_AUTH_TOKEN"
+                        | "CLAUDE_CODE_OAUTH_TOKEN"
+                        | "CLAUDE_CODE_OAUTH_REFRESH_TOKEN"
+                )
+            {
+                continue;
+            }
             environment
                 .entry(name.clone())
                 .or_insert_with(|| value.clone());

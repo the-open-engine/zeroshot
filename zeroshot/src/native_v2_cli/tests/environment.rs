@@ -176,7 +176,10 @@ async fn run_collects_only_the_distinct_declared_environment_before_submission()
         .await
         .assert_value();
 
-    assert_eq!(requested.into_inner(), ["DECLARED", "SHARED", "GH_TOKEN"]);
+    assert_eq!(
+        requested.into_inner(),
+        ["OPENAI_API_KEY", "DECLARED", "SHARED", "GH_TOKEN"]
+    );
     let calls = backend.calls();
     let (connections, github_token) = match calls.as_slice() {
         [
@@ -228,35 +231,162 @@ async fn non_utf8_declared_environment_fails_before_backend_contact() {
     let (_files, command) =
         environment_command(&["--submission-key", "non-utf8-environment", "-d"]);
     let backend = FakeBackend::default();
-    let available = |_: &str| Some(OsString::from_vec(vec![0xff]));
+    let available = |name: &str| {
+        if name == "OPENAI_API_KEY" {
+            Some(OsString::from("provider-secret"))
+        } else {
+            Some(OsString::from_vec(vec![0xff]))
+        }
+    };
     assert_declared_environment_rejected(command, &backend, &available).await;
 }
 
 fn uniform_runtime_command(title: &str, runtime: Value) -> (FixtureFiles, NativeV2CliCommand) {
+    uniform_runtime_command_for_placement(title, runtime, true)
+}
+
+fn local_uniform_runtime_command(
+    title: &str,
+    runtime: Value,
+) -> (FixtureFiles, NativeV2CliCommand) {
+    uniform_runtime_command_for_placement(title, runtime, false)
+}
+
+fn uniform_runtime_command_for_placement(
+    title: &str,
+    runtime: Value,
+    contained: bool,
+) -> (FixtureFiles, NativeV2CliCommand) {
     let files = FixtureFiles::new(graph(), json!({"task":"inspect it"}));
     std::fs::write(&files.runtime, serde_json::to_vec(&runtime).assert_value()).assert_value();
-    let command = parse_native_v2_args(args(&[
-        "run",
-        "--target",
-        "prod",
-        "--repository",
-        "open-engine/zeroshot",
-        "--branch",
-        "main",
-        "--revision",
-        "0123456789abcdef0123456789abcdef01234567",
-        "--title",
-        title,
-        "--template",
-        "single-worker",
-        "--input",
-        files.input.to_str().assert_value(),
-        "--uniform-runtime-config",
-        files.runtime.to_str().assert_value(),
-        "-d",
-    ]))
-    .assert_value();
+    let mut values = vec![OsString::from("run")];
+    if contained {
+        values.extend(
+            [
+                "--target",
+                "prod",
+                "--repository",
+                "open-engine/zeroshot",
+                "--branch",
+                "main",
+                "--revision",
+                "0123456789abcdef0123456789abcdef01234567",
+            ]
+            .map(OsString::from),
+        );
+    }
+    values.extend([
+        OsString::from("--title"),
+        OsString::from(title),
+        OsString::from("--template"),
+        OsString::from("single-worker"),
+        OsString::from("--input"),
+        files.input.as_os_str().to_owned(),
+        OsString::from("--uniform-runtime-config"),
+        files.runtime.as_os_str().to_owned(),
+        OsString::from("-d"),
+    ]);
+    let command = parse_native_v2_args(values).assert_value();
     (files, command)
+}
+
+async fn contained_uniform_submission(
+    title: &str,
+    runtime: Value,
+    available: &dyn Fn(&str) -> Option<OsString>,
+) -> (Value, Value) {
+    let (_files, command) = uniform_runtime_command(title, runtime);
+    let backend = FakeBackend::default();
+    execute_with_environment(command, &backend, available)
+        .await
+        .assert_value();
+    let calls = backend.calls();
+    let (runtime, connections) = match calls.as_slice() {
+        [
+            Call::Submit {
+                runtime,
+                connections,
+                ..
+            },
+        ] => Some((runtime, connections)),
+        _ => None,
+    }
+    .assert_value();
+    (
+        serde_json::to_value(runtime).assert_value(),
+        serde_json::to_value(connections).assert_value(),
+    )
+}
+
+#[tokio::test]
+async fn local_native_harnesses_do_not_require_invented_provider_keys() {
+    for (harness, provider) in [
+        ("codex", "openai"),
+        ("claude", "anthropic"),
+        ("copilot", "github"),
+    ] {
+        let (_files, command) = local_uniform_runtime_command(
+            &format!("Local {harness} runtime"),
+            json!({
+                "harness":harness,
+                "provider":provider,
+                "model":"provider-owned-model"
+            }),
+        );
+        let backend = FakeBackend::default();
+        let requested = std::cell::RefCell::new(Vec::new());
+        let available = |name: &str| {
+            requested.borrow_mut().push(name.to_owned());
+            Some(OsString::from("must-not-be-requested"))
+        };
+        execute_with_environment(command, &backend, &available)
+            .await
+            .assert_value();
+
+        assert!(requested.into_inner().is_empty());
+        let calls = backend.calls();
+        let (target, runtime, connections) = match calls.as_slice() {
+            [
+                Call::Submit {
+                    target,
+                    runtime,
+                    connections,
+                    ..
+                },
+            ] => Some((target, runtime, connections)),
+            _ => None,
+        }
+        .assert_value();
+        assert!(target.is_none());
+        assert!(connections.is_empty());
+        assert!(runtime.connection_requirements().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn contained_native_harnesses_receive_canonical_provider_requirements() {
+    for (harness, provider, connection, field) in [
+        ("codex", "openai", "openai", "OPENAI_API_KEY"),
+        ("claude", "anthropic", "anthropic", "ANTHROPIC_API_KEY"),
+        ("copilot", "github", "github", "COPILOT_GITHUB_TOKEN"),
+    ] {
+        let available = |name: &str| (name == field).then(|| OsString::from("provider-secret"));
+        let (runtime, connections) = contained_uniform_submission(
+            &format!("Contained {harness} runtime"),
+            json!({
+                "harness":harness,
+                "provider":provider,
+                "model":"provider-owned-model"
+            }),
+            &available,
+        )
+        .await;
+        assert_eq!(
+            runtime["nodes"]["worker"]["connections"][connection],
+            json!([field])
+        );
+        assert_eq!(connections[connection][field], "provider-secret");
+    }
 }
 
 #[tokio::test]
@@ -314,38 +444,22 @@ async fn uniform_gateway_and_bedrock_runtime_materializes_for_both_harnesses_wit
         ),
     ] {
         for harness in ["codex", "claude"] {
-            let (_files, command) = uniform_runtime_command(
-                &format!("Uniform {provider} {harness} runtime"),
-                json!({
-                    "harness":harness,
-                    "provider":provider,
-                    "model":"provider-owned-model"
-                }),
-            );
-            let backend = FakeBackend::default();
             let available = |name: &str| {
                 [(first, first_value), (second, second_value)]
                     .into_iter()
                     .find(|(field, _)| *field == name)
                     .map(|(_, value)| OsString::from(value))
             };
-            execute_with_environment(command, &backend, &available)
-                .await
-                .assert_value();
-
-            let calls = backend.calls();
-            let (runtime, connections) = match calls.as_slice() {
-                [
-                    Call::Submit {
-                        runtime,
-                        connections,
-                        ..
-                    },
-                ] => Some((runtime, connections)),
-                _ => None,
-            }
-            .assert_value();
-            let runtime = serde_json::to_value(runtime).assert_value();
+            let (runtime, connections) = contained_uniform_submission(
+                &format!("Uniform {provider} {harness} runtime"),
+                json!({
+                    "harness":harness,
+                    "provider":provider,
+                    "model":"provider-owned-model"
+                }),
+                &available,
+            )
+            .await;
             assert_eq!(runtime.pointer("/harness"), Some(&json!(harness)));
             assert_eq!(runtime.pointer("/provider"), Some(&json!(provider)));
             assert_eq!(
@@ -353,7 +467,7 @@ async fn uniform_gateway_and_bedrock_runtime_materializes_for_both_harnesses_wit
                 Some(&json!([first, second]))
             );
             assert_eq!(
-                serde_json::to_value(connections).assert_value(),
+                connections,
                 json!({
                     provider: { first: first_value, second: second_value }
                 })
@@ -426,16 +540,15 @@ async fn validation_only_reports_graph_and_runtime_causes_without_backend_contac
 }
 
 #[tokio::test]
-async fn copilot_uniform_runtime_preserves_model_and_declares_only_its_user_token() {
-    let (_files, command) = uniform_runtime_command(
+async fn local_copilot_uniform_runtime_preserves_model_without_inventing_a_token() {
+    let (_files, command) = local_uniform_runtime_command(
         "Copilot runtime",
         json!({
             "harness":"copilot", "provider":"github", "model":"opaque-future-model",
         }),
     );
     let backend = FakeBackend::default();
-    let available =
-        |name: &str| (name == "COPILOT_GITHUB_TOKEN").then(|| OsString::from("user-token"));
+    let available = |_name: &str| None;
     execute_with_environment(command, &backend, &available)
         .await
         .assert_value();
@@ -449,8 +562,5 @@ async fn copilot_uniform_runtime_preserves_model_and_declares_only_its_user_toke
     assert_eq!(runtime["harness"], "copilot");
     assert_eq!(runtime["provider"], "github");
     assert_eq!(runtime["nodes"]["worker"]["model"], "opaque-future-model");
-    assert_eq!(
-        runtime["nodes"]["worker"]["connections"],
-        json!({"github":["COPILOT_GITHUB_TOKEN"]})
-    );
+    assert!(runtime["nodes"]["worker"]["connections"].is_null());
 }

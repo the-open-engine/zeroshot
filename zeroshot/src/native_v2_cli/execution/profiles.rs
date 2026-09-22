@@ -9,6 +9,7 @@ use super::super::{
 };
 use super::submission::materialize_profile;
 use super::write_json;
+use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
 
 pub(super) async fn execute_profile<B, W>(
     command: NativeV2CliCommand,
@@ -76,7 +77,8 @@ async fn set<B: NativeV2CliBackend>(
         runtime,
         set_default,
     } = command;
-    let (graph, runtime) = materialize_profile(&graph, &runtime).await?;
+    let (graph, mut runtime) = materialize_profile(&graph, &runtime).await?;
+    materialize_stored_provider_access(&mut runtime, route.target.is_some())?;
     let result = backend
         .profile_set(
             route.target.as_deref(),
@@ -90,6 +92,17 @@ async fn set<B: NativeV2CliBackend>(
         )
         .await?;
     write_json(output, &result)
+}
+
+fn materialize_stored_provider_access(
+    runtime: &mut openengine_cluster_protocol::RuntimePlan,
+    contained: bool,
+) -> Result<(), NativeV2CliError> {
+    if contained {
+        materialize_provider_access(runtime, ProviderAccessPlacement::Contained)
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+    }
+    Ok(())
 }
 
 async fn remove<B: NativeV2CliBackend>(
@@ -130,4 +143,34 @@ async fn set_default<B: NativeV2CliBackend>(
         )
         .await?;
     write_json(output, &result)
+}
+
+#[cfg(test)]
+mod tests {
+    use openengine_cluster_protocol::RuntimePlan;
+    use openengine_cluster_testkit::assertions::AssertValue;
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn only_target_owned_profiles_store_contained_provider_requirements() {
+        let runtime: RuntimePlan = serde_json::from_value(json!({
+            "harness":"codex",
+            "provider":"openai",
+            "size":"medium",
+            "nodes":{"worker":{"kind":"agent","model":"provider-model"}}
+        }))
+        .assert_value();
+        let mut local = runtime.clone();
+        materialize_stored_provider_access(&mut local, false).assert_value();
+        assert!(local.connection_requirements().is_empty());
+
+        let mut contained = runtime;
+        materialize_stored_provider_access(&mut contained, true).assert_value();
+        assert_eq!(
+            serde_json::to_value(contained.connection_requirements()).assert_value(),
+            json!({"openai":["OPENAI_API_KEY"]})
+        );
+    }
 }

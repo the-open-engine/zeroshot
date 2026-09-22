@@ -175,12 +175,18 @@ fn hosted_runner(
                 workspace: fixture.child("workspace"),
                 runtime_home: fixture.child("runtime"),
                 local_user: None,
+                native_environment: Default::default(),
                 search_path: "/usr/bin:/bin".to_owned(),
                 process_pool: pool,
             }));
             NativeNodeRunner::new(admitted, adapter.clone(), adapter).assert_value()
         }
         _ => {
+            let base_environment = ClaudeProcessEnvironment::new(BTreeMap::from([(
+                "PATH".to_owned(),
+                "/usr/bin:/bin".to_owned(),
+            )]))
+            .assert_value();
             let adapter = Arc::new(
                 ClaudeAdapter::new(ClaudeAdapterConfig {
                     provider: ClaudeProvider::Anthropic,
@@ -189,11 +195,8 @@ fn hosted_runner(
                     workspace: fixture.child("workspace"),
                     runtime_home: fixture.child("runtime"),
                     local_user_home: None,
-                    base_environment: ClaudeProcessEnvironment::new(BTreeMap::from([(
-                        "PATH".to_owned(),
-                        "/usr/bin:/bin".to_owned(),
-                    )]))
-                    .assert_value(),
+                    native_environment: Default::default(),
+                    base_environment,
                     process_pool: pool,
                 })
                 .assert_value(),

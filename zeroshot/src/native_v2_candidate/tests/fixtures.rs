@@ -168,6 +168,7 @@ pub(super) fn candidate_config(
             workspace: repository.workspace.clone(),
             runtime_home: repository.root.child("codex-home"),
             local_user: None,
+            native_environment: Default::default(),
             search_path: "/usr/bin:/bin".to_owned(),
             process_pool: pool,
         }),
@@ -178,6 +179,7 @@ pub(super) fn candidate_config(
             workspace: repository.workspace.clone(),
             runtime_home: repository.root.child("claude-runtime"),
             local_user_home: None,
+            native_environment: Default::default(),
             base_environment: ClaudeProcessEnvironment::new(BTreeMap::from([
                 (
                     "HOME".to_owned(),

@@ -22,7 +22,8 @@ use crate::worker_catalog::ReasoningEffort;
 
 mod environment;
 pub(crate) use environment::{
-    CLAUDE_LOCAL_ENVIRONMENT, CODEX_LOCAL_ENVIRONMENT, local_environment, provider_redactions,
+    CLAUDE_LOCAL_ENVIRONMENT, CODEX_LOCAL_ENVIRONMENT, COPILOT_LOCAL_ENVIRONMENT,
+    LocalHarnessEnvironment, current_process_environment, provider_redactions,
 };
 mod configuration;
 pub(crate) use configuration::{ConfigurationRequest, PermissionPolicy, inspect_configuration};
@@ -414,6 +415,11 @@ impl ProviderFailureRetry {
         }
     }
 
+    pub(crate) fn extend_redactions(&mut self, values: &[String]) {
+        self.redactions.extend(values.iter().cloned());
+        normalize_redactions(&mut self.redactions);
+    }
+
     pub(crate) async fn after_failure(
         &mut self,
         control: &DriverControl,
@@ -464,9 +470,14 @@ pub(crate) fn redaction_values<'a>(values: impl Iterator<Item = &'a str>) -> Vec
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
         .collect::<Vec<_>>();
+    normalize_redactions(&mut values);
+    values
+}
+
+fn normalize_redactions(values: &mut Vec<String>) {
+    values.retain(|value| !value.is_empty());
     values.sort_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
     values.dedup();
-    values
 }
 
 pub(crate) const fn effort_token(effort: ReasoningEffort) -> &'static str {

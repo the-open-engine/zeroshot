@@ -73,6 +73,21 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   declared connection values take precedence. Hosted adapters do not inherit ambient settings.
   Endpoint and Claude control variables in declared connections are passed to the harness; active
   transport selectors cannot contradict an explicitly selected OpenRouter, Bedrock, or gateway lane.
+- Provider access defaults are materialized from the authored runtime at the execution-placement
+  boundary. Omitted connections remain omitted in author-owned local profiles. Local Codex/OpenAI,
+  Claude/Anthropic, and Copilot/GitHub lanes reuse native login state without inventing a
+  connection requirement; contained placements and non-native lanes add only their canonical
+  missing requirements. Explicit
+  compatible authored fields always win. Remote profiles materialize contained requirements before
+  storage, and the effective runtime drives the existing connection resolver and recovery contracts.
+  The local CLI captures the invoking shell in its private one-shot bootstrap, consumes and deletes
+  that file before controller effects, and keeps the detached controller's OS environment minimal.
+  A later local CLI startup scavenges orphaned bootstrap files after the bounded controller handoff
+  window without removing other run state.
+  The in-memory snapshot supplies bounded native-context forwarding and Codex config-referenced
+  provider variables; provider children still start from an empty environment. Snapshot values
+  never enter profiles, ledgers, observation, or hosted adapters. Relative harness home overrides
+  are resolved in the invoking process before detachment.
 - Codex inherits harness settings for web search and sandbox network access. Runtime arguments
   select the admitted model, optional effort, and response contract; they must not override unrelated
   user preferences. Hosted workers and verifiers always use the harness's maximum approval/sandbox
@@ -119,9 +134,31 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   exists. Structured output receives at most two correction turns before `malformed`.
 - Copilot uses the pinned CLI's headless JSON-RPC protocol 3, with provider `github` and
   caller-owned model IDs. Structured output and corrections share one session; node-instance
-  revisits resume it from the private home. `COPILOT_GITHUB_TOKEN` crosses private RPC only,
-  never process/tool environments. Optional `COPILOT_GITHUB_TOKEN_EXPIRES_AT` is Unix seconds;
-  expiring credentials use the runtime resolver callback and must retain more than one hour.
+  revisits resume from the current user's `COPILOT_HOME` locally and a private home when contained.
+  Local runs reuse stored Copilot login, host/auth endpoint settings, and supported custom-provider
+  environment. Static custom-provider configuration and ambient or declared GitHub tokens cross
+  private RPC only, never process/tool environments. Legacy command-backed keys cross the singular
+  private provider contract so the pinned CLI refreshes them for each provider request. Local
+  `providers.json` or `COPILOT_PROVIDERS_CONFIG` registries are read with size and entry bounds and
+  transferred through protocol 3 because headless sessions do not import the path themselves; a
+  selected registry provider with `apiKeyCommand` is translated to the working singular contract.
+  Its helper receives eligible invoking-shell fields privately; runtime, authentication, provider,
+  and parent-process loader controls are excluded, while every forwarded field is passed to
+  Copilot's `--secret-env-vars`. This preserves per-request refresh without exposing those fields to
+  shell or MCP tool environments. This matches native local Copilot's same-user trust boundary;
+  secret-env filtering is not an OS identity boundary against adversarial same-UID process inspection.
+  A nonempty registry takes precedence over legacy provider variables. Declared tokens suppress all
+  ambient provider and offline controls. Declared endpoints cannot inherit ambient credentials or
+  headers, and one declared credential form suppresses the other ambient forms. The admitted model
+  is supplied unchanged to the headless process and normally to its RPC session while provider
+  `modelId` capability and wire-model mappings remain intact. Translating a selected registry
+  command uses that registry entry's authored `modelId` for the singular RPC session; the admitted
+  `provider/id` remains the unchanged process-level registry selection. Contained runs require
+  `COPILOT_GITHUB_TOKEN`. Optional
+  `COPILOT_GITHUB_TOKEN_EXPIRES_AT` is Unix seconds;
+  expiring credentials use the runtime resolver callback, validate the configured GitHub host, and
+  must retain more than one hour. Present but empty or malformed declared credentials fail closed
+  instead of falling back to native login.
   Copilot RPC bounds each message to 64 MiB and bounds pending requests and output queues.
 - Provider JSONL readers do not cap cumulative output. They share only the 64 MiB unfinished-record
   guard, accept a complete final record without a newline, ignore unknown future event types before
