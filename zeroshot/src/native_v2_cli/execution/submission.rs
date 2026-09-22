@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
+use std::cell::Cell;
 use std::ffi::OsString;
 use std::fmt;
+use std::future::Future;
 use std::io::Write;
 use std::path::Path;
+use std::pin::Pin;
 
 use openengine_cluster_protocol::{
     ClaudeProvider, CodexProvider, DeclaredConnections, DeclaredEnvironment,
@@ -173,30 +176,69 @@ where
     Ok(params)
 }
 
-pub(super) async fn submit_run<B, W>(
+pub(super) enum RunSubmission {
+    Interrupted,
+    Validated,
+    Submitted {
+        receipt: RunSubmitResult,
+        interrupted: bool,
+    },
+}
+
+pub(super) async fn submit_run<B, W, D>(
     run: &RunCommand,
     context: &CliExecutionContext<'_, B>,
+    mut detach: Pin<&mut D>,
     output: &mut W,
-) -> Result<Option<RunSubmitResult>, NativeV2CliError>
+) -> Result<RunSubmission, NativeV2CliError>
 where
     B: NativeV2CliBackend,
     W: Write,
+    D: Future<Output = ()> + ?Sized,
 {
-    let resolved = resolve_run_profile(run, context.backend).await?;
-    let params =
-        prepare_validated_submission_with_environment(run, resolved, context.environment).await?;
+    let params = tokio::select! {
+        biased;
+        () = detach.as_mut() => return Ok(RunSubmission::Interrupted),
+        result = async {
+            let resolved = resolve_run_profile(run, context.backend).await?;
+            prepare_validated_submission_with_environment(
+                run,
+                resolved,
+                context.environment,
+            )
+            .await
+        } => result?,
+    };
     if run.validate_only {
-        return Ok(None);
+        return Ok(RunSubmission::Validated);
     }
     let source_record = named_source_record(run, &params);
-    let receipt = context
-        .backend
-        .run_submit(run.target.as_deref(), params)
-        .await?;
+    let started = Cell::new(false);
+    let submission = async {
+        started.set(true);
+        context
+            .backend
+            .run_submit(run.target.as_deref(), params)
+            .await
+    };
+    tokio::pin!(submission);
+    let (receipt, interrupted) = tokio::select! {
+        biased;
+        () = detach.as_mut() => {
+            if !started.get() {
+                return Ok(RunSubmission::Interrupted);
+            }
+            (submission.await?, true)
+        }
+        result = submission.as_mut() => (result?, false),
+    };
     if let Some(record) = source_record {
         write_json(output, &record)?;
     }
-    Ok(Some(receipt))
+    Ok(RunSubmission::Submitted {
+        receipt,
+        interrupted,
+    })
 }
 
 fn named_source_record(run: &RunCommand, params: &PreparedRunRequest) -> Option<serde_json::Value> {
