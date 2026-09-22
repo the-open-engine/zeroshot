@@ -6,7 +6,7 @@
 #[path = "native_v2_checkpoints/catalog.rs"]
 mod catalog;
 #[path = "native_v2_checkpoints/filesystem.rs"]
-pub(crate) mod filesystem;
+pub mod filesystem;
 #[cfg(test)]
 #[path = "native_v2_checkpoints/tests.rs"]
 mod tests;

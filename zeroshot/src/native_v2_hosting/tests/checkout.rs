@@ -1,3 +1,5 @@
+mod workspace_storage;
+
 use std::sync::Arc;
 use std::os::unix::fs::MetadataExt as _;
 use std::os::unix::process::CommandExt as _;
@@ -27,6 +29,13 @@ struct CheckoutFixture {
 
 impl CheckoutFixture {
     async fn new(body: &str) -> Self {
+        Self::with_workspace_storage(body, None).await
+    }
+
+    async fn with_workspace_storage(
+        body: &str,
+        storage: Option<Arc<dyn HostedWorkspaceStorage>>,
+    ) -> Self {
         let repository = RepositoryFixture::new();
         let root = TestDirectory::new("checkout-recovery");
         prepare_storage_root(&root.path().to_owned()).assert_value();
@@ -54,6 +63,7 @@ exec /usr/bin/git "$@"
         fs::write(external.join("keep"), "outside checkout").assert_value();
         let mut config = capsule_config(root.path().to_owned());
         config.git_program = program;
+        config.workspace_storage = storage;
         let diagnostics = config.operator_diagnostics.clone();
         let allocator = ProductionCapsuleAllocator::new(config)
             .assert_value()

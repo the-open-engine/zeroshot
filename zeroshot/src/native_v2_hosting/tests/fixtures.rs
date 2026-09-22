@@ -71,6 +71,7 @@ impl RepositoryFixture {
 
 pub(super) fn hosting_config(storage_root: PathBuf) -> ProductionHostingConfig {
     ProductionHostingConfig {
+        workspace_storage: None,
         storage_root,
         copilot_executable: PathBuf::from("/usr/bin/false"),
         codex_executable: PathBuf::from("/usr/bin/false"),
@@ -87,6 +88,7 @@ pub(super) fn hosting_config(storage_root: PathBuf) -> ProductionHostingConfig {
 pub(super) fn capsule_config(storage_root: PathBuf) -> ProductionCapsuleConfig {
     let config = hosting_config(storage_root.clone());
     ProductionCapsuleConfig {
+        workspace_storage: config.workspace_storage,
         storage_root,
         copilot_executable: config.copilot_executable,
         codex_executable: config.codex_executable,

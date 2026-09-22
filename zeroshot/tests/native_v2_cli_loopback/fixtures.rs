@@ -381,6 +381,7 @@ pub(crate) fn live_hosting_config(root: &TempRoot, lane: LiveLane) -> Production
     };
     ProductionHostingConfig {
         storage_root: root.path("live-target"),
+        workspace_storage: None,
         copilot_executable: PathBuf::from("/usr/local/bin/copilot"),
         codex_executable,
         claude_executable,

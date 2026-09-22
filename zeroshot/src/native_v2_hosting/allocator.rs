@@ -41,7 +41,10 @@ use crate::native_v2_supervisor::checkpoints::{
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
 use serde::{Deserialize, Serialize};
 
-use super::{ProductionHostingError, set_traversable_directory};
+use super::{
+    HostedWorkspace, HostedWorkspaceRequest, HostedWorkspaceStorage, ProductionHostingError,
+    set_traversable_directory,
+};
 use super::repository::{RepositoryInstall, install_repository, production_source};
 use identity_leases::{ActiveRunProcessPool, ActiveRunProcessPools};
 
@@ -57,6 +60,7 @@ pub(super) struct ProductionCapsuleConfig {
     pub gh_program: PathBuf,
     pub process_pool: HostedProcessPool,
     pub operator_diagnostics: Arc<OperatorDiagnosticStore>,
+    pub workspace_storage: Option<Arc<dyn HostedWorkspaceStorage>>,
 }
 
 type FilesystemPreparer =
@@ -87,6 +91,14 @@ struct CapsuleBuildRequest<'a> {
     github_token: Option<&'a str>,
     install_source: bool,
     transfer_retained_workspace: bool,
+}
+
+struct WorkspacePreparation<'a> {
+    run_id: &'a RunId,
+    workspace: &'a Path,
+    admitted: &'a AdmittedRun,
+    state: &'a ProductionCapsuleState,
+    process_pool: HostedProcessPool,
 }
 
 struct CapsuleBuildPaths {
@@ -221,6 +233,7 @@ impl ProductionCapsuleAllocator {
             run_root_identity: OnceLock::new(),
             recovery_path: recovery_path(&self.config.storage_root, request.run_id),
             delivery_run_id: request.delivery_run_id.clone(),
+            restored_delivery_run_id: OnceLock::new(),
             inherited_retained_workspace: request.transfer_retained_workspace,
             process_pool: Mutex::new(Some(process_pool)),
             #[cfg(test)]
@@ -264,6 +277,19 @@ impl ProductionCapsuleAllocator {
         let target = self
             .capsule_delivery_target(request, &filesystem, active_process_pool)
             .await?;
+        let hosted_workspace = self
+            .prepare_hosted_workspace(WorkspacePreparation {
+                run_id,
+                workspace: &filesystem.workspace,
+                admitted: request.admitted,
+                state: &state,
+                process_pool: active_process_pool,
+            })
+            .await?;
+        let delivery_run_id = state
+            .restored_delivery_run_id
+            .get()
+            .unwrap_or(request.delivery_run_id);
         let github_config = GhCliAuthorityConfig {
             git_identity: Some(git_identity),
             git_program: self.config.git_program.clone(),
@@ -276,8 +302,8 @@ impl ProductionCapsuleAllocator {
                 harness: self.harness(request.admitted, &filesystem, active_process_pool)?,
                 delivery: NativeV2DeliveryConfig::for_hosted_workspace(
                     DeliveryLineage::new(
-                        request.delivery_run_id.clone(),
-                        request.adopt_existing_delivery,
+                        delivery_run_id.clone(),
+                        request.adopt_existing_delivery || delivery_run_id != run_id,
                     ),
                     filesystem.workspace.clone(),
                     target,
@@ -301,11 +327,6 @@ impl ProductionCapsuleAllocator {
             .set(endpoint)
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let loss = state._loss_sender.subscribe();
-        let checkpoints = Arc::new(FilesystemCheckpointStore::new(
-            checkpoint_directory(&self.config.storage_root, run_id),
-            filesystem.workspace.clone(),
-            writer_nodes(request.admitted),
-        ));
         monitor_workspace_identity(
             filesystem.workspace,
             workspace_identity,
@@ -320,8 +341,45 @@ impl ProductionCapsuleAllocator {
             runner,
             cleanup,
             loss,
-            checkpoints: Some(checkpoints),
+            checkpoints: Some(hosted_workspace.checkpoints),
+            execution_seed: hosted_workspace.execution_seed,
+        })
+    }
+
+    async fn prepare_hosted_workspace(
+        &self,
+        request: WorkspacePreparation<'_>,
+    ) -> Result<HostedWorkspace, CapsuleAllocationUnavailable> {
+        let directory = checkpoint_directory(&self.config.storage_root, request.run_id);
+        let writers = writer_nodes(request.admitted);
+        if let Some(storage) = &self.config.workspace_storage {
+            let prepared = storage
+                .prepare(HostedWorkspaceRequest {
+                    run_id: request.run_id,
+                    workspace: request.workspace,
+                    checkpoint_directory: &directory,
+                    writers,
+                })
+                .await
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+            transfer_retained_workspace_to_writer(request.workspace, request.process_pool)?;
+            if let Some(id) = &prepared.delivery_run_id {
+                request
+                    .state
+                    .restored_delivery_run_id
+                    .set(id.clone())
+                    .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+            }
+            return Ok(prepared);
+        }
+        Ok(HostedWorkspace {
+            checkpoints: Arc::new(FilesystemCheckpointStore::new(
+                directory,
+                request.workspace.to_owned(),
+                writers,
+            )),
             execution_seed: Vec::new(),
+            delivery_run_id: None,
         })
     }
 
@@ -755,6 +813,7 @@ struct ProductionCapsuleState {
     run_root_identity: OnceLock<WorkspaceIdentity>,
     recovery_path: PathBuf,
     delivery_run_id: RunId,
+    restored_delivery_run_id: OnceLock<RunId>,
     inherited_retained_workspace: bool,
     // Retains the run's disjoint Linux identities until endpoint and workspace cleanup complete.
     process_pool: Mutex<Option<ActiveRunProcessPool>>,
@@ -808,7 +867,10 @@ impl ProductionCapsuleState {
             checkpoint_directory: &self.checkpoint_directory,
             recovery_path: &self.recovery_path,
             run_id,
-            delivery_run_id: &self.delivery_run_id,
+            delivery_run_id: self
+                .restored_delivery_run_id
+                .get()
+                .unwrap_or(&self.delivery_run_id),
             recovery_eligible: self.endpoint.get().is_some() || self.inherited_retained_workspace,
             exit,
         })

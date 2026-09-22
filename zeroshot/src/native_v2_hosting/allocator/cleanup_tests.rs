@@ -49,6 +49,7 @@ impl CleanupFixture {
         let (loss, _) = watch::channel(false);
         let run_id = RunId::new("delivery-lease-cleanup");
         let state = Arc::new(ProductionCapsuleState {
+            restored_delivery_run_id: OnceLock::new(),
             endpoint: OnceLock::from(Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(
                 IdleRunner,
             )))),

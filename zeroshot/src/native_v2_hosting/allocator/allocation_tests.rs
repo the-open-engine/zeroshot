@@ -54,6 +54,7 @@ exec /usr/bin/git "$@"
         let uid = NEXT_IDENTITY.fetch_add(1_000_000, Ordering::Relaxed);
         let unused_harness = PathBuf::from("/usr/bin/false");
         let allocator = ProductionCapsuleAllocator::new(ProductionCapsuleConfig {
+            workspace_storage: None,
             storage_root: root.path().to_owned(),
             copilot_executable: unused_harness.clone(),
             codex_executable: unused_harness.clone(),
