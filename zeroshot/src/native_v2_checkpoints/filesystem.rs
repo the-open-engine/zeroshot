@@ -286,6 +286,10 @@ fn sync_file(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
         // FlushFileBuffers requires a writable handle, including for copied read-only Git
         // objects. Only our private staging copy changes, and its original attributes survive.
         let mut writable = metadata.permissions();
+        #[expect(
+            clippy::permissions_set_readonly_false,
+            reason = "Windows-only: ACL permissions remain unchanged"
+        )]
         writable.set_readonly(false);
         fs::set_permissions(path, writable)?;
         let file = fs::OpenOptions::new().write(true).open(path);
