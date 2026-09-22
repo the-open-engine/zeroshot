@@ -166,6 +166,26 @@ fn readonly_workspace_files_remain_readonly_through_capture_and_restore() {
 }
 
 #[test]
+fn canonical_workspace_captures_and_restores_its_committed_git_head() {
+    let fixture = Fixture::new();
+    fixture.initialize_git();
+    let expected = git(&fixture.workspace, &["rev-parse", "HEAD"]);
+    let workspace = fs::canonicalize(&fixture.workspace).assert_value();
+    let result = capture(&workspace, &fixture.snapshots, &());
+    assert!(result.is_ok(), "canonical Git capture failed: {result:?}");
+    let id = result.assert_value();
+    assert_eq!(git(&fixture.tree(&id), &["rev-parse", "HEAD"]), expected);
+    fs::write(workspace.join("tracked"), "later edits").assert_value();
+    let result = restore(&fixture.snapshots, &id, &workspace);
+    assert!(result.is_ok(), "canonical Git restore failed: {result:?}");
+    assert_eq!(git(&workspace, &["rev-parse", "HEAD"]), expected);
+    assert_eq!(
+        fs::read_to_string(workspace.join("tracked")).assert_value(),
+        "initial"
+    );
+}
+
+#[test]
 fn capture_is_immutable_and_restore_replaces_the_entire_selected_tree() {
     let fixture = Fixture::new();
     fs::write(fixture.workspace.join("source"), "checkpoint").assert_value();

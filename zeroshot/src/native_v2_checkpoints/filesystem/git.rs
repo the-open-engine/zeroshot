@@ -259,7 +259,7 @@ fn validate_git_metadata(path: &Path) -> io::Result<()> {
 fn resolved_head(workspace: &Path, layout: &GitLayout) -> io::Result<String> {
     let output = git(workspace)
         .arg("--git-dir")
-        .arg(&layout.directory)
+        .arg(git_path(&layout.directory).as_os_str())
         .args(["rev-parse", "--verify", "HEAD"])
         .output()?;
     if !output.status.success() {
@@ -276,7 +276,7 @@ fn resolved_head(workspace: &Path, layout: &GitLayout) -> io::Result<String> {
 fn git(workspace: &Path) -> Command {
     let mut command = Command::new("git");
     let mut safe_directory = std::ffi::OsString::from("safe.directory=");
-    safe_directory.push(workspace);
+    safe_directory.push(git_path(workspace).as_os_str());
     command
         .current_dir(workspace)
         .arg("-c")
@@ -293,10 +293,41 @@ fn git(workspace: &Path) -> Command {
     ] {
         command.env_remove(name);
     }
+    #[cfg(windows)]
+    command.args(["-c", "core.longpaths=true"]);
     command
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_NO_LAZY_FETCH", "1");
     command
+}
+
+// Windows filesystem authority keeps its verbatim paths. Git rejects their `?` prefix in
+// path arguments; use the equivalent DOS/UNC spelling and let core.longpaths handle Win32 I/O.
+fn git_path(path: &Path) -> std::borrow::Cow<'_, Path> {
+    #[cfg(not(windows))]
+    return std::borrow::Cow::Borrowed(path);
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+
+        let mut components = path.components();
+        let Some(Component::Prefix(prefix)) = components.next() else {
+            return std::borrow::Cow::Borrowed(path);
+        };
+        let mut plain = match prefix.kind() {
+            Prefix::VerbatimDisk(drive) => PathBuf::from(format!("{}:", char::from(drive))),
+            Prefix::VerbatimUNC(server, share) => {
+                let mut prefix = std::ffi::OsString::from(r"\\");
+                prefix.push(server);
+                prefix.push(r"\");
+                prefix.push(share);
+                PathBuf::from(prefix)
+            }
+            _ => return std::borrow::Cow::Borrowed(path),
+        };
+        plain.push(components.as_path());
+        std::borrow::Cow::Owned(plain)
+    }
 }
 
 fn normalize_config(directory: &Path) -> io::Result<()> {
@@ -316,14 +347,7 @@ fn normalize_config(directory: &Path) -> io::Result<()> {
 }
 
 fn rewrite_config(path: &Path, standalone: bool) -> io::Result<()> {
-    let directory = path
-        .parent()
-        .ok_or_else(|| invalid("Git config has no parent"))?;
-    let status = git(directory)
-        .arg("--work-tree")
-        .arg(directory)
-        .args(["config", "--file"])
-        .arg(path)
+    let status = git_config(path)?
         .args(["--unset-all", "core.worktree"])
         .status()?;
     if !status.success() && status.code() != Some(5) {
@@ -332,13 +356,7 @@ fn rewrite_config(path: &Path, standalone: bool) -> io::Result<()> {
         ));
     }
     if standalone {
-        let status = git(directory)
-            .arg("--work-tree")
-            .arg(directory)
-            .args(["config", "--file"])
-            .arg(path)
-            .args(["core.bare", "false"])
-            .status()?;
+        let status = git_config(path)?.args(["core.bare", "false"]).status()?;
         if !status.success() {
             return Err(invalid(
                 "Git checkpoint configuration could not be normalized",
@@ -346,6 +364,19 @@ fn rewrite_config(path: &Path, standalone: bool) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn git_config(path: &Path) -> io::Result<Command> {
+    let directory = path
+        .parent()
+        .ok_or_else(|| invalid("Git config has no parent"))?;
+    let mut command = git(directory);
+    command
+        .arg("--work-tree")
+        .arg(git_path(directory).as_os_str())
+        .args(["config", "--file"])
+        .arg(git_path(path).as_os_str());
+    Ok(command)
 }
 
 pub(super) fn restore_target(
@@ -452,4 +483,21 @@ fn read_small(path: &Path) -> io::Result<String> {
         return Err(invalid("Git administrative marker exceeds its bound"));
     }
     Ok(value)
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn git_arguments_normalize_only_windows_verbatim_prefixes() {
+    for (input, expected) in [
+        (r"\\?\C:\work space\λ\.git", r"C:\work space\λ\.git"),
+        (
+            r"\\?\UNC\server\share\work space",
+            r"\\server\share\work space",
+        ),
+        (r"C:\work space\λ\.git", r"C:\work space\λ\.git"),
+        (r"\\server\share\work space", r"\\server\share\work space"),
+        (r"relative\directory", r"relative\directory"),
+    ] {
+        assert_eq!(git_path(Path::new(input)).as_ref(), Path::new(expected));
+    }
 }
