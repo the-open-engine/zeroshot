@@ -301,17 +301,24 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   an invariant, selectors prioritize repair and judges cannot reject a verified repair solely for
   missing an optional optimization threshold. Mutable state and summaries identify the retained
   workspace and its invariant status separately from the best supported historical findings; a
-  result from a restored artifact is never presented as current. Each iteration contains selection,
-  experiment, mapped judges, and decision inside a one-item research-phase map. That boundary keeps
-  the scout and judge control spaces from multiplying at the later checkpoint. A mapped scout or
-  judge execution failure finalizes an aborted iteration, restores when needed, and lets the bounded
-  loop continue. Files under
+  result from a restored artifact is never presented as current. Bootstrap returns the bounded scout
+  and judge role arrays plus one experiment work item. Graph guards require exactly one explorer,
+  synthesizer, challenger, evidence, method, progress, and experiment activation before dependent work
+  can run. A one-time read-only verifier preflight enforces those sets before the ten-iteration loop;
+  missing, duplicate, extra, or failed entries cannot silently shrink or rewrite the campaign.
+  Iteration role workers execute independently
+  and keep the verifier's control-assignment space bounded; judge prompts do not receive peer reviews.
+  Scout, selector, experiment, or judge execution failure
+  finalizes an aborted iteration, restores when needed, and lets the bounded loop continue. Recorder
+  and recovery failures stop the run before another iteration or checkpoint. Files under
   `.zeroshot/research` are the durable protocol: finalized iteration directories are append-only,
   while per-iteration directories under ignored `scratch/` hold reversible backups and in-progress
   handoffs. Agent workers never
   use Git. The template supports no delivery or `push@1`; for push, a read-only manifest worker
   derives checkpoint metadata from the finalized ledger and one graph-owned delivery node is
-  revisited after every iteration. Delivery cannot overlap a writer.
+  revisited after every iteration. Delivery cannot overlap a writer. A checkpoint manifest failure,
+  delivery repair request, receipt-auditor error, or rejected receipt stops the run; checkpoint
+  delivery never invokes an unreviewed writer repair.
 
 - Target images apply current Debian Trixie package updates and install a checksum-verified upstream
   GitHub CLI. Image tests exercise GraphQL pagination with the installed CLI before publication.

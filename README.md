@@ -81,6 +81,9 @@ evidence. The graph keeps its charter, summary, backlog, state, iteration record
 backups under `.zeroshot/research`. Its state and summary distinguish the retained workspace and
 known invariant status from the best historical findings. Run it without delivery to keep results
 local, or add `--push` to publish each finalized iteration.
+A one-time read-only graph preflight enforces the exact scout, judge, and experiment sets before the loop.
+Finalization and checkpoint audits fail closed, and a delivery repair request stops instead of
+bypassing review.
 
 ## One CLI, three environments
 

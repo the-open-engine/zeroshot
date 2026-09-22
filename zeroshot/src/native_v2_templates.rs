@@ -114,14 +114,30 @@ fn task_step(
     worker: &str,
     authored_instructions: &str,
 ) -> Result<GraphNode, BuiltinTemplateError> {
+    task_step_with_contract(
+        name,
+        worker,
+        authored_instructions,
+        PayloadType::Null,
+        Vec::new(),
+    )
+}
+
+fn task_step_with_contract(
+    name: &str,
+    worker: &str,
+    authored_instructions: &str,
+    output: PayloadType,
+    write_bindings: Vec<WriteBinding>,
+) -> Result<GraphNode, BuiltinTemplateError> {
     Ok(GraphNode::Step(StepNode {
         name: node_name(name)?,
         worker: worker_ref(worker)?,
         instructions: Some(instructions(authored_instructions)?),
         input: task_type()?,
-        output: PayloadType::Null,
+        output,
         input_bindings: vec![state_input(TASK_FIELD, TASK_FIELD)?],
-        write_bindings: Vec::new(),
+        write_bindings,
         timeout_ms: None,
         attempts: positive(1)?,
     }))
