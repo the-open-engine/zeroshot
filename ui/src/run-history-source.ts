@@ -1,5 +1,7 @@
 import { ApiError, type ApiClient } from './api';
 import { watchHistoryEvents, type HistoryObserver } from './history-stream';
+import { historyRetryDelay } from './history-response';
+import type { HistoryRetryDelay } from './history-readiness';
 import {
   historyCursorSequence as cursorSequence,
   invalidRuntimeFailure,
@@ -11,6 +13,8 @@ import type { HistoryEvent, HistoryPage, RunDetail, RunSummary } from './run-his
 
 /** A viewer needs a selected run, not knowledge of its host's run menu. */
 export interface RunHistoryReader {
+  /** Sources may identify transient read failures without exposing their transport to the viewer. */
+  retryDelay?: HistoryRetryDelay;
   detail(id: string, signal?: AbortSignal): Promise<RunDetail>;
   page(id: string, after: string, signal?: AbortSignal): Promise<HistoryPage>;
   watch?(id: string, after: string, observer: HistoryObserver, signal?: AbortSignal): () => void;
@@ -57,6 +61,7 @@ export function createRunHistorySource(
   fetcher: typeof fetch = fetch
 ): RunHistorySource {
   return {
+    retryDelay: historyRetryDelay,
     list: (after, signal) =>
       api(`runs${after ? `?after=${encodeURIComponent(after)}` : ''}`, undefined, signal),
     detail: async (id, signal) =>

@@ -7,25 +7,22 @@ import {
   createRunHistorySource,
   readRunDetail,
 } from './run-history-source';
-import type { HistoryEvent, HistoryPage, RunDetail } from './run-history';
+import type { HistoryEvent, HistoryPage } from './run-history';
+import { HISTORY_PENDING_RETRY_MS } from './history-response';
+import { runDetailFixture as detail } from './test-support';
 
-const detail = (): RunDetail => ({
-  version: 1,
-  projectionVersion: 1,
-  runId: 'run/selected',
-  title: 'Review a change',
-  phase: 'running',
-  cursor: 'v2:0',
-  historyAvailable: true,
-  graph: {
-    profile: 'openengine.graph.full/v1',
-    initialInput: { kind: 'null' },
-    policy: {},
-    root: { kind: 'seq', name: 'run', children: [] },
-  },
-  runtime: { harness: 'codex', provider: 'openai', size: 'small', nodes: {} },
-  initialInput: null,
-  history: { initialCursor: 'v2:0', cursor: 'v2:0', complete: false, limitations: [] },
+test('the HTTP source maps only the pending history problem to a retry delay', () => {
+  const base = new URL('https://example.test/ui/api/');
+  const source = createRunHistorySource(createApiClient(base), base);
+  assert.equal(
+    source.retryDelay?.(new ApiError(503, 'history_pending', 'History is pending.')),
+    HISTORY_PENDING_RETRY_MS
+  );
+  assert.equal(
+    source.retryDelay?.(new ApiError(503, 'history_unavailable', 'History is unavailable.')),
+    undefined
+  );
+  assert.equal(source.retryDelay?.(new Error('not an HTTP problem')), undefined);
 });
 
 test('HTTP history details require supported definition and projection versions before replay', async () => {

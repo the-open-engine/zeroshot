@@ -6,6 +6,15 @@ const MAX_FRAME_BYTES = 8 * 1024 * 1024;
 const MAX_PROBLEM_BYTES = 64 * 1024;
 const encoder = new TextEncoder();
 
+export const HISTORY_PENDING_RETRY_MS = 3_000;
+
+/** The HTTP adapter owns the server problem codes that are safe to retry. */
+export function historyRetryDelay(error: unknown): number | undefined {
+  return error instanceof ApiError && error.code === 'history_pending'
+    ? HISTORY_PENDING_RETRY_MS
+    : undefined;
+}
+
 /** Only complete SSE history records can advance the caller's resume cursor. */
 export async function readHistoryResponse(
   response: Response,
