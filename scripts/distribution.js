@@ -34,6 +34,7 @@ function runPackageCommand() {
     target: argument('target'),
     version: argument('version'),
     binaryPath: argument('binary'),
+    resticPath: argument('restic'),
     outputDirectory: argument('out'),
   });
   process.stdout.write(`${filename}\n`);
@@ -52,9 +53,10 @@ function runVerifyCommand() {
 function runDryRunCommand() {
   const version = argument('version');
   const binaryPath = argument('binary');
+  const resticPath = argument('restic');
   const outputDirectory = argument('out');
   for (const { target } of artifacts.targets) {
-    artifacts.packageTarget({ target, version, binaryPath, outputDirectory });
+    artifacts.packageTarget({ target, version, binaryPath, resticPath, outputDirectory });
   }
   artifacts.createManifest({ version, directory: outputDirectory });
   process.stdout.write(`dry-run produced and verified ${artifacts.targets.length} archives\n`);
@@ -106,18 +108,35 @@ function runSmokeCommand() {
   process.stdout.write(`Zeroshot release executable exited 0: ${binaryPath}\n`);
 }
 
+function smokeRestic(resticPath) {
+  const result = childProcess.spawnSync(resticPath, ['version'], { encoding: 'utf8' });
+  if (result.error) throw result.error;
+  const expected = `restic ${artifacts.RESTIC_VERSION} compiled with `;
+  if (result.signal || result.status !== 0 || !result.stdout.trim().startsWith(expected)) {
+    throw new Error(
+      `RESTIC_BINARY_SMOKE_FAILED: status=${result.status} ` +
+        `signal=${result.signal || 'none'} output=${JSON.stringify(result.stdout.trim())}`
+    );
+  }
+}
+
 function runSmokeArchiveCommand() {
   const target = argument('target');
   const declaration = artifacts.targets.find((candidate) => candidate.target === target);
   if (!declaration) throw new Error(`undeclared Zeroshot release target: ${target}`);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-smoke-'));
   const binaryPath = path.join(directory, declaration.executable);
+  const resticPath = path.join(directory, declaration.resticExecutable);
   try {
     const archive = fs.readFileSync(argument('archive'));
-    fs.writeFileSync(binaryPath, artifacts.extractExecutable(archive, declaration.executable), {
-      mode: 0o755,
-    });
+    const executables = artifacts.extractExecutables(archive, [
+      declaration.executable,
+      declaration.resticExecutable,
+    ]);
+    fs.writeFileSync(binaryPath, executables.get(declaration.executable), { mode: 0o755 });
+    fs.writeFileSync(resticPath, executables.get(declaration.resticExecutable), { mode: 0o755 });
     smokeExecutable(binaryPath, 'ZEROSHOT_ARCHIVE_SMOKE_FAILED');
+    smokeRestic(resticPath);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
@@ -170,6 +189,7 @@ if (require.main === module) {
 
 module.exports = {
   MINIMUM_RELEASE_MAJOR: artifacts.MINIMUM_RELEASE_MAJOR,
+  RESTIC_VERSION: artifacts.RESTIC_VERSION,
   RELEASE_TAG_PREFIX: artifacts.RELEASE_TAG_PREFIX,
   VERSION_ERROR: versioning.VERSION_ERROR,
   archiveName: artifacts.archiveName,
@@ -178,7 +198,7 @@ module.exports = {
   checkVersionCoupling: versioning.checkVersionCoupling,
   createArchive: artifacts.createArchive,
   createManifest: artifacts.createManifest,
-  extractExecutable: artifacts.extractExecutable,
+  extractExecutables: artifacts.extractExecutables,
   normalizeVersion: artifacts.normalizeVersion,
   packageTarget: artifacts.packageTarget,
   parseChecksumManifest: artifacts.parseChecksumManifest,
@@ -187,6 +207,7 @@ module.exports = {
   releaseTag: artifacts.releaseTag,
   sha256: artifacts.sha256,
   smokeExecutable,
+  smokeRestic,
   stageVersion: versioning.stageVersion,
   targetForHost: artifacts.targetForHost,
   targets: artifacts.targets,

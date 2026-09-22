@@ -208,7 +208,7 @@ impl PortableRuntime {
     }
 }
 
-struct ConfirmedCleanup;
+pub(super) struct ConfirmedCleanup;
 
 #[async_trait]
 impl CapsuleCleanup for ConfirmedCleanup {

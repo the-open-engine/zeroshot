@@ -245,6 +245,7 @@ impl LocalCliBackend {
             },
         )?;
         let workspace_lease = self.workspace_lease(&prepared.workspace)?;
+        let checkpoint_repository = self.checkpoint_repository(&prepared.delivery_run_id)?;
         let bootstrap_path = storage.join(BOOTSTRAP_FILE);
         let bootstrap = PortableControllerBootstrap {
             checkpoint,
@@ -256,6 +257,7 @@ impl LocalCliBackend {
             github_token: prepared.github_token,
             workspace: prepared.workspace,
             workspace_lease,
+            checkpoint_repository,
             storage,
             delivery_policy: DeliveryPolicy::Optional,
         };
@@ -353,6 +355,17 @@ impl LocalCliBackend {
 
     fn workspace_lease(&self, workspace: &Path) -> Result<PathBuf, NativeV2CliError> {
         local_workspace_lease_path(&self.state_root, workspace)
+    }
+
+    fn checkpoint_repository(&self, delivery_run_id: &RunId) -> Result<PathBuf, NativeV2CliError> {
+        validate_local_run_id(delivery_run_id)?;
+        let mut digest = Sha256::new();
+        digest.update(b"zeroshot/native-v2/local-checkpoint-repository/v1\0");
+        digest.update(delivery_run_id.as_str().as_bytes());
+        Ok(self
+            .state_root
+            .join("checkpoint-repositories")
+            .join(format!("{:x}", digest.finalize())))
     }
 
     fn create_run_storage(

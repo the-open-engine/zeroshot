@@ -8,7 +8,7 @@
 | Release item         | Identity                                                                 |
 | -------------------- | ------------------------------------------------------------------------ |
 | Git tag and release  | `vX.Y.Z`                                                                 |
-| Executable           | `zeroshot` (`zeroshot.exe` on Windows)                                   |
+| Executables          | `zeroshot` and `restic` (`.exe` on Windows)                              |
 | Native archives      | `zeroshot-vX.Y.Z-<target>.tar.gz`                                        |
 | Target manifest      | `distribution/zeroshot-targets.json`                                     |
 | npm package          | `@the-open-engine-company/zeroshot`                                      |
@@ -34,9 +34,10 @@ the package.
 The target manifest declares Linux x64/arm64 musl, macOS x64/arm64, and Windows x64, and the npm
 target table must match it exactly. The installer stops on any other host.
 
-Every archive contains one executable. `SHA256SUMS` covers each archive and the exact
-`zeroshot-skill.md` copied from the npm package's canonical skill. The workflow also rejects a Linux
-release binary that has a dynamic interpreter.
+Every archive contains exactly the Zeroshot executable and its pinned Restic sidecar. npm, Python
+wheels, self-update, and the target image install the pair together. `SHA256SUMS` covers each archive
+and the exact `zeroshot-skill.md` copied from the npm package's canonical skill. The workflow also
+rejects a Linux Zeroshot release binary that has a dynamic interpreter.
 
 ## Version staging
 

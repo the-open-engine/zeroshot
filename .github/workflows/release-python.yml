@@ -177,22 +177,27 @@ jobs:
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-latest
             executable: zeroshot
+            restic-executable: restic
             wheel-platform: manylinux_2_17_x86_64
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
             executable: zeroshot
+            restic-executable: restic
             wheel-platform: manylinux_2_17_aarch64
           - target: x86_64-apple-darwin
             runner: macos-15-intel
             executable: zeroshot
+            restic-executable: restic
             wheel-platform: macosx_11_0_x86_64
           - target: aarch64-apple-darwin
             runner: macos-14
             executable: zeroshot
+            restic-executable: restic
             wheel-platform: macosx_11_0_arm64
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
             executable: zeroshot.exe
+            restic-executable: restic.exe
             wheel-platform: win_amd64
     runs-on: ${{ matrix.runner }}
     permissions:
@@ -253,13 +258,25 @@ jobs:
             echo "::error::$ARCHIVE contains unexpected version $reported_version"
             exit 1
           }
+          restic_version="$("native/${{ matrix.restic-executable }}" version)"
+          [[ "$restic_version" == "restic 0.19.1 compiled with "* ]] || {
+            echo "::error::$ARCHIVE contains unexpected Restic version $restic_version"
+            exit 1
+          }
           binary_path="$(python - <<'PY'
           from pathlib import Path
 
           print(Path('native/${{ matrix.executable }}').resolve(strict=True))
           PY
           )"
+          restic_path="$(python - <<'PY'
+          from pathlib import Path
+
+          print(Path('native/${{ matrix.restic-executable }}').resolve(strict=True))
+          PY
+          )"
           echo "ZEROSHOT_BINARY=$binary_path" >> "$GITHUB_ENV"
+          echo "ZEROSHOT_RESTIC_BINARY=$restic_path" >> "$GITHUB_ENV"
 
       - name: Build platform wheel containing the exact Zeroshot executable
         working-directory: sdks/python

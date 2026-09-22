@@ -97,10 +97,12 @@ resolve fresh credentials. Provider sessions and previous token usage are not ca
 attempt. Selecting a checkpoint replaces later workspace edits, including untracked and ignored
 files. Local workspaces must be idle while they are restored.
 
-Local and Docker targets keep checkpoints beside their run storage and advertise
-`openengine.workspace-checkpoints/v1`. Cloud exposes recovery through authenticated hosted run
-routes, so checkpoints remain available after the original capsule is removed. Cloud resolves
-fresh credentials from the admitted connection references when it starts the successor.
+Local and Docker targets deduplicate checkpoints in a private Restic repository beside their run
+storage and advertise `openengine.workspace-checkpoints/v1`. They retain that repository only for a
+failed recovery lineage and delete it after a successful run. Cloud exposes recovery through
+authenticated hosted run routes, so failed-run checkpoints remain available for 30 days after the
+original capsule is removed. Cloud resolves fresh credentials from the admitted connection
+references when it starts the successor.
 
 ## Stop only with explicit intent
 

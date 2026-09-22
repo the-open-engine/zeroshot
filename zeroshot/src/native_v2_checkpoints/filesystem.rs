@@ -121,6 +121,20 @@ pub fn restore(snapshots_root: &Path, id: &SnapshotId, workspace: &Path) -> io::
     apply_restore(&tree, &workspace, target_git)
 }
 
+/// Installs a complete snapshot from a caller-owned disposable stage.
+///
+/// This consumes entries from `snapshot/workspace`. The caller must retain another durable copy
+/// when restoration needs to be retryable after interruption.
+pub fn restore_staged(snapshot: &Path, workspace: &Path) -> io::Result<()> {
+    let snapshot = existing_directory(snapshot)?;
+    let tree = existing_directory(&snapshot.join("workspace"))?;
+    let manifest = read_metadata::<serde_json::Value>(&snapshot)?;
+    let workspace = restore_destination(workspace)?;
+    ensure_disjoint(&workspace, &snapshot)?;
+    let target_git = git::restore_target(&workspace, manifest.git)?;
+    apply_restore(&tree, &workspace, target_git)
+}
+
 fn apply_restore(
     tree: &Path,
     workspace: &Path,

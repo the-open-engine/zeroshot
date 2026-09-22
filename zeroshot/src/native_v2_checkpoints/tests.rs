@@ -12,7 +12,7 @@ struct Fixture {
     _root: tempfile::TempDir,
     directory: PathBuf,
     workspace: PathBuf,
-    store: FilesystemCheckpointStore,
+    store: ResticCheckpointStore,
 }
 
 impl Fixture {
@@ -22,7 +22,8 @@ impl Fixture {
         let workspace = root.path().join("workspace");
         fs::create_dir(&workspace).assert_value();
         fs::write(workspace.join("source"), "initial").assert_value();
-        let store = FilesystemCheckpointStore::new(
+        let store = fake_checkpoint_store(
+            root.path(),
             directory.clone(),
             workspace.clone(),
             BTreeSet::from([NodeName::new("writer").assert_value()]),
@@ -48,7 +49,7 @@ impl Fixture {
         .checkpoints
     }
 
-    fn restore(&self, checkpoint: &RunCheckpoint) -> Vec<DurableExecution> {
+    async fn restore(&self, checkpoint: &RunCheckpoint) -> Vec<DurableExecution> {
         restore(
             &CheckpointRestore {
                 directory: self.directory.clone(),
@@ -56,7 +57,13 @@ impl Fixture {
             },
             &self.workspace,
         )
+        .await
         .assert_value()
+    }
+
+    async fn input_checkpoint(&self, node: &str) -> RunCheckpoint {
+        self.store.enter(&boundary(node), &[]).await.assert_value();
+        self.points().remove(0)
     }
 
     fn snapshot_count(&self) -> usize {
@@ -67,6 +74,10 @@ impl Fixture {
 
     fn source(&self) -> String {
         fs::read_to_string(self.workspace.join("source")).assert_value()
+    }
+
+    fn restic_control(&self, name: &str) -> PathBuf {
+        self._root.path().join("repository").join(name)
     }
 }
 
@@ -121,10 +132,10 @@ async fn input_checkpoints_restore_matching_workspace_bytes_and_execution_histor
     assert_eq!(points.len(), 2);
     assert_eq!(fixture.snapshot_count(), 2);
     fs::write(fixture.workspace.join("failed-only"), "partial").assert_value();
-    assert!(fixture.restore(&points[0]).is_empty());
+    assert!(fixture.restore(&points[0]).await.is_empty());
     assert_eq!(fixture.source(), "initial");
     assert!(!fixture.workspace.join("failed-only").exists());
-    assert_eq!(fixture.restore(&points[1]), history);
+    assert_eq!(fixture.restore(&points[1]).await, history);
     assert_eq!(fixture.source(), "writer output");
 }
 
@@ -147,8 +158,8 @@ async fn readonly_visits_share_snapshot_bytes_but_keep_distinct_input_histories(
     let points = fixture.points();
     assert_eq!(points.len(), 2);
     assert_eq!(fixture.snapshot_count(), 1);
-    assert_eq!(fixture.restore(&points[0]), writer_history);
-    assert_eq!(fixture.restore(&points[1]), reader_history);
+    assert_eq!(fixture.restore(&points[0]).await, writer_history);
+    assert_eq!(fixture.restore(&points[1]).await, reader_history);
 }
 
 #[tokio::test]
@@ -165,19 +176,14 @@ async fn repeated_map_batches_publish_one_input_checkpoint_for_the_atomic_group(
     assert_eq!(points.len(), 1);
     assert_eq!(points[0].loop_iterations, vec![2]);
     assert_eq!(fixture.snapshot_count(), 1);
-    assert!(fixture.restore(&points[0]).is_empty());
+    assert!(fixture.restore(&points[0]).await.is_empty());
     assert_eq!(fixture.source(), "initial");
 }
 
 #[tokio::test]
 async fn final_partial_workspace_does_not_replace_the_failed_visits_input_checkpoint() {
     let fixture = Fixture::new();
-    fixture
-        .store
-        .enter(&boundary("writer"), &[])
-        .await
-        .assert_value();
-    let point = fixture.points().remove(0);
+    let point = fixture.input_checkpoint("writer").await;
     fs::write(fixture.workspace.join("source"), "partial failed edits").assert_value();
     let mut writer = settled("writer", 1);
     writer.state = DurableExecutionState::Settled {
@@ -187,17 +193,14 @@ async fn final_partial_workspace_does_not_replace_the_failed_visits_input_checkp
     fixture.store.finish(&[writer]).await.assert_value();
     assert_eq!(fixture.points().len(), 1);
     assert_eq!(fixture.snapshot_count(), 2);
-    assert!(fixture.restore(&point).is_empty());
+    assert!(fixture.restore(&point).await.is_empty());
     assert_eq!(fixture.source(), "initial");
     let latest: SnapshotId =
         serde_json::from_slice(&fs::read(fixture.directory.join("latest.json")).assert_value())
             .assert_value();
-    filesystem::restore(
-        &fixture.directory.join("snapshots"),
-        &latest,
-        &fixture.workspace,
-    )
-    .assert_value();
+    restore_snapshot(&fixture.directory, &latest, &fixture.workspace)
+        .await
+        .assert_value();
     assert_eq!(fixture.source(), "partial failed edits");
 }
 
@@ -215,4 +218,164 @@ async fn active_executions_cannot_publish_or_finish_a_checkpoint() {
     );
     assert!(fixture.store.finish(&[active]).await.is_err());
     assert!(!fixture.directory.exists());
+}
+
+#[tokio::test]
+async fn failed_backup_does_not_publish_and_the_prior_checkpoint_stays_restorable() {
+    let fixture = Fixture::new();
+    let point = fixture.input_checkpoint("writer").await;
+    fs::write(fixture.workspace.join("source"), "uncommitted update").assert_value();
+    fs::write(fixture.restic_control("fail-backup"), "fail").assert_value();
+
+    assert!(
+        fixture
+            .store
+            .enter(&boundary("reader"), &[settled("writer", 1)])
+            .await
+            .is_err()
+    );
+    assert_eq!(fixture.points(), std::slice::from_ref(&point));
+    assert_eq!(fixture.snapshot_count(), 1);
+
+    fs::remove_file(fixture.restic_control("fail-backup")).assert_value();
+    fixture.restore(&point).await;
+    assert_eq!(fixture.source(), "initial");
+}
+
+#[tokio::test]
+async fn failed_restore_does_not_touch_the_live_workspace_and_can_be_retried() {
+    let fixture = Fixture::new();
+    let point = fixture.input_checkpoint("writer").await;
+    fs::write(fixture.workspace.join("source"), "live edits").assert_value();
+    fs::write(fixture.restic_control("fail-restore"), "fail").assert_value();
+
+    assert!(
+        restore(
+            &CheckpointRestore {
+                directory: fixture.directory.clone(),
+                checkpoint_id: point.checkpoint_id.clone(),
+            },
+            &fixture.workspace,
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(fixture.source(), "live edits");
+
+    fs::remove_file(fixture.restic_control("fail-restore")).assert_value();
+    fixture.restore(&point).await;
+    assert_eq!(fixture.source(), "initial");
+}
+
+#[tokio::test]
+async fn invalid_restic_snapshot_mapping_is_rejected_before_workspace_changes() {
+    let fixture = Fixture::new();
+    let point = fixture.input_checkpoint("writer").await;
+    let mapping = fs::read_dir(fixture.directory.join("snapshots"))
+        .assert_value()
+        .next()
+        .assert_value()
+        .assert_value()
+        .path();
+    fs::write(mapping, br#"{"format":1,"resticSnapshot":"../repository"}"#).assert_value();
+    fs::write(fixture.workspace.join("source"), "live edits").assert_value();
+
+    assert!(
+        restore(
+            &CheckpointRestore {
+                directory: fixture.directory.clone(),
+                checkpoint_id: point.checkpoint_id,
+            },
+            &fixture.workspace,
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(fixture.source(), "live edits");
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn real_restic_deduplicates_incremental_stages_and_restores_the_latest_bytes() {
+    use std::os::unix::fs::MetadataExt;
+
+    let Some(executable) = std::env::var_os("ZEROSHOT_RESTIC") else {
+        return;
+    };
+    let root = tempfile::tempdir().assert_value();
+    let directory = root.path().join("checkpoints");
+    let repository = root.path().join("lineage");
+    let workspace = root.path().join("workspace");
+    fs::create_dir(&workspace).assert_value();
+    let mut bytes = vec![0_u8; 32 * 1024 * 1024];
+    let mut value = 0x9e37_79b9_7f4a_7c15_u64;
+    for chunk in bytes.chunks_mut(8) {
+        value ^= value << 7;
+        value ^= value >> 9;
+        value ^= value << 8;
+        chunk.copy_from_slice(&value.to_le_bytes()[..chunk.len()]);
+    }
+    fs::write(workspace.join("large.bin"), &bytes).assert_value();
+    let program = restic::ResticProgram::test(PathBuf::from(executable), Vec::new()).assert_value();
+    let store = ResticCheckpointStore::with_program(ResticCheckpointStoreTestConfig {
+        directory: directory.clone(),
+        repository: repository.clone(),
+        workspace: workspace.clone(),
+        writers: BTreeSet::from([NodeName::new("writer").assert_value()]),
+        program,
+    });
+
+    store.enter(&boundary("writer"), &[]).await.assert_value();
+    bytes[..4096].fill(0xa5);
+    fs::write(workspace.join("large.bin"), &bytes).assert_value();
+    store
+        .enter(&boundary("reader"), &[settled("writer", 1)])
+        .await
+        .assert_value();
+
+    let points = list(
+        &directory,
+        RunCheckpointsParams {
+            run_id: RunId::new("real-restic-test"),
+            after: None,
+            limit: None,
+        },
+    )
+    .assert_value()
+    .checkpoints;
+    fs::write(workspace.join("large.bin"), "corrupt live workspace").assert_value();
+    restore(
+        &CheckpointRestore {
+            directory: directory.clone(),
+            checkpoint_id: points[1].checkpoint_id.clone(),
+        },
+        &workspace,
+    )
+    .await
+    .assert_value();
+    assert_eq!(fs::read(workspace.join("large.bin")).assert_value(), bytes);
+    assert_eq!(
+        fs::read_dir(directory.join("staging"))
+            .assert_value()
+            .count(),
+        0
+    );
+
+    fn allocated(path: &std::path::Path) -> u64 {
+        let metadata = fs::symlink_metadata(path).assert_value();
+        if metadata.is_dir() {
+            fs::read_dir(path)
+                .assert_value()
+                .map(|entry| allocated(&entry.assert_value().path()))
+                .sum()
+        } else {
+            metadata.blocks() * 512
+        }
+    }
+    let repository_bytes = allocated(&repository);
+    let two_full_copies = (bytes.len() * 2) as u64;
+    assert!(
+        repository_bytes < two_full_copies * 3 / 4,
+        "Restic used {repository_bytes} bytes for {two_full_copies} bytes of full copies"
+    );
 }

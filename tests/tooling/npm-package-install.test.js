@@ -92,7 +92,11 @@ it('packs and installs the published npm surface on the current host', async (t)
 
   const selected = installed.selectTarget();
   const binary = Buffer.from(`zeroshot package smoke for ${process.platform}/${process.arch}\n`);
-  const archive = createArchive(binary, selected.executable);
+  const restic = Buffer.from(`restic package smoke for ${process.platform}/${process.arch}\n`);
+  const archive = createArchive([
+    { name: selected.executable, contents: binary },
+    { name: selected.resticExecutable, contents: restic },
+  ]);
   const filename = installed.archiveName(version, selected.target);
   const checksum = Buffer.from(`${sha256(archive)}  ${filename}\n`);
   const requested = [];
@@ -116,6 +120,10 @@ it('packs and installs the published npm surface on the current host', async (t)
   const destination = await installed.install(installOptions);
 
   assert.deepEqual(fs.readFileSync(destination), binary);
+  assert.deepEqual(
+    fs.readFileSync(path.join(path.dirname(destination), selected.resticExecutable)),
+    restic
+  );
   assert.deepEqual(
     skillRuns[0].map(({ id, status }) => [id, status]),
     [

@@ -25,6 +25,7 @@ const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
 const MAX_SKILL_BYTES: usize = 1024 * 1024;
 const MAX_ARCHIVE_BYTES: usize = 256 * 1024 * 1024;
 const SKILL_ASSET: &str = "zeroshot-skill.md";
+const RESTIC_VERSION: &str = "0.19.1";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
@@ -63,8 +64,14 @@ struct UpdateResult {
 }
 
 struct ReleaseUpdate {
-    binary: Option<Vec<u8>>,
+    executables: Option<ReleaseExecutables>,
     skill: skill::PreparedSkill,
+}
+
+struct ReleaseExecutables {
+    zeroshot: Vec<u8>,
+    restic: Vec<u8>,
+    restic_name: &'static str,
 }
 
 pub(super) async fn execute(output: &mut impl Write) -> Result<CliOutcome, NativeV2CliError> {
@@ -93,9 +100,9 @@ async fn apply_release(
         return Ok((false, false));
     }
     let release = download_release(client, current, latest).await?;
-    let updated = release.binary.is_some();
-    if let Some(binary) = release.binary {
-        install(&binary, latest)?;
+    let updated = release.executables.is_some();
+    if let Some(executables) = release.executables {
+        install(&executables, latest)?;
     }
     let skill_updated = release.skill.install()?;
     Ok((updated, skill_updated))
@@ -163,15 +170,24 @@ async fn download_release(
     };
     let skill_contents = release.download(SKILL_ASSET, MAX_SKILL_BYTES).await?;
     let skill = skill::prepare(skill_contents)?;
-    let binary = if latest > current {
-        let (target, executable) = release_target()?;
+    let executables = if latest > current {
+        let (target, executable, restic) = release_target()?;
         let filename = format!("zeroshot-v{latest}-{target}.tar.gz");
         let archive = release.download(&filename, MAX_ARCHIVE_BYTES).await?;
-        Some(extract_executable(&archive, executable)?)
+        let mut extracted = extract_executables(&archive, &[executable, restic])?;
+        Some(ReleaseExecutables {
+            zeroshot: extracted
+                .remove(executable)
+                .ok_or_else(|| update_error("release archive omitted Zeroshot"))?,
+            restic: extracted
+                .remove(restic)
+                .ok_or_else(|| update_error("release archive omitted Restic"))?,
+            restic_name: restic,
+        })
     } else {
         None
     };
-    Ok(ReleaseUpdate { binary, skill })
+    Ok(ReleaseUpdate { executables, skill })
 }
 
 struct VerifiedRelease<'a> {
@@ -202,13 +218,13 @@ fn release_version(value: &str, kind: &str) -> Result<ReleaseVersion, NativeV2Cl
     Ok(version)
 }
 
-fn release_target() -> Result<(&'static str, &'static str), NativeV2CliError> {
+fn release_target() -> Result<(&'static str, &'static str, &'static str), NativeV2CliError> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("linux", "x86_64") => Ok(("x86_64-unknown-linux-musl", "zeroshot")),
-        ("linux", "aarch64") => Ok(("aarch64-unknown-linux-musl", "zeroshot")),
-        ("macos", "x86_64") => Ok(("x86_64-apple-darwin", "zeroshot")),
-        ("macos", "aarch64") => Ok(("aarch64-apple-darwin", "zeroshot")),
-        ("windows", "x86_64") => Ok(("x86_64-pc-windows-msvc", "zeroshot.exe")),
+        ("linux", "x86_64") => Ok(("x86_64-unknown-linux-musl", "zeroshot", "restic")),
+        ("linux", "aarch64") => Ok(("aarch64-unknown-linux-musl", "zeroshot", "restic")),
+        ("macos", "x86_64") => Ok(("x86_64-apple-darwin", "zeroshot", "restic")),
+        ("macos", "aarch64") => Ok(("aarch64-apple-darwin", "zeroshot", "restic")),
+        ("windows", "x86_64") => Ok(("x86_64-pc-windows-msvc", "zeroshot.exe", "restic.exe")),
         (os, arch) => Err(update_error(format!(
             "no prebuilt Zeroshot release exists for {os}/{arch}"
         ))),
@@ -301,51 +317,80 @@ fn verify_checksum(
     Ok(())
 }
 
-fn extract_executable(archive: &[u8], executable: &str) -> Result<Vec<u8>, NativeV2CliError> {
+fn extract_executables(
+    archive: &[u8],
+    expected: &[&str],
+) -> Result<std::collections::BTreeMap<String, Vec<u8>>, NativeV2CliError> {
+    let expected = expected.iter().copied().collect::<BTreeSet<_>>();
     let decoder = GzDecoder::new(archive);
     let mut archive = tar::Archive::new(decoder);
     let entries = archive
         .entries()
         .map_err(|error| update_error(format!("release archive is invalid: {error}")))?;
-    let mut binary = None;
+    let mut binaries = std::collections::BTreeMap::new();
     for entry in entries {
-        let mut entry =
-            entry.map_err(|error| update_error(format!("release archive is invalid: {error}")))?;
-        let path = entry
-            .path()
-            .map_err(|error| update_error(format!("release archive path is invalid: {error}")))?;
-        if path.as_ref() != Path::new(executable) || !entry.header().entry_type().is_file() {
-            return Err(update_error(format!(
-                "release archive contains unexpected entry {}",
-                path.display()
-            )));
-        }
-        if binary.is_some() {
-            return Err(update_error(format!(
-                "release archive contains duplicate {executable} entries"
-            )));
-        }
-        if entry.size() > MAX_ARCHIVE_BYTES as u64 {
-            return Err(update_error("release executable is too large"));
-        }
-        let mut contents = Vec::with_capacity(entry.size() as usize);
-        entry.read_to_end(&mut contents).map_err(|error| {
-            update_error(format!("could not extract release executable: {error}"))
-        })?;
-        binary = Some(contents);
+        insert_archive_entry(entry, &expected, &mut binaries)?;
     }
-    binary.ok_or_else(|| update_error(format!("release archive does not contain {executable}")))
+    if binaries.len() != expected.len() {
+        return Err(update_error("release archive omits a required executable"));
+    }
+    Ok(binaries)
 }
 
-fn install(binary: &[u8], version: ReleaseVersion) -> Result<(), NativeV2CliError> {
+fn insert_archive_entry<R: Read>(
+    entry: Result<tar::Entry<'_, R>, std::io::Error>,
+    expected: &BTreeSet<&str>,
+    binaries: &mut std::collections::BTreeMap<String, Vec<u8>>,
+) -> Result<(), NativeV2CliError> {
+    let mut entry =
+        entry.map_err(|error| update_error(format!("release archive is invalid: {error}")))?;
+    let path = entry
+        .path()
+        .map_err(|error| update_error(format!("release archive path is invalid: {error}")))?;
+    let display = path.display().to_string();
+    let Some(name) = path
+        .to_str()
+        .filter(|name| expected.contains(*name))
+        .map(str::to_owned)
+    else {
+        return Err(update_error(format!(
+            "release archive contains unexpected entry {display}"
+        )));
+    };
+    if !entry.header().entry_type().is_file() {
+        return Err(update_error(format!(
+            "release archive contains non-file entry {display}"
+        )));
+    }
+    if binaries.contains_key(&name) {
+        return Err(update_error(format!(
+            "release archive contains duplicate {name} entries"
+        )));
+    }
+    if entry.size() > MAX_ARCHIVE_BYTES as u64 {
+        return Err(update_error("release executable is too large"));
+    }
+    let mut contents = Vec::with_capacity(entry.size() as usize);
+    entry
+        .read_to_end(&mut contents)
+        .map_err(|error| update_error(format!("could not extract release executable: {error}")))?;
+    binaries.insert(name, contents);
+    Ok(())
+}
+
+fn install(
+    executables: &ReleaseExecutables,
+    version: ReleaseVersion,
+) -> Result<(), NativeV2CliError> {
     let current = std::env::current_exe()
         .map_err(|error| update_error(format!("could not locate this executable: {error}")))?;
     install_at(
         &current,
-        binary,
+        executables,
         version,
         InstallOperations {
             verify: smoke,
+            verify_restic: smoke_restic,
             replace: |staged: &Path| {
                 self_replace::self_replace(staged).map_err(|error| {
                     update_error(format!("could not replace this executable: {error}"))
@@ -355,40 +400,127 @@ fn install(binary: &[u8], version: ReleaseVersion) -> Result<(), NativeV2CliErro
     )
 }
 
-struct InstallOperations<Verify, Replace> {
+struct InstallOperations<Verify, VerifyRestic, Replace> {
     verify: Verify,
+    verify_restic: VerifyRestic,
     replace: Replace,
 }
 
-fn install_at<Verify, Replace>(
+fn install_at<Verify, VerifyRestic, Replace>(
     current: &Path,
-    binary: &[u8],
+    executables: &ReleaseExecutables,
     version: ReleaseVersion,
-    operations: InstallOperations<Verify, Replace>,
+    operations: InstallOperations<Verify, VerifyRestic, Replace>,
 ) -> Result<(), NativeV2CliError>
 where
     Verify: FnOnce(&Path, ReleaseVersion) -> Result<(), NativeV2CliError>,
+    VerifyRestic: FnOnce(&Path) -> Result<(), NativeV2CliError>,
     Replace: FnOnce(&Path) -> Result<(), NativeV2CliError>,
 {
     let parent = current
         .parent()
         .ok_or_else(|| update_error("this executable has no parent directory"))?;
+    let staged = stage_executable(
+        parent,
+        ".zeroshot-update-",
+        std::env::consts::EXE_SUFFIX,
+        &executables.zeroshot,
+    )?;
+    let staged_restic = stage_executable(
+        parent,
+        ".restic-update-",
+        std::env::consts::EXE_SUFFIX,
+        &executables.restic,
+    )?;
+    (operations.verify)(&staged, version)?;
+    (operations.verify_restic)(&staged_restic)?;
+    let sidecar =
+        SidecarReplacement::install(&staged_restic, &parent.join(executables.restic_name))?;
+    if let Err(error) = (operations.replace)(&staged) {
+        sidecar.rollback()?;
+        return Err(error);
+    }
+    sidecar.commit();
+    Ok(())
+}
+
+fn stage_executable(
+    parent: &Path,
+    prefix: &str,
+    suffix: &str,
+    contents: &[u8],
+) -> Result<tempfile::TempPath, NativeV2CliError> {
     let mut staged = tempfile::Builder::new()
-        .prefix(".zeroshot-update-")
-        .suffix(std::env::consts::EXE_SUFFIX)
+        .prefix(prefix)
+        .suffix(suffix)
         .tempfile_in(parent)
         .map_err(|error| update_error(format!("could not stage the update: {error}")))?;
     staged
-        .write_all(binary)
+        .write_all(contents)
         .map_err(|error| update_error(format!("could not stage the update: {error}")))?;
     make_executable(staged.path())?;
     staged
         .as_file()
         .sync_all()
         .map_err(|error| update_error(format!("could not stage the update: {error}")))?;
-    let staged = staged.into_temp_path();
-    (operations.verify)(&staged, version)?;
-    (operations.replace)(&staged)
+    Ok(staged.into_temp_path())
+}
+
+struct SidecarReplacement {
+    destination: std::path::PathBuf,
+    backup: Option<std::path::PathBuf>,
+}
+
+impl SidecarReplacement {
+    fn install(staged: &Path, destination: &Path) -> Result<Self, NativeV2CliError> {
+        let backup = destination.exists().then(|| {
+            destination.with_file_name(format!(
+                ".{}-update-backup-{}",
+                destination
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("restic"),
+                uuid::Uuid::now_v7()
+            ))
+        });
+        if let Some(backup) = &backup {
+            std::fs::rename(destination, backup).map_err(|error| {
+                update_error(format!(
+                    "could not preserve the installed Restic sidecar: {error}"
+                ))
+            })?;
+        }
+        if let Err(error) = std::fs::rename(staged, destination) {
+            if let Some(backup) = &backup {
+                let _ = std::fs::rename(backup, destination);
+            }
+            return Err(update_error(format!(
+                "could not install the Restic sidecar: {error}"
+            )));
+        }
+        Ok(Self {
+            destination: destination.to_owned(),
+            backup,
+        })
+    }
+
+    fn rollback(self) -> Result<(), NativeV2CliError> {
+        std::fs::remove_file(&self.destination).map_err(|error| {
+            update_error(format!("could not roll back the Restic sidecar: {error}"))
+        })?;
+        if let Some(backup) = self.backup {
+            std::fs::rename(backup, self.destination).map_err(|error| {
+                update_error(format!("could not restore the Restic sidecar: {error}"))
+            })?;
+        }
+        Ok(())
+    }
+
+    fn commit(self) {
+        if let Some(backup) = self.backup {
+            let _ = std::fs::remove_file(backup);
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -410,6 +542,22 @@ fn smoke(path: &Path, version: ReleaseVersion) -> Result<(), NativeV2CliError> {
         .output()
         .map_err(|error| update_error(format!("could not verify the update: {error}")))?;
     validate_smoke_result(result.status.success(), &result.stdout, version)
+}
+
+fn smoke_restic(path: &Path) -> Result<(), NativeV2CliError> {
+    let result = Command::new(path)
+        .arg("version")
+        .output()
+        .map_err(|error| update_error(format!("could not verify Restic: {error}")))?;
+    let stdout = std::str::from_utf8(&result.stdout).unwrap_or_default();
+    if !result.status.success()
+        || !stdout.starts_with(&format!("restic {RESTIC_VERSION} compiled with "))
+    {
+        return Err(update_error(
+            "downloaded Restic executable failed verification",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_smoke_result(
@@ -466,7 +614,8 @@ mod tests {
     #[test]
     fn checksum_and_archive_validation_accept_the_release_shape() {
         let binary = b"release binary";
-        let archive = test_archive(&[("zeroshot", binary)]);
+        let restic = b"restic binary";
+        let archive = test_archive(&[("zeroshot", binary), ("restic", restic)]);
         let filename = "zeroshot-v8.2.1-x86_64-unknown-linux-musl.tar.gz";
         let checksum = format!("{:x}", Sha256::digest(&archive));
         let skill = b"canonical skill";
@@ -477,10 +626,9 @@ mod tests {
         verify_checksum(filename, &archive, &expected).assert_value();
         let expected_skill = checksum_for(manifest.as_bytes(), SKILL_ASSET).assert_value();
         verify_checksum(SKILL_ASSET, skill, &expected_skill).assert_value();
-        assert_eq!(
-            extract_executable(&archive, "zeroshot").assert_value(),
-            binary
-        );
+        let extracted = extract_executables(&archive, &["zeroshot", "restic"]).assert_value();
+        assert_eq!(extracted["zeroshot"], binary);
+        assert_eq!(extracted["restic"], restic);
     }
 
     #[test]
@@ -501,7 +649,7 @@ mod tests {
 
         let archive = test_archive(&[("other", b"binary")]);
         assert!(matches!(
-            extract_executable(&archive, "zeroshot").assert_error(),
+            extract_executables(&archive, &["zeroshot", "restic"]).assert_error(),
             NativeV2CliError::Update(_)
         ));
     }
@@ -516,10 +664,11 @@ mod tests {
         fs::write(&current, b"old binary").unwrap();
         let verified = Cell::new(false);
         let version = ReleaseVersion([8, 2, 1]);
+        let executables = test_executables();
 
         install_at(
             &current,
-            b"new binary",
+            &executables,
             version,
             InstallOperations {
                 verify: |staged: &Path, actual_version| {
@@ -538,6 +687,10 @@ mod tests {
                     verified.set(true);
                     Ok(())
                 },
+                verify_restic: |staged: &Path| {
+                    assert_eq!(fs::read(staged).unwrap(), b"new restic");
+                    Ok(())
+                },
                 replace: |staged: &Path| {
                     assert!(verified.get());
                     fs::copy(staged, &installed)
@@ -549,12 +702,23 @@ mod tests {
         .assert_value();
 
         assert_eq!(fs::read(installed).unwrap(), b"new binary");
+        assert_eq!(
+            fs::read(directory.path().join("restic")).unwrap(),
+            b"new restic"
+        );
         assert!(!directory.path().read_dir().unwrap().any(|entry| {
             entry
                 .unwrap()
                 .file_name()
                 .to_string_lossy()
                 .starts_with(".zeroshot-update-")
+        }));
+        assert!(!directory.path().read_dir().unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".restic-update-")
         }));
     }
 
@@ -563,15 +727,18 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let current = directory.path().join("zeroshot");
         fs::write(&current, b"old binary").unwrap();
+        fs::write(directory.path().join("restic"), b"old restic").unwrap();
         let replaced = Cell::new(false);
         let version = ReleaseVersion([8, 2, 1]);
+        let executables = test_executables();
 
         let verification_error = install_at(
             &current,
-            b"new binary",
+            &executables,
             version,
             InstallOperations {
                 verify: |_: &Path, _| Err(update_error("verification failed")),
+                verify_restic: |_: &Path| Ok(()),
                 replace: |_: &Path| {
                     replaced.set(true);
                     Ok(())
@@ -584,15 +751,20 @@ mod tests {
 
         let replacement_error = install_at(
             &current,
-            b"new binary",
+            &executables,
             version,
             InstallOperations {
                 verify: |_: &Path, _| Ok(()),
+                verify_restic: |_: &Path| Ok(()),
                 replace: |_: &Path| Err(update_error("replacement failed")),
             },
         )
         .assert_error();
         assert!(matches!(replacement_error, NativeV2CliError::Update(_)));
+        assert_eq!(
+            fs::read(directory.path().join("restic")).unwrap(),
+            b"old restic"
+        );
     }
 
     #[test]
@@ -631,5 +803,13 @@ mod tests {
             archive.append_data(&mut header, name, *contents).unwrap();
         }
         archive.into_inner().unwrap().finish().unwrap()
+    }
+
+    fn test_executables() -> ReleaseExecutables {
+        ReleaseExecutables {
+            zeroshot: b"new binary".to_vec(),
+            restic: b"new restic".to_vec(),
+            restic_name: "restic",
+        }
     }
 }

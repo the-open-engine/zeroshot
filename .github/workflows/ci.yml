@@ -293,6 +293,7 @@ jobs:
           ZEROSHOT_PYTHON_VERSION: 8.0.0.post1
           ZEROSHOT_PYTHON_WHEEL_PLATFORM: manylinux_2_17_x86_64
           ZEROSHOT_BINARY: /bin/true
+          ZEROSHOT_RESTIC_BINARY: /bin/true
         run: |
           python -m build --wheel --outdir dist/first
           python -m build --wheel --outdir dist/second
@@ -311,6 +312,7 @@ jobs:
           with zipfile.ZipFile(wheels[0]) as archive:
               names = set(archive.namelist())
           assert any(name.endswith('/zeroshot/_bin/zeroshot') for name in names), names
+          assert any(name.endswith('/zeroshot/_bin/restic') for name in names), names
           PY
 
   docs-check:
@@ -441,7 +443,8 @@ jobs:
   required:
     name: required
     if: always()
-    needs: [classify, tooling-check, npm-check, native-check, python-check, docs-check, target-image]
+    needs:
+      [classify, tooling-check, npm-check, native-check, python-check, docs-check, target-image]
     runs-on: ubuntu-latest
     steps:
       - name: Require every selected lane

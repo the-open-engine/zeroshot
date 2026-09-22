@@ -84,6 +84,7 @@ function parseDocsWorkflow(workflow) {
 function checkReleaseJobs(document) {
   const expectedJobs = [
     'plan',
+    'restic',
     'binaries',
     'manifest',
     'image-input',
@@ -236,6 +237,8 @@ function checkReleaseFragments(workflow) {
     'npm --prefix ui ci --ignore-scripts',
     'npm --prefix ui run build',
     'cargo build --release --locked -p zeroshot --bin zeroshot --features ui --target ${{ matrix.target }}',
+    'scripts/distribution/build-restic.sh /out',
+    '--restic "$RESTIC_PATH"',
     'docker/zeroshot-target/Dockerfile',
     'ghcr.io/the-open-engine/zeroshot-target',
     'commit_ref="$ZEROSHOT_IMAGE:sha-$RELEASE_COMMIT"',
@@ -318,11 +321,12 @@ function checkPythonReleaseFragments(workflow) {
 }
 
 function normalizedReleaseTargets(declarations) {
-  return declarations.map(({ platform, arch, target, executable }) => ({
+  return declarations.map(({ platform, arch, target, executable, resticExecutable }) => ({
     platform,
     arch,
     target,
     executable,
+    resticExecutable,
   }));
 }
 

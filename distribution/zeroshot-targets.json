@@ -5,6 +5,7 @@
     "platform": "linux",
     "arch": "x64",
     "executable": "zeroshot",
+    "resticExecutable": "restic",
     "cCompiler": "musl-gcc"
   },
   {
@@ -13,6 +14,7 @@
     "platform": "linux",
     "arch": "arm64",
     "executable": "zeroshot",
+    "resticExecutable": "restic",
     "cCompiler": "musl-gcc"
   },
   {
@@ -21,6 +23,7 @@
     "platform": "darwin",
     "arch": "x64",
     "executable": "zeroshot",
+    "resticExecutable": "restic",
     "cCompiler": "cc"
   },
   {
@@ -29,6 +32,7 @@
     "platform": "darwin",
     "arch": "arm64",
     "executable": "zeroshot",
+    "resticExecutable": "restic",
     "cCompiler": "cc"
   },
   {
@@ -37,6 +41,7 @@
     "platform": "win32",
     "arch": "x64",
     "executable": "zeroshot.exe",
+    "resticExecutable": "restic.exe",
     "cCompiler": "cl.exe"
   }
 ]

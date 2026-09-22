@@ -15,6 +15,10 @@ use crate::native_v2_cloud::{
 };
 use crate::native_v2_delivery::git_auth::encode_basic_credential;
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
+use super::super::allocator::{
+    HostedRecoveryDocument, checkpoint_directory, checkpoint_repository, recovery_path,
+    write_recovery,
+};
 
 const CHECKOUT_TOKEN: &str = "checkout-secret";
 
@@ -345,6 +349,9 @@ async fn reconstructed_failed_runs_retain_workspace_without_active_capsules() {
         fs::write(git_metadata.join("HEAD"), "ref: refs/heads/main\n").assert_value();
         fs::create_dir_all(run_root.join("runtime")).assert_value();
         fs::write(run_root.join("runtime/private"), "remove me\n").assert_value();
+        let staging = checkpoint_directory(fixture.root.path(), &run_id).join("staging");
+        fs::create_dir_all(staging.join("incomplete")).assert_value();
+        fs::write(staging.join("incomplete/workspace"), "temporary full copy").assert_value();
 
         fixture
             .allocator
@@ -368,7 +375,39 @@ async fn reconstructed_failed_runs_retain_workspace_without_active_capsules() {
             "ref: refs/heads/main\n"
         );
         assert!(!run_root.join("runtime").exists());
+        assert!(!staging.exists());
     }
+}
+
+#[tokio::test]
+async fn reconstructed_completed_successor_deletes_the_lineage_repository() {
+    let fixture = CheckoutFixture::new("").await;
+    let successor = RunId::new("checkout-reconstructed-completed-successor");
+    let run_root = fixture.allocator.run_path(&successor);
+    fs::create_dir_all(&run_root).assert_value();
+    let repository = checkpoint_repository(fixture.root.path(), &fixture.run_id);
+    fs::create_dir_all(repository.join("repository/data")).assert_value();
+    fs::write(repository.join("repository/config"), "restic").assert_value();
+    write_recovery(
+        &recovery_path(fixture.root.path(), &successor),
+        &HostedRecoveryDocument {
+            recoverable: false,
+            run_id: Some(successor.clone()),
+            delivery_run_id: Some(fixture.run_id.clone()),
+            resumed_from: Some(fixture.run_id.clone()),
+            successor_run_id: None,
+        },
+    )
+    .assert_value();
+
+    fixture
+        .allocator
+        .destroy_or_confirm_absent(&successor, RunRuntimeExit::Completed)
+        .await
+        .assert_value();
+
+    assert!(!run_root.exists());
+    assert!(!repository.exists());
 }
 
 #[tokio::test]
@@ -531,6 +570,12 @@ async fn successful_and_force_stopped_disposal_remove_current_checkpoint_copies(
                 .count(),
             0
         );
+        assert_eq!(
+            fs::read_dir(fixture.root.child("checkpoint-repositories"))
+                .assert_value()
+                .count(),
+            0
+        );
         assert!(!fixture.allocator.run_path(&fixture.run_id).exists());
     }
 }
@@ -557,6 +602,12 @@ async fn checkpoint_restore_survives_workspace_move_and_discard_keeps_ancestor_c
         .destroy_or_confirm_absent(RunRuntimeExit::Failed)
         .await
         .assert_value();
+    assert_eq!(
+        fs::read_dir(fixture.root.child("checkpoint-repositories"))
+            .assert_value()
+            .count(),
+        1
+    );
 
     let successor = RunId::new("checkpoint-successor");
     let resumed = fixture

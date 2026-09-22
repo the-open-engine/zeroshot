@@ -28,13 +28,17 @@ describe('npm binary shim', () => {
       assert.deepEqual(installer.selectTarget(target.platform, target.arch), {
         target: target.target,
         executable: target.executable,
+        resticExecutable: target.resticExecutable,
       });
     }
     assert.throws(() => installer.selectTarget('plan9', 'mips'), /UNSUPPORTED_ZEROSHOT_HOST/);
   });
 
   it('verifies archive checksums before extraction', () => {
-    const archive = distribution.createArchive(Buffer.from('binary'), 'zeroshot');
+    const archive = distribution.createArchive([
+      { name: 'zeroshot', contents: Buffer.from('binary') },
+      { name: 'restic', contents: Buffer.from('restic') },
+    ]);
     const filename = installer.archiveName('8.0.0', 'x86_64-unknown-linux-musl');
     const manifest = `${distribution.sha256(archive)}  ${filename}\n`;
     assert.doesNotThrow(() => installer.verifyArchive(filename, archive, manifest));

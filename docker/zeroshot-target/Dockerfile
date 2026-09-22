@@ -14,6 +14,19 @@ RUN rustup component add rustfmt clippy \
     && cp -a /usr/local/rustup/. /opt/rustup/ \
     && cp -a /usr/local/cargo/bin /opt/rustup/bin
 
+FROM golang:1.27.1-trixie@sha256:9baa6b4187bbb98d240372a8a235ac0bb6b5ddd52bba1431dc2f7c0705862728 AS restic-builder
+ARG TARGETARCH
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-p=4
+COPY scripts/distribution/build-restic.sh /usr/local/bin/build-restic
+RUN case "$TARGETARCH" in \
+      amd64) target=x86_64-unknown-linux-musl ;; \
+      arm64) target=aarch64-unknown-linux-musl ;; \
+      *) echo "unsupported Restic architecture: $TARGETARCH" >&2; exit 2 ;; \
+    esac \
+    && build-restic /out "$target" \
+    && cp "/out/$target/restic" /out/restic \
+    && /out/restic version
+
 FROM rust-toolchain AS builder
 
 WORKDIR /src
@@ -93,6 +106,7 @@ RUN npm install --global --no-audit --no-fund "npm@${NPM_VERSION}" \
 FROM tooling AS runtime
 
 COPY --from=builder /src/target/release/zeroshot /usr/local/bin/zeroshot
+COPY --from=restic-builder /out/restic /usr/local/bin/restic
 COPY docker/zeroshot-target/entrypoint.sh /usr/local/bin/zeroshot-target-entrypoint
 
 # The native runtime deliberately retains root so it can isolate node processes.

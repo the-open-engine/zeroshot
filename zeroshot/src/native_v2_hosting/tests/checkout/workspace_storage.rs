@@ -1,5 +1,7 @@
 use super::*;
-use crate::native_v2_supervisor::checkpoints::{CheckpointError, FilesystemCheckpointStore};
+use crate::native_v2_supervisor::checkpoints::{
+    CheckpointError, ResticCheckpointStore, ResticCheckpointStoreTestConfig,
+};
 
 struct ExternalStorage {
     reject: bool,
@@ -23,10 +25,19 @@ impl HostedWorkspaceStorage for ExternalStorage {
             b"durable cloud bytes",
         )?;
         Ok(HostedWorkspace {
-            checkpoints: Arc::new(FilesystemCheckpointStore::new(
-                request.checkpoint_directory.to_owned(),
-                request.workspace.to_owned(),
-                request.writers,
+            checkpoints: Arc::new(ResticCheckpointStore::with_program(
+                ResticCheckpointStoreTestConfig {
+                    directory: request.checkpoint_directory.to_owned(),
+                    repository: request.checkpoint_directory.join("repository"),
+                    workspace: request.workspace.to_owned(),
+                    writers: request.writers,
+                    program: crate::native_v2_supervisor::checkpoints::restic::ResticProgram::fake(
+                        request
+                            .workspace
+                            .parent()
+                            .ok_or_else(|| std::io::Error::other("workspace has no parent"))?,
+                    )?,
+                },
             )),
             execution_seed: Vec::new(),
             delivery_run_id: Some(RunId::new("original-cloud-delivery")),

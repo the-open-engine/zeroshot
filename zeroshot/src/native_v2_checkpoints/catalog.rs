@@ -22,7 +22,7 @@ fn point_path(directory: &Path, id: &CheckpointId) -> PathBuf {
     directory.join("points").join(format!("{digest:x}.json"))
 }
 
-fn read<T: DeserializeOwned>(path: &Path) -> Result<T, CheckpointError> {
+pub(super) fn read<T: DeserializeOwned>(path: &Path) -> Result<T, CheckpointError> {
     let mut bytes = Vec::new();
     File::open(path)?
         .take(MAX_METADATA_BYTES + 1)

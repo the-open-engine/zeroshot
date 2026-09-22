@@ -41,6 +41,7 @@ struct PortableBootstrapDocument {
     github_token: Option<String>,
     workspace: PathBuf,
     workspace_lease: PathBuf,
+    checkpoint_repository: PathBuf,
     storage: PathBuf,
     delivery_policy: DeliveryPolicy,
 }
@@ -49,6 +50,7 @@ impl PortableBootstrapDocument {
     fn validate(self) -> Result<PortableControllerBootstrap, PortableControllerError> {
         require_absolute(&self.workspace)?;
         require_absolute(&self.workspace_lease)?;
+        require_absolute(&self.checkpoint_repository)?;
         require_absolute(&self.storage)?;
         let environment = RunEnvironment::exact(&self.submission.runtime, self.connections)?;
         Ok(PortableControllerBootstrap {
@@ -61,6 +63,7 @@ impl PortableBootstrapDocument {
             github_token: self.github_token,
             workspace: self.workspace,
             workspace_lease: self.workspace_lease,
+            checkpoint_repository: self.checkpoint_repository,
             storage: self.storage,
             delivery_policy: self.delivery_policy,
         })
@@ -168,6 +171,7 @@ fn encode_bootstrap(
 ) -> Result<Vec<u8>, PortableControllerError> {
     require_absolute(&bootstrap.workspace)?;
     require_absolute(&bootstrap.workspace_lease)?;
+    require_absolute(&bootstrap.checkpoint_repository)?;
     require_absolute(&bootstrap.storage)?;
     let environment = bootstrap
         .environment
@@ -182,6 +186,7 @@ fn encode_bootstrap(
         github_token: bootstrap.github_token.clone(),
         workspace: bootstrap.workspace.clone(),
         workspace_lease: bootstrap.workspace_lease.clone(),
+        checkpoint_repository: bootstrap.checkpoint_repository.clone(),
         storage: bootstrap.storage.clone(),
         delivery_policy: bootstrap.delivery_policy,
     };

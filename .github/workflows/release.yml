@@ -216,8 +216,39 @@ jobs:
           path: ${{ runner.temp }}/zeroshot-release-notes-v${{ steps.release.outputs.version }}.md
           if-no-files-found: error
 
-  binaries:
+  restic:
     needs: [plan]
+    if: inputs.action == 'dry-run' || inputs.action == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Zeroshot release source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ needs.plan.outputs.commit }}
+
+      - name: Build pinned Restic sidecars for every target
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p restic-output
+          docker run --rm \
+            --volume "${PWD}:/source:ro" \
+            --volume "${PWD}/restic-output:/out" \
+            golang:1.27.1-trixie@sha256:9baa6b4187bbb98d240372a8a235ac0bb6b5ddd52bba1431dc2f7c0705862728 \
+            /source/scripts/distribution/build-restic.sh /out
+
+      - name: Upload pinned Restic sidecars
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zeroshot-restic-v${{ needs.plan.outputs.version }}
+          path: restic-output/**
+          if-no-files-found: error
+
+  binaries:
+    needs: [plan, restic]
     if: inputs.action == 'dry-run' || inputs.action == 'release'
     strategy:
       fail-fast: false
@@ -226,28 +257,34 @@ jobs:
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-latest
             executable: zeroshot
+            restic-executable: restic
             c-compiler: musl-gcc
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
             executable: zeroshot
+            restic-executable: restic
             c-compiler: musl-gcc
           - target: x86_64-apple-darwin
             runner: macos-15-intel
             executable: zeroshot
+            restic-executable: restic
             c-compiler: cc
           - target: aarch64-apple-darwin
             runner: macos-14
             executable: zeroshot
+            restic-executable: restic
             c-compiler: cc
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
             executable: zeroshot.exe
+            restic-executable: restic.exe
             c-compiler: cl.exe
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
     env:
       BINARY_PATH: target/${{ matrix.target }}/release/${{ matrix.executable }}
+      RESTIC_PATH: restic-input/${{ matrix.target }}/${{ matrix.restic-executable }}
       RELEASE_TAG: ${{ needs.plan.outputs.tag }}
     steps:
       - name: Checkout exact Zeroshot release source
@@ -264,6 +301,12 @@ jobs:
 
       - name: Install pinned script dependencies
         run: npm ci --ignore-scripts
+
+      - name: Download matching pinned Restic sidecar
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: zeroshot-restic-v${{ needs.plan.outputs.version }}
+          path: restic-input
 
       - name: Build embedded UI
         run: |
@@ -331,12 +374,16 @@ jobs:
         run: node scripts/distribution.js smoke --binary "$BINARY_PATH"
         shell: bash
 
+      - name: Run standalone Restic sidecar
+        run: node -e "const d=require('./scripts/distribution'); d.smokeRestic(process.env.RESTIC_PATH)"
+
       - name: Package target archive
         run: |
           node scripts/distribution.js package \
             --target "${{ matrix.target }}" \
             --version "$RELEASE_TAG" \
             --binary "$BINARY_PATH" \
+            --restic "$RESTIC_PATH" \
             --out release-assets
         shell: bash
 

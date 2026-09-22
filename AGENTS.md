@@ -158,8 +158,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   imports old provider sessions, secrets, or token usage. Checkpoint IDs never become filesystem paths.
   The reducer owns boundaries: an outer parallel or mapped group is one unit across all nested work
   and dispatch waves. The supervisor captures only after all live executions and cleanup have settled;
-  read-only boundaries reuse bytes. Local/direct storage publishes private immutable filesystem
-  snapshots and catalogs atomically, using reflinks where supported, behind `RunCheckpointStore`.
+  read-only boundaries reuse bytes. Local/direct storage normalizes Git into a temporary private
+  filesystem stage, commits it to one deduplicated Restic repository per recovery lineage, and then
+  removes the full stage. Small catalogs atomically map logical checkpoint IDs to Restic snapshots.
+  Successful lineages delete their catalogs and repository; failed lineages retain both for resume.
   Hosted factories advertise checkpoints only when they implement storage and restore. Snapshot
   restore requires exclusive workspace ownership and preserves the checkout root and Git identity.
 - Hosted workspace recovery uses the optional `resume`, `checkpoints`, and `discard_workspace`

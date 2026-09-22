@@ -47,7 +47,7 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-zeroshot = ["py.typed", "_bin/zeroshot", "_bin/zeroshot.exe"]
+zeroshot = ["py.typed", "_bin/zeroshot", "_bin/zeroshot.exe", "_bin/restic", "_bin/restic.exe"]
 
 [tool.ruff]
 line-length = 100

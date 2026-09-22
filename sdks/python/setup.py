@@ -11,11 +11,17 @@ from setuptools.command.bdist_wheel import bdist_wheel
 from setuptools.command.build_py import build_py
 
 _BINARY_ENV = "ZEROSHOT_BINARY"
+_RESTIC_ENV = "ZEROSHOT_RESTIC_BINARY"
 _PLATFORM_ENV = "ZEROSHOT_PYTHON_WHEEL_PLATFORM"
 
 
 def _binary_source() -> Path | None:
     value = os.environ.get(_BINARY_ENV)
+    return Path(value).resolve() if value else None
+
+
+def _restic_source() -> Path | None:
+    value = os.environ.get(_RESTIC_ENV)
     return Path(value).resolve() if value else None
 
 
@@ -36,6 +42,11 @@ class BuildPythonWithNative(build_py):
         destination = package_root / "_bin" / executable
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
+        restic = _restic_source()
+        if restic is None or not restic.is_file():
+            raise RuntimeError(f"{_RESTIC_ENV} does not identify a file: {restic}")
+        restic_executable = "restic.exe" if os.name == "nt" else "restic"
+        shutil.copy2(restic, package_root / "_bin" / restic_executable)
 
 
 class PlatformWheel(bdist_wheel):
@@ -46,8 +57,8 @@ class PlatformWheel(bdist_wheel):
         self.root_is_pure = False
 
     def run(self) -> None:
-        if _binary_source() is None:
-            raise RuntimeError(f"{_BINARY_ENV} is required when building a wheel")
+        if _binary_source() is None or _restic_source() is None:
+            raise RuntimeError(f"{_BINARY_ENV} and {_RESTIC_ENV} are required when building a wheel")
         super().run()
 
     def get_tag(self) -> tuple[str, str, str]:

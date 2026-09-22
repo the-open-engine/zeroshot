@@ -7,7 +7,7 @@ const path = require('path');
 const zlib = require('zlib');
 const {
   archiveName: artifactArchiveName,
-  extractExecutable,
+  extractExecutables,
   parseChecksumManifest,
   sha256,
   targetForHost: findTargetForHost,
@@ -28,6 +28,7 @@ const targets = Object.freeze(JSON.parse(fs.readFileSync(targetManifestPath, 'ut
 const RELEASE_TAG_PREFIX = 'v';
 const MINIMUM_RELEASE_MAJOR = 8;
 const SKILL_ASSET_NAME = 'zeroshot-skill.md';
+const RESTIC_VERSION = '0.19.1';
 
 function normalizeVersion(tag) {
   const version =
@@ -90,20 +91,31 @@ function tarEntry(name, contents, mode = 0o755) {
   return Buffer.concat([header, contents, padding]);
 }
 
-function createArchive(binary, executable) {
-  const tar = Buffer.concat([tarEntry(executable, binary), Buffer.alloc(1024)]);
+function createArchive(entries) {
+  const names = new Set(entries.map(({ name }) => name));
+  if (entries.length === 0 || names.size !== entries.length) {
+    throw new Error('archive entries must have unique names');
+  }
+  const tar = Buffer.concat([
+    ...entries.map(({ name, contents }) => tarEntry(name, contents)),
+    Buffer.alloc(1024),
+  ]);
   return zlib.gzipSync(tar, { level: 9, mtime: 0 });
 }
 
-function packageTarget({ target, version, binaryPath, outputDirectory }) {
+function packageTarget({ target, version, binaryPath, resticPath, outputDirectory }) {
   const declaration = targets.find((candidate) => candidate.target === target);
   if (!declaration) throw new Error(`undeclared Zeroshot release target: ${target}`);
   const binary = fs.readFileSync(binaryPath);
+  const restic = fs.readFileSync(resticPath);
   const filename = archiveName(version, target);
   fs.mkdirSync(outputDirectory, { recursive: true });
   fs.writeFileSync(
     path.join(outputDirectory, filename),
-    createArchive(binary, declaration.executable)
+    createArchive([
+      { name: declaration.executable, contents: binary },
+      { name: declaration.resticExecutable, contents: restic },
+    ])
   );
   return filename;
 }
@@ -135,7 +147,7 @@ function verifyDistribution({ version, directory }) {
     const filename = archiveName(version, declaration.target);
     const archive = fs.readFileSync(path.join(directory, filename));
     verifyChecksum(filename, archive, manifest);
-    extractExecutable(archive, declaration.executable);
+    extractExecutables(archive, [declaration.executable, declaration.resticExecutable]);
   }
   const skill = fs.readFileSync(path.join(directory, SKILL_ASSET_NAME));
   verifyChecksum(SKILL_ASSET_NAME, skill, manifest);
@@ -194,11 +206,12 @@ function publishAssets({ tag, directory, invokeGh = runGh }) {
 
 module.exports = {
   MINIMUM_RELEASE_MAJOR,
+  RESTIC_VERSION,
   RELEASE_TAG_PREFIX,
   archiveName,
   createArchive,
   createManifest,
-  extractExecutable,
+  extractExecutables,
   normalizeVersion,
   packageTarget,
   parseChecksumManifest,

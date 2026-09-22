@@ -7,7 +7,7 @@ const { URL } = require('url');
 const { installSkills } = require('./skills');
 const {
   archiveName,
-  extractExecutable,
+  extractExecutables,
   parseChecksumManifest,
   targetForHost,
   verifyArchive,
@@ -25,8 +25,40 @@ const HOST_TARGETS = Object.freeze(
 );
 
 function selectTarget(platform = process.platform, arch = process.arch) {
-  const { target, executable } = targetForHost(TARGETS, platform, arch);
-  return { target, executable };
+  const { target, executable, resticExecutable } = targetForHost(TARGETS, platform, arch);
+  return { target, executable, resticExecutable };
+}
+
+function installExecutables(nativeDirectory, entries) {
+  fs.mkdirSync(nativeDirectory, { recursive: true });
+  const stage = fs.mkdtempSync(path.join(nativeDirectory, '.install-'));
+  const replaced = [];
+  const backups = [];
+  try {
+    for (const [name, contents] of entries) {
+      fs.writeFileSync(path.join(stage, name), contents, { mode: 0o755, flag: 'wx' });
+    }
+    for (const [name] of entries) {
+      const destination = path.join(nativeDirectory, name);
+      if (fs.existsSync(destination)) {
+        const backup = path.join(stage, `${name}.previous`);
+        fs.renameSync(destination, backup);
+        backups.push([destination, backup]);
+      }
+    }
+    for (const [name] of entries) {
+      const destination = path.join(nativeDirectory, name);
+      fs.renameSync(path.join(stage, name), destination);
+      replaced.push(destination);
+      if (process.platform !== 'win32') fs.chmodSync(destination, 0o755);
+    }
+  } catch (error) {
+    for (const destination of replaced.reverse()) fs.rmSync(destination, { force: true });
+    for (const [destination, backup] of backups.reverse()) fs.renameSync(backup, destination);
+    throw error;
+  } finally {
+    fs.rmSync(stage, { recursive: true, force: true });
+  }
 }
 
 function download(url, maximumBytes, redirects = 0) {
@@ -108,19 +140,11 @@ async function install(options = {}) {
   const manifest = await fetchBuffer(`${baseUrl}/SHA256SUMS`, MAX_MANIFEST_BYTES);
   const archive = await fetchBuffer(`${baseUrl}/${filename}`, MAX_ARCHIVE_BYTES);
   verifyArchive(filename, archive, manifest.toString('utf8'));
-  const executable = extractExecutable(archive, selected.executable);
+  const executables = extractExecutables(archive, [selected.executable, selected.resticExecutable]);
 
   const nativeDirectory = path.join(packageRoot, 'bin', 'native');
   const destination = path.join(nativeDirectory, selected.executable);
-  const temporary = `${destination}.${process.pid}.tmp`;
-  fs.mkdirSync(nativeDirectory, { recursive: true });
-  try {
-    fs.writeFileSync(temporary, executable, { mode: 0o755, flag: 'wx' });
-    fs.renameSync(temporary, destination);
-    if (process.platform !== 'win32') fs.chmodSync(destination, 0o755);
-  } finally {
-    fs.rmSync(temporary, { force: true });
-  }
+  installExecutables(nativeDirectory, executables);
   const skillResults = installSkills({
     packageRoot,
     homeDirectory: options.homeDirectory,
@@ -136,7 +160,7 @@ module.exports = {
   RELEASE_BASE_URL,
   RELEASE_TAG_PREFIX,
   archiveName,
-  extractExecutable,
+  extractExecutables,
   install,
   parseChecksumManifest,
   selectTarget,

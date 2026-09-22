@@ -58,43 +58,68 @@ function parseTarSize(header) {
   return Number.parseInt(value, 8);
 }
 
-function extractExecutable(archive, expectedName) {
-  let tar;
+function decompressArchive(archive) {
   try {
-    tar = zlib.gunzipSync(archive);
+    return zlib.gunzipSync(archive);
   } catch (error) {
     throw new Error(`ARCHIVE_INVALID: cannot decompress release archive: ${error.message}`);
   }
+}
+
+function readTarEntry(tar, offset, expected, executables) {
+  const header = tar.subarray(offset, offset + 512);
+  if (header.every((byte) => byte === 0)) {
+    if (!tar.subarray(offset).every((byte) => byte === 0)) {
+      throw new Error('ARCHIVE_INVALID: unexpected data after tar terminator');
+    }
+    return null;
+  }
+  const name = header.subarray(0, 100).toString('utf8').replace(/\0.*$/, '');
+  const size = parseTarSize(header.subarray(124, 136));
+  const start = offset + 512;
+  const end = start + size;
+  if (end > tar.length) throw new Error('ARCHIVE_INVALID: truncated tar entry');
+  if (!expected.has(name) || ![0, '0'.charCodeAt(0)].includes(header[156])) {
+    throw new Error(`ARCHIVE_INVALID: unexpected archive entry ${name}`);
+  }
+  if (executables.has(name)) throw new Error(`ARCHIVE_INVALID: duplicate ${name}`);
+  executables.set(name, Buffer.from(tar.subarray(start, end)));
+  return start + Math.ceil(size / 512) * 512;
+}
+
+function requireExpectedExecutables(expected, executables) {
+  for (const name of expected) {
+    if (!executables.has(name)) {
+      throw new Error(`ARCHIVE_INVALID: archive does not contain ${name}`);
+    }
+  }
+}
+
+function extractExecutables(archive, expectedNames) {
+  const expected = new Set(expectedNames);
+  if (expected.size !== expectedNames.length || expected.size === 0) {
+    throw new Error('ARCHIVE_INVALID: expected executable names must be unique');
+  }
+  const tar = decompressArchive(archive);
   let offset = 0;
-  let executable = null;
+  let terminated = false;
+  const executables = new Map();
   while (offset + 512 <= tar.length) {
-    const header = tar.subarray(offset, offset + 512);
-    if (header.every((byte) => byte === 0)) {
-      if (!tar.subarray(offset).every((byte) => byte === 0)) {
-        throw new Error('ARCHIVE_INVALID: unexpected data after tar terminator');
-      }
+    const next = readTarEntry(tar, offset, expected, executables);
+    if (next === null) {
+      terminated = true;
       break;
     }
-    const name = header.subarray(0, 100).toString('utf8').replace(/\0.*$/, '');
-    const size = parseTarSize(header.subarray(124, 136));
-    const start = offset + 512;
-    const end = start + size;
-    if (end > tar.length) throw new Error('ARCHIVE_INVALID: truncated tar entry');
-    if (name === expectedName) {
-      if (executable) throw new Error(`ARCHIVE_INVALID: duplicate ${expectedName}`);
-      executable = Buffer.from(tar.subarray(start, end));
-    } else {
-      throw new Error(`ARCHIVE_INVALID: unexpected archive entry ${name}`);
-    }
-    offset = start + Math.ceil(size / 512) * 512;
+    offset = next;
   }
-  if (!executable) throw new Error(`ARCHIVE_INVALID: archive does not contain ${expectedName}`);
-  return executable;
+  if (!terminated) throw new Error('ARCHIVE_INVALID: archive has no tar terminator');
+  requireExpectedExecutables(expected, executables);
+  return executables;
 }
 
 module.exports = {
   archiveName,
-  extractExecutable,
+  extractExecutables,
   parseChecksumManifest,
   sha256,
   targetForHost,

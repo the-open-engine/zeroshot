@@ -1,8 +1,6 @@
 use super::*;
 use crate::full_v1_reducer::ExecutionBoundary;
-use crate::native_v2_supervisor::checkpoints::{
-    CheckpointError, CheckpointRestore, FilesystemCheckpointStore, RunCheckpointStore,
-};
+use crate::native_v2_supervisor::checkpoints::{CheckpointError, CheckpointRestore, RunCheckpointStore};
 use openengine_cluster_protocol::RunCheckpointsParams;
 
 #[derive(Clone, Debug)]
@@ -192,7 +190,8 @@ async fn repeated_group_entry_keeps_one_catalog_point_and_its_original_workspace
     let directory = root.path().join("catalog");
     std::fs::create_dir(&workspace).assert_value();
     std::fs::write(workspace.join("state"), "before map").assert_value();
-    let store = FilesystemCheckpointStore::new(
+    let store = crate::native_v2_supervisor::checkpoints::fake_checkpoint_store(
+        root.path(),
         directory.clone(),
         workspace.clone(),
         BTreeSet::from([
@@ -236,6 +235,7 @@ async fn repeated_group_entry_keeps_one_catalog_point_and_its_original_workspace
         },
         &workspace,
     )
+    .await
     .assert_value();
     assert!(restored.is_empty());
     assert_eq!(
@@ -250,6 +250,7 @@ async fn repeated_group_entry_keeps_one_catalog_point_and_its_original_workspace
         },
         &workspace,
     )
+    .await
     .assert_value();
     assert_eq!(restored, history);
     assert_eq!(

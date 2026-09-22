@@ -29,12 +29,19 @@ describe('canonical distribution', () => {
     assert.throws(() => distribution.normalizeVersion('zeroshot-v8.0.0'), /expected X\.Y\.Z/);
   });
 
-  it('builds deterministic single-executable archives', () => {
+  it('builds deterministic engine-and-Restic archives', () => {
     const binary = Buffer.from('zeroshot-binary');
-    const first = distribution.createArchive(binary, 'zeroshot');
-    const second = distribution.createArchive(binary, 'zeroshot');
+    const restic = Buffer.from('restic-binary');
+    const entries = [
+      { name: 'zeroshot', contents: binary },
+      { name: 'restic', contents: restic },
+    ];
+    const first = distribution.createArchive(entries);
+    const second = distribution.createArchive(entries);
     assert.deepEqual(first, second);
-    assert.deepEqual(distribution.extractExecutable(first, 'zeroshot'), binary);
+    const extracted = distribution.extractExecutables(first, ['zeroshot', 'restic']);
+    assert.deepEqual(extracted.get('zeroshot'), binary);
+    assert.deepEqual(extracted.get('restic'), restic);
     assert.equal(
       distribution.archiveName('v8.0.0', 'x86_64-unknown-linux-musl'),
       'zeroshot-v8.0.0-x86_64-unknown-linux-musl.tar.gz'
@@ -45,13 +52,16 @@ describe('canonical distribution', () => {
   it('creates and verifies the complete declared target set', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-distribution-test-'));
     const binary = path.join(directory, 'zeroshot');
+    const restic = path.join(directory, 'restic');
     fs.writeFileSync(binary, 'fixture');
+    fs.writeFileSync(restic, 'restic fixture');
     try {
       for (const target of distribution.targets) {
         distribution.packageTarget({
           target: target.target,
           version: '8.0.0',
           binaryPath: binary,
+          resticPath: restic,
           outputDirectory: directory,
         });
       }

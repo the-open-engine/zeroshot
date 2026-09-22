@@ -29,6 +29,8 @@ def test_sdk_release_is_manual_and_zeroshot_release_triggered() -> None:
     assert "--pattern SHA256SUMS" in workflow
     assert "checksum mismatch for {archive}" in workflow
     assert '[[ "$reported_version" == "zeroshot $ZEROSHOT_VERSION" ]]' in workflow
+    assert '[[ "$restic_version" == "restic 0.19.1 compiled with "* ]]' in workflow
+    assert 'echo "ZEROSHOT_RESTIC_BINARY=$restic_path"' in workflow
     assert "pypa/gh-action-pypi-publish@" in workflow
     assert "python-sdk-release:" in zeroshot_workflow
     assert "sdk_revision: 1" in zeroshot_workflow

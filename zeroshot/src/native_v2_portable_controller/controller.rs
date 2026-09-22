@@ -73,12 +73,7 @@ impl PortableRunController {
         paths: PortableControllerPaths,
         run_id: RunId,
     ) -> Result<Self, PortableControllerError> {
-        require_absolute(paths.storage())?;
-        validate_existing_storage(paths.storage())?;
-        validate_existing_ledger_path(&paths.ledger())?;
-        let lease = Arc::new(ControllerLease::acquire(paths.lease())?);
-        clear_stale_endpoint(&paths)?;
-        let ledger = Arc::new(SqliteRunLedger::open(paths.ledger())?);
+        let (lease, ledger) = open_observer_storage(&paths)?;
         if !validate_existing_run(ledger.as_ref(), &run_id).await? {
             return Err(PortableControllerError::DurableIdentity);
         }
@@ -107,7 +102,7 @@ impl PortableRunController {
         E: std::error::Error + Send + Sync + 'static,
     {
         let prepared = prepare_controller_start(&bootstrap).await?;
-        let prepared_runtime = prepare_runtime(&prepared, &bootstrap, runtime_factory)?;
+        let prepared_runtime = prepare_runtime(&prepared, &bootstrap, runtime_factory).await?;
         let allocator = Arc::new(SingleRunAllocator::new(
             bootstrap.run_id.clone(),
             prepared_runtime.runtime,
@@ -219,6 +214,20 @@ impl PortableRunController {
     }
 }
 
+fn open_observer_storage(
+    paths: &PortableControllerPaths,
+) -> Result<(Arc<ControllerLease>, Arc<SqliteRunLedger>), PortableControllerError> {
+    require_absolute(paths.storage())?;
+    validate_existing_storage(paths.storage())?;
+    validate_existing_ledger_path(&paths.ledger())?;
+    let lease = Arc::new(ControllerLease::acquire(paths.lease())?);
+    clear_stale_endpoint(paths)?;
+    remove_directory_if_present(&paths.storage().join("checkpoints/staging"))
+        .map_err(PortableControllerError::Io)?;
+    let ledger = Arc::new(SqliteRunLedger::open(paths.ledger())?);
+    Ok((lease, ledger))
+}
+
 async fn prepare_controller_start(
     bootstrap: &PortableControllerBootstrap,
 ) -> Result<PreparedControllerStart, PortableControllerError> {
@@ -258,7 +267,7 @@ fn open_controller_storage(
     Ok((paths, lease, ledger))
 }
 
-fn prepare_runtime<F, E>(
+async fn prepare_runtime<F, E>(
     prepared: &PreparedControllerStart,
     bootstrap: &PortableControllerBootstrap,
     runtime_factory: F,
@@ -282,6 +291,7 @@ where
     let execution_seed = match &bootstrap.checkpoint {
         Some(selection) => {
             crate::native_v2_supervisor::checkpoints::restore(selection, &bootstrap.workspace)
+                .await
                 .map_err(|error| PortableControllerError::Io(error.0))?
         }
         None => Vec::new(),
@@ -292,13 +302,16 @@ where
     runtime.cleanup = Arc::new(PortableCheckpointCleanup {
         inner: runtime.cleanup,
         directory: prepared.paths.storage().join("checkpoints"),
+        repository: bootstrap.checkpoint_repository.clone(),
     });
     runtime.checkpoints = Some(Arc::new(
-        crate::native_v2_supervisor::checkpoints::FilesystemCheckpointStore::new(
+        crate::native_v2_supervisor::checkpoints::ResticCheckpointStore::new(
             prepared.paths.storage().join("checkpoints"),
+            bootstrap.checkpoint_repository.clone(),
             bootstrap.workspace.clone(),
             crate::native_v2_admission::writer_nodes(&prepared.admitted),
-        ),
+        )
+        .map_err(|error| PortableControllerError::Io(error.0))?,
     ));
     Ok(PreparedRuntime {
         runtime: Some(runtime),
@@ -307,9 +320,10 @@ where
     })
 }
 
-struct PortableCheckpointCleanup {
-    inner: Arc<dyn CapsuleCleanup>,
-    directory: PathBuf,
+pub(super) struct PortableCheckpointCleanup {
+    pub(super) inner: Arc<dyn CapsuleCleanup>,
+    pub(super) directory: PathBuf,
+    pub(super) repository: PathBuf,
 }
 
 #[async_trait]
@@ -319,15 +333,31 @@ impl CapsuleCleanup for PortableCheckpointCleanup {
         exit: RunRuntimeExit,
     ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable> {
         let destroyed = self.inner.destroy_or_confirm_absent(exit).await?;
-        // Local failed attempts, including force-stopped ones, retain their user-owned workspace.
-        if exit == RunRuntimeExit::Completed {
-            match std::fs::remove_dir_all(&self.directory) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(_) => return Err(CapsuleCleanupUnavailable),
+        remove_directory_if_present(&self.directory.join("staging"))
+            .map_err(|_| CapsuleCleanupUnavailable)?;
+        // Only failed or lost runtimes can become recoverable. Completed and explicitly stopped
+        // runs have no successor that could consume their checkpoint repository.
+        if matches!(
+            exit,
+            RunRuntimeExit::Completed | RunRuntimeExit::ForceStopped
+        ) {
+            for path in [&self.directory, &self.repository] {
+                match std::fs::remove_dir_all(path) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(_) => return Err(CapsuleCleanupUnavailable),
+                }
             }
         }
         Ok(destroyed)
+    }
+}
+
+fn remove_directory_if_present(path: &Path) -> io::Result<()> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
     }
 }
 

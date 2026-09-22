@@ -5,7 +5,7 @@ use std::process::Command;
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::json;
 
-use super::{SnapshotId, capture, metadata, restore};
+use super::{SnapshotId, capture, metadata, restore, restore_staged};
 
 struct Fixture {
     _root: tempfile::TempDir,
@@ -229,6 +229,28 @@ fn capture_is_immutable_and_restore_replaces_the_entire_selected_tree() {
     assert_eq!(
         fs::read_to_string(fixture.tree(&id).join("source")).assert_value(),
         "checkpoint"
+    );
+}
+
+#[test]
+fn disposable_restic_stage_installs_without_a_second_workspace_copy() {
+    let fixture = Fixture::new();
+    fs::write(fixture.workspace.join("source"), "checkpoint").assert_value();
+    let id = capture(&fixture.workspace, &fixture.snapshots, &()).assert_value();
+    let stage = fixture.snapshots.join(id.as_str());
+    fs::write(fixture.workspace.join("source"), "later edits").assert_value();
+    fs::write(fixture.workspace.join("extra"), "remove me").assert_value();
+
+    restore_staged(&stage, &fixture.workspace).assert_value();
+
+    assert_eq!(
+        fs::read_to_string(fixture.workspace.join("source")).assert_value(),
+        "checkpoint"
+    );
+    assert!(!fixture.workspace.join("extra").exists());
+    assert_eq!(
+        fs::read_dir(stage.join("workspace")).assert_value().count(),
+        0
     );
 }
 

@@ -36,7 +36,7 @@ use crate::native_v2_delivery::DeliveryTarget;
 use crate::native_v2_portable_controller::WorkspaceIdentity;
 use crate::native_v2_supervisor::RunRuntimeExit;
 use crate::native_v2_supervisor::checkpoints::{
-    self, CheckpointError, CheckpointRestore, FilesystemCheckpointStore,
+    self, CheckpointError, CheckpointRestore, ResticCheckpointStore,
 };
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
 use serde::{Deserialize, Serialize};
@@ -71,16 +71,16 @@ const MAX_RECOVERY_LINEAGE_DEPTH: usize = 64;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct HostedRecoveryDocument {
-    recoverable: bool,
+pub(super) struct HostedRecoveryDocument {
+    pub(super) recoverable: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    run_id: Option<RunId>,
+    pub(super) run_id: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    delivery_run_id: Option<RunId>,
+    pub(super) delivery_run_id: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    resumed_from: Option<RunId>,
+    pub(super) resumed_from: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    successor_run_id: Option<RunId>,
+    pub(super) successor_run_id: Option<RunId>,
 }
 
 struct CapsuleBuildRequest<'a> {
@@ -95,6 +95,7 @@ struct CapsuleBuildRequest<'a> {
 
 struct WorkspacePreparation<'a> {
     run_id: &'a RunId,
+    delivery_run_id: &'a RunId,
     workspace: &'a Path,
     admitted: &'a AdmittedRun,
     state: &'a ProductionCapsuleState,
@@ -142,6 +143,7 @@ struct RetainedAllocationClaim {
 struct CleanupRunRequest<'a> {
     run_root: &'a Path,
     checkpoint_directory: &'a Path,
+    checkpoint_repository: &'a Path,
     recovery_path: &'a Path,
     run_id: &'a RunId,
     delivery_run_id: &'a RunId,
@@ -230,6 +232,10 @@ impl ProductionCapsuleAllocator {
             endpoint: OnceLock::new(),
             run_root: run_directory(&self.config.storage_root, request.run_id),
             checkpoint_directory: checkpoint_directory(&self.config.storage_root, request.run_id),
+            checkpoint_repository: checkpoint_repository(
+                &self.config.storage_root,
+                request.delivery_run_id,
+            ),
             run_root_identity: OnceLock::new(),
             recovery_path: recovery_path(&self.config.storage_root, request.run_id),
             delivery_run_id: request.delivery_run_id.clone(),
@@ -280,6 +286,7 @@ impl ProductionCapsuleAllocator {
         let hosted_workspace = self
             .prepare_hosted_workspace(WorkspacePreparation {
                 run_id,
+                delivery_run_id: request.delivery_run_id,
                 workspace: &filesystem.workspace,
                 admitted: request.admitted,
                 state: &state,
@@ -373,11 +380,15 @@ impl ProductionCapsuleAllocator {
             return Ok(prepared);
         }
         Ok(HostedWorkspace {
-            checkpoints: Arc::new(FilesystemCheckpointStore::new(
-                directory,
-                request.workspace.to_owned(),
-                writers,
-            )),
+            checkpoints: Arc::new(
+                ResticCheckpointStore::new(
+                    directory.clone(),
+                    checkpoint_repository(&self.config.storage_root, request.delivery_run_id),
+                    request.workspace.to_owned(),
+                    writers,
+                )
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
+            ),
             execution_seed: Vec::new(),
             delivery_run_id: None,
         })
@@ -397,6 +408,7 @@ impl ProductionCapsuleAllocator {
                 },
                 &CapsuleBuildPaths::new(&self.config.storage_root, request.run_id).workspace,
             )
+            .await
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
             None => Vec::new(),
         };
@@ -666,12 +678,22 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                     return Err(CapsuleCleanupUnavailable);
                 }
             } else {
+                let recovery = recovery_path(&self.config.storage_root, run_id);
+                let document = read_recovery(&recovery);
+                let delivery_run_id = document
+                    .as_ref()
+                    .and_then(|document| document.delivery_run_id.as_ref())
+                    .unwrap_or(run_id);
                 cleanup_run_directory(CleanupRunRequest {
                     run_root: &path,
                     checkpoint_directory: &checkpoint_directory(&self.config.storage_root, run_id),
-                    recovery_path: &recovery_path(&self.config.storage_root, run_id),
+                    checkpoint_repository: &checkpoint_repository(
+                        &self.config.storage_root,
+                        delivery_run_id,
+                    ),
+                    recovery_path: &recovery,
                     run_id,
-                    delivery_run_id: run_id,
+                    delivery_run_id,
                     recovery_eligible: true,
                     exit,
                 })?;
@@ -731,6 +753,10 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                             &self.config.storage_root,
                             run_id,
                         ),
+                        checkpoint_repository: &checkpoint_repository(
+                            &self.config.storage_root,
+                            &claim.delivery_run_id,
+                        ),
                         recovery_path: &paths.run_recovery,
                         run_id,
                         delivery_run_id: &claim.delivery_run_id,
@@ -786,6 +812,11 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
             return Ok(false);
         }
         remove_run_directory(&checkpoint_directory(&self.config.storage_root, run_id))?;
+        let delivery_run_id = document.delivery_run_id.as_ref().unwrap_or(run_id);
+        remove_run_directory(&checkpoint_repository(
+            &self.config.storage_root,
+            delivery_run_id,
+        ))?;
         remove_run_directory(&root)?;
         document.recoverable = false;
         write_recovery(&metadata_path, &document)?;
@@ -810,6 +841,7 @@ struct ProductionCapsuleState {
     endpoint: OnceLock<Arc<NativeCapsuleNodeEndpoint>>,
     run_root: PathBuf,
     checkpoint_directory: PathBuf,
+    checkpoint_repository: PathBuf,
     run_root_identity: OnceLock<WorkspaceIdentity>,
     recovery_path: PathBuf,
     delivery_run_id: RunId,
@@ -865,6 +897,7 @@ impl ProductionCapsuleState {
         cleanup_run_directory(CleanupRunRequest {
             run_root: &self.run_root,
             checkpoint_directory: &self.checkpoint_directory,
+            checkpoint_repository: &self.checkpoint_repository,
             recovery_path: &self.recovery_path,
             run_id,
             delivery_run_id: self
@@ -995,6 +1028,7 @@ fn dispose_run_directory(request: CleanupRunRequest<'_>) -> Result<(), CapsuleCl
         .is_some_and(|recovery| recovery.successor_run_id.is_some());
     if !ancestor {
         remove_run_directory(request.checkpoint_directory)?;
+        remove_run_directory(request.checkpoint_repository)?;
     }
     Ok(())
 }
@@ -1026,6 +1060,7 @@ fn failed_run_directory_state(
 fn retain_failed_workspace(
     request: CleanupRunRequest<'_>,
 ) -> Result<(), CapsuleCleanupUnavailable> {
+    remove_run_directory(&request.checkpoint_directory.join("staging"))?;
     let runtime = request.run_root.join("runtime");
     if runtime.exists() {
         std::fs::remove_dir_all(runtime).map_err(|_| CapsuleCleanupUnavailable)?;
@@ -1104,7 +1139,7 @@ fn transfer_entry_ownership(path: &Path, uid: u32, gid: u32) -> std::io::Result<
     std::os::unix::fs::lchown(path, Some(uid), Some(gid))
 }
 
-fn recovery_path(root: &Path, run_id: &RunId) -> PathBuf {
+pub(super) fn recovery_path(root: &Path, run_id: &RunId) -> PathBuf {
     let mut digest = Sha256::new();
     digest.update(b"zeroshot/native-v2/workspace-recovery/v1\0");
     digest.update(run_id.as_str().as_bytes());
@@ -1116,7 +1151,7 @@ fn read_recovery(path: &Path) -> Option<HostedRecoveryDocument> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
-fn write_recovery(
+pub(super) fn write_recovery(
     path: &Path,
     document: &HostedRecoveryDocument,
 ) -> Result<(), CapsuleCleanupUnavailable> {
@@ -1253,11 +1288,19 @@ fn run_directory(root: &Path, run_id: &RunId) -> PathBuf {
     root.join("runs").join(format!("{:x}", digest.finalize()))
 }
 
-fn checkpoint_directory(root: &Path, run_id: &RunId) -> PathBuf {
+pub(super) fn checkpoint_directory(root: &Path, run_id: &RunId) -> PathBuf {
     let mut digest = Sha256::new();
     digest.update(b"zeroshot/native-v2/workspace-checkpoints/v1\0");
     digest.update(run_id.as_str().as_bytes());
     root.join("checkpoints")
+        .join(format!("{:x}", digest.finalize()))
+}
+
+pub(super) fn checkpoint_repository(root: &Path, delivery_run_id: &RunId) -> PathBuf {
+    let mut digest = Sha256::new();
+    digest.update(b"zeroshot/native-v2/workspace-checkpoint-repository/v1\0");
+    digest.update(delivery_run_id.as_str().as_bytes());
+    root.join("checkpoint-repositories")
         .join(format!("{:x}", digest.finalize()))
 }
 
