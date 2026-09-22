@@ -174,9 +174,12 @@ fn auto_research_leaves(delivery: TemplateDelivery) -> Vec<&'static str> {
         "abort_execution",
         "abort_scouting",
         "abort_review",
+        "audit_disposition",
         "bootstrap",
         "experiment",
-        "finalize_iteration",
+        "finalize_aborted",
+        "finalize_adopted",
+        "finalize_record_only",
         "research_judge",
         "research_scout",
         "select_hypothesis",
@@ -409,6 +412,26 @@ fn assert_scout_topology(iteration_nodes: &[&GraphNode]) {
 }
 
 fn assert_judge_topology(iteration_nodes: &[&GraphNode]) {
+    let judge_phase = iteration_nodes
+        .iter()
+        .find_map(|node| match node {
+            GraphNode::Map(node) if node.name.as_str() == "judge_phase" => Some(node),
+            _ => None,
+        })
+        .assert_value_with("judge phase");
+    assert_eq!(judge_phase.max_items.get(), 1);
+    assert!(judge_phase.promoted_state_paths.is_empty());
+
+    let audit_phase = iteration_nodes
+        .iter()
+        .find_map(|node| match node {
+            GraphNode::Map(node) if node.name.as_str() == "disposition_audit_phase" => Some(node),
+            _ => None,
+        })
+        .assert_value_with("disposition audit phase");
+    assert_eq!(audit_phase.max_items.get(), 1);
+    assert_eq!(audit_phase.body.name().as_str(), "audit_disposition_stage");
+
     let judges = iteration_nodes
         .iter()
         .find_map(|node| match node {
@@ -480,12 +503,7 @@ fn assert_recovery_route(iteration_nodes: &[&GraphNode], choice_name: &str, stag
 }
 
 fn assert_guarded_finalizers(iteration_nodes: &[&GraphNode]) {
-    for name in [
-        "abort_execution",
-        "abort_review",
-        "abort_scouting",
-        "finalize_iteration",
-    ] {
+    for name in ["abort_execution", "abort_scouting"] {
         let result_name = format!("{name}_result");
         let route = find_choice(iteration_nodes, &result_name);
         let Guard::In { value, labels } = &route.branches.as_slice()[0].when else {
@@ -601,35 +619,118 @@ fn find_choice<'a>(nodes: &'a [&GraphNode], name: &str) -> &'a ChoiceNode {
 
 fn assert_research_decision(iteration_nodes: &[&GraphNode]) {
     let decision = find_choice(iteration_nodes, "research_decision");
-    assert_eq!(decision.branches.as_slice().len(), 2);
+    assert_eq!(decision.branches.as_slice().len(), 5);
     assert_eq!(
         decision.branches.as_slice()[0].node.name().as_str(),
-        "abort_review_stage"
+        "abort_review"
     );
     assert_eq!(
         decision.branches.as_slice()[1].node.name().as_str(),
         "judge_activation_overflow"
     );
+    assert_disposition_routes(decision);
     assert_eq!(
         decision.otherwise.as_ref().assert_value().name().as_str(),
-        "finalize_iteration_stage"
+        "invalid_judge_consensus"
     );
-    let finalizer = iteration_nodes
-        .iter()
-        .find_map(|node| match node {
-            GraphNode::Step(node) if node.name.as_str() == "finalize_iteration" => Some(node),
-            _ => None,
-        })
-        .assert_value_with("consensus finalizer");
-    assert!(finalizer.instructions.as_ref().is_some_and(|value| {
-        value
-            .as_str()
-            .contains("exactly three complete judge verdicts")
-            && value.as_str().contains("all three verdicts are adopt")
-            && value
+    assert_disposition_stages(iteration_nodes);
+}
+
+fn assert_disposition_routes(decision: &ChoiceNode) {
+    for (branch, count, label, target) in [
+        (
+            &decision.branches.as_slice()[2],
+            1,
+            "abort",
+            "finalize_aborted",
+        ),
+        (
+            &decision.branches.as_slice()[3],
+            3,
+            "adopt",
+            "finalize_adopted",
+        ),
+        (
+            &decision.branches.as_slice()[4],
+            1,
+            "record_only",
+            "finalize_record_only",
+        ),
+    ] {
+        let Guard::KOfMap {
+            count: actual_count,
+            value,
+            labels,
+        } = &branch.when
+        else {
+            panic!("research disposition must use a mapped verdict guard");
+        };
+        assert_eq!(actual_count.get(), count);
+        assert_eq!(value.name.as_str(), "research_judge");
+        assert_eq!(value.source, ControlSource::Signal);
+        assert_eq!(
+            value.field.as_ref().map(FieldName::as_str),
+            Some(VERDICT_FIELD)
+        );
+        assert_eq!(labels, &enum_labels(&[label]).assert_value());
+        assert_eq!(branch.node.name().as_str(), target);
+    }
+}
+
+fn assert_disposition_stages(iteration_nodes: &[&GraphNode]) {
+    for (finalizer_name, disposition) in [
+        ("finalize_aborted", "abort"),
+        ("finalize_adopted", "adopt"),
+        ("finalize_record_only", "record_only"),
+    ] {
+        let finalizer = iteration_nodes
+            .iter()
+            .find_map(|node| match node {
+                GraphNode::Step(node) if node.name.as_str() == finalizer_name => Some(node),
+                _ => None,
+            })
+            .assert_value_with(finalizer_name);
+        assert!(finalizer.instructions.as_ref().is_some_and(|value| {
+            value
                 .as_str()
-                .contains("best supported historical findings")
+                .contains(&format!("graph selected '{disposition}'"))
+                && value.as_str().contains("independently auditable")
+                && value
+                    .as_str()
+                    .contains("best supported historical findings")
+        }));
+    }
+
+    let auditor = find_verifier(iteration_nodes, "audit_disposition");
+    assert_eq!(
+        auditor.worker.as_str(),
+        "builtin.agent.research-disposition-auditor@1"
+    );
+    assert_eq!(
+        auditor
+            .signals
+            .get(&field_name(VERDICT_FIELD).assert_value()),
+        Some(&enum_labels(&[ACCEPTED_LABEL, REJECTED_LABEL]).assert_value())
+    );
+    assert!(auditor.instructions.as_ref().is_some_and(|value| {
+        value.as_str().contains("required disposition")
+            && value.as_str().contains("current filesystem")
     }));
+
+    let audit_result = find_choice(iteration_nodes, "audit_disposition_result");
+    assert_eq!(audit_result.branches.as_slice().len(), 3);
+    assert!(matches!(
+        audit_result.branches.as_slice()[0].node,
+        GraphNode::Fail(_)
+    ));
+    assert!(matches!(
+        audit_result.branches.as_slice()[1].node,
+        GraphNode::Fail(_)
+    ));
+    assert_eq!(
+        audit_result.branches.as_slice()[2].node.name().as_str(),
+        "audit_disposition_accepted"
+    );
 }
 
 #[test]

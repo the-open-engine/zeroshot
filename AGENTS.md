@@ -294,9 +294,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   policy checks. Feedback is untrusted text and delivery credentials never enter the repair worker.
 - The built-in `auto-research` graph runs exactly ten iterations. Explorer, synthesizer, and
   challenger scouts propose bounded directions; evidence, method, and progress judges return
-  `adopt`, `record_only`, or `abort`. Unanimous adoption keeps workspace changes. Record-only retains
-  a supported negative or inconclusive finding while restoring changes; any abort restores changes
-  and records invalid, incomplete, or unsafe evidence. The charter separates non-negotiable
+  `adopt`, `record_only`, or `abort`. Graph guards route any abort, unanimous adoption, and the
+  remaining record-only consensus to separate finalizers. A second one-item phase keeps judge controls
+  bounded while an independent auditor recomputes consensus from the finalized evaluations and verifies
+  the decision, hashes, and retained or restored filesystem before the iteration can continue. Unanimous
+  adoption keeps workspace changes. Record-only retains a supported negative
+  or inconclusive finding while restoring changes; any abort restores changes and records invalid,
+  incomplete, or unsafe evidence. The charter separates non-negotiable
   invariants from optional progress measures. Once evidence proves the retained workspace violates
   an invariant, selectors prioritize repair and judges cannot reject a verified repair solely for
   missing an optional optimization threshold. Mutable state and summaries identify the retained

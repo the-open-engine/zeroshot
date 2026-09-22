@@ -343,7 +343,7 @@ fn execution_stage(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError
                  Return a Conventional Commit title and short checkpoint description.",
             )?,
         }])?,
-        otherwise: Some(Box::new(judge_phase(state.clone())?)),
+        otherwise: Some(Box::new(review_stage(state.clone())?)),
         promoted_state_paths: Vec::new(),
     });
     sequence(
@@ -405,6 +405,15 @@ fn experiment() -> Result<GraphNode, BuiltinTemplateError> {
     )
 }
 
+fn review_stage(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
+    sequence(
+        "review_stage",
+        state.clone(),
+        vec![judge_phase(state.clone())?, disposition_audit_phase(state)?],
+        Vec::new(),
+    )
+}
+
 fn judge_phase(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
     Ok(GraphNode::Map(MapNode {
         name: node_name("judge_phase")?,
@@ -425,6 +434,19 @@ fn judge_stage(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
         vec![judge_map(state.clone())?, research_decision(state)?],
         Vec::new(),
     )
+}
+
+fn disposition_audit_phase(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
+    Ok(GraphNode::Map(MapNode {
+        name: node_name("disposition_audit_phase")?,
+        state: state.clone(),
+        body: Box::new(decision_audit_stage(state)?),
+        over: DataSelector::State {
+            path: field_path(WORK_ITEMS_FIELD)?,
+        },
+        max_items: positive(1)?,
+        promoted_state_paths: Vec::new(),
+    }))
 }
 
 fn judge_map(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
@@ -476,6 +498,54 @@ fn judge() -> Result<GraphNode, BuiltinTemplateError> {
     }))
 }
 
+#[derive(Clone, Copy)]
+enum ResearchDisposition {
+    Abort,
+    Adopt,
+    RecordOnly,
+}
+
+impl ResearchDisposition {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Abort => ABORT_LABEL,
+            Self::Adopt => ADOPT_LABEL,
+            Self::RecordOnly => RECORD_ONLY_LABEL,
+        }
+    }
+
+    fn finalizer_name(self) -> &'static str {
+        match self {
+            Self::Abort => "finalize_aborted",
+            Self::Adopt => "finalize_adopted",
+            Self::RecordOnly => "finalize_record_only",
+        }
+    }
+
+    fn finalizer_action(self) -> &'static str {
+        match self {
+            Self::Abort => {
+                "The graph selected 'abort' because at least one judge emitted abort. Do not \
+                 reinterpret the verdicts. Restore every changed workspace path byte-for-byte from \
+                 the scratch manifest, remove paths created by the experiment, prove restoration \
+                 against the prior state, and finalize the draft with disposition 'abort'."
+            }
+            Self::Adopt => {
+                "The graph selected 'adopt' because all three judges emitted adopt. Do not \
+                 reinterpret the verdicts. Keep the reviewed workspace changes and finalize the \
+                 draft with disposition 'adopt'."
+            }
+            Self::RecordOnly => {
+                "The graph selected 'record_only' because at least one judge emitted record_only \
+                 and none emitted abort. Do not reinterpret the verdicts. Restore every changed \
+                 workspace path byte-for-byte from the scratch manifest, remove paths created by \
+                 the experiment, prove restoration against the prior state, and finalize the draft \
+                 with disposition 'record_only'."
+            }
+        }
+    }
+}
+
 fn research_decision(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
     Ok(GraphNode::Choice(ChoiceNode {
         name: node_name("research_decision")?,
@@ -483,8 +553,7 @@ fn research_decision(state: PayloadType) -> Result<GraphNode, BuiltinTemplateErr
         branches: non_empty(vec![
             ChoiceBranch {
                 when: mapped_error_guard("research_judge")?,
-                node: recovery_stage(
-                    state.clone(),
+                node: recovery_worker(
                     "abort_review",
                     "An independent judge failed. Restore the workspace from the current scratch \
                      manifest, remove newly created paths, and prove restoration against the prior \
@@ -505,14 +574,25 @@ fn research_decision(state: PayloadType) -> Result<GraphNode, BuiltinTemplateErr
                 )?,
                 node: fail("judge_activation_overflow", "invalid_research_topology")?,
             },
+            ChoiceBranch {
+                when: mapped_verdict_guard(1, &[ABORT_LABEL])?,
+                node: decision_worker(ResearchDisposition::Abort)?,
+            },
+            ChoiceBranch {
+                when: mapped_verdict_guard(3, &[ADOPT_LABEL])?,
+                node: decision_worker(ResearchDisposition::Adopt)?,
+            },
+            ChoiceBranch {
+                when: mapped_verdict_guard(1, &[RECORD_ONLY_LABEL])?,
+                node: decision_worker(ResearchDisposition::RecordOnly)?,
+            },
         ])?,
-        otherwise: Some(Box::new(decision_stage(state.clone())?)),
+        otherwise: Some(Box::new(fail(
+            "invalid_judge_consensus",
+            "invalid_judge_consensus",
+        )?)),
         promoted_state_paths: paths(&[TITLE_FIELD, DESCRIPTION_FIELD])?,
     }))
-}
-
-fn decision_stage(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
-    finalizer_stage(state, "finalize_iteration", decision_worker()?)
 }
 
 fn mapped_error_guard(node: &str) -> Result<Guard, BuiltinTemplateError> {
@@ -523,30 +603,41 @@ fn mapped_error_guard(node: &str) -> Result<Guard, BuiltinTemplateError> {
     })
 }
 
-fn decision_worker() -> Result<GraphNode, BuiltinTemplateError> {
-    let name = "finalize_iteration";
+fn mapped_verdict_guard(count: u64, labels: &[&str]) -> Result<Guard, BuiltinTemplateError> {
+    Ok(Guard::KOfMap {
+        count: positive(count)?,
+        value: ControlSelector {
+            name: node_name("research_judge")?,
+            source: ControlSource::Signal,
+            field: Some(field_name(VERDICT_FIELD)?),
+        },
+        labels: enum_labels(labels)?,
+    })
+}
+
+fn decision_worker(disposition: ResearchDisposition) -> Result<GraphNode, BuiltinTemplateError> {
+    let name = disposition.finalizer_name();
+    let authored_instructions = format!(
+        "{} Store the three reviews and verdicts in 'evaluations.json' and write the exact '{}' \
+         disposition plus its reason to 'decision.json'. Before removing scratch, preserve the \
+         changed-path manifest and pre-experiment, reviewed-candidate, and final-current hashes in \
+         'artifacts.json' so restoration or retention remains independently auditable. Reconcile \
+         'state.json', 'summary.md', and 'backlog.json' so they separately identify the retained \
+         workspace, its known invariant status and open violations, and the best supported historical \
+         findings, including findings from restored artifacts. Never attribute a historical finding or \
+         measure to the retained workspace unless hashes or provenance match. Update the retained \
+         workspace identity, hashes, invariant status, open violations, and accepted measures only for \
+         an adopted result. Advance the next iteration number and remove scratch only after any required \
+         restoration is proven. Prior iteration directories are append-only. Keep large artifacts out \
+         of Git and do not use Git commands. Return a Conventional Commit title and a short description \
+         for this iteration checkpoint.",
+        disposition.finalizer_action(),
+        disposition.label(),
+    );
     Ok(GraphNode::Step(StepNode {
         name: node_name(name)?,
         worker: worker_ref("builtin.agent.research-recorder@1")?,
-        instructions: Some(instructions(
-            "Apply the consensus rule mechanically to exactly three complete judge verdicts. If any \
-             verdict is abort, restore every changed workspace path byte-for-byte from the scratch \
-             manifest, remove paths created by the experiment, prove restoration, and finalize the draft \
-             as aborted. If all three verdicts are adopt, keep the working changes and finalize it as \
-             adopted. Otherwise, when at least one verdict is record_only and none is abort, restore and \
-             prove the prior workspace, then finalize it as record-only. Never reinterpret a verdict. If \
-             the reviews and verdicts are incomplete or inconsistent, restore and finalize as aborted. \
-             Store the three reviews and verdicts in 'evaluations.json'; write the resulting disposition \
-             and reason to 'decision.json'. Reconcile 'state.json', 'summary.md', and 'backlog.json' so they \
-             separately identify the retained workspace, its known invariant status and open violations, \
-             and the best supported historical findings, including findings from restored artifacts. \
-             Never attribute a historical finding or measure to the retained workspace unless hashes or \
-             provenance match. Update the retained workspace identity, hashes, invariant status, open \
-             violations, and accepted measures only for an adopted result. Advance the next iteration \
-             number and remove scratch only after any required restoration is proven. Prior iteration \
-             directories are append-only. Keep large artifacts out of Git and do not use Git commands. \
-             Return a Conventional Commit title and a short description for this iteration checkpoint.",
-        )?),
+        instructions: Some(instructions(&authored_instructions)?),
         input: decision_input_type()?,
         output: change_manifest_type()?,
         input_bindings: decision_input_bindings()?,
@@ -556,6 +647,73 @@ fn decision_worker() -> Result<GraphNode, BuiltinTemplateError> {
         ],
         timeout_ms: None,
         attempts: positive(1)?,
+    }))
+}
+
+fn decision_audit_stage(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
+    let name = "audit_disposition";
+    let result = GraphNode::Choice(ChoiceNode {
+        name: node_name("audit_disposition_result")?,
+        state: state.clone(),
+        branches: non_empty(vec![
+            ChoiceBranch {
+                when: executable_error_guard(name)?,
+                node: fail(
+                    "audit_disposition_failed",
+                    "iteration_finalization_audit_failed",
+                )?,
+            },
+            ChoiceBranch {
+                when: signal_guard(name, VERDICT_FIELD, &[REJECTED_LABEL])?,
+                node: fail(
+                    "audit_disposition_rejected",
+                    "iteration_finalization_rejected",
+                )?,
+            },
+            ChoiceBranch {
+                when: signal_guard(name, VERDICT_FIELD, &[ACCEPTED_LABEL])?,
+                node: empty_continuation("audit_disposition_accepted", state.clone())?,
+            },
+        ])?,
+        otherwise: None,
+        promoted_state_paths: Vec::new(),
+    });
+    sequence(
+        "audit_disposition_stage",
+        state,
+        vec![decision_auditor()?, result],
+        Vec::new(),
+    )
+}
+
+fn decision_auditor() -> Result<GraphNode, BuiltinTemplateError> {
+    Ok(GraphNode::Verifier(VerifierNode {
+        name: node_name("audit_disposition")?,
+        worker: worker_ref("builtin.agent.research-disposition-auditor@1")?,
+        input: task_type()?,
+        output: PayloadType::Null,
+        input_bindings: vec![state_input(TASK_FIELD, TASK_FIELD)?],
+        write_bindings: Vec::new(),
+        timeout_ms: None,
+        attempts: positive(MAX_AGENT_VERIFIER_ATTEMPTS)?,
+        signals: review_signals()?,
+        diagnostic: diagnostic_type()?,
+        instructions: Some(instructions(
+            "Read only. Independently recompute the required disposition from the finalized \
+             'evaluations.json': any abort requires abort, three adopts require adopt, every other complete \
+             valid combination requires record_only, and a missing judge recorded by abort_review requires \
+             abort. Reject duplicate, extra, unknown, or inconsistent evaluations. Confirm 'decision.json' \
+             records that exact disposition, all five standard iteration records are finalized, prior \
+             finalized iterations are unchanged, mutable state and summary advance exactly once, and no \
+             draft or scratch backup remains. Confirm 'artifacts.json' contains the changed-path manifest \
+             plus pre-experiment, reviewed-candidate, and final-current hashes. For abort or record_only, \
+             recompute every current manifest hash and require byte-for-byte equality with the pre-experiment \
+             state, restored deleted paths, and no experiment-created paths. For adopt, require current hashes \
+             to equal the reviewed candidate and the retained workspace identity and hashes to be updated \
+             consistently. Return accepted only when the verdict rule, ledger, and current filesystem all \
+             agree; otherwise return rejected with an actionable diagnostic. Do not edit files and do not \
+             use Git commands.",
+        )?),
     }))
 }
 
