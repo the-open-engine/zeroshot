@@ -562,7 +562,7 @@ fn copy_workspace_file(
     destination: &Path,
     metadata: &fs::Metadata,
 ) -> io::Result<()> {
-    let mut input = crate::execution::platform::open_identity(source)?;
+    let mut input = open_workspace_file(source)?;
     let mut output = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -570,6 +570,26 @@ fn copy_workspace_file(
     io::copy(&mut input, &mut output)?;
     output.set_permissions(metadata.permissions())?;
     preserve_workspace_file_times(&output, metadata)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_workspace_file(source: &Path) -> io::Result<fs::File> {
+    #[cfg(unix)]
+    return crate::execution::platform::open_identity(source);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+
+        // Identity handles only permit metadata reads on Windows. Copying requires data access,
+        // but must still reject a reparse point swapped in after the path metadata was checked.
+        let input = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(source)?;
+        crate::execution::platform::file_identity(&input)?;
+        Ok(input)
+    }
 }
 
 #[cfg(not(target_os = "linux"))]

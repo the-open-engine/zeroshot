@@ -110,6 +110,34 @@ fn staging_directory_is_private_at_creation_and_removed_with_its_contents() {
 }
 
 #[test]
+fn workspace_copy_reads_file_contents_and_preserves_attributes() {
+    let root = tempfile::tempdir().assert_value();
+    let source = root.path().join("source-λ");
+    let destination = root.path().join("copied-λ");
+    let bytes = b"nonempty checkpoint contents\0with binary data";
+    fs::write(&source, bytes).assert_value();
+    let mut permissions = fs::metadata(&source).assert_value().permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&source, permissions).assert_value();
+    let result =
+        crate::native_v2_capsule::provider_process::copy_workspace_entry(&source, &destination);
+    assert!(result.is_ok(), "workspace file copy failed: {result:?}");
+    assert_eq!(fs::read(&destination).assert_value(), bytes);
+    assert!(
+        fs::metadata(&destination)
+            .assert_value()
+            .permissions()
+            .readonly()
+    );
+    assert!(
+        fs::metadata(&source)
+            .assert_value()
+            .permissions()
+            .readonly()
+    );
+}
+
+#[test]
 fn readonly_workspace_files_remain_readonly_through_capture_and_restore() {
     let fixture = Fixture::new();
     let file = fixture.workspace.join("readonly");
