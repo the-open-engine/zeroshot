@@ -3,7 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
+use std::os::unix::process::CommandExt as _;
 use std::path::Path;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use openengine_cluster_protocol::{
@@ -113,6 +115,144 @@ async fn sqlite_controllers_share_one_durable_namespace_without_a_target_wide_cl
     assert!(first_controller.list().await.assert_value().is_empty());
     assert!(second_controller.list().await.assert_value().is_empty());
     assert!(root.path().join("runs.sqlite3").is_file());
+}
+
+#[tokio::test]
+async fn production_controller_normalizes_an_existing_ledger_without_migration() {
+    let root = TestDirectory::new("hosting-ledger-permissions");
+    let ledger_path = root.path().join("runs.sqlite3");
+    drop(SqliteRunLedger::open(&ledger_path).assert_value_with("create existing ledger"));
+    fs::set_permissions(&ledger_path, fs::Permissions::from_mode(0o644)).assert_value();
+
+    ProductionTargetControllerFactory::new(hosting_config(root.path().to_owned()))
+        .create_controller()
+        .await
+        .assert_value_with("open existing production ledger");
+
+    assert_eq!(
+        fs::metadata(ledger_path)
+            .assert_value()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+}
+
+#[test]
+fn production_ledger_normalizes_existing_sqlite_sidecars() {
+    let root = TestDirectory::new("hosting-ledger-sidecars");
+    let ledger_path = root.path().join("runs.sqlite3");
+    for path in [
+        ledger_path.clone(),
+        root.path().join("runs.sqlite3-wal"),
+        root.path().join("runs.sqlite3-shm"),
+        root.path().join("runs.sqlite3-journal"),
+    ] {
+        fs::write(&path, "existing").assert_value();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).assert_value();
+    }
+
+    prepare_production_ledger(&ledger_path).assert_value();
+
+    for path in [
+        ledger_path,
+        root.path().join("runs.sqlite3-wal"),
+        root.path().join("runs.sqlite3-shm"),
+        root.path().join("runs.sqlite3-journal"),
+    ] {
+        assert_eq!(
+            fs::metadata(path).assert_value().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+}
+
+#[test]
+fn production_ledger_rejects_symlinks_and_foreign_owners() {
+    use std::os::unix::fs::{MetadataExt as _, chown, symlink};
+
+    let root = TestDirectory::new("hosting-ledger-validation");
+    let target = root.path().join("target");
+    fs::write(&target, "target").assert_value();
+    let ledger_path = root.path().join("runs.sqlite3");
+    symlink(&target, &ledger_path).assert_value();
+    assert_eq!(
+        prepare_production_ledger(&ledger_path),
+        Err(ProductionHostingError::Ledger)
+    );
+
+    fs::remove_file(&ledger_path).assert_value();
+    fs::write(&ledger_path, "ledger").assert_value();
+    if unsafe { libc::geteuid() } == 0 {
+        chown(&ledger_path, Some(31_002), Some(31_002)).assert_value();
+        assert_ne!(fs::metadata(&ledger_path).assert_value().uid(), 0);
+        assert_eq!(
+            prepare_production_ledger(&ledger_path),
+            Err(ProductionHostingError::Ledger)
+        );
+    }
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn hosted_worker_cannot_read_the_ledger_or_another_candidate() {
+    use crate::execution::process::{HostedProcessPool, HostedProcessScope};
+    use crate::native_v2_capsule::{CapsuleFilesystemSpec, prepare_capsule_filesystem};
+
+    if unsafe { libc::geteuid() } != 0 {
+        eprintln!("root-only cross-UID hosted boundary test skipped");
+        return;
+    }
+    let root = TestDirectory::new("hosting-cross-run-boundary");
+    let storage = prepare_storage_root(&root.path().to_owned()).assert_value();
+    let ledger_path = storage.join("runs.sqlite3");
+    fs::write(&ledger_path, "private ledger").assert_value();
+    prepare_production_ledger(&ledger_path).assert_value();
+
+    let first_root = storage.join("runs/first");
+    let second_root = storage.join("runs/second");
+    for run_root in [&first_root, &second_root] {
+        fs::create_dir(run_root).assert_value();
+        fs::set_permissions(run_root, fs::Permissions::from_mode(0o711)).assert_value();
+    }
+    let first_pool = HostedProcessPool::new(31_002, 31_002, 32_000, 32_000).assert_value();
+    let second_pool = HostedProcessPool::new(31_003, 31_003, 33_000, 33_000).assert_value();
+    let first = prepare_capsule_filesystem(CapsuleFilesystemSpec {
+        workspace: &first_root.join("workspace"),
+        runtime_home: &first_root.join("runtime"),
+        process_pool: first_pool,
+    })
+    .assert_value();
+    let second = prepare_capsule_filesystem(CapsuleFilesystemSpec {
+        workspace: &second_root.join("workspace"),
+        runtime_home: &second_root.join("runtime"),
+        process_pool: second_pool,
+    })
+    .assert_value();
+    fs::write(second.workspace.join("secret"), "other candidate").assert_value();
+    let writer = first_pool
+        .identity(HostedProcessScope::Writer)
+        .assert_value();
+
+    let status = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(
+            "set -eu; cd \"$OWN\"; printf own > worker.txt; test \"$(cat worker.txt)\" = own; \
+             ! cat \"$LEDGER\" >/dev/null 2>&1; ! cat \"$OTHER/secret\" >/dev/null 2>&1",
+        )
+        .env_clear()
+        .env("OWN", &first.workspace)
+        .env("LEDGER", &ledger_path)
+        .env("OTHER", &second.workspace)
+        .uid(writer.uid())
+        .gid(writer.gid())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .assert_value();
+    assert!(status.success());
 }
 
 #[tokio::test]

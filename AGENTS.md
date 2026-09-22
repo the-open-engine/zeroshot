@@ -312,6 +312,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   run nonterminal until replacement-controller reconciliation confirms cleanup.
 - Hosted verifiers build in disposable writable copies of the current candidate. Copies include
   dirty files and build artifacts, preserve metadata, and use reflinks or independent file copies.
+  Hosted candidate workspace roots are writer-owned `0700`; workers cannot traverse another run's
+  candidate, and the supervisor-owned production ledger and existing SQLite sidecars are `0600`.
   Source traversal pins descriptors without following symlinks so concurrent renames cannot escape
   the candidate; copying alongside writers does not provide an atomic snapshot. Verifier writes
   are never promoted to the candidate or peers. Provider scratch permits execution.

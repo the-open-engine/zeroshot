@@ -224,9 +224,10 @@ pub struct CapsuleFilesystem {
 
 /// Establishes the capsule's role-aware Linux filesystem boundary.
 ///
-/// Writers share the run's workspace owner identity. Distinct verifier UIDs receive read/traverse but
-/// no mutation authority. The runtime root remains root-owned and non-writable; provider-specific
-/// private homes are created beneath it by [`HostedProcessPool`] identities.
+/// Writers share the run's private workspace owner identity. Hosted verifiers receive separate
+/// supervisor-created copies instead of access to this candidate. The runtime root remains
+/// root-owned and non-writable; provider-specific private homes are created beneath it by
+/// [`HostedProcessPool`] identities.
 pub fn prepare_capsule_filesystem(
     specification: CapsuleFilesystemSpec<'_>,
 ) -> Result<CapsuleFilesystem, CapsuleFilesystemError> {
@@ -246,7 +247,7 @@ pub fn prepare_capsule_filesystem(
         .process_pool
         .identity(HostedProcessScope::Writer)
         .map_err(|_| CapsuleFilesystemError::InvalidIdentity)?;
-    set_directory_boundary(&workspace, 0o755, writer.uid(), writer.gid())?;
+    set_directory_boundary(&workspace, 0o700, writer.uid(), writer.gid())?;
     set_directory_boundary(&runtime_home, 0o711, 0, 0)?;
     Ok(CapsuleFilesystem {
         workspace,

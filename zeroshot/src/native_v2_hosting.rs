@@ -98,9 +98,10 @@ impl ProductionTargetControllerFactory {
         &self,
     ) -> Result<Arc<NativeV2CloudController>, ProductionHostingError> {
         let root = prepare_storage_root(&self.config.storage_root)?;
+        let ledger_path = root.join("runs.sqlite3");
+        prepare_production_ledger(&ledger_path)?;
         let ledger: Arc<dyn RunLedger> = Arc::new(
-            SqliteRunLedger::open(root.join("runs.sqlite3"))
-                .map_err(|_| ProductionHostingError::Ledger)?,
+            SqliteRunLedger::open(ledger_path).map_err(|_| ProductionHostingError::Ledger)?,
         );
         let allocator = Arc::new(ProductionCapsuleAllocator::new(ProductionCapsuleConfig {
             storage_root: root,
@@ -244,6 +245,50 @@ fn canonical_directory(path: &std::path::Path) -> Result<PathBuf, ProductionHost
         return Err(ProductionHostingError::Storage);
     }
     std::fs::canonicalize(path).map_err(|_| ProductionHostingError::Storage)
+}
+
+#[cfg(unix)]
+fn prepare_production_ledger(path: &std::path::Path) -> Result<(), ProductionHostingError> {
+    use std::ffi::OsString;
+    use std::fs::OpenOptions;
+    use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _};
+
+    fn secure_file(path: &std::path::Path, create: bool) -> Result<(), ProductionHostingError> {
+        let mut options = OpenOptions::new();
+        options
+            .read(true)
+            .mode(0o600)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        if create {
+            options.write(true).create(true);
+        }
+        let file = match options.open(path) {
+            Ok(file) => file,
+            Err(error) if !create && error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err(ProductionHostingError::Ledger),
+        };
+        let metadata = file
+            .metadata()
+            .map_err(|_| ProductionHostingError::Ledger)?;
+        if !metadata.is_file() || metadata.uid() != unsafe { libc::geteuid() } {
+            return Err(ProductionHostingError::Ledger);
+        }
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|_| ProductionHostingError::Ledger)
+    }
+
+    secure_file(path, true)?;
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let mut sidecar: OsString = path.as_os_str().to_owned();
+        sidecar.push(suffix);
+        secure_file(std::path::Path::new(&sidecar), false)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn prepare_production_ledger(_path: &std::path::Path) -> Result<(), ProductionHostingError> {
+    Ok(())
 }
 
 #[cfg(unix)]
