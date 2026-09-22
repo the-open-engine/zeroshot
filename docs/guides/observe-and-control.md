@@ -84,7 +84,7 @@ zeroshot checkpoints RUN_ID
 zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID
 ```
 
-Add `--target NAME` to both commands for a direct target. Checkpoint listings are paginated; use
+Add `--target NAME` to both commands for a named target. Checkpoint listings are paginated; use
 `--after CHECKPOINT_ID` with the returned `nextAfter` value to fetch the next page.
 
 A selected checkpoint restores the files from immediately before its node and the completed
@@ -97,8 +97,10 @@ resolve fresh credentials. Provider sessions and previous token usage are not ca
 attempt. Selecting a checkpoint replaces later workspace edits, including untracked and ignored
 files. Local workspaces must be idle while they are restored.
 
-Local and Docker targets keep checkpoints beside their run storage. Cloud targets require the
-`openengine.workspace-checkpoints/v1` capability before selected checkpoint resume is available.
+Local and Docker targets keep checkpoints beside their run storage and advertise
+`openengine.workspace-checkpoints/v1`. Cloud exposes recovery through authenticated hosted run
+routes, so checkpoints remain available after the original capsule is removed. Cloud resolves
+fresh credentials from the admitted connection references when it starts the successor.
 
 ## Stop only with explicit intent
 

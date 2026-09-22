@@ -25,6 +25,8 @@ const MAX_STREAM_FRAME_BYTES: usize = 64 * 1024;
 
 #[path = "hosted_runs/merge_plans_http.rs"]
 mod merge_plans_http;
+#[path = "hosted_runs/recovery_http.rs"]
+mod recovery_http;
 
 struct HostedRunSubscription<E> {
     response: Response,

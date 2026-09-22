@@ -1,6 +1,6 @@
 use openengine_cluster_protocol::{Cursor, ExecutionRef, RunId};
 use reqwest::Url;
-use openengine_cluster_protocol::TargetDiscoveryExtensions;
+use openengine_cluster_protocol::{TargetDiscoveryExtensions, TargetHostedRunRoutes};
 
 #[path = "hosted_runs/merge_plans.rs"]
 mod merge_plans;
@@ -19,6 +19,9 @@ pub(in super::super) struct HostedRunsDescriptor {
     watch: HostedRunRoute,
     logs: HostedRunRoute,
     force: HostedRunRoute,
+    resume: Option<HostedRunRoute>,
+    checkpoints: Option<HostedRunRoute>,
+    discard_workspace: Option<HostedRunRoute>,
 }
 
 #[derive(Clone)]
@@ -47,6 +50,40 @@ struct RouteValues<'a> {
 }
 
 impl HostedRunsDescriptor {
+    pub(in super::super) fn resume_url(&self, run_id: &RunId) -> Result<Url, TargetAuthorityError> {
+        self.recovery_url(self.resume.as_ref(), run_id)
+    }
+
+    pub(in super::super) fn checkpoints_url(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Url, TargetAuthorityError> {
+        self.recovery_url(self.checkpoints.as_ref(), run_id)
+    }
+
+    pub(in super::super) fn discard_workspace_url(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Url, TargetAuthorityError> {
+        self.recovery_url(self.discard_workspace.as_ref(), run_id)
+    }
+
+    fn recovery_url(
+        &self,
+        route: Option<&HostedRunRoute>,
+        run_id: &RunId,
+    ) -> Result<Url, TargetAuthorityError> {
+        route
+            .ok_or_else(|| authority_error("target does not advertise hosted workspace recovery"))?
+            .expand(
+                &self.base_url,
+                RouteValues {
+                    run_id: Some(run_id),
+                    ..RouteValues::default()
+                },
+            )
+    }
+
     pub(in super::super) fn list_url(&self) -> Result<Url, TargetAuthorityError> {
         self.list.expand(&self.base_url, RouteValues::default())
     }
@@ -169,22 +206,36 @@ pub(super) fn build_hosted_runs_descriptor(
     } else {
         same_origin_url(origin, &wire.base_url)?
     };
+    compile_hosted_run_routes(base_url, &wire.route_templates)
+}
+
+fn compile_hosted_run_routes(
+    base_url: Url,
+    routes: &TargetHostedRunRoutes,
+) -> Result<HostedRunsDescriptor, TargetAuthorityError> {
     Ok(HostedRunsDescriptor {
         base_url,
-        list: compile_hosted_run_route(&wire.route_templates.list, false, &[])?,
-        status: compile_hosted_run_route(&wire.route_templates.status, true, &[])?,
-        watch: compile_hosted_run_route(
-            &wire.route_templates.watch,
-            true,
-            &[HostedRunQuery::FromCursor],
-        )?,
+        list: compile_hosted_run_route(&routes.list, false, &[])?,
+        status: compile_hosted_run_route(&routes.status, true, &[])?,
+        watch: compile_hosted_run_route(&routes.watch, true, &[HostedRunQuery::FromCursor])?,
         logs: compile_hosted_run_route(
-            &wire.route_templates.logs,
+            &routes.logs,
             true,
             &[HostedRunQuery::FromCursor, HostedRunQuery::Execution],
         )?,
-        force: compile_hosted_run_route(&wire.route_templates.force, true, &[])?,
+        force: compile_hosted_run_route(&routes.force, true, &[])?,
+        resume: optional_recovery_route(routes.resume.as_deref())?,
+        checkpoints: optional_recovery_route(routes.checkpoints.as_deref())?,
+        discard_workspace: optional_recovery_route(routes.discard_workspace.as_deref())?,
     })
+}
+
+fn optional_recovery_route(
+    value: Option<&str>,
+) -> Result<Option<HostedRunRoute>, TargetAuthorityError> {
+    value
+        .map(|route| compile_hosted_run_route(route, true, &[]))
+        .transpose()
 }
 
 fn compile_hosted_run_route(
@@ -269,6 +320,72 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
+
+    #[test]
+    fn recovery_routes_are_optional_and_escape_the_run_identity() {
+        let origin = Url::parse("https://target.example").assert_value();
+        let run_id = RunId::new("run/1");
+        let missing = descriptor(
+            &origin,
+            json!({
+                "kind": HOSTED_RUNS_KIND, "base_url": origin.as_str(), "route_templates": routes()
+            }),
+        )
+        .assert_value();
+        assert!(missing.resume_url(&run_id).is_err());
+        assert!(missing.checkpoints_url(&run_id).is_err());
+        assert!(missing.discard_workspace_url(&run_id).is_err());
+
+        let mut recovery = routes();
+        recovery["resume"] = json!("/runs/{run_id}/resume");
+        recovery["checkpoints"] = json!("/runs/{run_id}/checkpoints");
+        recovery["discard_workspace"] = json!("/runs/{run_id}/discard-workspace");
+        let present = descriptor(
+            &origin,
+            json!({
+                "kind": HOSTED_RUNS_KIND, "base_url": origin.as_str(), "route_templates": recovery
+            }),
+        )
+        .assert_value();
+        assert_eq!(
+            present.resume_url(&run_id).assert_value().as_str(),
+            "https://target.example/runs/run%2F1/resume"
+        );
+        assert_eq!(
+            present.checkpoints_url(&run_id).assert_value().as_str(),
+            "https://target.example/runs/run%2F1/checkpoints"
+        );
+        assert_eq!(
+            present
+                .discard_workspace_url(&run_id)
+                .assert_value()
+                .as_str(),
+            "https://target.example/runs/run%2F1/discard-workspace"
+        );
+    }
+
+    #[test]
+    fn recovery_routes_reject_unsafe_paths_and_extra_template_variables() {
+        let origin = Url::parse("https://target.example").assert_value();
+        for name in ["resume", "checkpoints", "discard_workspace"] {
+            for invalid in [
+                "https://attacker.example/{run_id}",
+                "/runs/{run_id}/../resume",
+                "/runs/{run_id}/{checkpoint_id}",
+            ] {
+                assert!(
+                    descriptor(
+                        &origin,
+                        json!({
+                            "kind": HOSTED_RUNS_KIND, "base_url": origin.as_str(),
+                            "route_templates": routes_with(name, invalid)
+                        })
+                    )
+                    .is_err()
+                );
+            }
+        }
+    }
 
     #[test]
     fn hosted_routes_expand_opaque_values_under_the_advertised_base_path() {

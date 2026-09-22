@@ -162,6 +162,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   snapshots and catalogs atomically, using reflinks where supported, behind `RunCheckpointStore`.
   Hosted factories advertise checkpoints only when they implement storage and restore. Snapshot
   restore requires exclusive workspace ownership and preserves the checkout root and Git identity.
+- Hosted workspace recovery uses the optional `resume`, `checkpoints`, and `discard_workspace`
+  route templates in `zeroshot.hosted-runs/v1`, with POST bodies and results matching the OECP
+  `Run*Params`/`Run*Result` types. These authenticated Cloud routes remain available after capsule
+  disposal. Cloud resolves the admitted connection references freshly; hosted recovery does not
+  depend on local direct-target authorization or read local provider environment values.
+  `ProductionHostingConfig` can accept host-owned `HostedWorkspaceStorage`; the allocator invokes
+  it after source checkout and before provider dispatch, imports settled prerequisites, and
+  preserves supplied delivery lineage. Public clients never supply storage paths or execution seeds.
 - Durable observation replay reads bounded ledger pages and retains its scan cursor across pages.
   A finished snapshot closes a subscription only after replay reaches its durable cursor.
 - Bulk replay uses the WebSocket client's opt-in subscription backpressure on a dedicated

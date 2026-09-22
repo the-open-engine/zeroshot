@@ -24,6 +24,39 @@ mod merge_plans;
 #[path = "hosted_authority/problem_errors.rs"]
 mod problem_errors;
 
+type HostedTestBackend = zeroshot_engine::native_v2_cli::oecp::NamedTargetCliBackend<
+    NativeV2TargetConnector<
+        super::fixtures::MemoryRegistry,
+        TargetHttpControlAuthority,
+        super::fixtures::FakeDialer,
+    >,
+>;
+
+pub(super) async fn hosted_backend(
+    root: &super::fixtures::TempRoot,
+    request_count: usize,
+) -> (
+    HostedTestBackend,
+    super::fixtures::FakeDialer,
+    tokio::task::JoinHandle<Vec<CapturedHttpRequest>>,
+) {
+    use super::fixtures::{FakeDialer, MemoryRegistry, hosted_target};
+    let (origin, server) = spawn_target_authority(request_count).await;
+    let (credentials, authority) = test_authority(root);
+    let target = hosted_target("prod", origin);
+    credentials
+        .set(&target.id, "refresh-0")
+        .await
+        .assert_value();
+    let registry = MemoryRegistry::default();
+    registry.insert(target).assert_value();
+    let dialer = FakeDialer::default();
+    let backend = zeroshot_engine::native_v2_cli::oecp::NamedTargetCliBackend::new(
+        NativeV2TargetConnector::new(registry, authority, dialer.clone()),
+    );
+    (backend, dialer, server)
+}
+
 pub(super) struct RotatingCredentialStore {
     state: Mutex<RotatingCredentialState>,
 }
@@ -117,6 +150,9 @@ fn authority_response(
     address: std::net::SocketAddr,
     token_index: &mut u8,
 ) -> String {
+    if let Some(response) = super::hosted_recovery::response(request) {
+        return response;
+    }
     if let Some(response) = hosted_run_response(request) {
         return response;
     }
@@ -314,6 +350,9 @@ fn hosted_discovery(origin: &str) -> String {
 
 fn hosted_run_routes() -> serde_json::Value {
     json!({
+        "resume": "/native-v2/runs/{run_id}/resume",
+        "checkpoints": "/native-v2/runs/{run_id}/checkpoints",
+        "discard_workspace": "/native-v2/runs/{run_id}/discard-workspace",
         "force": "/native-v2/runs/{run_id}/force",
         "list": "/native-v2/runs",
         "logs": "/native-v2/runs/{run_id}/logs{?from_cursor,execution}",

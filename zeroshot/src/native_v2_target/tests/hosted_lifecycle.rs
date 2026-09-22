@@ -2,35 +2,18 @@ use openengine_cluster_protocol::{
     Cursor, ExecutionRef, RunForceParams, RunId, RunListParams, RunLogsParams, RunStatusParams,
 };
 use openengine_cluster_testkit::assertions::AssertValue;
-use zeroshot_engine::native_v2_cli::oecp::NamedTargetCliBackend;
 use zeroshot_engine::native_v2_cli::{
     CliOutcome, CliRunStatus, CliSubscription, CliSubscriptionItem, NativeV2CliBackend,
     NativeV2CliCommand, NeverDetach, RunSelector, RunWatchCommand, execute_native_v2_cli,
 };
 
-use super::super::controller_authority::TargetCredentialStore;
-use super::super::*;
 use super::fixtures::*;
 use super::hosted_authority::*;
 
 #[tokio::test]
 async fn hosted_lifecycle_stays_cloud_owned_from_queue_through_completion() {
     let root = temp_root();
-    let (origin, server) = spawn_target_authority(32).await;
-    let (credentials, authority) = test_authority(&root);
-    let target = hosted_target("prod", origin);
-    credentials
-        .set(&target.id, "refresh-0")
-        .await
-        .assert_value();
-    let registry = MemoryRegistry::default();
-    registry.insert(target).assert_value();
-    let dialer = FakeDialer::default();
-    let backend = NamedTargetCliBackend::new(NativeV2TargetConnector::new(
-        registry,
-        authority,
-        dialer.clone(),
-    ));
+    let (backend, dialer, server) = hosted_backend(&root, 32).await;
     let run_id = RunId::new("run-hosted");
 
     assert_queued(&backend, &run_id).await;

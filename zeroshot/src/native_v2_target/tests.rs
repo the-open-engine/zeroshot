@@ -10,6 +10,8 @@ mod fixtures;
 mod hosted_authority;
 #[path = "tests/hosted_lifecycle.rs"]
 mod hosted_lifecycle;
+#[path = "tests/hosted_recovery.rs"]
+mod hosted_recovery;
 #[path = "tests/integration.rs"]
 mod integration;
 #[path = "tests/transport.rs"]

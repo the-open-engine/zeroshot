@@ -1,5 +1,9 @@
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
+    RunCheckpointsParams, RunCheckpointsResult, RunDiscardWorkspaceParams,
+    RunDiscardWorkspaceResult, RunResumeParams, RunResumeResult,
+};
+use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
     ConnectionMutationResult, ConnectionSetRequest,
 };
@@ -130,6 +134,33 @@ pub trait TargetControlAuthority: Send + Sync {
         _plan_id: &MergePlanId,
     ) -> Result<MergePlan, TargetAuthorityError> {
         merge_plan_unavailable()
+    }
+    async fn hosted_run_resume(
+        &self,
+        _target: &TargetRecord,
+        _params: RunResumeParams,
+    ) -> Result<RunResumeResult, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise workspace recovery",
+        ))
+    }
+    async fn hosted_run_checkpoints(
+        &self,
+        _target: &TargetRecord,
+        _params: RunCheckpointsParams,
+    ) -> Result<RunCheckpointsResult, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise workspace checkpoints",
+        ))
+    }
+    async fn hosted_run_discard_workspace(
+        &self,
+        _target: &TargetRecord,
+        _params: RunDiscardWorkspaceParams,
+    ) -> Result<RunDiscardWorkspaceResult, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise workspace recovery",
+        ))
     }
     async fn hosted_run_list(
         &self,

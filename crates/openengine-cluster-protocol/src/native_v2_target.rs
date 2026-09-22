@@ -364,6 +364,12 @@ pub struct TargetHostedRunRoutes {
     pub watch: String,
     pub logs: String,
     pub force: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoints: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discard_workspace: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

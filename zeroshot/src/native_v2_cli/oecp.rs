@@ -421,9 +421,17 @@ where
         target: Option<&str>,
         params: openengine_cluster_protocol::RunCheckpointsParams,
     ) -> Result<openengine_cluster_protocol::RunCheckpointsResult, NativeV2CliError> {
+        let target = require_named_target(target)?;
+        if let Some(result) = self
+            .connector
+            .hosted_run_checkpoints(target, params.clone())
+            .await?
+        {
+            return Ok(result);
+        }
         let transport = self
             .connector
-            .connect_workspace_checkpoints(require_named_target(target)?, params.run_id.clone())
+            .connect_workspace_checkpoints(target, params.run_id.clone())
             .await?;
         ClusterClient::new(transport.as_ref())
             .run_checkpoints(params)
@@ -437,6 +445,13 @@ where
         params: openengine_cluster_protocol::RunResumeParams,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
         let target = require_named_target(target)?;
+        if let Some(result) = self
+            .connector
+            .hosted_run_resume(target, params.clone())
+            .await?
+        {
+            return Ok(result);
+        }
         self.connector
             .prepare_workspace_recovery_resume(target, &params)?;
         let transport = if params.from.is_some() {
@@ -461,14 +476,22 @@ where
     ) -> Result<openengine_cluster_protocol::RunDiscardWorkspaceResult, NativeV2CliError> {
         let target = require_named_target(target)?;
         let run_id = params.run_id.clone();
-        let transport = self
+        let result = if let Some(result) = self
             .connector
-            .connect_workspace_recovery(target, run_id.clone())
-            .await?;
-        let result = ClusterClient::new(transport.as_ref())
-            .run_discard_workspace(params)
-            .await
-            .map_err(protocol_error)?;
+            .hosted_run_discard_workspace(target, params.clone())
+            .await?
+        {
+            result
+        } else {
+            let transport = self
+                .connector
+                .connect_workspace_recovery(target, run_id.clone())
+                .await?;
+            ClusterClient::new(transport.as_ref())
+                .run_discard_workspace(params)
+                .await
+                .map_err(protocol_error)?
+        };
         if result.run_id != run_id {
             return Err(NativeV2CliError::Protocol(
                 "workspace discard returned a different run ID".to_owned(),
