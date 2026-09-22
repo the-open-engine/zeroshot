@@ -25,11 +25,16 @@ fn catalog_and_template_inputs_are_closed() {
         &[
             BuiltinGraphTemplate::SingleWorker,
             BuiltinGraphTemplate::SoftwareChange,
+            BuiltinGraphTemplate::AutoResearch,
         ]
     );
     assert_eq!(
         BuiltinGraphTemplate::parse("software-change"),
         Some(BuiltinGraphTemplate::SoftwareChange)
+    );
+    assert_eq!(
+        BuiltinGraphTemplate::parse("auto-research"),
+        Some(BuiltinGraphTemplate::AutoResearch)
     );
     assert_eq!(BuiltinGraphTemplate::parse("unknown"), None);
     assert!(matches!(
@@ -45,6 +50,19 @@ fn catalog_and_template_inputs_are_closed() {
         .initial_input
         .validate_value(&authored)
         .assert_value();
+    let research = BuiltinGraphTemplate::AutoResearch
+        .materialize(TemplateDelivery::None)
+        .assert_value();
+    research
+        .initial_input
+        .validate_value(&authored)
+        .assert_value();
+    assert!(
+        research
+            .initial_input
+            .validate_value(&json!({"task":"repair checkout","iterations":10}))
+            .is_err()
+    );
     let software = BuiltinGraphTemplate::SoftwareChange
         .materialize(TemplateDelivery::None)
         .assert_value();
@@ -126,6 +144,16 @@ async fn every_supported_materialization_is_admissible() {
                 "worker",
             ],
         ),
+        (
+            BuiltinGraphTemplate::AutoResearch,
+            TemplateDelivery::None,
+            auto_research_leaves(TemplateDelivery::None),
+        ),
+        (
+            BuiltinGraphTemplate::AutoResearch,
+            TemplateDelivery::Push,
+            auto_research_leaves(TemplateDelivery::Push),
+        ),
     ];
 
     for (template, delivery, expected) in cases {
@@ -139,6 +167,240 @@ async fn every_supported_materialization_is_admissible() {
             }
         }
     }
+}
+
+fn auto_research_leaves(delivery: TemplateDelivery) -> Vec<&'static str> {
+    let mut leaves = vec![
+        "abort_iteration",
+        "abort_review",
+        "abort_scouting",
+        "adopt_iteration",
+        "bootstrap",
+        "experiment",
+        "record_iteration",
+        "research_judge",
+        "research_scout",
+        "select_hypothesis",
+    ];
+    if delivery == TemplateDelivery::Push {
+        leaves.extend([
+            "checkpoint_complete",
+            "checkpoint_delivery",
+            "checkpoint_manifest",
+            "checkpoint_observer",
+            "checkpoint_repair",
+        ]);
+    }
+    leaves
+}
+
+#[test]
+fn auto_research_has_ten_gated_iterations_and_optional_checkpoint() {
+    for (delivery, expected_deliveries) in
+        [(TemplateDelivery::None, 0), (TemplateDelivery::Push, 1)]
+    {
+        let graph = BuiltinGraphTemplate::AutoResearch
+            .materialize(delivery)
+            .assert_value();
+        assert_research_bootstrap(&graph.root);
+        let graph_nodes = all_nodes(&graph.root);
+        let research_loop = graph_nodes
+            .into_iter()
+            .find_map(|node| match node {
+                GraphNode::Loop(node) if node.name.as_str() == "research_loop" => Some(node),
+                _ => None,
+            })
+            .assert_value_with("research loop");
+        assert_eq!(research_loop.max_iterations.get(), 10);
+        assert!(research_loop.until.is_none());
+
+        let iteration_nodes = all_nodes(&research_loop.body);
+        let selector = iteration_nodes
+            .iter()
+            .find_map(|node| match node {
+                GraphNode::Step(node) if node.name.as_str() == "select_hypothesis" => Some(node),
+                _ => None,
+            })
+            .assert_value_with("research selector");
+        assert!(selector.instructions.as_ref().is_some_and(|value| {
+            value
+                .as_str()
+                .contains("retained workspace violates a charter invariant")
+                && value
+                    .as_str()
+                    .contains("Predeclare evidence collection and evaluation order")
+        }));
+        let scouts = iteration_nodes
+            .iter()
+            .find_map(|node| match node {
+                GraphNode::Map(node) if node.name.as_str() == "hypothesis_scouts" => Some(node),
+                _ => None,
+            })
+            .assert_value_with("hypothesis scouts");
+        assert_eq!(scouts.max_items.get(), 3);
+        assert_eq!(scouts.body.name().as_str(), "research_scout");
+        assert_role_labels(&scouts.body, &["explorer", "synthesizer", "challenger"]);
+        let scout_result = iteration_nodes
+            .iter()
+            .find_map(|node| match node {
+                GraphNode::Choice(node) if node.name.as_str() == "scout_result" => Some(node),
+                _ => None,
+            })
+            .assert_value_with("scout result");
+        assert_eq!(
+            scout_result.branches.as_slice()[0].node.name().as_str(),
+            "abort_scouting"
+        );
+        let judges = iteration_nodes
+            .iter()
+            .find_map(|node| match node {
+                GraphNode::Map(node) if node.name.as_str() == "independent_judges" => Some(node),
+                _ => None,
+            })
+            .assert_value_with("independent judges");
+        assert_eq!(judges.max_items.get(), 3);
+        assert_eq!(judges.body.name().as_str(), "research_judge");
+        assert_role_labels(&judges.body, &["evidence", "method", "progress"]);
+        let GraphNode::Verifier(judge) = judges.body.as_ref() else {
+            panic!("research judge must be a verifier");
+        };
+        assert!(judge.instructions.as_ref().is_some_and(|value| {
+            value
+                .as_str()
+                .contains("restoring the known-invalid predecessor")
+        }));
+        assert_eq!(
+            judge.signals.get(&field_name(VERDICT_FIELD).assert_value()),
+            Some(&enum_labels(&["adopt", "record_only", "abort"]).assert_value())
+        );
+        assert_research_checkpoint(&iteration_nodes, delivery, expected_deliveries);
+        assert_research_decision(&iteration_nodes);
+    }
+    for delivery in [TemplateDelivery::PullRequest, TemplateDelivery::Merge] {
+        assert!(matches!(
+            BuiltinGraphTemplate::AutoResearch.materialize(delivery),
+            Err(BuiltinTemplateError::UnsupportedDelivery { .. })
+        ));
+    }
+}
+
+fn assert_research_bootstrap(root: &GraphNode) {
+    let bootstrap = all_nodes(root)
+        .into_iter()
+        .find_map(|node| match node {
+            GraphNode::Step(node) if node.name.as_str() == "bootstrap" => Some(node),
+            _ => None,
+        })
+        .assert_value_with("research bootstrap");
+    assert!(bootstrap.instructions.as_ref().is_some_and(|value| {
+        value
+            .as_str()
+            .contains("best supported historical findings")
+    }));
+}
+
+fn assert_research_checkpoint(
+    iteration_nodes: &[&GraphNode],
+    delivery: TemplateDelivery,
+    expected_deliveries: usize,
+) {
+    assert_eq!(
+        iteration_nodes
+            .iter()
+            .filter(|node| matches!(
+                node,
+                GraphNode::Verifier(node)
+                    if node.worker.as_str() == GIT_DELIVERY_PUSH_WORKER_REF
+            ))
+            .count(),
+        expected_deliveries
+    );
+    if delivery == TemplateDelivery::Push {
+        let manifest = iteration_nodes
+            .iter()
+            .find_map(|node| match node {
+                GraphNode::Step(node) if node.name.as_str() == "checkpoint_manifest" => Some(node),
+                _ => None,
+            })
+            .assert_value_with("research checkpoint manifest");
+        assert!(
+            manifest.instructions.as_ref().is_some_and(|value| {
+                value.as_str().contains("best supported historical finding")
+            })
+        );
+    }
+}
+
+fn assert_research_decision(iteration_nodes: &[&GraphNode]) {
+    let decision = iteration_nodes
+        .iter()
+        .find_map(|node| match node {
+            GraphNode::Choice(node) if node.name.as_str() == "research_decision" => Some(node),
+            _ => None,
+        })
+        .assert_value_with("research decision");
+    assert_eq!(decision.branches.as_slice().len(), 3);
+    assert_eq!(
+        decision.branches.as_slice()[0].node.name().as_str(),
+        "abort_review"
+    );
+    assert_eq!(
+        decision.branches.as_slice()[1].node.name().as_str(),
+        "abort_iteration"
+    );
+    assert_mapped_verdict_guard(&decision.branches.as_slice()[1].when, 1, "abort");
+    assert_eq!(
+        decision.branches.as_slice()[2].node.name().as_str(),
+        "adopt_iteration"
+    );
+    assert_mapped_verdict_guard(&decision.branches.as_slice()[2].when, 3, "adopt");
+    let record = decision.otherwise.as_ref().assert_value();
+    assert_eq!(record.name().as_str(), "record_iteration");
+    let GraphNode::Step(record) = record.as_ref() else {
+        panic!("record-only disposition must use the research recorder");
+    };
+    assert!(record.instructions.as_ref().is_some_and(|value| {
+        value
+            .as_str()
+            .contains("best supported historical findings")
+    }));
+}
+
+fn assert_mapped_verdict_guard(guard: &Guard, expected_count: u64, expected_label: &str) {
+    let Guard::KOfMap {
+        count,
+        value,
+        labels,
+    } = guard
+    else {
+        panic!("research disposition must use a mapped verdict guard");
+    };
+    assert_eq!(count.get(), expected_count);
+    assert_eq!(value.name.as_str(), "research_judge");
+    assert_eq!(value.source, ControlSource::Signal);
+    assert_eq!(
+        value.field.as_ref().map(FieldName::as_str),
+        Some(VERDICT_FIELD)
+    );
+    assert_eq!(labels, &enum_labels(&[expected_label]).assert_value());
+}
+
+fn assert_role_labels(node: &GraphNode, expected: &[&str]) {
+    let GraphNode::Verifier(verifier) = node else {
+        panic!("mapped research role must use a verifier");
+    };
+    let PayloadType::Record { fields } = &verifier.input else {
+        panic!("mapped research role must have a record input");
+    };
+    let role = fields
+        .get(&field_name("role").assert_value())
+        .assert_value_with("research role field");
+    assert_eq!(
+        role.value_type,
+        PayloadType::Enum {
+            values: enum_labels(expected).assert_value()
+        }
+    );
 }
 
 #[test]
@@ -635,7 +897,7 @@ async fn assert_admissible(
     } else {
         DeliveryPolicy::Required
     };
-    NativeV2Admission
+    let admitted = NativeV2Admission
         .validate_intent(
             &RunSubmissionIntent {
                 title: RunTitle::new("Built-in template admission").assert_value(),
@@ -652,8 +914,14 @@ async fn assert_admissible(
             },
             policy,
         )
-        .await
-        .assert_value();
+        .await;
+    admitted.unwrap_or_else(|error| {
+        panic!(
+            "{} with {} delivery was not admissible: {error:?}",
+            template.name(),
+            delivery.name()
+        )
+    });
 }
 
 async fn verified_software_template(

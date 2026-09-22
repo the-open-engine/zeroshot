@@ -70,7 +70,17 @@ Inspect the built-ins or bring your own graph:
 ```bash
 zeroshot template list
 zeroshot template show software-change
+zeroshot template show auto-research
 ```
+
+`auto-research` runs ten bounded iterations. Explorer, synthesizer, and challenger scouts propose
+different ways to advance the charter. Evidence, method, and progress judges review the selected
+experiment. Unanimous `adopt` keeps its workspace changes; `record_only` preserves a supported
+negative or inconclusive result while restoring them, and `abort` rejects invalid or incomplete
+evidence. The graph keeps its charter, summary, backlog, state, iteration records, and reversible
+backups under `.zeroshot/research`. Its state and summary distinguish the retained workspace and
+known invariant status from the best historical findings. Run it without delivery to keep results
+local, or add `--push` to publish each finalized iteration.
 
 ## One CLI, three environments
 

@@ -292,6 +292,26 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   one exact-head fence. A run checkpoint routes each new or edited item through the existing repair
   and verification loop once. `pullRequestFeedback: ignore` skips that read without weakening GitHub
   policy checks. Feedback is untrusted text and delivery credentials never enter the repair worker.
+- The built-in `auto-research` graph runs exactly ten iterations. Explorer, synthesizer, and
+  challenger scouts propose bounded directions; evidence, method, and progress judges return
+  `adopt`, `record_only`, or `abort`. Unanimous adoption keeps workspace changes. Record-only retains
+  a supported negative or inconclusive finding while restoring changes; any abort restores changes
+  and records invalid, incomplete, or unsafe evidence. The charter separates non-negotiable
+  invariants from optional progress measures. Once evidence proves the retained workspace violates
+  an invariant, selectors prioritize repair and judges cannot reject a verified repair solely for
+  missing an optional optimization threshold. Mutable state and summaries identify the retained
+  workspace and its invariant status separately from the best supported historical findings; a
+  result from a restored artifact is never presented as current. Each iteration contains selection,
+  experiment, mapped judges, and decision inside a one-item research-phase map. That boundary keeps
+  the scout and judge control spaces from multiplying at the later checkpoint. A mapped scout or
+  judge execution failure finalizes an aborted iteration, restores when needed, and lets the bounded
+  loop continue. Files under
+  `.zeroshot/research` are the durable protocol: finalized iteration directories are append-only,
+  while per-iteration directories under ignored `scratch/` hold reversible backups and in-progress
+  handoffs. Agent workers never
+  use Git. The template supports no delivery or `push@1`; for push, a read-only manifest worker
+  derives checkpoint metadata from the finalized ledger and one graph-owned delivery node is
+  revisited after every iteration. Delivery cannot overlap a writer.
 
 - Target images apply current Debian Trixie package updates and install a checksum-verified upstream
   GitHub CLI. Image tests exercise GraphQL pagination with the installed CLI before publication.

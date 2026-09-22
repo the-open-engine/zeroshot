@@ -340,6 +340,9 @@ enum TemplateName {
 
     /// A review, validation, and optional delivery workflow for code changes.
     SoftwareChange,
+
+    /// Ten bounded research iterations with independent evidence gates.
+    AutoResearch,
 }
 
 #[derive(Debug, Args)]

@@ -41,7 +41,8 @@ flowchart LR
 ```
 
 The built-in `software-change` template uses the route shown above. For work that does not need its
-review loop, use `single-worker`; custom graphs follow the same protocol contracts.
+review loop, use `single-worker`. For ten rounds of measured, reversible research against a durable
+charter, use `auto-research`; custom graphs follow the same protocol contracts.
 
 ## Choose where it runs
 

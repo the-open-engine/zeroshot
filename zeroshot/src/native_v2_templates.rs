@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 
 use openengine_cluster_protocol::{
     ChoiceBranch, ChoiceNode, ControlSelector, ControlSource, EnumLabel, FieldName, FieldPath,
-    GraphNode, GraphSpec, Guard, Join, LoopNode, NodeInstructions, NodeName, NonEmptyEnumSet,
-    NonEmptyVec, ParNode, PayloadType, PositiveInteger, StepNode, SucceedNode, VerifierNode,
-    WorkerErrorCode, WorkerRef, WriteBinding,
+    GraphNode, GraphSpec, Guard, Join, LoopNode, MapNode, NodeInstructions, NodeName,
+    NonEmptyEnumSet, NonEmptyVec, ParNode, PayloadType, PositiveInteger, StepNode, SucceedNode,
+    VerifierNode, WorkerErrorCode, WorkerRef, WriteBinding,
 };
 
 use crate::native_v2_admission::MAX_AGENT_VERIFIER_ATTEMPTS;
@@ -21,6 +21,9 @@ use crate::native_v2_delivery::{
     DELIVERY_REPAIR_REQUIRED_LABEL, DELIVERY_SIGNAL_FIELD,
 };
 
+#[path = "native_v2_templates/auto_research.rs"]
+mod auto_research;
+use auto_research::auto_research_graph;
 #[path = "native_v2_templates/catalog.rs"]
 mod catalog;
 pub use catalog::{BuiltinGraphTemplate, TemplateDelivery};
@@ -103,8 +106,16 @@ fn task_worker(
     worker: &str,
     authored_instructions: &str,
 ) -> Result<GraphNode, BuiltinTemplateError> {
+    task_step("worker", worker, authored_instructions)
+}
+
+fn task_step(
+    name: &str,
+    worker: &str,
+    authored_instructions: &str,
+) -> Result<GraphNode, BuiltinTemplateError> {
     Ok(GraphNode::Step(StepNode {
-        name: node_name("worker")?,
+        name: node_name(name)?,
         worker: worker_ref(worker)?,
         instructions: Some(instructions(authored_instructions)?),
         input: task_type()?,
@@ -350,8 +361,15 @@ fn delivery_with_repair(
 }
 
 fn delivery_repair(mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError> {
+    named_delivery_repair("delivery_repair", mode)
+}
+
+fn named_delivery_repair(
+    name: &str,
+    mode: DeliveryMode,
+) -> Result<GraphNode, BuiltinTemplateError> {
     Ok(GraphNode::Step(StepNode {
-        name: node_name("delivery_repair")?,
+        name: node_name(name)?,
         worker: worker_ref("builtin.agent.delivery-repair@1")?,
         instructions: Some(delivery_feedback_instructions(
             "Diagnose the reported Git, delivery, CI failure, or merge conflict using the original \
@@ -374,11 +392,15 @@ fn delivery_repair(mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError
 }
 
 fn delivery_node(mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError> {
+    named_delivery_node(DELIVERY_NODE, mode)
+}
+
+fn named_delivery_node(name: &str, mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError> {
     let output = static_value(delivery_result_schema(mode))?;
-    let write_bindings = delivery_write_bindings(&output)?;
+    let write_bindings = delivery_write_bindings(name, &output)?;
     let signals = delivery_signals(mode)?;
     Ok(GraphNode::Verifier(VerifierNode {
-        name: node_name(DELIVERY_NODE)?,
+        name: node_name(name)?,
         worker: worker_ref(delivery_worker(mode))?,
         input: delivery_input_type()?,
         output,
@@ -397,13 +419,14 @@ fn delivery_node(mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError> 
 }
 
 fn delivery_write_bindings(
+    name: &str,
     output: &PayloadType,
 ) -> Result<Vec<WriteBinding>, BuiltinTemplateError> {
     output_fields(output)?
         .into_iter()
-        .map(|field| output_write(DELIVERY_NODE, &field, &field))
+        .map(|field| output_write(name, &field, &field))
         .chain(std::iter::once(diagnostic_write(
-            DELIVERY_NODE,
+            name,
             DELIVERY_FEEDBACK_FIELD,
         )))
         .collect()
@@ -441,15 +464,28 @@ fn accepted_reviews_guard() -> Result<Guard, BuiltinTemplateError> {
 }
 
 fn delivery_signal_guard(labels: &[&str]) -> Result<Guard, BuiltinTemplateError> {
-    signal_guard(DELIVERY_NODE, DELIVERY_SIGNAL_FIELD, labels)
+    named_delivery_signal_guard(DELIVERY_NODE, labels)
+}
+
+fn named_delivery_signal_guard(node: &str, labels: &[&str]) -> Result<Guard, BuiltinTemplateError> {
+    signal_guard(node, DELIVERY_SIGNAL_FIELD, labels)
 }
 
 fn signal_guard(node: &str, field: &str, labels: &[&str]) -> Result<Guard, BuiltinTemplateError> {
+    control_guard(node, ControlSource::Signal, Some(field), labels)
+}
+
+fn control_guard(
+    node: &str,
+    source: ControlSource,
+    field: Option<&str>,
+    labels: &[&str],
+) -> Result<Guard, BuiltinTemplateError> {
     Ok(Guard::In {
         value: ControlSelector {
             name: node_name(node)?,
-            source: ControlSource::Signal,
-            field: Some(field_name(field)?),
+            source,
+            field: field.map(field_name).transpose()?,
         },
         labels: enum_labels(labels)?,
     })
@@ -457,18 +493,26 @@ fn signal_guard(node: &str, field: &str, labels: &[&str]) -> Result<Guard, Built
 
 fn executable_error_guard(node: &str) -> Result<Guard, BuiltinTemplateError> {
     Ok(Guard::In {
-        value: ControlSelector {
-            name: node_name(node)?,
-            source: ControlSource::Error,
-            field: None,
-        },
-        labels: enum_labels(&[
-            WorkerErrorCode::Timeout.as_str(),
-            WorkerErrorCode::Crash.as_str(),
-            WorkerErrorCode::Malformed.as_str(),
-            WorkerErrorCode::Refusal.as_str(),
-        ])?,
+        value: error_selector(node)?,
+        labels: worker_error_labels()?,
     })
+}
+
+fn error_selector(node: &str) -> Result<ControlSelector, BuiltinTemplateError> {
+    Ok(ControlSelector {
+        name: node_name(node)?,
+        source: ControlSource::Error,
+        field: None,
+    })
+}
+
+fn worker_error_labels() -> Result<NonEmptyEnumSet, BuiltinTemplateError> {
+    enum_labels(&[
+        WorkerErrorCode::Timeout.as_str(),
+        WorkerErrorCode::Crash.as_str(),
+        WorkerErrorCode::Malformed.as_str(),
+        WorkerErrorCode::Refusal.as_str(),
+    ])
 }
 
 fn any_executable_error_guard(nodes: &[&str]) -> Result<Guard, BuiltinTemplateError> {

@@ -249,7 +249,7 @@ fn template_list_and_show_are_static_and_emit_ordinary_json() {
     assert_eq!(outcome, CliOutcome::Completed);
     assert_eq!(
         serde_json::from_slice::<Value>(&list_output).assert_value(),
-        json!(["single-worker", "software-change"])
+        json!(["single-worker", "software-change", "auto-research"])
     );
 
     let mut show_output = Vec::new();

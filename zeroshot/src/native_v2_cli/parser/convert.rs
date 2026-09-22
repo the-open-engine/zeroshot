@@ -260,6 +260,7 @@ impl TemplateName {
         let name = match self {
             Self::SingleWorker => "single-worker",
             Self::SoftwareChange => "software-change",
+            Self::AutoResearch => "auto-research",
         };
         BuiltinGraphTemplate::parse(name)
             .ok_or_else(|| usage("Clap template value is outside the built-in catalog"))
@@ -430,7 +431,7 @@ fn run_graph(
             Ok(RunGraph::File(path))
         }
         (Some(_), None) => Err(usage(
-            "delivery flags require --template software-change; author delivery in custom graphs",
+            "delivery flags require --template; author delivery in custom graphs",
         )),
         (None, Some(template)) => {
             let template = template.into_template()?;
@@ -541,10 +542,19 @@ fn validate_template_delivery(
     if no_pr_feedback && !delivery_supports_feedback(delivery) {
         return Err(usage("--no-pr-feedback requires --pr or --ship"));
     }
-    if template == BuiltinGraphTemplate::SingleWorker && delivery != TemplateDelivery::None {
-        return Err(usage(
-            "delivery flags are valid only with --template software-change",
-        ));
+    let supported = match template {
+        BuiltinGraphTemplate::SingleWorker => delivery == TemplateDelivery::None,
+        BuiltinGraphTemplate::SoftwareChange => true,
+        BuiltinGraphTemplate::AutoResearch => {
+            matches!(delivery, TemplateDelivery::None | TemplateDelivery::Push)
+        }
+    };
+    if !supported {
+        return Err(usage(format!(
+            "delivery mode {} is not supported by --template {}",
+            delivery,
+            template.name()
+        )));
     }
     Ok(())
 }
