@@ -84,6 +84,60 @@ fn git(directory: &Path, arguments: &[&str]) -> String {
 }
 
 #[test]
+fn staging_directory_is_private_at_creation_and_removed_with_its_contents() {
+    let root = tempfile::tempdir().assert_value();
+    let stage = super::private_stage(root.path(), ".test-").assert_value();
+    let path = stage.path().to_owned();
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use crate::execution::platform;
+        let directory = platform::open_directory(&path).assert_value();
+        platform::windows::security::validate(directory.as_raw_handle()).assert_value();
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&path).assert_value().permissions().mode() & 0o777,
+            0o700
+        );
+    }
+    fs::create_dir(path.join("nested")).assert_value();
+    fs::write(path.join("nested/file"), "unfinished capture").assert_value();
+    drop(stage);
+    assert!(!path.exists());
+}
+
+#[test]
+fn readonly_workspace_files_remain_readonly_through_capture_and_restore() {
+    let fixture = Fixture::new();
+    let file = fixture.workspace.join("readonly");
+    fs::write(&file, "checkpoint").assert_value();
+    let mut permissions = fs::metadata(&file).assert_value().permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&file, permissions).assert_value();
+    let result = capture(&fixture.workspace, &fixture.snapshots, &());
+    assert!(result.is_ok(), "read-only capture failed: {result:?}");
+    let id = result.assert_value();
+    assert!(fs::metadata(&file).assert_value().permissions().readonly());
+    assert!(
+        fs::metadata(fixture.tree(&id).join("readonly"))
+            .assert_value()
+            .permissions()
+            .readonly()
+    );
+
+    fs::rename(&file, fixture.workspace.join("old-readonly")).assert_value();
+    fs::write(&file, "later edits").assert_value();
+    let result = restore(&fixture.snapshots, &id, &fixture.workspace);
+    assert!(result.is_ok(), "read-only restore failed: {result:?}");
+    assert_eq!(fs::read_to_string(&file).assert_value(), "checkpoint");
+    assert!(fs::metadata(&file).assert_value().permissions().readonly());
+    assert!(!fixture.workspace.join("old-readonly").exists());
+}
+
+#[test]
 fn capture_is_immutable_and_restore_replaces_the_entire_selected_tree() {
     let fixture = Fixture::new();
     fs::write(fixture.workspace.join("source"), "checkpoint").assert_value();

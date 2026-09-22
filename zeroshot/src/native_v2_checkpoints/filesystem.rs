@@ -163,10 +163,26 @@ fn install_children(tree: &Path, workspace: &Path, preserve_git: bool) -> io::Re
     Ok(())
 }
 
-fn private_stage(parent: &Path, prefix: &str) -> io::Result<tempfile::TempDir> {
-    let stage = tempfile::Builder::new().prefix(prefix).tempdir_in(parent)?;
-    platform::private_directory(stage.path())?;
-    Ok(stage)
+struct PrivateStage(PathBuf);
+
+impl PrivateStage {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for PrivateStage {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(self.path());
+    }
+}
+
+fn private_stage(parent: &Path, prefix: &str) -> io::Result<PrivateStage> {
+    let path = parent.join(format!("{prefix}{}", uuid::Uuid::now_v7()));
+    // Windows may give ordinary temporary directories the Administrators owner. Set the
+    // current-user owner and private ACL atomically rather than trying to repair that owner.
+    platform::create_private_directory(&path)?;
+    Ok(PrivateStage(path))
 }
 
 fn prepare_snapshots_root(workspace: &Path, root: &Path) -> io::Result<PathBuf> {
@@ -255,7 +271,26 @@ fn sync_tree(path: &Path) -> io::Result<()> {
         }
         sync_directory(path)
     } else {
+        sync_file(path, &metadata)
+    }
+}
+
+fn sync_file(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let _ = metadata;
         fs::File::open(path)?.sync_all()
+    }
+    #[cfg(windows)]
+    {
+        // FlushFileBuffers requires a writable handle, including for copied read-only Git
+        // objects. Only our private staging copy changes, and its original attributes survive.
+        let mut writable = metadata.permissions();
+        writable.set_readonly(false);
+        fs::set_permissions(path, writable)?;
+        let file = fs::OpenOptions::new().write(true).open(path);
+        fs::set_permissions(path, metadata.permissions())?;
+        file?.sync_all()
     }
 }
 
