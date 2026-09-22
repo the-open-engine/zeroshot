@@ -79,10 +79,10 @@ enum CliCommand {
     ///
     /// When --target is omitted, the run uses the current local repository. A foreground run
     /// follows NDJSON events until completion. --detach returns after submission. Ctrl-C before
-    /// submission cancels the command; during submission it waits for the receipt, then detaches;
-    /// during observation it detaches without stopping the run. Named-target runs send GH_TOKEN,
-    /// when set, for source checkout and Git delivery; providers receive it only when the runtime
-    /// declares GH_TOKEN.
+    /// the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the
+    /// receipt and then detaches. During observation, Ctrl-C detaches without stopping the run.
+    /// Named-target runs send GH_TOKEN, when set, for source checkout and Git delivery; providers
+    /// receive it only when the runtime declares GH_TOKEN.
     Run(RunArgs),
 
     #[command(flatten)]

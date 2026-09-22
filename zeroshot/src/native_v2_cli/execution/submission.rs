@@ -213,9 +213,11 @@ where
         return Ok(RunSubmission::Validated);
     }
     let source_record = named_source_record(run, &params);
-    let started = Cell::new(false);
+    let submission_polled = Cell::new(false);
     let submission = async {
-        started.set(true);
+        // Once polled, the backend may cross an irreversible admission boundary before yielding.
+        // Preserve this exact future so an interrupt cannot orphan an admitted run's receipt.
+        submission_polled.set(true);
         context
             .backend
             .run_submit(run.target.as_deref(), params)
@@ -225,7 +227,7 @@ where
     let (receipt, interrupted) = tokio::select! {
         biased;
         () = detach.as_mut() => {
-            if !started.get() {
+            if !submission_polled.get() {
                 return Ok(RunSubmission::Interrupted);
             }
             (submission.await?, true)

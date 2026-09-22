@@ -340,9 +340,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 
 - CLI grammar/help comes from the derived Clap `Cli` tree and Rust doc comments.
 - The foreground run command carries one Ctrl-C signal across preparation, submission, and
-  observation. An interrupt before backend submission cancels without dispatching work. After
-  dispatch, it preserves the same in-flight submission through its receipt or error; a successful
-  receipt is emitted before detaching without opening observation. Ctrl-C never force-stops a run.
+  observation. An interrupt before the backend submission future is first polled cancels without
+  entering the backend. Once polled, that future is preserved through its receipt or error because
+  it may cross an irreversible admission boundary before yielding. A successful receipt is emitted
+  before detaching without opening observation. Ctrl-C never force-stops a run.
 - Graph verification errors display their first safe diagnostic through the shared verifier error,
   so local validation and hosted rejection report the same cause.
 - Do not hand-edit `docs/zeroshot-cli.md` or `docs/zeroshot-cli.html`; regenerate with
