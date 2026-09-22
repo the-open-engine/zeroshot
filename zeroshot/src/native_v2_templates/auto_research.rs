@@ -99,8 +99,10 @@ fn bootstrap() -> Result<GraphNode, BuiltinTemplateError> {
          (evidence, method, progress), exactly one experiment work item, and empty continuationItems, \
          proposals, reviews, and verdicts arrays. The graph validates role and work-item coverage before \
          dependent work and rejects missing, duplicate, extra, or failed entries.",
-        bootstrap_output_type()?,
-        write_bindings,
+        TaskStepContract {
+            output: bootstrap_output_type()?,
+            write_bindings,
+        },
     )
 }
 
