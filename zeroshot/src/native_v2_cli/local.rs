@@ -37,7 +37,8 @@ use crate::native_v2_cloud::submission_digest;
 use crate::native_v2_local::{PreparedLocalRun, prepare_local_run};
 use crate::native_v2_portable_controller::{
     ControllerLease, ControllerLeaseError, PortableControllerBootstrap, PortableControllerError,
-    PortableControllerPaths, PortableRunController, read_ready, write_bootstrap_file,
+    PortableControllerPaths, PortableControllerServer, PortableRunController, read_ready,
+    write_bootstrap_file,
 };
 use crate::native_v2_portable_controller::process::{PortableControllerTransport, connect_transport};
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
@@ -165,19 +166,15 @@ impl LocalCliBackend {
                 return Ok(transport);
             }
 
-            match PortableRunController::open_observer(paths.clone(), run_id.clone()).await {
-                Ok(observer) => {
-                    let observer = Arc::new(observer);
-                    let server = observer.bind().await.map_err(local_error)?;
+            match bind_observer(paths.clone(), run_id.clone()).await {
+                Ok(server) => {
                     tokio::spawn(async move {
                         let _ = server.serve().await;
                     });
                     // The observer owns the lease now; reconnect through the same bounded loop so
                     // Windows does not fail the handoff on one unavailable named-pipe instance.
                 }
-                Err(PortableControllerError::Lease(ControllerLeaseError::Held))
-                    if Instant::now() < deadline =>
-                {
+                Err(error) if retryable_controller_handoff(&error) && Instant::now() < deadline => {
                     sleep(CONTROLLER_HANDOFF_RETRY_DELAY).await;
                 }
                 Err(error) => return Err(local_error(error)),
@@ -804,6 +801,22 @@ async fn wait_for_controller(
         }
         sleep(Duration::from_millis(20)).await;
     }
+}
+
+async fn bind_observer(
+    paths: PortableControllerPaths,
+    run_id: RunId,
+) -> Result<PortableControllerServer, PortableControllerError> {
+    Arc::new(PortableRunController::open_observer(paths, run_id).await?)
+        .bind()
+        .await
+}
+
+fn retryable_controller_handoff(error: &PortableControllerError) -> bool {
+    matches!(
+        error,
+        PortableControllerError::Lease(ControllerLeaseError::Held) | PortableControllerError::Io(_)
+    )
 }
 
 fn require_local(target: Option<&str>) -> Result<(), NativeV2CliError> {
