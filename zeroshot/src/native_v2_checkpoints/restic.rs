@@ -23,6 +23,9 @@ pub(crate) struct ResticProgram {
     executable: PathBuf,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     arguments: Vec<String>,
+    #[cfg(test)]
+    #[serde(default)]
+    in_process_test_fake: bool,
 }
 
 impl ResticProgram {
@@ -64,6 +67,8 @@ impl ResticProgram {
         Ok(Self {
             executable,
             arguments: Vec::new(),
+            #[cfg(test)]
+            in_process_test_fake: false,
         })
     }
 
@@ -75,71 +80,12 @@ impl ResticProgram {
     }
 
     #[cfg(test)]
-    pub(crate) fn fake(directory: &Path) -> io::Result<Self> {
-        let script = directory.join("fake-restic.js");
-        std::fs::write(
-            &script,
-            r#"'use strict';
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const args = process.argv.slice(2);
-if (args[0] === '--no-cache') args.shift();
-const command = args[0];
-const repository = process.env.RESTIC_REPOSITORY;
-const snapshots = path.join(repository, 'snapshots');
-const controls = path.dirname(repository);
-for (const secret of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'AWS_SECRET_ACCESS_KEY']) {
-  if (process.env[secret] !== undefined) throw new Error(`inherited ${secret}`);
-}
-function copyChildren(source, target) {
-  fs.mkdirSync(target, { recursive: true });
-  for (const name of fs.readdirSync(source)) {
-    fs.cpSync(path.join(source, name), path.join(target, name), {
-      recursive: true,
-      preserveTimestamps: true,
-      verbatimSymlinks: true,
-    });
-  }
-}
-if (command === 'cat') {
-  process.stdout.write(fs.readFileSync(path.join(repository, 'config')));
-} else if (command === 'init') {
-  fs.mkdirSync(repository, { recursive: true });
-  fs.writeFileSync(path.join(repository, 'config'), 'fake-restic-v1\n');
-} else if (command === 'unlock') {
-  // The fake repository has no locks.
-} else if (command === 'backup') {
-  if (fs.existsSync(path.join(controls, 'fail-backup'))) process.exit(19);
-  const id = crypto.randomBytes(32).toString('hex');
-  copyChildren(process.cwd(), path.join(snapshots, id));
-  process.stdout.write(JSON.stringify({message_type: 'summary', snapshot_id: id}) + '\n');
-} else if (command === 'restore') {
-  if (fs.existsSync(path.join(controls, 'fail-restore'))) process.exit(20);
-  const id = args[1];
-  const target = args[args.indexOf('--target') + 1];
-  copyChildren(path.join(snapshots, id), target);
-} else {
-  process.exitCode = 2;
-}
-"#,
-        )?;
-        let name = if cfg!(windows) { "node.exe" } else { "node" };
-        let executable = std::env::var_os("PATH")
-            .into_iter()
-            .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
-            .map(|root| root.join(name))
-            .find(|candidate| candidate.is_file())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "node is unavailable"))?;
-        Self::test(
-            executable,
-            vec![
-                script
-                    .to_str()
-                    .ok_or_else(|| io::Error::other("fake restic path is not Unicode"))?
-                    .to_owned(),
-            ],
-        )
+    pub(crate) fn fake(_directory: &Path) -> io::Result<Self> {
+        Ok(Self {
+            executable: PathBuf::from("in-process-test-restic"),
+            arguments: Vec::new(),
+            in_process_test_fake: true,
+        })
     }
 }
 
@@ -270,6 +216,10 @@ impl Repository {
     }
 
     async fn run(&self, directory: &Path, arguments: &[OsString]) -> io::Result<Vec<u8>> {
+        #[cfg(test)]
+        if self.program.in_process_test_fake {
+            return self.run_test_fake(directory, arguments);
+        }
         let mut environment = BTreeMap::new();
         platform::process_environment(&mut environment);
         let mut command = Command::new(&self.program.executable);
@@ -313,6 +263,91 @@ impl Repository {
         }
         Ok(output)
     }
+
+    #[cfg(test)]
+    fn run_test_fake(&self, directory: &Path, arguments: &[OsString]) -> io::Result<Vec<u8>> {
+        let command = arguments
+            .first()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| io::Error::other("fake restic command is invalid"))?;
+        match command {
+            "cat" => std::fs::read(self.repository_path().join("config")),
+            "init" => self.initialize_test_fake(),
+            "unlock" => Ok(Vec::new()),
+            "backup" => self.backup_test_fake(directory),
+            "restore" => self.restore_test_fake(arguments),
+            _ => Err(io::Error::other("fake restic command is unsupported")),
+        }
+    }
+
+    #[cfg(test)]
+    fn initialize_test_fake(&self) -> io::Result<Vec<u8>> {
+        platform::private_directory(&self.repository_path())?;
+        std::fs::write(self.repository_path().join("config"), b"fake-restic-v1\n")?;
+        Ok(Vec::new())
+    }
+
+    #[cfg(test)]
+    fn backup_test_fake(&self, source: &Path) -> io::Result<Vec<u8>> {
+        if self.root.join("fail-backup").exists() {
+            return Err(io::Error::other("fake restic backup failed"));
+        }
+        let mut random = [0_u8; 32];
+        getrandom::fill(&mut random).map_err(io::Error::other)?;
+        let snapshot = random
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let snapshots = self.repository_path().join("snapshots");
+        platform::private_directory(&snapshots)?;
+        crate::native_v2_capsule::provider_process::copy_workspace_entry(
+            source,
+            &snapshots.join(&snapshot),
+        )?;
+        let mut output = serde_json::to_vec(&serde_json::json!({
+            "message_type": "summary",
+            "snapshot_id": snapshot,
+        }))
+        .map_err(io::Error::other)?;
+        output.push(b'\n');
+        Ok(output)
+    }
+
+    #[cfg(test)]
+    fn restore_test_fake(&self, arguments: &[OsString]) -> io::Result<Vec<u8>> {
+        if self.root.join("fail-restore").exists() {
+            return Err(io::Error::other("fake restic restore failed"));
+        }
+        let snapshot = arguments
+            .get(1)
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| io::Error::other("fake restic snapshot is invalid"))?;
+        let target_index = arguments
+            .iter()
+            .position(|value| value == "--target")
+            .ok_or_else(|| io::Error::other("fake restic target is missing"))?;
+        let target = arguments
+            .get(target_index + 1)
+            .map(PathBuf::from)
+            .ok_or_else(|| io::Error::other("fake restic target is missing"))?;
+        copy_test_children(
+            &self.repository_path().join("snapshots").join(snapshot),
+            &target,
+        )?;
+        Ok(Vec::new())
+    }
+}
+
+#[cfg(test)]
+fn copy_test_children(source: &Path, target: &Path) -> io::Result<()> {
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        crate::native_v2_capsule::provider_process::copy_workspace_entry(
+            &entry.path(),
+            &target.join(entry.file_name()),
+        )?;
+    }
+    Ok(())
 }
 
 fn arguments<const N: usize>(values: [&str; N]) -> Vec<OsString> {

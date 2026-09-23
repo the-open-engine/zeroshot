@@ -215,6 +215,9 @@ describe('Embedded UI distribution', () => {
     assert.match(commands, /npm --prefix ui test/);
     assert.match(commands, /cargo clippy --workspace --all-targets -- -D warnings/);
     assert.match(commands, /cargo clippy --package zeroshot --all-targets --features ui/);
+    assert.match(commands, /scripts\/distribution\/build-restic\.sh/);
+    assert.match(commands, /ZEROSHOT_RESTIC_TEST=%s/);
+    assert.match(commands, /ZEROSHOT_RESTIC="\$ZEROSHOT_RESTIC_TEST"/);
     assert.match(commands, /cargo test --workspace/);
     assert.match(commands, /cargo test --package zeroshot --features ui/);
     assert.match(commands, /smoke-ui\.js --binary target\/release\/zeroshot/);
@@ -249,12 +252,15 @@ describe('CI efficiency contract', () => {
   it('pins the Rust cache without weakening native checks', () => {
     const workflow = yaml.load(read('.github/workflows/ci.yml'));
     const native = workflow.jobs['native-check'];
+    const go = native.steps.find((step) => step.uses?.startsWith('actions/setup-go@'));
     const cache = native.steps.find((step) => step.uses?.startsWith('Swatinem/rust-cache@'));
     const rustdocs = native.steps.find(
       (step) => step.name === 'Build documentation with warnings denied'
     );
     const commands = native.steps.map((step) => step.run || '').join('\n');
 
+    assert.equal(go.uses, 'actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e');
+    assert.deepEqual(go.with, { 'go-version': '1.27.1', cache: false });
     assert.equal(cache.uses, 'Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6');
     assert.deepEqual(cache.with, { 'cache-on-failure': true });
     assert.match(commands, /cargo clippy --workspace --all-targets -- -D warnings/);
