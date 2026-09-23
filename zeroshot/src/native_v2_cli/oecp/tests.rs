@@ -417,9 +417,11 @@ async fn wave7_cli_contract_oecp_default_optional_authority_is_refused() {
             .to_string()
             .contains("does not advertise workspace recovery")
     );
+    let successor_run_id = RunId::new("run-successor");
     let resume = openengine_cluster_protocol::RunResumeParams {
         run_id: run_id.clone(),
-        successor_run_id: RunId::new("run-successor"),
+        successor_run_id,
+        from: None,
         connections: BTreeMap::new(),
         connection_resolver: None,
         github_token: None,

@@ -406,6 +406,7 @@ async fn assert_bootstrap_and_resume_failures_leave_recoverable_state() {
             RunResumeParams {
                 run_id: original.clone(),
                 successor_run_id: successor.clone(),
+                from: None,
                 connections: BTreeMap::new(),
                 connection_resolver: None,
                 github_token: None,

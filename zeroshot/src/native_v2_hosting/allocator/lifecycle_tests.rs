@@ -21,17 +21,20 @@ fn retained_workspace(root: &Path) {
 }
 
 fn cleanup_request<'a>(
-    paths: (&'a Path, &'a Path),
+    paths: (&'a Path, &'a Path, &'a Path, &'a Path),
     identities: (&'a RunId, &'a RunId),
     recovery_eligible: bool,
     exit: RunRuntimeExit,
 ) -> CleanupRunRequest<'a> {
     CleanupRunRequest {
         run_root: paths.0,
-        recovery_path: paths.1,
+        checkpoint_directory: paths.1,
+        checkpoint_repository: paths.2,
+        recovery_path: paths.3,
         run_id: identities.0,
         delivery_run_id: identities.1,
         recovery_eligible,
+        defer_completed_checkpoint_gc: false,
         exit,
     }
 }
@@ -39,6 +42,7 @@ fn cleanup_request<'a>(
 fn test_allocator(root: &Path) -> ProductionCapsuleAllocator {
     let harness = PathBuf::from("/usr/bin/false");
     ProductionCapsuleAllocator::new(ProductionCapsuleConfig {
+        workspace_storage: None,
         storage_root: root.to_path_buf(),
         copilot_executable: harness.clone(),
         codex_executable: harness.clone(),
@@ -61,8 +65,15 @@ fn hosting_source_contract_cleanup_retains_only_failed_candidate_workspaces() {
     let run_id = RunId::new("cleanup-run");
     let delivery_run_id = RunId::new("delivery-run");
     let run_root = root.child("run");
+    let checkpoints = checkpoint_directory(root.path(), &run_id);
+    let checkpoint_repository = checkpoint_repository(root.path(), &delivery_run_id);
     let recovery = root.child("recovery.json");
-    let paths = (run_root.as_path(), recovery.as_path());
+    let paths = (
+        run_root.as_path(),
+        checkpoints.as_path(),
+        checkpoint_repository.as_path(),
+        recovery.as_path(),
+    );
     let identities = (&run_id, &delivery_run_id);
 
     assert!(matches!(

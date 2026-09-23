@@ -31,7 +31,8 @@ async fn boundary_contract_single_run_allocator_refuses_foreign_runs_and_confirm
     let foreign = RunId::new("run-foreign");
     let lease =
         Arc::new(ControllerLease::acquire(root.path().join("controller.lock")).assert_value());
-    let allocator = SingleRunAllocator::new(run_id.clone(), None, lease);
+    let allocator =
+        SingleRunAllocator::new(run_id.clone(), None, lease, root.path().join("checkpoints"));
 
     assert!(allocator.require_run(&run_id).is_ok());
     assert!(allocator.require_run(&foreign).is_err());

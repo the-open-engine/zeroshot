@@ -418,6 +418,7 @@ async fn wave5_cli_contract_default_backend_bounds_recovery_and_redacts_requests
     let resume = RunResumeParams {
         run_id: run_id.clone(),
         successor_run_id: RunId::new("run-successor"),
+        from: None,
         connections: BTreeMap::new(),
         connection_resolver: None,
         github_token: None,

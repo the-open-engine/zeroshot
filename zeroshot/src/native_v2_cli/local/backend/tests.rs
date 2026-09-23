@@ -178,6 +178,7 @@ async fn exercise_named_run_rejections(backend: &LocalCliBackend) {
                 RunResumeParams {
                     run_id: run_id.clone(),
                     successor_run_id: successor,
+                    from: None,
                     connections: BTreeMap::new(),
                     connection_resolver: None,
                     github_token: None,
@@ -266,6 +267,7 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
                 RunResumeParams {
                     run_id,
                     successor_run_id: RunId::new("0199f33f-3b44-7d21-9000-000000000032",),
+                    from: None,
                     connections: BTreeMap::new(),
                     connection_resolver: None,
                     github_token: None,
@@ -383,6 +385,7 @@ async fn local_resume_rejects_an_unusable_state_root_before_observing_the_run() 
         .resume_local(RunResumeParams {
             run_id: run_id("0199f33f-3b44-7d21-9000-000000000042"),
             successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000043"),
+            from: None,
             connections: BTreeMap::new(),
             connection_resolver: None,
             github_token: None,

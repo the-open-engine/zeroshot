@@ -86,13 +86,16 @@ fn assert_checksum_manifest_rejects_invalid_missing_and_duplicate_entries() {
     }
 }
 
-fn assert_release_archive_accepts_one_exact_regular_executable() {
+fn assert_release_archive_accepts_exact_regular_executables() {
     let binary = b"release binary";
-    let archive = test_archive(&[ArchiveEntry::File("zeroshot", binary)]);
-    assert_eq!(
-        extract_executable(&archive, "zeroshot").assert_value(),
-        binary
-    );
+    let restic = b"restic binary";
+    let archive = test_archive(&[
+        ArchiveEntry::File("zeroshot", binary),
+        ArchiveEntry::File("restic", restic),
+    ]);
+    let extracted = extract_executables(&archive, &["zeroshot", "restic"]).assert_value();
+    assert_eq!(extracted["zeroshot"], binary);
+    assert_eq!(extracted["restic"], restic);
 }
 
 fn assert_release_archive_rejects_wrong_paths_types_duplicates_and_missing_executables() {
@@ -103,7 +106,7 @@ fn assert_release_archive_rejects_wrong_paths_types_duplicates_and_missing_execu
         ),
         (
             test_archive(&[ArchiveEntry::Directory("zeroshot")]),
-            "unexpected entry",
+            "non-file entry",
         ),
         (
             test_archive(&[
@@ -112,10 +115,10 @@ fn assert_release_archive_rejects_wrong_paths_types_duplicates_and_missing_execu
             ]),
             "duplicate",
         ),
-        (test_archive(&[]), "does not contain"),
+        (test_archive(&[]), "omits a required executable"),
     ];
     for (archive, expected) in cases {
-        let error = extract_executable(&archive, "zeroshot")
+        let error = extract_executables(&archive, &["zeroshot", "restic"])
             .assert_error()
             .to_string();
         assert!(error.contains(expected), "{error}");
@@ -179,13 +182,14 @@ async fn wave5_cli_contract_release_metadata_and_verified_assets_are_self_consis
     metadata.finish();
 
     let latest = ReleaseVersion([8, 2, 1]);
-    let target = release_target().assert_value().0;
+    let (target, executable, restic_name) = release_target().assert_value();
     let filename = format!("zeroshot-v{latest}-{target}.tar.gz");
     let binary = b"verified release binary";
-    let archive = test_archive(&[ArchiveEntry::File(
-        release_target().assert_value().1,
-        binary,
-    )]);
+    let restic = b"verified restic binary";
+    let archive = test_archive(&[
+        ArchiveEntry::File(executable, binary),
+        ArchiveEntry::File(restic_name, restic),
+    ]);
     let canonical_skill = b"---\nname: zeroshot\ndescription: Release skill\n---\n\nVerified.\n";
     let manifest = format!(
         "{:x}  {SKILL_ASSET}\n{:x}  {filename}\n",
@@ -200,7 +204,10 @@ async fn wave5_cli_contract_release_metadata_and_verified_assets_are_self_consis
     let release = download_release_at(&client, ReleaseVersion([8, 2, 0]), latest, &assets.base_url)
         .await
         .assert_value();
-    assert_eq!(release.binary.assert_value(), binary);
+    let executables = release.executables.assert_value();
+    assert_eq!(executables.zeroshot, binary);
+    assert_eq!(executables.restic, restic);
+    assert_eq!(executables.restic_name, restic_name);
     assets.finish();
 
     let unchanged = TestServer::start(vec![
@@ -211,7 +218,7 @@ async fn wave5_cli_contract_release_metadata_and_verified_assets_are_self_consis
         download_release_at(&client, latest, latest, &unchanged.base_url)
             .await
             .assert_value()
-            .binary
+            .executables
             .is_none()
     );
     unchanged.finish();
@@ -238,10 +245,11 @@ fn assert_installation_stages_verifies_replaces_and_cleans_up() {
     fs::write(&current, b"old binary").unwrap();
     let verified = Cell::new(false);
     let version = ReleaseVersion([8, 2, 1]);
+    let executables = test_executables();
 
     install_at(
         &current,
-        b"new binary",
+        &executables,
         version,
         InstallOperations {
             verify: |staged: &Path, actual_version| {
@@ -260,6 +268,10 @@ fn assert_installation_stages_verifies_replaces_and_cleans_up() {
                 verified.set(true);
                 Ok(())
             },
+            verify_restic: |staged: &Path| {
+                assert_eq!(fs::read(staged).unwrap(), b"new restic");
+                Ok(())
+            },
             replace: |staged: &Path| {
                 assert!(verified.get());
                 fs::copy(staged, &installed)
@@ -271,6 +283,10 @@ fn assert_installation_stages_verifies_replaces_and_cleans_up() {
     .assert_value();
 
     assert_eq!(fs::read(installed).unwrap(), b"new binary");
+    assert_eq!(
+        fs::read(directory.path().join("restic")).unwrap(),
+        b"new restic"
+    );
     assert!(!directory.path().read_dir().unwrap().any(|entry| {
         entry
             .unwrap()
@@ -278,21 +294,31 @@ fn assert_installation_stages_verifies_replaces_and_cleans_up() {
             .to_string_lossy()
             .starts_with(".zeroshot-update-")
     }));
+    assert!(!directory.path().read_dir().unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".restic-update-")
+    }));
 }
 
 fn assert_installation_stops_on_verification_or_replacement_failure() {
     let directory = tempfile::tempdir().unwrap();
     let current = directory.path().join("zeroshot");
     fs::write(&current, b"old binary").unwrap();
+    fs::write(directory.path().join("restic"), b"old restic").unwrap();
     let replaced = Cell::new(false);
     let version = ReleaseVersion([8, 2, 1]);
+    let executables = test_executables();
 
     let verification_error = install_at(
         &current,
-        b"new binary",
+        &executables,
         version,
         InstallOperations {
             verify: |_: &Path, _| Err(update_error("verification failed")),
+            verify_restic: |_: &Path| Ok(()),
             replace: |_: &Path| {
                 replaced.set(true);
                 Ok(())
@@ -305,15 +331,20 @@ fn assert_installation_stops_on_verification_or_replacement_failure() {
 
     let replacement_error = install_at(
         &current,
-        b"new binary",
+        &executables,
         version,
         InstallOperations {
             verify: |_: &Path, _| Ok(()),
+            verify_restic: |_: &Path| Ok(()),
             replace: |_: &Path| Err(update_error("replacement failed")),
         },
     )
     .assert_error();
     assert!(matches!(replacement_error, NativeV2CliError::Update(_)));
+    assert_eq!(
+        fs::read(directory.path().join("restic")).unwrap(),
+        b"old restic"
+    );
 }
 
 fn assert_smoke_and_result_reporting_require_the_exact_release_version() {
@@ -350,17 +381,19 @@ fn assert_update_process_boundaries_fail_before_replacement() {
     }
 
     let version = ReleaseVersion([8, 2, 1]);
-    let (target, executable) = release_target().assert_value();
+    let (target, executable, restic) = release_target().assert_value();
     assert!(!target.is_empty());
     assert!(matches!(executable, "zeroshot" | "zeroshot.exe"));
-    assert!(extract_executable(b"not a gzip archive", executable).is_err());
+    assert!(matches!(restic, "restic" | "restic.exe"));
+    assert!(extract_executables(b"not a gzip archive", &[executable, restic]).is_err());
     assert!(
         install_at(
             Path::new(""),
-            b"binary",
+            &test_executables(),
             version,
             InstallOperations {
                 verify: verify_noop,
+                verify_restic: |_: &Path| Ok(()),
                 replace: replace_noop,
             },
         )
@@ -429,7 +462,7 @@ async fn wave10_cli_contract_release_integrity_pipeline_is_lean_and_fail_closed(
     assert_release_versions_are_canonical_and_ordered();
     assert_checksum_manifest_accepts_exact_release_names_and_digests();
     assert_checksum_manifest_rejects_invalid_missing_and_duplicate_entries();
-    assert_release_archive_accepts_one_exact_regular_executable();
+    assert_release_archive_accepts_exact_regular_executables();
     assert_release_archive_rejects_wrong_paths_types_duplicates_and_missing_executables();
     assert_installation_stages_verifies_replaces_and_cleans_up();
     assert_installation_stops_on_verification_or_replacement_failure();
@@ -458,7 +491,7 @@ async fn wave11_cli_contract_update_wrappers_fail_before_remote_or_replacement_e
         "{error}"
     );
 
-    let error = install(b"not an executable", ReleaseVersion([8, 11, 0]))
+    let error = install(&test_executables(), ReleaseVersion([8, 11, 0]))
         .assert_error()
         .to_string();
     assert!(error.contains("could not verify the update"), "{error}");
@@ -494,6 +527,14 @@ fn test_archive(entries: &[ArchiveEntry<'_>]) -> Vec<u8> {
         }
     }
     archive.into_inner().unwrap().finish().unwrap()
+}
+
+fn test_executables() -> ReleaseExecutables {
+    ReleaseExecutables {
+        zeroshot: b"new binary".to_vec(),
+        restic: b"new restic".to_vec(),
+        restic_name: "restic",
+    }
 }
 
 struct TestServer {
