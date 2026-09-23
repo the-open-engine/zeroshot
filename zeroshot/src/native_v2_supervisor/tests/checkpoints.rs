@@ -1,6 +1,8 @@
 use super::*;
 use crate::full_v1_reducer::ExecutionBoundary;
-use crate::native_v2_supervisor::checkpoints::{CheckpointError, CheckpointRestore, RunCheckpointStore};
+use crate::native_v2_supervisor::checkpoints::{
+    CheckpointError, CheckpointRestore, CheckpointRestoreSelection, RunCheckpointStore,
+};
 use openengine_cluster_protocol::RunCheckpointsParams;
 
 #[derive(Clone, Debug)]
@@ -13,6 +15,7 @@ struct RecordingCheckpointStore {
     driver: Arc<FakeDriver>,
     ledger: Arc<FakeRunLedger>,
     records: StdMutex<Vec<Observation>>,
+    discarded: AtomicBool,
 }
 
 impl RecordingCheckpointStore {
@@ -21,6 +24,7 @@ impl RecordingCheckpointStore {
             driver: harness.driver.clone(),
             ledger: harness.ledger.clone(),
             records: StdMutex::default(),
+            discarded: AtomicBool::new(false),
         });
         (
             harness
@@ -80,6 +84,12 @@ impl RunCheckpointStore for RecordingCheckpointStore {
     async fn finish(&self, history: &[DurableExecution]) -> Result<(), CheckpointError> {
         self.record(None, history).await;
         Ok(())
+    }
+
+    async fn discard(&self) -> Result<(), CheckpointError> {
+        assert!(stored_run(&self.ledger).await.snapshot.terminal.is_some());
+        self.discarded.store(true, Ordering::SeqCst);
+        Err(std::io::Error::other("simulated post-terminal cleanup failure").into())
     }
 }
 
@@ -159,9 +169,8 @@ async fn map_stage_waves_only_offer_the_same_group_checkpoint_when_quiescent() {
     assert_eq!(first.history.len(), 1);
     assert!(mapped.last().assert_value().history.len() > first.history.len());
     assert!(mapped.iter().all(|point| point.boundary == first.boundary));
-    let finished = observations.last().assert_value();
-    assert!(finished.boundary.is_none());
-    assert_eq!(finished.history.len(), 8);
+    assert!(observations.iter().all(|point| point.boundary.is_some()));
+    assert!(store.discarded.load(Ordering::SeqCst));
 }
 
 pub(super) fn prerequisite(id: u64, node: &str, outcome: WorkerOutcome) -> DurableExecution {
@@ -231,7 +240,9 @@ async fn repeated_group_entry_keeps_one_catalog_point_and_its_original_workspace
     let restored = crate::native_v2_supervisor::checkpoints::restore(
         &CheckpointRestore {
             directory: directory.clone(),
-            checkpoint_id: first.checkpoint_id.clone(),
+            selection: CheckpointRestoreSelection::Checkpoint {
+                checkpoint_id: first.checkpoint_id.clone(),
+            },
         },
         &workspace,
     )
@@ -246,7 +257,9 @@ async fn repeated_group_entry_keeps_one_catalog_point_and_its_original_workspace
     let restored = crate::native_v2_supervisor::checkpoints::restore(
         &CheckpointRestore {
             directory,
-            checkpoint_id: last.checkpoint_id.clone(),
+            selection: CheckpointRestoreSelection::Checkpoint {
+                checkpoint_id: last.checkpoint_id.clone(),
+            },
         },
         &workspace,
     )

@@ -96,7 +96,7 @@ impl AllocatedCapsule {
 }
 
 pub struct RetainedAllocationRequest<'a> {
-    pub checkpoint_id: Option<&'a openengine_cluster_protocol::CheckpointId>,
+    pub selection: crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection,
     pub source_run_id: &'a RunId,
     pub run_id: &'a RunId,
     pub admitted: &'a AdmittedRun,

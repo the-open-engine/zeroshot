@@ -29,14 +29,12 @@ impl LocalCliBackend {
         params: &openengine_cluster_protocol::RunResumeParams,
     ) -> Result<Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>, NativeV2CliError>
     {
-        use crate::native_v2_supervisor::checkpoints::{CheckpointRestore, selected_checkpoint};
+        use crate::native_v2_supervisor::checkpoints::{CheckpointRestore, restore_selection};
         let directory = self.paths(&params.run_id)?.storage().join("checkpoints");
-        Ok(
-            selected_checkpoint(params.from.as_ref()).map(|checkpoint_id| CheckpointRestore {
-                directory,
-                checkpoint_id: checkpoint_id.clone(),
-            }),
-        )
+        Ok(Some(CheckpointRestore {
+            directory,
+            selection: restore_selection(params.from.as_ref()),
+        }))
     }
 
     async fn start_local_successor(

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use fs2::FileExt;
-use openengine_cluster_protocol::{CheckpointId, RunCheckpointsParams, RunCheckpointsResult, RunId};
+use openengine_cluster_protocol::{RunCheckpointsParams, RunCheckpointsResult, RunId};
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, watch};
 
@@ -36,7 +36,7 @@ use crate::native_v2_delivery::DeliveryTarget;
 use crate::native_v2_portable_controller::WorkspaceIdentity;
 use crate::native_v2_supervisor::RunRuntimeExit;
 use crate::native_v2_supervisor::checkpoints::{
-    self, CheckpointError, CheckpointRestore, ResticCheckpointStore,
+    self, CheckpointError, CheckpointRestore, CheckpointRestoreSelection, ResticCheckpointStore,
 };
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
 use serde::{Deserialize, Serialize};
@@ -148,6 +148,7 @@ struct CleanupRunRequest<'a> {
     run_id: &'a RunId,
     delivery_run_id: &'a RunId,
     recovery_eligible: bool,
+    defer_completed_checkpoint_gc: bool,
     exit: RunRuntimeExit,
 }
 
@@ -397,23 +398,8 @@ impl ProductionCapsuleAllocator {
     async fn build_retained_capsule(
         &self,
         request: CapsuleBuildRequest<'_>,
-        source_run_id: &RunId,
-        checkpoint_id: Option<&CheckpointId>,
+        execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
-        let execution_seed = match checkpoint_id {
-            Some(checkpoint_id) => checkpoints::restore(
-                &CheckpointRestore {
-                    directory: checkpoint_directory(&self.config.storage_root, source_run_id),
-                    checkpoint_id: checkpoint_id.clone(),
-                },
-                &CapsuleBuildPaths::new(&self.config.storage_root, request.run_id).workspace,
-            )
-            .await
-            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
-            None => Vec::new(),
-        };
-        // Restore while the allocation lock owns the moved workspace, before a writer UID
-        // receives it. There is no cancellable background restore that could outlive cleanup.
         let mut capsule = self.build_capsule(request).await?;
         capsule.execution_seed = execution_seed;
         Ok(capsule)
@@ -470,16 +456,30 @@ impl ProductionCapsuleAllocator {
     fn validate_retained_checkpoint(
         &self,
         source_run_id: &RunId,
-        checkpoint_id: Option<&CheckpointId>,
+        selection: CheckpointRestoreSelection,
     ) -> Result<(), CapsuleAllocationUnavailable> {
-        if let Some(checkpoint_id) = checkpoint_id {
-            checkpoints::validate_selection(&CheckpointRestore {
+        checkpoints::validate_selection(&CheckpointRestore {
+            directory: checkpoint_directory(&self.config.storage_root, source_run_id),
+            selection,
+        })
+        .map_err(|_| CapsuleAllocationUnavailable::Runtime)
+    }
+
+    async fn restore_retained_workspace(
+        &self,
+        source_run_id: &RunId,
+        selection: CheckpointRestoreSelection,
+    ) -> Result<Vec<crate::full_v1_reducer::DurableExecution>, CapsuleAllocationUnavailable> {
+        self.validate_retained_checkpoint(source_run_id, selection.clone())?;
+        checkpoints::restore(
+            &CheckpointRestore {
                 directory: checkpoint_directory(&self.config.storage_root, source_run_id),
-                checkpoint_id: checkpoint_id.clone(),
-            })
-            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-        }
-        Ok(())
+                selection,
+            },
+            &CapsuleBuildPaths::new(&self.config.storage_root, source_run_id).workspace,
+        )
+        .await
+        .map_err(|_| CapsuleAllocationUnavailable::Runtime)
     }
 
     fn claim_retained_allocation(
@@ -700,6 +700,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                     run_id,
                     delivery_run_id,
                     recovery_eligible: true,
+                    defer_completed_checkpoint_gc: false,
                     exit,
                 })?;
             }
@@ -712,15 +713,19 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
         request: RetainedAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, RetainedAllocationUnavailable> {
         let RetainedAllocationRequest {
-            checkpoint_id,
+            selection,
             source_run_id,
             run_id,
             admitted,
             github_token,
         } = request;
         let _turn = self.allocation_turn.lock().await;
-        self.validate_retained_checkpoint(source_run_id, checkpoint_id)?;
         let paths = RetainedAllocationPaths::new(&self.config.storage_root, source_run_id, run_id);
+        // Restore before claiming or moving the retained workspace. A crash leaves the source
+        // claimable, and a retry can repeat the restore from the durable snapshot.
+        let execution_seed = self
+            .restore_retained_workspace(source_run_id, selection)
+            .await?;
         let claim = self.claim_retained_allocation(source_run_id, run_id, &paths)?;
         if std::fs::rename(&paths.source_root, &paths.run_root).is_err() {
             return Err(retained_claim_failure(&paths, &claim.original_source));
@@ -736,8 +741,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                     install_source: false,
                     transfer_retained_workspace: true,
                 },
-                source_run_id,
-                checkpoint_id,
+                execution_seed,
             )
             .await;
         match allocation {
@@ -766,6 +770,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                         run_id,
                         delivery_run_id: &claim.delivery_run_id,
                         recovery_eligible: true,
+                        defer_completed_checkpoint_gc: false,
                         exit: RunRuntimeExit::RuntimeLost,
                     }),
                 };
@@ -816,12 +821,12 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
         if !document.recoverable {
             return Ok(false);
         }
-        remove_run_directory(&checkpoint_directory(&self.config.storage_root, run_id))?;
         let delivery_run_id = document.delivery_run_id.as_ref().unwrap_or(run_id);
-        remove_run_directory(&checkpoint_repository(
-            &self.config.storage_root,
-            delivery_run_id,
-        ))?;
+        checkpoints::discard_lineage(
+            &checkpoint_directory(&self.config.storage_root, run_id),
+            &checkpoint_repository(&self.config.storage_root, delivery_run_id),
+        )
+        .map_err(|_| CapsuleCleanupUnavailable)?;
         remove_run_directory(&root)?;
         document.recoverable = false;
         write_recovery(&metadata_path, &document)?;
@@ -910,6 +915,7 @@ impl ProductionCapsuleState {
                 .get()
                 .unwrap_or(&self.delivery_run_id),
             recovery_eligible: self.endpoint.get().is_some() || self.inherited_retained_workspace,
+            defer_completed_checkpoint_gc: true,
             exit,
         })
     }
@@ -1031,7 +1037,11 @@ fn dispose_run_directory(request: CleanupRunRequest<'_>) -> Result<(), CapsuleCl
     remove_run_directory(request.run_root)?;
     let ancestor = read_recovery(request.recovery_path)
         .is_some_and(|recovery| recovery.successor_run_id.is_some());
-    if !ancestor {
+    // Successful checkpoint GC runs only after the terminal event is durable.
+    if !ancestor
+        && !(request.defer_completed_checkpoint_gc
+            && matches!(request.exit, RunRuntimeExit::Completed))
+    {
         remove_run_directory(request.checkpoint_directory)?;
         remove_run_directory(request.checkpoint_repository)?;
     }

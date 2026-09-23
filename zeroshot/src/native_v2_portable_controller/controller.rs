@@ -335,12 +335,8 @@ impl CapsuleCleanup for PortableCheckpointCleanup {
         let destroyed = self.inner.destroy_or_confirm_absent(exit).await?;
         remove_directory_if_present(&self.directory.join("staging"))
             .map_err(|_| CapsuleCleanupUnavailable)?;
-        // Only failed or lost runtimes can become recoverable. Completed and explicitly stopped
-        // runs have no successor that could consume their checkpoint repository.
-        if matches!(
-            exit,
-            RunRuntimeExit::Completed | RunRuntimeExit::ForceStopped
-        ) {
+        // Explicitly stopped runs have no durable terminal path that can perform post-terminal GC.
+        if matches!(exit, RunRuntimeExit::ForceStopped) {
             for path in [&self.directory, &self.repository] {
                 match std::fs::remove_dir_all(path) {
                     Ok(()) => {}

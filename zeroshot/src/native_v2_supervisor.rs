@@ -329,17 +329,35 @@ impl NativeV2Supervisor {
         let terminal =
             enforce_delivery_terminal(self.delivery_policy, admitted, snapshot, terminal)?;
         self.runner.close_run(&self.run_id).await;
-        if let Some(store) = &self.checkpoints {
-            store.finish(&durable_history(snapshot)?).await?;
-        }
-        let exit = if matches!(terminal, TerminalResult::Succeeded { .. }) {
+        let succeeded = matches!(terminal, TerminalResult::Succeeded { .. });
+        self.finish_failed_checkpoints(succeeded, snapshot).await?;
+        let exit = if succeeded {
             RunRuntimeExit::Completed
         } else {
             RunRuntimeExit::Failed
         };
         self.cleanup_runtime(exit).await?;
         let terminal = self.append_terminal(terminal).await?;
+        self.discard_successful_checkpoints(succeeded).await;
         Ok(terminal)
+    }
+
+    async fn finish_failed_checkpoints(
+        &self,
+        succeeded: bool,
+        snapshot: &RunSnapshot,
+    ) -> Result<(), NativeV2SupervisorError> {
+        if !succeeded && let Some(store) = &self.checkpoints {
+            store.finish(&durable_history(snapshot)?).await?;
+        }
+        Ok(())
+    }
+
+    async fn discard_successful_checkpoints(&self, succeeded: bool) {
+        if succeeded && let Some(store) = &self.checkpoints {
+            // Checkpoint garbage collection is post-terminal and best effort by design.
+            let _ = store.discard().await;
+        }
     }
 
     async fn await_completion(

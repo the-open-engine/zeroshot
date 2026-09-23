@@ -14,6 +14,8 @@ pub(crate) mod restic;
 mod tests;
 
 use std::collections::BTreeSet;
+use std::fs::File;
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -42,6 +44,11 @@ pub trait RunCheckpointStore: Send + Sync {
     ) -> Result<(), CheckpointError>;
 
     async fn finish(&self, history: &[DurableExecution]) -> Result<(), CheckpointError>;
+
+    /// Best-effort post-terminal garbage collection. A failure must not change run truth.
+    async fn discard(&self) -> Result<(), CheckpointError> {
+        Ok(())
+    }
 }
 
 /// Private bootstrap selection. The controller restores it after acquiring workspace ownership.
@@ -49,18 +56,91 @@ pub trait RunCheckpointStore: Send + Sync {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CheckpointRestore {
     pub directory: PathBuf,
-    pub checkpoint_id: CheckpointId,
+    pub selection: CheckpointRestoreSelection,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase", tag = "kind")]
+pub enum CheckpointRestoreSelection {
+    Latest,
+    Checkpoint { checkpoint_id: CheckpointId },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct RecoveryPoint {
+    version: u32,
     descriptor: RunCheckpoint,
     snapshot: SnapshotId,
-    history: Vec<DurableExecution>,
+    seed_format: u32,
 }
 
 const STORAGE_FORMAT: u32 = 1;
+const RECOVERY_POINT_FORMAT: u32 = 1;
+const CHECKPOINT_SEED_FORMAT: u32 = 1;
+
+/// Versioned private reducer state used only by selected checkpoint continuation.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CheckpointSeed {
+    format: u32,
+    executions: Vec<DurableExecution>,
+}
+
+impl CheckpointSeed {
+    #[must_use]
+    pub fn new(executions: Vec<DurableExecution>) -> Self {
+        Self {
+            format: CHECKPOINT_SEED_FORMAT,
+            executions,
+        }
+    }
+
+    pub fn read(path: &Path) -> Result<Self, CheckpointError> {
+        let seed: Self =
+            serde_json::from_reader(BufReader::new(File::open(path)?)).map_err(|_| {
+                catalog::invalid(
+                    "checkpoint seed is incompatible; restart from the latest workspace",
+                )
+            })?;
+        if seed.format != CHECKPOINT_SEED_FORMAT {
+            return Err(catalog::invalid(
+                "checkpoint seed is incompatible; restart from the latest workspace",
+            ));
+        }
+        Ok(seed)
+    }
+
+    pub fn write_atomic(&self, path: &Path) -> Result<(), CheckpointError> {
+        let parent = path
+            .parent()
+            .ok_or_else(|| catalog::invalid("checkpoint seed path has no parent"))?;
+        crate::execution::platform::private_directory(parent)?;
+        let temporary = parent.join(format!(".seed-{}.tmp", uuid::Uuid::now_v7()));
+        let mut file = crate::execution::platform::private_file(
+            &temporary,
+            crate::execution::platform::FileAccess::CreateNew,
+        )?;
+        let result = (|| {
+            serde_json::to_writer(&mut file, self)
+                .map_err(|_| catalog::invalid("checkpoint seed cannot be encoded"))?;
+            file.flush()?;
+            file.sync_all()?;
+            drop(file);
+            crate::execution::platform::commit_file(&temporary, path, parent)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&temporary);
+        }
+        result
+    }
+
+    #[must_use]
+    pub fn into_executions(self) -> Vec<DurableExecution> {
+        self.executions
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -262,22 +342,39 @@ impl RunCheckpointStore for ResticCheckpointStore {
         catalog::write_atomic(&self.directory.join("latest.json"), &snapshot)?;
         Ok(())
     }
+
+    async fn discard(&self) -> Result<(), CheckpointError> {
+        discard_lineage(&self.directory, &self.repository)
+    }
+}
+
+pub fn discard_lineage(directory: &Path, repository: &Path) -> Result<(), CheckpointError> {
+    remove_lineage_catalogs(directory, repository)?;
+    remove_if_present(repository)
 }
 
 #[must_use]
-pub fn selected_checkpoint(
+pub fn restore_selection(
     from: Option<&openengine_cluster_protocol::RunResumeFrom>,
-) -> Option<&CheckpointId> {
+) -> CheckpointRestoreSelection {
     match from {
         Some(openengine_cluster_protocol::RunResumeFrom::Checkpoint { checkpoint_id }) => {
-            Some(checkpoint_id)
+            CheckpointRestoreSelection::Checkpoint {
+                checkpoint_id: checkpoint_id.clone(),
+            }
         }
-        _ => None,
+        _ => CheckpointRestoreSelection::Latest,
     }
 }
 
 pub fn validate_selection(selection: &CheckpointRestore) -> Result<(), CheckpointError> {
-    catalog::point(&selection.directory, &selection.checkpoint_id).map(|_| ())
+    let snapshot = match &selection.selection {
+        CheckpointRestoreSelection::Latest => catalog::latest(&selection.directory)?,
+        CheckpointRestoreSelection::Checkpoint { checkpoint_id } => {
+            catalog::point(&selection.directory, checkpoint_id)?.snapshot
+        }
+    };
+    stored_snapshot(&selection.directory, &snapshot).map(|_| ())
 }
 
 pub fn list(
@@ -291,9 +388,21 @@ pub async fn restore(
     selection: &CheckpointRestore,
     workspace: &Path,
 ) -> Result<Vec<DurableExecution>, CheckpointError> {
-    let point = catalog::point(&selection.directory, &selection.checkpoint_id)?;
-    restore_snapshot(&selection.directory, &point.snapshot, workspace).await?;
-    Ok(point.history)
+    match &selection.selection {
+        CheckpointRestoreSelection::Latest => {
+            let snapshot = catalog::latest(&selection.directory)?;
+            restore_snapshot(&selection.directory, &snapshot, workspace).await?;
+            Ok(Vec::new())
+        }
+        CheckpointRestoreSelection::Checkpoint { checkpoint_id } => {
+            let point = catalog::point(&selection.directory, checkpoint_id)?;
+            restore_snapshot(&selection.directory, &point.snapshot, workspace).await?;
+            Ok(
+                CheckpointSeed::read(&catalog::seed_path(&selection.directory, checkpoint_id))?
+                    .into_executions(),
+            )
+        }
+    }
 }
 
 async fn restore_snapshot(
@@ -303,10 +412,11 @@ async fn restore_snapshot(
 ) -> Result<(), CheckpointError> {
     let (repository, snapshot) = stored_snapshot(directory, point)?;
     repository.initialize().await?;
-    let restore_root = directory.join("staging");
-    crate::execution::platform::private_directory(&restore_root)?;
+    let restore_root = workspace
+        .parent()
+        .ok_or_else(|| catalog::invalid("workspace has no parent directory"))?;
     let stage = tempfile::Builder::new()
-        .prefix(".restore-")
+        .prefix(".zeroshot-restore-")
         .tempdir_in(restore_root)?;
     let snapshots = stage.path().join("snapshots");
     crate::execution::platform::private_directory(&snapshots)?;
@@ -314,6 +424,56 @@ async fn restore_snapshot(
     crate::execution::platform::private_directory(&restored)?;
     repository.restore(&snapshot, &restored).await?;
     filesystem::restore_staged(&restored, workspace)?;
+    Ok(())
+}
+
+fn remove_if_present(path: &Path) -> Result<(), CheckpointError> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn remove_lineage_catalogs(directory: &Path, repository: &Path) -> Result<(), CheckpointError> {
+    let expected = std::path::absolute(repository)?;
+    let mut candidates = vec![directory.to_owned()];
+
+    if let Some(parent) = directory.parent()
+        && let Ok(entries) = std::fs::read_dir(parent)
+    {
+        candidates.extend(entries.filter_map(Result::ok).filter_map(|entry| {
+            entry
+                .file_type()
+                .ok()
+                .filter(|kind| kind.is_dir() && !kind.is_symlink())
+                .map(|_| entry.path())
+        }));
+    }
+    if let Some(root) = repository.parent().and_then(Path::parent)
+        && let Ok(entries) = std::fs::read_dir(root.join("runs"))
+    {
+        candidates.extend(entries.filter_map(Result::ok).filter_map(|entry| {
+            entry
+                .file_type()
+                .ok()
+                .filter(|kind| kind.is_dir() && !kind.is_symlink())
+                .map(|_| entry.path().join("checkpoints"))
+        }));
+    }
+
+    candidates.sort();
+    candidates.dedup();
+    for candidate in candidates {
+        let matches = candidate == directory
+            || catalog::read::<StorageConfiguration>(&candidate.join("storage.json"))
+                .ok()
+                .and_then(|configuration| std::path::absolute(configuration.repository).ok())
+                .is_some_and(|configured| configured == expected);
+        if matches {
+            remove_if_present(&candidate)?;
+        }
+    }
     Ok(())
 }
 

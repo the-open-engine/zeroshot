@@ -364,12 +364,6 @@ pub struct TargetHostedRunRoutes {
     pub watch: String,
     pub logs: String,
     pub force: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resume: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub checkpoints: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub discard_workspace: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -378,6 +372,23 @@ pub struct TargetHostedRunsDiscovery {
     pub kind: String,
     pub base_url: String,
     pub route_templates: TargetHostedRunRoutes,
+}
+
+pub const HOSTED_WORKSPACE_RECOVERY_KIND: &str = "openengine.hosted-workspace-recovery/v1";
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetHostedWorkspaceRecoveryRoutes {
+    pub resume: String,
+    pub checkpoints: String,
+    pub discard_workspace: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetHostedWorkspaceRecoveryDiscovery {
+    pub kind: String,
+    pub route_templates: TargetHostedWorkspaceRecoveryRoutes,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -430,6 +441,8 @@ pub struct TargetDiscoveryExtensions {
     pub workspace_recovery: Option<TargetWorkspaceRecoveryDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_checkpoints: Option<TargetWorkspaceCheckpointsDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hosted_workspace_recovery: Option<TargetHostedWorkspaceRecoveryDiscovery>,
 }
 
 /// One discovery document for direct Docker targets and OAuth-hosted targets.
@@ -461,6 +474,7 @@ impl TargetDiscoveryExtensions {
             && self.run_profiles.is_none()
             && self.workspace_recovery.is_none()
             && self.workspace_checkpoints.is_none()
+            && self.hosted_workspace_recovery.is_none()
     }
 }
 

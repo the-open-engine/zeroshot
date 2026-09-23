@@ -1,6 +1,8 @@
-use openengine_cluster_protocol::{Cursor, ExecutionRef, RunId};
+use openengine_cluster_protocol::{
+    Cursor, ExecutionRef, HOSTED_WORKSPACE_RECOVERY_KIND, RunId, TargetDiscoveryExtensions,
+    TargetHostedRunRoutes, TargetHostedWorkspaceRecoveryRoutes,
+};
 use reqwest::Url;
-use openengine_cluster_protocol::{TargetDiscoveryExtensions, TargetHostedRunRoutes};
 
 #[path = "hosted_runs/merge_plans.rs"]
 mod merge_plans;
@@ -206,7 +208,16 @@ pub(super) fn build_hosted_runs_descriptor(
     } else {
         same_origin_url(origin, &wire.base_url)?
     };
-    compile_hosted_run_routes(base_url, &wire.route_templates)
+    let mut descriptor = compile_hosted_run_routes(base_url, &wire.route_templates)?;
+    if let Some(recovery) = extensions.hosted_workspace_recovery.as_ref() {
+        if recovery.kind != HOSTED_WORKSPACE_RECOVERY_KIND {
+            return Err(authority_error(
+                "hosted workspace recovery discovery is incompatible",
+            ));
+        }
+        compile_recovery_routes(&mut descriptor, &recovery.route_templates)?;
+    }
+    Ok(descriptor)
 }
 
 fn compile_hosted_run_routes(
@@ -224,18 +235,24 @@ fn compile_hosted_run_routes(
             &[HostedRunQuery::FromCursor, HostedRunQuery::Execution],
         )?,
         force: compile_hosted_run_route(&routes.force, true, &[])?,
-        resume: optional_recovery_route(routes.resume.as_deref())?,
-        checkpoints: optional_recovery_route(routes.checkpoints.as_deref())?,
-        discard_workspace: optional_recovery_route(routes.discard_workspace.as_deref())?,
+        resume: None,
+        checkpoints: None,
+        discard_workspace: None,
     })
 }
 
-fn optional_recovery_route(
-    value: Option<&str>,
-) -> Result<Option<HostedRunRoute>, TargetAuthorityError> {
-    value
-        .map(|route| compile_hosted_run_route(route, true, &[]))
-        .transpose()
+fn compile_recovery_routes(
+    descriptor: &mut HostedRunsDescriptor,
+    routes: &TargetHostedWorkspaceRecoveryRoutes,
+) -> Result<(), TargetAuthorityError> {
+    descriptor.resume = Some(compile_hosted_run_route(&routes.resume, true, &[])?);
+    descriptor.checkpoints = Some(compile_hosted_run_route(&routes.checkpoints, true, &[])?);
+    descriptor.discard_workspace = Some(compile_hosted_run_route(
+        &routes.discard_workspace,
+        true,
+        &[],
+    )?);
+    Ok(())
 }
 
 fn compile_hosted_run_route(
@@ -336,15 +353,12 @@ mod tests {
         assert!(missing.checkpoints_url(&run_id).is_err());
         assert!(missing.discard_workspace_url(&run_id).is_err());
 
-        let mut recovery = routes();
-        recovery["resume"] = json!("/runs/{run_id}/resume");
-        recovery["checkpoints"] = json!("/runs/{run_id}/checkpoints");
-        recovery["discard_workspace"] = json!("/runs/{run_id}/discard-workspace");
-        let present = descriptor(
+        let present = descriptor_with_recovery(
             &origin,
             json!({
-                "kind": HOSTED_RUNS_KIND, "base_url": origin.as_str(), "route_templates": recovery
+                "kind": HOSTED_RUNS_KIND, "base_url": origin.as_str(), "route_templates": routes()
             }),
+            recovery_routes(),
         )
         .assert_value();
         assert_eq!(
@@ -374,12 +388,13 @@ mod tests {
                 "/runs/{run_id}/{checkpoint_id}",
             ] {
                 assert!(
-                    descriptor(
+                    descriptor_with_recovery(
                         &origin,
                         json!({
                             "kind": HOSTED_RUNS_KIND, "base_url": origin.as_str(),
-                            "route_templates": routes_with(name, invalid)
-                        })
+                            "route_templates": routes()
+                        }),
+                        recovery_routes_with(name, invalid)
                     )
                     .is_err()
                 );
@@ -472,6 +487,22 @@ mod tests {
         build_hosted_runs_descriptor(origin, &extensions)
     }
 
+    fn descriptor_with_recovery(
+        origin: &Url,
+        hosted_runs: Value,
+        recovery: Value,
+    ) -> Result<HostedRunsDescriptor, TargetAuthorityError> {
+        let extensions = serde_json::from_value::<TargetDiscoveryExtensions>(json!({
+            "hosted_runs": hosted_runs,
+            "hosted_workspace_recovery": {
+                "kind": HOSTED_WORKSPACE_RECOVERY_KIND,
+                "route_templates": recovery
+            }
+        }))
+        .assert_value();
+        build_hosted_runs_descriptor(origin, &extensions)
+    }
+
     fn routes() -> Value {
         json!({
             "list": "/native-v2/runs",
@@ -489,5 +520,22 @@ mod tests {
             .assert_value()
             .insert(name.to_owned(), Value::String(value.to_owned()));
         routes
+    }
+
+    fn recovery_routes_with(name: &str, value: &str) -> Value {
+        let mut routes = recovery_routes();
+        routes
+            .as_object_mut()
+            .assert_value()
+            .insert(name.to_owned(), Value::String(value.to_owned()));
+        routes
+    }
+
+    fn recovery_routes() -> Value {
+        json!({
+            "resume": "/runs/{run_id}/resume",
+            "checkpoints": "/runs/{run_id}/checkpoints",
+            "discard_workspace": "/runs/{run_id}/discard-workspace"
+        })
     }
 }

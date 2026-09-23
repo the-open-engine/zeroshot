@@ -479,18 +479,20 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
         );
     }
 
-    let error = client
-        .run_resume(RunResumeParams {
-            run_id: run_id(),
-            successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992"),
-            from: None,
-            connections: BTreeMap::new(),
-            connection_resolver: None,
-            github_token: None,
-        })
-        .await
-        .expect_err("missing run must be rejected by controller");
-    assert!(!error.to_string().contains("does not support"));
+    for from in [None, Some(RunResumeFrom::Restart {})] {
+        let error = client
+            .run_resume(RunResumeParams {
+                run_id: run_id(),
+                successor_run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992"),
+                from,
+                connections: BTreeMap::new(),
+                connection_resolver: None,
+                github_token: None,
+            })
+            .await
+            .expect_err("missing run must be rejected by controller");
+        assert!(!error.to_string().contains("does not support"));
+    }
     let error = client
         .run_discard_workspace(RunDiscardWorkspaceParams { run_id: run_id() })
         .await

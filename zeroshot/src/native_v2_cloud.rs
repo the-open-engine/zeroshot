@@ -437,7 +437,7 @@ impl NativeV2CloudController {
             .await?;
         let capsule = self
             .allocate_retained_capsule(RetainedAllocationRequest {
-                checkpoint_id: crate::native_v2_supervisor::checkpoints::selected_checkpoint(
+                selection: crate::native_v2_supervisor::checkpoints::restore_selection(
                     from.as_ref(),
                 ),
                 source_run_id: &run_id,

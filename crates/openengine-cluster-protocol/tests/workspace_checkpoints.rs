@@ -1,6 +1,7 @@
 use openengine_cluster_protocol::{
-    CheckpointId, RunCheckpoint, RunCheckpointsParams, RunCheckpointsResult, RunResumeFrom,
-    RunResumeParams, TargetAuthentication, TargetDiscoveryDocument, TargetDiscoveryExtensions,
+    CheckpointId, HOSTED_WORKSPACE_RECOVERY_KIND, RunCheckpoint, RunCheckpointsParams,
+    RunCheckpointsResult, RunResumeFrom, RunResumeParams, TargetAuthentication,
+    TargetDiscoveryDocument, TargetDiscoveryExtensions, TargetHostedRunsDiscovery,
     MAX_SAFE_GENERATION, WORKSPACE_CHECKPOINTS_KIND, WORKSPACE_RECOVERY_KIND,
 };
 use openengine_cluster_testkit::assertions::AssertValue;
@@ -179,4 +180,36 @@ fn checkpoints_are_opt_in_and_discovery_tolerates_future_extensions() {
     }))
     .assert_value();
     assert!(extensions.workspace_checkpoints.is_some());
+}
+
+#[test]
+fn hosted_recovery_routes_do_not_change_the_strict_hosted_runs_v1_shape() {
+    let legacy_routes = json!({
+        "kind": "zeroshot.hosted-runs/v1",
+        "base_url": "https://target.example",
+        "route_templates": {
+            "list": "/runs",
+            "status": "/runs/{run_id}",
+            "watch": "/runs/{run_id}/watch{?from_cursor}",
+            "logs": "/runs/{run_id}/logs{?from_cursor,execution}",
+            "force": "/runs/{run_id}/force"
+        }
+    });
+    assert!(serde_json::from_value::<TargetHostedRunsDiscovery>(legacy_routes.clone()).is_ok());
+    let mut incompatible = legacy_routes;
+    incompatible["route_templates"]["resume"] = json!("/runs/{run_id}/resume");
+    assert!(serde_json::from_value::<TargetHostedRunsDiscovery>(incompatible).is_err());
+
+    let extensions: TargetDiscoveryExtensions = serde_json::from_value(json!({
+        "hosted_workspace_recovery": {
+            "kind": HOSTED_WORKSPACE_RECOVERY_KIND,
+            "route_templates": {
+                "resume": "/runs/{run_id}/resume",
+                "checkpoints": "/runs/{run_id}/checkpoints",
+                "discard_workspace": "/runs/{run_id}/discard-workspace"
+            }
+        }
+    }))
+    .assert_value();
+    assert!(extensions.hosted_workspace_recovery.is_some());
 }

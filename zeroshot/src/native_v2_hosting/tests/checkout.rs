@@ -14,6 +14,7 @@ use crate::native_v2_cloud::{
     RetainedAllocationUnavailable,
 };
 use crate::native_v2_delivery::git_auth::encode_basic_credential;
+use crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection;
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
 use super::super::allocator::{
     HostedRecoveryDocument, checkpoint_directory, checkpoint_repository, recovery_path,
@@ -98,6 +99,7 @@ exec /usr/bin/git "$@"
         let capsule = self.allocate().await.assert_value();
         let workspace = self.allocator.run_path(&self.run_id).join("workspace");
         fs::write(workspace.join("untracked.txt"), "resume me\n").assert_value();
+        finish_checkpoints(&capsule).await;
         capsule
             .cleanup
             .destroy_or_confirm_absent(RunRuntimeExit::Failed)
@@ -112,7 +114,7 @@ exec /usr/bin/git "$@"
     ) -> Result<AllocatedCapsule, RetainedAllocationUnavailable> {
         self.allocator
             .allocate_from_retained(RetainedAllocationRequest {
-                checkpoint_id: None,
+                selection: CheckpointRestoreSelection::Latest,
                 source_run_id: &self.run_id,
                 run_id: successor,
                 admitted: &self.admitted,
@@ -542,8 +544,18 @@ async fn capture_checkpoint(capsule: &AllocatedCapsule) {
     assert!(captured.is_ok(), "snapshot capture failed: {captured:?}");
 }
 
+async fn finish_checkpoints(capsule: &AllocatedCapsule) {
+    capsule
+        .checkpoints
+        .as_ref()
+        .assert_value()
+        .finish(&[])
+        .await
+        .assert_value();
+}
+
 #[tokio::test]
-async fn successful_and_force_stopped_disposal_remove_current_checkpoint_copies() {
+async fn post_terminal_success_and_force_stop_remove_checkpoint_copies() {
     for exit in [RunRuntimeExit::Completed, RunRuntimeExit::ForceStopped] {
         let fixture = CheckoutFixture::new("").await;
         let capsule = fixture.allocate().await.assert_value();
@@ -557,6 +569,15 @@ async fn successful_and_force_stopped_disposal_remove_current_checkpoint_copies(
             .destroy_or_confirm_absent(exit)
             .await
             .assert_value();
+        if matches!(exit, RunRuntimeExit::Completed) {
+            capsule
+                .checkpoints
+                .as_ref()
+                .assert_value()
+                .discard()
+                .await
+                .assert_value();
+        }
         assert!(
             fixture
                 .checkpoints(&fixture.run_id)
@@ -581,7 +602,7 @@ async fn successful_and_force_stopped_disposal_remove_current_checkpoint_copies(
 }
 
 #[tokio::test]
-async fn checkpoint_restore_survives_workspace_move_and_discard_keeps_ancestor_catalog() {
+async fn checkpoint_restore_survives_workspace_move_and_discard_removes_lineage_catalogs() {
     let fixture = CheckoutFixture::new("").await;
     let original = fixture.allocate().await.assert_value();
     let workspace = fixture
@@ -613,7 +634,9 @@ async fn checkpoint_restore_survives_workspace_move_and_discard_keeps_ancestor_c
     let resumed = fixture
         .allocator
         .allocate_from_retained(RetainedAllocationRequest {
-            checkpoint_id: Some(checkpoint_id),
+            selection: CheckpointRestoreSelection::Checkpoint {
+                checkpoint_id: checkpoint_id.clone(),
+            },
             source_run_id: &fixture.run_id,
             run_id: &successor,
             admitted: &fixture.admitted,
@@ -651,7 +674,13 @@ async fn checkpoint_restore_survives_workspace_move_and_discard_keeps_ancestor_c
             .assert_value()
     );
     assert!(fixture.checkpoints(&successor).await.checkpoints.is_empty());
-    assert_eq!(fixture.checkpoints(&fixture.run_id).await, page);
+    assert!(
+        fixture
+            .checkpoints(&fixture.run_id)
+            .await
+            .checkpoints
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -665,7 +694,7 @@ async fn missing_checkpoint_leaves_source_workspace_available_for_resume() {
     let result = fixture
         .allocator
         .allocate_from_retained(RetainedAllocationRequest {
-            checkpoint_id: Some(&checkpoint_id),
+            selection: CheckpointRestoreSelection::Checkpoint { checkpoint_id },
             source_run_id: &fixture.run_id,
             run_id: &successor,
             admitted: &fixture.admitted,
@@ -706,6 +735,7 @@ async fn missing_checkpoint_leaves_source_workspace_available_for_resume() {
 async fn repeated_retained_successors_keep_the_root_delivery_identity() {
     let fixture = CheckoutFixture::new("").await;
     let original = fixture.allocate().await.assert_value();
+    finish_checkpoints(&original).await;
     original
         .cleanup
         .destroy_or_confirm_absent(RunRuntimeExit::Failed)
@@ -716,7 +746,7 @@ async fn repeated_retained_successors_keep_the_root_delivery_identity() {
     let first = fixture
         .allocator
         .allocate_from_retained(RetainedAllocationRequest {
-            checkpoint_id: None,
+            selection: CheckpointRestoreSelection::Latest,
             source_run_id: &fixture.run_id,
             run_id: &first_successor,
             admitted: &fixture.admitted,
@@ -731,6 +761,7 @@ async fn repeated_retained_successors_keep_the_root_delivery_identity() {
             .as_ref(),
         Some(&fixture.run_id)
     );
+    finish_checkpoints(&first).await;
     first
         .cleanup
         .destroy_or_confirm_absent(RunRuntimeExit::Failed)
@@ -753,7 +784,7 @@ async fn repeated_retained_successors_keep_the_root_delivery_identity() {
     let second = fixture
         .allocator
         .allocate_from_retained(RetainedAllocationRequest {
-            checkpoint_id: None,
+            selection: CheckpointRestoreSelection::Latest,
             source_run_id: &first_successor,
             run_id: &second_successor,
             admitted: &fixture.admitted,
@@ -925,6 +956,7 @@ async fn retained_workspace_transfers_to_a_different_concurrent_writer_identity(
         .output()
         .assert_value();
     assert!(create.status.success());
+    finish_checkpoints(&capsule).await;
     capsule
         .cleanup
         .destroy_or_confirm_absent(RunRuntimeExit::Failed)

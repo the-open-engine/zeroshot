@@ -22,6 +22,11 @@ fn point_path(directory: &Path, id: &CheckpointId) -> PathBuf {
     directory.join("points").join(format!("{digest:x}.json"))
 }
 
+pub(super) fn seed_path(directory: &Path, id: &CheckpointId) -> PathBuf {
+    let digest = Sha256::digest(id.as_str().as_bytes());
+    directory.join("seeds").join(format!("{digest:x}-v1.json"))
+}
+
 pub(super) fn read<T: DeserializeOwned>(path: &Path) -> Result<T, CheckpointError> {
     let mut bytes = Vec::new();
     File::open(path)?
@@ -68,10 +73,12 @@ pub(super) fn publish(
         .map_err(|_| invalid("checkpoint clock is out of range"))?,
     };
     let point = RecoveryPoint {
+        version: RECOVERY_POINT_FORMAT,
         descriptor: descriptor.clone(),
         snapshot,
-        history,
+        seed_format: CHECKPOINT_SEED_FORMAT,
     };
+    CheckpointSeed::new(history).write_atomic(&seed_path(directory, &descriptor.checkpoint_id))?;
     write_atomic(&point_path(directory, &descriptor.checkpoint_id), &point)?;
     entries.push(descriptor);
     write_atomic(&directory.join("index.json"), &entries)?;
@@ -80,10 +87,19 @@ pub(super) fn publish(
 
 pub(super) fn point(directory: &Path, id: &CheckpointId) -> Result<RecoveryPoint, CheckpointError> {
     let point: RecoveryPoint = read(&point_path(directory, id))?;
+    if point.version != RECOVERY_POINT_FORMAT || point.seed_format != CHECKPOINT_SEED_FORMAT {
+        return Err(invalid(
+            "checkpoint seed is incompatible; restart from the latest workspace",
+        ));
+    }
     if &point.descriptor.checkpoint_id != id {
         return Err(invalid("checkpoint identity does not match"));
     }
     Ok(point)
+}
+
+pub(super) fn latest(directory: &Path) -> Result<SnapshotId, CheckpointError> {
+    read(&directory.join("latest.json"))
 }
 
 pub(super) fn list(

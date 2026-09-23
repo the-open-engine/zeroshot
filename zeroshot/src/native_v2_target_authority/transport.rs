@@ -7,7 +7,7 @@ use openengine_cluster_protocol::{
     GetParams, GetResult, InitializeParams, InitializeResult, RunAttachParams, RunAttachResult,
     RunCheckpointsParams, RunCheckpointsResult, RunDiscardWorkspaceParams,
     RunDiscardWorkspaceResult, RunForceParams, RunForceResult, RunListParams, RunListResult,
-    RunLogsParams, RunLogsResult, RunResumeParams, RunResumeResult, RunStatusParams,
+    RunLogsParams, RunLogsResult, RunResumeFrom, RunResumeParams, RunResumeResult, RunStatusParams,
     RunStatusResult, RunSubmitParams, RunSubmitResult, RunWatchParams, RunWatchResult,
     TargetOecpSessionRequest, TargetPrivateBootstrapRequest, INVALID_PHASE, RUN_CONFLICT,
     SCHEMA_VIOLATION, TARGET_PRIVATE_BOOTSTRAP_PATH, is_canonical_uuid_v7,
@@ -597,7 +597,9 @@ impl ClusterBackend for TargetOecpBackend {
         if !self.workspace_recovery {
             return Err(workspace_recovery_unavailable());
         }
-        if params.from.is_some() && !self.workspace_checkpoints {
+        if matches!(params.from.as_ref(), Some(RunResumeFrom::Checkpoint { .. }))
+            && !self.workspace_checkpoints
+        {
             return Err(workspace_checkpoints_unavailable());
         }
         if !is_canonical_uuid_v7(&params.run_id) || !is_canonical_uuid_v7(&params.successor_run_id)

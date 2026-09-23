@@ -53,7 +53,9 @@ impl Fixture {
         restore(
             &CheckpointRestore {
                 directory: self.directory.clone(),
-                checkpoint_id: checkpoint.checkpoint_id.clone(),
+                selection: CheckpointRestoreSelection::Checkpoint {
+                    checkpoint_id: checkpoint.checkpoint_id.clone(),
+                },
             },
             &self.workspace,
         )
@@ -64,6 +66,18 @@ impl Fixture {
     async fn input_checkpoint(&self, node: &str) -> RunCheckpoint {
         self.store.enter(&boundary(node), &[]).await.assert_value();
         self.points().remove(0)
+    }
+
+    async fn restore_latest(&self) -> Vec<DurableExecution> {
+        restore(
+            &CheckpointRestore {
+                directory: self.directory.clone(),
+                selection: CheckpointRestoreSelection::Latest,
+            },
+            &self.workspace,
+        )
+        .await
+        .unwrap_or_else(|error| panic!("latest restore failed: {error:?}"))
     }
 
     fn snapshot_count(&self) -> usize {
@@ -79,6 +93,82 @@ impl Fixture {
     fn restic_control(&self, name: &str) -> PathBuf {
         self._root.path().join("repository").join(name)
     }
+}
+
+#[tokio::test]
+async fn restart_restores_latest_workspace_without_reading_the_checkpoint_seed() {
+    let fixture = Fixture::new();
+    let point = fixture.input_checkpoint("writer").await;
+    fs::write(
+        catalog::seed_path(&fixture.directory, &point.checkpoint_id),
+        "incompatible seed",
+    )
+    .assert_value();
+    fs::write(fixture.workspace.join("source"), "partial failed write").assert_value();
+
+    let seed = fixture.restore_latest().await;
+
+    assert!(seed.is_empty());
+    assert_eq!(fixture.source(), "initial");
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn restore_stages_beside_a_workspace_on_another_filesystem() {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let state = tempfile::tempdir().assert_value();
+    let Ok(workspace_root) = tempfile::Builder::new()
+        .prefix("zeroshot-restore-")
+        .tempdir_in("/dev/shm")
+    else {
+        return;
+    };
+    if state.path().metadata().assert_value().dev()
+        == workspace_root.path().metadata().assert_value().dev()
+    {
+        return;
+    }
+    let workspace = workspace_root.path().join("workspace");
+    let directory = state.path().join("checkpoints");
+    fs::create_dir(&workspace).assert_value();
+    fs::write(workspace.join("source"), "saved").assert_value();
+    let store = fake_checkpoint_store(
+        state.path(),
+        directory.clone(),
+        workspace.clone(),
+        BTreeSet::from([NodeName::new("writer").assert_value()]),
+    );
+    store.enter(&boundary("writer"), &[]).await.assert_value();
+    let point = list(
+        &directory,
+        RunCheckpointsParams {
+            run_id: RunId::new("cross-filesystem"),
+            after: None,
+            limit: None,
+        },
+    )
+    .assert_value()
+    .checkpoints
+    .remove(0);
+    fs::write(workspace.join("source"), "corrupt").assert_value();
+
+    restore(
+        &CheckpointRestore {
+            directory,
+            selection: CheckpointRestoreSelection::Checkpoint {
+                checkpoint_id: point.checkpoint_id,
+            },
+        },
+        &workspace,
+    )
+    .await
+    .assert_value();
+
+    assert_eq!(
+        fs::read_to_string(workspace.join("source")).assert_value(),
+        "saved"
+    );
 }
 
 fn boundary(node: &str) -> ExecutionBoundary {
@@ -253,7 +343,9 @@ async fn failed_restore_does_not_touch_the_live_workspace_and_can_be_retried() {
         restore(
             &CheckpointRestore {
                 directory: fixture.directory.clone(),
-                checkpoint_id: point.checkpoint_id.clone(),
+                selection: CheckpointRestoreSelection::Checkpoint {
+                    checkpoint_id: point.checkpoint_id.clone(),
+                },
             },
             &fixture.workspace,
         )
@@ -284,7 +376,9 @@ async fn invalid_restic_snapshot_mapping_is_rejected_before_workspace_changes() 
         restore(
             &CheckpointRestore {
                 directory: fixture.directory.clone(),
-                checkpoint_id: point.checkpoint_id,
+                selection: CheckpointRestoreSelection::Checkpoint {
+                    checkpoint_id: point.checkpoint_id,
+                },
             },
             &fixture.workspace,
         )
@@ -344,7 +438,9 @@ async fn real_restic_deduplicates_incremental_stages_and_restores_the_latest_byt
     restore(
         &CheckpointRestore {
             directory: directory.clone(),
-            checkpoint_id: points[1].checkpoint_id.clone(),
+            selection: CheckpointRestoreSelection::Checkpoint {
+                checkpoint_id: points[1].checkpoint_id.clone(),
+            },
         },
         &workspace,
     )

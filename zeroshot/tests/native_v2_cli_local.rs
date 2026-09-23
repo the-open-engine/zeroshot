@@ -311,7 +311,7 @@ async fn concurrent_identical_submissions_create_one_local_run() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn failed_local_run_resumes_in_the_same_dirty_workspace_with_fresh_connections() {
+async fn failed_local_run_restarts_from_its_latest_snapshot_with_fresh_connections() {
     let fixture = LocalFixture::new();
     let failed = fixture.run("Recoverable local run", "fail", false).await;
     assert!(
@@ -363,10 +363,9 @@ async fn failed_local_run_resumes_in_the_same_dirty_workspace_with_fresh_connect
             .assert_key("resumedFrom"),
         failed_run_id.as_str()
     );
-    assert_eq!(
-        fs::read_to_string(fixture.repository.join("resume-sentinel.txt"))
-            .assert_value_with("retained workspace sentinel"),
-        "retained\n"
+    assert!(
+        !fixture.repository.join("resume-sentinel.txt").exists(),
+        "post-snapshot workspace edits must not enter a restart"
     );
     let turns = fs::read_to_string(fixture.repository.join("local-session.args"))
         .assert_value_with("local session arguments");

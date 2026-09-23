@@ -95,7 +95,9 @@ writers do not have separate snapshots. Read-only boundaries can share the same 
 Both modes create a new run ID, keep the original graph, input, source, and delivery lineage, and
 resolve fresh credentials. Provider sessions and previous token usage are not carried into the new
 attempt. Selecting a checkpoint replaces later workspace edits, including untracked and ignored
-files. Local workspaces must be idle while they are restored.
+files. Restart restores the latest completed snapshot and starts the graph at its root. A sudden
+target loss can precede the next snapshot boundary, so the last writer may run again. Local
+workspaces must be idle while they are restored.
 
 Local and Docker targets deduplicate checkpoints in a private Restic repository beside their run
 storage and advertise `openengine.workspace-checkpoints/v1`. They retain that repository only for a

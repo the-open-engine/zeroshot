@@ -454,7 +454,10 @@ where
         }
         self.connector
             .prepare_workspace_recovery_resume(target, &params)?;
-        let transport = if params.from.is_some() {
+        let transport = if matches!(
+            params.from.as_ref(),
+            Some(openengine_cluster_protocol::RunResumeFrom::Checkpoint { .. })
+        ) {
             self.connector
                 .connect_workspace_checkpoints(target, params.run_id.clone())
                 .await?
