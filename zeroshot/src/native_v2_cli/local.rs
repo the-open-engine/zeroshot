@@ -786,8 +786,11 @@ async fn wait_for_controller(
     loop {
         if let Ok(ready) = read_ready(paths) {
             if &ready.run_id == run_id {
-                connect_transport(paths).await.map_err(local_error)?;
-                return Ok(());
+                // Windows readiness can be visible while no named-pipe instance is currently
+                // available. Keep the connection in the existing bounded readiness loop.
+                if connect_transport(paths).await.is_ok() {
+                    return Ok(());
+                }
             }
         }
         if child.try_wait().map_err(local_io)?.is_some() {
