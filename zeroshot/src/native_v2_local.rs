@@ -413,26 +413,5 @@ fn prepare_private_directory(path: &Path) -> Result<(), LocalCompositionError> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_canonical_github_remote_forms() {
-        for remote in [
-            "https://github.com/open-engine/zeroshot.git",
-            "ssh://git@github.com/open-engine/zeroshot.git",
-            "git@github.com:open-engine/zeroshot.git",
-        ] {
-            assert_eq!(
-                github_repository(remote).as_deref(),
-                Some("open-engine/zeroshot")
-            );
-        }
-        assert!(github_repository("https://example.com/open-engine/zeroshot.git").is_none());
-        assert!(github_repository("https://github.com/extra/open-engine/zeroshot").is_none());
-    }
-}
-
-#[cfg(test)]
 #[path = "native_v2_local/tests.rs"]
 mod contract_tests;

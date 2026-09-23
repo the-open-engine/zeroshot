@@ -306,6 +306,7 @@ describe('Native coverage contract', () => {
     const workflow = yaml.load(read('.github/workflows/coverage.yml'));
     const coverage = workflow.jobs.coverage;
     const commands = coverage.steps.map((step) => step.run || '').join('\n');
+    const measure = coverage.steps.find((step) => step.name === 'Measure native coverage');
     const install = coverage.steps.find((step) => step.name === 'Install coverage tooling');
     const publish = coverage.steps.find((step) => step.name === 'Publish coverage');
 
@@ -324,8 +325,18 @@ describe('Native coverage contract', () => {
       commands,
       /cargo llvm-cov --package zeroshot --bin zeroshot --features ui --no-clean --summary-only/
     );
-    assert.match(commands, /cargo llvm-cov report --json --output-path coverage\.json/);
-    assert.match(commands, /cargo llvm-cov report --lcov --output-path lcov\.info/);
+    assert.equal(
+      measure.env.COVERAGE_IGNORE_REGEX,
+      '(^|/)(tests(/|\\.rs$)|[^/]+[_-]tests\\.rs$)'
+    );
+    assert.match(
+      commands,
+      /cargo llvm-cov report --ignore-filename-regex "\$COVERAGE_IGNORE_REGEX" --json --output-path coverage\.json/
+    );
+    assert.match(
+      commands,
+      /cargo llvm-cov report --ignore-filename-regex "\$COVERAGE_IGNORE_REGEX" --lcov --output-path lcov\.info/
+    );
     assert.match(commands, /const floors = \{ lines: 95, regions: 92, functions: 92 \}/);
     assert.match(commands, /regions\.count < 150/);
     assert.match(commands, /lines\.percent >= 75 && regions\.percent >= 75/);

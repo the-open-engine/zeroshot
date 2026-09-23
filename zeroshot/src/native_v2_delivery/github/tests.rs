@@ -116,6 +116,7 @@ fn policy_page_with_merge_capabilities(merge: bool, squash: bool, rebase: bool) 
     page
 }
 
+#[cfg(unix)]
 fn set_review_state(page: &mut Value, state: &str, merged: bool) {
     let review = page
         .pointer_mut("/data/repository/pullRequest")

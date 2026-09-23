@@ -202,3 +202,19 @@ async fn local_harness_contract_materializes_each_native_lane_without_processes(
         _ => panic!("expected Claude harness"),
     }
 }
+
+#[test]
+fn parses_canonical_github_remote_forms() {
+    for remote in [
+        "https://github.com/open-engine/zeroshot.git",
+        "ssh://git@github.com/open-engine/zeroshot.git",
+        "git@github.com:open-engine/zeroshot.git",
+    ] {
+        assert_eq!(
+            github_repository(remote).as_deref(),
+            Some("open-engine/zeroshot")
+        );
+    }
+    assert!(github_repository("https://example.com/open-engine/zeroshot.git").is_none());
+    assert!(github_repository("https://github.com/extra/open-engine/zeroshot").is_none());
+}

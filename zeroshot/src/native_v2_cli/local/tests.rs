@@ -5,11 +5,14 @@ use openengine_cluster_protocol::{
     Cursor, EnumLabel, RunResumeParams, RunSize, RunStatus, RunStatusResult, RunTitle,
     TerminalResult,
 };
-use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
+#[cfg(unix)]
+use openengine_cluster_testkit::assertions::AssertError;
+use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::json;
 
 use super::*;
 use crate::native_v2_candidate::test_support::{TestDirectory, full_graph, success_node};
+#[cfg(unix)]
 use crate::native_v2_cli::TargetRunIntent;
 use crate::native_v2_local::PreparedLocalRun;
 use crate::native_v2_supervisor::RunEnvironment;
@@ -119,6 +122,7 @@ fn prepared_local_run(
     }
 }
 
+#[cfg(unix)]
 fn prepared_request(run_id: RunId, submission_key: &str) -> PreparedRunRequest {
     let submission = contract_submission(submission_key);
     PreparedRunRequest {

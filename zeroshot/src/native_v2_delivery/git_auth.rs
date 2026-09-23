@@ -31,14 +31,5 @@ fn encode_base64(bytes: &[u8]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn basic_credential_encoding_is_canonical() {
-        assert_eq!(
-            encode_basic_credential("token"),
-            "eC1hY2Nlc3MtdG9rZW46dG9rZW4="
-        );
-    }
-}
+#[path = "git_auth/tests.rs"]
+mod tests;
