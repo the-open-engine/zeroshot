@@ -280,6 +280,19 @@ fn resolved_linear_issue(reference: IssueProviderRef) -> ResolvedIssue {
     .assert_value()
 }
 
+fn issue_resolve_request(reference: IssueProviderRef) -> IssueResolveRequest {
+    IssueResolveRequest::new(
+        reference,
+        issue_profile(),
+        (
+            IssueAccountId::new("open-engine-linear").assert_value(),
+            IssueCredentialHandleId::new("linear-lease").assert_value(),
+        ),
+        IssueReference::new("ENG-7").assert_value(),
+    )
+    .assert_value()
+}
+
 fn issue_close_request(reference: IssueProviderRef) -> IssueCloseRequest {
     IssueCloseRequest::new(
         resolved_linear_issue(reference),
@@ -309,6 +322,7 @@ fn issue_close_receipt(request: &IssueCloseRequest) -> IssueCloseReceipt {
 struct FakeIssueProvider {
     descriptor: IssueProviderDescriptor,
     inspection: Mutex<IssueCloseInspection>,
+    mismatched_evidence: bool,
     resolve_calls: AtomicUsize,
     inspect_calls: AtomicUsize,
     close_calls: AtomicUsize,
@@ -319,10 +333,16 @@ impl FakeIssueProvider {
         Self {
             descriptor,
             inspection: Mutex::new(inspection),
+            mismatched_evidence: false,
             resolve_calls: AtomicUsize::new(0),
             inspect_calls: AtomicUsize::new(0),
             close_calls: AtomicUsize::new(0),
         }
+    }
+
+    fn with_mismatched_evidence(mut self) -> Self {
+        self.mismatched_evidence = true;
+        self
     }
 }
 
@@ -338,7 +358,11 @@ impl IssueProvider for FakeIssueProvider {
     ) -> Result<ResolvedIssue, IssueProviderFailure> {
         self.resolve_calls.fetch_add(1, Ordering::SeqCst);
         Ok(ResolvedIssue::new(
-            request.provider().clone(),
+            if self.mismatched_evidence {
+                issue_ref("issue.substituted", 1)
+            } else {
+                request.provider().clone()
+            },
             request.profile().clone(),
             (
                 request.account().clone(),
@@ -368,7 +392,11 @@ impl IssueProvider for FakeIssueProvider {
         Ok(IssueCloseReceipt::new(
             request.issue().clone(),
             (
-                request.operation_id().clone(),
+                if self.mismatched_evidence {
+                    IssueOperationId::new("substituted-close").assert_value()
+                } else {
+                    request.operation_id().clone()
+                },
                 request.fingerprint().clone(),
             ),
             request.source_merge().clone(),

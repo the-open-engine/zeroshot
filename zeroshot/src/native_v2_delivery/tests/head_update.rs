@@ -41,6 +41,73 @@ async fn failed_head_adoption_stops_without_repeating_the_remote_mutation() {
     }
 }
 
+#[tokio::test]
+async fn lost_head_update_response_is_observed_without_repeating_the_mutation() {
+    let (repo, authority) = delivery_harness(Script::HeadUpdateResponseLost);
+
+    let outcome = run_delivery(&repo, authority.clone(), 3, DeliveryMode::Merge).await;
+
+    assert_delivery_signal(&outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+    let diagnostic = outcome_diagnostic(&outcome);
+    assert!(diagnostic.contains("head update completed but its response was lost"));
+    assert!(diagnostic.contains("reconciled an observed remote update"));
+    assert_eq!(authority.head_updates.load(Ordering::SeqCst), 1);
+    assert_eq!(authority.head_sync_attempts.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn uncertain_head_updates_fail_closed_by_observed_remote_state() {
+    for (script, expected) in [
+        (
+            Script::HeadUpdatePending,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Timeout),
+        ),
+        (
+            Script::HeadUpdateIdentityMismatch,
+            WorkerOutcome::malformed(),
+        ),
+        (
+            Script::HeadUpdateUnavailable,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Timeout),
+        ),
+        (
+            Script::HeadRecoveryReviewMissing,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Refusal),
+        ),
+        (
+            Script::HeadRecoveryClosed,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Refusal),
+        ),
+        (
+            Script::HeadRecoveryMerged,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Timeout),
+        ),
+    ] {
+        let (repo, authority) = delivery_harness(script);
+        let outcome = run_delivery(&repo, authority.clone(), 2, DeliveryMode::Merge).await;
+
+        assert_eq!(outcome, expected, "unexpected outcome for {script:?}");
+        assert!(
+            authority.head_updates.load(Ordering::SeqCst) <= 1,
+            "repeated remote mutation for {script:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn authoritative_head_update_conflict_uses_the_typed_conflict_route() {
+    let (repo, authority) = delivery_harness(Script::HeadUpdateConflict);
+
+    let outcome = run_delivery(&repo, authority.clone(), 2, DeliveryMode::Merge).await;
+
+    assert_delivery_signal(&outcome, DELIVERY_CONFLICT_LABEL);
+    assert_eq!(authority.head_updates.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        authority.conflict_materializations.load(Ordering::SeqCst),
+        1
+    );
+}
+
 async fn assert_head_updates(
     script: Script,
     expected_updates: usize,

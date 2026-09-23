@@ -84,17 +84,84 @@ fn coverage_contract_codex_declared_auth_suppresses_ambient_auth_and_paths_fail_
         use std::ffi::OsString;
         use std::os::unix::ffi::OsStringExt;
 
-        let mut configuration = local_configuration(CodexProvider::OpenAi, BTreeMap::new());
-        configuration.local_user = Some(NativeV2CodexUser {
-            home: PathBuf::from(OsString::from_vec(vec![0xff])),
-            codex_home: PathBuf::from("/user/.codex"),
-        });
-        let error = NativeV2CodexAdapter::new_local(configuration)
-            .provider_environment(&empty, Path::new("/runtime"))
-            .err()
-            .assert_value();
-        assert!(error.to_string().contains("user home"));
+        for (home, codex_home, expected) in [
+            (
+                PathBuf::from(OsString::from_vec(vec![0xff])),
+                PathBuf::from("/user/.codex"),
+                "user home",
+            ),
+            (
+                PathBuf::from("/user"),
+                PathBuf::from(OsString::from_vec(vec![0xff])),
+                "configuration home",
+            ),
+        ] {
+            let mut configuration = local_configuration(CodexProvider::OpenAi, BTreeMap::new());
+            configuration.local_user = Some(NativeV2CodexUser { home, codex_home });
+            let error = NativeV2CodexAdapter::new_local(configuration)
+                .provider_environment(&empty, Path::new("/runtime"))
+                .err()
+                .assert_value();
+            assert!(error.to_string().contains(expected));
+        }
     }
+
+    let reserved_binding = binding(SessionScope::Execution, &["CODEX_HOME"]);
+    let reserved = ResolvedEnvironment::exact(
+        &reserved_binding,
+        BTreeMap::from([(environment_name("CODEX_HOME"), "caller-owned".to_owned())]),
+    )
+    .assert_value();
+    let error = adapter
+        .provider_environment(&reserved, Path::new("/runtime"))
+        .err()
+        .assert_value();
+    assert!(error.to_string().contains("reserved runtime configuration"));
+}
+
+#[cfg(unix)]
+fn non_utf8_path(directory: &TestDirectory, byte: u8) -> PathBuf {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    directory.path().join(OsString::from_vec(vec![byte]))
+}
+
+#[tokio::test]
+async fn coverage_contract_command_path_failures_preserve_driver_detail_across_one_continuation() {
+    async fn rejected(
+        directory: &TestDirectory,
+        mut configuration: NativeV2CodexConfig,
+        expected: &str,
+    ) {
+        let workspace_name = format!("workspace-{expected}");
+        let workspace = directory.child(&workspace_name);
+        fs::create_dir(&workspace).assert_value();
+        configuration.workspace = workspace;
+        let adapter = Arc::new(NativeV2CodexAdapter::new_for_test(configuration));
+        let admitted = admitted(binding(SessionScope::Execution, &[]), CodexProvider::OpenAi).await;
+        let runtime = runner(&admitted, adapter);
+        let (logs, completion) = complete_with_logs(start(&runtime, &admitted, 1, &[]).await).await;
+
+        assert_eq!(completion, Err(NodeRunnerError::Driver));
+        assert!(logs.contains(expected), "missing {expected:?} in {logs:?}");
+        assert!(logs.contains("Codex provider failed; continuing once"));
+    }
+
+    let directory = TestDirectory::new("codex-command-path-errors");
+    let runtime_home = directory.child("runtime-valid");
+    fs::create_dir(&runtime_home).assert_value();
+    let mut invalid_executable = local_configuration(CodexProvider::OpenAi, BTreeMap::new());
+    invalid_executable.executable = non_utf8_path(&directory, 0xfe);
+    invalid_executable.runtime_home = runtime_home;
+    rejected(&directory, invalid_executable, "executable path").await;
+
+    let invalid_runtime_home = non_utf8_path(&directory, 0xfd);
+    fs::create_dir(&invalid_runtime_home).assert_value();
+    let mut invalid_schema = local_configuration(CodexProvider::OpenAi, BTreeMap::new());
+    invalid_schema.executable = PathBuf::from("/bin/false");
+    invalid_schema.runtime_home = invalid_runtime_home;
+    rejected(&directory, invalid_schema, "response schema path").await;
 }
 
 #[test]

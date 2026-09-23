@@ -236,6 +236,30 @@ async fn wave8_cli_contract_aborted_allocation_is_terminal_and_exact_retry_recon
 }
 
 #[tokio::test]
+async fn wave9_cli_contract_settled_allocation_refusal_cleans_up_before_terminal_failure() {
+    let harness = harness(Behavior::Complete).await;
+    harness
+        .allocator
+        .fail_next_allocation(CapsuleAllocationUnavailable::Runtime);
+    let request = request_with_key(Value::Null, "cloud-wave9-allocation-refusal");
+    let run_id = request.run_id.clone();
+    assert!(matches!(
+        submit_test_request(&harness.controller, request).await,
+        Err(NativeV2CloudError::Allocation(
+            CapsuleAllocationUnavailable::Runtime
+        ))
+    ));
+    assert_eq!(
+        terminal(&harness.controller, &run_id).await,
+        TerminalResult::Failed {
+            reason: EnumLabel::new("runtime_unavailable").assert_value_with("failure label")
+        }
+    );
+    assert_eq!(harness.cleanup.exits(), vec![RunRuntimeExit::RuntimeLost]);
+    assert_eq!(harness.cleanup.terminal_seen(), vec![false]);
+}
+
+#[tokio::test]
 async fn force_destroys_live_capsule_before_one_terminal_result() {
     let (harness, receipt) = started_harness(Behavior::Hang).await;
     harness

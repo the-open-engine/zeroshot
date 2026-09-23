@@ -6,11 +6,12 @@ use openengine_cluster_protocol::{
     ConnectionMutationResult, ConnectionSetRequest, ConnectionSummary, MergePlan, MergePlanState,
     NodeName, PositiveInteger, RunAttachEventNotification, RunAttachParams, RunCheckpoint,
     RunCheckpointsParams, RunCheckpointsResult, RunConnectionRequirements, RunConnectionValues,
-    RunForceParams, RunId, RunListParams, RunLogEventNotification, RunLogsParams, RunProfile,
-    RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
-    RunProfileListRequest, RunProfileListResult, RunProfileMutationResult, RunProfileName,
-    RunProfileScope, RunProfileSelector, RunProfileSetRequest, RunProfileSummary, RunResumeParams,
-    RunStatusParams, RunSubmitResult, RunTitle, RunWatchParams, RuntimePlan, UnixTimestampMillis,
+    RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunForceParams, RunId, RunListParams,
+    RunLogEventNotification, RunLogsParams, RunProfile, RunProfileDefaultRequest,
+    RunProfileDefaultResult, RunProfileDeleteResult, RunProfileListRequest, RunProfileListResult,
+    RunProfileMutationResult, RunProfileName, RunProfileScope, RunProfileSelector,
+    RunProfileSetRequest, RunProfileSummary, RunResumeParams, RunStatusParams, RunSubmitResult,
+    RunTitle, RunWatchParams, RuntimePlan, UnixTimestampMillis,
 };
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{json, Value};
@@ -113,6 +114,10 @@ pub(in crate::native_v2_cli) enum Call {
     Checkpoints {
         target: Option<String>,
         params: RunCheckpointsParams,
+    },
+    DiscardWorkspace {
+        target: Option<String>,
+        run_id: String,
     },
 }
 
@@ -929,6 +934,24 @@ impl NativeV2CliBackend for FakeBackend {
         Ok(openengine_cluster_protocol::RunResumeResult {
             run_id: params.successor_run_id,
             resumed_from: params.run_id,
+        })
+    }
+
+    async fn run_discard_workspace(
+        &self,
+        target: Option<&str>,
+        params: RunDiscardWorkspaceParams,
+    ) -> Result<RunDiscardWorkspaceResult, NativeV2CliError> {
+        self.calls
+            .lock()
+            .assert_value()
+            .push(Call::DiscardWorkspace {
+                target: target.map(str::to_owned),
+                run_id: params.run_id.as_str().to_owned(),
+            });
+        Ok(RunDiscardWorkspaceResult {
+            run_id: params.run_id,
+            discarded: true,
         })
     }
 }

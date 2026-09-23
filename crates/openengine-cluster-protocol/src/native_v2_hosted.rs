@@ -165,6 +165,8 @@ mod tests {
 
     #[test]
     fn oecp_status_conversion_never_synthesizes_queued() {
+        let queued = HostedRunStatus::queued();
+        assert!(queued.as_target().is_none());
         for value in [
             json!({"phase":"admitted"}),
             json!({"phase":"running","activeExecutions":[]}),
@@ -180,10 +182,9 @@ mod tests {
             let Ok(oecp) = oecp else {
                 return;
             };
-            assert!(!matches!(
-                HostedRunStatus::from(oecp),
-                HostedRunStatus::Queued(_)
-            ));
+            let hosted = HostedRunStatus::target(oecp);
+            assert!(hosted.as_target().is_some());
+            assert!(!matches!(hosted, HostedRunStatus::Queued(_)));
         }
     }
 

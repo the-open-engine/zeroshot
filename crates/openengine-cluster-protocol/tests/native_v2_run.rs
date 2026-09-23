@@ -10,8 +10,8 @@ mod json_read;
 use assert_value::AssertValue;
 use openengine_cluster_protocol::{
     ClaudeProvider, CodexProvider, ResolvedSource, RunId, RunListParams, RunListResult, RunSize,
-    RunStatus, RunStatusResult, RunSubmitParams, RunSubmitResult, RunTitle, SourceBranchId,
-    SourceRepositoryId, SourceRevisionId,
+    RunResumeParams, RunStatus, RunStatusResult, RunSubmitParams, RunSubmitResult, RunTitle,
+    SourceBranchId, SourceRepositoryId, SourceRevisionId,
 };
 use serde_json::{json, Value};
 
@@ -212,4 +212,23 @@ fn submit_and_list_results_expose_only_public_run_identity_and_status() {
         "run-1"
     );
     assert!(wire.to_string().find("capsule").is_none());
+}
+
+#[test]
+fn resume_debug_exposes_connection_names_but_redacts_credentials() {
+    let resume: RunResumeParams = serde_json::from_value(json!({
+        "runId": "run-1",
+        "successorRunId": "run-2",
+        "connections": {
+            "provider": {"API_KEY": "connection-secret"}
+        },
+        "githubToken": "github-secret"
+    }))
+    .assert_value();
+
+    let diagnostic = format!("{resume:?}");
+    assert!(diagnostic.contains("provider"));
+    assert!(diagnostic.contains("[REDACTED]"));
+    assert!(!diagnostic.contains("connection-secret"));
+    assert!(!diagnostic.contains("github-secret"));
 }

@@ -29,6 +29,36 @@ fn done() -> Value {
 fn graph(children: Vec<Value>) -> Value {
     json!({"profile":"openengine.graph.full/v1","initialInput":record(json!({})),"policy":{"policy":"policy.native-v2@1","default":"deny"},"root":seq("run",children)})
 }
+fn named_item_type() -> Value {
+    record(json!({"name":{"type":{"kind":"string"},"required":true}}))
+}
+fn items_map(children: Vec<Value>, over: Value) -> Value {
+    json!({
+        "kind":"map", "name":"items_map", "state":record(json!({})),
+        "body":seq("body",children), "over":over, "maxItems":8,
+        "promotedStatePaths":[]
+    })
+}
+fn configured_item_map() -> Value {
+    let source = action(
+        graph(vec![items_map(vec![worker("draft")], Value::Null), done()]),
+        json!({
+            "kind":"run_input_field", "name":"items",
+            "type":{"kind":"array","items":named_item_type()}, "required":true
+        }),
+    )
+    .assert_value();
+    let source = action(
+        source,
+        json!({"kind":"map_collection","node":"items_map","source":{"kind":"run_input","path":["items"]}}),
+    )
+    .assert_value();
+    action(
+        source,
+        json!({"kind":"connect","target":{"node":"draft","input":"name"},"source":{"kind":"map_item","path":["name"]}}),
+    )
+    .assert_value()
+}
 fn incomplete_route(source: Value) -> Value {
     graph(vec![
         source,
@@ -46,6 +76,12 @@ fn action(graph: Value, action: Value) -> Result<Value, String> {
 }
 fn connect(graph: Value, source: &str, target: &str) -> Value {
     action(graph,json!({"kind":"connect","target":{"node":target,"input":"text"},"source":{"kind":"node_output","node":source,"channel":"out","path":["text"]}})).assert_value()
+}
+fn connect_to_consumer(source: &str) -> Value {
+    json!({
+        "kind":"connect", "target":{"node":"consumer","input":"value"},
+        "source":{"kind":"node_output","node":source,"channel":"out","path":["text"]}
+    })
 }
 fn protect(graph: Value, node: &str) -> Value {
     let request = serde_json::from_value(
@@ -247,8 +283,8 @@ fn adding_and_renaming_blank_run_input_preserves_node_fields() {
 
 #[test]
 fn collection_setup_supports_empty_map_drafts_and_item_fields() {
-    let items = record(json!({"name":{"type":{"kind":"string"},"required":true}}));
-    let map = json!({"kind":"map","name":"items_map","state":record(json!({})),"body":seq("body",Vec::new()),"over":{"source":"state","path":["missing"]},"maxItems":8,"promotedStatePaths":[]});
+    let items = named_item_type();
+    let map = items_map(Vec::new(), json!({"source":"state","path":["missing"]}));
     let source=action(graph(vec![map,done()]),json!({"kind":"run_input_field","name":"items","type":{"kind":"array","items":items},"required":true})).assert_value();
     let mut source=action(source,json!({"kind":"map_collection","node":"items_map","source":{"kind":"run_input","path":["items"]}})).assert_value();
     source["root"]["children"][0]["body"]["children"] = json!([worker("draft")]);
@@ -261,11 +297,8 @@ fn collection_setup_supports_empty_map_drafts_and_item_fields() {
 
 #[test]
 fn editing_run_collection_refreshes_item_types_and_clears_removed_sources() {
-    let map = json!({"kind":"map","name":"items_map","state":record(json!({})),"body":seq("body",vec![worker("draft")]),"over":null,"maxItems":8,"promotedStatePaths":[]});
-    let item = record(json!({"name":{"type":{"kind":"string"},"required":true}}));
-    let source = action(graph(vec![map, done()]),json!({"kind":"run_input_field","name":"items","type":{"kind":"array","items":item},"required":true})).assert_value();
-    let source = action(source,json!({"kind":"map_collection","node":"items_map","source":{"kind":"run_input","path":["items"]}})).assert_value();
-    let source = action(source,json!({"kind":"connect","target":{"node":"draft","input":"name"},"source":{"kind":"map_item","path":["name"]}})).assert_value();
+    let mut source = configured_item_map();
+    source["root"]["children"][0]["promotedStatePaths"] = json!([["items"]]);
     let new_item = record(json!({"name":{"type":{"kind":"boolean"},"required":true}}));
     let changed = action(source.clone(),json!({"kind":"run_input_field","before":"items","name":"attendees","type":{"kind":"array","items":new_item},"required":true})).assert_value();
     assert_eq!(
@@ -275,6 +308,10 @@ fn editing_run_collection_refreshes_item_types_and_clears_removed_sources() {
     assert_eq!(
         changed["root"]["children"][0]["body"]["children"][0]["input"]["fields"]["name"]["type"],
         json!({"kind":"boolean"})
+    );
+    assert_eq!(
+        changed["root"]["children"][0]["promotedStatePaths"],
+        json!([["attendees"]])
     );
     serde_json::from_value::<GraphSpec>(changed).assert_value();
     let removed_item = action(source.clone(),json!({"kind":"run_input_field","before":"items","name":"items","type":{"kind":"array","items":record(json!({}))},"required":true})).assert_value();
@@ -647,6 +684,36 @@ fn feedback_reuse_rejects_missing_returns_optional_state_and_competing_write_pat
 }
 
 #[test]
+fn feedback_reuse_rejects_invalid_donors_mappings_and_changed_output_types() {
+    for damage in 0..4 {
+        let mut source = feedback_fixture();
+        match damage {
+            0 => source["root"]["children"][0]["body"]["children"][0]["kind"] = json!("succeed"),
+            1 => {
+                let binding = source["root"]["children"][0]["body"]["children"][0]["inputBindings"]
+                    [0]
+                .clone();
+                source["root"]["children"][0]["body"]["children"][0]["inputBindings"] =
+                    json!([binding.clone(), binding])
+            }
+            2 => {
+                source["root"]["children"][0]["body"]["children"][0]["inputBindings"][0]["target"] =
+                    json!(["feedback", "nested"])
+            }
+            3 => {
+                source["root"]["children"][0]["body"]["children"][2]["output"]["fields"]["text"]["type"] =
+                    json!({"kind":"number"})
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            reuse_feedback(source).is_err(),
+            "damage {damage} must reject"
+        );
+    }
+}
+
+#[test]
 fn feedback_reuse_rejects_an_uninitialized_type_and_accepts_a_real_caller_initial_value() {
     let mut source = feedback_fixture();
     let nodes = index(&source).assert_value();
@@ -923,17 +990,10 @@ fn output_routes_reject_ambiguous_or_conditionally_available_values() {
             "labels":["crash"]
         })
     };
-    let connect_from = |node: &str| {
-        json!({
-            "kind":"connect", "target":{"node":"consumer","input":"value"},
-            "source":{"kind":"node_output","node":node,"channel":"out","path":["text"]}
-        })
-    };
-
     let ambiguous = seq("producers", vec![worker("first"), worker("second")]);
     assert_action_error(
         graph(vec![ambiguous, worker("consumer"), incomplete()]),
-        connect_from("producers"),
+        connect_to_consumer("producers"),
         "Select an unambiguous producing node",
     );
 
@@ -945,7 +1005,7 @@ fn output_routes_reject_ambiguous_or_conditionally_available_values() {
     });
     assert_action_error(
         graph(vec![terminal_choice, worker("consumer"), incomplete()]),
-        connect_from("finished"),
+        connect_to_consumer("finished"),
         "This decision has no continuing output",
     );
 
@@ -961,7 +1021,7 @@ fn output_routes_reject_ambiguous_or_conditionally_available_values() {
     });
     assert_action_error(
         graph(vec![differently_shaped, worker("consumer"), incomplete()]),
-        connect_from("shapes"),
+        connect_to_consumer("shapes"),
         "Selected outputs have different collection shapes",
     );
 
@@ -972,10 +1032,14 @@ fn output_routes_reject_ambiguous_or_conditionally_available_values() {
     });
     assert_action_error(
         graph(vec![conditional, worker("consumer"), incomplete()]),
-        connect_from("selected"),
+        connect_to_consumer("selected"),
         "Select a common decision output",
     );
+}
 
+#[test]
+fn output_routes_reject_incomplete_groups_late_values_and_type_mismatches() {
+    let incomplete = || seq("unfinished", Vec::new());
     let not_joined = json!({
         "kind":"par", "name":"race", "state":record(json!({})),
         "branches":[worker("winner"), worker("peer")],
@@ -983,15 +1047,53 @@ fn output_routes_reject_ambiguous_or_conditionally_available_values() {
     });
     assert_action_error(
         graph(vec![not_joined, worker("consumer"), incomplete()]),
-        connect_from("winner"),
+        connect_to_consumer("winner"),
         "Select an output from a completed group",
     );
 
     assert_action_error(
         graph(vec![worker("consumer"), worker("later"), incomplete()]),
-        connect_from("later"),
+        connect_to_consumer("later"),
         "Select an earlier output",
     );
+
+    let mut number = worker("number");
+    number["output"]["fields"]["text"]["type"] = json!({"kind":"number"});
+    let incompatible = json!({
+        "kind":"choice", "name":"incompatible", "state":record(json!({})),
+        "branches":[{"when":{
+            "kind":"in", "value":{"name":"missing","source":"error","field":null},
+            "labels":["crash"]
+        },"node":worker("text")}],
+        "otherwise":number, "promotedStatePaths":[]
+    });
+    assert_action_error(
+        graph(vec![incompatible, worker("consumer"), incomplete()]),
+        connect_to_consumer("incompatible"),
+        "Decision outputs must have matching types",
+    );
+}
+
+#[test]
+fn removing_a_run_collection_disconnects_only_its_dependent_map_data() {
+    let mut source = configured_item_map();
+    source["root"]["children"][0]["promotedStatePaths"] = json!([["items"], ["unrelated"]]);
+    let draft = &mut source["root"]["children"][0]["body"]["children"][0];
+    draft["input"]["fields"]["constant"] = json!({"type":{"kind":"string"},"required":true});
+    draft["inputBindings"]
+        .as_array_mut()
+        .assert_value()
+        .push(json!({"target":["constant"],"value":{"source":"input","path":["constant"]}}));
+
+    let removed = action(source, json!({"kind":"remove_run_input","name":"items"})).assert_value();
+    let map = &removed["root"]["children"][0];
+    assert!(map["over"].is_null());
+    assert_eq!(map["promotedStatePaths"], json!([["unrelated"]]));
+    let bindings = map["body"]["children"][0]["inputBindings"]
+        .as_array()
+        .assert_value();
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0]["target"], json!(["constant"]));
 }
 
 #[test]

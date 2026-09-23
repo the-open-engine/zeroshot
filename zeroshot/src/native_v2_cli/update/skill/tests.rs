@@ -194,3 +194,14 @@ fn does_not_follow_skill_directory_or_file_symlinks() {
     assert!(error.contains("SKILL.md is not a regular file"));
     assert_eq!(fs::read(&outside).unwrap(), b"outside remains unchanged");
 }
+
+#[cfg(unix)]
+#[test]
+fn wave9_cli_contract_skill_install_guard_matches_effective_sudo_identity() {
+    let sudo_user = std::env::var_os("SUDO_USER");
+    let should_refuse = unsafe { libc::geteuid() } == 0
+        && sudo_user
+            .as_deref()
+            .is_some_and(|user| user != OsStr::new("root"));
+    assert_eq!(reject_sudo_install().is_err(), should_refuse);
+}

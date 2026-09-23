@@ -218,13 +218,176 @@ async fn completed_reconciliation_followed_by_retry_still_requires_current_work_
     let initial = run_with_adapter(request(), adapter.clone()).await.outcome;
     assert_delivery_signal(&initial, DELIVERY_CI_FAILED_LABEL);
     let branch = delivery_branch("delivery-run");
+    let external_head = advance_delivery_branch(&repo, &branch);
+    let outcome = run_with_adapter(request(), adapter).await.outcome;
+    assert_delivery_signal(&outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+    assert!(
+        outcome_diagnostic(&outcome).contains("workspace changed during trusted reconciliation")
+    );
+    assert_eq!(
+        git_output(&repo.workspace, &["rev-parse", "HEAD"]),
+        external_head
+    );
+    assert_eq!(authority.head_sync_attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(authority.review_sync_attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn preflight_retries_reads_but_refuses_unowned_remote_lineage() {
+    let repo = TempRepo::delivery();
+    let (authority, adapter) = scripted_adapter(
+        &repo,
+        Script::PreflightRefusedAfterTransientRead,
+        3,
+        DeliveryLineage::original("preflight-refusal"),
+    );
+    let request = || DeliveryRunRequest {
+        repo: &repo,
+        attempts: 3,
+        mode: DeliveryMode::PullRequest,
+        run_id: "preflight-refusal",
+        refresh: None,
+    };
+    let opened = run_with_adapter(request(), adapter.clone()).await.outcome;
+    assert_delivery_signal(&opened, DELIVERY_OPENED_LABEL);
+    assert_eq!(authority.delivery_reads.load(Ordering::SeqCst), 2);
+
+    let branch = delivery_branch("preflight-refusal");
+    let external_head = advance_delivery_branch(&repo, &branch);
+    let local_head = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
+    let refused = run_with_adapter(request(), adapter).await;
+
+    assert_eq!(
+        refused.outcome,
+        WorkerOutcome::declared_failure(WorkerErrorCode::Refusal)
+    );
+    assert!(refused.output.iter().any(|event| {
+        event
+            .text
+            .contains("remote branch no longer has lineage-owned ancestry")
+    }));
+    assert_eq!(
+        git_output(&repo.workspace, &["rev-parse", "HEAD"]),
+        local_head
+    );
+    assert_eq!(
+        git_output(&repo.remote, &["rev-parse", &branch]),
+        external_head
+    );
+    assert_eq!(authority.review_sync_attempts.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn published_branch_deletion_and_unexplained_existing_branch_fail_closed() {
+    for scenario in ["deleted", "fresh-adapter"] {
+        let repo = TempRepo::delivery();
+        let (authority, adapter) =
+            scripted_adapter(&repo, Script::NoCi, 2, DeliveryLineage::original(scenario));
+        let request = || DeliveryRunRequest {
+            repo: &repo,
+            attempts: 2,
+            mode: DeliveryMode::PullRequest,
+            run_id: scenario,
+            refresh: None,
+        };
+        let opened = run_with_adapter(request(), adapter.clone()).await.outcome;
+        assert_delivery_signal(&opened, DELIVERY_OPENED_LABEL);
+        let branch = delivery_branch(scenario);
+
+        let retry_adapter = if scenario == "deleted" {
+            git(
+                &repo.remote,
+                &["update-ref", "-d", &format!("refs/heads/{branch}")],
+            );
+            adapter
+        } else {
+            retained_adapter(
+                &repo,
+                authority.clone(),
+                DeliveryPollPolicy::new(2, Duration::ZERO).assert_value(),
+                DeliveryLineage::original(scenario),
+            )
+        };
+        let refused = run_with_adapter(request(), retry_adapter).await;
+
+        assert_eq!(
+            refused.outcome,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Refusal),
+            "unexpected outcome for {scenario}"
+        );
+        let expected = if scenario == "deleted" {
+            "published run branch was deleted"
+        } else {
+            "unexpected existing run branch"
+        };
+        assert!(
+            refused
+                .output
+                .iter()
+                .any(|event| event.text.contains(expected))
+        );
+        assert_eq!(authority.review_sync_attempts.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[tokio::test]
+async fn retained_delivery_honors_terminal_review_state_before_any_new_mutation() {
+    for (script, expected) in [
+        (
+            Script::PreflightClosed,
+            Some(WorkerOutcome::declared_failure(WorkerErrorCode::Refusal)),
+        ),
+        (Script::PreflightMerged, None),
+    ] {
+        let repo = TempRepo::delivery();
+        let (authority, adapter) = scripted_adapter(
+            &repo,
+            script,
+            2,
+            DeliveryLineage::original("terminal-preflight"),
+        );
+        let request = |mode| DeliveryRunRequest {
+            repo: &repo,
+            attempts: 2,
+            mode,
+            run_id: "terminal-preflight",
+            refresh: None,
+        };
+
+        let opened = run_with_adapter(request(DeliveryMode::PullRequest), adapter.clone())
+            .await
+            .outcome;
+        assert_delivery_signal(&opened, DELIVERY_OPENED_LABEL);
+        let pushes = authority.head_updates.load(Ordering::SeqCst);
+
+        let outcome = run_with_adapter(request(DeliveryMode::Merge), adapter)
+            .await
+            .outcome;
+        if matches!(script, Script::PreflightMerged) {
+            assert_delivery_signal(&outcome, DELIVERY_MERGED_LABEL);
+        } else {
+            assert_eq!(outcome, expected.assert_value());
+        }
+        assert_eq!(authority.head_updates.load(Ordering::SeqCst), pushes);
+    }
+}
+
+fn retained_delivery(
+    repo: &TempRepo,
+    script: Script,
+) -> (Arc<FakeGitHub>, Arc<NativeV2DeliveryAdapter>) {
+    scripted_adapter(repo, script, 3, DeliveryLineage::original("delivery-run"))
+}
+
+fn advance_delivery_branch(repo: &TempRepo, branch: &str) -> String {
     let external = repo.root.child("external-reconciliation");
     git(
         repo.root.path(),
         &[
             "clone",
             "--branch",
-            &branch,
+            branch,
             repo.remote.to_str().assert_value(),
             external.to_str().assert_value(),
         ],
@@ -244,32 +407,6 @@ async fn completed_reconciliation_followed_by_retry_still_requires_current_work_
             "external change",
         ],
     );
-    git(&external, &["push", "origin", &branch]);
-    let external_head = git_output(&external, &["rev-parse", "HEAD"]);
-    let outcome = run_with_adapter(request(), adapter).await.outcome;
-    assert_delivery_signal(&outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
-    assert!(
-        outcome_diagnostic(&outcome).contains("workspace changed during trusted reconciliation")
-    );
-    assert_eq!(
-        git_output(&repo.workspace, &["rev-parse", "HEAD"]),
-        external_head
-    );
-    assert_eq!(authority.head_sync_attempts.load(Ordering::SeqCst), 2);
-    assert_eq!(authority.review_sync_attempts.load(Ordering::SeqCst), 1);
-    assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 0);
-}
-
-fn retained_delivery(
-    repo: &TempRepo,
-    script: Script,
-) -> (Arc<FakeGitHub>, Arc<NativeV2DeliveryAdapter>) {
-    let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), script));
-    let adapter = retained_adapter(
-        repo,
-        authority.clone(),
-        DeliveryPollPolicy::new(3, Duration::ZERO).assert_value(),
-        DeliveryLineage::original("delivery-run"),
-    );
-    (authority, adapter)
+    git(&external, &["push", "origin", branch]);
+    git_output(&external, &["rev-parse", "HEAD"])
 }

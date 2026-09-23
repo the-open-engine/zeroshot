@@ -170,3 +170,7 @@ impl ObservationSink for InMemoryObservationSink {
         state.faults.push(observation);
     }
 }
+
+#[cfg(test)]
+#[path = "observability/tests.rs"]
+mod tests;

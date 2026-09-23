@@ -177,7 +177,10 @@ exec /bin/sleep 30
         .err()
         .assert_value();
     let diagnostic = error.to_string();
-    assert!(diagnostic.contains("command timed out after 1000 milliseconds"));
+    assert!(
+        diagnostic.contains("command timed out after 1000 milliseconds"),
+        "unexpected diagnostic: {diagnostic}"
+    );
     assert!(diagnostic.contains("stdout (truncated=true):\npartial stdout [REDACTED]"));
     assert!(
         diagnostic.contains("stderr (truncated=true):\ngh: partial response (HTTP 401) [REDACTED]")
@@ -207,7 +210,9 @@ async fn failed_api_reserves_diagnostic_space_for_both_streams_and_retains_http_
         root.as_path(),
         "/bin/cat \"$HOME/stdout\"\n/bin/cat \"$HOME/stderr\" >&2\nexit 7\n",
     );
-    let error = authority(program, Duration::from_secs(10))
+    // Emitting and draining both bounded multi-megabyte streams is intentionally heavier under
+    // coverage instrumentation; the assertion is about capture bounds, not scheduler latency.
+    let error = authority(program, Duration::from_secs(30))
         .api_output(&[], GitHubCredential("test-token"))
         .await
         .err()

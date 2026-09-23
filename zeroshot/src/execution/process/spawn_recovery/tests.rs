@@ -2,6 +2,17 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use super::*;
 
+fn blocking_child_command() -> Command {
+    let mut command = Command::new("/bin/sh");
+    command
+        .args(["-c", "read ignored"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    command
+}
+
 #[test]
 fn coverage_contract_child_command_is_sanitized_and_preserves_the_validated_specification() {
     let directory = tempfile::tempdir().assert_value();
@@ -86,13 +97,7 @@ async fn empty_spawn_recovery_state_is_explicitly_inert() {
 
 #[tokio::test]
 async fn coverage_contract_spawn_recovery_terminates_and_reaps_a_captured_child() {
-    let mut command = Command::new("/bin/sh");
-    command
-        .args(["-c", "read ignored"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true);
+    let mut command = blocking_child_command();
     let child = command.spawn().assert_value();
     let mut recovery = SpawnRecovery::registered();
     recovery.capture(child);
@@ -102,5 +107,24 @@ async fn coverage_contract_spawn_recovery_terminates_and_reaps_a_captured_child(
     assert!(
         diagnostic.is_none(),
         "unexpected cleanup failure: {diagnostic:?}"
+    );
+}
+
+#[tokio::test]
+async fn coverage_contract_spawn_recovery_uses_registered_tree_cleanup_when_available() {
+    let registration =
+        platform::register_process_tree_for(ProcessContainment::ProcessGroup).assert_value();
+    let mut command = blocking_child_command();
+    platform::configure_process(&mut command, ProcessContainment::ProcessGroup);
+    let mut child = command.spawn().assert_value();
+    let process_tree = platform::capture_process_tree(registration, &mut child).assert_value();
+    let mut recovery = SpawnRecovery::registered();
+    recovery.capture(child);
+    recovery.capture_process_tree(process_tree);
+
+    let diagnostic = recovery.recover().await;
+    assert!(
+        diagnostic.is_none(),
+        "unexpected registered-tree cleanup failure: {diagnostic:?}"
     );
 }

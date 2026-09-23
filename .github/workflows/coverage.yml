@@ -82,6 +82,10 @@ jobs:
           fallback: none
 
       - name: Measure native coverage
+        env:
+          CARGO_INCREMENTAL: '0'
+          CARGO_PROFILE_TEST_DEBUG: '1'
+          RUST_TEST_THREADS: '4'
         run: |
           cargo llvm-cov clean --workspace
           mkdir -p target/llvm-cov-target/debug
@@ -89,8 +93,38 @@ jobs:
           chmod +x target/llvm-cov-target/debug/restic
           cargo llvm-cov --workspace --no-report
           cargo llvm-cov --package zeroshot --features ui --no-clean --summary-only
+          cargo llvm-cov --package zeroshot --bin zeroshot --features ui --no-clean --summary-only
           cargo llvm-cov report --json --output-path coverage.json
           cargo llvm-cov report --lcov --output-path lcov.info
+
+      - name: Enforce useful coverage
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync('coverage.json', 'utf8')).data[0];
+          const floors = { lines: 95, regions: 92, functions: 92 };
+          const failures = [];
+
+          for (const [kind, floor] of Object.entries(floors)) {
+            const actual = report.totals[kind].percent;
+            console.log(`${kind}: ${actual.toFixed(2)}% (minimum ${floor}%)`);
+            if (actual < floor) failures.push(`${kind} ${actual.toFixed(2)}% < ${floor}%`);
+          }
+
+          for (const file of report.files) {
+            const { lines, regions } = file.summary;
+            if (regions.count < 200 || (lines.percent >= 75 && regions.percent >= 75)) continue;
+            const path = file.filename.replace(`${process.cwd()}/`, '');
+            failures.push(
+              `${path}: ${lines.percent.toFixed(2)}% lines, ${regions.percent.toFixed(2)}% regions`,
+            );
+          }
+
+          if (failures.length) {
+            console.error(`Coverage gate failed:\n- ${failures.join('\n- ')}`);
+            process.exit(1);
+          }
+          NODE
 
       - name: Publish coverage
         uses: coverallsapp/github-action@8d6379e14d29928660c4ba802d8e85393440b329 # v2.3.8

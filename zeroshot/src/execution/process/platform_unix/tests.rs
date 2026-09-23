@@ -6,6 +6,20 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use super::*;
 
+async fn blocked_child(containment: Option<ProcessContainment>) -> tokio::process::Child {
+    let mut command = tokio::process::Command::new("/bin/sh");
+    command
+        .args(["-c", "read ignored"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    if let Some(containment) = containment {
+        configure_process(&mut command, containment);
+    }
+    command.spawn().assert_value()
+}
+
 #[test]
 fn process_files_opened_before_exit_are_treated_as_absent() {
     let mut child = Command::new("/bin/sh")
@@ -373,24 +387,127 @@ fn coverage_contract_worker_signal_batch_ignores_disappearance_but_stops_on_real
     .assert_error();
     assert_eq!(error.raw_os_error(), Some(libc::EPERM));
     assert_eq!(visited, [21, 22]);
+
+    assert_eq!(
+        kernel_kill(i32::MAX).assert_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
+    assert_eq!(
+        kill_process_group(i32::MAX).assert_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
+    let absent = WorkerMembership::Uid(u32::MAX);
+    assert!(!reap_and_kill_worker_processes(absent).assert_value());
+    kill_linux_worker_processes(absent).assert_value();
+}
+
+#[test]
+fn coverage_contract_kernel_identity_verification_is_read_only_and_rejects_mismatches() {
+    assert_eq!(
+        verify_linux_identity(u32::MAX, u32::MAX, None)
+            .assert_error()
+            .kind(),
+        io::ErrorKind::Other
+    );
+    assert_eq!(
+        KernelWorkerSecurity
+            .verify_identity(u32::MAX, u32::MAX, Some(u32::MAX))
+            .assert_error()
+            .kind(),
+        io::ErrorKind::Other
+    );
+
+    // Exercise every identity comparison against the actual process without mutating it. A normal
+    // development shell has several supplementary groups, while the worker contract permits zero
+    // or one; either state has a deterministic expected result.
+    let mut only_group = 0_u32;
+    // SAFETY: these calls only inspect the test process credentials and write one valid u32 slot.
+    let (real_uid, uid, real_gid, gid, group_count) = unsafe {
+        (
+            libc::getuid(),
+            libc::geteuid(),
+            libc::getgid(),
+            libc::getegid(),
+            libc::getgroups(0, std::ptr::null_mut()),
+        )
+    };
+    assert!(group_count >= 0);
+    let uniform_identity = real_uid == uid && real_gid == gid;
+    assert_eq!(
+        verify_linux_identity(uid, gid, None).is_ok(),
+        uniform_identity && group_count == 0
+    );
+    let expected_single_group = if group_count == 1 {
+        // SAFETY: group_count proved that the one-element output buffer is sufficient.
+        assert_eq!(unsafe { libc::getgroups(1, &mut only_group) }, 1);
+        true
+    } else {
+        false
+    };
+    assert_eq!(
+        verify_linux_identity(uid, gid, Some(only_group)).is_ok(),
+        uniform_identity && expected_single_group
+    );
+
+    // The ordinary unprivileged CI identity can safely exercise the real fail-closed syscall
+    // boundary: setgroups is rejected before any credential changes. Clearing an already-empty
+    // capability set and enabling no-new-privileges affect only this finished test thread.
+    if uid != 0 {
+        assert_eq!(
+            KernelWorkerSecurity
+                .drop_identity(u32::MAX, u32::MAX, None)
+                .assert_error()
+                .raw_os_error(),
+            Some(libc::EPERM)
+        );
+        KernelWorkerSecurity.clear_privileges().assert_value();
+    }
+}
+
+#[tokio::test]
+async fn coverage_contract_kernel_kill_terminates_only_the_selected_child() {
+    let mut child = blocked_child(None).await;
+    let pid = i32::try_from(child.id().assert_value()).assert_value();
+
+    kernel_kill(pid).assert_value();
+    let status = child.wait().await.assert_value();
+    assert!(!status.success());
+}
+
+#[tokio::test]
+async fn coverage_contract_worker_pre_exec_drops_identity_or_fails_closed_without_authority() {
+    const WORKER_ID: u32 = 65_534;
+    let mut command = tokio::process::Command::new("/usr/bin/id");
+    command
+        .arg("-u")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    configure_process(
+        &mut command,
+        ProcessContainment::WorkerUid {
+            uid: WORKER_ID,
+            gid: WORKER_ID,
+        },
+    );
+
+    match command.output().await {
+        Ok(output) => {
+            assert!(output.status.success());
+            assert_eq!(
+                String::from_utf8(output.stdout).assert_value().trim(),
+                "65534"
+            );
+        }
+        Err(error) => assert_eq!(error.raw_os_error(), Some(libc::EPERM)),
+    }
 }
 
 #[tokio::test]
 async fn coverage_contract_process_group_configuration_and_fallback_cleanup_reap_immediate_children()
  {
-    async fn blocked_child() -> tokio::process::Child {
-        let mut command = tokio::process::Command::new("/bin/sh");
-        command
-            .args(["-c", "read ignored"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .kill_on_drop(true);
-        configure_process(&mut command, ProcessContainment::ProcessGroup);
-        command.spawn().assert_value()
-    }
-
-    let mut grouped = blocked_child().await;
+    let mut grouped = blocked_child(Some(ProcessContainment::ProcessGroup)).await;
     let pid = i32::try_from(grouped.id().assert_value()).assert_value();
     // SAFETY: getpgid only inspects the live child created above.
     assert_eq!(unsafe { libc::getpgid(pid) }, pid);
@@ -402,7 +519,7 @@ async fn coverage_contract_process_group_configuration_and_fallback_cleanup_reap
         .assert_value()
         .assert_value();
 
-    let mut fallback = blocked_child().await;
+    let mut fallback = blocked_child(Some(ProcessContainment::ProcessGroup)).await;
     assert!(kill_process_tree(None, ProcessContainment::ProcessGroup, &mut fallback).is_empty());
     tokio::time::timeout(std::time::Duration::from_millis(250), fallback.wait())
         .await

@@ -9,13 +9,18 @@ use openengine_cluster_testkit::assertions::AssertValue;
 
 use super::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(super) enum Script {
     NoCi,
     Feedback,
+    FeedbackReadTransient,
+    FeedbackTooLarge,
     PushRejected,
     PolicyForbidden,
     PolicySchemaInvalid,
+    PreflightClosed,
+    PreflightMerged,
+    PreflightRefusedAfterTransientRead,
     InspectFailed,
     MergeFailed,
     CiFailed,
@@ -34,6 +39,14 @@ pub(super) enum Script {
     HeadAdoptionAfterRepair,
     HeadAdoptionRejected,
     HeadAdoptionUnavailable,
+    HeadRecoveryClosed,
+    HeadRecoveryMerged,
+    HeadRecoveryReviewMissing,
+    HeadUpdateConflict,
+    HeadUpdateIdentityMismatch,
+    HeadUpdatePending,
+    HeadUpdateResponseLost,
+    HeadUpdateUnavailable,
     RepeatedBehind,
     ProtectedBranch,
     ReviewSyncRace,
@@ -41,6 +54,10 @@ pub(super) enum Script {
     ConflictThenMerges,
     StaleConflictThenMerges,
     NeverConfirmsMerge,
+    InvalidReviewObservation,
+    PendingReadiness,
+    ReviewIdentityMismatch,
+    TerminalClosed,
     CredentialExpires,
     ReviewSyncCredentialExpires,
 }
@@ -55,6 +72,7 @@ pub(super) struct FakeGitHub {
     pub(super) head_sync_attempts: AtomicUsize,
     pub(super) inspections: AtomicUsize,
     pub(super) feedback_reads: AtomicUsize,
+    pub(super) delivery_reads: AtomicUsize,
     pub(super) reviews: Mutex<Vec<GitHubReviewRequest>>,
     pub(super) review_sync_attempts: AtomicUsize,
     pub(super) conflict_materializations: AtomicUsize,
@@ -73,6 +91,7 @@ impl FakeGitHub {
             head_sync_attempts: AtomicUsize::new(0),
             inspections: AtomicUsize::new(0),
             feedback_reads: AtomicUsize::new(0),
+            delivery_reads: AtomicUsize::new(0),
             reviews: Mutex::new(Vec::new()),
             review_sync_attempts: AtomicUsize::new(0),
             conflict_materializations: AtomicUsize::new(0),
@@ -84,14 +103,21 @@ impl FakeGitHub {
         match self.script {
             Script::NoCi
             | Script::Feedback
+            | Script::FeedbackReadTransient
+            | Script::FeedbackTooLarge
             | Script::TargetIntegrationResponseLost
             | Script::LaterTargetIntegrationFails
             | Script::CredentialExpires
             | Script::ReviewSyncRace
             | Script::PolicyForbidden
             | Script::PolicySchemaInvalid
+            | Script::PreflightClosed
+            | Script::PreflightMerged
+            | Script::PreflightRefusedAfterTransientRead
             | Script::InspectFailed
-            | Script::MergeFailed => self.no_ci_state(),
+            | Script::InvalidReviewObservation
+            | Script::MergeFailed
+            | Script::ReviewIdentityMismatch => self.no_ci_state(),
             Script::ReviewSyncCredentialExpires => self.no_ci_state(),
             Script::RegistrationRace => self.registration_race_state(inspection),
             Script::MultipleRegistrationWaves => self.multiple_registration_waves_state(inspection),
@@ -99,11 +125,16 @@ impl FakeGitHub {
             Script::ConflictThenMerges | Script::StaleConflictThenMerges => {
                 self.conflict_repair_state()
             }
+            Script::PendingReadiness => open_review(GitHubChecks::Pending),
+            Script::TerminalClosed => GitHubReviewState::Closed,
             _ => self.static_review_state(),
         }
     }
 
     fn static_review_state(&self) -> GitHubReviewState {
+        if self.exercises_head_update() || matches!(self.script, Script::RepeatedBehind) {
+            return self.no_ci_state();
+        }
         match self.script {
             Script::CiFailed | Script::ReconcileCompletesThenUnavailable => {
                 open_review(failed_checks())
@@ -116,12 +147,6 @@ impl FakeGitHub {
             }
             Script::ConflictAtMerge => open_review(GitHubChecks::NotRequired),
             Script::DeferredMerge => self.no_ci_state(),
-            Script::StrictBehind
-            | Script::HeadAdoptionRace
-            | Script::HeadAdoptionAfterRepair
-            | Script::HeadAdoptionRejected
-            | Script::HeadAdoptionUnavailable
-            | Script::RepeatedBehind => self.no_ci_state(),
             Script::ProtectedBranch | Script::NeverConfirmsMerge => {
                 open_review(GitHubChecks::Passed)
             }
@@ -194,6 +219,39 @@ impl FakeGitHub {
         )
     }
 
+    fn exercises_head_update(&self) -> bool {
+        matches!(
+            self.script,
+            Script::StrictBehind
+                | Script::HeadAdoptionRace
+                | Script::HeadAdoptionAfterRepair
+                | Script::HeadAdoptionRejected
+                | Script::HeadAdoptionUnavailable
+                | Script::HeadRecoveryClosed
+                | Script::HeadRecoveryMerged
+                | Script::HeadRecoveryReviewMissing
+                | Script::HeadUpdateConflict
+                | Script::HeadUpdateIdentityMismatch
+                | Script::HeadUpdatePending
+                | Script::HeadUpdateResponseLost
+                | Script::HeadUpdateUnavailable
+        )
+    }
+
+    fn immediate_head_update_outcome(
+        &self,
+    ) -> Option<Result<GitHubHeadUpdateOutcome, GitHubAuthorityError>> {
+        match self.script {
+            Script::HeadUpdatePending => Some(Ok(GitHubHeadUpdateOutcome::Pending)),
+            Script::HeadUpdateConflict => Some(Ok(GitHubHeadUpdateOutcome::Conflict)),
+            Script::HeadUpdateUnavailable
+            | Script::HeadRecoveryReviewMissing
+            | Script::HeadRecoveryClosed
+            | Script::HeadRecoveryMerged => Some(Err(GitHubAuthorityError::Unavailable)),
+            _ => None,
+        }
+    }
+
     pub(super) fn review_requests(&self) -> MutexGuard<'_, Vec<GitHubReviewRequest>> {
         self.reviews.lock().assert_value_with("review request lock")
     }
@@ -257,6 +315,10 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         request: GitHubDeliveryRead<'_>,
         _credential: GitHubCredential<'_>,
     ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError> {
+        let read = self.delivery_reads.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.script, Script::PreflightRefusedAfterTransientRead) && read == 0 {
+            return Err(GitHubAuthorityError::Unavailable);
+        }
         let output = tokio::process::Command::new("/usr/bin/git")
             .arg("-C")
             .arg(&self.remote)
@@ -275,8 +337,18 @@ impl GitHubDeliveryAuthority for FakeGitHub {
                 .to_owned()
         });
         let review = head_revision.as_ref().and_then(|head| {
+            if matches!(self.script, Script::HeadRecoveryReviewMissing) {
+                return None;
+            }
             let reviews = self.reviews.lock().assert_value();
             let request = reviews.last()?;
+            let state = match self.script {
+                Script::HeadRecoveryClosed => GitHubReviewState::Closed,
+                Script::HeadRecoveryMerged => merged_review(),
+                Script::PreflightClosed => GitHubReviewState::Closed,
+                Script::PreflightMerged => merged_review(),
+                _ => self.no_ci_state(),
+            };
             Some(
                 GitHubReviewReceipt {
                     review_id: "17".to_owned(),
@@ -285,7 +357,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
                     head_branch: request.head_branch.clone(),
                     head_revision: head.clone(),
                 }
-                .observation(self.no_ci_state()),
+                .observation(state),
             )
         });
         Ok(GitHubDeliverySnapshot {
@@ -334,6 +406,13 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         request: GitHubHeadReconciliation<'_>,
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubReconciliationOutcome, GitHubAuthorityError> {
+        if matches!(self.script, Script::PreflightRefusedAfterTransientRead)
+            && request.published.head_revision != request.observed.head_revision
+        {
+            return Ok(GitHubReconciliationOutcome::Refused(
+                "the remote branch no longer has lineage-owned ancestry".to_owned(),
+            ));
+        }
         if matches!(self.script, Script::ReconcileCompletesThenUnavailable)
             && request.published.head_revision != request.observed.head_revision
         {
@@ -441,13 +520,17 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             .lock()
             .assert_value_with("review request lock")
             .push(request.clone());
-        Ok(GitHubReviewReceipt {
+        let mut receipt = GitHubReviewReceipt {
             review_id: "17".to_owned(),
             repository: request.target.repository.clone(),
             target_branch: request.target.target_branch.clone(),
             head_branch: request.head_branch.clone(),
             head_revision: request.head_revision.clone(),
-        })
+        };
+        if matches!(self.script, Script::ReviewIdentityMismatch) {
+            receipt.repository = "other/project".to_owned();
+        }
+        Ok(receipt)
     }
 
     async fn inspect_review(
@@ -484,7 +567,11 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         };
         assert_eq!(credential.expose(), expected);
         let state = self.review_state(inspection);
-        Ok(review.observation(state))
+        let mut observation = review.observation(state);
+        if matches!(self.script, Script::InvalidReviewObservation) {
+            observation.head_branch = "zeroshot/unowned-head".to_owned();
+        }
+        Ok(observation)
     }
 
     async fn inspect_review_feedback(
@@ -492,14 +579,21 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         _review: &GitHubReviewReceipt,
         _credential: GitHubCredential<'_>,
     ) -> Result<GitHubReviewFeedback, GitHubAuthorityError> {
-        self.feedback_reads.fetch_add(1, Ordering::SeqCst);
-        let items = matches!(self.script, Script::Feedback)
+        let read = self.feedback_reads.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.script, Script::FeedbackReadTransient) && read == 0 {
+            return Err(GitHubAuthorityError::Unavailable);
+        }
+        let items = matches!(self.script, Script::Feedback | Script::FeedbackTooLarge)
             .then(|| GitHubReviewFeedbackItem {
                 key: "review_comment:41".to_owned(),
                 version: "v1".to_owned(),
                 author: "review-bot".to_owned(),
                 location: Some("path=src/lib.rs line=7".to_owned()),
-                body: "Handle the empty input before returning.".to_owned(),
+                body: if matches!(self.script, Script::FeedbackTooLarge) {
+                    "x".repeat(4 * 1024 * 1024 + 1)
+                } else {
+                    "Handle the empty input before returning.".to_owned()
+                },
             })
             .into_iter()
             .collect();
@@ -528,14 +622,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             return Ok(GitHubMergeRequestOutcome::Conflict);
         }
         let updates = self.head_updates.load(Ordering::SeqCst);
-        if (matches!(
-            self.script,
-            Script::StrictBehind
-                | Script::HeadAdoptionRace
-                | Script::HeadAdoptionAfterRepair
-                | Script::HeadAdoptionRejected
-                | Script::HeadAdoptionUnavailable
-        ) && updates == 0)
+        if (self.exercises_head_update() && updates == 0)
             || (matches!(self.script, Script::RepeatedBehind) && updates < 2)
         {
             return Ok(GitHubMergeRequestOutcome::HeadUpdateRequired);
@@ -554,15 +641,10 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubHeadUpdateOutcome, GitHubAuthorityError> {
         assert_eq!(credential.expose(), "test-token");
-        if !matches!(
-            self.script,
-            Script::StrictBehind
-                | Script::HeadAdoptionRace
-                | Script::HeadAdoptionAfterRepair
-                | Script::HeadAdoptionRejected
-                | Script::HeadAdoptionUnavailable
-                | Script::RepeatedBehind
-        ) {
+        if let Some(outcome) = self.immediate_head_update_outcome() {
+            return outcome;
+        }
+        if !self.exercises_head_update() && !matches!(self.script, Script::RepeatedBehind) {
             return Ok(GitHubHeadUpdateOutcome::Pending);
         }
         let status = tokio::process::Command::new("/usr/bin/git")
@@ -611,6 +693,15 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         self.head_updates.fetch_add(1, Ordering::SeqCst);
         let mut updated = review.clone();
         updated.head_revision = head_revision;
+        if matches!(self.script, Script::HeadUpdateIdentityMismatch) {
+            updated.head_branch = "zeroshot/unowned-head".to_owned();
+        }
+        if matches!(self.script, Script::HeadUpdateResponseLost) {
+            return Err(GitHubAuthorityError::api(
+                Some(503),
+                "head update completed but its response was lost",
+            ));
+        }
         if matches!(self.script, Script::HeadAdoptionAfterRepair) {
             git(workspace, &["reset", "--hard", &review.head_revision]);
         }

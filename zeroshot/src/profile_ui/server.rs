@@ -356,6 +356,7 @@ mod tests {
 
     use axum::http::HeaderName;
     use openengine_cluster_testkit::assertions::AssertValue;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
     use crate::native_v2_observability::history::RunHistoryList;
@@ -640,6 +641,53 @@ mod tests {
         );
         service.shutdown();
         assert!(*service.shutdown.0.borrow());
+    }
+
+    #[tokio::test]
+    async fn target_connection_serves_one_http_lifetime_and_drains_on_shutdown() {
+        let observations = crate::native_v2_observability::NativeV2Observability::new(Arc::new(
+            crate::v2_run_ledger::fake::FakeRunLedger::new(),
+        ));
+        let root = openengine_cluster_testkit::TemporaryDirectory::for_test(
+            "profile-ui-target-connection",
+        );
+        let service = UiService::for_target(
+            root.as_path().to_owned(),
+            "https://target.example",
+            observations,
+        )
+        .assert_value();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
+        let address = listener.local_addr().assert_value();
+        let client = TcpStream::connect(address).await.assert_value();
+        let (server_stream, _) = listener.accept().await.assert_value();
+        let served = tokio::spawn({
+            let service = service.clone();
+            async move { service.serve_connection(server_stream).await }
+        });
+        let (mut reader, mut writer) = client.into_split();
+        writer
+            .write_all(b"GET /ui/ HTTP/1.1\r\nHost: target.example\r\nConnection: close\r\n\r\n")
+            .await
+            .assert_value();
+        let mut response = Vec::new();
+        reader.read_to_end(&mut response).await.assert_value();
+        let response = String::from_utf8(response).assert_value();
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        served.await.assert_value().assert_value();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
+        let address = listener.local_addr().assert_value();
+        let idle_client = TcpStream::connect(address).await.assert_value();
+        let (server_stream, _) = listener.accept().await.assert_value();
+        let draining = tokio::spawn({
+            let service = service.clone();
+            async move { service.serve_connection(server_stream).await }
+        });
+        service.shutdown();
+        draining.await.assert_value().assert_value();
+        drop(idle_client);
     }
 
     #[tokio::test]

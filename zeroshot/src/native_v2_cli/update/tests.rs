@@ -10,8 +10,7 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use super::*;
 
-#[test]
-fn wave8_cli_contract_release_versions_are_canonical_and_ordered() {
+fn assert_release_versions_are_canonical_and_ordered() {
     assert_eq!(
         ReleaseVersion::parse("8.2.1").assert_value().to_string(),
         "8.2.1"
@@ -26,8 +25,7 @@ fn wave8_cli_contract_release_versions_are_canonical_and_ordered() {
     );
 }
 
-#[test]
-fn wave8_cli_contract_checksum_manifest_accepts_exact_release_names_and_digests() {
+fn assert_checksum_manifest_accepts_exact_release_names_and_digests() {
     let binary = b"release binary";
     let filename = "zeroshot-v8.2.1-x86_64-unknown-linux-musl.tar.gz";
     let checksum = format!("{:x}", Sha256::digest(binary));
@@ -42,8 +40,7 @@ fn wave8_cli_contract_checksum_manifest_accepts_exact_release_names_and_digests(
     assert!(verify_checksum(filename, b"tampered", &expected).is_err());
 }
 
-#[test]
-fn wave8_cli_contract_checksum_manifest_rejects_invalid_missing_and_duplicate_entries() {
+fn assert_checksum_manifest_rejects_invalid_missing_and_duplicate_entries() {
     let filename = "zeroshot-v8.2.1-x86_64-unknown-linux-musl.tar.gz";
     let digest = "0".repeat(64);
     let missing = format!("{digest}  {SKILL_ASSET}\n");
@@ -89,8 +86,7 @@ fn wave8_cli_contract_checksum_manifest_rejects_invalid_missing_and_duplicate_en
     }
 }
 
-#[test]
-fn wave8_cli_contract_release_archive_accepts_one_exact_regular_executable() {
+fn assert_release_archive_accepts_one_exact_regular_executable() {
     let binary = b"release binary";
     let archive = test_archive(&[ArchiveEntry::File("zeroshot", binary)]);
     assert_eq!(
@@ -99,9 +95,7 @@ fn wave8_cli_contract_release_archive_accepts_one_exact_regular_executable() {
     );
 }
 
-#[test]
-fn wave8_cli_contract_release_archive_rejects_wrong_paths_types_duplicates_and_missing_executables()
-{
+fn assert_release_archive_rejects_wrong_paths_types_duplicates_and_missing_executables() {
     let cases = [
         (
             test_archive(&[ArchiveEntry::File("bin/zeroshot", b"binary")]),
@@ -235,8 +229,7 @@ async fn wave5_cli_contract_release_metadata_and_verified_assets_are_self_consis
     assert!(installed_version().is_err());
 }
 
-#[test]
-fn wave8_cli_contract_installation_stages_verifies_replaces_and_cleans_up() {
+fn assert_installation_stages_verifies_replaces_and_cleans_up() {
     let directory = tempfile::tempdir().unwrap();
     let current = directory
         .path()
@@ -287,8 +280,7 @@ fn wave8_cli_contract_installation_stages_verifies_replaces_and_cleans_up() {
     }));
 }
 
-#[test]
-fn wave8_cli_contract_installation_stops_on_verification_or_replacement_failure() {
+fn assert_installation_stops_on_verification_or_replacement_failure() {
     let directory = tempfile::tempdir().unwrap();
     let current = directory.path().join("zeroshot");
     fs::write(&current, b"old binary").unwrap();
@@ -324,8 +316,7 @@ fn wave8_cli_contract_installation_stops_on_verification_or_replacement_failure(
     assert!(matches!(replacement_error, NativeV2CliError::Update(_)));
 }
 
-#[test]
-fn wave8_cli_contract_smoke_and_result_reporting_require_the_exact_release_version() {
+fn assert_smoke_and_result_reporting_require_the_exact_release_version() {
     let version = ReleaseVersion([8, 2, 1]);
     validate_smoke_result(true, b"zeroshot 8.2.1\n", version).assert_value();
     assert!(validate_smoke_result(false, b"zeroshot 8.2.1\n", version).is_err());
@@ -349,8 +340,7 @@ fn wave8_cli_contract_smoke_and_result_reporting_require_the_exact_release_versi
     );
 }
 
-#[test]
-fn wave8_cli_contract_update_process_boundaries_fail_before_replacement() {
+fn assert_update_process_boundaries_fail_before_replacement() {
     fn verify_noop(_: &Path, _: ReleaseVersion) -> Result<(), NativeV2CliError> {
         Ok(())
     }
@@ -391,6 +381,87 @@ fn wave8_cli_contract_update_process_boundaries_fail_before_replacement() {
         assert!(make_executable(&missing).is_err());
         assert!(smoke(&missing, version).is_err());
     }
+}
+
+async fn assert_update_short_circuits_and_serializes_without_release_io() {
+    let current = ReleaseVersion([8, 4, 0]);
+    let older = ReleaseVersion([8, 3, 9]);
+    let client = http_client().assert_value();
+    assert_eq!(
+        apply_release(&client, current, older).await.assert_value(),
+        (false, false)
+    );
+    assert!(installed_version().is_err());
+
+    validate_smoke_result(true, b"zeroshot 8.4.0\n", current).assert_value();
+    for (success, output) in [
+        (false, b"zeroshot 8.4.0\n".as_slice()),
+        (true, b"zeroshot 8.3.9\n".as_slice()),
+        (true, b"zeroshot 8.4.0".as_slice()),
+    ] {
+        assert!(validate_smoke_result(success, output, current).is_err());
+    }
+
+    let mut output = Vec::new();
+    write_result(
+        &mut output,
+        UpdateResult {
+            current_version: current.to_string(),
+            latest_version: current.to_string(),
+            updated: false,
+            skill_updated: true,
+        },
+    )
+    .assert_value();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output).assert_value(),
+        serde_json::json!({
+            "currentVersion":"8.4.0",
+            "latestVersion":"8.4.0",
+            "updated":false,
+            "skillUpdated":true
+        })
+    );
+}
+
+#[tokio::test]
+async fn wave10_cli_contract_release_integrity_pipeline_is_lean_and_fail_closed() {
+    assert_release_versions_are_canonical_and_ordered();
+    assert_checksum_manifest_accepts_exact_release_names_and_digests();
+    assert_checksum_manifest_rejects_invalid_missing_and_duplicate_entries();
+    assert_release_archive_accepts_one_exact_regular_executable();
+    assert_release_archive_rejects_wrong_paths_types_duplicates_and_missing_executables();
+    assert_installation_stages_verifies_replaces_and_cleans_up();
+    assert_installation_stops_on_verification_or_replacement_failure();
+    assert_smoke_and_result_reporting_require_the_exact_release_version();
+    assert_update_process_boundaries_fail_before_replacement();
+    assert_update_short_circuits_and_serializes_without_release_io().await;
+}
+
+#[tokio::test]
+async fn wave11_cli_contract_update_wrappers_fail_before_remote_or_replacement_effects() {
+    let mut output = Vec::new();
+    let error = execute(&mut output).await.assert_error().to_string();
+    assert!(
+        error.contains("canonical v8 or newer release builds"),
+        "{error}"
+    );
+    assert!(output.is_empty());
+
+    let client = http_client().assert_value();
+    let error = download(&client, "not a URL", 1, "malformed release URL")
+        .await
+        .assert_error()
+        .to_string();
+    assert!(
+        error.contains("could not fetch malformed release URL"),
+        "{error}"
+    );
+
+    let error = install(b"not an executable", ReleaseVersion([8, 11, 0]))
+        .assert_error()
+        .to_string();
+    assert!(error.contains("could not verify the update"), "{error}");
 }
 
 enum ArchiveEntry<'a> {

@@ -218,5 +218,50 @@ mod tests {
         }))
         .assert_value();
         assert_eq!(status.name.as_str(), "backend");
+        assert_eq!(
+            serde_json::to_value(status).assert_value(),
+            json!({
+                "name": "backend",
+                "runId": "run-1",
+                "state": "blocked",
+                "needs": [],
+                "sourceRevision": null,
+                "readyAt": null,
+                "queueExpiresAt": null,
+                "terminalAt": null,
+                "waitingReason": null,
+                "errorCode": null
+            })
+        );
+    }
+
+    #[test]
+    fn plan_state_helpers_cover_every_terminal_contract() {
+        for (state, terminal, succeeded) in [
+            (MergePlanState::Queued, false, false),
+            (MergePlanState::Running, false, false),
+            (MergePlanState::Succeeded, true, true),
+            (MergePlanState::Failed, true, false),
+            (MergePlanState::Cancelled, true, false),
+            (MergePlanState::Expired, true, false),
+        ] {
+            assert_eq!(state.is_terminal(), terminal, "state {state:?}");
+            assert_eq!(state.succeeded(), succeeded, "state {state:?}");
+        }
+
+        for (state, terminal) in [
+            (MergePlanRunState::Blocked, false),
+            (MergePlanRunState::Materializing, false),
+            (MergePlanRunState::Queued, false),
+            (MergePlanRunState::Provisioning, false),
+            (MergePlanRunState::Running, false),
+            (MergePlanRunState::Cancelling, false),
+            (MergePlanRunState::Succeeded, true),
+            (MergePlanRunState::Failed, true),
+            (MergePlanRunState::Cancelled, true),
+            (MergePlanRunState::Expired, true),
+        ] {
+            assert_eq!(state.is_terminal(), terminal, "run state {state:?}");
+        }
     }
 }

@@ -2,11 +2,13 @@ use std::sync::Arc;
 
 use openengine_cluster_protocol::{
     admission_fingerprint, Cursor, DispatchState, Generation, IdempotencyKey, StopMode, StopParams,
-    UpdateParams, GENERATION_CONFLICT, IDEMPOTENCY_REUSE, INTERNAL_ERROR_CODE, SCHEMA_VIOLATION,
+    TurnFailureKind, UpdateParams, GENERATION_CONFLICT, IDEMPOTENCY_REUSE, INTERNAL_ERROR_CODE,
+    SCHEMA_VIOLATION,
 };
 use openengine_cluster_server::admission::{AdmissionCoordinator, StoreError};
 use openengine_cluster_server::lifecycle::{
-    LifecycleEvent, LifecycleRecord, LifecycleStore, TurnId, UpdateProposal, VerifiedCompletion,
+    FailureRetryability, LifecycleEvent, LifecycleRecord, LifecycleStore, TurnId, UpdateProposal,
+    VerifiedCompletion,
 };
 use openengine_cluster_server::{BackendErrorKind, ClusterBackend, ConnectionContext};
 use openengine_cluster_testkit::admission::ScriptedVerifier;
@@ -303,6 +305,88 @@ async fn authoritative_reads_reconstruct_every_lifecycle_transition() {
     reject_update_ignored_by_operational_status().await;
     reject_dispatch_after_drain().await;
     reject_finished_mode_mismatch().await;
+}
+
+#[tokio::test]
+async fn authoritative_reads_reject_structurally_impossible_record_sequences() {
+    let (client, store) = running().await;
+    let baseline = store.inspect().await.lifecycle;
+    let turn = TurnId::new("turn-1");
+    let cases = [
+        (
+            "duplicate dispatch",
+            vec![
+                LifecycleEvent::Dispatched {
+                    turn_id: turn.clone(),
+                },
+                LifecycleEvent::Dispatched {
+                    turn_id: turn.clone(),
+                },
+            ],
+        ),
+        (
+            "failure without an in-flight turn",
+            vec![LifecycleEvent::Failed {
+                turn_id: turn.clone(),
+                kind: TurnFailureKind::Crash,
+                retryability: FailureRetryability::Retryable,
+            }],
+        ),
+        (
+            "retry without a failed frontier",
+            vec![LifecycleEvent::Retried {
+                failed_turn_id: turn.clone(),
+                retry_turn_id: TurnId::new("turn-2"),
+            }],
+        ),
+        (
+            "empty update",
+            vec![LifecycleEvent::Updated {
+                labels: None,
+                log_level: None,
+                suspended: None,
+            }],
+        ),
+        (
+            "stop mode changed in one request",
+            vec![LifecycleEvent::StopRequested {
+                accepted_mode: StopMode::Drain,
+                effective_mode: StopMode::Force,
+            }],
+        ),
+        (
+            "verified unknown turn",
+            vec![LifecycleEvent::Verified {
+                turn_id: turn.clone(),
+            }],
+        ),
+        (
+            "void outside force-stop",
+            vec![LifecycleEvent::Void {
+                turn_id: turn.clone(),
+            }],
+        ),
+        (
+            "finished before stop",
+            vec![LifecycleEvent::Finished {
+                mode: StopMode::Drain,
+            }],
+        ),
+    ];
+
+    for (case, events) in cases {
+        let mut snapshot = baseline.clone();
+        snapshot.records = events
+            .into_iter()
+            .enumerate()
+            .map(|(index, event)| LifecycleRecord {
+                cursor: Cursor::new(format!("invalid-{index}")),
+                event,
+            })
+            .collect();
+        snapshot.latest_cursor = snapshot.records.last().map(|record| record.cursor.clone());
+        assert_authoritative_reads_reject(&client, &store, snapshot, case).await;
+    }
 }
 
 use openengine_cluster_testkit::assertions::{AssertAt, AssertError, AssertValue};

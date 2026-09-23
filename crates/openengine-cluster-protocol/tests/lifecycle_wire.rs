@@ -49,6 +49,18 @@ fn update_wire_is_closed_non_empty_and_presence_sensitive() {
 fn labels_are_bounded_and_stop_is_closed() {
     assert!(serde_json::from_value::<Labels>(json!({"":"value"})).is_err());
     assert!(serde_json::from_value::<Labels>(json!({"key":"\u{0000}"})).is_err());
+    let labels = Labels::new(BTreeMap::from([(
+        Label::new("environment").assert_value(),
+        Label::new("test").assert_value(),
+    )]))
+    .assert_value();
+    assert_eq!(
+        labels
+            .as_map()
+            .get(&Label::new("environment").assert_value()),
+        Some(&Label::new("test").assert_value())
+    );
+    assert_eq!(labels.into_map().len(), 1);
     let too_many = (0..=MAX_LABELS)
         .map(|index| {
             (

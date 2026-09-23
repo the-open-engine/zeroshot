@@ -928,6 +928,7 @@ fn validate_single_string_record(payload: &PayloadType, field: &str) -> Result<(
 mod tests {
     use std::collections::BTreeMap;
 
+    use acp::Agent as _;
     use super::*;
     use openengine_cluster_protocol::{
         ClaudeProvider, CodexProvider, CopilotProvider, DeclaredConnections, ModelId, NodeName,
@@ -1018,6 +1019,56 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["OPENROUTER_API_KEY"]
         );
+    }
+
+    #[tokio::test]
+    async fn agent_surface_advertises_its_contract_and_rejects_unsupported_session_inputs() {
+        let core = Arc::new(AcpCore::new(
+            acp_profile(runtime("codex", "node_instance", json!({}))),
+            PathBuf::from("unused-for-rejected-requests"),
+        ));
+        let (updates, _receiver) = mpsc::unbounded_channel();
+        let agent = AcpAgent { core, updates };
+
+        let initialized = agent
+            .initialize(acp::InitializeRequest::new(acp::ProtocolVersion::V1))
+            .await
+            .assert_value();
+        assert_eq!(initialized.protocol_version, acp::ProtocolVersion::V1);
+        let info = initialized.agent_info.assert_value();
+        assert_eq!(info.name, "zeroshot");
+        assert_eq!(info.title.as_deref(), Some("Zeroshot"));
+        agent
+            .authenticate(acp::AuthenticateRequest::new("unused"))
+            .await
+            .assert_value();
+
+        let error = agent
+            .new_session(acp::NewSessionRequest::new("/unused").mcp_servers(vec![
+                acp::McpServer::Stdio(acp::McpServerStdio::new("unsupported", "false")),
+            ]))
+            .await
+            .assert_error();
+        assert_eq!(error.code, acp::ErrorCode::InvalidParams);
+        assert!(error.message.contains("MCP servers"));
+
+        let missing = acp::SessionId::new("missing");
+        for error in [
+            agent
+                .cancel(acp::CancelNotification::new(missing.clone()))
+                .await
+                .assert_error(),
+            agent
+                .close_session(acp::CloseSessionRequest::new(missing.clone()))
+                .await
+                .assert_error(),
+            agent
+                .prompt(acp::PromptRequest::new(missing, Vec::new()))
+                .await
+                .assert_error(),
+        ] {
+            assert_eq!(error.code, acp::ErrorCode::InvalidParams);
+        }
     }
 
     fn acp_graph() -> openengine_cluster_protocol::GraphSpec {
@@ -1227,6 +1278,18 @@ mod tests {
         assert!(validate_single_string_record(&valid, "task").is_ok());
         assert!(validate_single_string_record(&PayloadType::Null, "task").is_err());
         assert!(validate_single_string_record(&valid, "missing").is_err());
+        assert!(
+            validate_task_type(&PayloadType::Null)
+                .assert_error()
+                .to_string()
+                .contains("required task string")
+        );
+        assert!(
+            validate_response_type(&PayloadType::Null)
+                .assert_error()
+                .to_string()
+                .contains("required response string")
+        );
 
         let mut state = SessionState::default();
         let active = state.start_turn().assert_value();

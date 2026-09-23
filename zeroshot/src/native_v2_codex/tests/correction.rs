@@ -62,6 +62,7 @@ async fn invalid_output_is_corrected_in_the_same_codex_session() {
         "missing correction prompt; fixture capture:\n{capture}\nprovider logs:\n{logs}"
     );
     assert!(capture.contains("output $.answer must be a integer"));
+    assert!(logs.contains("Codex final output rejected; requesting correction"));
 }
 
 #[tokio::test]

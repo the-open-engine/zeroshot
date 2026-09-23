@@ -55,6 +55,8 @@ fn no_retryable_frontier_reasons_are_closed_wire_values() {
         (NoRetryableFrontierReason::Active, "active"),
         (NoRetryableFrontierReason::Consumed, "consumed"),
     ] {
+        assert_eq!(reason.as_str(), wire);
+        assert_eq!(reason.to_string(), wire);
         assert_eq!(serde_json::to_value(reason).assert_value(), json!(wire));
         assert_eq!(
             serde_json::from_value::<NoRetryableFrontierReason>(json!(wire)).assert_value(),

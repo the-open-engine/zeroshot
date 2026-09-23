@@ -370,6 +370,11 @@ async fn observer_reconciles_process_loss_without_constructing_or_dispatching_a_
             metadata: Default::default(),
         }
     );
+    controller
+        .wait_terminal()
+        .await
+        .assert_value_with("durable terminal truth is immediately observable");
+    assert_eq!(controller.run_id(), &run_id);
 
     let server = controller
         .clone()
@@ -389,6 +394,10 @@ async fn observer_reconciles_process_loss_without_constructing_or_dispatching_a_
         TerminalResult::Failed { reason } if reason.as_str() == "runtime_lost"
     ));
     server_task.abort();
+    assert!(server_task.await.assert_error().is_cancelled());
+    drop(client);
+    drop(transport);
+    drop(controller);
 }
 
 #[test]

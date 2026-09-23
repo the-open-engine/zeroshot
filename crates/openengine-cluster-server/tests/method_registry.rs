@@ -12,6 +12,7 @@ use openengine_cluster_server::method_registry::{
 };
 use openengine_cluster_server::{BackendError, ClusterBackend, ConnectionContext, Dispatcher};
 use serde_json::Value;
+use serde_json::json;
 
 struct EmptyBackend;
 
@@ -196,6 +197,62 @@ async fn subscription_methods_remain_unavailable_to_unary_dispatch() {
         assert_eq!(
             response.assert_at("error").assert_at("message"),
             "Method not found"
+        );
+    }
+}
+
+#[tokio::test]
+async fn default_backend_fails_closed_for_every_supported_unary_extension() {
+    let dispatcher = Dispatcher::new(EmptyBackend, ConnectionContext::default());
+    let graph: Value = serde_json::from_str(include_str!(
+        "../../../protocol/openengine-cluster/v1/fixtures/graph/positive/single-worker.json"
+    ))
+    .assert_value();
+    let cases = [
+        ("plan", json!({"graph": graph.clone()})),
+        ("apply", json!({"graph": graph})),
+        (
+            "update",
+            json!({"suspended": true, "ifGeneration": 1, "idempotencyKey": "update"}),
+        ),
+        (
+            "stop",
+            json!({"mode": "force", "ifGeneration": 1, "idempotencyKey": "stop"}),
+        ),
+        (
+            "retry",
+            json!({"ifGeneration": 1, "idempotencyKey": "retry"}),
+        ),
+        (
+            "resubmit",
+            json!({"ifGeneration": 1, "ifRunId": "run-1", "idempotencyKey": "resubmit"}),
+        ),
+        (
+            "delete",
+            json!({"ifGeneration": 1, "ifRunId": "run-1", "idempotencyKey": "delete"}),
+        ),
+        ("run/list", json!({})),
+        ("run/status", json!({"runId": "run-1"})),
+        ("run/force", json!({"runId": "run-1"})),
+        (
+            "run/resume",
+            json!({"runId": "run-1", "successorRunId": "run-2"}),
+        ),
+        ("run/discard_workspace", json!({"runId": "run-1"})),
+    ];
+
+    for (index, (method, params)) in cases.into_iter().enumerate() {
+        let response = dispatcher
+            .dispatch_decoded(RequestId::Integer(index as i64), method, params)
+            .await;
+        let response: Value = serde_json::from_str(&response).assert_value();
+        assert_eq!(
+            response
+                .assert_at("error")
+                .assert_at("data")
+                .assert_at("code"),
+            "INVALID_PHASE",
+            "{method} must be unavailable until a backend explicitly implements it"
         );
     }
 }

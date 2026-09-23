@@ -67,6 +67,46 @@ fn wave8_cli_contract_parser_connection_and_profile_refusals_preserve_precedence
 }
 
 #[test]
+fn run_profiles_preserve_explicit_scope_and_unqualified_lookup() {
+    for (value, qualifier) in [
+        ("reviewer", None),
+        ("local:reviewer", Some(ProfileQualifier::Local)),
+        ("user:reviewer", Some(ProfileQualifier::User)),
+        ("org:reviewer", Some(ProfileQualifier::Org)),
+    ] {
+        let run = run_command(
+            parse_native_v2_args(args(&[
+                "run",
+                "--title",
+                "Profile run",
+                "--input",
+                "input.json",
+                "--profile",
+                value,
+            ]))
+            .assert_value(),
+        );
+        assert!(matches!(
+            run.selection,
+            RunSelection::Profile(Some(ProfileReference { qualifier: actual, name }))
+                if actual == qualifier && name.as_str() == "reviewer"
+        ));
+    }
+
+    let error = parse_native_v2_args(args(&[
+        "run",
+        "--title",
+        "Profile run",
+        "--input",
+        "input.json",
+        "--profile",
+        "team:reviewer",
+    ]))
+    .assert_error();
+    assert!(error.to_string().contains("profile scope must be"));
+}
+
+#[test]
 fn wave8_cli_contract_parser_run_and_delivery_refusals_preserve_precedence() {
     assert_parser_refusals(&[
         (

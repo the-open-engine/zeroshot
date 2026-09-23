@@ -133,6 +133,93 @@ async fn runtime_policy_can_ignore_pr_feedback_without_weakening_readiness() {
     assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 0);
 }
 
+#[tokio::test]
+async fn feedback_retry_and_absolute_size_bound_fail_closed() {
+    for (script, expected, expected_reads) in [
+        (Script::FeedbackReadTransient, DELIVERY_READY_LABEL, 2usize),
+        (Script::FeedbackTooLarge, "refusal", 1),
+    ] {
+        let repo = TempRepo::delivery();
+        let (authority, adapter) = scripted_adapter(
+            &repo,
+            script,
+            2,
+            DeliveryLineage::original("feedback-boundary"),
+        );
+        let execution = run_with_adapter(
+            DeliveryRunRequest {
+                repo: &repo,
+                attempts: 2,
+                mode: DeliveryMode::PullRequestV2,
+                run_id: "feedback-boundary",
+                refresh: None,
+            },
+            adapter,
+        )
+        .await;
+
+        if matches!(script, Script::FeedbackTooLarge) {
+            assert_eq!(
+                execution.outcome,
+                WorkerOutcome::declared_failure(WorkerErrorCode::Refusal)
+            );
+            assert!(execution.output.iter().any(|event| {
+                event
+                    .text
+                    .contains("exceeded the 4 MiB absolute repair backstop")
+            }));
+        } else {
+            assert_delivery_signal(&execution.outcome, expected);
+        }
+        assert_eq!(
+            authority.feedback_reads.load(Ordering::SeqCst),
+            expected_reads,
+            "unexpected feedback reads for {script:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn review_state_and_identity_boundaries_are_typed_and_fail_closed() {
+    for (script, mode, expected) in [
+        (
+            Script::PendingReadiness,
+            DeliveryMode::PullRequestV2,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Timeout),
+        ),
+        (
+            Script::TerminalClosed,
+            DeliveryMode::PullRequest,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
+        ),
+        (
+            Script::TerminalClosed,
+            DeliveryMode::PullRequestV2,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
+        ),
+        (
+            Script::TerminalClosed,
+            DeliveryMode::Merge,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
+        ),
+        (
+            Script::InvalidReviewObservation,
+            DeliveryMode::PullRequest,
+            WorkerOutcome::malformed(),
+        ),
+        (
+            Script::ReviewIdentityMismatch,
+            DeliveryMode::PullRequest,
+            WorkerOutcome::malformed(),
+        ),
+    ] {
+        let (repo, authority) = delivery_harness(script);
+        let outcome = run_delivery(&repo, authority, 2, mode).await;
+
+        assert_eq!(outcome, expected, "unexpected outcome for {script:?}");
+    }
+}
+
 async fn successful_delivery(
     mode: DeliveryMode,
     expected_label: &str,
@@ -401,6 +488,56 @@ impl crate::native_v2_runner::RuntimeEnvironmentRefresh for RefreshedDeliveryEnv
             )]),
         )
         .map_err(|_| crate::native_v2_runner::EnvironmentRefreshError::Unavailable)
+    }
+}
+
+struct FailedDeliveryRefresh {
+    error: crate::native_v2_runner::EnvironmentRefreshError,
+}
+
+#[async_trait]
+impl crate::native_v2_runner::RuntimeEnvironmentRefresh for FailedDeliveryRefresh {
+    async fn refresh(
+        &self,
+    ) -> Result<ResolvedEnvironment, crate::native_v2_runner::EnvironmentRefreshError> {
+        Err(self.error)
+    }
+}
+
+#[tokio::test]
+async fn dynamic_credential_refresh_failures_preserve_typed_outcomes() {
+    for (error, expected) in [
+        (
+            crate::native_v2_runner::EnvironmentRefreshError::Refused,
+            WorkerOutcome::authentication_refusal(),
+        ),
+        (
+            crate::native_v2_runner::EnvironmentRefreshError::InvalidResponse,
+            WorkerOutcome::malformed(),
+        ),
+        (
+            crate::native_v2_runner::EnvironmentRefreshError::Unavailable,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Timeout),
+        ),
+    ] {
+        let repo = TempRepo::delivery();
+        let authority = Arc::new(FakeGitHub::new(
+            repo.remote.clone(),
+            Script::CredentialExpires,
+        ));
+        let outcome = run_delivery_with_id(
+            DeliveryRunRequest {
+                repo: &repo,
+                attempts: 2,
+                mode: DeliveryMode::Merge,
+                run_id: "failed-delivery-refresh",
+                refresh: Some(Arc::new(FailedDeliveryRefresh { error })),
+            },
+            authority,
+        )
+        .await;
+
+        assert_eq!(outcome, expected, "unexpected outcome for {error:?}");
     }
 }
 
@@ -764,6 +901,22 @@ fn retained_adapter(
         },
         authority,
     ))
+}
+
+fn scripted_adapter(
+    repo: &TempRepo,
+    script: Script,
+    attempts: usize,
+    lineage: DeliveryLineage<'_>,
+) -> (Arc<FakeGitHub>, Arc<NativeV2DeliveryAdapter>) {
+    let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), script));
+    let adapter = retained_adapter(
+        repo,
+        authority.clone(),
+        DeliveryPollPolicy::new(attempts, Duration::ZERO).assert_value(),
+        lineage,
+    );
+    (authority, adapter)
 }
 
 fn feedback_adapter(

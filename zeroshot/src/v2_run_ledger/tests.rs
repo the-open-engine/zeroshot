@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use openengine_cluster_protocol::{
-    ArtifactRef, CompiledGraphIr, Cursor, IdempotencyKey, MAX_SAFE_GENERATION, NodeName,
+    ArtifactRef, CompiledGraphIr, Cursor, IdempotencyKey, MAX_SAFE_GENERATION, NodeName, Phase,
     PositiveInteger, RunId, Sha256Digest, RunSize, RunTitle, SourceBranchId, SourceRepositoryId,
     SourceRevisionId, ResolvedSource, TerminalResult, TokenCount, TokenUsage, UnixTimestampMillis,
     WorkerOutcome,
@@ -13,7 +13,8 @@ use super::fake::FakeRunLedger;
 use super::sqlite::SqliteRunLedger;
 use super::{
     CreateRun, CreateRunOutcome, NodeState, RunEvent, RunLedger, RunLedgerError, RunPhase,
-    RunSnapshot, SafeLogLine, SafeLogStream, apply_event, cursor_for, cursor_sequence,
+    RunSnapshot, SafeLogLine, SafeLogStream, MAX_SAFE_LOG_BYTES, apply_event, cursor_for,
+    cursor_sequence,
 };
 use crate::full_v1_reducer::{ExecutionVoidReason, StructuralOccurrence};
 use crate::native_v2_contract::{
@@ -120,6 +121,32 @@ fn assert_invalid_projection(snapshot: &mut RunSnapshot, event: RunEvent, expect
         apply_event(snapshot, &event, 99),
         Err(RunLedgerError::InvalidEvent(expected))
     );
+}
+
+#[test]
+fn public_phase_and_safe_log_contracts_cover_every_wire_boundary() {
+    for (phase, protocol, display) in [
+        (RunPhase::Admitted, Phase::Admitting, "admitted"),
+        (RunPhase::Running, Phase::Running, "running"),
+        (RunPhase::Stopping, Phase::Running, "stopping"),
+        (RunPhase::Finished, Phase::Finished, "finished"),
+    ] {
+        assert_eq!(phase.protocol_phase(), protocol);
+        assert_eq!(phase.to_string(), display);
+    }
+
+    let boundary = "x".repeat(MAX_SAFE_LOG_BYTES);
+    let line = SafeLogLine::new(boundary.clone()).assert_value();
+    assert_eq!(line.as_str(), boundary);
+    assert_eq!(
+        SafeLogLine::new("x".repeat(MAX_SAFE_LOG_BYTES + 1)),
+        Err(RunLedgerError::SafeLogTooLarge)
+    );
+    assert_eq!(
+        SafeLogLine::new("before\0after"),
+        Err(RunLedgerError::InvalidSafeLog)
+    );
+    assert!(serde_json::from_str::<SafeLogLine>(r#""before\u0000after""#).is_err());
 }
 
 fn active_snapshot(run: &str) -> (RunSnapshot, ExecutionRef) {

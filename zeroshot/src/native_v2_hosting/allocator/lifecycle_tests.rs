@@ -36,6 +36,25 @@ fn cleanup_request<'a>(
     }
 }
 
+fn test_allocator(root: &Path) -> ProductionCapsuleAllocator {
+    let harness = PathBuf::from("/usr/bin/false");
+    ProductionCapsuleAllocator::new(ProductionCapsuleConfig {
+        storage_root: root.to_path_buf(),
+        copilot_executable: harness.clone(),
+        codex_executable: harness.clone(),
+        claude_executable: harness.to_string_lossy().into_owned(),
+        claude_prefix_arguments: Vec::new(),
+        claude_process_environment: ClaudeProcessEnvironment::default(),
+        executable_search_path: "/usr/bin:/bin".to_owned(),
+        git_program: harness.clone(),
+        gh_program: harness,
+        process_pool: HostedProcessPool::new(8_000_000, 8_000_000, 8_001_000, 8_001_000)
+            .assert_value(),
+        operator_diagnostics: Arc::new(OperatorDiagnosticStore::default()),
+    })
+    .assert_value()
+}
+
 #[test]
 fn hosting_source_contract_cleanup_retains_only_failed_candidate_workspaces() {
     let root = TestDirectory::new("host-cleanup-decisions");
@@ -309,4 +328,120 @@ fn recovery_scans_ignore_incomplete_documents_but_report_unreadable_storage() {
     let blocked = TestDirectory::new("host-recovery-scan-unreadable");
     std::fs::write(blocked.child(RECOVERY_DIRECTORY), b"not a directory").assert_value();
     assert!(reconcile_retained_allocations(blocked.path()).is_err());
+}
+
+#[tokio::test]
+async fn retained_claims_are_atomic_single_successor_transitions() {
+    let root = TestDirectory::new("host-retained-claim-transition");
+    let allocator = test_allocator(root.path());
+    let source_id = RunId::new("source-run");
+    let successor_id = RunId::new("successor-run");
+    let paths = RetainedAllocationPaths::new(root.path(), &source_id, &successor_id);
+    retained_workspace(&paths.source_root);
+    write_recovery(&paths.source_recovery, &recovery_document(&source_id)).assert_value();
+
+    let claim = allocator
+        .claim_retained_allocation(&source_id, &successor_id, &paths)
+        .assert_value();
+    assert_eq!(claim.delivery_run_id, source_id);
+    assert!(claim.original_source.recoverable);
+    let source = read_recovery(&paths.source_recovery).assert_value();
+    assert!(!source.recoverable);
+    assert_eq!(source.successor_run_id, Some(successor_id.clone()));
+    let successor = read_recovery(&paths.run_recovery).assert_value();
+    assert_eq!(successor.run_id, Some(successor_id.clone()));
+    assert_eq!(successor.resumed_from, Some(source_id.clone()));
+
+    assert!(
+        allocator
+            .claim_retained_allocation(&source_id, &successor_id, &paths)
+            .is_err(),
+        "an already-claimed workspace must not acquire a second successor"
+    );
+
+    let missing = RetainedAllocationPaths::new(
+        root.path(),
+        &RunId::new("missing-source"),
+        &RunId::new("missing-successor"),
+    );
+    assert!(
+        allocator
+            .claim_retained_allocation(
+                &RunId::new("missing-source"),
+                &RunId::new("missing-successor"),
+                &missing,
+            )
+            .is_err()
+    );
+}
+
+#[test]
+fn retained_claim_write_failure_restores_source_and_reports_unconfirmed_cleanup() {
+    let root = TestDirectory::new("host-retained-claim-write-failure");
+    let allocator = test_allocator(root.path());
+    let source_id = RunId::new("source-run");
+    let successor_id = RunId::new("successor-run");
+    let source_root = run_directory(root.path(), &source_id);
+    retained_workspace(&source_root);
+    let source_recovery = recovery_path(root.path(), &source_id);
+    write_recovery(&source_recovery, &recovery_document(&source_id)).assert_value();
+    let blocked_successor = root.child("blocked-successor.json");
+    std::fs::create_dir(&blocked_successor).assert_value();
+    let paths = RetainedAllocationPaths {
+        source_root,
+        run_root: run_directory(root.path(), &successor_id),
+        source_recovery: source_recovery.clone(),
+        run_recovery: blocked_successor,
+    };
+
+    assert!(matches!(
+        allocator.claim_retained_allocation(&source_id, &successor_id, &paths),
+        Err(RetainedAllocationUnavailable::CleanupUnconfirmed(_))
+    ));
+    let restored = read_recovery(&source_recovery).assert_value();
+    assert!(restored.recoverable);
+    assert_eq!(restored.successor_run_id, None);
+}
+
+#[tokio::test]
+async fn controller_claim_lock_rejects_a_concurrent_owner() {
+    let root = TestDirectory::new("host-controller-claim-lock");
+    let allocator = test_allocator(root.path());
+    let run_id = RunId::new("claim-run");
+
+    let first = allocator.claim_controller(&run_id).await.assert_value();
+    assert!(allocator.claim_controller(&run_id).await.is_err());
+    drop(first);
+}
+
+#[test]
+fn hosted_copilot_harness_and_invalid_filesystem_layout_preserve_capsule_boundaries() {
+    let root = TestDirectory::new("host-copilot-harness");
+    let allocator = test_allocator(root.path());
+    let mut admitted = crate::native_v2_runner::test_support::admitted();
+    let nodes = admitted.runtime.nodes().clone();
+    admitted.runtime = RuntimePlan::Copilot {
+        provider: crate::native_v2_contract::CopilotProvider::Github,
+        size: crate::native_v2_contract::RunSize::Medium,
+        nodes,
+    };
+    let filesystem = CapsuleFilesystem {
+        workspace: root.child("workspace"),
+        runtime_home: root.child("runtime"),
+    };
+    let process_pool = allocator.config.process_pool;
+
+    let harness = allocator
+        .harness(&admitted, &filesystem, process_pool)
+        .assert_value();
+    let NativeV2HarnessConfig::Copilot(config) = harness else {
+        panic!("Copilot admission must select the Copilot harness");
+    };
+    assert_eq!(config.executable, PathBuf::from("/usr/bin/false"));
+    assert_eq!(config.workspace, filesystem.workspace);
+    assert_eq!(config.runtime_home, filesystem.runtime_home);
+    assert!(config.base_environment.is_empty());
+    assert!(config.local_command_environment.is_empty());
+
+    assert!(production_filesystem(root.path(), root.path(), process_pool).is_err());
 }

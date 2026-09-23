@@ -7,7 +7,8 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use super::super::*;
 use super::fixtures::{
-    direct_target, hosted_target, run_request, FakeAuthority, FakeDialer, MemoryRegistry,
+    direct_target, hosted_target, run_request, AuthorityCall, FakeAuthority, FakeDialer,
+    MemoryRegistry,
 };
 
 fn profile_operations() -> (
@@ -40,6 +41,16 @@ fn profile_operations() -> (
         github_token: prepared.github_token,
     };
     (target, selector, set, run)
+}
+
+fn hosted_connector(
+    authority: FakeAuthority,
+) -> NativeV2TargetConnector<MemoryRegistry, FakeAuthority, FakeDialer> {
+    let registry = MemoryRegistry::default();
+    registry
+        .insert(hosted_target("cloud", "https://target.example"))
+        .assert_value();
+    NativeV2TargetConnector::new(registry, authority, FakeDialer::default())
 }
 
 #[test]
@@ -215,12 +226,7 @@ async fn connector_preserves_fail_closed_profile_and_merge_plan_errors() {
 #[tokio::test]
 async fn connector_preserves_hosted_lifecycle_failures_without_fallback() {
     let authority = FakeAuthority::new("ws://127.0.0.1:1/native-v2/oecp");
-    let registry = MemoryRegistry::default();
-    registry
-        .insert(hosted_target("cloud", "https://target.example"))
-        .assert_value();
-    let connector =
-        NativeV2TargetConnector::new(registry, authority.clone(), FakeDialer::default());
+    let connector = hosted_connector(authority.clone());
     let run_id = RunId::new("run-hosted");
     let errors = [
         connector
@@ -268,4 +274,47 @@ async fn connector_preserves_hosted_lifecycle_failures_without_fallback() {
             .contains("fake hosted lifecycle is unavailable")
     }));
     assert!(authority.calls().is_empty());
+}
+
+#[tokio::test]
+async fn connector_delegates_login_and_rejects_an_unresolved_source_before_submission() {
+    let authority = FakeAuthority::new("ws://127.0.0.1:1/native-v2/oecp");
+    let connector = hosted_connector(authority.clone());
+
+    connector.login("cloud").await.assert_value();
+    let mut request = run_request();
+    request.source = None;
+    let error = connector
+        .submit("cloud", request)
+        .await
+        .assert_error()
+        .to_string();
+    assert!(error.contains("requires a resolved worktree source"));
+    assert!(matches!(
+        authority.calls().as_slice(),
+        [AuthorityCall::Login(_)]
+    ));
+}
+
+#[test]
+fn connector_errors_hide_transport_details_but_preserve_typed_failures() {
+    let target = hosted_target("cloud", "https://target.example");
+    let disconnected = cli_connector_error(
+        &target,
+        TargetConnectorError::OecpConnection("private endpoint detail".to_owned()),
+    )
+    .to_string();
+    assert!(!disconnected.contains("private endpoint detail"));
+    assert!(disconnected.contains("WebSocket connection failed"));
+
+    let invalid_token = cli_connector_error(&target, TargetConnectorError::InvalidBearerToken);
+    assert_eq!(
+        invalid_token.to_string(),
+        "target operation failed: target OECP bearer token is invalid"
+    );
+    assert!(matches!(
+        invalid_token,
+        NativeV2CliError::Target(message)
+            if message == TargetConnectorError::InvalidBearerToken.to_string()
+    ));
 }

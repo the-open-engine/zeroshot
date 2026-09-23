@@ -94,4 +94,23 @@ async fn detached_and_absent_process_boundaries_settle_without_waiting() {
             .cleanup,
         ProcessCleanupEvidence::Reaped
     );
+
+    let absent_worker = ProcessTreeHandle {
+        process_group_id: None,
+        containment: ProcessContainment::WorkerUid {
+            uid: u32::MAX,
+            gid: 1,
+        },
+    };
+    assert!(!process_tree_has_live_members(&absent_worker).assert_value());
+    assert_eq!(
+        await_group_exit(&absent_worker, Instant::now())
+            .await
+            .cleanup,
+        ProcessCleanupEvidence::Reaped
+    );
+    assert_eq!(
+        cleanup_process_domain(absent_worker.containment).await,
+        ProcessCleanupEvidence::Reaped
+    );
 }

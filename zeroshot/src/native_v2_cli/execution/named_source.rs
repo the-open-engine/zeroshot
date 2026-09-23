@@ -396,6 +396,12 @@ mod tests {
             matching_remote(&root.0, &repository, None).await.as_deref(),
             Some("private")
         );
+        assert_eq!(
+            matching_remote(&root.0, &repository, Some("private"))
+                .await
+                .as_deref(),
+            Some("private")
+        );
     }
 
     #[tokio::test]
@@ -422,6 +428,26 @@ mod tests {
             assert_eq!(repository.as_str(), "owner/project");
             assert_eq!(remote.as_deref(), Some("github"));
         }
+    }
+
+    #[tokio::test]
+    async fn repository_inference_requires_one_github_remote_and_ignores_missing_upstream() {
+        let root = initialized_repository("repository-cardinality");
+        let branch = output(&root.0, &["branch", "--show-current"]);
+        assert!(
+            upstream(&root.0, branch.trim())
+                .await
+                .assert_value()
+                .is_none()
+        );
+
+        let missing = select_repository(&root.0, None).await.assert_error();
+        assert!(missing.to_string().contains("no GitHub remote"));
+
+        add_remote(&root.0, "first", "https://github.com/owner/first.git");
+        add_remote(&root.0, "second", "git@github.com:owner/second.git");
+        let ambiguous = select_repository(&root.0, None).await.assert_error();
+        assert!(ambiguous.to_string().contains("multiple GitHub remotes"));
     }
 
     #[tokio::test]

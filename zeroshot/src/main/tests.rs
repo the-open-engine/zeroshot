@@ -6,8 +6,7 @@ use openengine_cluster_testkit::assertions::AssertValue;
 
 use super::*;
 
-#[test]
-fn target_serve_is_part_of_the_public_command_schema() {
+fn assert_target_serve_is_part_of_the_public_command_schema() {
     let arguments = [
         "target",
         "serve",
@@ -25,8 +24,7 @@ fn target_serve_is_part_of_the_public_command_schema() {
     assert!(matches!(command, NativeV2CliCommand::TargetServe(_)));
 }
 
-#[test]
-fn wave8_cli_contract_process_routing_follows_the_authored_target() {
+fn assert_process_routing_follows_the_authored_target() {
     let cases: &[(&[&str], bool)] = &[
         (&["list"], true),
         (&["list", "--target", "prod"], false),
@@ -68,8 +66,7 @@ fn wave8_cli_contract_process_routing_follows_the_authored_target() {
     }
 }
 
-#[tokio::test]
-async fn wave8_cli_contract_private_bootstrap_is_exact_and_public_startup_stays_public() {
+async fn assert_private_bootstrap_is_exact_and_public_startup_stays_public() {
     let public = Vec::<OsString>::new();
     assert!(
         private_controller_bootstrap(&public)
@@ -105,4 +102,75 @@ async fn wave8_cli_contract_private_bootstrap_is_exact_and_public_startup_stays_
             .to_string()
             .contains("cargo build -p zeroshot --features ui")
     );
+}
+
+async fn assert_static_dispatch_and_remaining_management_routes_are_exact() {
+    for (arguments, expected_local) in [
+        (vec!["connection", "list"], true),
+        (vec!["connection", "list", "--target", "prod"], false),
+        (vec!["connection", "delete", "provider"], true),
+        (
+            vec!["connection", "delete", "provider", "--target", "prod"],
+            false,
+        ),
+        (
+            vec![
+                "profile",
+                "set",
+                "reviewer",
+                "--template",
+                "single-worker",
+                "--runtime-config",
+                "runtime.json",
+            ],
+            true,
+        ),
+        (
+            vec![
+                "profile",
+                "set",
+                "reviewer",
+                "--target",
+                "prod",
+                "--template",
+                "single-worker",
+                "--runtime-config",
+                "runtime.json",
+            ],
+            false,
+        ),
+        (vec!["profile", "list"], true),
+        (vec!["profile", "list", "--target", "prod"], false),
+        (vec!["profile", "show", "reviewer"], true),
+        (
+            vec!["profile", "show", "reviewer", "--target", "prod"],
+            false,
+        ),
+        (vec!["profile", "remove", "reviewer"], true),
+        (
+            vec!["profile", "remove", "reviewer", "--target", "prod"],
+            false,
+        ),
+        (vec!["profile", "default", "reviewer"], true),
+        (
+            vec!["profile", "default", "reviewer", "--target", "prod"],
+            false,
+        ),
+    ] {
+        let command =
+            parse_native_v2_args(arguments.into_iter().map(OsString::from)).assert_value();
+        assert_eq!(is_local_command(&command), expected_local);
+    }
+
+    dispatch(NativeV2CliCommand::Version).await.assert_value();
+    let templates = parse_native_v2_args(["template", "list"].map(OsString::from)).assert_value();
+    dispatch(templates).await.assert_value();
+}
+
+#[tokio::test]
+async fn wave10_cli_contract_process_dispatch_and_routing_matrix_is_exact() {
+    assert_target_serve_is_part_of_the_public_command_schema();
+    assert_process_routing_follows_the_authored_target();
+    assert_private_bootstrap_is_exact_and_public_startup_stays_public().await;
+    assert_static_dispatch_and_remaining_management_routes_are_exact().await;
 }
