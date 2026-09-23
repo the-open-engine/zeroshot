@@ -59,6 +59,10 @@ impl LocalCliBackend {
             environment,
             github_token: params.github_token,
             workspace: recovery.workspace,
+            native_environment: crate::native_v2_local::capture_local_native_environment(
+                &self.current_directory,
+            )
+            .map_err(local_error)?,
         };
         if let Err(error) = self
             .start_prepared_controller_with_lineage(

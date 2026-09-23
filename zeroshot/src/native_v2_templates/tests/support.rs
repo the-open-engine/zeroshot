@@ -40,7 +40,9 @@ pub(super) fn assert_instruction_ownership(leaves: &[&GraphNode]) {
     for node in leaves {
         match node {
             GraphNode::Step(step) => assert!(step.instructions.is_some()),
-            GraphNode::Verifier(verifier) if verifier.name.as_str() == DELIVERY_NODE => {
+            GraphNode::Verifier(verifier)
+                if DeliveryMode::from_worker(&verifier.worker).is_some() =>
+            {
                 assert!(verifier.instructions.is_none());
             }
             GraphNode::Verifier(verifier) => assert!(verifier.instructions.is_some()),
@@ -59,7 +61,10 @@ pub(super) fn runtime_for(
 ) -> RuntimePlan {
     let mut nodes = leaves
         .iter()
-        .filter(|node| node.name().as_str() != DELIVERY_NODE)
+        .filter(|node| match node {
+            GraphNode::Verifier(verifier) => DeliveryMode::from_worker(&verifier.worker).is_none(),
+            _ => true,
+        })
         .map(|node| (node.name().clone(), agent_binding()))
         .collect::<BTreeMap<_, _>>();
     if let Some((name, binding)) = template.delivery_runtime_binding(delivery).assert_value() {

@@ -179,6 +179,23 @@ describe('Embedded UI distribution', () => {
     assert.match(commands, /cargo build[^\n]+--features ui[^\n]+--target/);
   });
 
+  it('links the Windows release executable reproducibly before packaging it', () => {
+    const release = yaml.load(read('.github/workflows/release.yml'));
+    const steps = release.jobs.binaries.steps;
+    const configureIndex = steps.findIndex(
+      (step) => step.name === 'Configure reproducible MSVC linking'
+    );
+    const buildIndex = steps.findIndex(
+      (step) => step.name === 'Build standalone Zeroshot release binary'
+    );
+    const configure = steps[configureIndex];
+
+    assert.ok(configureIndex >= 0 && buildIndex > configureIndex);
+    assert.equal(configure.if, "runner.os == 'Windows'");
+    assert.equal(configure.shell, 'bash');
+    assert.match(configure.run, /RUSTFLAGS=-C link-arg=\/Brepro/);
+  });
+
   it('builds target UI assets independently of local generated files', () => {
     const dockerfile = read('docker/zeroshot-target/Dockerfile');
     const ignore = read('.dockerignore');

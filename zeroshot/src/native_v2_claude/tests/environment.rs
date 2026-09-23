@@ -95,6 +95,7 @@ pub(super) fn provider_environment(
         workspace: workspace.path().to_owned(),
         runtime_home: workspace.child("runtime"),
         local_user_home: None,
+        native_environment: Default::default(),
         base_environment: ClaudeProcessEnvironment::new(BTreeMap::from([(
             "PATH".to_owned(),
             "/usr/bin:/bin".to_owned(),

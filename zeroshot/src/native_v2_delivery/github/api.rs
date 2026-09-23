@@ -216,7 +216,10 @@ impl ApiOutput {
         credential: GitHubCredential<'_>,
     ) -> GitHubAuthorityError {
         // Incomplete stderr is not an authoritative HTTP response.
-        let api_status = status.and_then(|_| github_api_error(&self.stderr).api_status());
+        let api_error = status.map(|_| github_api_error(&self.stderr));
+        let api_status = api_error
+            .as_ref()
+            .and_then(GitHubAuthorityError::api_status);
         let (stdout, stdout_truncated) = api_diagnostic_text(
             self.stdout,
             status.is_none(),
@@ -229,10 +232,15 @@ impl ApiOutput {
             MAX_API_ERROR_BYTES,
             credential,
         );
-        let transient = api_status.is_none()
-            && stderr.lines().any(|line| {
-                line.starts_with("error connecting to ") || line.contains(": TLS handshake timeout")
-            });
+        let rate_limited = api_error
+            .as_ref()
+            .is_some_and(|error| error.api_status() == Some(403) && error.retryable_operation());
+        let transient = rate_limited
+            || api_status.is_none()
+                && stderr.lines().any(|line| {
+                    line.starts_with("error connecting to ")
+                        || line.contains(": TLS handshake timeout")
+                });
         let failure = redacted_api_error(
             api_status,
             format!(
@@ -313,7 +321,28 @@ fn github_api_error(output: &[u8]) -> GitHubAuthorityError {
         .as_ref()
         .and_then(github_api_status)
         .or_else(|| github_api_status_from_text(&text));
-    GitHubAuthorityError::api(status, text.into_owned())
+    let rate_limited = status == Some(403)
+        && (value
+            .as_ref()
+            .and_then(|value| value.get("message"))
+            .and_then(Value::as_str)
+            .is_some_and(github_rate_limit_message)
+            || text.lines().any(|line| {
+                line.strip_prefix("gh: ")
+                    .and_then(|line| line.strip_suffix(" (HTTP 403)"))
+                    .is_some_and(github_rate_limit_message)
+            }));
+    let failure = GitHubAuthorityError::api(status, text.into_owned());
+    if rate_limited {
+        failure.temporary()
+    } else {
+        failure
+    }
+}
+
+fn github_rate_limit_message(message: &str) -> bool {
+    message.starts_with("API rate limit exceeded")
+        || message.starts_with("You have exceeded a secondary rate limit")
 }
 
 fn github_api_error_value(text: &str) -> Option<Value> {

@@ -81,6 +81,22 @@ pub(super) enum Call {
     },
 }
 
+#[derive(Clone, Default)]
+pub(super) struct SubmitGate {
+    started: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+impl SubmitGate {
+    pub(super) async fn wait_until_started(&self) {
+        self.started.notified().await;
+    }
+
+    pub(super) fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
 pub(super) struct FakeSubscription<E> {
     items: Option<VecDeque<FakeSubscriptionStep<E>>>,
 }
@@ -142,6 +158,7 @@ where
 pub(super) struct FakeBackend {
     calls: Arc<Mutex<Vec<Call>>>,
     failed_submit: bool,
+    submit_gate: Option<SubmitGate>,
     pending_watch: bool,
     reconnect_watch: bool,
     permanent_reopen_watch: bool,
@@ -167,6 +184,26 @@ impl FakeBackend {
             failed_submit: true,
             ..Self::default()
         }
+    }
+
+    pub(super) fn with_blocked_submit() -> (Self, SubmitGate) {
+        Self::with_blocked_submit_failure(false)
+    }
+
+    pub(super) fn with_blocked_failed_submit() -> (Self, SubmitGate) {
+        Self::with_blocked_submit_failure(true)
+    }
+
+    fn with_blocked_submit_failure(failed_submit: bool) -> (Self, SubmitGate) {
+        let gate = SubmitGate::default();
+        (
+            Self {
+                failed_submit,
+                submit_gate: Some(gate.clone()),
+                ..Self::default()
+            },
+            gate,
+        )
     }
 
     pub(super) fn with_pending_watch() -> Self {
@@ -400,6 +437,10 @@ impl NativeV2CliBackend for FakeBackend {
             branch: intent.branch.map(|branch| branch.as_str().to_owned()),
             submission_key: intent.submission_key.as_str().to_owned(),
         });
+        if let Some(gate) = &self.submit_gate {
+            gate.started.notify_one();
+            gate.release.notified().await;
+        }
         if self.failed_submit {
             return Err(NativeV2CliError::Protocol("submission rejected".to_owned()));
         }

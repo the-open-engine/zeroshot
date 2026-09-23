@@ -1,4 +1,5 @@
 use std::io::{self, Read, Write};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,7 +28,7 @@ const BOOTSTRAP_MAX_BYTES: u64 = 4 * 1024 * 1024;
 const READY_MAX_BYTES: u64 = 16 * 1024;
 const READY_KIND: &str = "zeroshot.portable-controller-ready/v1";
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct PortableBootstrapDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -37,6 +38,8 @@ struct PortableBootstrapDocument {
     adopt_existing_delivery: bool,
     submission: RunSubmission,
     connections: RunConnectionValues,
+    #[serde(default)]
+    native_environment: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     github_token: Option<String>,
     workspace: PathBuf,
@@ -60,6 +63,7 @@ impl PortableBootstrapDocument {
             adopt_existing_delivery: self.adopt_existing_delivery,
             submission: self.submission,
             environment,
+            native_environment: self.native_environment,
             github_token: self.github_token,
             workspace: self.workspace,
             workspace_lease: self.workspace_lease,
@@ -126,6 +130,7 @@ pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), Portabl
     let delivery_run_id = bootstrap.delivery_run_id.clone();
     let adopt_existing_delivery = bootstrap.adopt_existing_delivery;
     let github_token = bootstrap.github_token.clone();
+    let native_environment = bootstrap.native_environment.clone();
     let controller = Arc::new(
         PortableRunController::start(bootstrap, move |admitted| {
             crate::native_v2_local::build_local_process_candidate(
@@ -136,6 +141,7 @@ pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), Portabl
                     workspace: &workspace,
                     storage: &storage,
                     github_token,
+                    native_environment: &native_environment,
                 },
             )
             .map(PortableRuntime::new)
@@ -183,6 +189,7 @@ fn encode_bootstrap(
         adopt_existing_delivery: bootstrap.adopt_existing_delivery,
         submission: bootstrap.submission.clone(),
         connections: environment.bootstrap_values(),
+        native_environment: bootstrap.native_environment.clone(),
         github_token: bootstrap.github_token.clone(),
         workspace: bootstrap.workspace.clone(),
         workspace_lease: bootstrap.workspace_lease.clone(),

@@ -100,21 +100,20 @@ async fn legacy_response_contract_keeps_receipt_validation_without_repair_opt_in
 }
 
 #[tokio::test]
-async fn later_delivery_errors_preserve_the_existing_review_in_repair_feedback() {
+async fn later_api_failure_does_not_request_code_repair() {
     for script in [Script::MergeFailed] {
         let repo = TempRepo::delivery();
         let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), script));
         let outcome = run_delivery(&repo, authority, 3, DeliveryMode::Merge).await;
-        let output = assert_delivery_signal(&outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
-        assert!(!output["pullRequestId"].as_str().assert_value().is_empty());
-        assert!(!output["headRevision"].as_str().assert_value().is_empty());
-        assert!(outcome_diagnostic(&outcome).contains("remote"));
-        assert_receipt_match(output, DeliveryMode::Merge, &repo, false);
+        assert_eq!(
+            outcome,
+            WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
+        );
     }
 }
 
 #[tokio::test]
-async fn repair_retry_resumes_the_authorized_remote_head_before_pushing() {
+async fn later_execution_resumes_the_authorized_remote_head_after_infrastructure_failure() {
     let repo = TempRepo::delivery();
     let (authority, adapter) = retained_delivery(&repo, Script::HeadAdoptionAfterRepair);
     let request = || DeliveryRunRequest {
@@ -125,10 +124,20 @@ async fn repair_retry_resumes_the_authorized_remote_head_before_pushing() {
         refresh: None,
     };
     let failure = run_with_adapter(request(), adapter.clone()).await.outcome;
-    let output = assert_delivery_signal(&failure, DELIVERY_REPAIR_REQUIRED_LABEL);
+    assert_eq!(
+        failure,
+        WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
+    );
+    let remote_head = git_output(
+        &repo.remote,
+        &[
+            "rev-parse",
+            &format!("refs/heads/{}", delivery_branch("delivery-run")),
+        ],
+    );
     assert_ne!(
         git_output(&repo.workspace, &["rev-parse", "HEAD"]),
-        output["headRevision"].as_str().assert_value()
+        remote_head
     );
     let success = run_with_adapter(request(), adapter).await.outcome;
     head_update::assert_retried_head_adoption(&authority, &success);

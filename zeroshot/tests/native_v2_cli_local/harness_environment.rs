@@ -17,6 +17,140 @@ async fn detached_controller_preserves_local_codex_configuration_through_correct
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn detached_controller_uses_codex_configured_gateway_environment_without_a_connection() {
+    let (mut fixture, config_dir) = local_configuration_fixture();
+    fixture.harness_environment.extend([
+        ("CODEX_HOME".to_owned(), "./custom-config".to_owned()),
+        (
+            "INTERNAL_GATEWAY_KEY".to_owned(),
+            "gateway-secret".to_owned(),
+        ),
+        ("INTERNAL_ACCOUNT".to_owned(), "account-42".to_owned()),
+    ]);
+    let mut runtime = local_runtime();
+    runtime["nodes"]["worker"]
+        .as_object_mut()
+        .assert_value()
+        .remove("connections");
+    write_json(&fixture.runtime, &runtime);
+
+    let configuration = json!({
+        "model_provider":"internal",
+        "model_providers":{
+            "internal":{
+                "env_key":"INTERNAL_GATEWAY_KEY",
+                "env_http_headers":{"X-Internal-Account":"INTERNAL_ACCOUNT"}
+            }
+        }
+    });
+    fs::write(
+        config_dir.join("config.toml"),
+        concat!(
+            "model_provider = \"internal\"\n",
+            "[model_providers.internal]\n",
+            "name = \"Internal\"\n",
+            "base_url = \"https://gateway.internal/v1\"\n",
+            "env_key = \"INTERNAL_GATEWAY_KEY\"\n",
+            "env_http_headers = { X-Internal-Account = \"INTERNAL_ACCOUNT\" }\n",
+            "wire_api = \"responses\"\n",
+        ),
+    )
+    .assert_value();
+    install_configuration_probe(
+        &fixture,
+        "codex",
+        CODEX_CUSTOM_PROVIDER_SCRIPT,
+        &ProbeResponse::Configured(configuration),
+    );
+
+    let arguments = [
+        "run",
+        "--title",
+        "Configured Codex gateway",
+        "--graph",
+        fixture.graph.to_str().assert_value(),
+        "--input",
+        fixture.input.to_str().assert_value(),
+        "--runtime-config",
+        fixture.runtime.to_str().assert_value(),
+        "-d",
+    ];
+    let output = timeout(
+        CLI_TIMEOUT,
+        fixture
+            .command_with_inline(&arguments, "finish", false)
+            .output(),
+    )
+    .await
+    .assert_value()
+    .assert_value();
+    assert_success(&output, "configured Codex gateway run");
+    let receipt: Value = serde_json::from_slice(&output.stdout).assert_value();
+    let run_id = receipt["runId"].as_str().assert_value();
+    assert_succeeded(&fixture, run_id).await;
+    let logs = timeout(
+        CLI_TIMEOUT,
+        fixture
+            .command_with_inline(&["logs", run_id], "finish", false)
+            .output(),
+    )
+    .await
+    .assert_value()
+    .assert_value();
+    assert_success(&logs, "configured Codex gateway logs");
+    let logs = String::from_utf8_lossy(&logs.stdout);
+    assert!(logs.contains("[REDACTED]"), "logs: {logs}");
+    assert!(!logs.contains("gateway-secret"), "logs: {logs}");
+    wait_for_exit(fixture.ready_pid(run_id)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn detached_controller_explicit_codex_provider_ignores_native_provider_environment() {
+    let (mut fixture, config_dir) = local_configuration_fixture();
+    fixture.harness_environment.extend([
+        ("CODEX_HOME".to_owned(), "./custom-config".to_owned()),
+        (
+            "INTERNAL_GATEWAY_KEY".to_owned(),
+            "unrelated-native-secret".to_owned(),
+        ),
+        (
+            "OPENROUTER_API_KEY".to_owned(),
+            "explicit-openrouter-key".to_owned(),
+        ),
+    ]);
+    let mut runtime = local_runtime();
+    runtime["provider"] = json!("openrouter");
+    runtime["nodes"]["worker"]["connections"] = json!({"openrouter":["OPENROUTER_API_KEY"]});
+    write_json(&fixture.runtime, &runtime);
+
+    fs::write(
+        config_dir.join("config.toml"),
+        concat!(
+            "model_provider = \"internal\"\n",
+            "[model_providers.internal]\n",
+            "name = \"Internal\"\n",
+            "base_url = \"https://gateway.internal/v1\"\n",
+            "env_key = \"INTERNAL_GATEWAY_KEY\"\n",
+            "wire_api = \"responses\"\n",
+        ),
+    )
+    .assert_value();
+    let configuration = json!({
+        "model_provider":"internal",
+        "model_providers":{"internal":{"env_key":"INTERNAL_GATEWAY_KEY"}}
+    });
+    install_configuration_probe(
+        &fixture,
+        "codex",
+        CODEX_EXPLICIT_PROVIDER_SCRIPT,
+        &ProbeResponse::Configured(configuration),
+    );
+
+    let run_id = submit_succeeded(&fixture).await;
+    wait_for_exit(fixture.ready_pid(&run_id)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn detached_controller_preserves_local_claude_configuration_through_correction() {
     exercise_local_configuration(
         "claude",
@@ -121,15 +255,7 @@ fn permission_cases(
 }
 
 async fn exercise_local_configuration(harness: &str, case: HarnessCase) {
-    let mut fixture = LocalFixture::new();
-    let home = fixture.root.path("user-home");
-    fixture.working_directory = fixture.repository.join("nested");
-    let config_dir = fixture.working_directory.join("custom-config");
-    fs::create_dir_all(&home).assert_value();
-    fs::create_dir_all(&config_dir).assert_value();
-    fixture
-        .harness_environment
-        .insert("HOME".to_owned(), home.display().to_string());
+    let (mut fixture, config_dir) = local_configuration_fixture();
     let config = case.contents;
     let (config_name, script) = match harness {
         "codex" => {
@@ -176,16 +302,9 @@ async fn exercise_local_configuration(harness: &str, case: HarnessCase) {
     let script = permission_environment_script(&mut fixture, script, case.environment.as_ref());
     let config_path = config_dir.join(config_name);
     fs::write(&config_path, config).assert_value();
-    let executable = fixture.root.path("bin").join(harness);
-    fs::write(
-        &executable,
-        with_configuration_probe(script.as_bytes(), harness, &case.probe),
-    )
-    .assert_value();
-    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).assert_value();
+    install_configuration_probe(&fixture, harness, &script, &case.probe);
 
-    let run_id = fixture.submit_detached("finish").await;
-    assert_succeeded(&fixture, &run_id).await;
+    let run_id = submit_succeeded(&fixture).await;
     assert_eq!(fs::read_to_string(&config_path).assert_value(), config);
     assert_eq!(
         fs::read_to_string(fixture.repository.join("config-capture")).assert_value(),
@@ -194,6 +313,40 @@ async fn exercise_local_configuration(harness: &str, case: HarnessCase) {
     let args = fs::read_to_string(fixture.repository.join("harness-args")).assert_value();
     assert_harness_arguments(harness, &args, case.bypass);
     wait_for_exit(fixture.ready_pid(&run_id)).await;
+}
+
+fn local_configuration_fixture() -> (LocalFixture, std::path::PathBuf) {
+    let mut fixture = LocalFixture::new();
+    let home = fixture.root.path("user-home");
+    fixture.working_directory = fixture.repository.join("nested");
+    let config_dir = fixture.working_directory.join("custom-config");
+    fs::create_dir_all(&home).assert_value();
+    fs::create_dir_all(&config_dir).assert_value();
+    fixture
+        .harness_environment
+        .insert("HOME".to_owned(), home.display().to_string());
+    (fixture, config_dir)
+}
+
+fn install_configuration_probe(
+    fixture: &LocalFixture,
+    harness: &str,
+    script: &str,
+    response: &ProbeResponse,
+) {
+    let executable = fixture.root.path("bin").join(harness);
+    fs::write(
+        &executable,
+        with_configuration_probe(script.as_bytes(), harness, response),
+    )
+    .assert_value();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).assert_value();
+}
+
+async fn submit_succeeded(fixture: &LocalFixture) -> String {
+    let run_id = fixture.submit_detached("finish").await;
+    assert_succeeded(fixture, &run_id).await;
+    run_id
 }
 
 fn permission_environment_script(
@@ -265,6 +418,37 @@ else
   touch first-turn
   printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"\"invalid\""}}'
 fi
+printf '%s\n' '{"type":"turn.completed"}'
+"#;
+
+const CODEX_CUSTOM_PROVIDER_SCRIPT: &str = r#"#!/bin/sh
+set -eu
+test "$INTERNAL_GATEWAY_KEY" = gateway-secret
+test "$INTERNAL_ACCOUNT" = account-42
+test -z "${OPENAI_API_KEY+x}"
+test -z "${CODEX_API_KEY+x}"
+test -z "${UNDECLARED_SECRET+x}"
+cat > prompt-capture
+printf '%s\n' '{"type":"thread.started","thread_id":"local-thread"}'
+if test ! -f custom-provider-retried; then
+  touch custom-provider-retried
+  printf 'custom provider stderr contains %s\n' "$INTERNAL_GATEWAY_KEY" >&2
+  printf '%s\n' '{"type":"turn.failed","error":{"message":"gateway-secret"}}'
+  exit 23
+fi
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"response\":null}"}}'
+printf '%s\n' '{"type":"turn.completed"}'
+"#;
+
+const CODEX_EXPLICIT_PROVIDER_SCRIPT: &str = r#"#!/bin/sh
+set -eu
+test "$OPENROUTER_API_KEY" = explicit-openrouter-key
+test -z "${INTERNAL_GATEWAY_KEY+x}"
+test -z "${OPENAI_API_KEY+x}"
+test -z "${CODEX_API_KEY+x}"
+cat >/dev/null
+printf '%s\n' '{"type":"thread.started","thread_id":"local-thread"}'
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"response\":null}"}}'
 printf '%s\n' '{"type":"turn.completed"}'
 "#;
 

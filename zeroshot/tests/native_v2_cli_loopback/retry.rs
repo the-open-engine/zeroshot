@@ -118,6 +118,7 @@ impl RetryAllocator {
             workspace: self.workspace.clone(),
             runtime_home: self.runtime_home.clone(),
             local_user: None,
+            native_environment: Default::default(),
             search_path: "/usr/bin:/bin".to_owned(),
             process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000)
                 .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
@@ -148,6 +149,7 @@ impl RetryAllocator {
                 workspace: self.workspace.clone(),
                 runtime_home: self.runtime_home.clone(),
                 local_user_home: None,
+                native_environment: Default::default(),
                 base_environment,
                 process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000)
                     .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,

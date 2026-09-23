@@ -27,6 +27,12 @@ fn expiry() -> String {
         .to_string()
 }
 
+async fn rejected_before_process(fixture: Fixture) {
+    let (_, outcome) = complete(fixture.start(1).await).await;
+    assert!(outcome.is_err());
+    assert!(!fixture.directory.child("capture").exists());
+}
+
 #[tokio::test]
 async fn credential_callback_refreshes_through_the_existing_resolver() {
     let fixture = Fixture::with_values(
@@ -92,22 +98,53 @@ async fn expiry_and_callback_identity_fail_closed() {
 }
 
 #[tokio::test]
+async fn declared_invalid_token_cannot_fall_back_to_native_identity() {
+    let fixture = Fixture::with_local_provider(
+        "declared_token",
+        BTreeMap::from([(auth::TOKEN.to_owned(), "   ".to_owned())]),
+        custom_provider_environment(),
+    )
+    .await;
+    rejected_before_process(fixture).await;
+}
+
+#[tokio::test]
+async fn dynamic_auth_accepts_the_configured_custom_github_host() {
+    let fixture = Fixture::with_local_provider(
+        "success",
+        BTreeMap::from([
+            (auth::TOKEN.to_owned(), "ghe-user-token".to_owned()),
+            (auth::EXPIRES_AT.to_owned(), expiry()),
+        ]),
+        BTreeMap::from([("COPILOT_GH_HOST".to_owned(), "octocorp.ghe.com".to_owned())]),
+    )
+    .await;
+    verified(complete(fixture.start(1).await).await.1);
+}
+
+#[tokio::test]
 async fn reserved_provider_controls_are_never_passed_to_agent_processes() {
     for name in [
-        "GH_TOKEN",
-        "GITHUB_TOKEN",
-        "COPILOT_PROVIDER_API_KEY",
         "HOME",
+        "COPILOT_HOME",
+        "COPILOT_AUTO_UPDATE",
         "NODE_OPTIONS",
+        "NODE_PATH",
+        "BUN_OPTIONS",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "LD_PROFILE",
+        "DYLD_INSERT_LIBRARIES",
+        "OPENSSL_CONF",
+        "OPENSSL_MODULES",
+        "OPENSSL_ENGINES",
     ] {
         let fixture = Fixture::with_values(
             "success",
             BTreeMap::from([(name.to_owned(), "sentinel".to_owned())]),
         )
         .await;
-        let (_, outcome) = complete(fixture.start(1).await).await;
-        assert!(outcome.is_err());
-        assert!(!fixture.directory.child("capture").exists());
+        rejected_before_process(fixture).await;
     }
 }
 

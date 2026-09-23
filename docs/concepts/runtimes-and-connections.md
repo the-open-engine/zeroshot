@@ -64,7 +64,10 @@ A connection maps a stable key to required environment field names:
 The submission environment or a target-owned connection store supplies the values. Zeroshot keeps
 them out of the graph, runtime JSON, run ledger, and observation records.
 
-The uniform runtime defaults are:
+When `connections` is omitted, Zeroshot materializes provider access for the selected execution
+placement. Local `codex`/`openai`, `claude`/`anthropic`, and `copilot`/`github` runs reuse the
+harness's native login and configuration without inventing a connection. A contained target, or
+any non-native provider lane, receives these canonical requirements:
 
 | Provider     | Connection key | Fields                                   |
 | ------------ | -------------- | ---------------------------------------- |
@@ -74,6 +77,11 @@ The uniform runtime defaults are:
 | `gateway`    | `gateway`      | `GATEWAY_BASE_URL`, `GATEWAY_API_KEY`    |
 | `bedrock`    | `bedrock`      | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_REGION` |
 | `github`     | `github`       | `COPILOT_GITHUB_TOKEN`                   |
+
+Compatible authored connections take precedence, including `CODEX_API_KEY` for contained OpenAI
+access and Claude's supported auth-token variables for contained Anthropic access. Local profiles
+keep the authored runtime unchanged; applying one to a target derives the contained requirements at
+submission time. Profiles stored on a target derive those requirements when they are stored.
 
 Store a local static connection by prompting for its fields:
 

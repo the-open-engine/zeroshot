@@ -14,6 +14,8 @@ pub(super) enum Script {
     NoCi,
     Feedback,
     PushRejected,
+    PolicyForbidden,
+    PolicySchemaInvalid,
     InspectFailed,
     MergeFailed,
     CiFailed,
@@ -86,6 +88,8 @@ impl FakeGitHub {
             | Script::LaterTargetIntegrationFails
             | Script::CredentialExpires
             | Script::ReviewSyncRace
+            | Script::PolicyForbidden
+            | Script::PolicySchemaInvalid
             | Script::InspectFailed
             | Script::MergeFailed => self.no_ci_state(),
             Script::ReviewSyncCredentialExpires => self.no_ci_state(),
@@ -318,8 +322,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
                 result.outcome,
                 GitHubReconciliationOutcome::NeedsWork(_)
             ));
-            return Err(GitHubAuthorityError::api(
-                None,
+            return Err(GitHubAuthorityError::repairable(
                 "target integration completed but its response was malformed",
             ));
         }
@@ -383,10 +386,19 @@ impl GitHubDeliveryAuthority for FakeGitHub {
     ) -> Result<(), GitHubAuthorityError> {
         assert_eq!(credential.expose(), "test-token");
         if matches!(self.script, Script::PushRejected) {
-            return Err(GitHubAuthorityError::api(
-                None,
-                "unfamiliar remote refusal: uploaded pack rejected",
-            ));
+            let mut command = tokio::process::Command::new("/bin/sh");
+            command.args([
+                "-c",
+                "printf '%s\\n' 'unfamiliar remote refusal: uploaded pack rejected' >&2; exit 1",
+            ]);
+            let failure = crate::native_v2_delivery::command::capture(
+                &mut command,
+                std::time::Duration::from_secs(1),
+            )
+            .await
+            .and_then(GitCommandFailure::require_success)
+            .expect_err("explicit Git command failure");
+            return Err(failure.into());
         }
         if !push_succeeded(request, &self.remote).await {
             return Err(GitHubAuthorityError::Rejected);
@@ -443,6 +455,18 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         review: &GitHubReviewReceipt,
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubReviewObservation, GitHubAuthorityError> {
+        if matches!(self.script, Script::PolicyForbidden) {
+            return Err(GitHubAuthorityError::api(
+                Some(403),
+                "GraphQL: Resource not accessible by integration (HTTP 403)",
+            ));
+        }
+        if matches!(self.script, Script::PolicySchemaInvalid) {
+            return Err(GitHubAuthorityError::api(
+                None,
+                "GitHub returned an invalid policy response: missing field `repository`",
+            ));
+        }
         if matches!(self.script, Script::InspectFailed) {
             return Err(GitHubAuthorityError::api(
                 Some(503),
@@ -673,8 +697,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             self.script,
             Script::ConflictMaterializationFailsAfterMutation
         ) {
-            return Err(GitHubAuthorityError::api(
-                None,
+            return Err(GitHubAuthorityError::repairable(
                 "conflict inspection failed after integrating a newer target",
             ));
         }
@@ -795,8 +818,8 @@ case "$endpoint:$method" in
       '"id":"PR_node_17","number":17,"state":"OPEN","merged":false,"mergeCommit":null,' \
       '"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false,' \
       '"isInMergeQueue":false,"isMergeQueueEnabled":false,"baseRefName":"main",' \
-      '"baseRef":{"name":"main","branchProtectionRule":{"requiresDeployments":false},' \
-      '"refUpdateRule":{"requiredApprovingReviewCount":0,"requiredStatusCheckContexts":[],' \
+      '"baseRef":{"name":"main","refUpdateRule":{"requiredApprovingReviewCount":0,' \
+      '"requiredStatusCheckContexts":[],' \
       '"requiresCodeOwnerReviews":false,"requiresConversationResolution":false,' \
       '"requiresLinearHistory":false,"requiresSignatures":false}},' \
       '"headRefName":"zeroshot/v2-test",' \

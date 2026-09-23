@@ -350,6 +350,11 @@ jobs:
             throw 'MSVC C toolchain required by bundled SQLite is unavailable'
           }
 
+      - name: Configure reproducible MSVC linking
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "RUSTFLAGS=-C link-arg=/Brepro" >> "$GITHUB_ENV"
+
       - name: Stage explicit Zeroshot package version
         run: node scripts/distribution.js stage-version --tag "$RELEASE_TAG"
         shell: bash

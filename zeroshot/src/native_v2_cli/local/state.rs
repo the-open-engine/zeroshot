@@ -4,9 +4,6 @@ use openengine_cluster_protocol::{RunId, is_canonical_uuid_v7};
 use tokio::process::Command;
 
 use super::{NativeV2CliError, local_io, local_message};
-use crate::native_v2_capsule::provider_process::{
-    CLAUDE_LOCAL_ENVIRONMENT, CODEX_LOCAL_ENVIRONMENT, local_environment,
-};
 
 pub(super) fn validate_local_run_id(run_id: &RunId) -> Result<(), NativeV2CliError> {
     is_canonical_uuid_v7(run_id)
@@ -56,8 +53,6 @@ fn local_socket_path_capacity() -> usize {
 pub(super) fn copy_minimal_process_environment(
     command: &mut Command,
 ) -> Result<(), NativeV2CliError> {
-    command.envs(local_environment(CODEX_LOCAL_ENVIRONMENT));
-    command.envs(local_environment(CLAUDE_LOCAL_ENVIRONMENT));
     for name in [
         "PATH",
         "LANG",
@@ -65,7 +60,6 @@ pub(super) fn copy_minimal_process_environment(
         "TERM",
         "TMPDIR",
         "HOME",
-        "CODEX_HOME",
         "USERPROFILE",
         "APPDATA",
         "LOCALAPPDATA",
@@ -77,13 +71,6 @@ pub(super) fn copy_minimal_process_environment(
         "TMP",
     ] {
         if let Some(value) = std::env::var_os(name).filter(|value| !value.is_empty()) {
-            let value = if name == "CODEX_HOME" {
-                std::path::absolute(value)
-                    .map_err(local_io)?
-                    .into_os_string()
-            } else {
-                value
-            };
             command.env(name, value);
         }
     }
@@ -127,7 +114,7 @@ mod tests {
     }
 
     #[test]
-    fn local_controller_inherits_current_user_cli_home_paths() {
+    fn local_controller_receives_only_minimal_non_harness_environment() {
         let mut command = Command::new("true");
         command.env_clear();
         copy_minimal_process_environment(&mut command).expect("copy local environment");
@@ -137,22 +124,24 @@ mod tests {
             .filter_map(|(name, value)| value.map(|value| (name.to_owned(), value.to_owned())))
             .collect::<std::collections::BTreeMap<_, _>>();
 
-        for name in ["HOME", "CODEX_HOME"] {
-            let expected = std::env::var_os(name)
-                .filter(|value| !value.is_empty())
-                .map(|value| {
-                    if name == "CODEX_HOME" {
-                        std::path::absolute(value)
-                            .expect("absolute config home")
-                            .into_os_string()
-                    } else {
-                        value
-                    }
-                });
+        for name in ["HOME", "USERPROFILE", "PATH"] {
+            let expected = std::env::var_os(name).filter(|value| !value.is_empty());
             assert_eq!(
                 environment.get(std::ffi::OsStr::new(name)),
                 expected.as_ref()
             );
+        }
+        for name in [
+            "CODEX_HOME",
+            "CLAUDE_CONFIG_DIR",
+            "COPILOT_HOME",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "COPILOT_GITHUB_TOKEN",
+            "DBUS_SESSION_BUS_ADDRESS",
+            "XDG_RUNTIME_DIR",
+        ] {
+            assert!(!environment.contains_key(std::ffi::OsStr::new(name)));
         }
     }
 }

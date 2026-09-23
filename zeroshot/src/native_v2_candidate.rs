@@ -4,6 +4,10 @@
 //! one allocated capsule this module binds the graph-wide agent harness together with the
 //! trusted Git delivery lane and hands the resulting runner to the private capsule transport.
 
+#[path = "native_v2_candidate/provider_access.rs"]
+mod provider_access;
+pub(crate) use provider_access::{ProviderAccessPlacement, materialize_provider_access};
+
 use std::sync::Arc;
 
 use async_trait::async_trait;

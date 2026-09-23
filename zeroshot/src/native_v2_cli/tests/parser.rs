@@ -335,7 +335,7 @@ fn parser_is_the_agreed_lean_hosted_surface() {
 }
 
 #[test]
-fn parser_exposes_the_two_builtin_templates_and_closed_delivery_choice() {
+fn parser_exposes_the_builtin_templates_and_closed_delivery_choice() {
     assert_eq!(
         parse_native_v2_args(args(&["template", "list"])).assert_value(),
         NativeV2CliCommand::TemplateList
@@ -348,6 +348,14 @@ fn parser_exposes_the_two_builtin_templates_and_closed_delivery_choice() {
             delivery: TemplateDelivery::Merge,
         }
     );
+    assert_eq!(
+        parse_native_v2_args(args(&["template", "show", "auto-research", "--push"])).assert_value(),
+        NativeV2CliCommand::TemplateShow {
+            template: BuiltinGraphTemplate::AutoResearch,
+            delivery: TemplateDelivery::Push,
+        }
+    );
+    assert!(parse_native_v2_args(args(&["template", "show", "auto-research", "--pr"])).is_err());
 
     let run = parse_native_v2_args(args(&[
         "run",

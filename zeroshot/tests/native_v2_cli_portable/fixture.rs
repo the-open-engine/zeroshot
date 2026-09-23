@@ -13,7 +13,8 @@ pub(super) struct Fixture {
 
 impl Fixture {
     pub(super) fn new() -> Self {
-        let root = TemporaryDirectory::for_test("portable-cli");
+        // Keep the state root short enough for the controller's Unix-domain socket path.
+        let root = TemporaryDirectory::for_test("pc");
         let workspace = root.path("workspace space-é & (native)");
         let bin = root.path("bin space-é");
         std::fs::create_dir(&workspace).unwrap();

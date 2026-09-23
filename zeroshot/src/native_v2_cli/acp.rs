@@ -22,6 +22,7 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission, NativeV2AdmissionError};
+use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
 use crate::native_v2_cli::local::{create_local_run_storage, local_workspace_lease_path};
 use crate::native_v2_cli::{default_local_state_root, LocalRunProfileStore, NativeV2CliError};
 use crate::native_v2_cloud::{submission_digest, NativeV2CloudError};
@@ -93,10 +94,11 @@ impl AcpServeError {
 
 /// Serves one local profile over ACP stdio until the client disconnects.
 pub async fn serve_local_acp(profile_name: RunProfileName) -> Result<(), AcpServeError> {
-    let profile = LocalRunProfileStore::production()?.show(RunProfileSelector {
+    let mut profile = LocalRunProfileStore::production()?.show(RunProfileSelector {
         scope: RunProfileScope::User,
         name: profile_name,
     })?;
+    materialize_acp_provider_access(&mut profile.runtime)?;
     validate_profile(&profile).await?;
     let core = Arc::new(AcpCore::new(profile, default_local_state_root()?));
     let local = tokio::task::LocalSet::new();
@@ -104,6 +106,11 @@ pub async fn serve_local_acp(profile_name: RunProfileName) -> Result<(), AcpServ
         .run_until(serve_stdio(core))
         .await
         .map_err(|error| AcpServeError::Transport(error.to_string()))
+}
+
+fn materialize_acp_provider_access(runtime: &mut RuntimePlan) -> Result<(), AcpServeError> {
+    materialize_provider_access(runtime, ProviderAccessPlacement::Local)
+        .map_err(|error| NativeV2CliError::Usage(error.to_string()).into())
 }
 
 async fn serve_stdio(core: Arc<AcpCore>) -> acp::Result<()> {
@@ -507,6 +514,9 @@ impl AcpSession {
                 seed_run_id.as_str(),
             )?)
             .await?;
+        let invoking_directory = std::env::current_dir().map_err(AcpServeError::Storage)?;
+        let native_environment =
+            crate::native_v2_local::capture_local_native_environment(&invoking_directory)?;
         let runner = build_local_owner_process_candidate(LocalProcessCandidateRequest {
             admitted: &admitted,
             delivery_run_id: seed_run_id,
@@ -514,6 +524,7 @@ impl AcpSession {
             workspace: &prepared.workspace,
             storage: prepared.resources._runtime.path(),
             github_token: None,
+            native_environment: &native_environment,
         })?;
         let session = Arc::new(Self {
             id: acp::SessionId::new(uuid::Uuid::now_v7().to_string()),
@@ -916,6 +927,7 @@ fn validate_single_string_record(payload: &PayloadType, field: &str) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openengine_cluster_testkit::assertions::AssertValue;
 
     #[test]
     fn prompt_requires_exactly_one_nonempty_text_block() {
@@ -969,5 +981,34 @@ mod tests {
         let loss_target = lost.loss_target().unwrap();
         assert!(Arc::ptr_eq(&active, &loss_target));
         assert!(lost.start_turn().is_err());
+    }
+
+    #[test]
+    fn acp_materializes_non_native_local_provider_access_before_validation() {
+        let mut runtime: RuntimePlan = serde_json::from_value(json!({
+            "harness":"codex",
+            "provider":"openrouter",
+            "size":"medium",
+            "nodes":{
+                "work":{
+                    "kind":"agent",
+                    "model":"provider-owned-model",
+                    "sessionScope":"node_instance"
+                }
+            }
+        }))
+        .assert_value();
+
+        assert!(runtime.connection_requirements().is_empty());
+        materialize_acp_provider_access(&mut runtime).assert_value();
+        assert_eq!(
+            runtime
+                .connection_requirements()
+                .values()
+                .flat_map(|names| names.iter())
+                .map(|name| name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["OPENROUTER_API_KEY"]
+        );
     }
 }

@@ -174,6 +174,7 @@ enum DeliveryStop {
     Runner(NodeRunnerError),
     Outcome(WorkerOutcome),
     Repair(recovery::RepairFailure),
+    Retry(GitHubAuthorityError),
 }
 
 struct DeliveryPreparation<'a, 'environment> {
@@ -188,7 +189,9 @@ impl DeliveryStop {
         match self {
             Self::Runner(error) => Err(error),
             Self::Outcome(outcome) => Ok(outcome),
-            Self::Repair(_) => Ok(WorkerOutcome::declared_failure(WorkerErrorCode::Crash)),
+            Self::Repair(_) | Self::Retry(_) => {
+                Ok(WorkerOutcome::declared_failure(WorkerErrorCode::Crash))
+            }
         }
     }
 }

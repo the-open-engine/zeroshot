@@ -32,8 +32,10 @@ impl GitHubApiFailure {
     }
 
     fn retryable_review_sync(&self) -> bool {
-        self.status
-            .is_none_or(|status| matches!(status, 403 | 404 | 409 | 422 | 429 | 500..=599))
+        self.transient
+            || self
+                .status
+                .is_some_and(|status| matches!(status, 404 | 409 | 422 | 429 | 500..=599))
     }
 
     fn authentication_failed(&self) -> bool {
@@ -57,6 +59,8 @@ pub enum GitHubAuthorityError {
     Identity(Box<str>),
     #[error("GitHub API request failed: {0}")]
     Api(GitHubApiFailure),
+    #[error("GitHub delivery left repository work requiring repair: {0}")]
+    Repairable(Box<str>),
     #[error("{0}")]
     Command(Box<super::GitCommandFailure>),
 }
@@ -76,7 +80,7 @@ impl GitHubAuthorityError {
     pub(super) fn retryable_review_sync(&self) -> bool {
         match self {
             Self::Unavailable => true,
-            Self::Rejected | Self::Identity(_) | Self::Command(_) => false,
+            Self::Rejected | Self::Identity(_) | Self::Repairable(_) | Self::Command(_) => false,
             Self::Api(failure) => failure.retryable_review_sync(),
         }
     }
@@ -85,7 +89,7 @@ impl GitHubAuthorityError {
         match self {
             Self::Api(failure) => failure.authentication_failed(),
             Self::Command(failure) => failure.authentication_failed(),
-            _ => false,
+            Self::Unavailable | Self::Rejected | Self::Identity(_) | Self::Repairable(_) => false,
         }
     }
 
@@ -99,7 +103,7 @@ impl GitHubAuthorityError {
                         .is_some_and(|status| matches!(status, 429 | 500..=599))
             }
             Self::Command(failure) => failure.retryable_transport(),
-            Self::Rejected | Self::Identity(_) => false,
+            Self::Rejected | Self::Identity(_) | Self::Repairable(_) => false,
         }
     }
 
@@ -123,6 +127,7 @@ impl GitHubAuthorityError {
                 Self::Api(wrapped)
             }
             Self::Identity(detail) => Self::identity(format!("{context}\n{detail}")),
+            Self::Repairable(detail) => Self::repairable(format!("{context}\n{detail}")),
             Self::Unavailable => Self::api(
                 None,
                 format!("{context}\nGitHub delivery authority is unavailable"),
@@ -134,7 +139,11 @@ impl GitHubAuthorityError {
     }
 
     pub(super) fn review_head_not_visible() -> Self {
-        Self::api(None, "GitHub review head revision is not visible")
+        Self::api(None, "GitHub review head revision is not visible").temporary()
+    }
+
+    pub(super) fn repairable(diagnostic: impl Into<String>) -> Self {
+        Self::Repairable(GitHubApiFailure::new(None, diagnostic).diagnostic)
     }
 }
 

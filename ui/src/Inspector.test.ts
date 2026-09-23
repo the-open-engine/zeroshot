@@ -2,9 +2,8 @@ import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { createServer } from 'vite';
-import { fileURLToPath } from 'node:url';
 import { findNode, type Document } from './domain';
+import { createViteTestServer } from './test-support';
 
 const record = (fields: Record<string, any>) => ({
   kind: 'record',
@@ -67,14 +66,7 @@ function fixture(): Document {
   };
 }
 async function inspector(t: TestContext) {
-  const server = await createServer({
-    root: fileURLToPath(new URL('..', import.meta.url)),
-    configFile: false,
-    server: { middlewareMode: true, watch: null, hmr: false, ws: false },
-    appType: 'custom',
-    optimizeDeps: { noDiscovery: true },
-  });
-  t.after(() => server.close());
+  const server = await createViteTestServer(t);
   const { Inspector } = await server.ssrLoadModule('/src/Inspector.tsx');
   const { createNumericDrafts, NumericDraftProvider } =
     await server.ssrLoadModule('/src/numeric-drafts.ts');

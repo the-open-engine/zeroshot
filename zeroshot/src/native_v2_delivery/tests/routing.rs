@@ -237,6 +237,39 @@ async fn materialized_conflict_repairs_and_retries_the_same_run_branch() {
     );
 }
 
+#[tokio::test]
+async fn github_policy_authority_failures_never_dispatch_code_repair() {
+    for script in [Script::PolicyForbidden, Script::PolicySchemaInvalid] {
+        let repo = TempRepo::delivery();
+        let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), script));
+        let (terminal, lane, run_id, ledger) = drive_repair_loop(&repo, authority).await;
+
+        assert!(matches!(terminal, TerminalResult::Failed { .. }));
+        assert_eq!(lane.repairs.load(Ordering::SeqCst), 0);
+        let stored = ledger.get(&run_id).await.assert_value().assert_value();
+        assert!(
+            stored
+                .snapshot
+                .executions
+                .values()
+                .all(|execution| execution.reference.node.as_str() != "repair")
+        );
+        let delivery = stored
+            .snapshot
+            .executions
+            .values()
+            .find(|execution| execution.reference.node.as_str() == "deliver")
+            .assert_value();
+        assert!(matches!(
+            delivery.outcome(),
+            Some(WorkerOutcome::Error {
+                code: WorkerErrorCode::Crash,
+                ..
+            })
+        ));
+    }
+}
+
 pub(super) async fn assert_ci_failure_routes_an_authored_worker_loop(
     base_revision: &str,
     outcome: WorkerOutcome,

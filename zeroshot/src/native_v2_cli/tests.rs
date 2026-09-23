@@ -47,6 +47,18 @@ impl DetachSignal for EdgeDetachSignal {
     }
 }
 
+struct SubmitDetachSignal {
+    gate: SubmitGate,
+}
+
+#[async_trait::async_trait]
+impl DetachSignal for SubmitDetachSignal {
+    async fn wait(&mut self) {
+        self.gate.wait_until_started().await;
+        self.gate.release();
+    }
+}
+
 struct NotifyingOutput {
     notification: Option<tokio::sync::watch::Sender<()>>,
     bytes: Vec<u8>,
@@ -64,6 +76,19 @@ impl Write for NotifyingOutput {
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
+}
+
+fn notifying_detach() -> (EdgeDetachSignal, NotifyingOutput) {
+    let (notification, _) = tokio::sync::watch::channel(());
+    (
+        EdgeDetachSignal {
+            notification: notification.clone(),
+        },
+        NotifyingOutput {
+            notification: Some(notification),
+            bytes: Vec::new(),
+        },
+    )
 }
 
 fn assert_cursor_calls(calls: &[Call], kind: CursorCallKind, expected: &[Option<&str>]) {
@@ -140,6 +165,27 @@ fn run_args(graph: &Path, input: &Path, runtime: &Path, extra: &[&str]) -> Vec<O
     }
     values.extend(extra.iter().map(OsString::from));
     values
+}
+
+async fn execute_run_task<S, W>(
+    task: &str,
+    backend: &FakeBackend,
+    signal: &mut S,
+    output: &mut W,
+) -> Result<CliOutcome, NativeV2CliError>
+where
+    S: DetachSignal,
+    W: Write,
+{
+    let files = FixtureFiles::new(graph(), json!({"task":task}));
+    let command = parse_native_v2_args(run_args(&files.graph, &files.input, &files.runtime, &[]))
+        .assert_value();
+    execute_native_v2_cli(command, backend, signal, output).await
+}
+
+fn assert_detached_submission(outcome: CliOutcome, backend: &FakeBackend) {
+    assert_eq!(outcome, CliOutcome::Detached);
+    assert!(matches!(backend.calls().as_slice(), [Call::Submit { .. }]));
 }
 
 async fn rejected_without_backend_contact(
@@ -251,7 +297,7 @@ fn template_list_and_show_are_static_and_emit_ordinary_json() {
     assert_eq!(outcome, CliOutcome::Completed);
     assert_eq!(
         serde_json::from_slice::<Value>(&list_output).assert_value(),
-        json!(["single-worker", "software-change"])
+        json!(["single-worker", "software-change", "auto-research"])
     );
 
     let mut show_output = Vec::new();
@@ -390,24 +436,76 @@ async fn detach_flag_returns_after_submit_without_opening_watch() {
     let outcome = execute_native_v2_cli(command, &backend, &mut NeverDetach, &mut Vec::new())
         .await
         .assert_value();
-    assert_eq!(outcome, CliOutcome::Detached);
-    assert!(matches!(backend.calls().as_slice(), [Call::Submit { .. }]));
+    assert_detached_submission(outcome, &backend);
 }
 
 #[tokio::test]
-async fn ctrl_c_detaches_observation_without_force_stop() {
-    let files = FixtureFiles::new(graph(), json!({"task":"interrupt"}));
-    let command = parse_native_v2_args(run_args(&files.graph, &files.input, &files.runtime, &[]))
-        .assert_value();
-    let backend = FakeBackend::with_pending_watch();
-    let outcome = execute_native_v2_cli(command, &backend, &mut ImmediateDetach, &mut Vec::new())
+async fn ctrl_c_during_preparation_does_not_submit() {
+    let backend = FakeBackend::default();
+    let mut output = Vec::new();
+    let outcome = execute_run_task("interrupt", &backend, &mut ImmediateDetach, &mut output)
         .await
         .assert_value();
+
     assert_eq!(outcome, CliOutcome::Detached);
-    assert!(matches!(
-        backend.calls().as_slice(),
-        [Call::Submit { .. }] | [Call::Submit { .. }, Call::Watch { .. }]
-    ));
+    assert!(backend.calls().is_empty());
+    assert!(output.is_empty());
+}
+
+#[tokio::test]
+async fn ctrl_c_during_submission_waits_for_the_receipt_and_skips_watch() {
+    let (backend, gate) = FakeBackend::with_blocked_submit();
+    let mut signal = SubmitDetachSignal { gate };
+    let mut output = Vec::new();
+
+    let outcome = execute_run_task("interrupt submission", &backend, &mut signal, &mut output)
+        .await
+        .assert_value();
+
+    assert_detached_submission(outcome, &backend);
+    let lines = String::from_utf8(output).assert_value();
+    assert!(lines.contains("\"source\":"));
+    assert!(lines.contains("\"runId\":\"run-public\""));
+}
+
+#[tokio::test]
+async fn ctrl_c_during_rejected_submission_reports_the_error_without_output() {
+    let (backend, gate) = FakeBackend::with_blocked_failed_submit();
+    let mut signal = SubmitDetachSignal { gate };
+    let mut output = Vec::new();
+
+    let result = execute_run_task(
+        "reject interrupted submission",
+        &backend,
+        &mut signal,
+        &mut output,
+    )
+    .await
+    .map_err(|error| error.to_string());
+
+    assert_eq!(
+        result,
+        Err("Zeroshot OECP request failed: submission rejected".to_owned())
+    );
+    assert!(matches!(backend.calls().as_slice(), [Call::Submit { .. }]));
+    assert!(output.is_empty());
+}
+
+#[tokio::test]
+async fn ctrl_c_after_submission_detaches_observation_without_force_stop() {
+    let backend = FakeBackend::with_pending_watch();
+    let (mut signal, mut output) = notifying_detach();
+
+    let outcome = execute_run_task("interrupt observation", &backend, &mut signal, &mut output)
+        .await
+        .assert_value();
+
+    assert_detached_submission(outcome, &backend);
+    assert!(
+        String::from_utf8(output.bytes)
+            .assert_value()
+            .contains("\"runId\":\"run-public\"")
+    );
     assert!(
         !backend
             .calls()
@@ -419,14 +517,7 @@ async fn ctrl_c_detaches_observation_without_force_stop() {
 #[tokio::test]
 async fn detach_notification_survives_a_completed_subscription_branch() {
     let backend = FakeBackend::with_reconnecting_watch();
-    let (notification, _receiver) = tokio::sync::watch::channel(());
-    let mut signal = EdgeDetachSignal {
-        notification: notification.clone(),
-    };
-    let mut output = NotifyingOutput {
-        notification: Some(notification),
-        bytes: Vec::new(),
-    };
+    let (mut signal, mut output) = notifying_detach();
     let command =
         parse_native_v2_args(args(&["watch", "run-public", "--target", "prod"])).assert_value();
 

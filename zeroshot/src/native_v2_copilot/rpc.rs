@@ -13,7 +13,7 @@ use crate::native_v2_runner::{
     AgentResponseState, DriverControl, DriverInvocation, NodeRunnerError, ProviderSchemaDialect,
     VerifierWorkspace, render_agent_prompt_for, resolve_agent_response_with_dialect,
 };
-use super::{auth, command, events, framing::Frames, session::CopilotSession};
+use super::{auth, command, events, framing::Frames, provider, session::CopilotSession};
 
 pub(super) fn failure(message: impl Into<String>) -> NodeRunnerError {
     NodeRunnerError::DriverDetail(message.into())
@@ -61,6 +61,15 @@ pub(super) struct CopilotRpc<'a> {
     pub(super) response: Option<String>,
     pub(super) provider_error: Option<String>,
     pub(super) redactions: Vec<String>,
+    authentication: auth::CopilotAuthentication<'a>,
+    provider: Option<&'a provider::LocalProvider>,
+}
+
+pub(super) struct CopilotRpcNative<'a> {
+    pub verifier_workspace: VerifierWorkspace,
+    pub authentication: auth::CopilotAuthentication<'a>,
+    pub provider: Option<&'a provider::LocalProvider>,
+    pub redactions: Vec<String>,
 }
 
 impl<'a> CopilotRpc<'a> {
@@ -68,21 +77,31 @@ impl<'a> CopilotRpc<'a> {
         stdout: ProcessStdout,
         invocation: &'a DriverInvocation,
         control: &'a DriverControl,
-        verifier_workspace: VerifierWorkspace,
+        native: CopilotRpcNative<'a>,
     ) -> Self {
+        let redactions = redaction_values(
+            invocation
+                .environment
+                .iter()
+                .map(|(_, value)| value)
+                .chain(native.redactions.iter().map(String::as_str))
+                .chain(native.authentication.token()),
+        );
         Self {
             stdout,
             frames: Frames::default(),
             invocation,
             control,
-            verifier_workspace,
+            verifier_workspace: native.verifier_workspace,
             sender: None,
             next_id: 0,
             pending: BTreeSet::new(),
             session_id: String::new(),
             response: None,
             provider_error: None,
-            redactions: redaction_values(invocation.environment.iter().map(|(_, value)| value)),
+            redactions,
+            authentication: native.authentication,
+            provider: native.provider,
         }
     }
 
@@ -113,7 +132,15 @@ impl<'a> CopilotRpc<'a> {
         self.session_id = resume
             .clone()
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-        let params = command::session_parameters(self.invocation, files, &self.session_id)?;
+        let params = command::session_parameters(
+            self.invocation,
+            files,
+            &self.session_id,
+            command::SessionProvider {
+                authentication: &self.authentication,
+                local: self.provider,
+            },
+        )?;
         let method = if resume.is_some() {
             "session.resume"
         } else {
@@ -262,12 +289,10 @@ impl<'a> CopilotRpc<'a> {
     }
 
     async fn acquire_token(&mut self, message: &Value) -> Result<(), NodeRunnerError> {
-        let acquired = auth::acquire(
-            &message["params"],
-            &self.invocation.environment,
-            &self.session_id,
-        )
-        .await?;
+        let acquired = self
+            .authentication
+            .acquire(&message["params"], &self.session_id)
+            .await?;
         for (_, value) in acquired.iter() {
             if !self.redactions.iter().any(|current| current == value) {
                 if self.redactions.len() >= 128 {

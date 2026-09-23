@@ -40,6 +40,7 @@ import {
   type RunDetail,
 } from './run-history';
 import { canFollowHistory, observationEnded } from './history-contract';
+import { readHistoryWhenReady } from './history-readiness';
 import './run-history.css';
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -82,6 +83,7 @@ export function RunHistoryView({
   const [positions, setPositions] = useState<Positions>({}),
     [focus, setFocus] = useState<{ name: string; tick: number }>();
   const [loading, setLoading] = useState(false),
+    [historyPending, setHistoryPending] = useState(false),
     [error, setError] = useState('');
   const loadGeneration = useRef(0),
     loadAbort = useRef<AbortController | undefined>(undefined);
@@ -128,6 +130,7 @@ export function RunHistoryView({
     const controller = new AbortController();
     loadAbort.current = controller;
     setLoading(true);
+    setHistoryPending(false);
     setPlaying(false);
     setPlaybackNode(undefined);
     setError('');
@@ -148,8 +151,18 @@ export function RunHistoryView({
       pageCursor.current = 'v2:0';
     }
     try {
-      const detail = await dataSource.detail(id, controller.signal);
+      const pending = () => {
+        if (!controller.signal.aborted && generation === loadGeneration.current)
+          setHistoryPending(true);
+      };
+      const detail = await readHistoryWhenReady(
+        () => dataSource.detail(id, controller.signal),
+        controller.signal,
+        dataSource.retryDelay,
+        pending
+      );
       if (controller.signal.aborted || generation !== loadGeneration.current) return;
+      setHistoryPending(false);
       setRun(detail);
       if (reset) {
         setSelected(detail.graph.root.name);
@@ -161,8 +174,14 @@ export function RunHistoryView({
         bytes = 0,
         complete = false;
       while (!complete && count < 5000 && bytes < 8 * 1024 * 1024) {
-        const page = await dataSource.page(id, pageCursor.current, controller.signal);
+        const page = await readHistoryWhenReady(
+          () => dataSource.page(id, pageCursor.current, controller.signal),
+          controller.signal,
+          dataSource.retryDelay,
+          pending
+        );
         if (controller.signal.aborted || generation !== loadGeneration.current) return;
+        setHistoryPending(false);
         if (!page.complete && (!page.events.length || page.nextCursor === pageCursor.current))
           throw new Error('History stopped advancing. Reload to try again.');
         collected = appendHistory(collected, page);
@@ -179,8 +198,10 @@ export function RunHistoryView({
         if (page.complete && page.finished) finishRun(id, collected, page);
       }
     } catch (error) {
-      if (!controller.signal.aborted && generation === loadGeneration.current)
+      if (!controller.signal.aborted && generation === loadGeneration.current) {
+        setHistoryPending(false);
         setError(message(error));
+      }
     } finally {
       if (!controller.signal.aborted && generation === loadGeneration.current) setLoading(false);
     }
@@ -196,6 +217,7 @@ export function RunHistoryView({
       setControlError('');
       setPlaying(false);
       setLoading(false);
+      setHistoryPending(false);
       setError('');
     }
     return () => {
@@ -743,7 +765,11 @@ export function RunHistoryView({
                 <ChevronsRight size={18} />
               </button>
             </div>
-            {loading ? (
+            {historyPending ? (
+              <div className="history-load-state" role="status">
+                <Loader2 size={13} className="spin" /> Run history is still setting up
+              </div>
+            ) : loading ? (
               <div className="history-load-state">
                 <Loader2 size={13} className="spin" /> Loading history · {events.length} events
               </div>
@@ -761,8 +787,14 @@ export function RunHistoryView({
           </footer>
         </>
       ) : (
-        <div className="history-empty">
-          {loading ? (
+        <div className="history-empty" role={historyPending ? 'status' : undefined}>
+          {historyPending ? (
+            <>
+              <Loader2 size={23} className="spin" />
+              <h1>Run view is still setting up</h1>
+              <p>The graph will appear here automatically when it’s ready.</p>
+            </>
+          ) : loading ? (
             <>
               <Loader2 size={23} className="spin" />
               <h1>Loading run</h1>

@@ -107,7 +107,7 @@ fn assert_prepared_metadata(
 
     let workspace_metadata = fs::metadata(&prepared.workspace).assert_value();
     assert_eq!(workspace_metadata.uid(), writer.uid());
-    assert_eq!(workspace_metadata.permissions().mode() & 0o777, 0o755);
+    assert_eq!(workspace_metadata.permissions().mode() & 0o777, 0o700);
     let runtime_metadata = fs::metadata(&prepared.runtime_home).assert_value();
     assert_eq!(runtime_metadata.uid(), 0);
     assert_eq!(runtime_metadata.permissions().mode() & 0o777, 0o711);

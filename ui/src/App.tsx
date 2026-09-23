@@ -1315,7 +1315,7 @@ export function App({
                       {bootstrap?.templates.map((t) => (
                         <option key={t.id ?? t.name} value={t.id ?? t.name}>
                           {t.label ??
-                            (t.name === 'single-worker' ? 'Single worker' : 'Software change')}
+                            t.name.replaceAll('-', ' ').replace(/^\w/, (c) => c.toUpperCase())}
                         </option>
                       ))}
                     </select>

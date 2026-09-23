@@ -132,6 +132,7 @@ fn bootstrap(
         run_id,
         submission,
         environment,
+        native_environment: BTreeMap::new(),
         github_token: None,
         workspace,
         workspace_lease: storage.join("workspace.lock"),
@@ -395,14 +396,23 @@ fn bootstrap_is_private_bounded_consumed_and_exact() {
     std::fs::create_dir(&workspace).assert_value_with("workspace");
     let path = root.child("controller.bootstrap.json");
     let run_id = RunId::new("run-portable-bootstrap");
-    let bootstrap = bootstrap(
+    let mut bootstrap = bootstrap(
         run_id.clone(),
         submission("portable-bootstrap"),
         workspace,
         storage,
     );
+    bootstrap.native_environment = BTreeMap::from([
+        ("PATH".to_owned(), "/native/bin".to_owned()),
+        (
+            "INTERNAL_GATEWAY_KEY".to_owned(),
+            "private-value".to_owned(),
+        ),
+    ]);
+    assert!(!format!("{bootstrap:?}").contains("private-value"));
     write_bootstrap_file(&path, &bootstrap).assert_value_with("write bootstrap");
     let loaded = load_bootstrap_file(&path).assert_value_with("load bootstrap");
     assert_eq!(loaded.run_id, run_id);
+    assert_eq!(loaded.native_environment, bootstrap.native_environment);
     assert!(!path.exists(), "bootstrap must be consumed exactly once");
 }

@@ -33,11 +33,10 @@ with an identifier accepted by the selected provider.
 ```
 
 Zeroshot passes model identifiers to the provider unchanged and does not keep its own model catalog.
-If `OPENAI_API_KEY` is absent from the environment, add the `openai` connection:
-
-```console
-zeroshot connection set openai --field OPENAI_API_KEY
-```
+For this local run, Zeroshot reuses the installed Codex CLI's login and provider configuration; no
+placeholder API key or `openai` connection is required. A Docker or cloud run instead derives the
+canonical `OPENAI_API_KEY` requirement and resolves it from the submission environment or the
+target's connection store because it cannot inherit host login state.
 
 ## 3. Check the request without starting it
 
@@ -94,3 +93,7 @@ zeroshot template show single-worker
 
 `zeroshot template show software-change` prints the exact graph behind the first example as the same
 `GraphSpec` accepted by `--graph` and the Python SDK.
+
+`zeroshot template show auto-research` prints the fixed ten-iteration research graph. It keeps
+adopted, record-only, and aborted results under `.zeroshot/research`; add `--push` to a run when every
+finalized iteration should be published.

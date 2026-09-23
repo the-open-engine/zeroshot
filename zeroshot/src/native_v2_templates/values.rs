@@ -167,7 +167,7 @@ pub(super) fn software_state(
     Ok(PayloadType::Record { fields })
 }
 
-fn add_delivery_state_fields(
+pub(super) fn add_delivery_state_fields(
     fields: &mut BTreeMap<FieldName, RecordField>,
     mode: DeliveryMode,
 ) -> Result<(), BuiltinTemplateError> {
@@ -187,7 +187,7 @@ fn add_delivery_state_fields(
     Ok(())
 }
 
-fn record_type(
+pub(super) fn record_type(
     fields: Vec<(&str, PayloadType, bool)>,
 ) -> Result<PayloadType, BuiltinTemplateError> {
     let fields = fields
@@ -223,14 +223,14 @@ pub(super) fn output_fields(payload: &PayloadType) -> Result<Vec<String>, Builti
     }
 }
 
-fn required(value_type: PayloadType) -> RecordField {
+pub(super) fn required(value_type: PayloadType) -> RecordField {
     RecordField {
         value_type,
         required: true,
     }
 }
 
-fn optional(value_type: PayloadType) -> RecordField {
+pub(super) fn optional(value_type: PayloadType) -> RecordField {
     RecordField {
         value_type,
         required: false,
@@ -267,6 +267,14 @@ pub(super) fn output_write(
     target: &str,
 ) -> Result<WriteBinding, BuiltinTemplateError> {
     write_binding(node, NodeOutputChannel::Out, source, target)
+}
+
+pub(super) fn signal_write(
+    node: &str,
+    source: &str,
+    target: &str,
+) -> Result<WriteBinding, BuiltinTemplateError> {
+    write_binding(node, NodeOutputChannel::Signal, source, target)
 }
 
 fn write_binding(

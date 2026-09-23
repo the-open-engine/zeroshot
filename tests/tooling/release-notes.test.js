@@ -118,6 +118,30 @@ describe('release-note validation', () => {
     );
   });
 
+  it('recovers the one immutable plain-heading summary without weakening later commits', () => {
+    const body = [
+      'Summary',
+      '- Route authority failures directly to refusal.',
+      '',
+      'Validation',
+      '- cargo test --workspace',
+    ].join('\n');
+    const historical = {
+      hash: '78b7baa2d88dcd6a7640d8cf06d6fbce94d91f42',
+      subject: 'fix(delivery): route authority failures without repair (#1141)',
+      body,
+    };
+
+    assert.equal(
+      parseReleaseCommit(historical).summary,
+      '- Route authority failures directly to refusal.'
+    );
+    assert.throws(
+      () => parseReleaseCommit({ ...historical, hash: 'a'.repeat(40) }),
+      /has no release summary/
+    );
+  });
+
   it('classifies both Conventional Commit breaking footer forms', () => {
     for (const footer of ['BREAKING CHANGE:', 'BREAKING-CHANGE:']) {
       const body = [

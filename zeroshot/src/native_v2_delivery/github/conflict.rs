@@ -135,7 +135,9 @@ async fn conflicted_paths(
     )
     .await?;
     if !output.is_empty() && !output.ends_with('\0') {
-        return Err(GitHubAuthorityError::Rejected);
+        return Err(GitHubAuthorityError::repairable(
+            "Git conflict path inspection returned malformed output after merge materialization",
+        ));
     }
     output
         .split_terminator('\0')
@@ -147,7 +149,11 @@ async fn conflicted_paths(
                     .all(|component| matches!(component, Component::Normal(_)));
             valid
                 .then(|| path.to_owned())
-                .ok_or(GitHubAuthorityError::Rejected)
+                .ok_or_else(|| {
+                    GitHubAuthorityError::repairable(
+                        "Git conflict path inspection returned an unsafe path after merge materialization",
+                    )
+                })
         })
         .collect()
 }
@@ -168,7 +174,9 @@ fn require_merge_result(
     conflicted_paths: &[String],
 ) -> Result<(), GitHubAuthorityError> {
     if merge_status != 1 || conflicted_paths.is_empty() {
-        return Err(GitHubAuthorityError::Rejected);
+        return Err(GitHubAuthorityError::repairable(
+            "Git merge did not leave the exact expected conflict state",
+        ));
     }
     Ok(())
 }
@@ -176,7 +184,9 @@ fn require_merge_result(
 async fn require_unchanged_head(context: ConflictContext<'_>) -> Result<(), GitHubAuthorityError> {
     let head = workspace_head(context).await?;
     if head.trim() != context.request.review.head_revision {
-        return Err(GitHubAuthorityError::Rejected);
+        return Err(GitHubAuthorityError::repairable(
+            "Git merge changed the reviewed HEAD while materializing a conflict",
+        ));
     }
     Ok(())
 }
@@ -221,7 +231,11 @@ async fn require_merge_head(
         .ok()
         .filter(|merge_head| merge_head.trim() == target_revision)
         .map(|_| ())
-        .ok_or(GitHubAuthorityError::Rejected)
+        .ok_or_else(|| {
+            GitHubAuthorityError::repairable(
+                "Git merge did not retain the expected target revision in MERGE_HEAD",
+            )
+        })
 }
 
 async fn workspace_head(context: ConflictContext<'_>) -> Result<String, GitHubAuthorityError> {

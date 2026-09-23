@@ -73,6 +73,21 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   declared connection values take precedence. Hosted adapters do not inherit ambient settings.
   Endpoint and Claude control variables in declared connections are passed to the harness; active
   transport selectors cannot contradict an explicitly selected OpenRouter, Bedrock, or gateway lane.
+- Provider access defaults are materialized from the authored runtime at the execution-placement
+  boundary. Omitted connections remain omitted in author-owned local profiles. Local Codex/OpenAI,
+  Claude/Anthropic, and Copilot/GitHub lanes reuse native login state without inventing a
+  connection requirement; contained placements and non-native lanes add only their canonical
+  missing requirements. Explicit
+  compatible authored fields always win. Remote profiles materialize contained requirements before
+  storage, and the effective runtime drives the existing connection resolver and recovery contracts.
+  The local CLI captures the invoking shell in its private one-shot bootstrap, consumes and deletes
+  that file before controller effects, and keeps the detached controller's OS environment minimal.
+  A later local CLI startup scavenges orphaned bootstrap files after the bounded controller handoff
+  window without removing other run state.
+  The in-memory snapshot supplies bounded native-context forwarding and Codex config-referenced
+  provider variables; provider children still start from an empty environment. Snapshot values
+  never enter profiles, ledgers, observation, or hosted adapters. Relative harness home overrides
+  are resolved in the invoking process before detachment.
 - Codex inherits harness settings for web search and sandbox network access. Runtime arguments
   select the admitted model, optional effort, and response contract; they must not override unrelated
   user preferences. Hosted workers and verifiers always use the harness's maximum approval/sandbox
@@ -119,9 +134,31 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   exists. Structured output receives at most two correction turns before `malformed`.
 - Copilot uses the pinned CLI's headless JSON-RPC protocol 3, with provider `github` and
   caller-owned model IDs. Structured output and corrections share one session; node-instance
-  revisits resume it from the private home. `COPILOT_GITHUB_TOKEN` crosses private RPC only,
-  never process/tool environments. Optional `COPILOT_GITHUB_TOKEN_EXPIRES_AT` is Unix seconds;
-  expiring credentials use the runtime resolver callback and must retain more than one hour.
+  revisits resume from the current user's `COPILOT_HOME` locally and a private home when contained.
+  Local runs reuse stored Copilot login, host/auth endpoint settings, and supported custom-provider
+  environment. Static custom-provider configuration and ambient or declared GitHub tokens cross
+  private RPC only, never process/tool environments. Legacy command-backed keys cross the singular
+  private provider contract so the pinned CLI refreshes them for each provider request. Local
+  `providers.json` or `COPILOT_PROVIDERS_CONFIG` registries are read with size and entry bounds and
+  transferred through protocol 3 because headless sessions do not import the path themselves; a
+  selected registry provider with `apiKeyCommand` is translated to the working singular contract.
+  Its helper receives eligible invoking-shell fields privately; runtime, authentication, provider,
+  and parent-process loader controls are excluded, while every forwarded field is passed to
+  Copilot's `--secret-env-vars`. This preserves per-request refresh without exposing those fields to
+  shell or MCP tool environments. This matches native local Copilot's same-user trust boundary;
+  secret-env filtering is not an OS identity boundary against adversarial same-UID process inspection.
+  A nonempty registry takes precedence over legacy provider variables. Declared tokens suppress all
+  ambient provider and offline controls. Declared endpoints cannot inherit ambient credentials or
+  headers, and one declared credential form suppresses the other ambient forms. The admitted model
+  is supplied unchanged to the headless process and normally to its RPC session while provider
+  `modelId` capability and wire-model mappings remain intact. Translating a selected registry
+  command uses that registry entry's authored `modelId` for the singular RPC session; the admitted
+  `provider/id` remains the unchanged process-level registry selection. Contained runs require
+  `COPILOT_GITHUB_TOKEN`. Optional
+  `COPILOT_GITHUB_TOKEN_EXPIRES_AT` is Unix seconds;
+  expiring credentials use the runtime resolver callback, validate the configured GitHub host, and
+  must retain more than one hour. Present but empty or malformed declared credentials fail closed
+  instead of falling back to native login.
   Copilot RPC bounds each message to 64 MiB and bounds pending requests and output queues.
 - Provider JSONL readers do not cap cumulative output. They share only the 64 MiB unfinished-record
   guard, accept a complete final record without a newline, ignore unknown future event types before
@@ -238,9 +275,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   merge queues/deferrals, and succeeds only after observing the exact merged result. Configured
   branch-protection contexts remain pending until they appear on the exact PR head, preventing a
   newly opened PR from looking ready before its required workflow registers. Missing or stale human
-  review may satisfy PR readiness only when aggregate branch policy positively identifies approval
-  as the sole remaining blocker; incomplete or co-blocked policy stays pending. That exception never
-  grants merge authority. Outside merge
+  review may satisfy PR readiness when aggregate ref-update policy positively requires approval,
+  required checks have settled, and no observed conversation, linear-history, or signature blocker
+  remains. Deployment requirements do not block PR handoff. Missing review-policy evidence stays
+  pending, and this exception never grants merge authority. Outside merge
   queues, branch freshness advances only through an authorized compare-and-swap response. A
   reported conflict is routable only after the trusted lane fetches the exact current target and
   leaves a verified nonempty Git merge conflict in the workspace; repair agents receive no GitHub
@@ -251,6 +289,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Supporting checks never acquire merge authority, and unavailable or omitted logs are explicit.
   Job-log reads opt into raw terminal sequences only inside bounded pipe capture, then remove
   controls before feedback; older GitHub CLI versions retry without the unsupported opt-in flag.
+- GitHub API permission, schema, and policy failures are delivery execution errors, never candidate
+  repair. Authentication rejection remains an explicit refusal. Review synchronization retries only
+  explicitly transient failures and bounded visibility races; an ordinary statusless failure or HTTP
+  403 is not presumed transient. Only typed CI/feedback/conflict outcomes, Git command failures, or
+  verified repository/workspace reconciliation may request an agent repair.
 - Delivery-enabled software-change templates make the acceptance verifier the sole author of the
   current change title and description after every review pass. Git delivery uses that manifest for
   commits and reviews, refreshes only its marker-delimited body section while preserving surrounding
@@ -270,6 +313,37 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   one exact-head fence. A run checkpoint routes each new or edited item through the existing repair
   and verification loop once. `pullRequestFeedback: ignore` skips that read without weakening GitHub
   policy checks. Feedback is untrusted text and delivery credentials never enter the repair worker.
+- The built-in `auto-research` graph runs exactly ten iterations. Explorer, synthesizer, and
+  challenger scouts propose bounded directions; evidence, method, and progress judges return
+  `adopt`, `record_only`, or `abort`. Graph guards route any abort, unanimous adoption, and the
+  remaining record-only consensus to separate finalizers. A second one-item phase keeps judge controls
+  bounded while an independent auditor recomputes consensus from the finalized evaluations and verifies
+  the decision, hashes, and retained or restored filesystem before the iteration can continue. Unanimous
+  adoption keeps workspace changes. Record-only retains a supported negative
+  or inconclusive finding while restoring changes; any abort restores changes and records invalid,
+  incomplete, or unsafe evidence. The charter separates non-negotiable
+  invariants from optional progress measures. Once evidence proves the retained workspace violates
+  an invariant, selectors prioritize repair and judges cannot reject a verified repair solely for
+  missing an optional optimization threshold. Mutable state and summaries identify the retained
+  workspace and its invariant status separately from the best supported historical findings; a
+  result from a restored artifact is never presented as current. Bootstrap returns the bounded scout
+  and judge role arrays plus one experiment work item. Graph guards require exactly one explorer,
+  synthesizer, challenger, evidence, method, progress, and experiment activation before dependent work
+  can run. A one-time read-only verifier preflight enforces those sets before the ten-iteration loop;
+  missing, duplicate, extra, or failed entries cannot silently shrink or rewrite the campaign.
+  Iteration role workers execute independently
+  and keep the verifier's control-assignment space bounded; judge prompts do not receive peer reviews.
+  Scout, selector, experiment, or judge execution failure
+  finalizes an aborted iteration, restores when needed, and lets the bounded loop continue. Recorder
+  and recovery failures stop the run before another iteration or checkpoint. Files under
+  `.zeroshot/research` are the durable protocol: finalized iteration directories are append-only,
+  while per-iteration directories under ignored `scratch/` hold reversible backups and in-progress
+  handoffs. Agent workers never
+  use Git. The template supports no delivery or `push@1`; for push, a read-only manifest worker
+  derives checkpoint metadata from the finalized ledger and one graph-owned delivery node is
+  revisited after every iteration. Delivery cannot overlap a writer. A checkpoint manifest failure,
+  delivery repair request, receipt-auditor error, or rejected receipt stops the run; checkpoint
+  delivery never invokes an unreviewed writer repair.
 
 - Target images apply current Debian Trixie package updates and install a checksum-verified upstream
   GitHub CLI. Image tests exercise GraphQL pagination with the installed CLI before publication.
@@ -290,6 +364,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   run nonterminal until replacement-controller reconciliation confirms cleanup.
 - Hosted verifiers build in disposable writable copies of the current candidate. Copies include
   dirty files and build artifacts, preserve metadata, and use reflinks or independent file copies.
+  Hosted candidate workspace roots are writer-owned `0700`; workers cannot traverse another run's
+  candidate, and the supervisor-owned production ledger and existing SQLite sidecars are `0600`.
   Source traversal pins descriptors without following symlinks so concurrent renames cannot escape
   the candidate; copying alongside writers does not provide an atomic snapshot. Verifier writes
   are never promoted to the candidate or peers. Provider scratch permits execution.
@@ -317,6 +393,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 ## CLI and target contracts
 
 - CLI grammar/help comes from the derived Clap `Cli` tree and Rust doc comments.
+- The foreground run command carries one Ctrl-C signal across preparation, submission, and
+  observation. An interrupt before the backend submission future is first polled cancels without
+  entering the backend. Once polled, that future is preserved through its receipt or error because
+  it may cross an irreversible admission boundary before yielding. A successful receipt is emitted
+  before detaching without opening observation. Ctrl-C never force-stops a run.
 - Graph verification errors display their first safe diagnostic through the shared verifier error,
   so local validation and hosted rejection report the same cause.
 - Do not hand-edit `docs/zeroshot-cli.md` or `docs/zeroshot-cli.html`; regenerate with

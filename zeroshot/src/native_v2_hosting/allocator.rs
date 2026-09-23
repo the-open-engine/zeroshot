@@ -557,6 +557,9 @@ impl ProductionCapsuleAllocator {
                     executable: self.config.copilot_executable.clone(),
                     workspace: filesystem.workspace.clone(),
                     runtime_home: filesystem.runtime_home.clone(),
+                    local_user: None,
+                    base_environment: std::collections::BTreeMap::new(),
+                    local_command_environment: std::collections::BTreeMap::new(),
                     search_path: self.config.executable_search_path.clone(),
                     process_pool,
                 },
@@ -568,6 +571,7 @@ impl ProductionCapsuleAllocator {
                     workspace: filesystem.workspace.clone(),
                     runtime_home: filesystem.runtime_home.clone(),
                     local_user: None,
+                    native_environment: Default::default(),
                     search_path: self.config.executable_search_path.clone(),
                     process_pool,
                 }))
@@ -588,6 +592,7 @@ impl ProductionCapsuleAllocator {
                     workspace: filesystem.workspace.clone(),
                     runtime_home: filesystem.runtime_home.clone(),
                     local_user_home: None,
+                    native_environment: Default::default(),
                     base_environment,
                     process_pool,
                 }))

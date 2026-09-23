@@ -12,6 +12,7 @@ pub(super) struct CodexCommandInput<'a> {
 
 pub(super) struct CodexTurnProcess {
     pub(super) process: ProviderProcess,
+    pub(super) native_redactions: Vec<String>,
     pub(super) _schema: CodexSchemaFile,
 }
 

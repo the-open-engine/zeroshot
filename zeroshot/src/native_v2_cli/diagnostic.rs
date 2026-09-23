@@ -139,7 +139,7 @@ fn usage_code(message: &str) -> &'static str {
     {
         "template.unknown"
     } else if message.contains("template delivery mode")
-        || message.contains("valid only with --template software-change")
+        || message.contains("not supported by --template")
     {
         "template.unsupported_delivery"
     } else {

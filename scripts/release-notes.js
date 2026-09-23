@@ -11,6 +11,7 @@ const RELEASE_VERSION = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*
 const RELEASE_COMMIT = /^[0-9a-f]{40}$/;
 const RELEASE_SUBJECT =
   /^(?<type>[a-z]+)(?:\((?<scope>[^()\r\n]+)\))?(?<breaking>!)?: (?<title>.+) \(#(?<pull>[1-9][0-9]*)\)$/;
+const PLAIN_SUMMARY_COMMIT_EXCEPTIONS = new Set(['78b7baa2d88dcd6a7640d8cf06d6fbce94d91f42']);
 const CATEGORIES = Object.freeze([
   ['breaking', 'Breaking changes'],
   ['feat', 'Features'],
@@ -110,19 +111,27 @@ function releaseCommits(repository, previousTag, releaseCommit) {
   });
 }
 
-function summaryFromBody(body) {
+function sectionFromBody(body, headingPattern, nextHeadingPattern) {
   const lines = body.replace(/\r\n/g, '\n').split('\n');
-  const summaryHeading = lines.findIndex((line) => /^## Summary\s*$/i.test(line));
+  const summaryHeading = lines.findIndex((line) => headingPattern.test(line));
   if (summaryHeading === -1) return '';
   const start = summaryHeading + 1;
   let end = lines.length;
   for (let index = start; index < lines.length; index += 1) {
-    if (/^##\s+/.test(lines[index])) {
+    if (nextHeadingPattern.test(lines[index])) {
       end = index;
       break;
     }
   }
   return lines.slice(start, end).join('\n').trim();
+}
+
+function summaryFromBody(body) {
+  return sectionFromBody(body, /^## Summary\s*$/i, /^##\s+/);
+}
+
+function plainSummaryFromBody(body) {
+  return sectionFromBody(body, /^Summary\s*$/i, /^(?:Validation\s*$|##\s+)/i);
 }
 
 function hasBreakingFooter(body) {
@@ -151,7 +160,12 @@ function parseReleaseCommit(commit) {
         commit.subject
     );
   }
-  const summary = summaryFromBody(commit.body);
+  let summary = summaryFromBody(commit.body);
+  // This immutable squash commit predates enforcement of the Markdown heading.
+  // Keep the recovery exception bound to its exact object so later commits stay strict.
+  if (!summary && PLAIN_SUMMARY_COMMIT_EXCEPTIONS.has(commit.hash)) {
+    summary = plainSummaryFromBody(commit.body);
+  }
   if (!summary) throw new Error(`${commit.hash} has no release summary`);
   const breakingFooter = hasBreakingFooter(commit.body);
   const category =

@@ -373,10 +373,17 @@ async fn cloud_oecp_candidate_runs_worker_and_trusted_merge_entirely_through_v2(
     let submitted = submit_through_cli(
         &repository,
         controller.clone(),
-        BTreeMap::from([(
-            EnvironmentVariableName::new(GITHUB_TOKEN_ENV).assert_value_with("token name"),
-            "test-github-token".to_owned(),
-        )]),
+        BTreeMap::from([
+            (
+                EnvironmentVariableName::new(GITHUB_TOKEN_ENV).assert_value_with("token name"),
+                "test-github-token".to_owned(),
+            ),
+            (
+                EnvironmentVariableName::new("OPENAI_API_KEY")
+                    .assert_value_with("provider token name"),
+                "test-provider-token".to_owned(),
+            ),
+        ]),
     )
     .await;
     let direct_status = ClusterBackend::run_status(

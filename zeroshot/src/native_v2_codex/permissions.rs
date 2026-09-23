@@ -1,5 +1,6 @@
 //! Permission fallback resolved through Codex's native configuration stack.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -9,8 +10,17 @@ use super::NativeV2CodexAdapter;
 use crate::execution::process::ProcessSessionCommand;
 use crate::native_v2_capsule::provider_process::{
     ConfigurationRequest, PermissionPolicy, ProviderExecutionFiles, inspect_configuration,
+    redaction_values,
 };
+use crate::native_v2_contract::{CodexProvider, EnvironmentVariableName};
 use crate::native_v2_runner::{DriverControl, NodeRunnerError};
+
+const MAX_NATIVE_PROVIDER_ENVIRONMENT: usize = 64;
+
+struct CodexConfigurationInspection {
+    permission_policy: PermissionPolicy,
+    provider_environment: Vec<String>,
+}
 
 impl NativeV2CodexAdapter {
     pub(super) async fn apply_permission_default(
@@ -18,30 +28,54 @@ impl NativeV2CodexAdapter {
         files: Arc<ProviderExecutionFiles>,
         command: &mut ProcessSessionCommand,
         control: &DriverControl,
-    ) -> Result<(), NodeRunnerError> {
-        if self.runners.is_hosted()
-            || self
-                .inspect_permission_policy(files, command.clone(), control)
-                .await?
-                == PermissionPolicy::Unset
-        {
+    ) -> Result<Vec<String>, NodeRunnerError> {
+        if self.runners.is_hosted() {
+            command
+                .argv
+                .insert(1, "--dangerously-bypass-approvals-and-sandbox".to_owned());
+            return Ok(Vec::new());
+        }
+        let inspection = self
+            .inspect_configuration(files, command.clone(), control)
+            .await?;
+        let redactions =
+            if self.config.local_user.is_some() && self.config.provider == CodexProvider::OpenAi {
+                let declared_auth = command.environment.contains_key("CODEX_API_KEY")
+                    || command.environment.contains_key("OPENAI_API_KEY");
+                inherit_provider_environment(
+                    &mut command.environment,
+                    &inspection.provider_environment,
+                    |name| {
+                        if declared_auth && matches!(name, "CODEX_API_KEY" | "OPENAI_API_KEY") {
+                            return None;
+                        }
+                        self.config.native_environment.get(name).cloned()
+                    },
+                )
+            } else {
+                Vec::new()
+            };
+        if inspection.permission_policy == PermissionPolicy::Unset {
             command
                 .argv
                 .insert(1, "--dangerously-bypass-approvals-and-sandbox".to_owned());
         }
-        Ok(())
+        Ok(redactions)
     }
 
-    async fn inspect_permission_policy(
+    async fn inspect_configuration(
         &self,
         files: Arc<ProviderExecutionFiles>,
         mut command: ProcessSessionCommand,
         control: &DriverControl,
-    ) -> Result<PermissionPolicy, NodeRunnerError> {
+    ) -> Result<CodexConfigurationInspection, NodeRunnerError> {
         // Transcript fixtures isolate model-turn I/O; configuration tests use real inspection.
         #[cfg(test)]
         if let Some(default) = self.test_permission_policy {
-            return Ok(default);
+            return Ok(CodexConfigurationInspection {
+                permission_policy: default,
+                provider_environment: Vec::new(),
+            });
         }
         let cwd = command.workspace.current_dir.clone();
         command.argv = vec!["app-server".to_owned()];
@@ -67,10 +101,74 @@ impl NativeV2CodexAdapter {
         ];
         let Some(responses) = inspect_configuration(files, command, control, requests).await?
         else {
-            return Ok(PermissionPolicy::Unavailable);
+            return Ok(CodexConfigurationInspection {
+                permission_policy: PermissionPolicy::Unavailable,
+                provider_environment: Vec::new(),
+            });
         };
-        Ok(permission_policy(&responses, &cwd))
+        Ok(CodexConfigurationInspection {
+            permission_policy: permission_policy(&responses, &cwd),
+            provider_environment: provider_environment_names(&responses),
+        })
     }
+}
+
+fn provider_environment_names(responses: &[Value]) -> Vec<String> {
+    let Some((config, _, _)) = configuration_payloads(responses) else {
+        return Vec::new();
+    };
+    let Some(provider) = config.get("model_provider").and_then(Value::as_str) else {
+        return Vec::new();
+    };
+    let Some(settings) = config
+        .get("model_providers")
+        .and_then(Value::as_object)
+        .and_then(|providers| providers.get(provider))
+        .and_then(Value::as_object)
+    else {
+        return Vec::new();
+    };
+    let names = settings
+        .get("env_key")
+        .and_then(Value::as_str)
+        .into_iter()
+        .chain(
+            settings
+                .get("env_http_headers")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flat_map(|headers| headers.values().filter_map(Value::as_str)),
+        );
+    let names = names
+        .filter_map(|name| EnvironmentVariableName::new(name).ok())
+        .map(|name| name.as_str().to_owned())
+        .collect::<BTreeSet<_>>();
+    if names.len() > MAX_NATIVE_PROVIDER_ENVIRONMENT {
+        Vec::new()
+    } else {
+        names.into_iter().collect()
+    }
+}
+
+fn inherit_provider_environment<F>(
+    environment: &mut BTreeMap<String, String>,
+    names: &[String],
+    available: F,
+) -> Vec<String>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let mut inherited = Vec::new();
+    for name in names {
+        if environment.contains_key(name) {
+            continue;
+        }
+        if let Some(value) = available(name).filter(|value| !value.contains('\0')) {
+            inherited.push(value.clone());
+            environment.insert(name.clone(), value);
+        }
+    }
+    redaction_values(inherited.iter().map(String::as_str))
 }
 
 fn request(id: u8, messages: Vec<Value>) -> ConfigurationRequest {
@@ -220,6 +318,62 @@ mod tests {
         json!({"sandbox_mode":null,"approval_policy":null,"projects":null,
             "approvals_reviewer":null,"sandbox_workspace_write":null,"permissions":null,
             "default_permissions":null,"profile":null,"profiles":{},"include_permissions_instructions":true})
+    }
+
+    #[test]
+    fn configured_provider_environment_is_discovered_without_values() {
+        let mut config = empty();
+        config["model_provider"] = json!("internal");
+        config["model_providers"] = json!({
+            "internal": {
+                "env_key": "INTERNAL_API_KEY",
+                "env_http_headers": {
+                    "X-Internal-Account": "INTERNAL_ACCOUNT",
+                    "X-Invalid": "NOT-A-NAME"
+                }
+            },
+            "inactive": {"env_key": "INACTIVE_API_KEY"}
+        });
+        assert_eq!(
+            provider_environment_names(&responses(config)),
+            ["INTERNAL_ACCOUNT", "INTERNAL_API_KEY"]
+        );
+    }
+
+    #[test]
+    fn only_missing_configured_provider_values_are_inherited_and_redacted() {
+        let mut environment = BTreeMap::from([
+            ("INTERNAL_API_KEY".to_owned(), "declared-secret".to_owned()),
+            ("PATH".to_owned(), "/usr/bin".to_owned()),
+        ]);
+        let requested = std::cell::RefCell::new(Vec::new());
+        let redactions = inherit_provider_environment(
+            &mut environment,
+            &[
+                "INTERNAL_ACCOUNT".to_owned(),
+                "INTERNAL_API_KEY".to_owned(),
+                "MISSING".to_owned(),
+            ],
+            |name| {
+                requested.borrow_mut().push(name.to_owned());
+                match name {
+                    "INTERNAL_ACCOUNT" => Some("ambient-secret".to_owned()),
+                    "MISSING" => None,
+                    _ => panic!("declared values must take precedence"),
+                }
+            },
+        );
+        assert_eq!(requested.into_inner(), ["INTERNAL_ACCOUNT", "MISSING"]);
+        assert_eq!(
+            environment.get("INTERNAL_API_KEY").map(String::as_str),
+            Some("declared-secret")
+        );
+        assert_eq!(
+            environment.get("INTERNAL_ACCOUNT").map(String::as_str),
+            Some("ambient-secret")
+        );
+        assert!(!environment.contains_key("MISSING"));
+        assert_eq!(redactions, ["ambient-secret"]);
     }
 
     #[test]

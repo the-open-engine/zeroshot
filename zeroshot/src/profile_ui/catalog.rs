@@ -15,15 +15,17 @@ use super::{WorkspaceError as ApiError, BuiltinGraphTemplate, TemplateDelivery};
 pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
     let mut result = Vec::new();
     for template in BuiltinGraphTemplate::all() {
-        let deliveries = if *template == BuiltinGraphTemplate::SoftwareChange {
-            &[
+        let deliveries = match template {
+            BuiltinGraphTemplate::SingleWorker => &[TemplateDelivery::None][..],
+            BuiltinGraphTemplate::SoftwareChange => &[
                 TemplateDelivery::None,
                 TemplateDelivery::Push,
                 TemplateDelivery::PullRequest,
                 TemplateDelivery::Merge,
-            ][..]
-        } else {
-            &[TemplateDelivery::None][..]
+            ][..],
+            BuiltinGraphTemplate::AutoResearch => {
+                &[TemplateDelivery::None, TemplateDelivery::Push][..]
+            }
         };
         for delivery in deliveries {
             let graph = materialize(*template, *delivery)?;
@@ -129,6 +131,9 @@ fn template_label(template: BuiltinGraphTemplate, delivery: TemplateDelivery) ->
         (BuiltinGraphTemplate::SoftwareChange, TemplateDelivery::Merge) => {
             "Software change · merge"
         }
+        (BuiltinGraphTemplate::AutoResearch, TemplateDelivery::None) => "Auto research",
+        (BuiltinGraphTemplate::AutoResearch, TemplateDelivery::Push) => "Auto research · push",
+        (BuiltinGraphTemplate::AutoResearch, _) => "Auto research",
     }
 }
 
@@ -199,7 +204,7 @@ mod tests {
     #[tokio::test]
     async fn template_variants_keep_exact_factory_graphs_and_admit_with_factory_bindings() {
         let templates = templates().assert_value();
-        assert_eq!(templates.len(), 5);
+        assert_eq!(templates.len(), 7);
         for template in templates {
             let kind = BuiltinGraphTemplate::parse(template["name"].as_str().assert_value())
                 .assert_value();

@@ -376,6 +376,7 @@ Options:
           Possible values:
           - single-worker:   A single general-purpose worker
           - software-change: A review, validation, and optional delivery workflow for code changes
+          - auto-research:   Ten bounded research iterations with independent evidence gates
 
       --runtime-config <FILE>
 
@@ -550,6 +551,7 @@ Arguments:
           Possible values:
           - single-worker:   A single general-purpose worker
           - software-change: A review, validation, and optional delivery workflow for code changes
+          - auto-research:   Ten bounded research iterations with independent evidence gates
 
 Options:
       --delivery <MODE>
@@ -749,7 +751,7 @@ Commands:
 ```text
 Submit a graph run locally or to a named target.
 
-When --target is omitted, the run uses the current local repository. A foreground run follows NDJSON events until completion. --detach returns after submission; Ctrl-C also detaches from observation without stopping the run. Named-target runs send GH_TOKEN, when set, for source checkout and Git delivery; providers receive it only when the runtime declares GH_TOKEN.
+When --target is omitted, the run uses the current local repository. A foreground run follows NDJSON events until completion. --detach returns after submission. Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the receipt and then detaches. During observation, Ctrl-C detaches without stopping the run. Named-target runs send GH_TOKEN, when set, for source checkout and Git delivery; providers receive it only when the runtime declares GH_TOKEN.
 
 Usage: zeroshot run [OPTIONS] --title <TITLE> --input <FILE>
 
@@ -766,6 +768,7 @@ Options:
           Possible values:
           - single-worker:   A single general-purpose worker
           - software-change: A review, validation, and optional delivery workflow for code changes
+          - auto-research:   Ten bounded research iterations with independent evidence gates
 
       --input <FILE>
           Load the graph's initial input from this JSON file
@@ -844,8 +847,9 @@ RUNTIME CONFIGURATION
     claude/openrouter, claude/bedrock, codex/gateway, claude/gateway, and copilot/github. Gateway connections
     require GATEWAY_BASE_URL and GATEWAY_API_KEY; Codex uses Responses and Claude uses Messages.
     Known-incompatible harness/provider pairs include
-    codex/anthropic and claude/openai. Copilot uses a user-backed GitHub connection with
-    COPILOT_GITHUB_TOKEN. Model IDs are passed unchanged to the selected harness and
+    codex/anthropic and claude/openai. Local Copilot reuses its native user login; contained
+    Copilot uses a user-backed GitHub connection with COPILOT_GITHUB_TOKEN. Model IDs are passed
+    unchanged to the selected harness and
     provider; Zeroshot does not maintain or validate provider model catalogs.
 
     Sizes are small, medium, and large.
@@ -861,6 +865,9 @@ RUNTIME CONFIGURATION
     --uniform-runtime-config requires harness, provider, and model. It accepts optional size,
     effort, sessionScope, and connections fields without nodes. Zeroshot expands that agent binding
     across every executable graph node and supplies graph-visible Git delivery bindings itself.
+    Omitted connections reuse native local login for codex/openai, claude/anthropic, and
+    copilot/github; other local lanes and contained targets derive their canonical connection
+    requirements.
 ```
 
 ### `zeroshot update`

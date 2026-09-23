@@ -32,7 +32,7 @@ mod submission;
 use attach::{RoutedAttach, follow_attach};
 pub(crate) use context::CliExecutionContext;
 pub use submission::{try_execute_native_v2_preflight, try_execute_native_v2_static};
-use submission::{select_connection_requirements, submit_run, validate_github_token};
+use submission::{RunSubmission, select_connection_requirements, submit_run, validate_github_token};
 use status::outcome_for_status;
 
 pub async fn execute_native_v2_cli<B, S, W>(
@@ -373,15 +373,24 @@ where
     S: DetachSignal,
     W: Write,
 {
-    let Some(receipt) = submit_run(&run, context, output).await? else {
-        write_json(output, &serde_json::json!({ "valid": true }))?;
-        return Ok(CliOutcome::Completed);
+    let detach = signal.wait();
+    tokio::pin!(detach);
+    let (receipt, interrupted) = match submit_run(&run, context, detach.as_mut(), output).await? {
+        RunSubmission::Interrupted => return Ok(CliOutcome::Detached),
+        RunSubmission::Validated => {
+            write_json(output, &serde_json::json!({ "valid": true }))?;
+            return Ok(CliOutcome::Completed);
+        }
+        RunSubmission::Submitted {
+            receipt,
+            interrupted,
+        } => (receipt, interrupted),
     };
     write_json(output, &receipt)?;
-    if run.detach {
+    if run.detach || interrupted {
         return Ok(CliOutcome::Detached);
     }
-    let outcome = follow_durable(
+    let outcome = follow_durable_with_detach(
         DurableFollow {
             backend: context.backend,
             target: run.target.as_deref(),
@@ -390,10 +399,14 @@ where
             initial_cursor: None,
             execution: None,
         },
-        signal,
+        detach.as_mut(),
         output,
     )
     .await?;
+    foreground_run_outcome(outcome)
+}
+
+fn foreground_run_outcome(outcome: CliOutcome) -> Result<CliOutcome, NativeV2CliError> {
     if outcome == CliOutcome::Failed {
         Err(NativeV2CliError::RunFailed)
     } else {
@@ -530,24 +543,36 @@ impl DurableItem {
     }
 }
 
-async fn follow_durable<B, S, W>(
+async fn follow_durable<B, S>(
     follow: DurableFollow<'_, B>,
     signal: &mut S,
-    output: &mut W,
+    output: &mut impl Write,
 ) -> Result<CliOutcome, NativeV2CliError>
 where
     B: NativeV2CliBackend,
     S: DetachSignal,
+{
+    let detach = signal.wait();
+    tokio::pin!(detach);
+    follow_durable_with_detach(follow, detach.as_mut(), output).await
+}
+
+async fn follow_durable_with_detach<B, D, W>(
+    follow: DurableFollow<'_, B>,
+    mut detach: Pin<&mut D>,
+    output: &mut W,
+) -> Result<CliOutcome, NativeV2CliError>
+where
+    B: NativeV2CliBackend,
+    D: Future<Output = ()> + ?Sized,
     W: Write,
 {
     let mut from_cursor = follow.initial_cursor.clone();
     let mut opened = false;
-    let detach = signal.wait();
-    tokio::pin!(detach);
     loop {
         let subscription = tokio::select! {
             biased;
-            () = &mut detach => return Ok(CliOutcome::Detached),
+            () = detach.as_mut() => return Ok(CliOutcome::Detached),
             result = follow.open(from_cursor.clone()) => match result {
                 Ok(subscription) => {
                     opened = true;

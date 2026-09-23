@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ApiError } from './api';
 import { watchHistoryEvents, type HistoryConnection, type HistoryObserver } from './history-stream';
+import type { HistoryRetryWait } from './history-readiness';
+import { HISTORY_PENDING_RETRY_MS } from './history-response';
 import { appendHistory } from './run-history-source';
 import { canFollowHistory } from './history-contract';
 import type { HistoryEvent, HistoryPage, RunDetail } from './run-history';
@@ -54,7 +56,8 @@ function channel() {
 function setup(
   fetcher: typeof fetch,
   overrides: Partial<HistoryObserver> = {},
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  wait?: HistoryRetryWait
 ) {
   const pages: HistoryPage[] = [],
     states: HistoryConnection[] = [],
@@ -68,19 +71,33 @@ function setup(
       ...overrides,
     },
     signal,
-    fetcher
+    fetcher,
+    wait
   );
   return { pages, states, errors, dispose };
 }
+function immediateWait(delays: number[]): HistoryRetryWait {
+  return async (signal, delayMs) => {
+    assert.equal(signal.aborted, false);
+    delays.push(delayMs);
+  };
+}
 
-test('network read failure resumes after the last accepted execution cursor', async (t) => {
+test('network and pending stream failures resume after the last accepted cursor', async (t) => {
   const first = channel(),
-    second = channel();
-  const requests: RequestInit[] = [];
-  const stream = setup(async (_url, init) => {
-    requests.push(init!);
-    return requests.length === 1 ? first.response : second.response;
-  });
+    second = channel(),
+    resumed = channel();
+  const requests: RequestInit[] = [],
+    delays: number[] = [];
+  const stream = setup(
+    async (_url, init) => {
+      requests.push(init!);
+      return [first.response, second.response, resumed.response][requests.length - 1];
+    },
+    {},
+    undefined,
+    immediateWait(delays)
+  );
   t.after(stream.dispose);
   await until(() => stream.states.includes('connected'));
   first.send(
@@ -96,7 +113,45 @@ test('network read failure resumes after the last accepted execution cursor', as
   first.disconnect();
   await until(() => requests.length === 2);
   assert.equal(new Headers(requests[1].headers).get('Last-Event-ID'), 'v2:1');
-  assert.deepEqual(stream.states, ['connecting', 'connected', 'reconnecting', 'connected']);
+  second.send(
+    'event: history_error\ndata: {"code":"history_pending","message":"History is still being prepared."}\n\n'
+  );
+  await until(() => requests.length === 3);
+  assert.equal(new Headers(requests[2].headers).get('Last-Event-ID'), 'v2:1');
+  assert.deepEqual(delays, [500, HISTORY_PENDING_RETRY_MS]);
+  assert.deepEqual(stream.states, [
+    'connecting',
+    'connected',
+    'reconnecting',
+    'connected',
+    'reconnecting',
+    'connected',
+  ]);
+  assert.equal(stream.errors.length, 0);
+});
+test('HTTP pending history reconnects without surfacing an error', async (t) => {
+  const ready = channel();
+  let calls = 0;
+  const delays: number[] = [];
+  const stream = setup(
+    async () => {
+      calls++;
+      return calls === 1
+        ? Response.json(
+            { code: 'history_pending', message: 'History is still being prepared.' },
+            { status: 503 }
+          )
+        : ready.response;
+    },
+    {},
+    undefined,
+    immediateWait(delays)
+  );
+  t.after(stream.dispose);
+  await until(() => stream.states.includes('connected'));
+  assert.equal(calls, 2);
+  assert.deepEqual(delays, [HISTORY_PENDING_RETRY_MS]);
+  assert.deepEqual(stream.states, ['connecting', 'reconnecting', 'connected']);
   assert.equal(stream.errors.length, 0);
 });
 test('HTTP denials retain status, problem code and details without reconnecting', async () => {

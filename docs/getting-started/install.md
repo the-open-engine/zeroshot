@@ -92,16 +92,18 @@ Run Zeroshot from a Git worktree, and install the agent harness named by the run
 - install and sign in to Claude Code for `"harness": "claude"`;
 - install GitHub Copilot CLI 1.0.86 for `"harness": "copilot"` with `"provider": "github"`.
 
-Provider credentials can come from the current environment or the private Zeroshot connection
-store. The command below prompts without echo and keeps the value out of runtime JSON:
+Local Codex/OpenAI, Claude/Anthropic, and Copilot/GitHub runs reuse the installed harness's native
+login and configuration. Other provider lanes can read declared values from the current environment
+or the private Zeroshot connection store. For example, this command prompts without echo and keeps
+an OpenAI value out of runtime JSON for a contained target:
 
 ```console
 zeroshot connection set openai --field OPENAI_API_KEY
 ```
 
-Use `openrouter`, `anthropic`, `bedrock`, or `gateway` as the connection key when the runtime declares that
-provider. [Runtimes and connections](../concepts/runtimes-and-connections.md) lists the default field
-names and explains the separation.
+Use `openrouter`, `anthropic`, `bedrock`, or `gateway` as the connection key when the effective
+runtime declares that provider. [Runtimes and connections](../concepts/runtimes-and-connections.md)
+lists the automatic requirements and explains the separation.
 
 ## Other installation paths
 
@@ -123,20 +125,43 @@ For a long-running target, use `ghcr.io/the-open-engine/zeroshot-target`. See th
 
 ## GitHub Copilot
 
-Copilot uses your GitHub user identity and Copilot entitlement. Store a user OAuth token or
-fine-grained personal token with Copilot Requests permission in the `github` connection's
+Copilot uses your GitHub user identity and Copilot entitlement. Local runs reuse the login stored by
+`copilot login` in `COPILOT_HOME` or the system credential store. Ambient
+`COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` values stay in private RPC and are excluded
+from agent tool environments. For a contained target, store a user OAuth token or fine-grained
+personal token with Copilot Requests permission in the `github` connection's
 `COPILOT_GITHUB_TOKEN` field. A GitHub App installation token is not the user-backed route.
-The token stays in private RPC and is excluded from agent tool environments.
+
+Local Copilot BYOK settings such as `COPILOT_PROVIDER_BASE_URL`, the static provider credential,
+headers, wire API, and wire-model mapping are also reused. Zeroshot transfers that provider
+configuration into the private headless RPC session and strips its credential fields and native
+credential-store locators from tools. Command-backed keys configured with
+`COPILOT_PROVIDER_API_KEY_COMMAND` cross that private provider contract, so the pinned CLI refreshes
+them for each provider request. Eligible helper-only invoking-shell fields are exhaustively marked
+through Copilot's `--secret-env-vars`, keeping them out of shell and MCP tools; runtime, auth,
+provider, and parent-process loader controls are excluded. Zeroshot also reads a bounded
+`COPILOT_PROVIDERS_CONFIG` or default `COPILOT_HOME/providers.json` registry and transfers its
+providers and models into the headless session; a nonempty registry takes precedence over legacy
+provider variables. An explicit declared GitHub token suppresses ambient BYOK and offline controls.
+Declared credentials replace other ambient credential forms, and a declared endpoint does not
+inherit ambient credentials or headers.
+
+This is Copilot's native same-user boundary: secret fields are not inherited by ordinary shell or
+MCP environments and are redacted from output, but the flag is not OS isolation from an adversarial
+process running as your own user.
 
 ```json
 { "harness": "copilot", "provider": "github", "model": "auto" }
 ```
 
-Model IDs pass unchanged to Copilot. Zeroshot uses headless RPC schema output and validates each
-response locally, allowing at most two correction turns in the same session. Install the pinned
-CLI version above; the target image already includes it.
+Model IDs pass unchanged to the Copilot process. When a registry entry with `apiKeyCommand` must use
+Copilot's singular provider contract, its authored `modelId` becomes the RPC session model and its
+authored `wireModel` still names the provider request model. Zeroshot uses headless RPC schema output
+and validates each response locally, allowing at most two correction turns in the same session.
+Install the pinned CLI version above; the target image already includes it.
 
 Hosted connection resolvers may additionally declare `COPILOT_GITHUB_TOKEN_EXPIRES_AT` (Unix
 seconds). Copilot then requests credentials through the resolver throughout a long execution.
-The resolver must return a refreshed token with more than one hour remaining. Static tokens
+The callback must match `COPILOT_GH_HOST` (or `GH_HOST`) when configured. The resolver must return a
+refreshed token with more than one hour remaining. Static tokens
 without expiry metadata are supplied once when each provider process starts.

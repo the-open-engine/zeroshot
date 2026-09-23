@@ -61,6 +61,7 @@ pub const LOCAL_CONTROLLER_MODE: &str = "__zeroshot-run-controller";
 const BOOTSTRAP_FILE: &str = "controller.bootstrap.json";
 const SUBMISSION_LOCK_FILE: &str = "submission.lock";
 const DEFAULT_READY_TIMEOUT: Duration = Duration::from_secs(10);
+const STALE_BOOTSTRAP_AGE: Duration = Duration::from_secs(60);
 const CONTROLLER_HANDOFF_RETRY_DELAY: Duration = Duration::from_millis(25);
 const RECOVERY_FILE: &str = "workspace-recovery.json";
 const RECOVERY_CLAIM_FILE: &str = "workspace-recovery.claim";
@@ -98,13 +99,15 @@ pub struct LocalCliBackend {
 
 impl LocalCliBackend {
     pub fn production() -> Result<Self, NativeV2CliError> {
-        Ok(Self {
+        let backend = Self {
             state_root: default_local_state_root()?,
             executable: std::env::current_exe().map_err(local_io)?,
             current_directory: std::env::current_dir().map_err(local_io)?,
             git_program: PathBuf::from("git"),
             ready_timeout: DEFAULT_READY_TIMEOUT,
-        })
+        };
+        backend.remove_stale_bootstraps(STALE_BOOTSTRAP_AGE)?;
+        Ok(backend)
     }
 
     #[must_use]
@@ -254,6 +257,7 @@ impl LocalCliBackend {
             adopt_existing_delivery,
             submission: prepared.submission,
             environment: prepared.environment,
+            native_environment: prepared.native_environment,
             github_token: prepared.github_token,
             workspace: prepared.workspace,
             workspace_lease,
@@ -353,6 +357,14 @@ impl LocalCliBackend {
         Ok(run_ids)
     }
 
+    fn remove_stale_bootstraps(&self, minimum_age: Duration) -> Result<(), NativeV2CliError> {
+        for run_id in self.local_run_ids()? {
+            let path = self.run_storage(&run_id)?.join(BOOTSTRAP_FILE);
+            remove_stale_bootstrap(&path, minimum_age)?;
+        }
+        Ok(())
+    }
+
     fn workspace_lease(&self, workspace: &Path) -> Result<PathBuf, NativeV2CliError> {
         local_workspace_lease_path(&self.state_root, workspace)
     }
@@ -383,8 +395,10 @@ impl LocalCliBackend {
             .arg(bootstrap)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .env_clear();
+            .stderr(Stdio::null());
+        // Harness context crosses the private one-shot bootstrap, not this long-lived process
+        // environment. Keep only the platform values needed to re-exec the controller.
+        command.env_clear();
         copy_minimal_process_environment(&mut command)?;
         crate::execution::platform::spawn_controller(&mut command).map_err(local_io)
     }
@@ -717,6 +731,29 @@ impl LocalCliBackend {
     }
 }
 
+fn remove_stale_bootstrap(path: &Path, minimum_age: Duration) -> Result<(), NativeV2CliError> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                return Ok(());
+            }
+            return Err(local_io(error));
+        }
+    };
+    let stale = metadata.is_file()
+        && !metadata.file_type().is_symlink()
+        && metadata
+            .modified()
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age >= minimum_age);
+    if stale {
+        std::fs::remove_file(path).map_err(local_io)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn local_workspace_lease_path(
     state_root: &Path,
     workspace: &Path,
@@ -889,9 +926,28 @@ mod recovery_claim_tests {
         );
     }
 
+    #[test]
+    fn stale_private_bootstraps_are_scavenged_without_touching_other_state() {
+        let root = TestDirectory::new("stale-bootstrap");
+        let run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000001");
+        let backend = backend(root.path());
+        let storage = backend.create_run_storage(&run_id).assert_value();
+        let bootstrap = storage.join(BOOTSTRAP_FILE);
+        let retained = storage.join("retained-state");
+        std::fs::write(&bootstrap, b"ambient-secret").assert_value();
+        std::fs::write(&retained, b"keep").assert_value();
+
+        backend
+            .remove_stale_bootstraps(Duration::ZERO)
+            .assert_value();
+
+        assert!(!bootstrap.exists());
+        assert!(retained.exists());
+    }
+
     #[tokio::test]
     async fn interrupted_resume_with_empty_ledger_clears_the_successor_claim() {
-        let fixture = resume_claim_fixture("lr-empty", "interrupted-resume");
+        let fixture = resume_claim_fixture("lre", "interrupted-resume");
         drop(SqliteRunLedger::open(fixture.successor_storage.join("runs.sqlite3")).assert_value());
 
         fixture
@@ -913,7 +969,7 @@ mod recovery_claim_tests {
 
     #[tokio::test]
     async fn interrupted_resume_with_a_durable_successor_keeps_the_claim() {
-        let fixture = resume_claim_fixture("lr-durable", "durable-successor");
+        let fixture = resume_claim_fixture("lrd", "durable-successor");
         let ledger =
             SqliteRunLedger::open(fixture.successor_storage.join("runs.sqlite3")).assert_value();
         let admitted = NativeV2Admission

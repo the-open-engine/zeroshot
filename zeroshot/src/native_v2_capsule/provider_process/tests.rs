@@ -171,6 +171,24 @@ fn provider_diagnostic_is_redacted_sanitized_and_bounded() {
 }
 
 #[test]
+fn provider_retry_extends_dynamic_redactions_in_longest_first_order() {
+    let mut retry =
+        ProviderFailureRetry::new("Codex", "prompt".to_owned(), vec!["secret".to_owned()]);
+    retry.extend_redactions(&["secret-tail".to_owned(), "secret".to_owned(), String::new()]);
+
+    assert_eq!(retry.redactions, ["secret-tail", "secret"]);
+    assert_eq!(
+        provider_failure_diagnostic(
+            "Codex",
+            Some("dynamic=secret-tail base=secret"),
+            None,
+            &retry.redactions,
+        ),
+        "Codex provider failure: dynamic=[REDACTED] base=[REDACTED]"
+    );
+}
+
+#[test]
 fn bounded_diagnostic_keeps_utf8_parser_context_and_process_root_cause() {
     let mut output = process_output();
     output.exit_code = Some(23);

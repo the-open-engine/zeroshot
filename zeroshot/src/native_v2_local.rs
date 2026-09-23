@@ -26,13 +26,15 @@ use crate::native_v2_claude::{ClaudeAdapterConfig, ClaudeAdapterConfigError, Cla
 use crate::native_v2_cli::PreparedRunRequest;
 use crate::native_v2_codex::{NativeV2CodexConfig, NativeV2CodexUser};
 use crate::native_v2_contract::AdmittedRun;
-use crate::native_v2_copilot::CopilotConfig;
+use crate::native_v2_copilot::{CopilotConfig, CopilotLocalUser};
+use crate::native_v2_capsule::provider_process::{COPILOT_LOCAL_ENVIRONMENT, LocalHarnessEnvironment};
 use crate::native_v2_delivery::{
     DeliveryTarget, GhCliAuthorityConfig, GhCliDeliveryAuthority, NativeV2DeliveryConfig,
 };
 use crate::native_v2_runner::{NativeNodeRunner, NodeRunner};
 use crate::native_v2_supervisor::{RunEnvironment, RunEnvironmentError};
 
+#[cfg(not(windows))]
 const DEFAULT_SEARCH_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 const MAX_GIT_OUTPUT_BYTES: usize = 16 * 1024;
 
@@ -52,6 +54,8 @@ pub enum LocalCompositionError {
     RunEnvironment(#[from] RunEnvironmentError),
     #[error("local controller storage could not be prepared")]
     Storage,
+    #[error("local harness environment could not be represented")]
+    NativeEnvironment,
     #[error(transparent)]
     Claude(#[from] ClaudeAdapterConfigError),
     #[error(transparent)]
@@ -66,6 +70,7 @@ pub struct PreparedLocalRun {
     pub environment: RunEnvironment,
     pub github_token: Option<String>,
     pub workspace: PathBuf,
+    pub native_environment: BTreeMap<String, String>,
 }
 
 pub struct LocalProcessCandidateRequest<'a> {
@@ -75,6 +80,7 @@ pub struct LocalProcessCandidateRequest<'a> {
     pub workspace: &'a Path,
     pub storage: &'a Path,
     pub github_token: Option<String>,
+    pub native_environment: &'a BTreeMap<String, String>,
 }
 
 /// Snapshots local source and revalidates the request's exact runtime environment.
@@ -93,6 +99,7 @@ pub fn prepare_local_run(
     } = request;
     let environment = RunEnvironment::exact(&intent.runtime, connections)?;
     let (workspace, source) = local_resolved_source(current_directory, git_program)?;
+    let native_environment = capture_local_native_environment(current_directory)?;
     Ok(PreparedLocalRun {
         delivery_run_id: run_id.clone(),
         run_id,
@@ -107,7 +114,35 @@ pub fn prepare_local_run(
         environment,
         github_token,
         workspace,
+        native_environment,
     })
+}
+
+pub(crate) fn capture_local_native_environment(
+    invoking_directory: &Path,
+) -> Result<BTreeMap<String, String>, LocalCompositionError> {
+    let mut environment = LocalHarnessEnvironment::new(
+        crate::native_v2_capsule::provider_process::current_process_environment(),
+    );
+    for name in [
+        "CODEX_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "COPILOT_HOME",
+        "COPILOT_PROVIDERS_CONFIG",
+    ] {
+        let Some(value) = environment.get_mut(name) else {
+            continue;
+        };
+        let path = PathBuf::from(&*value);
+        if path.is_relative() {
+            *value = invoking_directory
+                .join(path)
+                .into_os_string()
+                .into_string()
+                .map_err(|_| LocalCompositionError::NativeEnvironment)?;
+        }
+    }
+    Ok(environment.into_values())
 }
 
 pub(crate) fn local_resolved_source(
@@ -233,47 +268,11 @@ fn build_local_candidate_config(
         workspace,
         storage,
         github_token,
+        native_environment,
     } = request;
     let runtime_home = storage.join("runtime");
     prepare_private_directory(&runtime_home)?;
-    let search_path = std::env::var("PATH").unwrap_or_else(|_| DEFAULT_SEARCH_PATH.to_owned());
-    let local_home = current_user_home();
-    let process_pool = HostedProcessPool::hosted_default();
-    let harness = match &admitted.runtime {
-        RuntimePlan::Copilot { .. } => NativeV2HarnessConfig::Copilot(CopilotConfig {
-            executable: PathBuf::from("copilot"),
-            workspace: workspace.to_owned(),
-            runtime_home: runtime_home.clone(),
-            search_path: search_path.clone(),
-            process_pool,
-        }),
-        RuntimePlan::Codex { provider, .. } => NativeV2HarnessConfig::Codex(NativeV2CodexConfig {
-            provider: *provider,
-            executable: PathBuf::from("codex"),
-            workspace: workspace.to_owned(),
-            runtime_home: runtime_home.clone(),
-            local_user: local_home.clone().map(|home| NativeV2CodexUser {
-                codex_home: std::env::var_os("CODEX_HOME")
-                    .filter(|value| !value.is_empty())
-                    .map_or_else(|| home.join(".codex"), PathBuf::from),
-                home,
-            }),
-            search_path: search_path.clone(),
-            process_pool,
-        }),
-        RuntimePlan::Claude { provider, .. } => {
-            NativeV2HarnessConfig::Claude(ClaudeAdapterConfig {
-                provider: *provider,
-                executable: "claude".to_owned(),
-                prefix_arguments: Vec::new(),
-                workspace: workspace.to_owned(),
-                runtime_home: runtime_home.clone(),
-                local_user_home: local_home,
-                base_environment: local_claude_environment(&search_path)?,
-                process_pool,
-            })
-        }
-    };
+    let harness = local_harness(admitted, workspace, &runtime_home, native_environment)?;
     let target = DeliveryTarget::new(
         admitted.source.repository.as_str(),
         admitted.source.branch.as_str(),
@@ -308,17 +307,102 @@ fn build_local_candidate_config(
     }
 }
 
-fn current_user_home() -> Option<PathBuf> {
-    crate::execution::platform::user_home()
+fn local_harness(
+    admitted: &AdmittedRun,
+    workspace: &Path,
+    runtime_home: &Path,
+    native_environment: &BTreeMap<String, String>,
+) -> Result<NativeV2HarnessConfig, LocalCompositionError> {
+    let native_environment = LocalHarnessEnvironment::new(native_environment.clone());
+    let local_command_environment = native_environment.clone().into_values();
+    let search_path = native_environment
+        .get("PATH")
+        .filter(|value| !value.is_empty())
+        .cloned()
+        .unwrap_or_else(|| default_search_path(&native_environment));
+    let local_home = current_user_home(&native_environment);
+    let process_pool = HostedProcessPool::hosted_default();
+    let harness = match &admitted.runtime {
+        RuntimePlan::Copilot { .. } => NativeV2HarnessConfig::Copilot(CopilotConfig {
+            executable: PathBuf::from("copilot"),
+            workspace: workspace.to_owned(),
+            runtime_home: runtime_home.to_owned(),
+            local_user: local_home.clone().map(|home| CopilotLocalUser {
+                copilot_home: native_environment
+                    .get("COPILOT_HOME")
+                    .filter(|value| !value.is_empty())
+                    .map_or_else(|| home.join(".copilot"), PathBuf::from),
+                home,
+            }),
+            base_environment: native_environment.selected(COPILOT_LOCAL_ENVIRONMENT),
+            local_command_environment,
+            search_path: search_path.clone(),
+            process_pool,
+        }),
+        RuntimePlan::Codex { provider, .. } => NativeV2HarnessConfig::Codex(NativeV2CodexConfig {
+            provider: *provider,
+            executable: PathBuf::from("codex"),
+            workspace: workspace.to_owned(),
+            runtime_home: runtime_home.to_owned(),
+            local_user: local_home.clone().map(|home| NativeV2CodexUser {
+                codex_home: native_environment
+                    .get("CODEX_HOME")
+                    .filter(|value| !value.is_empty())
+                    .map_or_else(|| home.join(".codex"), PathBuf::from),
+                home,
+            }),
+            native_environment: native_environment.clone(),
+            search_path: search_path.clone(),
+            process_pool,
+        }),
+        RuntimePlan::Claude { provider, .. } => {
+            NativeV2HarnessConfig::Claude(ClaudeAdapterConfig {
+                provider: *provider,
+                executable: "claude".to_owned(),
+                prefix_arguments: Vec::new(),
+                workspace: workspace.to_owned(),
+                runtime_home: runtime_home.to_owned(),
+                local_user_home: local_home,
+                native_environment: native_environment.clone(),
+                base_environment: local_claude_environment(&search_path, &native_environment)?,
+                process_pool,
+            })
+        }
+    };
+    Ok(harness)
+}
+
+fn current_user_home(environment: &LocalHarnessEnvironment) -> Option<PathBuf> {
+    environment
+        .user_home()
+        .map(PathBuf::from)
+        .or_else(crate::execution::platform::user_home)
+}
+
+fn default_search_path(environment: &LocalHarnessEnvironment) -> String {
+    #[cfg(windows)]
+    {
+        environment
+            .get("SystemRoot")
+            .filter(|value| !value.is_empty())
+            .map(|root| format!(r"{root}\System32;{root}"))
+            .unwrap_or_else(|| r"C:\Windows\System32;C:\Windows".to_owned())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = environment;
+        DEFAULT_SEARCH_PATH.to_owned()
+    }
 }
 
 fn local_claude_environment(
     search_path: &str,
+    native_environment: &LocalHarnessEnvironment,
 ) -> Result<ClaudeProcessEnvironment, ClaudeAdapterConfigError> {
     let mut base_environment = BTreeMap::from([("PATH".to_owned(), search_path.to_owned())]);
     for name in ["LANG", "LC_ALL", "TERM", "TMPDIR"] {
-        if let Ok(value) = std::env::var(name) {
-            base_environment.insert(name.to_owned(), value);
+        if let Some(value) = native_environment.get(name) {
+            base_environment.insert(name.to_owned(), value.clone());
         }
     }
     ClaudeProcessEnvironment::new(base_environment)
