@@ -587,6 +587,9 @@ python -m mkdocs build --strict
   `scripts/test-windows.ps1` to run test executables outside Cargo's restrictive Job; the CI-only
   `.github/scripts/test-windows-host.ps1` also starts outside the hosted runner's Job. Linux also executes
   hosted process and filesystem boundary tests as root against its built test binary.
+- `.github/workflows/coverage.yml` measures the default workspace and UI-feature Rust test surfaces
+  on native changes and publishes LCOV to Coveralls. Coverage is observational and stays outside the
+  required CI aggregate.
 - `.github/workflows/release.yml` is the only canonical product release workflow.
 - It generates the GitHub Release body from the exact first-parent commits since the preceding
   canonical tag. Every released commit must retain a Conventional Commit squash title ending in

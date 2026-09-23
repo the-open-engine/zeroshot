@@ -10,6 +10,7 @@ const packageManifest = require('../../npm/zeroshot/package.json');
 describe('npm binary shim', () => {
   it('owns the canonical public package and command', () => {
     assert.equal(packageManifest.name, '@the-open-engine-company/zeroshot');
+    assert.equal(packageManifest.homepage, 'https://the-open-engine.github.io/zeroshot/');
     assert.deepEqual(packageManifest.bin, { zeroshot: 'bin/zeroshot.js' });
     assert.equal(packageManifest.scripts.postinstall, 'node install.js');
     assert.equal(packageManifest.files.includes('skills/'), true);
