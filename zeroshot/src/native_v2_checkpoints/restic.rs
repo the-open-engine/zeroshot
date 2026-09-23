@@ -218,7 +218,14 @@ impl Repository {
     async fn run(&self, directory: &Path, arguments: &[OsString]) -> io::Result<Vec<u8>> {
         #[cfg(test)]
         if self.program.in_process_test_fake {
-            return self.run_test_fake(directory, arguments);
+            let result = self.run_test_fake(directory, arguments);
+            if let Err(error) = &result {
+                eprintln!(
+                    "in-process Restic test fake failed for {:?}: {error:?}",
+                    arguments.first()
+                );
+            }
+            return result;
         }
         let mut environment = BTreeMap::new();
         platform::process_environment(&mut environment);
