@@ -294,11 +294,8 @@ async fn invalid_restic_snapshot_mapping_is_rejected_before_workspace_changes() 
     assert_eq!(fixture.source(), "live edits");
 }
 
-#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn real_restic_deduplicates_incremental_stages_and_restores_the_latest_bytes() {
-    use std::os::unix::fs::MetadataExt;
-
     let Some(executable) = std::env::var_os("ZEROSHOT_RESTIC") else {
         return;
     };
@@ -361,18 +358,18 @@ async fn real_restic_deduplicates_incremental_stages_and_restores_the_latest_byt
         0
     );
 
-    fn allocated(path: &std::path::Path) -> u64 {
+    fn stored_bytes(path: &std::path::Path) -> u64 {
         let metadata = fs::symlink_metadata(path).assert_value();
         if metadata.is_dir() {
             fs::read_dir(path)
                 .assert_value()
-                .map(|entry| allocated(&entry.assert_value().path()))
+                .map(|entry| stored_bytes(&entry.assert_value().path()))
                 .sum()
         } else {
-            metadata.blocks() * 512
+            metadata.len()
         }
     }
-    let repository_bytes = allocated(&repository);
+    let repository_bytes = stored_bytes(&repository);
     let two_full_copies = (bytes.len() * 2) as u64;
     assert!(
         repository_bytes < two_full_copies * 3 / 4,
