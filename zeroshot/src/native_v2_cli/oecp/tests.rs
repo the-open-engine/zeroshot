@@ -2,14 +2,17 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use openengine_cluster_client::{
-    JsonRpcTransport, PumpedSubscription, SubscriptionTransport, TransportError,
+    JsonRpcTransport, NdjsonTransport, PumpedSubscription, RunSubscriptionClient,
+    SubscriptionTransport, TransportError,
 };
 use openengine_cluster_protocol::{
-    ConnectionKey, ConnectionScope, EnvironmentVariableName, ExecutionRef, RequestId, RunId,
-    RunProfileName, RunProfileScope, StaticConnectionValues, SubscriptionId,
+    ConnectionKey, ConnectionScope, EnvironmentVariableName, ExecutionRef, IdempotencyKey,
+    MergePlanSource, RequestId, RunId, RunProfileName, RunProfileScope, RunTitle, SourceBranchId,
+    SourceRepositoryId, StaticConnectionValues, SubscriptionCloseReason, SubscriptionId,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{Value, json};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use super::*;
 
@@ -237,6 +240,40 @@ fn status(phase: &str) -> CliRunStatusResult {
     .assert_value()
 }
 
+fn profile_set_request() -> RunProfileSetRequest {
+    RunProfileSetRequest {
+        name: RunProfileName::new("review").assert_value(),
+        scope: RunProfileScope::Org,
+        graph: crate::native_v2_cli::BuiltinGraphTemplate::SingleWorker
+            .materialize(crate::native_v2_cli::TemplateDelivery::None)
+            .assert_value(),
+        runtime: serde_json::from_value(json!({
+            "harness":"codex",
+            "provider":"openai",
+            "size":"small",
+            "nodes":{"worker":{"kind":"agent","model":"provider-model"}}
+        }))
+        .assert_value(),
+        set_default: false,
+    }
+}
+
+fn merge_plan_request() -> PreparedMergePlanRequest {
+    PreparedMergePlanRequest {
+        submission_key: IdempotencyKey::new("oecp-merge-plan").assert_value(),
+        title: RunTitle::new("OECP merge plan").assert_value(),
+        expires_at: "2026-09-24T00:00:00Z".to_owned(),
+        source: MergePlanSource {
+            repository: SourceRepositoryId::new("open-engine/zeroshot").assert_value(),
+            branch: SourceBranchId::new("main").assert_value(),
+        },
+        profile: selector(),
+        runs: Vec::new(),
+        connections: BTreeMap::new(),
+        github_token: None,
+    }
+}
+
 #[tokio::test]
 async fn wave7_cli_contract_oecp_management_and_default_authority_fail_closed() {
     let connector = StubConnector::new(None);
@@ -291,6 +328,11 @@ async fn wave7_cli_contract_oecp_management_and_default_authority_fail_closed() 
             .assert_error()
             .to_string(),
         backend
+            .profile_set(Some("prod"), profile_set_request())
+            .await
+            .assert_error()
+            .to_string(),
+        backend
             .profile_delete(Some("prod"), selector())
             .await
             .assert_error()
@@ -313,6 +355,7 @@ async fn wave7_cli_contract_oecp_management_and_default_authority_fail_closed() 
         "connection_delete",
         "profile_list",
         "profile_show",
+        "profile_set",
         "profile_delete",
         "profile_default",
     ]) {
@@ -331,6 +374,14 @@ async fn wave7_cli_contract_oecp_default_optional_authority_is_refused() {
         Err(NativeV2CliError::Target(message))
             if message.contains("local controller composition")
     ));
+    assert!(
+        backend
+            .merge_plan_submit("prod", merge_plan_request())
+            .await
+            .assert_error()
+            .to_string()
+            .contains("does not advertise merge plans")
+    );
     assert!(
         backend
             .merge_plan_status("prod", MergePlanId::new("plan"))
@@ -503,4 +554,119 @@ async fn wave7_cli_contract_oecp_hosted_operations_and_task_cursors_fail_closed(
     );
     assert!(task_cursor(Some(Cursor::new("cloud:7"))).is_none());
     assert!(task_cursor(None).is_none());
+}
+
+async fn forward_watch_script(
+    notifications: Vec<Value>,
+    consumer_is_open: bool,
+) -> Vec<Result<CliSubscriptionItem<CliRunWatchEventNotification>, NativeV2CliError>> {
+    let (client_write, server_read) = tokio::io::duplex(16 * 1024);
+    let (mut server_write, client_read) = tokio::io::duplex(16 * 1024);
+    let server = tokio::spawn(async move {
+        let mut reader = BufReader::new(server_read);
+        let mut request = String::new();
+        reader.read_line(&mut request).await.assert_value();
+        let request: Value = serde_json::from_str(&request).assert_value();
+        assert_eq!(request.get("method"), Some(&json!("run/watch")));
+        let response = json!({
+            "jsonrpc":"2.0",
+            "id":request.get("id").assert_value(),
+            "result":{
+                "subscriptionId":"watch-forward",
+                "runId":"run-contract",
+                "atCursor":"v2:0"
+            }
+        });
+        server_write
+            .write_all(format!("{response}\n").as_bytes())
+            .await
+            .assert_value();
+        for notification in notifications {
+            server_write
+                .write_all(format!("{notification}\n").as_bytes())
+                .await
+                .assert_value();
+        }
+        server_write.shutdown().await.assert_value();
+    });
+
+    let transport = NdjsonTransport::new(client_read, client_write);
+    let (_, mut stream) = RunSubscriptionClient::new(&transport)
+        .run_watch(RunWatchParams {
+            run_id: RunId::new("run-contract"),
+            from_cursor: None,
+        })
+        .await
+        .assert_value();
+    let (sender, mut receiver) = mpsc::channel(4);
+    if consumer_is_open {
+        forward(&mut stream, sender).await;
+        let mut items = Vec::new();
+        while let Some(item) = receiver.recv().await {
+            items.push(item);
+        }
+        server.await.assert_value();
+        items
+    } else {
+        drop(receiver);
+        forward(&mut stream, sender).await;
+        server.await.assert_value();
+        Vec::new()
+    }
+}
+
+#[tokio::test]
+async fn oecp_forwarding_preserves_close_errors_eof_and_consumer_drop() {
+    let closed = forward_watch_script(
+        vec![json!({
+            "jsonrpc":"2.0",
+            "method":"subscription/closed",
+            "params":{"subscriptionId":"watch-forward","reason":"done"}
+        })],
+        true,
+    )
+    .await;
+    assert!(matches!(
+        closed.as_slice(),
+        [Ok(CliSubscriptionItem::Closed {
+            reason: SubscriptionCloseReason::Done,
+        })]
+    ));
+
+    let malformed = forward_watch_script(
+        vec![json!({
+            "jsonrpc":"2.0",
+            "method":"unexpected",
+            "params":{"subscriptionId":"watch-forward"}
+        })],
+        true,
+    )
+    .await;
+    assert!(matches!(malformed.as_slice(), [Err(_)]));
+
+    assert!(forward_watch_script(Vec::new(), true).await.is_empty());
+    assert!(
+        forward_watch_script(
+            vec![json!({
+                "jsonrpc":"2.0",
+                "method":"event",
+                "params":{
+                    "subscriptionId":"watch-forward",
+                    "runId":"run-contract",
+                    "cursor":"v2:1",
+                    "title":"Forwarding contract",
+                    "source":{
+                        "repository":"open-engine/zeroshot",
+                        "branch":"main",
+                        "revision":"0123456789abcdef0123456789abcdef01234567"
+                    },
+                    "size":"small",
+                    "status":{"phase":"admitted"}
+                }
+            })],
+            false,
+        )
+        .await
+        .is_empty()
+    );
 }

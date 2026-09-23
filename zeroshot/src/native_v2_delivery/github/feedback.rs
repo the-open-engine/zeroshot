@@ -253,10 +253,13 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::*;
+    #[cfg(unix)]
     use super::super::observation::test_support::{
         HEAD, OTHER_HEAD, assert_retryable_api, authority, receipt, shell_literal, write_executable,
     };
-    use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
+    #[cfg(unix)]
+    use openengine_cluster_testkit::assertions::AssertError;
+    use openengine_cluster_testkit::assertions::AssertValue;
     use serde_json::{Value, json};
 
     fn user(login: &str) -> UserWire {
@@ -265,6 +268,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn review_wire(head: &str) -> Value {
         json!({
             "number": 17,

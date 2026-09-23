@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::Write;
 
 use openengine_cluster_protocol::{
     ConnectionKey, ConnectionScope, EnvironmentVariableName, StaticConnectionValues,
@@ -7,8 +8,21 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{Value, json};
 
 use super::*;
+use crate::native_v2_cli::local::LocalCliBackend;
 use crate::native_v2_cli::tests::support::{Call, FakeBackend};
 use crate::native_v2_cli::ConnectionRoute;
+
+struct UnavailableOutput;
+
+impl Write for UnavailableOutput {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Err(std::io::Error::other("output unavailable"))
+    }
+}
 
 #[tokio::test]
 async fn wave7_cli_contract_management_routes_values_without_secret_output() {
@@ -190,4 +204,113 @@ fn wave6_cli_contract_connection_inputs_are_bounded_and_fail_closed() {
     )
     .unwrap_err();
     assert!(matches!(io_error, NativeV2CliError::Output(_)));
+
+    let mut prompts = 0;
+    let prompt_error = read_connection_values_with(
+        ConnectionInput::Prompt(fields),
+        |_| {
+            prompts += 1;
+            if prompts == 2 {
+                Err(std::io::Error::other("terminal unavailable"))
+            } else {
+                Ok("first-secret".to_owned())
+            }
+        },
+        || panic!("prompt input must not read stdin"),
+    )
+    .unwrap_err();
+    assert!(matches!(prompt_error, NativeV2CliError::Output(_)));
+    assert_eq!(prompts, 2, "prompting must stop at the first I/O failure");
+}
+
+#[tokio::test]
+async fn connection_mutations_surface_output_failure_after_backend_completion() {
+    let backend = FakeBackend::default();
+    let route = ConnectionRoute {
+        target: Some("prod".to_owned()),
+        scope: ConnectionScope::Org,
+    };
+    let field = EnvironmentVariableName::new("OPENAI_API_KEY").assert_value();
+    let values =
+        StaticConnectionValues::new(BTreeMap::from([(field, "provider-secret".to_owned())]))
+            .assert_value();
+
+    let listed = execute_connection(
+        NativeV2CliCommand::ConnectionList(route.clone()),
+        &backend,
+        &mut UnavailableOutput,
+    )
+    .await;
+    assert!(matches!(listed, Err(NativeV2CliError::Output(_))));
+
+    let stored = store_connection_values(
+        &route,
+        ConnectionSetRequest {
+            key: ConnectionKey::new("openai").assert_value(),
+            scope: route.scope,
+            values,
+        },
+        &backend,
+        &mut UnavailableOutput,
+    )
+    .await;
+    assert!(matches!(stored, Err(NativeV2CliError::Output(_))));
+
+    let deleted = execute_connection(
+        NativeV2CliCommand::ConnectionDelete {
+            route: route.clone(),
+            key: ConnectionKey::new("openai").assert_value(),
+        },
+        &backend,
+        &mut UnavailableOutput,
+    )
+    .await;
+    assert!(matches!(deleted, Err(NativeV2CliError::Output(_))));
+    assert_eq!(backend.calls().len(), 3);
+
+    let root = tempfile::tempdir().assert_value();
+    let local = LocalCliBackend::new(
+        root.path().to_path_buf(),
+        "zeroshot".into(),
+        root.path().to_path_buf(),
+        "git".into(),
+    );
+    let mut refused_output = Vec::new();
+    let listed = execute_connection(
+        NativeV2CliCommand::ConnectionList(route.clone()),
+        &local,
+        &mut refused_output,
+    )
+    .await;
+    assert!(matches!(listed, Err(NativeV2CliError::Local(_))));
+    let stored = store_connection_values(
+        &route,
+        ConnectionSetRequest {
+            key: ConnectionKey::new("openai").assert_value(),
+            scope: route.scope,
+            values: StaticConnectionValues::new(BTreeMap::from([(
+                EnvironmentVariableName::new("OPENAI_API_KEY").assert_value(),
+                "provider-secret".to_owned(),
+            )]))
+            .assert_value(),
+        },
+        &local,
+        &mut refused_output,
+    )
+    .await;
+    assert!(matches!(stored, Err(NativeV2CliError::Local(_))));
+    let deleted = execute_connection(
+        NativeV2CliCommand::ConnectionDelete {
+            route,
+            key: ConnectionKey::new("openai").assert_value(),
+        },
+        &local,
+        &mut refused_output,
+    )
+    .await;
+    assert!(matches!(deleted, Err(NativeV2CliError::Local(_))));
+    assert!(
+        refused_output.is_empty(),
+        "backend refusal must not emit a partial response"
+    );
 }

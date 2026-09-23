@@ -203,16 +203,19 @@ impl ClusterBackend for FakeBackend {
                 run_id: run_id(),
                 execution: execution(),
             },
-            stream(vec![RunSubscriptionItem::Event(
-                RunAttachEventNotification {
+            stream(vec![
+                RunSubscriptionItem::Event(RunAttachEventNotification {
                     subscription_id,
                     run_id: run_id(),
                     execution: execution(),
                     event: AgentAttachEvent::Output {
                         text: BoundedAssistantOutput::new("live").assert_value(),
                     },
+                }),
+                RunSubscriptionItem::Closed {
+                    reason: SubscriptionCloseReason::Done,
                 },
-            )]),
+            ]),
         ))
     }
 
@@ -343,6 +346,16 @@ async fn typed_direct_subscription_surface_reuses_run_observation_values() {
             RunAttachEventNotification { .. }
         ))
     ));
+    assert!(matches!(
+        attach.next().await,
+        Some(RunSubscriptionItem::Closed {
+            reason: SubscriptionCloseReason::Done
+        })
+    ));
+    assert!(
+        attach.next().await.is_none(),
+        "attach close must be terminal"
+    );
 }
 
 async fn write_request(writer: &mut DuplexStream, method: &str, params: Value) {
@@ -380,6 +393,43 @@ async fn ndjson_routes_run_watch_and_emits_resume_cursor_on_close() {
     assert_eq!(
         closed.assert_at("params").assert_at("lastDeliveredCursor"),
         "v2:3"
+    );
+
+    drop(writer);
+    await_ndjson_shutdown(server).await;
+}
+
+#[tokio::test]
+async fn ndjson_run_attach_close_has_no_resume_cursor() {
+    let (mut writer, reader, server) = spawn_ndjson(FakeBackend);
+    let mut reader = BufReader::new(reader);
+    write_request(
+        &mut writer,
+        "run/attach",
+        json!({"runId":"run-1", "execution":"execution-1"}),
+    )
+    .await;
+
+    let response = read_value(&mut reader).await;
+    assert_eq!(
+        response.assert_at("result").assert_at("subscriptionId"),
+        "attach-1"
+    );
+    let event = read_value(&mut reader).await;
+    assert_eq!(event.assert_at("method"), "event");
+    assert_eq!(
+        event.assert_at("params").assert_at("subscriptionId"),
+        "attach-1"
+    );
+    let closed = read_value(&mut reader).await;
+    assert_eq!(closed.assert_at("method"), "subscription/closed");
+    assert_eq!(closed.assert_at("params").assert_at("reason"), "done");
+    assert!(
+        closed
+            .assert_at("params")
+            .get("lastDeliveredCursor")
+            .is_none(),
+        "attach close must not invent a resume cursor"
     );
 
     drop(writer);

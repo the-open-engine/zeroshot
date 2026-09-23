@@ -96,11 +96,14 @@ async fn assert_private_bootstrap_is_exact_and_public_startup_stays_public() {
 
     #[cfg(not(feature = "ui"))]
     assert!(
-        serve_ui("127.0.0.1:0".parse().assert_value(), None)
-            .await
-            .assert_error()
-            .to_string()
-            .contains("cargo build -p zeroshot --features ui")
+        dispatch(NativeV2CliCommand::Ui {
+            listen: "127.0.0.1:0".parse().assert_value(),
+            target: None,
+        })
+        .await
+        .assert_error()
+        .to_string()
+        .contains("cargo build -p zeroshot --features ui")
     );
 }
 
@@ -165,6 +168,40 @@ async fn assert_static_dispatch_and_remaining_management_routes_are_exact() {
     dispatch(NativeV2CliCommand::Version).await.assert_value();
     let templates = parse_native_v2_args(["template", "list"].map(OsString::from)).assert_value();
     dispatch(templates).await.assert_value();
+
+    let input = tempfile::Builder::new()
+        .prefix("zeroshot-main-input-")
+        .tempfile()
+        .assert_value();
+    let runtime = tempfile::Builder::new()
+        .prefix("zeroshot-main-runtime-")
+        .tempfile()
+        .assert_value();
+    std::fs::write(input.path(), r#"{"task":"validate public routing"}"#).assert_value();
+    std::fs::write(
+        runtime.path(),
+        r#"{
+            "harness":"codex",
+            "provider":"openai",
+            "size":"small",
+            "nodes":{"worker":{"kind":"agent","model":"provider-model"}}
+        }"#,
+    )
+    .assert_value();
+    let validate = parse_native_v2_args(vec![
+        OsString::from("run"),
+        OsString::from("--title"),
+        OsString::from("Validate public routing"),
+        OsString::from("--input"),
+        input.path().as_os_str().to_owned(),
+        OsString::from("--template"),
+        OsString::from("single-worker"),
+        OsString::from("--runtime-config"),
+        runtime.path().as_os_str().to_owned(),
+        OsString::from("--validate-only"),
+    ])
+    .assert_value();
+    run_public_command(validate).await.assert_value();
 }
 
 #[tokio::test]

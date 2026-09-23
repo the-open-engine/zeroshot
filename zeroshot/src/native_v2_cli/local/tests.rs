@@ -551,33 +551,36 @@ async fn assert_local_stale_state_and_readiness_fail_closed() {
     assert!(require_local(None).is_ok());
     assert!(require_local(Some("prod")).is_err());
 
-    let paths = PortableControllerPaths::new(storage);
-    let mut exited = tokio::process::Command::new("sh")
-        .args(["-c", "exit 0"])
-        .spawn()
-        .assert_value();
-    exited.wait().await.assert_value();
-    assert!(
-        wait_for_controller(&mut exited, &paths, &run_id, Duration::ZERO)
-            .await
-            .assert_error()
-            .to_string()
-            .contains("exited before becoming ready")
-    );
+    #[cfg(unix)]
+    {
+        let paths = PortableControllerPaths::new(storage);
+        let mut exited = tokio::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .assert_value();
+        exited.wait().await.assert_value();
+        assert!(
+            wait_for_controller(&mut exited, &paths, &run_id, Duration::ZERO)
+                .await
+                .assert_error()
+                .to_string()
+                .contains("exited before becoming ready")
+        );
 
-    let mut waiting = tokio::process::Command::new("sh")
-        .args(["-c", "read _"])
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .assert_value();
-    assert!(
-        wait_for_controller(&mut waiting, &paths, &run_id, Duration::ZERO)
-            .await
-            .assert_error()
-            .to_string()
-            .contains("before the deadline")
-    );
-    waiting.kill().await.assert_value();
+        let mut waiting = tokio::process::Command::new("sh")
+            .args(["-c", "read _"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .assert_value();
+        assert!(
+            wait_for_controller(&mut waiting, &paths, &run_id, Duration::ZERO)
+                .await
+                .assert_error()
+                .to_string()
+                .contains("before the deadline")
+        );
+        waiting.kill().await.assert_value();
+    }
 }
 
 async fn assert_observer_recovers_durable_local_status_without_controller_process() {

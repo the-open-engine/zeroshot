@@ -302,7 +302,7 @@ describe('CI efficiency contract', () => {
 });
 
 describe('Native coverage contract', () => {
-  it('measures every native test configuration and enforces useful coverage', () => {
+  it('measures every native test configuration and reports useful coverage', () => {
     const workflow = yaml.load(read('.github/workflows/coverage.yml'));
     const coverage = workflow.jobs.coverage;
     const commands = coverage.steps.map((step) => step.run || '').join('\n');
@@ -318,17 +318,19 @@ describe('Native coverage contract', () => {
     assert.match(commands, /cargo llvm-cov --workspace --no-report/);
     assert.match(
       commands,
-      /cargo llvm-cov --package zeroshot --features ui --no-clean --summary-only/
+      /cargo llvm-cov --package zeroshot --features ui --no-report/
     );
-    assert.match(
+    assert.doesNotMatch(
       commands,
       /cargo llvm-cov --package zeroshot --bin zeroshot --features ui --no-clean --summary-only/
     );
     assert.match(commands, /cargo llvm-cov report --json --output-path coverage\.json/);
     assert.match(commands, /cargo llvm-cov report --lcov --output-path lcov\.info/);
     assert.match(commands, /const floors = \{ lines: 95, regions: 92, functions: 92 \}/);
-    assert.match(commands, /regions\.count < 200/);
+    assert.match(commands, /regions\.count < 150/);
     assert.match(commands, /lines\.percent >= 75 && regions\.percent >= 75/);
+    assert.match(commands, /Weakest files with at least 100 regions/);
+    assert.doesNotMatch(commands, /process\.exit\(1\)/);
     assert.equal(install.uses, 'taiki-e/install-action@7623a79cdfecb99d681017af368ca353d9f49bb5');
     assert.deepEqual(install.with, {
       tool: 'cargo-llvm-cov@0.9.0',

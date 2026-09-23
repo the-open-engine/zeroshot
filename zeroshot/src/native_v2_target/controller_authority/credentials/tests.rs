@@ -11,8 +11,8 @@ use super::linux::LinuxTargetCredentialStore;
 use super::private_file::PrivateFileTargetCredentialStore;
 use super::test_support::{MemoryCredentialStore, UnavailableCredentialStore};
 use super::{
-    CredentialStorePreparation, TargetCredentialStore, credential_service, open_refresh_lock,
-    refresh_lock_is_held,
+    CredentialStorePreparation, KeyringTargetCredentialStore, TargetCredentialStore,
+    credential_service, open_refresh_lock, refresh_lock_is_held,
 };
 
 const TARGET_ID: &str = "11111111-1111-4111-8111-111111111111";
@@ -265,6 +265,50 @@ fn credential_identity_and_refresh_lock_fail_closed_at_the_filesystem_boundary()
     assert!(refresh_lock_is_held(&directory, &path).assert_value());
     drop(guard);
     assert!(!refresh_lock_is_held(&directory, &path).assert_value());
+}
+
+#[tokio::test]
+async fn malformed_identity_is_rejected_before_keyring_access() {
+    let store = KeyringTargetCredentialStore;
+    for error in [
+        store.prepare_for_login("invalid").await.unwrap_err(),
+        store.get("invalid").await.unwrap_err(),
+        store.set("invalid", "refresh-token").await.unwrap_err(),
+    ] {
+        assert_eq!(
+            error.to_string(),
+            "stored target credential identity is invalid"
+        );
+    }
+}
+
+#[test]
+fn refresh_lock_errors_identify_directory_and_file_boundaries() {
+    let root =
+        openengine_cluster_testkit::TemporaryDirectory::for_test("zeroshot-refresh-lock-errors");
+    let blocked_directory = root.path("blocked");
+    std::fs::write(&blocked_directory, b"not a directory").assert_value();
+    let blocked_path = blocked_directory.join("target.lock");
+    for error in [
+        open_refresh_lock(&blocked_directory, &blocked_path).assert_error(),
+        refresh_lock_is_held(&blocked_directory, &blocked_path).assert_error(),
+    ] {
+        assert_eq!(
+            error.to_string(),
+            "target refresh lock directory is unavailable"
+        );
+    }
+
+    let directory = root.path("locks");
+    std::fs::create_dir(&directory).assert_value();
+    let directory_path = directory.join("target.lock");
+    std::fs::create_dir(&directory_path).assert_value();
+    for error in [
+        open_refresh_lock(&directory, &directory_path).assert_error(),
+        refresh_lock_is_held(&directory, &directory_path).assert_error(),
+    ] {
+        assert_eq!(error.to_string(), "target refresh lock is unavailable");
+    }
 }
 
 #[tokio::test]

@@ -366,3 +366,28 @@ async fn local_backend_contract_delegates_storage_and_rejects_remote_routes() {
     exercise_named_run_rejections(&backend).await;
     exercise_absent_local_run_failures(&backend).await;
 }
+
+#[tokio::test]
+async fn local_resume_rejects_an_unusable_state_root_before_observing_the_run() {
+    let root = tempfile::tempdir().assert_value();
+    let blocked_state = root.path().join("not-a-directory");
+    std::fs::write(&blocked_state, b"blocked").assert_value();
+    let backend = LocalCliBackend::new(
+        blocked_state,
+        PathBuf::from("zeroshot"),
+        root.path().to_path_buf(),
+        PathBuf::from("git"),
+    );
+
+    let error = backend
+        .resume_local(RunResumeParams {
+            run_id: run_id("0199f33f-3b44-7d21-9000-000000000042"),
+            successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000043"),
+            connections: BTreeMap::new(),
+            connection_resolver: None,
+            github_token: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(error, NativeV2CliError::Local(_)));
+}
