@@ -208,3 +208,25 @@ fn coverage_contract_bootstrap_parent_and_private_read_refuse_ambiguous_filesyst
         ));
     }
 }
+
+#[test]
+fn coverage_contract_controller_server_waits_for_both_terminal_truth_and_one_observer() {
+    let mut lifecycle = ServerLifecycle::default();
+    assert!(!lifecycle.is_complete());
+    lifecycle.terminal();
+    assert!(
+        !lifecycle.is_complete(),
+        "a short run still needs one observer"
+    );
+    lifecycle.accepted();
+    assert!(lifecycle.is_complete());
+
+    let mut reversed = ServerLifecycle::default();
+    reversed.accepted();
+    assert!(
+        !reversed.is_complete(),
+        "an observer cannot hide active work"
+    );
+    reversed.terminal();
+    assert!(reversed.is_complete());
+}

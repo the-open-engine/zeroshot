@@ -72,8 +72,12 @@ impl CapsuleAllocator for RetainedCleanupFailureAllocator {
 }
 
 #[tokio::test]
-async fn invalid_submission_has_no_durable_or_allocation_effect() {
+async fn wave8_cli_contract_submission_rejects_missing_secrets_and_invalid_graphs_before_effects() {
     let harness = harness(Behavior::Complete).await;
+    assert!(matches!(
+        harness.controller.submit(request(Value::Null)).await,
+        Err(NativeV2CloudError::Environment(_))
+    ));
     assert!(matches!(
         submit_test_request(&harness.controller, request(json!({}))).await,
         Err(NativeV2CloudError::Admission(_))
@@ -122,7 +126,7 @@ async fn startup_reconciles_every_persisted_nonterminal_before_status_is_visible
 }
 
 #[tokio::test]
-async fn unconfirmed_retained_cleanup_stays_nonterminal_until_reconstruction() {
+async fn wave8_cli_contract_retained_cleanup_and_discard_fail_closed_across_reconstruction() {
     let ledger = Arc::new(FakeRunLedger::new());
     let source_run_id = seed_controller_reconstructed_run(&ledger, "resume-source").await;
     let source = ledger
@@ -184,7 +188,7 @@ async fn unconfirmed_retained_cleanup_stays_nonterminal_until_reconstruction() {
     );
     let status = replacement
         .status(RunStatusParams {
-            run_id: successor_run_id,
+            run_id: successor_run_id.clone(),
         })
         .await
         .assert_value_with("reconciled successor status");
@@ -196,6 +200,22 @@ async fn unconfirmed_retained_cleanup_stays_nonterminal_until_reconstruction() {
         } if reason.as_str() == "runtime_lost"
     ));
     assert!(status.workspace_recovery.recoverable);
+
+    assert!(matches!(
+        replacement
+            .discard_workspace(RunDiscardWorkspaceParams {
+                run_id: RunId::new("missing-run"),
+            })
+            .await,
+        Err(NativeV2CloudError::Ledger(RunLedgerError::RunNotFound))
+    ));
+    let discarded = replacement
+        .discard_workspace(RunDiscardWorkspaceParams {
+            run_id: successor_run_id,
+        })
+        .await
+        .assert_value_with("workspace discard");
+    assert!(!discarded.discarded);
 }
 
 #[tokio::test]

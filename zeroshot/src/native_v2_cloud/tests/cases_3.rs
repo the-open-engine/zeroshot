@@ -170,7 +170,7 @@ async fn exact_source_revision_participates_in_retry_identity() {
 }
 
 #[tokio::test]
-async fn aborted_allocation_leaves_durable_run_exclusive_and_exact_retry_reconciles_it() {
+async fn wave8_cli_contract_aborted_allocation_is_terminal_and_exact_retry_reconciles_it() {
     let GatedHarness {
         controller,
         ledger,

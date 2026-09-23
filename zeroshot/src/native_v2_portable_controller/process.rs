@@ -220,6 +220,26 @@ pub struct PortableControllerServer {
     listener: super::transport::Listener,
 }
 
+#[derive(Default)]
+struct ServerLifecycle {
+    accepted: bool,
+    terminal: bool,
+}
+
+impl ServerLifecycle {
+    fn accepted(&mut self) {
+        self.accepted = true;
+    }
+
+    fn terminal(&mut self) {
+        self.terminal = true;
+    }
+
+    fn is_complete(&self) -> bool {
+        self.accepted && self.terminal
+    }
+}
+
 impl PortableControllerServer {
     pub(super) async fn bind(
         controller: Arc<PortableRunController>,
@@ -244,20 +264,19 @@ impl PortableControllerServer {
     /// finishes before the submitting CLI reaches the socket, one connection is still accepted so
     /// readiness cannot race normal startup. Later observation reopens the durable ledger.
     async fn serve_until_terminal(self) -> Result<(), PortableControllerError> {
-        let mut accepted = false;
-        let mut terminal = false;
+        let mut lifecycle = ServerLifecycle::default();
         loop {
-            if accepted && terminal {
+            if lifecycle.is_complete() {
                 return Ok(());
             }
             tokio::select! {
                 result = self.accept() => {
                     result.map_err(PortableControllerError::Io)?;
-                    accepted = true;
+                    lifecycle.accepted();
                 }
-                result = self.controller.wait_terminal(), if !terminal => {
+                result = self.controller.wait_terminal(), if !lifecycle.terminal => {
                     result?;
-                    terminal = true;
+                    lifecycle.terminal();
                 }
             }
         }

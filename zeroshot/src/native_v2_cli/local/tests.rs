@@ -441,7 +441,7 @@ fn wave5_cli_contract_recovery_lineage_is_bounded_and_honors_root_delivery() {
 }
 
 #[tokio::test]
-async fn wave7_cli_contract_local_stale_state_and_readiness_fail_closed() {
+async fn wave8_cli_contract_local_stale_state_and_readiness_fail_closed() {
     let root = TestDirectory::new("local-wave7-boundaries");
     let backend = contract_backend(root.path());
     let run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000071");
@@ -456,6 +456,40 @@ async fn wave7_cli_contract_local_stale_state_and_readiness_fail_closed() {
         .remove_stale_bootstraps(Duration::ZERO)
         .assert_value();
     assert!(!bootstrap.exists());
+
+    let claim = backend.claim_recovery_workspace(&run_id).assert_value();
+    assert!(
+        !backend
+            .recovery_workspace_is_unclaimed(&run_id)
+            .assert_value()
+    );
+    drop(claim);
+    assert!(
+        backend
+            .recovery_workspace_is_unclaimed(&run_id)
+            .assert_value()
+    );
+
+    let no_ledger = RunId::new("0199f33f-3b44-7d21-9000-000000000072");
+    backend.create_run_storage(&no_ledger).assert_value();
+    let submission = contract_submission("missing-ledger");
+    let digest = submission_digest(&submission).assert_value();
+    assert!(
+        backend
+            .matching_submission(no_ledger, &submission.submission_key, &digest)
+            .await
+            .assert_value()
+            .is_none()
+    );
+
+    let unreadable_root = TestDirectory::new("local-wave8-unreadable-runs");
+    std::fs::write(unreadable_root.child("runs"), b"not a directory").assert_value();
+    assert!(
+        contract_backend(unreadable_root.path())
+            .list_local()
+            .await
+            .is_err()
+    );
     assert!(require_local(None).is_ok());
     assert!(require_local(Some("prod")).is_err());
 
@@ -472,4 +506,18 @@ async fn wave7_cli_contract_local_stale_state_and_readiness_fail_closed() {
             .to_string()
             .contains("exited before becoming ready")
     );
+
+    let mut waiting = tokio::process::Command::new("sh")
+        .args(["-c", "read _"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .assert_value();
+    assert!(
+        wait_for_controller(&mut waiting, &paths, &run_id, Duration::ZERO)
+            .await
+            .assert_error()
+            .to_string()
+            .contains("before the deadline")
+    );
+    waiting.kill().await.assert_value();
 }

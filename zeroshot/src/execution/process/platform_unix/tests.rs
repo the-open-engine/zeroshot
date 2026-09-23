@@ -278,6 +278,103 @@ fn coverage_contract_linux_security_reducers_distinguish_authority_occupancy_and
     );
 }
 
+#[test]
+fn coverage_contract_worker_security_steps_are_ordered_and_fail_closed_before_exec() {
+    use std::cell::RefCell;
+
+    struct SecurityProbe {
+        fail_at: Option<&'static str>,
+        calls: RefCell<Vec<&'static str>>,
+    }
+
+    impl SecurityProbe {
+        fn step(&self, name: &'static str) -> Result<(), io::Error> {
+            self.calls.borrow_mut().push(name);
+            if self.fail_at == Some(name) {
+                Err(io::Error::from_raw_os_error(libc::EPERM))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    impl LinuxWorkerSecurity for SecurityProbe {
+        fn close_control_descriptors(&self) -> Result<(), io::Error> {
+            self.step("close")
+        }
+
+        fn drop_identity(
+            &self,
+            _uid: u32,
+            _gid: u32,
+            _group: Option<u32>,
+        ) -> Result<(), io::Error> {
+            self.step("identity")
+        }
+
+        fn clear_privileges(&self) -> Result<(), io::Error> {
+            self.step("privileges")
+        }
+
+        fn verify_identity(
+            &self,
+            _uid: u32,
+            _gid: u32,
+            _group: Option<u32>,
+        ) -> Result<(), io::Error> {
+            self.step("verify")
+        }
+    }
+
+    let expected = ["close", "identity", "privileges", "verify"];
+    for failure in [
+        None,
+        Some("close"),
+        Some("identity"),
+        Some("privileges"),
+        Some("verify"),
+    ] {
+        let probe = SecurityProbe {
+            fail_at: failure,
+            calls: RefCell::new(Vec::new()),
+        };
+        let result = configure_linux_worker_with(&probe, 10_002, 10_002, Some(20_001));
+        let count = failure
+            .and_then(|failed| expected.iter().position(|step| *step == failed))
+            .map_or(expected.len(), |index| index + 1);
+        assert_eq!(probe.calls.into_inner(), expected[..count]);
+        assert_eq!(result.is_err(), failure.is_some());
+    }
+}
+
+#[test]
+fn coverage_contract_worker_signal_batch_ignores_disappearance_but_stops_on_real_refusal() {
+    let mut visited = Vec::new();
+    kill_linux_pids(&[11, 12, 13], |pid| {
+        visited.push(pid);
+        if pid == 12 {
+            Err(io::Error::from_raw_os_error(libc::ESRCH))
+        } else {
+            Ok(())
+        }
+    })
+    .assert_value();
+    assert_eq!(visited, [11, 12, 13]);
+
+    let mut visited = Vec::new();
+    let error = kill_linux_pids(&[21, 22, 23], |pid| {
+        visited.push(pid);
+        if pid == 22 {
+            Err(io::Error::from_raw_os_error(libc::EPERM))
+        } else {
+            Ok(())
+        }
+    })
+    .assert_error();
+    assert_eq!(error.raw_os_error(), Some(libc::EPERM));
+    assert_eq!(visited, [21, 22]);
+}
+
 #[tokio::test]
 async fn coverage_contract_process_group_configuration_and_fallback_cleanup_reap_immediate_children()
  {

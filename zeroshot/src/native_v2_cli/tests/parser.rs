@@ -18,6 +18,144 @@ fn parser_exposes_static_help_version_and_update_commands() {
 }
 
 #[test]
+fn wave8_cli_contract_parser_connection_and_profile_refusals_preserve_precedence() {
+    assert!(matches!(
+        parse_native_v2_args(args(&[])).assert_value(),
+        NativeV2CliCommand::Help(_)
+    ));
+    assert!(matches!(
+        parse_native_v2_args(args(&["--help"])).assert_value(),
+        NativeV2CliCommand::Help(_)
+    ));
+
+    assert_parser_refusals(&[
+        (
+            &[
+                "connection",
+                "set",
+                "provider",
+                "--field",
+                "TOKEN",
+                "--field",
+                "TOKEN",
+            ],
+            "must be unique",
+        ),
+        (
+            &["connection", "set", "provider", "--field", "bad-name"],
+            "invalid connection field",
+        ),
+        (
+            &["profile", "list", "--scope", "org"],
+            "organization profiles require --target",
+        ),
+        (
+            &[
+                "run",
+                "--title",
+                "Profile",
+                "--input",
+                "input.json",
+                "--profile",
+                "reviewer",
+                "--graph",
+                "graph.json",
+            ],
+            "--profile cannot be combined",
+        ),
+    ]);
+}
+
+#[test]
+fn wave8_cli_contract_parser_run_and_delivery_refusals_preserve_precedence() {
+    assert_parser_refusals(&[
+        (
+            &[
+                "run",
+                "--title",
+                "Inline",
+                "--input",
+                "input.json",
+                "--graph",
+                "graph.json",
+            ],
+            "inline runs require",
+        ),
+        (
+            &[
+                "run",
+                "--title",
+                "Custom",
+                "--input",
+                "input.json",
+                "--graph",
+                "graph.json",
+                "--runtime-config",
+                "runtime.json",
+                "--ship",
+            ],
+            "delivery flags require --template",
+        ),
+        (
+            &[
+                "run",
+                "--title",
+                "Runtime",
+                "--input",
+                "input.json",
+                "--template",
+                "single-worker",
+                "--runtime-config",
+                "exact.json",
+                "--uniform-runtime-config",
+                "uniform.json",
+            ],
+            "exactly one of --runtime-config",
+        ),
+        (
+            &[
+                "run",
+                "--title",
+                "Local",
+                "--input",
+                "input.json",
+                "--profile",
+                "reviewer",
+                "--branch",
+                "feature",
+            ],
+            "require --target",
+        ),
+        (
+            &["template", "show", "single-worker", "--push"],
+            "not supported",
+        ),
+        (
+            &[
+                "template",
+                "show",
+                "software-change",
+                "--delivery",
+                "future",
+            ],
+            "unknown template delivery mode",
+        ),
+        (&["target", "login", "\n"], "target name must be"),
+        (&["attach", "run-1", ""], "invalid execution reference"),
+    ]);
+}
+
+fn assert_parser_refusals(cases: &[(&[&str], &str)]) {
+    for (arguments, expected) in cases {
+        let error = parse_native_v2_args(args(arguments)).assert_error();
+        assert!(
+            error.to_string().contains(expected),
+            "{arguments:?} returned {error}"
+        );
+    }
+}
+
+#[test]
 fn acp_accepts_only_an_explicit_local_profile() {
     assert!(matches!(
         parse_native_v2_args(args(&["acp", "--profile", "local:reviewer"])).assert_value(),

@@ -189,7 +189,16 @@ mod tests {
             oecp_endpoint("https://target.example").assert_value(),
             "wss://target.example/native-v2/oecp"
         );
-        for invalid in ["not a URL", "ftp://target.example"] {
+        assert_eq!(
+            oecp_endpoint("http://[::1]:8080").assert_value(),
+            "ws://[::1]:8080/native-v2/oecp"
+        );
+        for invalid in [
+            "not a URL",
+            "ftp://target.example",
+            "ws://target.example",
+            "file:///target",
+        ] {
             assert_eq!(
                 oecp_endpoint(invalid).assert_error().to_string(),
                 "public target origin is invalid"
@@ -208,15 +217,23 @@ mod tests {
     async fn direct_serve_rejects_an_invalid_public_origin_before_preparing_storage() {
         let storage =
             openengine_cluster_testkit::TemporaryDirectory::for_test("target-serve-invalid-origin");
-        let error = serve_direct_target(TargetServe {
-            listen: "127.0.0.1:0".parse().assert_value(),
-            public_origin: "http://target.example".to_owned(),
-            storage: storage.path("unused"),
-            bootstrap_key_file: None,
-        })
-        .await
-        .assert_error();
-        assert!(matches!(error, TargetServeError::InvalidOrigin(_)));
-        assert!(!storage.path("unused").exists());
+        for (case, origin) in [
+            ("non-loopback-http", "http://target.example"),
+            ("credentials", "https://user@target.example"),
+            ("path", "https://target.example/private"),
+            ("query", "https://target.example?token=private"),
+        ] {
+            let path = storage.path(case);
+            let error = serve_direct_target(TargetServe {
+                listen: "127.0.0.1:0".parse().assert_value(),
+                public_origin: origin.to_owned(),
+                storage: path.clone(),
+                bootstrap_key_file: None,
+            })
+            .await
+            .assert_error();
+            assert!(matches!(error, TargetServeError::InvalidOrigin(_)));
+            assert!(!path.exists(), "invalid origin prepared storage for {case}");
+        }
     }
 }

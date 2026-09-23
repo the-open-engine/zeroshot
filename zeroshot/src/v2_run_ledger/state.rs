@@ -1,5 +1,8 @@
-use openengine_cluster_protocol::{Cursor, TerminalResult, TokenCount, TokenUsage};
+use openengine_cluster_protocol::{Cursor, PositiveInteger, TerminalResult, TokenCount, TokenUsage};
 use serde::Serialize;
+use serde_json::Value;
+
+use crate::full_v1_reducer::StructuralOccurrence;
 
 use super::{
     CreateRun, ExecutionId, ExecutionRef, ExecutionVoidReason, MAX_ADMITTED_RUN_BYTES,
@@ -63,7 +66,21 @@ fn apply_event_kind(
     match event {
         RunEvent::PriorExecution { execution } => apply_prior_execution(snapshot, execution),
         RunEvent::RunStarted => apply_run_started(snapshot),
-        RunEvent::NodeStarted { .. } => apply_node_started(snapshot, event, sequence),
+        RunEvent::NodeStarted {
+            reference,
+            occurrence,
+            attempt,
+            input,
+        } => apply_node_started(
+            snapshot,
+            NodeStart {
+                reference,
+                occurrence,
+                attempt: *attempt,
+                input,
+            },
+            sequence,
+        ),
         RunEvent::NodeCompleted { completion } => {
             apply_node_completed(snapshot, completion, sequence)
         }
@@ -107,22 +124,24 @@ fn apply_run_started(snapshot: &mut RunSnapshot) -> Result<(), RunLedgerError> {
     Ok(())
 }
 
+struct NodeStart<'a> {
+    reference: &'a ExecutionRef,
+    occurrence: &'a StructuralOccurrence,
+    attempt: PositiveInteger,
+    input: &'a Value,
+}
+
 fn apply_node_started(
     snapshot: &mut RunSnapshot,
-    event: &RunEvent,
+    start: NodeStart<'_>,
     sequence: u64,
 ) -> Result<(), RunLedgerError> {
-    let RunEvent::NodeStarted {
+    let NodeStart {
         reference,
         occurrence,
         attempt,
         input,
-    } = event
-    else {
-        return Err(RunLedgerError::InvalidEvent(
-            "node-start projection received a different event",
-        ));
-    };
+    } = start;
     require_running(snapshot)?;
     require_run(snapshot, reference)?;
     require_new_dispatch(snapshot, reference)?;
@@ -131,7 +150,7 @@ fn apply_node_started(
         NodeSnapshot {
             reference: reference.clone(),
             occurrence: occurrence.clone(),
-            attempt: *attempt,
+            attempt,
             input: input.clone(),
             started_at: cursor_for(sequence),
             state: NodeState::Active,

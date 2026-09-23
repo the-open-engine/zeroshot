@@ -124,14 +124,7 @@ pub(super) fn reap_and_kill_worker_processes(
     membership: WorkerMembership,
 ) -> Result<bool, io::Error> {
     let pids = linux_worker_processes(membership)?;
-    for pid in &pids {
-        if unsafe { libc::kill(*pid, libc::SIGKILL) } != 0 {
-            let error = io::Error::last_os_error();
-            if !process_is_missing(&error) {
-                return Err(error);
-            }
-        }
-    }
+    kill_linux_pids(&pids, kernel_kill)?;
     for pid in &pids {
         reap_linux_child(*pid)?;
     }
@@ -245,10 +238,50 @@ struct CapabilityData {
 
 #[cfg(target_os = "linux")]
 fn configure_linux_worker(uid: u32, gid: u32, group: Option<u32>) -> Result<(), io::Error> {
-    close_control_descriptors()?;
-    drop_linux_identity(uid, gid, group)?;
-    clear_linux_privileges()?;
-    verify_linux_identity(uid, gid, group)
+    configure_linux_worker_with(&KernelWorkerSecurity, uid, gid, group)
+}
+
+#[cfg(target_os = "linux")]
+trait LinuxWorkerSecurity {
+    fn close_control_descriptors(&self) -> Result<(), io::Error>;
+    fn drop_identity(&self, uid: u32, gid: u32, group: Option<u32>) -> Result<(), io::Error>;
+    fn clear_privileges(&self) -> Result<(), io::Error>;
+    fn verify_identity(&self, uid: u32, gid: u32, group: Option<u32>) -> Result<(), io::Error>;
+}
+
+#[cfg(target_os = "linux")]
+struct KernelWorkerSecurity;
+
+#[cfg(target_os = "linux")]
+impl LinuxWorkerSecurity for KernelWorkerSecurity {
+    fn close_control_descriptors(&self) -> Result<(), io::Error> {
+        close_control_descriptors()
+    }
+
+    fn drop_identity(&self, uid: u32, gid: u32, group: Option<u32>) -> Result<(), io::Error> {
+        drop_linux_identity(uid, gid, group)
+    }
+
+    fn clear_privileges(&self) -> Result<(), io::Error> {
+        clear_linux_privileges()
+    }
+
+    fn verify_identity(&self, uid: u32, gid: u32, group: Option<u32>) -> Result<(), io::Error> {
+        verify_linux_identity(uid, gid, group)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn configure_linux_worker_with(
+    security: &impl LinuxWorkerSecurity,
+    uid: u32,
+    gid: u32,
+    group: Option<u32>,
+) -> Result<(), io::Error> {
+    security.close_control_descriptors()?;
+    security.drop_identity(uid, gid, group)?;
+    security.clear_privileges()?;
+    security.verify_identity(uid, gid, group)
 }
 
 #[cfg(target_os = "linux")]
@@ -370,9 +403,25 @@ fn boolean_result(failed: bool) -> Result<(), io::Error> {
 
 #[cfg(target_os = "linux")]
 fn kill_linux_worker_processes(membership: WorkerMembership) -> Result<(), io::Error> {
-    for pid in linux_worker_processes(membership)? {
-        if unsafe { libc::kill(pid, libc::SIGKILL) } != 0 {
-            let error = io::Error::last_os_error();
+    kill_linux_pids(&linux_worker_processes(membership)?, kernel_kill)
+}
+
+#[cfg(target_os = "linux")]
+fn kernel_kill(pid: i32) -> Result<(), io::Error> {
+    if unsafe { libc::kill(pid, libc::SIGKILL) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn kill_linux_pids(
+    pids: &[i32],
+    mut kill: impl FnMut(i32) -> Result<(), io::Error>,
+) -> Result<(), io::Error> {
+    for pid in pids {
+        if let Err(error) = kill(*pid) {
             if !process_is_missing(&error) {
                 return Err(error);
             }

@@ -240,29 +240,5 @@ fn resolve_ui_target(
 }
 
 #[cfg(test)]
-mod tests {
-    use std::ffi::OsString;
-
-    use openengine_cluster_testkit::assertions::AssertValue;
-
-    use super::*;
-
-    #[test]
-    fn target_serve_is_part_of_the_public_command_schema() {
-        let arguments = [
-            "target",
-            "serve",
-            "--listen",
-            "127.0.0.1:8080",
-            "--public-origin",
-            "http://127.0.0.1:8080",
-            "--storage",
-            "/tmp/zeroshot-target",
-        ]
-        .into_iter()
-        .map(OsString::from)
-        .collect::<Vec<_>>();
-        let command = parse_native_v2_args(arguments).assert_value();
-        assert!(matches!(command, NativeV2CliCommand::TargetServe(_)));
-    }
-}
+#[path = "main/tests.rs"]
+mod tests;

@@ -2,9 +2,10 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use openengine_cluster_protocol::{
-    ArtifactRef, CompiledGraphIr, IdempotencyKey, NodeName, PositiveInteger, RunId, Sha256Digest,
-    RunSize, RunTitle, SourceBranchId, SourceRepositoryId, SourceRevisionId, ResolvedSource,
-    TerminalResult, TokenCount, TokenUsage, UnixTimestampMillis, WorkerOutcome,
+    ArtifactRef, CompiledGraphIr, Cursor, IdempotencyKey, MAX_SAFE_GENERATION, NodeName,
+    PositiveInteger, RunId, Sha256Digest, RunSize, RunTitle, SourceBranchId, SourceRepositoryId,
+    SourceRevisionId, ResolvedSource, TerminalResult, TokenCount, TokenUsage, UnixTimestampMillis,
+    WorkerOutcome,
 };
 use serde_json::{Value, json};
 
@@ -12,7 +13,7 @@ use super::fake::FakeRunLedger;
 use super::sqlite::SqliteRunLedger;
 use super::{
     CreateRun, CreateRunOutcome, NodeState, RunEvent, RunLedger, RunLedgerError, RunPhase,
-    SafeLogLine, SafeLogStream, cursor_for,
+    RunSnapshot, SafeLogLine, SafeLogStream, apply_event, cursor_for, cursor_sequence,
 };
 use crate::full_v1_reducer::{ExecutionVoidReason, StructuralOccurrence};
 use crate::native_v2_contract::{
@@ -98,6 +99,160 @@ fn usage(
         cache_creation_input_tokens: cache_creation
             .map(|value| TokenCount::new(value).assert_value()),
     }
+}
+
+fn projected_snapshot(run: &str) -> RunSnapshot {
+    let admitted = admitted_run();
+    RunSnapshot::admitted(RunId::new(run), &admitted)
+}
+
+fn safe_log(execution: Option<ExecutionId>) -> RunEvent {
+    RunEvent::SafeLog {
+        execution,
+        timestamp: UnixTimestampMillis::new(1_725_000_000_123).assert_value(),
+        stream: SafeLogStream::System,
+        line: SafeLogLine::new("projection check").assert_value(),
+    }
+}
+
+fn assert_invalid_projection(snapshot: &mut RunSnapshot, event: RunEvent, expected: &'static str) {
+    assert_eq!(
+        apply_event(snapshot, &event, 99),
+        Err(RunLedgerError::InvalidEvent(expected))
+    );
+}
+
+fn active_snapshot(run: &str) -> (RunSnapshot, ExecutionRef) {
+    let run_id = RunId::new(run);
+    let reference = reference(&run_id, 1);
+    let mut snapshot = projected_snapshot(run_id.as_str());
+    apply_event(&mut snapshot, &RunEvent::RunStarted, 1).assert_value();
+    apply_event(&mut snapshot, &started(reference.clone()), 2).assert_value();
+    (snapshot, reference)
+}
+
+#[test]
+fn state_projection_rejects_invalid_cursors_dispatches_and_log_references() {
+    for cursor in ["v1:1", "v2:not-a-number", "v2:18446744073709551616"] {
+        assert_eq!(
+            cursor_sequence(&Cursor::new(cursor)),
+            Err(RunLedgerError::InvalidCursor)
+        );
+    }
+
+    let (mut snapshot, active) = active_snapshot("projection-boundaries");
+    assert_invalid_projection(&mut snapshot, RunEvent::RunStarted, "run already started");
+    assert_invalid_projection(
+        &mut snapshot,
+        started(active.clone()),
+        "execution was already dispatched",
+    );
+
+    apply_event(&mut snapshot, &safe_log(None), 3).assert_value();
+    apply_event(&mut snapshot, &safe_log(Some(active.execution)), 4).assert_value();
+    assert_invalid_projection(
+        &mut snapshot,
+        safe_log(Some(ExecutionId::new(2).assert_value())),
+        "log references an unknown execution",
+    );
+    assert_invalid_projection(
+        &mut snapshot,
+        RunEvent::Terminal {
+            result: TerminalResult::Succeeded {
+                output: Value::Null,
+            },
+        },
+        "cannot finish with active executions",
+    );
+}
+
+#[test]
+fn state_projection_rejects_usage_and_settlement_identity_corruption() {
+    let (mut snapshot, active) = active_snapshot("settlement-boundaries");
+    let run_id = snapshot.run_id.clone();
+    assert_invalid_projection(
+        &mut snapshot,
+        RunEvent::TokenUsageObserved {
+            execution: ExecutionId::new(2).assert_value(),
+            usage: None,
+        },
+        "token usage references an unknown execution",
+    );
+    apply_event(
+        &mut snapshot,
+        &RunEvent::TokenUsageObserved {
+            execution: active.execution,
+            usage: Some(usage(MAX_SAFE_GENERATION, 0, None, None)),
+        },
+        5,
+    )
+    .assert_value();
+    assert_invalid_projection(
+        &mut snapshot,
+        RunEvent::TokenUsageObserved {
+            execution: active.execution,
+            usage: Some(usage(1, 0, None, None)),
+        },
+        "token usage overflow",
+    );
+
+    let mut mismatched = active.clone();
+    mismatched.node_instance = NodeInstanceId::new(2).assert_value();
+    assert_invalid_projection(
+        &mut snapshot,
+        completed(mismatched, Value::Null),
+        "execution reference does not match dispatch",
+    );
+    let unknown = reference(&run_id, 2);
+    assert_invalid_projection(
+        &mut snapshot,
+        completed(unknown, Value::Null),
+        "execution was not dispatched",
+    );
+
+    apply_event(&mut snapshot, &completed(active.clone(), Value::Null), 6).assert_value();
+    assert_invalid_projection(
+        &mut snapshot,
+        completed(active.clone(), Value::Null),
+        "execution is already settled",
+    );
+    assert_invalid_projection(
+        &mut snapshot,
+        RunEvent::TokenUsageObserved {
+            execution: active.execution,
+            usage: None,
+        },
+        "token usage references a settled execution",
+    );
+    apply_event(
+        &mut snapshot,
+        &RunEvent::Terminal {
+            result: TerminalResult::Succeeded {
+                output: Value::Null,
+            },
+        },
+        7,
+    )
+    .assert_value();
+    assert_invalid_projection(&mut snapshot, safe_log(None), "run is already terminal");
+}
+
+#[test]
+fn state_projection_rejects_dispatch_and_stop_replays_after_stop_intent() {
+    let mut stopped = projected_snapshot("stopped-corrupt-replay");
+    stopped.phase = RunPhase::Running;
+    stopped.force_stop_requested = true;
+    let stopped_run = stopped.run_id.clone();
+    assert_invalid_projection(
+        &mut stopped,
+        started(reference(&stopped_run, 1)),
+        "cannot dispatch after force-stop",
+    );
+    assert_invalid_projection(
+        &mut stopped,
+        RunEvent::ForceStopRequested,
+        "force-stop was already requested",
+    );
 }
 
 #[tokio::test]

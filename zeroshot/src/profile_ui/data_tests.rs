@@ -8,7 +8,7 @@ use openengine_cluster_server::{
     graph_verifier::ProductionGraphVerifier,
     worker_registry::{WorkerRegistry, WorkerRegistryError},
 };
-use openengine_cluster_testkit::assertions::AssertValue;
+use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use crate::full_v1_reducer::{
     FullV1Reducer, ReductionInput, Reduction, Decision, DurableExecution, DurableExecutionState,
     StructuralOccurrence, HistoryPosition, NodeInstanceId, ExecutionId, TerminalProjection,
@@ -1120,4 +1120,97 @@ fn run_input_rewrites_reject_collisions_and_stale_nested_bindings() {
         json!({"kind":"remove_run_input","name":"request"}),
         "This input is also authored as writable state",
     );
+}
+
+#[test]
+fn structural_helpers_keep_empty_decisions_and_terminal_groups_fail_closed() {
+    let empty_choice = json!({"kind":"choice","name":"route","branches":[]});
+    assert!(!structurally_complete(&empty_choice));
+    assert!(!can_continue(&done()));
+    assert!(!can_continue(&seq("terminal", vec![done()])));
+
+    let document = graph(vec![worker("source"), worker("consumer"), done()]);
+    let nodes = index(&document).assert_value();
+    assert!(previous_round_route(&nodes, "source", "source").assert_value());
+
+    let verifier = json!({
+        "kind":"verifier",
+        "name":"review",
+        "output":record(json!({})),
+        "diagnostic":record(json!({"summary":{"type":{"kind":"string"},"required":true}})),
+        "signals":{"decision":["accept","revise"]}
+    });
+    let signal = producers(&verifier, Channel::Signal, &["decision".to_owned()]).assert_value();
+    assert_eq!(
+        signal[0].value_type,
+        json!({"kind":"enum","values":["accept","revise"]})
+    );
+    assert_eq!(
+        producers(
+            &seq("group", vec![worker("nested")]),
+            Channel::Diagnostic,
+            &[]
+        )
+        .assert_error()
+        .message,
+        "Select an output."
+    );
+}
+
+#[test]
+fn input_mutation_helpers_update_null_results_atomically_and_reject_type_collisions() {
+    let mut document = graph(vec![done()]);
+    let nodes = index(&document).assert_value();
+    set_input(
+        &mut document,
+        &nodes,
+        InputEdit {
+            node: "done",
+            input: "result",
+            value_type: json!({"kind":"string"}),
+            selector: json!({"source":"input","path":["request"]}),
+        },
+    )
+    .assert_value();
+    let result = get(&document, &nodes, "done").assert_value();
+    assert_eq!(result["output"]["kind"], "record");
+    assert_eq!(result["bindings"].as_array().map(Vec::len), Some(1));
+
+    remove_input(&mut document, &nodes, "done", "result").assert_value();
+    let result = get(&document, &nodes, "done").assert_value();
+    assert!(
+        result["output"]["fields"]
+            .as_object()
+            .assert_value()
+            .is_empty()
+    );
+    assert!(result["bindings"].as_array().assert_value().is_empty());
+
+    let mut missing = json!({});
+    array_mut(&mut missing, "bindings")
+        .assert_value()
+        .push(json!({"target":["result"]}));
+    assert_eq!(missing["bindings"].as_array().map(Vec::len), Some(1));
+
+    let mut group = seq("scope", vec![done()]);
+    add_field(
+        &mut group,
+        "shared",
+        json!({"type":{"kind":"string"},"required":false}),
+    )
+    .assert_value();
+    assert_eq!(
+        add_field(
+            &mut group,
+            "shared",
+            json!({"type":{"kind":"null"},"required":false}),
+        )
+        .assert_error()
+        .message,
+        "An existing field has a different type."
+    );
+    assert!(state_path_written(
+        &json!({"root":null}),
+        &["shared".to_owned()]
+    ));
 }

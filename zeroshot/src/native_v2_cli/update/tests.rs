@@ -11,7 +11,7 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use super::*;
 
 #[test]
-fn release_versions_are_canonical_and_ordered() {
+fn wave8_cli_contract_release_versions_are_canonical_and_ordered() {
     assert_eq!(
         ReleaseVersion::parse("8.2.1").assert_value().to_string(),
         "8.2.1"
@@ -27,7 +27,7 @@ fn release_versions_are_canonical_and_ordered() {
 }
 
 #[test]
-fn checksum_manifest_accepts_exact_release_names_and_digests() {
+fn wave8_cli_contract_checksum_manifest_accepts_exact_release_names_and_digests() {
     let binary = b"release binary";
     let filename = "zeroshot-v8.2.1-x86_64-unknown-linux-musl.tar.gz";
     let checksum = format!("{:x}", Sha256::digest(binary));
@@ -43,7 +43,7 @@ fn checksum_manifest_accepts_exact_release_names_and_digests() {
 }
 
 #[test]
-fn checksum_manifest_rejects_invalid_missing_and_duplicate_entries() {
+fn wave8_cli_contract_checksum_manifest_rejects_invalid_missing_and_duplicate_entries() {
     let filename = "zeroshot-v8.2.1-x86_64-unknown-linux-musl.tar.gz";
     let digest = "0".repeat(64);
     let missing = format!("{digest}  {SKILL_ASSET}\n");
@@ -90,7 +90,7 @@ fn checksum_manifest_rejects_invalid_missing_and_duplicate_entries() {
 }
 
 #[test]
-fn release_archive_accepts_one_exact_regular_executable() {
+fn wave8_cli_contract_release_archive_accepts_one_exact_regular_executable() {
     let binary = b"release binary";
     let archive = test_archive(&[ArchiveEntry::File("zeroshot", binary)]);
     assert_eq!(
@@ -100,7 +100,8 @@ fn release_archive_accepts_one_exact_regular_executable() {
 }
 
 #[test]
-fn release_archive_rejects_wrong_paths_types_duplicates_and_missing_executables() {
+fn wave8_cli_contract_release_archive_rejects_wrong_paths_types_duplicates_and_missing_executables()
+{
     let cases = [
         (
             test_archive(&[ArchiveEntry::File("bin/zeroshot", b"binary")]),
@@ -235,7 +236,7 @@ async fn wave5_cli_contract_release_metadata_and_verified_assets_are_self_consis
 }
 
 #[test]
-fn installation_stages_verifies_replaces_and_cleans_up() {
+fn wave8_cli_contract_installation_stages_verifies_replaces_and_cleans_up() {
     let directory = tempfile::tempdir().unwrap();
     let current = directory
         .path()
@@ -287,7 +288,7 @@ fn installation_stages_verifies_replaces_and_cleans_up() {
 }
 
 #[test]
-fn installation_stops_on_verification_or_replacement_failure() {
+fn wave8_cli_contract_installation_stops_on_verification_or_replacement_failure() {
     let directory = tempfile::tempdir().unwrap();
     let current = directory.path().join("zeroshot");
     fs::write(&current, b"old binary").unwrap();
@@ -324,7 +325,7 @@ fn installation_stops_on_verification_or_replacement_failure() {
 }
 
 #[test]
-fn smoke_and_result_reporting_require_the_exact_release_version() {
+fn wave8_cli_contract_smoke_and_result_reporting_require_the_exact_release_version() {
     let version = ReleaseVersion([8, 2, 1]);
     validate_smoke_result(true, b"zeroshot 8.2.1\n", version).assert_value();
     assert!(validate_smoke_result(false, b"zeroshot 8.2.1\n", version).is_err());
@@ -349,7 +350,7 @@ fn smoke_and_result_reporting_require_the_exact_release_version() {
 }
 
 #[test]
-fn wave7_cli_contract_update_process_boundaries_fail_before_replacement() {
+fn wave8_cli_contract_update_process_boundaries_fail_before_replacement() {
     fn verify_noop(_: &Path, _: ReleaseVersion) -> Result<(), NativeV2CliError> {
         Ok(())
     }
@@ -386,6 +387,9 @@ fn wave7_cli_contract_update_process_boundaries_fail_before_replacement() {
         fs::set_permissions(&candidate, fs::Permissions::from_mode(0o755)).assert_value();
         smoke(&candidate, version).assert_value();
         assert!(smoke(&candidate, ReleaseVersion([8, 2, 2])).is_err());
+        let missing = directory.path().join("missing");
+        assert!(make_executable(&missing).is_err());
+        assert!(smoke(&missing, version).is_err());
     }
 }
 

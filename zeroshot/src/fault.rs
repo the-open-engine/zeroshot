@@ -496,3 +496,7 @@ impl From<FaultContext> for ObservationOperation {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "fault/tests.rs"]
+mod tests;

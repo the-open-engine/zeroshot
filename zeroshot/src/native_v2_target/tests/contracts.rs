@@ -1,11 +1,14 @@
 use openengine_cluster_protocol::{
-    MergePlanId, RunProfileDefaultRequest, RunProfileListRequest, RunProfileName,
-    RunProfileRunRequest, RunProfileScope, RunProfileSelector, RunProfileSetRequest,
+    MergePlanId, RunForceParams, RunId, RunListParams, RunLogsParams, RunProfileDefaultRequest,
+    RunProfileListRequest, RunProfileName, RunProfileRunRequest, RunProfileScope,
+    RunProfileSelector, RunProfileSetRequest, RunStatusParams, RunWatchParams,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use super::super::*;
-use super::fixtures::{direct_target, run_request, FakeAuthority, FakeDialer, MemoryRegistry};
+use super::fixtures::{
+    direct_target, hosted_target, run_request, FakeAuthority, FakeDialer, MemoryRegistry,
+};
 
 fn profile_operations() -> (
     TargetRecord,
@@ -206,5 +209,63 @@ async fn connector_preserves_fail_closed_profile_and_merge_plan_errors() {
                 .contains("hosted merge plans are unavailable")
         );
     }
+    assert!(authority.calls().is_empty());
+}
+
+#[tokio::test]
+async fn connector_preserves_hosted_lifecycle_failures_without_fallback() {
+    let authority = FakeAuthority::new("ws://127.0.0.1:1/native-v2/oecp");
+    let registry = MemoryRegistry::default();
+    registry
+        .insert(hosted_target("cloud", "https://target.example"))
+        .assert_value();
+    let connector =
+        NativeV2TargetConnector::new(registry, authority.clone(), FakeDialer::default());
+    let run_id = RunId::new("run-hosted");
+    let errors = [
+        connector
+            .hosted_run_list("cloud", RunListParams {})
+            .await
+            .assert_error(),
+        connector
+            .hosted_run_status(
+                "cloud",
+                RunStatusParams {
+                    run_id: run_id.clone(),
+                },
+            )
+            .await
+            .assert_error(),
+        connector
+            .hosted_run_watch(
+                "cloud",
+                RunWatchParams {
+                    run_id: run_id.clone(),
+                    from_cursor: None,
+                },
+            )
+            .await
+            .assert_error(),
+        connector
+            .hosted_run_logs(
+                "cloud",
+                RunLogsParams {
+                    run_id: run_id.clone(),
+                    from_cursor: None,
+                    execution: None,
+                },
+            )
+            .await
+            .assert_error(),
+        connector
+            .hosted_run_force("cloud", RunForceParams { run_id })
+            .await
+            .assert_error(),
+    ];
+    assert!(errors.iter().all(|error| {
+        error
+            .to_string()
+            .contains("fake hosted lifecycle is unavailable")
+    }));
     assert!(authority.calls().is_empty());
 }

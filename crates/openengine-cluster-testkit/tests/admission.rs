@@ -5,7 +5,10 @@ use openengine_cluster_protocol::{
     ApplyParams, Generation, GetParams, IdempotencyKey, PlanParams, CANCELLED, GENERATION_CONFLICT,
     IDEMPOTENCY_REUSE, INTERNAL_ERROR_CODE, SCHEMA_VIOLATION,
 };
-use openengine_cluster_server::admission::{AdmissionCoordinator, CancellationSignal};
+use openengine_cluster_server::admission::{
+    AdmissionCoordinator, AdmissionStore, CancellationSignal, ControlJournal, VerifiedIoLedger,
+};
+use openengine_cluster_server::lifecycle::MutationReceipt;
 use openengine_cluster_server::{ConnectionContext, Dispatcher};
 use openengine_cluster_testkit::admission::{
     compiled_from_graph_fixture, graph_fixture, InMemoryAdmissionStore, ScriptedOutcome,
@@ -175,6 +178,43 @@ async fn committed_lifecycle_creates_changes_and_deduplicates() {
         .assert_value();
     assert!(replay.deduped);
     assert_eq!(replay.generation, changed_back.generation);
+    assert_eq!(replay.run_id, changed_back.run_id);
+
+    let current_run = changed_back.run_id.as_ref().assert_value();
+    let control = store.read_control().await.assert_value();
+    assert_eq!(control.generation, changed_back.generation);
+    assert_eq!(control.run_id.as_ref(), Some(current_run));
+    let record = store
+        .lookup_idempotency(&IdempotencyKey::new("back").assert_value())
+        .await
+        .assert_value()
+        .assert_value();
+    assert_eq!(record.receipt, MutationReceipt::Apply(changed_back.clone()));
+    assert!(
+        store
+            .lookup_idempotency(&IdempotencyKey::new("absent").assert_value())
+            .await
+            .assert_value()
+            .is_none()
+    );
+    let seed = store
+        .read_verified_seed(current_run)
+        .await
+        .assert_value()
+        .assert_value();
+    assert_eq!(seed.input, json!(null));
+    assert!(
+        store
+            .read_verified_seed(&openengine_cluster_protocol::RunId::new("absent"))
+            .await
+            .assert_value()
+            .is_none()
+    );
+    let snapshot = store.read_snapshot().await.assert_value();
+    let (aggregate, lifecycle) = store.read_aggregate().await.assert_value();
+    assert_eq!(aggregate, snapshot);
+    assert_eq!(aggregate.seed, Some(seed));
+    assert_eq!(lifecycle.latest_cursor, aggregate.control.cursor);
     assert_eq!(store.inspect().await.seed_ledger.len(), 3);
 }
 

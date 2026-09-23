@@ -174,3 +174,7 @@ fn incompatible(_: TargetAuthorityError) -> RunHistoryTransportError {
 fn unavailable(_: TargetAuthorityError) -> RunHistoryTransportError {
     RunHistoryTransportError::unavailable()
 }
+
+#[cfg(test)]
+#[path = "history/tests.rs"]
+mod tests;

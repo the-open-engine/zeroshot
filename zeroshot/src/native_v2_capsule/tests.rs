@@ -440,6 +440,33 @@ fn coverage_contract_filesystem_boundary_rejects_nul_paths_before_mutating_them(
     assert!(matches!(error, CapsuleFilesystemError::InvalidLayout));
 }
 
+#[test]
+#[cfg(target_os = "linux")]
+fn coverage_contract_capsule_layout_rejects_aliases_and_applies_an_owned_directory_boundary() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempfile::tempdir().assert_value();
+    let invalid = prepare_capsule_filesystem(CapsuleFilesystemSpec {
+        workspace: root.path(),
+        runtime_home: root.path(),
+        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
+    });
+    assert!(matches!(
+        invalid,
+        Err(CapsuleFilesystemError::InvalidLayout)
+    ));
+
+    let owned = root.path().join("owned");
+    fs::create_dir(&owned).assert_value();
+    // SAFETY: these calls only inspect this process's effective identity.
+    let (uid, gid) = unsafe { (libc::geteuid(), libc::getegid()) };
+    set_directory_boundary(&owned, 0o711, uid, gid).assert_value();
+    assert_eq!(
+        fs::metadata(&owned).assert_value().permissions().mode() & 0o777,
+        0o711
+    );
+}
+
 #[tokio::test]
 async fn boundary_contract_bounded_execution_stream_drains_live_then_terminal_events_exactly_once()
 {

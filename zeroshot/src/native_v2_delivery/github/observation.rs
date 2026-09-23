@@ -197,7 +197,10 @@ pub(super) mod test_support {
     ) -> GhCliDeliveryAuthority {
         GhCliDeliveryAuthority::new(GhCliAuthorityConfig {
             gh_program: program,
-            api_deadline: std::time::Duration::from_secs(2),
+            // Instrumented suites can briefly saturate process startup while running these
+            // otherwise immediate local fixtures in parallel. Keep the production deadline out
+            // of this test helper so a scheduler delay is not mistaken for an API failure.
+            api_deadline: std::time::Duration::from_secs(10),
             ..GhCliAuthorityConfig::hosted(home.to_owned())
         })
     }

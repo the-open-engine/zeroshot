@@ -1,7 +1,27 @@
+use openengine_cluster_protocol::{IdempotencyKey, Sha256Digest};
 use openengine_cluster_testkit::assertions::AssertValue;
 
 use super::*;
-use crate::v2_run_ledger::fake::FakeRunLedger;
+use crate::v2_run_ledger::{CreateRun, RunLedger, fake::FakeRunLedger};
+
+async fn insert_fake_run(ledger: &FakeRunLedger, run: &str, key: &str, digest: char) {
+    ledger
+        .create_or_get(CreateRun {
+            run_id: RunId::new(run),
+            submission_key: IdempotencyKey::new(key).assert_value(),
+            submission_digest: Sha256Digest::new(digest.to_string().repeat(64)).assert_value(),
+            admitted: crate::native_v2_runner::test_support::admitted(),
+        })
+        .await
+        .assert_value();
+}
+
+fn workspace_identity(root: &Path) -> (PathBuf, WorkspaceIdentity) {
+    let workspace = root.join("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    let identity = WorkspaceIdentity::capture(&workspace).assert_value();
+    (workspace, identity)
+}
 
 #[tokio::test]
 async fn boundary_contract_single_run_allocator_refuses_foreign_runs_and_confirms_absent_runtime_cleanup()
@@ -38,9 +58,7 @@ async fn boundary_contract_single_run_allocator_refuses_foreign_runs_and_confirm
 #[test]
 fn boundary_contract_workspace_identity_detects_replacement_and_rejects_non_directories() {
     let root = tempfile::tempdir().assert_value();
-    let workspace = root.path().join("workspace");
-    std::fs::create_dir(&workspace).assert_value();
-    let identity = WorkspaceIdentity::capture(&workspace).assert_value();
+    let (workspace, identity) = workspace_identity(root.path());
     assert!(identity.is_current(&workspace));
 
     let original = root.path().join("original");
@@ -99,6 +117,28 @@ async fn coverage_contract_observer_refuses_storage_without_the_exact_durable_ru
     ));
 }
 
+#[tokio::test]
+async fn coverage_contract_existing_ledger_requires_one_exact_run_identity() {
+    let ledger = FakeRunLedger::new();
+    let expected = RunId::new("expected-run");
+    insert_fake_run(&ledger, expected.as_str(), "first-key", 'a').await;
+    assert!(
+        validate_existing_run(&ledger, &expected)
+            .await
+            .assert_value()
+    );
+    assert!(matches!(
+        validate_existing_run(&ledger, &RunId::new("foreign-run")).await,
+        Err(PortableControllerError::DurableIdentity)
+    ));
+
+    insert_fake_run(&ledger, "second-run", "second-key", 'b').await;
+    assert!(matches!(
+        validate_existing_run(&ledger, &expected).await,
+        Err(PortableControllerError::DurableIdentity)
+    ));
+}
+
 #[test]
 fn coverage_contract_workspace_loss_requires_all_three_sources_of_positive_evidence() {
     for identity in [false, true] {
@@ -111,4 +151,35 @@ fn coverage_contract_workspace_loss_requires_all_three_sources_of_positive_evide
             }
         }
     }
+}
+
+#[test]
+fn coverage_contract_workspace_monitor_stops_when_either_lease_owner_disappears() {
+    let root = tempfile::tempdir().assert_value();
+    let (workspace, identity) = workspace_identity(root.path());
+    let controller =
+        Arc::new(ControllerLease::acquire(root.path().join("controller.lock")).assert_value());
+    let workspace_lease =
+        Arc::new(ControllerLease::acquire(root.path().join("workspace.lock")).assert_value());
+    let monitor = WorkspaceMonitor {
+        workspace,
+        identity,
+        controller_lease: Arc::downgrade(&controller),
+        workspace_lease: Arc::downgrade(&workspace_lease),
+    };
+    assert!(active_monitor_leases(&monitor).is_some());
+    drop(workspace_lease);
+    assert!(active_monitor_leases(&monitor).is_none());
+
+    let replacement =
+        Arc::new(ControllerLease::acquire(root.path().join("replacement.lock")).assert_value());
+    let monitor = WorkspaceMonitor {
+        workspace: monitor.workspace,
+        identity: monitor.identity,
+        controller_lease: Arc::downgrade(&controller),
+        workspace_lease: Arc::downgrade(&replacement),
+    };
+    assert!(active_monitor_leases(&monitor).is_some());
+    drop(controller);
+    assert!(active_monitor_leases(&monitor).is_none());
 }

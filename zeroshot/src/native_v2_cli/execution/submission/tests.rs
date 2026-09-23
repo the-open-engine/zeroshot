@@ -1,6 +1,6 @@
 use openengine_cluster_protocol::{
     ConnectionKey, EnvironmentVariableName, GraphProfile, ModelId, NodeRuntimeBinding,
-    PullRequestFeedback, RunConnectionRequirements, RunSize, SessionScope,
+    PullRequestFeedback, RunConnectionRequirements, RunSize, RunTitle, SessionScope,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
@@ -157,4 +157,77 @@ fn wave6_cli_contract_connection_selection_and_json_errors_keep_precedence() {
             ..
         })
     ));
+}
+
+#[tokio::test]
+async fn wave8_cli_contract_validate_only_preflight_materializes_without_backend_contact() {
+    let directory = tempfile::tempdir().assert_value();
+    let input = directory.path().join("input.json");
+    let runtime = directory.path().join("runtime.json");
+    std::fs::write(
+        &input,
+        serde_json::json!({"task":"validate this run"}).to_string(),
+    )
+    .assert_value();
+    std::fs::write(
+        &runtime,
+        serde_json::json!({
+            "harness":"codex",
+            "provider":"openai",
+            "size":"small",
+            "nodes":{"worker":{"kind":"agent","model":"provider-model"}}
+        })
+        .to_string(),
+    )
+    .assert_value();
+    let run = RunCommand {
+        target: None,
+        title: RunTitle::new("Validate only").assert_value(),
+        selection: RunSelection::Inline {
+            graph: RunGraph::Template {
+                template: BuiltinGraphTemplate::SingleWorker,
+                delivery: TemplateDelivery::None,
+                ignore_pr_feedback: false,
+            },
+            runtime: RunRuntime::Exact(runtime),
+        },
+        input,
+        repository: None,
+        branch: None,
+        revision: None,
+        detach: false,
+        validate_only: true,
+        submission_key: None,
+    };
+    let mut output = Vec::new();
+    assert_eq!(
+        try_execute_native_v2_preflight_with_environment(
+            &NativeV2CliCommand::Run(run.clone()),
+            &mut output,
+            |_| None,
+        )
+        .await
+        .assert_value(),
+        Some(CliOutcome::Completed)
+    );
+    assert_eq!(output, b"{\"valid\":true}\n");
+
+    for command in [
+        NativeV2CliCommand::Run(RunCommand {
+            validate_only: false,
+            ..run.clone()
+        }),
+        NativeV2CliCommand::Run(RunCommand {
+            selection: RunSelection::Profile(None),
+            ..run
+        }),
+        NativeV2CliCommand::TemplateList,
+    ] {
+        assert!(
+            try_execute_native_v2_preflight_with_environment(&command, &mut Vec::new(), |_| None)
+                .await
+                .assert_value()
+                .is_none()
+        );
+    }
 }

@@ -468,10 +468,7 @@ fn monitor_workspace_and_lease(monitor: WorkspaceMonitor, loss: watch::Sender<bo
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(WORKSPACE_MONITOR_INTERVAL).await;
-            let Some(controller_lease) = monitor.controller_lease.upgrade() else {
-                return;
-            };
-            let Some(workspace_lease) = monitor.workspace_lease.upgrade() else {
+            let Some((controller_lease, workspace_lease)) = active_monitor_leases(&monitor) else {
                 return;
             };
             if workspace_is_lost(
@@ -484,6 +481,15 @@ fn monitor_workspace_and_lease(monitor: WorkspaceMonitor, loss: watch::Sender<bo
             }
         }
     });
+}
+
+fn active_monitor_leases(
+    monitor: &WorkspaceMonitor,
+) -> Option<(Arc<ControllerLease>, Arc<ControllerLease>)> {
+    Some((
+        monitor.controller_lease.upgrade()?,
+        monitor.workspace_lease.upgrade()?,
+    ))
 }
 
 fn workspace_is_lost(
