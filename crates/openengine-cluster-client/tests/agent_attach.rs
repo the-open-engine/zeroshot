@@ -13,8 +13,8 @@
 use std::sync::Arc;
 
 use openengine_cluster_client::{
-    AgentAttachEventOrClosed, NdjsonAgentAttachClient, NdjsonAgentAttachEventStream,
-    NdjsonTransport,
+    AgentAttachClient, AgentAttachEventOrClosed, NdjsonAgentAttachClient,
+    NdjsonAgentAttachEventStream, NdjsonTransport,
 };
 use openengine_cluster_protocol::{
     AgentAttachEvent, AgentAttachParams, BoundedAssistantOutput, ExecutionRef, GONE, NOT_FOUND,
@@ -22,7 +22,9 @@ use openengine_cluster_protocol::{
 use openengine_cluster_server::agent_attach::fixtures::{
     AgentAttachFixtureBackend, AgentAttachFixtureStore,
 };
+use openengine_cluster_server::agent_attach::AgentAttachStreamItem;
 use openengine_cluster_server::watch::fixtures::{await_ndjson_shutdown, spawn_ndjson};
+use openengine_cluster_server::{ConnectionContext, Dispatcher};
 use tokio::io::DuplexStream;
 
 #[path = "support/mod.rs"]
@@ -148,4 +150,29 @@ async fn inactive_execution_ref_error_propagates_to_the_client() {
     store.register_active(execution.clone()).await;
     store.mark_inactive(&execution).await;
     assert_attach_rejection(store, GONE, "expected an inactive execution ref rejection").await;
+}
+
+#[tokio::test]
+async fn typed_client_delegates_attach_establishment_and_live_events() {
+    let store = Arc::new(AgentAttachFixtureStore::new());
+    let execution = sample_execution_ref();
+    store.register_active(execution.clone()).await;
+    let client = AgentAttachClient::new(Dispatcher::new(
+        AgentAttachFixtureBackend::new(Arc::clone(&store)),
+        ConnectionContext::default(),
+    ));
+
+    let (result, mut stream, handle) = client
+        .agent_attach(agent_attach_params())
+        .await
+        .assert_value();
+    assert!(!result.subscription_id.as_str().is_empty());
+
+    let expected = sample_output_event("typed client");
+    store.publish(&execution, expected.clone()).await;
+    assert_eq!(
+        stream.next().await,
+        Some(AgentAttachStreamItem::Event(expected))
+    );
+    drop(handle);
 }

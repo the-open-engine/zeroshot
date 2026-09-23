@@ -55,6 +55,92 @@ impl Fixture {
 }
 
 #[test]
+fn boundary_contract_filesystem_helpers_reject_overlap_non_directories_invalid_names_and_cancelled_reads()
+ {
+    use std::io::Read as _;
+    use std::os::unix::ffi::OsStringExt;
+
+    let fixture = Fixture::new();
+    let mut overlap = fixture.specification(90);
+    overlap.candidate = fixture.runtime.clone();
+    assert!(copy_candidate(&overlap, &fixture.runtime.join("copy")).is_err());
+
+    let nested = fixture.candidate.join("nested");
+    fs::create_dir(&nested).assert_value();
+    let pinned = open_copy_root(&nested.join("../nested")).assert_value();
+    assert!(pinned.metadata().assert_value().is_dir());
+
+    let regular = fixture.candidate.join("regular");
+    fs::write(&regular, b"contents").assert_value();
+    assert!(open_copy_directory(libc::AT_FDCWD, &regular).is_err());
+    assert!(open_copy_source(libc::AT_FDCWD, Path::new("missing-entry")).is_err());
+    let nul = PathBuf::from(std::ffi::OsString::from_vec(b"bad\0name".to_vec()));
+    assert!(open_copy_source(libc::AT_FDCWD, &nul).is_err());
+
+    fixture.cancellation.send_replace(true);
+    let mut reader = CancellableReader {
+        source: fs::File::open(&regular).assert_value(),
+        cancellation: &DriverCancellation::new(fixture.cancellation.subscribe()),
+    };
+    assert!(reader.read(&mut [0_u8; 4]).is_err());
+    assert!(
+        copy_entry(
+            open_copy_source(libc::AT_FDCWD, &regular).assert_value(),
+            &fixture.runtime.join("cancelled-copy"),
+            &fixture.specification(91),
+        )
+        .is_err()
+    );
+    assert!(!fixture.runtime.join("cancelled-copy").exists());
+
+    let metadata = fs::metadata(&regular).assert_value();
+    assert!(preserve_times(&fixture.runtime.join("absent"), &metadata).is_err());
+}
+
+#[test]
+fn boundary_contract_execution_files_expose_utf8_scratch_and_return_to_idle_after_confirmed_reap() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let fixture = Fixture::new();
+    let files = fixture.prepare(1);
+    assert!(files.scratch_text().is_ok());
+    files.begin_process();
+    assert!(files.ensure_idle().is_err());
+    files.process_reaped();
+    files.ensure_idle().assert_value();
+
+    let invalid = ProviderExecutionFiles {
+        runner: LocalProcessRunner::new(),
+        workspace: fixture.candidate.clone(),
+        scratch: PathBuf::from(std::ffi::OsString::from_vec(vec![0xff])),
+        home: Arc::new(PrivateDirectory::retained(
+            fixture.runtime.join("invalid-home"),
+        )),
+        root: PrivateDirectory::retained(fixture.runtime.join("invalid-root")),
+    };
+    assert!(matches!(
+        invalid.scratch_text(),
+        Err(ProcessRunnerError::InvalidCommand(detail)) if detail.contains("not valid UTF-8")
+    ));
+}
+
+#[test]
+fn boundary_contract_private_directory_drop_removes_only_idle_directories() {
+    let fixture = Fixture::new();
+    let file = fixture.runtime.join("retained-file");
+    fs::write(&file, b"keep").assert_value();
+    drop(PrivateDirectory::retained(file.clone()));
+    assert!(file.is_file());
+
+    let active = fixture.runtime.join("active");
+    fs::create_dir(&active).assert_value();
+    let directory = PrivateDirectory::retained(active.clone());
+    directory.processes.store(1, Ordering::Release);
+    drop(directory);
+    assert!(active.is_dir());
+}
+
+#[test]
 fn candidate_copy_preserves_artifacts_metadata_and_symlinks_without_shared_inodes() {
     let fixture = Fixture::new();
     fs::create_dir(fixture.candidate.join("target")).assert_value();

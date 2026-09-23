@@ -294,19 +294,22 @@ mod tests {
             let _ = std::fs::remove_dir_all(&self.root);
         }
     }
+    fn state(root: std::path::PathBuf, origin: &str) -> UiState {
+        UiState::new(
+            LocalRunProfileStore::new(root.clone()),
+            runs::NativeRunHistory::new(root.join("state")),
+            origin,
+            "local",
+        )
+        .assert_value()
+    }
     async fn server() -> Server {
         let root = std::env::temp_dir().join(format!("zeroshot-ui-test-{}", uuid::Uuid::now_v7()));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .assert_value();
         let authority = listener.local_addr().assert_value().to_string();
-        let state = UiState::new(
-            LocalRunProfileStore::new(root.clone()),
-            runs::NativeRunHistory::new(root.join("state")),
-            &format!("http://{authority}"),
-            "local",
-        )
-        .assert_value();
+        let state = state(root.clone(), &format!("http://{authority}"));
         let workspace = state.workspace.id.clone();
         let app = router(state, false);
         let task = tokio::spawn(async move {
@@ -321,6 +324,116 @@ mod tests {
     }
     fn profile_request() -> Value {
         json!({"name":"browser-test","graph":BuiltinGraphTemplate::SingleWorker.materialize(TemplateDelivery::None).assert_value(),"runtime":{"harness":"codex","provider":"openai","size":"small","nodes":{"worker":{"kind":"agent","model":"opaque-model"}}},"expectedRevision":null})
+    }
+    #[tokio::test]
+    async fn direct_profile_handlers_round_trip_without_a_transport() {
+        let root = openengine_cluster_testkit::TemporaryDirectory::for_test("profile-ui-handlers");
+        let state = state(root.as_path().to_owned(), "https://target.example");
+        let workspace = state.workspace.id.clone();
+
+        let Json(bootstrap) = bootstrap(State(state.clone())).await.assert_value();
+        assert_eq!(bootstrap["workspace"]["kind"], "local");
+        assert_eq!(bootstrap["workspace"]["id"], workspace);
+        let Json(empty) = list(State(state.clone())).await.assert_value();
+        assert_eq!(empty["profiles"], json!([]));
+
+        let mut headers = HeaderMap::new();
+        headers.insert("x-zeroshot-workspace", workspace.parse().assert_value());
+        let request = profile_request();
+        let Json(saved) = save(
+            State(state.clone()),
+            headers,
+            Ok(Bytes::from(request.to_string())),
+        )
+        .await
+        .assert_value();
+        assert_eq!(saved["profile"]["name"], "browser-test");
+
+        let Json(profiles) = list(State(state.clone())).await.assert_value();
+        assert_eq!(profiles["profiles"].as_array().assert_value().len(), 1);
+        let Json(shown) = show(State(state.clone()), Path("browser-test".to_owned()))
+            .await
+            .assert_value();
+        assert_eq!(shown, saved);
+        let error = show(State(state), Path("bad/name".to_owned()))
+            .await
+            .err()
+            .assert_value();
+        assert_eq!(error.code, "invalid_profile");
+    }
+
+    #[tokio::test]
+    async fn direct_authoring_and_validation_handlers_preserve_drafts_and_reject_bad_json() {
+        let request = profile_request();
+        let document = json!({"graph":request["graph"],"runtime":request["runtime"]});
+        let Json(valid) = validate(Ok(Bytes::from(document.to_string())))
+            .await
+            .assert_value();
+        assert_eq!(valid, json!({"valid":true}));
+
+        let data_request = json!({
+            "graph": request["graph"],
+            "runtime": request["runtime"],
+            "action": {
+                "kind":"run_input_field", "name":"request",
+                "type":{"kind":"string"}, "required":true
+            }
+        });
+        let Json(authored) = data_author(Ok(Bytes::from(data_request.to_string())))
+            .await
+            .assert_value();
+        assert_eq!(
+            authored["graph"]["initialInput"]["fields"]["request"]["type"],
+            json!({"kind":"string"})
+        );
+
+        for malformed in ["{", r#"{"graph":null,"runtime":null,"extra":true}"#] {
+            let error = validate(Ok(Bytes::from(malformed.to_owned())))
+                .await
+                .err()
+                .assert_value();
+            assert_eq!(error.status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(error.code, "invalid_profile");
+            assert!(error.message.contains("Invalid profile JSON"));
+        }
+    }
+
+    #[tokio::test]
+    async fn helper_failures_keep_stable_problem_categories() {
+        struct RefusesSerialization;
+        impl serde::Serialize for RefusesSerialization {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                use serde::ser::Error as _;
+                Err(S::Error::custom("fixture refusal"))
+            }
+        }
+
+        let serialization = encoded(RefusesSerialization).err().assert_value();
+        assert_eq!(serialization.code, "profile_store_error");
+        assert!(serialization.message.contains("fixture refusal"));
+        let operation = blocking::<()>(|| Err(NativeV2CliError::Local("store offline".into())))
+            .await
+            .err()
+            .assert_value();
+        assert_eq!(operation.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(operation.message.contains("store offline"));
+        assert!(
+            local_error(std::io::Error::other("disk offline"))
+                .to_string()
+                .contains("disk offline")
+        );
+
+        let mapped: ApiError = workspace::WorkspaceError {
+            status: 99,
+            code: "fixture",
+            message: "invalid status".into(),
+        }
+        .into();
+        assert_eq!(mapped.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(mapped.code, "fixture");
     }
     #[tokio::test]
     async fn browser_save_is_cli_visible_and_conflicts_are_atomic() {

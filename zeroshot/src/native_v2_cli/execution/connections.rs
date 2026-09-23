@@ -2,13 +2,13 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 
 use openengine_cluster_protocol::{
-    ConnectionDeleteRequest, ConnectionListRequest, ConnectionSetRequest, EnvironmentVariableName,
-    StaticConnectionValues,
+    ConnectionDeleteRequest, ConnectionKey, ConnectionListRequest, ConnectionSetRequest,
+    EnvironmentVariableName, StaticConnectionValues,
 };
 
 use crate::native_v2_cli::{
-    CliOutcome, ConnectionInput, ConnectionSetCommand, NativeV2CliBackend, NativeV2CliCommand,
-    NativeV2CliError,
+    CliOutcome, ConnectionInput, ConnectionRoute, ConnectionSetCommand, NativeV2CliBackend,
+    NativeV2CliCommand, NativeV2CliError,
 };
 
 use super::write_json;
@@ -64,13 +64,28 @@ where
     B: NativeV2CliBackend,
     W: Write,
 {
-    let values = read_connection_values(command.input)?;
+    let ConnectionSetCommand { route, key, input } = command;
+    let values = read_connection_values(input)?;
+    store_connection_values(route, key, values, backend, output).await
+}
+
+async fn store_connection_values<B, W>(
+    route: ConnectionRoute,
+    key: ConnectionKey,
+    values: StaticConnectionValues,
+    backend: &B,
+    output: &mut W,
+) -> Result<CliOutcome, NativeV2CliError>
+where
+    B: NativeV2CliBackend,
+    W: Write,
+{
     let result = backend
         .connection_set(
-            command.route.target.as_deref(),
+            route.target.as_deref(),
             ConnectionSetRequest {
-                key: command.key,
-                scope: command.route.scope,
+                key,
+                scope: route.scope,
                 values,
             },
         )
@@ -82,17 +97,36 @@ where
 fn read_connection_values(
     input: ConnectionInput,
 ) -> Result<StaticConnectionValues, NativeV2CliError> {
+    read_connection_values_with(
+        input,
+        |field| rpassword::prompt_password(format!("{}: ", field.as_str())),
+        || {
+            let mut encoded = String::new();
+            std::io::stdin().lock().read_to_string(&mut encoded)?;
+            Ok(encoded)
+        },
+    )
+}
+
+fn read_connection_values_with<P, R>(
+    input: ConnectionInput,
+    mut prompt: P,
+    read_stdin: R,
+) -> Result<StaticConnectionValues, NativeV2CliError>
+where
+    P: FnMut(&EnvironmentVariableName) -> Result<String, std::io::Error>,
+    R: FnOnce() -> Result<String, std::io::Error>,
+{
     let values = match input {
         ConnectionInput::Prompt(fields) => fields
             .into_iter()
             .map(|field| {
-                let value = rpassword::prompt_password(format!("{}: ", field.as_str()))?;
+                let value = prompt(&field)?;
                 Ok((field, value))
             })
             .collect::<Result<BTreeMap<_, _>, std::io::Error>>()?,
         ConnectionInput::JsonStdin => {
-            let mut encoded = String::new();
-            std::io::stdin().lock().read_to_string(&mut encoded)?;
+            let encoded = read_stdin()?;
             serde_json::from_str::<BTreeMap<EnvironmentVariableName, String>>(&encoded).map_err(
                 |error| NativeV2CliError::Usage(format!("connection JSON is invalid: {error}")),
             )?
@@ -100,3 +134,7 @@ fn read_connection_values(
     };
     StaticConnectionValues::new(values).map_err(|error| NativeV2CliError::Usage(error.to_string()))
 }
+
+#[cfg(test)]
+#[path = "connections/tests.rs"]
+mod tests;

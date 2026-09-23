@@ -272,3 +272,7 @@ fn add_optional_tokens(
         _ => Some(None),
     }
 }
+
+#[cfg(test)]
+#[path = "usage/tests.rs"]
+mod tests;

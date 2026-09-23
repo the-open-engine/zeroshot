@@ -83,6 +83,85 @@ fn file_registry_round_trips_direct_access_without_a_device_credential() {
 }
 
 #[test]
+fn file_registry_rejects_malformed_records_and_noncanonical_recovery_authority() {
+    let root = temp_root();
+    let malformed = [
+        serde_json::json!({"version":99,"targets":{}}),
+        serde_json::json!({
+            "version":5,
+            "targets":{"stored-key":{
+                "id":"11111111-1111-4111-8111-111111111111",
+                "name":"different-name", "origin":"https://target.example",
+                "access":{"mode":"direct"}
+            }}
+        }),
+        serde_json::json!({
+            "version":5,
+            "targets":{"bad-origin":{
+                "id":"11111111-1111-4111-8111-111111111111",
+                "name":"bad-origin", "origin":"https://target.example/path",
+                "access":{"mode":"direct"}
+            }}
+        }),
+        serde_json::json!({
+            "version":5,
+            "targets":{"bad-id":{
+                "id":"NOT-A-UUID", "name":"bad-id", "origin":"https://target.example",
+                "access":{"mode":"hosted","deviceToken":"ALSO-NOT-A-UUID"}
+            }}
+        }),
+    ];
+    for (index, state) in malformed.into_iter().enumerate() {
+        let relative_path = format!("malformed-{index}/targets.json");
+        let path = root.path(&relative_path);
+        std::fs::create_dir_all(path.parent().assert_value()).assert_value();
+        std::fs::write(&path, serde_json::to_vec(&state).assert_value()).assert_value();
+        assert!(matches!(
+            FileTargetRegistry::new(path).get("cloud"),
+            Err(TargetConnectorError::RegistryJson(_))
+        ));
+    }
+
+    let oversized = root.path("oversized/targets.json");
+    std::fs::create_dir_all(oversized.parent().assert_value()).assert_value();
+    std::fs::write(&oversized, vec![b' '; 1024 * 1024 + 1]).assert_value();
+    assert!(matches!(
+        FileTargetRegistry::new(oversized).get("cloud"),
+        Err(TargetConnectorError::RegistryTooLarge)
+    ));
+
+    let directory = root.path("directory/targets.json");
+    std::fs::create_dir_all(&directory).assert_value();
+    assert!(matches!(
+        FileTargetRegistry::new(directory).get("cloud"),
+        Err(TargetConnectorError::RegistryIo(_))
+    ));
+
+    let registry = FileTargetRegistry::new(root.path("recovery/targets.json"));
+    let run_id = run_request().run_id;
+    let empty = BTreeMap::from([(ConnectionKey::new("openai").assert_value(), Vec::new())]);
+    assert!(matches!(
+        registry.record_recovery_authorization(
+            "11111111-1111-4111-8111-111111111111",
+            &run_id,
+            &empty,
+        ),
+        Err(TargetConnectorError::RecoveryAuthorizationInvalid)
+    ));
+    assert!(matches!(
+        registry.record_recovery_authorization("not-a-target-id", &run_id, &BTreeMap::new()),
+        Err(TargetConnectorError::RecoveryAuthorizationInvalid)
+    ));
+    assert!(matches!(
+        registry.recovery_authorization(
+            "11111111-1111-4111-8111-111111111111",
+            &RunId::new("not-a-run-id"),
+        ),
+        Err(TargetConnectorError::RecoveryAuthorizationInvalid)
+    ));
+}
+
+#[test]
 fn file_registry_keeps_recovery_authorization_outside_target_records() {
     let root = temp_root();
     let path = root.path("config/targets.json");

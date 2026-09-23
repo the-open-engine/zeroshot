@@ -321,3 +321,69 @@ fn provider_envelope_is_unwrapped_before_authoritative_validation() {
         AgentResponse::Correction(_)
     ));
 }
+
+#[test]
+fn coverage_contract_verifier_response_errors_are_bounded_and_identify_signal_contract_violations()
+{
+    let verdict = FieldName::new("verdict").assert_value();
+    let accepted = EnumLabel::new("accepted").assert_value();
+    let contract = NodeResponseContract::Verifier {
+        output: PayloadType::Null,
+        signals: BTreeMap::from([(
+            verdict.clone(),
+            NonEmptyEnumSet::new(vec![accepted.clone()]).assert_value(),
+        )]),
+        diagnostic: PayloadType::String,
+    };
+
+    let malformed = contract
+        .parse_agent_response(r#"{"output":null}"#)
+        .err()
+        .assert_value();
+    assert!(
+        malformed
+            .to_string()
+            .contains("exactly output, signals, and diagnostic")
+    );
+    assert!(
+        contract
+            .validate_agent_outcome(&WorkerOutcome::Verified {
+                output: Value::Null,
+                artifacts: Vec::new(),
+            })
+            .is_err()
+    );
+
+    let missing = validate_signals(&contract_signals(&contract), &BTreeMap::new())
+        .err()
+        .assert_value();
+    assert!(
+        missing
+            .to_string()
+            .contains("missing required field verdict")
+    );
+    let extra = validate_signals(
+        &contract_signals(&contract),
+        &BTreeMap::from([
+            (verdict, accepted),
+            (
+                FieldName::new("future").assert_value(),
+                EnumLabel::new("unknown").assert_value(),
+            ),
+        ]),
+    )
+    .err()
+    .assert_value();
+    assert!(extra.to_string().contains("undeclared field future"));
+
+    let bounded = NodeResponseError::new("é".repeat(MAX_RESPONSE_ERROR_BYTES));
+    assert!(bounded.to_string().len() <= MAX_RESPONSE_ERROR_BYTES);
+    assert!(bounded.to_string().ends_with("..."));
+}
+
+fn contract_signals(contract: &NodeResponseContract) -> BTreeMap<FieldName, NonEmptyEnumSet> {
+    let NodeResponseContract::Verifier { signals, .. } = contract else {
+        unreachable!("test contract is a verifier")
+    };
+    signals.clone()
+}

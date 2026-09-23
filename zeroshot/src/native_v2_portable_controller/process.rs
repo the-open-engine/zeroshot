@@ -442,3 +442,7 @@ fn write_ready(controller: &PortableRunController) -> Result<(), PortableControl
     }
     result
 }
+
+#[cfg(test)]
+#[path = "process/tests.rs"]
+mod tests;

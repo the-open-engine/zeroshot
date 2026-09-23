@@ -9,7 +9,8 @@ mod json_mut;
 
 use assert_value::AssertValue;
 use openengine_cluster_protocol::{
-    admission_fingerprint, diff_compiled_graphs, CanonicalError, CompiledGraphIr, GraphIdentity,
+    admission_fingerprint, canonical_value_bytes, diff_compiled_graphs, CanonicalError,
+    CompiledGraphIr, GraphIdentity,
 };
 use serde_json::{json, Value};
 
@@ -335,6 +336,23 @@ fn admission_fingerprint_sorts_json_keys_and_binds_the_method() {
         )
         .assert_value()
     );
+}
+
+#[test]
+fn canonical_request_values_sort_recursively_without_changing_scalar_meaning() {
+    let value = json!({
+        "z": [null, true, false, "line\n", -1, 1.5],
+        "a": {"z": 2, "a": 1}
+    });
+    let bytes = canonical_value_bytes(&value).assert_value();
+    assert_eq!(
+        String::from_utf8(bytes).assert_value(),
+        r#"{"a":{"a":1,"z":2},"z":[null,true,false,"line\n",-1,1.5]}"#
+    );
+
+    let integral = admission_fingerprint("apply", &json!({"value": 1})).assert_value();
+    let floating = admission_fingerprint("apply", &json!({"value": 1.0})).assert_value();
+    assert_ne!(integral, floating);
 }
 
 #[test]

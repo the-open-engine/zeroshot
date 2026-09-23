@@ -1399,3 +1399,6 @@ mod cleanup_tests;
 
 #[cfg(all(test, target_os = "linux"))]
 mod allocation_tests;
+
+#[cfg(all(test, target_os = "linux"))]
+mod lifecycle_tests;

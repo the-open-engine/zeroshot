@@ -9,8 +9,9 @@ mod json_mut;
 
 use assert_value::AssertValue;
 use openengine_cluster_protocol::{
-    ArtifactId, ArtifactLineage, ArtifactProducer, ArtifactRef, ByteLength, Generation, MediaType,
-    NodeName, PositiveInteger, RedactionClass, RunId, Sha256Digest, TypeId, WorkerRef,
+    ArtifactId, ArtifactLineage, ArtifactProducer, ArtifactRef, ArtifactValueError, ByteLength,
+    Generation, MediaType, NodeName, PositiveInteger, RedactionClass, RunId, Sha256Digest, TypeId,
+    WorkerRef, MAX_SAFE_GENERATION,
 };
 use serde_json::json;
 
@@ -118,4 +119,45 @@ fn artifact_receipts_reject_bytes_urls_tokens_paths_bad_hashes_and_unsafe_counts
     *json_mut::json_at_mut(&mut value, "/byteLength") = decimal_integral;
     assert!(serde_json::from_value::<ArtifactRef>(value.clone()).is_ok());
     assert!(validator.is_valid(&value));
+}
+
+#[test]
+fn artifact_value_boundaries_preserve_exact_public_values() {
+    assert_eq!(
+        ArtifactId::new(""),
+        Err(ArtifactValueError::Empty("artifact ID"))
+    );
+    assert_eq!(
+        MediaType::new(""),
+        Err(ArtifactValueError::Empty("media type"))
+    );
+    assert_eq!(
+        ArtifactId::new("bad\nidentifier"),
+        Err(ArtifactValueError::Invalid("artifact ID"))
+    );
+
+    let artifact_id = ArtifactId::new("artifact-123").assert_value();
+    let media_type = MediaType::new("application/json").assert_value();
+    let type_id = TypeId::new("openengine.result@1").assert_value();
+    assert_eq!(artifact_id.as_str(), "artifact-123");
+    assert_eq!(media_type.as_str(), "application/json");
+    assert_eq!(type_id.as_str(), "openengine.result@1");
+
+    let digest: Sha256Digest = "0123456789abcdef".repeat(4).parse().assert_value();
+    assert_eq!(digest.as_str(), "0123456789abcdef".repeat(4));
+    assert_eq!(digest.to_string(), digest.as_str());
+    assert!("A".repeat(64).parse::<Sha256Digest>().is_err());
+
+    assert_eq!(ByteLength::new(0).assert_value().get(), 0);
+    assert_eq!(
+        ByteLength::new(MAX_SAFE_GENERATION).assert_value().get(),
+        MAX_SAFE_GENERATION
+    );
+    assert_eq!(
+        ByteLength::new(MAX_SAFE_GENERATION + 1),
+        Err(ArtifactValueError::ByteLengthOutOfRange)
+    );
+    for invalid in [json!(-1), json!(1.5), json!("42")] {
+        assert!(serde_json::from_value::<ByteLength>(invalid).is_err());
+    }
 }

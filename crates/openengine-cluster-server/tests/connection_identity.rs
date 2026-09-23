@@ -52,6 +52,19 @@ impl ConnectionIdentityResolver for CountingResolver {
 }
 
 #[derive(Clone)]
+struct RejectingResolver {
+    calls: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl ConnectionIdentityResolver for RejectingResolver {
+    async fn resolve(&self) -> Result<ConnectionIdentity, IdentityResolutionError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(IdentityResolutionError::new("fixture identity rejected"))
+    }
+}
+
+#[derive(Clone)]
 struct FixedTime(Arc<AtomicU64>);
 
 impl FixedTime {
@@ -138,6 +151,29 @@ fn connection_identity_has_typed_read_only_shape() {
     );
     assert!(!identity.is_expired_at(49));
     assert!(identity.is_expired_at(50));
+}
+
+#[tokio::test]
+async fn resolver_rejection_precedes_dispatcher_and_backend_effects() {
+    let backend = Arc::new(RecordingBackend::default());
+    let resolver_calls = Arc::new(AtomicUsize::new(0));
+    let error = ConnectionBinding::new(
+        Arc::clone(&backend),
+        RejectingResolver {
+            calls: Arc::clone(&resolver_calls),
+        },
+        FixedTime::new(0),
+        CancellationSignal::default(),
+    )
+    .into_dispatcher()
+    .await
+    .err()
+    .assert_value();
+
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    assert_eq!(error.to_string(), "fixture identity rejected");
+    assert_eq!(resolver_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(backend.calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

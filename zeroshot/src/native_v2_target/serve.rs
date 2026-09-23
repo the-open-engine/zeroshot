@@ -142,7 +142,7 @@ fn direct_identity() -> ConnectionIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openengine_cluster_testkit::assertions::AssertValue;
+    use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
     struct Storage(std::path::PathBuf);
 
@@ -189,5 +189,34 @@ mod tests {
             oecp_endpoint("https://target.example").assert_value(),
             "wss://target.example/native-v2/oecp"
         );
+        for invalid in ["not a URL", "ftp://target.example"] {
+            assert_eq!(
+                oecp_endpoint(invalid).assert_error().to_string(),
+                "public target origin is invalid"
+            );
+        }
+
+        let identity = direct_identity();
+        assert_eq!(identity.principal().as_str(), "direct-target");
+        assert_eq!(identity.tenant().as_str(), "direct-target");
+        assert_eq!(identity.issued_at_ms(), None);
+        assert_eq!(identity.expires_at_ms(), u64::MAX);
+        assert!(identity.binding_attributes().iter().next().is_none());
+    }
+
+    #[tokio::test]
+    async fn direct_serve_rejects_an_invalid_public_origin_before_preparing_storage() {
+        let storage =
+            openengine_cluster_testkit::TemporaryDirectory::for_test("target-serve-invalid-origin");
+        let error = serve_direct_target(TargetServe {
+            listen: "127.0.0.1:0".parse().assert_value(),
+            public_origin: "http://target.example".to_owned(),
+            storage: storage.path("unused"),
+            bootstrap_key_file: None,
+        })
+        .await
+        .assert_error();
+        assert!(matches!(error, TargetServeError::InvalidOrigin(_)));
+        assert!(!storage.path("unused").exists());
     }
 }

@@ -1,7 +1,9 @@
-use openengine_cluster_testkit::assertions::AssertValue;
+use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{Value, json};
 
 use super::*;
+#[cfg(unix)]
+use super::observation::test_support::{authority, shell_literal, write_executable};
 use super::policy::MergeMethod;
 use crate::native_v2_delivery::GitHubChecks;
 
@@ -112,6 +114,89 @@ fn policy_page_with_merge_capabilities(merge: bool, squash: bool, rebase: bool) 
     repository["squashMergeAllowed"] = json!(squash);
     repository["rebaseMergeAllowed"] = json!(rebase);
     page
+}
+
+fn set_review_state(page: &mut Value, state: &str, merged: bool) {
+    let review = page
+        .pointer_mut("/data/repository/pullRequest")
+        .assert_value();
+    review["state"] = json!(state);
+    review["merged"] = json!(merged);
+}
+
+#[cfg(unix)]
+fn review_wire(request: &GitHubReviewRequest, title: Option<&str>, body: Option<&str>) -> Value {
+    json!({
+        "number": 17,
+        "title": title,
+        "body": body,
+        "base": {
+            "ref": request.target.target_branch,
+            "sha": request.target.base_revision,
+            "repo": {"full_name": request.target.repository}
+        },
+        "head": {
+            "ref": request.head_branch,
+            "sha": request.head_revision,
+            "repo": {"full_name": request.target.repository}
+        }
+    })
+}
+
+#[cfg(unix)]
+fn write_review_fixture(
+    root: &std::path::Path,
+    listed: Value,
+    current: Value,
+    created: Value,
+    patched: Value,
+) -> std::path::PathBuf {
+    let program = root.join("gh-review-fixture");
+    let reference = json!({
+        "ref": "refs/heads/zeroshot/v2-run",
+        "object": {
+            "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "type": "commit"
+        }
+    });
+    let source = format!(
+        "#!/bin/sh\ncase \"$2:$4\" in\n\
+         repos/acme/project/pulls:GET) printf '%s\\n' {} ;;\n\
+         repos/acme/project/pulls:POST) printf '%s\\n' {} ;;\n\
+         repos/acme/project/pulls/17:GET) printf '%s\\n' {} ;;\n\
+         repos/acme/project/pulls/17:PATCH) printf '%s\\n' {} ;;\n\
+         repos/acme/project/git/ref/heads/zeroshot/v2-run:) \
+           printf '%s\\n' {} ;;\n\
+         *) exit 19 ;;\n\
+         esac\n",
+        shell_literal(&listed.to_string()),
+        shell_literal(&created.to_string()),
+        shell_literal(&current.to_string()),
+        shell_literal(&patched.to_string()),
+        shell_literal(&reference.to_string()),
+    );
+    write_executable(&program, source);
+    program
+}
+
+#[cfg(unix)]
+fn write_policy_fixture(
+    root: &std::path::Path,
+    page: &Value,
+    log_action: &str,
+) -> std::path::PathBuf {
+    let program = root.join("gh-policy-fixture");
+    let source = format!(
+        "#!/bin/sh\ncase \"$2\" in\n\
+         graphql) printf '%s\\n' {} ;;\n\
+         repos/acme/project/actions/jobs/91/logs) {} ;;\n\
+         *) exit 19 ;;\n\
+         esac\n",
+        shell_literal(&json!([page]).to_string()),
+        log_action,
+    );
+    write_executable(&program, source);
+    program
 }
 
 fn classify_conclusion(conclusion: &str, merge_state: &str) -> PolicySnapshot {
@@ -712,4 +797,261 @@ fn oversized_failure_summary_marks_omitted_text() {
     };
     assert_eq!(diagnostic.chars().count(), 8 * 1024);
     assert!(diagnostic.ends_with("[diagnostic truncated]"));
+}
+
+#[test]
+fn merge_actions_preserve_terminal_authority_and_select_only_allowed_methods() {
+    let snapshot = |state, merge_method| PolicySnapshot {
+        state,
+        failed_job_ids: Vec::new(),
+        merge_method,
+        head_update: None,
+        pull_request_ready: false,
+    };
+
+    for (state, expected) in [
+        (
+            GitHubReviewState::Merged {
+                merge_revision: "cccccccccccccccccccccccccccccccccccccccc".to_owned(),
+            },
+            GitHubMergeRequestOutcome::Accepted,
+        ),
+        (
+            GitHubReviewState::Conflict,
+            GitHubMergeRequestOutcome::Conflict,
+        ),
+        (
+            GitHubReviewState::Open {
+                checks: GitHubChecks::Pending,
+            },
+            GitHubMergeRequestOutcome::Pending,
+        ),
+    ] {
+        let MergeAction::Complete(actual) = merge_action(snapshot(state, None)).assert_value()
+        else {
+            panic!("terminal policy must complete without submitting");
+        };
+        assert_eq!(actual, expected);
+    }
+
+    for (method, argument) in [
+        (MergeMethod::Queue, None),
+        (MergeMethod::Merge, Some("--merge")),
+        (MergeMethod::Squash, Some("--squash")),
+        (MergeMethod::Rebase, Some("--rebase")),
+    ] {
+        let MergeAction::Submit(actual) = merge_action(snapshot(
+            GitHubReviewState::Open {
+                checks: GitHubChecks::NotRequired,
+            },
+            Some(method),
+        ))
+        .assert_value() else {
+            panic!("ready policy must submit an allowed merge method");
+        };
+        assert_eq!(actual, method);
+        assert_eq!(merge_method_argument(actual), argument);
+    }
+
+    for state in [
+        GitHubReviewState::Closed,
+        GitHubReviewState::Open {
+            checks: GitHubChecks::Passed,
+        },
+    ] {
+        assert_eq!(
+            merge_action(snapshot(state, None)).assert_error(),
+            GitHubAuthorityError::Rejected
+        );
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn review_opening_rediscovery_and_metadata_refresh_are_identity_fenced() {
+    let request = test_review_request();
+    let expected_body = pull_request_body(&request).assert_value();
+    let exact = review_wire(&request, Some(&request.title), Some(expected_body.as_str()));
+
+    let existing_root = tempfile::tempdir().assert_value();
+    let existing_program = write_review_fixture(
+        existing_root.path(),
+        json!([exact.clone()]),
+        exact.clone(),
+        exact.clone(),
+        exact.clone(),
+    );
+    let existing = authority(existing_program, existing_root.path())
+        .open_or_update_review(&request, GitHubCredential("test-token"))
+        .await
+        .assert_value();
+    assert_eq!(existing, review());
+
+    let created_root = tempfile::tempdir().assert_value();
+    let created_program = write_review_fixture(
+        created_root.path(),
+        json!([]),
+        exact.clone(),
+        exact.clone(),
+        exact.clone(),
+    );
+    let created = authority(created_program, created_root.path())
+        .open_or_update_review(&request, GitHubCredential("test-token"))
+        .await
+        .assert_value();
+    assert_eq!(created, review());
+
+    let refreshed_body = refresh_pull_request_body(Some("Human context."), &request).assert_value();
+    let current = review_wire(&request, Some("stale title"), Some("Human context."));
+    let refreshed = review_wire(
+        &request,
+        Some(&request.title),
+        Some(refreshed_body.as_str()),
+    );
+    let refreshed_root = tempfile::tempdir().assert_value();
+    let refreshed_program = write_review_fixture(
+        refreshed_root.path(),
+        json!([current.clone()]),
+        current,
+        refreshed.clone(),
+        refreshed,
+    );
+    authority(refreshed_program, refreshed_root.path())
+        .refresh_review_metadata(&request, &review(), GitHubCredential("test-token"))
+        .await
+        .assert_value();
+
+    let ambiguous_root = tempfile::tempdir().assert_value();
+    let ambiguous_program = write_review_fixture(
+        ambiguous_root.path(),
+        json!([exact.clone(), exact.clone()]),
+        exact.clone(),
+        exact.clone(),
+        exact.clone(),
+    );
+    assert_eq!(
+        authority(ambiguous_program, ambiguous_root.path())
+            .find_review(&request, GitHubCredential("test-token"))
+            .await
+            .assert_error(),
+        GitHubAuthorityError::Rejected
+    );
+
+    let mismatched = review_wire(
+        &request,
+        Some("provider changed title"),
+        Some(&expected_body),
+    );
+    let mismatched_root = tempfile::tempdir().assert_value();
+    let mismatched_program = write_review_fixture(
+        mismatched_root.path(),
+        json!([]),
+        exact.clone(),
+        mismatched.clone(),
+        mismatched,
+    );
+    assert_eq!(
+        authority(mismatched_program, mismatched_root.path())
+            .create_review(&request, GitHubCredential("test-token"))
+            .await
+            .assert_error(),
+        GitHubAuthorityError::Rejected
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn failed_check_logs_are_enriched_but_transport_failures_remain_typed() {
+    let page = policy_page(
+        "MERGEABLE",
+        "BLOCKED",
+        Some(vec![check_run(
+            "required-ci",
+            "COMPLETED",
+            Some("FAILURE"),
+            true,
+        )]),
+        (false, None),
+    );
+    for (log_action, expected) in [
+        (
+            "printf '%s\\n' 'setup passed' 'assertion failed at boundary'",
+            "assertion failed at boundary",
+        ),
+        (
+            "printf '%s\\n' 'gh: Resource not accessible (HTTP 403)' >&2; exit 1",
+            "GitHub job log unavailable",
+        ),
+    ] {
+        let root = tempfile::tempdir().assert_value();
+        let program = write_policy_fixture(root.path(), &page, log_action);
+        let observation = authority(program, root.path())
+            .inspect_review(&review(), GitHubCredential("test-token"))
+            .await
+            .assert_value();
+        let GitHubReviewState::Open {
+            checks: GitHubChecks::Failed { diagnostic },
+        } = observation.state
+        else {
+            panic!("required failed check must remain failed");
+        };
+        assert!(diagnostic.contains(expected), "{diagnostic}");
+    }
+
+    let root = tempfile::tempdir().assert_value();
+    let program = write_policy_fixture(
+        root.path(),
+        &page,
+        "printf '%s\\n' 'gh: rate limited (HTTP 429)' >&2; exit 1",
+    );
+    let error = authority(program, root.path())
+        .inspect_review(&review(), GitHubCredential("test-token"))
+        .await
+        .assert_error();
+    assert_eq!(error.api_status(), Some(429));
+    assert!(error.retryable_operation());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn rejected_merge_is_reclassified_from_the_latest_authoritative_policy() {
+    let mut merged = policy_page("MERGEABLE", "CLEAN", None, (false, None));
+    set_review_state(&mut merged, "MERGED", true);
+    merged["data"]["repository"]["pullRequest"]["mergeCommit"] =
+        json!({"oid": "cccccccccccccccccccccccccccccccccccccccc"});
+    let conflict = policy_page("CONFLICTING", "DIRTY", None, (false, None));
+    let behind = policy_page("MERGEABLE", "BEHIND", None, (false, None));
+    let pending = policy_page("UNKNOWN", "UNKNOWN", None, (false, None));
+    let ready = policy_page("MERGEABLE", "CLEAN", None, (false, None));
+    let mut closed = policy_page("UNKNOWN", "UNKNOWN", None, (false, None));
+    set_review_state(&mut closed, "CLOSED", false);
+
+    let cases = [
+        (merged, Ok(GitHubMergeRequestOutcome::Accepted)),
+        (conflict, Ok(GitHubMergeRequestOutcome::Conflict)),
+        (behind, Ok(GitHubMergeRequestOutcome::HeadUpdateRequired)),
+        (pending, Ok(GitHubMergeRequestOutcome::Pending)),
+        (ready, Err(GitHubAuthorityError::Rejected)),
+        (closed, Err(GitHubAuthorityError::Rejected)),
+    ];
+    for (page, expected) in cases {
+        let root = tempfile::tempdir().assert_value();
+        let program = write_policy_fixture(root.path(), &page, "exit 19");
+        let actual = authority(program, root.path())
+            .classify_rejected_merge(&review(), GitHubCredential("test-token"))
+            .await;
+        assert_eq!(actual, expected);
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn bounded_git_output_refuses_truncated_success() {
+    let mut command = tokio::process::Command::new("/bin/sh");
+    command.args(["-c", "printf 'candidate-output'"]);
+    let error = bounded_git_output(&mut command, Duration::from_secs(1), 8)
+        .await
+        .assert_error();
+    assert!(error.to_string().contains("exceeded 8 bytes"));
+    assert!(error.to_string().contains("candidate-output"));
 }

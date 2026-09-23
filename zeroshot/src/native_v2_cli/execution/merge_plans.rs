@@ -526,3 +526,88 @@ fn manifest_requires_scoped_profile_and_rfc3339_deadline() {
     assert!(validate_deadline_at("2026-09-18T00:00:00Z", now).is_err());
     assert!(validate_deadline_at("tomorrow", now).is_err());
 }
+
+#[test]
+fn wave6_cli_contract_manifest_validation_and_terminal_outcomes_are_closed() {
+    let directory = tempfile::tempdir().unwrap();
+    let manifest_path = directory.path().join("plan.json");
+    let mut manifest = test_manifest_json();
+    let expires = OffsetDateTime::now_utc() + TimeDuration::days(1);
+    manifest["expiresAt"] = serde_json::json!(format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        expires.year(),
+        u8::from(expires.month()),
+        expires.day(),
+        expires.hour(),
+        expires.minute(),
+        expires.second()
+    ));
+    std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let mut output = Vec::new();
+    assert_eq!(
+        validate_file(&manifest_path, &mut output).unwrap(),
+        CliOutcome::Completed
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output).unwrap(),
+        serde_json::json!({"valid":true})
+    );
+
+    manifest["schema"] = serde_json::json!("zeroshot.merge-plan/future");
+    std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let schema_error = match load_manifest(&manifest_path) {
+        Err(error) => error,
+        Ok(_) => panic!("future merge-plan schemas must be rejected"),
+    };
+    assert!(schema_error.to_string().contains("schema must be"));
+
+    let title = RunTitle::new("x".repeat(256)).unwrap();
+    let name = MergePlanRunName::new("build").unwrap();
+    assert!(validate_derived_title(&title, &name).is_err());
+    let names = [MergePlanRunName::new("build").unwrap()]
+        .into_iter()
+        .collect();
+    assert!(
+        compile_needs(
+            &name,
+            vec!["dependency".to_owned(), "dependency".to_owned()],
+            &names,
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("more than once")
+    );
+
+    assert!(compile_runs(&RunTitle::new("Release").unwrap(), BTreeMap::new()).is_err());
+    let too_many = (0..=MAX_MERGE_PLAN_RUNS)
+        .map(|index| (format!("run-{index}"), test_run(index as i64, &[])))
+        .collect();
+    assert!(compile_runs(&RunTitle::new("Release").unwrap(), too_many).is_err());
+
+    for (state, expected) in [
+        (MergePlanState::Succeeded, CliOutcome::Finished),
+        (MergePlanState::Failed, CliOutcome::Failed),
+        (MergePlanState::Cancelled, CliOutcome::Failed),
+        (MergePlanState::Expired, CliOutcome::Failed),
+        (MergePlanState::Queued, CliOutcome::Completed),
+        (MergePlanState::Running, CliOutcome::Completed),
+    ] {
+        let plan: MergePlan = serde_json::from_value(serde_json::json!({
+            "planId":"plan-contract",
+            "title":"Release",
+            "state":state,
+            "repository":"owner/repo",
+            "branch":"main",
+            "submittedAt":"2026-09-10T00:00:00Z",
+            "expiresAt":"2026-09-11T00:00:00Z",
+            "runs":[]
+        }))
+        .unwrap();
+        let outcome = outcome_for_plan(&plan);
+        assert_eq!(outcome, expected);
+        assert_eq!(
+            foreground_outcome(outcome).is_err(),
+            expected == CliOutcome::Failed
+        );
+    }
+}

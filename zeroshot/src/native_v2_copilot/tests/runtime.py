@@ -179,13 +179,25 @@ while (message := read()) is not None:
         assert params["responseFormat"]["jsonSchema"]["strict"] is True
         assert params["sessionId"] == session
         event("future.event", {"invalid": [1, 2, 3]})
-        event("assistant.usage", {"inputTokens": 7, "outputTokens": 3})
+        usage = {"inputTokens": 7, "outputTokens": 3}
+        if mode == "permission":
+            usage.update({"cacheReadTokens": 2, "cacheWriteTokens": 1})
+        event("assistant.usage", usage)
         if mode == "cancel":
             event("tool.execution_start", {"toolName": "ready"})
             time.sleep(60)
         if mode == "error":
             event("session.error", {"message": "rejected gho_fake-secret"})
         if mode == "permission":
+            event("assistant.message", {
+                "parentToolCallId": "tool-child", "content": "ignored child output"})
+            event("permission.requested", {"resolvedByHook": True})
+            event("tool.execution_start", {"toolName": "contract-check"})
+            event("tool.execution_complete", {
+                "success": False,
+                "error": {"message": "x" * 8191 + "é"},
+            })
+            event("tool.execution_complete", {"success": True})
             event("permission.requested", {"requestId": "allow-shell", "permissionRequest": {
                 "kind": "shell", "commands": [{"identifier": "echo", "readOnly": True}],
                 "hasWriteFileRedirection": False}})

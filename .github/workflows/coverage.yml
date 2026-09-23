@@ -88,9 +88,9 @@ jobs:
           cp "$ZEROSHOT_RESTIC" target/llvm-cov-target/debug/restic
           chmod +x target/llvm-cov-target/debug/restic
           cargo llvm-cov --workspace --no-report
-          cargo llvm-cov --package zeroshot --features ui --no-report
+          cargo llvm-cov --package zeroshot --features ui --no-clean --summary-only
+          cargo llvm-cov report --json --output-path coverage.json
           cargo llvm-cov report --lcov --output-path lcov.info
-          cargo llvm-cov report --summary-only
 
       - name: Publish coverage
         uses: coverallsapp/github-action@8d6379e14d29928660c4ba802d8e85393440b329 # v2.3.8

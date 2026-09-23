@@ -1,5 +1,9 @@
-use openengine_cluster_protocol::{Cursor, Generation, GetParams, Phase, RunId, INTERNAL_ERROR_CODE};
+use openengine_cluster_protocol::{
+    Cursor, DispatchState, Generation, GetParams, OperationalStatus, Phase, RunId, StopMode,
+    INTERNAL_ERROR_CODE, INVALID_PHASE,
+};
 use openengine_cluster_server::admission::{AdmissionSnapshot, ControlSnapshot, VerifiedSeed};
+use openengine_cluster_server::lifecycle::{LifecycleSnapshot, TurnId};
 use openengine_cluster_testkit::admission::{
     compiled_from_graph_fixture, graph_fixture, ScriptedOutcome,
 };
@@ -143,6 +147,87 @@ async fn admission_admitting_snapshot_preserves_complete_empty_or_committed_stat
             Phase::Admitting
         );
     }
+}
+
+fn natural_terminal(snapshot: &AdmissionSnapshot) -> LifecycleSnapshot {
+    LifecycleSnapshot {
+        operational: Some(OperationalStatus {
+            dispatch_state: DispatchState::Stopped,
+            stop_mode: None,
+            ..OperationalStatus::default()
+        }),
+        latest_cursor: snapshot.control.cursor.clone(),
+        ..LifecycleSnapshot::default()
+    }
+}
+
+#[tokio::test]
+async fn natural_terminal_snapshots_require_an_exact_empty_settlement_frontier() {
+    let mut snapshot = valid_running_snapshot();
+    snapshot.control.phase = Phase::Finished;
+    let valid = natural_terminal(&snapshot);
+    let (client, _, store) = client(vec![]);
+    store.replace_snapshot_for_test(snapshot.clone()).await;
+    store
+        .replace_lifecycle_snapshot_for_test(valid.clone())
+        .await;
+    assert_eq!(
+        client.initialize().await.assert_value().status.phase,
+        Phase::Finished
+    );
+
+    let mut malformed = Vec::new();
+    let mut missing_cursor = valid.clone();
+    missing_cursor.latest_cursor = None;
+    malformed.push(("missing latest cursor", missing_cursor));
+    let mut wrong_cursor = valid.clone();
+    wrong_cursor.latest_cursor = Some(Cursor::new("wrong-cursor"));
+    malformed.push(("mismatched latest cursor", wrong_cursor));
+    let mut active_work = valid.clone();
+    active_work.operational.as_mut().assert_value().in_flight = 1;
+    malformed.push(("active work", active_work));
+    let mut stop_mode = valid.clone();
+    stop_mode.operational.as_mut().assert_value().stop_mode = Some(StopMode::Force);
+    malformed.push(("non-natural stop mode", stop_mode));
+    let mut retry_frontier = valid;
+    retry_frontier.pending_failed_frontier = Some(TurnId::new("failed"));
+    malformed.push(("pending retry frontier", retry_frontier));
+
+    for (case, lifecycle) in malformed {
+        store.replace_lifecycle_snapshot_for_test(lifecycle).await;
+        assert_eq!(
+            rpc_code(client.get(GetParams::default()).await.assert_error()),
+            INTERNAL_ERROR_CODE,
+            "accepted {case}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn admission_get_fences_reads_to_the_exact_authoritative_cursor() {
+    let snapshot = valid_running_snapshot();
+    let cursor = snapshot.control.cursor.clone().assert_value();
+    let (client, _, store) = client(vec![]);
+    store.replace_snapshot_for_test(snapshot).await;
+
+    let current = client
+        .get(GetParams {
+            at_cursor: Some(cursor.clone()),
+        })
+        .await
+        .assert_value();
+    assert_eq!(current.at_cursor, Some(cursor));
+    assert_eq!(
+        rpc_code(
+            client
+                .get(GetParams {
+                    at_cursor: Some(Cursor::new("stale-cursor")),
+                })
+                .await
+                .assert_error()
+        ),
+        INVALID_PHASE
+    );
 }
 
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};

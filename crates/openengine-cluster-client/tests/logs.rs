@@ -8,13 +8,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use openengine_cluster_client::{
-    LogEventOrClosed, NdjsonLogsClient, NdjsonLogsEventStream, NdjsonTransport,
+    LogEventOrClosed, LogsClient, NdjsonLogsClient, NdjsonLogsEventStream, NdjsonTransport,
 };
 use openengine_cluster_protocol::{LogLevel, LogRecord, LogsParams};
 use openengine_cluster_server::logs::fixtures::{
     fixture_log_record, LogsFixtureBackend, LogsFixtureStore,
 };
+use openengine_cluster_server::logs::LogStreamItem;
 use openengine_cluster_server::watch::fixtures::{await_ndjson_shutdown, spawn_ndjson};
+use openengine_cluster_server::{ConnectionContext, Dispatcher};
 use serde_json::{json, Value};
 use tokio::io::{BufReader, DuplexStream};
 
@@ -80,6 +82,23 @@ async fn cancel_stops_further_delivery() {
     drop(stream);
     drop(transport);
     await_ndjson_shutdown(server).await;
+}
+
+#[tokio::test]
+async fn typed_client_delegates_log_establishment_and_live_records() {
+    let store = Arc::new(LogsFixtureStore::new());
+    let client = LogsClient::new(Dispatcher::new(
+        LogsFixtureBackend::new(Arc::clone(&store)),
+        ConnectionContext::default(),
+    ));
+
+    let (result, mut stream, handle) = client.logs(LogsParams::default()).await.assert_value();
+    assert!(!result.subscription_id.as_str().is_empty());
+
+    let expected = sample_log_record("typed client");
+    store.publish(expected.clone()).await;
+    assert_eq!(stream.next().await, Some(LogStreamItem::Event(expected)));
+    drop(handle);
 }
 
 #[tokio::test]

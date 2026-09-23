@@ -484,7 +484,7 @@ async fn submit_through_cli(
 }
 
 #[tokio::test]
-async fn concrete_codex_and_claude_configs_bind_only_to_their_admitted_lane() {
+async fn coverage_contract_candidate_builders_bind_only_to_their_admitted_lane_and_workspace() {
     let repository = TempRepository::candidate();
     let github = Arc::new(ScriptedGitHub::new(repository.remote.clone()));
     let codex = admitted(RuntimePlanKind::Codex).await;
@@ -495,10 +495,58 @@ async fn concrete_codex_and_claude_configs_bind_only_to_their_admitted_lane() {
     let claude_config = candidate_config(RuntimePlanKind::Claude, &repository, github.clone());
     build_native_v2_candidate(&claude, claude_config).assert_value_with("Claude candidate");
 
-    let mismatch = candidate_config(RuntimePlanKind::Claude, &repository, github);
+    let mismatch = candidate_config(RuntimePlanKind::Claude, &repository, github.clone());
     let error = build_native_v2_candidate(&codex, mismatch)
         .assert_error_with("mismatched candidate must fail");
     assert_eq!(error, NativeV2CandidateError::RuntimeMismatch);
+
+    assert!(!CandidatePlacement::Capsule.is_local());
+    assert!(CandidatePlacement::Local(SessionBoundary::Run).is_local());
+    assert!(matches!(
+        CandidatePlacement::Capsule.session_boundary(),
+        SessionBoundary::Run
+    ));
+    assert!(matches!(
+        CandidatePlacement::Local(SessionBoundary::Owner).session_boundary(),
+        SessionBoundary::Owner
+    ));
+
+    build_native_v2_candidate_with_github_token(
+        &codex,
+        candidate_config(RuntimePlanKind::Codex, &repository, github.clone()),
+        Some(Arc::from("private-token")),
+    )
+    .assert_value_with("hosted candidate with token");
+    build_local_native_v2_candidate(
+        &codex,
+        candidate_config(RuntimePlanKind::Codex, &repository, github.clone()),
+    )
+    .assert_value_with("local candidate");
+    build_local_native_v2_candidate_with_github_token(
+        &codex,
+        candidate_config(RuntimePlanKind::Codex, &repository, github.clone()),
+        Some(Arc::from("private-token")),
+    )
+    .assert_value_with("local candidate with token");
+    build_local_owner_native_v2_candidate(
+        &codex,
+        candidate_config(RuntimePlanKind::Codex, &repository, github.clone()),
+    )
+    .assert_value_with("owner-scoped local candidate");
+
+    let mut mismatched_workspace =
+        candidate_config(RuntimePlanKind::Codex, &repository, github.clone());
+    mismatched_workspace.delivery.workspace = repository.root.child("different-workspace");
+    assert_eq!(
+        validate_config(&codex, &mismatched_workspace).assert_error(),
+        NativeV2CandidateError::WorkspaceMismatch
+    );
+
+    build_local_native_v2_candidate(
+        &claude,
+        candidate_config(RuntimePlanKind::Claude, &repository, github),
+    )
+    .assert_value_with("local Claude candidate");
 }
 
 #[test]

@@ -1,6 +1,32 @@
 use openengine_cluster_protocol::GraphSpec;
-use openengine_cluster_testkit::artifacts::generate_artifacts;
+use openengine_cluster_testkit::artifacts::{generate_artifacts, Artifact};
 use openengine_cluster_testkit::graph_verifier_artifacts::{result_value, verify_fixture_graph};
+use serde_json::Value;
+
+fn fixture_graph(artifacts: &[Artifact], suffix: &str) -> Value {
+    let artifact = artifacts
+        .iter()
+        .find(|artifact| artifact.relative_path.ends_with(suffix))
+        .assert_value_with("expected verifier fixture artifact");
+    let envelope: Value = serde_json::from_slice(&artifact.bytes).assert_value();
+    envelope.assert_key("graph").clone()
+}
+
+async fn assert_rejection_messages(graph: Value, expected: &[&str]) {
+    let graph: GraphSpec = serde_json::from_value(graph).assert_value();
+    let result = result_value(verify_fixture_graph(&graph).await);
+    assert_eq!(result.assert_key("status"), "rejected");
+    let diagnostics = result.assert_key("diagnostics").as_array().assert_value();
+    for message in expected {
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic
+                .assert_key("message")
+                .as_str()
+                .is_some_and(|actual| actual == *message)),
+            "missing {message:?} in {diagnostics:?}"
+        );
+    }
+}
 
 fn assert_required_paths(paths: &std::collections::BTreeSet<&str>) {
     for required in [
@@ -101,6 +127,95 @@ async fn committed_verifier_vectors_match_exact_repeatable_results() {
             vector.relative_path
         );
     }
+
+    assert_binding_mutations(&artifacts).await;
+}
+
+async fn assert_binding_mutations(artifacts: &[Artifact]) {
+    let binding = fixture_graph(artifacts, "/positive/binding-channels.json");
+    for (pointer, value, expected) in [
+        (
+            "/root/children/0/writeBindings/0/target",
+            serde_json::json!(["missing"]),
+            "write target does not exist in node state",
+        ),
+        (
+            "/root/children/0/writeBindings/0/value/path",
+            serde_json::json!(["missing"]),
+            "node output selector channel or path is invalid",
+        ),
+        (
+            "/root/children/0/writeBindings/1/value/node",
+            serde_json::json!("done"),
+            "node output selector channel or path is invalid",
+        ),
+        (
+            "/root/children/0/writeBindings/0/target",
+            serde_json::json!(["verdict"]),
+            "write value is not a subtype of its state target",
+        ),
+    ] {
+        let mut graph = binding.clone();
+        *graph.pointer_mut(pointer).assert_value() = value;
+        assert_rejection_messages(graph, &[expected]).await;
+    }
+
+    let mut overlapping_writes = binding;
+    *overlapping_writes
+        .pointer_mut("/root/children/0/writeBindings/1/target")
+        .assert_value() = serde_json::json!(["result"]);
+    assert_rejection_messages(
+        overlapping_writes,
+        &["executable has overlapping write targets"],
+    )
+    .await;
+
+    let data = fixture_graph(artifacts, "/positive/success-routed-write.json");
+    for (pointer, value, expected) in [
+        (
+            "/root/children/0/inputBindings/0/target",
+            serde_json::json!(["missing"]),
+            "binding target does not exist in declared payload",
+        ),
+        (
+            "/root/children/0/inputBindings/0/value/source",
+            serde_json::json!("item"),
+            "item selector is legal only inside a map body",
+        ),
+        (
+            "/root/children/0/inputBindings/0/value/path",
+            serde_json::json!(["missing"]),
+            "selector path does not exist in its payload type",
+        ),
+    ] {
+        let mut graph = data.clone();
+        *graph.pointer_mut(pointer).assert_value() = value;
+        assert_rejection_messages(graph, &[expected]).await;
+    }
+
+    let mut overlapping_inputs = data;
+    let duplicate = overlapping_inputs
+        .pointer("/root/children/0/inputBindings/0")
+        .assert_value()
+        .clone();
+    overlapping_inputs
+        .pointer_mut("/root/children/0/inputBindings")
+        .assert_value()
+        .as_array_mut()
+        .assert_value()
+        .push(duplicate);
+    assert_rejection_messages(overlapping_inputs, &["bindings have overlapping targets"]).await;
+
+    let mut scalar_map = fixture_graph(artifacts, "/positive/map-indexed-promotion.json");
+    for pointer in [
+        "/initialInput/fields/items/type",
+        "/root/state/fields/items/type",
+        "/root/children/0/state/fields/items/type",
+        "/root/children/1/state/fields/items/type",
+    ] {
+        *scalar_map.pointer_mut(pointer).assert_value() = serde_json::json!({"kind":"integer"});
+    }
+    assert_rejection_messages(scalar_map, &["map selector must resolve to an array"]).await;
 }
 
 fn assert_required_diagnostic(path: &str, envelope: &serde_json::Value) {

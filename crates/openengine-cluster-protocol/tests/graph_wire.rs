@@ -10,9 +10,9 @@ mod json_mut;
 use assert_value::AssertValue;
 use openengine_cluster_testkit::assertions::AssertError;
 use openengine_cluster_protocol::{
-    FieldName, FieldPath, GraphDiagnostic, GraphProfile, GraphSpec, Join, NodeInstructions,
-    NodeName, PolicyRef, PositiveInteger, WorkerErrorCode, WorkerRef, FULL_GRAPH_PROFILE,
-    MAX_NODE_INSTRUCTIONS_BYTES, SINGLE_WORKER_GRAPH_PROFILE,
+    EnumLabel, FieldName, FieldPath, GraphDiagnostic, GraphProfile, GraphSpec, Join,
+    NodeInstructions, NodeName, PolicyRef, PositiveInteger, WorkerErrorCode, WorkerRef,
+    FULL_GRAPH_PROFILE, MAX_NODE_INSTRUCTIONS_BYTES, SINGLE_WORKER_GRAPH_PROFILE,
 };
 use serde_json::{json, Value};
 
@@ -220,9 +220,20 @@ fn structured_contract_rejects_executable_or_secret_bearing_extensions() {
 
 #[test]
 fn identifiers_references_paths_and_positive_counts_validate_on_construction_and_wire_input() {
-    assert!(NodeName::new("node.valid-1").is_ok());
-    assert!(NodeName::new("bad name").is_err());
+    let node: NodeName = "node.valid-1".parse().assert_value();
+    assert_eq!(node.as_str(), "node.valid-1");
+    assert_eq!(node.to_string(), node.as_str());
+    assert!(NodeName::new("a".repeat(128)).is_ok());
+    for invalid in ["1node", "bad name", "node/name", "é"] {
+        assert!(NodeName::new(invalid).is_err(), "accepted {invalid:?}");
+    }
+    assert!(NodeName::new("a".repeat(129)).is_err());
     assert!(FieldName::new("").is_err());
+    let field: FieldName = "_field-1".parse().assert_value();
+    assert_eq!(field.to_string(), "_field-1");
+    let label: EnumLabel = serde_json::from_value(json!("accepted.v2")).assert_value();
+    assert_eq!(label.as_str(), "accepted.v2");
+    assert!(serde_json::from_value::<EnumLabel>(json!("bad/label")).is_err());
     assert!(FieldPath::new(vec![]).is_err());
     assert!(WorkerRef::new("worker.main@1").is_ok());
     assert!(WorkerRef::new("worker").is_err());
@@ -272,7 +283,12 @@ fn identifiers_references_paths_and_positive_counts_validate_on_construction_and
 
 #[test]
 fn node_instructions_are_nonempty_bounded_and_schema_validated() {
-    assert!(NodeInstructions::new("Implement the change.\nRun tests.").is_ok());
+    let instructions = NodeInstructions::new("Implement the change.\nRun tests.").assert_value();
+    assert_eq!(instructions.as_str(), "Implement the change.\nRun tests.");
+    assert_eq!(instructions.to_string(), instructions.as_str());
+    let maximum = "é".repeat(MAX_NODE_INSTRUCTIONS_BYTES / 2);
+    assert!(NodeInstructions::new(maximum.clone()).is_ok());
+    assert!(NodeInstructions::new(format!("{maximum}a")).is_err());
     assert!(NodeInstructions::new(" \n\t ").is_err());
     assert!(NodeInstructions::new("contains\0nul").is_err());
     assert!(NodeInstructions::new("a".repeat(MAX_NODE_INSTRUCTIONS_BYTES + 1)).is_err());

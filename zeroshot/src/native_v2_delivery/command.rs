@@ -393,6 +393,26 @@ pub(super) fn diagnostic_text(bytes: Vec<u8>, truncated: bool, token: &str) -> (
 mod tests {
     use super::*;
 
+    fn failure(stderr: impl Into<String>) -> GitCommandFailure {
+        GitCommandFailure {
+            command: "git fetch".into(),
+            working_directory: "/workspace".into(),
+            exit_status: Some(1),
+            stdout: String::new(),
+            stderr: stderr.into(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            context: Box::<str>::default(),
+            timed_out: false,
+        }
+    }
+
+    fn http_failure(status: u16) -> GitCommandFailure {
+        failure(format!(
+            "fatal: unable to access 'https://github.com/acme/project': The requested URL returned error: {status}"
+        ))
+    }
+
     #[test]
     fn truncated_output_cannot_retain_a_partial_secret() {
         let captured = CapturedBytes {
@@ -402,6 +422,76 @@ mod tests {
         let (text, truncated) = sanitize(captured, &["credential-value".to_owned()]);
         assert_eq!(text, "safe ");
         assert!(truncated);
+    }
+
+    #[test]
+    fn authentication_classification_accepts_only_http_credentials_failures() {
+        assert!(http_failure(401).authentication_failed());
+        for credential in ["Username", "Password"] {
+            assert!(
+                failure(format!(
+                    "fatal: could not read {credential} for 'https://github.com': terminal prompts disabled"
+                ))
+                .authentication_failed()
+            );
+        }
+        for stderr in [
+            "fatal: Authentication failed for 'https://github.com/acme/project'",
+            "fatal: could not read Username for 'ssh://github.com': terminal prompts disabled",
+            "fatal: could not read Username for 'https://github.com': another reason",
+            "remote: Permission to acme/project denied",
+        ] {
+            assert_eq!(
+                failure(stderr).authentication_failed(),
+                stderr.starts_with("fatal: Authentication failed"),
+                "{stderr}"
+            );
+        }
+    }
+
+    #[test]
+    fn retryable_transport_classification_is_narrow_and_complete() {
+        for status in [429, 500, 503, 599] {
+            assert!(http_failure(status).retryable_transport(), "HTTP {status}");
+        }
+        for status in [400, 401, 422, 600] {
+            assert!(!http_failure(status).retryable_transport(), "HTTP {status}");
+        }
+        for message in [
+            "Could not resolve host: github.com",
+            "Failed to connect to github.com port 443",
+            "Connection timed out",
+            "Recv failure: Connection reset by peer",
+            "Empty reply from server",
+        ] {
+            assert!(
+                failure(format!(
+                    "fatal: unable to access 'https://github.com/acme/project': {message}"
+                ))
+                .retryable_transport(),
+                "{message}"
+            );
+        }
+        assert!(!failure("fatal: repository not found").retryable_transport());
+        assert!(!failure("Could not resolve host: github.com").retryable_transport());
+
+        let mut timed_out = failure("");
+        timed_out.timed_out = true;
+        assert!(timed_out.retryable_transport());
+    }
+
+    #[test]
+    fn success_and_operator_diagnostics_preserve_bounded_command_context() {
+        let mut succeeded = failure("warning");
+        succeeded.exit_status = Some(0);
+        succeeded.stderr_truncated = true;
+        succeeded.context = "trusted delivery".into();
+        let diagnostic = succeeded.operator_stderr();
+        assert!(diagnostic.contains("stderr (truncated):\nwarning"));
+        assert!(diagnostic.contains("command: git fetch"));
+        assert!(diagnostic.contains("workingDirectory: /workspace"));
+        assert!(diagnostic.contains("trusted delivery"));
+        assert!(succeeded.require_success().is_ok());
     }
 
     #[cfg(unix)]

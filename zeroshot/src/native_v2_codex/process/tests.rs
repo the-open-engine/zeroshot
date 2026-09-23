@@ -113,3 +113,62 @@ fn parsing_after_an_emission_failure_retains_later_terminal_usage() {
     assert_eq!(usage.cache_read_input_tokens.assert_value().get(), 4);
     assert_eq!(usage.cache_creation_input_tokens.assert_value().get(), 3);
 }
+
+#[test]
+fn coverage_contract_delivery_and_process_failures_preserve_all_safe_evidence() {
+    assert!(matches!(
+        retain_delivery_evidence(
+            CodexOutput::provider_failure("provider".to_owned()),
+            Some(NodeRunnerError::Cancelled),
+        ),
+        Err(NodeRunnerError::Cancelled)
+    ));
+    let output = retain_delivery_evidence(
+        CodexOutput::provider_failure("provider".to_owned()),
+        Some(NodeRunnerError::DurableOutputClosed),
+    )
+    .assert_value();
+    assert!(
+        output
+            .failure_message()
+            .assert_value()
+            .contains("provider output delivery failed")
+    );
+
+    let resolved = resolve_input_failure(
+        Err(NodeRunnerError::DurableOutputClosed),
+        ProcessRunnerError::Io("stdin closed".to_owned()),
+        Ok(completion(ProcessCleanupEvidence::Reaped, false)),
+        false,
+    )
+    .assert_value();
+    let detail = resolved.failure_message().assert_value();
+    assert!(detail.contains("provider output collection failed"));
+    assert!(detail.contains("provider process input failed"));
+
+    let completion_error = completion_detail(
+        &Err(ProcessRunnerError::Launch("not started".to_owned())),
+        true,
+    )
+    .assert_value()
+    .assert_value();
+    assert!(completion_error.contains("provider process completion failed"));
+    let merged = merge_completion_detail(
+        Err(NodeRunnerError::Driver),
+        Some("process exited".to_owned()),
+    )
+    .assert_value();
+    let detail = merged.failure_message().assert_value();
+    assert!(detail.contains("provider output collection failed"));
+    assert!(detail.contains("process exited"));
+}
+
+#[test]
+fn coverage_contract_output_chunk_boundaries_preserve_utf8_without_exceeding_the_live_limit() {
+    assert_eq!(output_chunk_end("short").assert_value(), 5);
+    let text = format!("{}é-tail", "a".repeat(8 * 1024 - 1));
+    let end = output_chunk_end(&text).assert_value();
+    assert_eq!(end, 8 * 1024 - 1);
+    assert!(text.is_char_boundary(end));
+    assert!(end <= 8 * 1024);
+}

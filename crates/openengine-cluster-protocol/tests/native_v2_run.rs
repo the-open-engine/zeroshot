@@ -90,6 +90,52 @@ fn resolved_source_has_one_unambiguous_wire_shape() {
 }
 
 #[test]
+fn resolved_source_identifiers_enforce_git_and_host_boundaries() {
+    let repository =
+        SourceRepositoryId::new(format!("{}/{}", "a".repeat(100), "b".repeat(100))).assert_value();
+    assert_eq!(repository.as_str().len(), 201);
+    assert_eq!(repository.to_string(), repository.as_str());
+    for invalid in [
+        "owner",
+        "/name",
+        "owner/",
+        "owner/name/extra",
+        "owner name/repository",
+    ] {
+        assert!(
+            SourceRepositoryId::new(invalid).is_err(),
+            "accepted repository {invalid:?}"
+        );
+    }
+    assert!(SourceRepositoryId::new(format!("{}/name", "a".repeat(101))).is_err());
+
+    let branch = SourceBranchId::new("feature/coverage-v2").assert_value();
+    assert_eq!(branch.as_str(), "feature/coverage-v2");
+    for invalid in [
+        "",
+        "-main",
+        "main.",
+        "main/",
+        "main.lock",
+        "a..b",
+        "a@{b",
+        "a:b",
+        "a b",
+    ] {
+        assert!(
+            SourceBranchId::new(invalid).is_err(),
+            "accepted branch {invalid:?}"
+        );
+    }
+    assert!(SourceBranchId::new("a".repeat(256)).is_err());
+
+    let revision = SourceRevisionId::new("0123456789abcdef0123456789abcdef01234567").assert_value();
+    assert_eq!(revision.as_str().len(), 40);
+    assert!(SourceRevisionId::new("A".repeat(40)).is_err());
+    assert!(SourceRevisionId::new("a".repeat(39)).is_err());
+}
+
+#[test]
 fn legacy_run_sizes_reopen_and_serialize_with_current_names() {
     for (legacy, current, expected) in [
         ("tiny", "small", RunSize::Small),

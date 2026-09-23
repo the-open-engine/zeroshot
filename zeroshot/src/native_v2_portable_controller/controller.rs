@@ -523,3 +523,7 @@ impl WorkspaceIdentity {
             .is_ok_and(|identity| identity == self.identity)
     }
 }
+
+#[cfg(test)]
+#[path = "controller/tests.rs"]
+mod tests;

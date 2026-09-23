@@ -139,15 +139,19 @@ async fn emit(
     let safe = safe_provider_text(text, &rpc.redactions);
     let mut remaining = safe.as_str();
     while !remaining.is_empty() {
-        let mut end = remaining.len().min(8 * 1024);
-        while !remaining.is_char_boundary(end) {
-            end -= 1;
-        }
-        let (part, rest) = remaining.split_at(end);
+        let (part, rest) = split_output_chunk(remaining);
         rpc.control.emit(LiveOutput::new(stream, part)?).await?;
         remaining = rest;
     }
     Ok(())
+}
+
+fn split_output_chunk(text: &str) -> (&str, &str) {
+    let mut end = text.len().min(8 * 1024);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.split_at(end)
 }
 
 fn permission(rpc: &mut CopilotRpc<'_>, data: &Value) -> Result<(), NodeRunnerError> {
@@ -181,3 +185,7 @@ pub(super) fn permission_allowed(request: &Value) -> bool {
         Some("read" | "url" | "write" | "shell")
     )
 }
+
+#[cfg(test)]
+#[path = "events/tests.rs"]
+mod tests;

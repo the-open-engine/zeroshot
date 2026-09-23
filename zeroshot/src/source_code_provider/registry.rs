@@ -340,3 +340,7 @@ impl From<ValueError> for SourceContractError {
         Self::new("source provider value", error)
     }
 }
+
+#[cfg(test)]
+#[path = "registry/tests.rs"]
+mod tests;

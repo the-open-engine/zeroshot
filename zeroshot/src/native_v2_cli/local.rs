@@ -847,31 +847,10 @@ fn local_message(message: impl Into<String>) -> NativeV2CliError {
 mod recovery_claim_tests {
     use super::*;
     use openengine_cluster_testkit::assertions::AssertValue;
-    use serde_json::json;
 
-    use crate::native_v2_candidate::test_support::{TestDirectory, full_graph, success_node};
+    use super::local_contract_tests::contract_submission;
+    use crate::native_v2_candidate::test_support::TestDirectory;
     use crate::v2_run_ledger::CreateRun;
-
-    fn submission(key: &str) -> RunSubmission {
-        serde_json::from_value(json!({
-            "title": "Local recovery test",
-            "graph": full_graph(vec![success_node()]),
-            "initialInput": null,
-            "runtime": {
-                "harness": "codex",
-                "provider": "openai",
-                "size": "small",
-                "nodes": {}
-            },
-            "source": {
-                "repository": "open-engine/zeroshot",
-                "branch": "main",
-                "revision": "0123456789abcdef0123456789abcdef01234567"
-            },
-            "submissionKey": key
-        }))
-        .assert_value()
-    }
 
     fn backend(root: &Path) -> LocalCliBackend {
         LocalCliBackend::new(
@@ -897,7 +876,7 @@ mod recovery_claim_tests {
         let successor_run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000002");
         let backend = backend(root.path()).with_ready_timeout(Duration::ZERO);
         backend.create_run_storage(&run_id).assert_value();
-        let submission = submission(submission_key);
+        let submission = contract_submission(submission_key);
         backend
             .write_recovery_document(
                 &run_id,
@@ -1022,3 +1001,7 @@ mod recovery_claim_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "local/tests.rs"]
+mod local_contract_tests;

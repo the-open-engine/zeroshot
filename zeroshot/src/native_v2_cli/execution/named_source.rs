@@ -336,6 +336,10 @@ fn source_error(message: &str) -> NativeV2CliError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openengine_cluster_protocol::RunTitle;
+    use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
+
+    use crate::native_v2_cli::RunSelection;
 
     struct TestDirectory(std::path::PathBuf);
 
@@ -474,6 +478,147 @@ mod tests {
             super::run(&mut command).await.unwrap().trim(),
             "private-helper"
         );
+    }
+
+    #[tokio::test]
+    async fn wave6_cli_contract_source_selection_obeys_explicit_upstream_and_local_precedence() {
+        let root = initialized_repository("selection");
+        let mut command = test_run_command();
+        assert!(resolve(&command, None).await.assert_value().is_none());
+        command.target = Some("prod".to_owned());
+        command.validate_only = true;
+        assert!(resolve(&command, None).await.assert_value().is_none());
+        command.validate_only = false;
+
+        let upstream = SourceBranchId::new("upstream-main").assert_value();
+        let worktree = WorktreeSourceContext {
+            root: root.0.clone(),
+            local_branch: Some("local-main".to_owned()),
+            upstream: Some(("origin".to_owned(), upstream.clone())),
+        };
+        assert_eq!(
+            select_run_branch(&command, &worktree).assert_value(),
+            upstream
+        );
+
+        command.branch = Some(SourceBranchId::new("explicit-main").assert_value());
+        assert_eq!(
+            select_run_branch(&command, &worktree)
+                .assert_value()
+                .as_str(),
+            "explicit-main"
+        );
+        command.branch = None;
+        let local_only = WorktreeSourceContext {
+            root: root.0.clone(),
+            local_branch: Some("local-main".to_owned()),
+            upstream: None,
+        };
+        assert_eq!(
+            select_run_branch(&command, &local_only)
+                .assert_value()
+                .as_str(),
+            "local-main"
+        );
+        let unavailable = WorktreeSourceContext {
+            root: root.0.clone(),
+            local_branch: None,
+            upstream: None,
+        };
+        assert!(
+            select_run_branch(&command, &unavailable)
+                .assert_error()
+                .to_string()
+                .contains("supply --branch")
+        );
+    }
+
+    #[tokio::test]
+    async fn wave6_cli_contract_remote_tip_is_exact_and_missing_branches_fail_closed() {
+        let source = initialized_repository("remote-source");
+        std::fs::write(source.0.join("tracked.txt"), "source\n").assert_value();
+        run(std::process::Command::new("git")
+            .current_dir(&source.0)
+            .args(["add", "tracked.txt"]))
+        .assert_value();
+        run(std::process::Command::new("git")
+            .current_dir(&source.0)
+            .args([
+                "-c",
+                "user.name=Zeroshot Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-m",
+                "source",
+            ]))
+        .assert_value();
+        let revision = output(&source.0, &["rev-parse", "HEAD"]);
+        let branch = output(&source.0, &["branch", "--show-current"]);
+
+        let client = initialized_repository("remote-client");
+        add_remote(&client.0, "origin", source.0.to_str().assert_value());
+        let repository = SourceRepositoryId::new("owner/repository").assert_value();
+        let branch = SourceBranchId::new(branch.trim()).assert_value();
+        let selection = || RevisionSelection {
+            root: &client.0,
+            repository: &repository,
+            branch: &branch,
+            remote: Some("origin"),
+            token: None,
+        };
+        assert_eq!(
+            remote_tip(selection()).await.assert_value().as_str(),
+            revision.trim()
+        );
+
+        let missing = SourceBranchId::new("missing").assert_value();
+        assert!(
+            remote_tip(RevisionSelection {
+                root: &client.0,
+                repository: &repository,
+                branch: &missing,
+                remote: Some("origin"),
+                token: None,
+            })
+            .await
+            .is_err()
+        );
+
+        let explicit = SourceRevisionId::new(revision.trim()).assert_value();
+        let mut command = test_run_command();
+        command.revision = Some(explicit.clone());
+        assert_eq!(
+            select_run_revision(&command, selection())
+                .await
+                .assert_value(),
+            explicit
+        );
+    }
+
+    fn test_run_command() -> RunCommand {
+        RunCommand {
+            target: None,
+            title: RunTitle::new("Source selection").assert_value(),
+            input: "unused.json".into(),
+            selection: RunSelection::Profile(None),
+            repository: None,
+            branch: None,
+            revision: None,
+            detach: true,
+            validate_only: false,
+            submission_key: None,
+        }
+    }
+
+    fn output(root: &Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .current_dir(root)
+            .args(args)
+            .output()
+            .assert_value();
+        assert!(output.status.success());
+        String::from_utf8(output.stdout).assert_value()
     }
 
     fn initialized_repository(label: &str) -> TestDirectory {

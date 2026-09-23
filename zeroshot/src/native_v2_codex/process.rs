@@ -227,16 +227,7 @@ async fn emit_text(
     let safe = safe_provider_text(text, redactions);
     let mut rest = safe.as_str();
     while !rest.is_empty() {
-        let split = if rest.len() <= 8 * 1024 {
-            rest.len()
-        } else {
-            rest.char_indices()
-                .map(|(index, _)| index)
-                .take_while(|index| *index <= 8 * 1024)
-                .last()
-                .filter(|index| *index > 0)
-                .ok_or(NodeRunnerError::UnsafeOutput)?
-        };
+        let split = output_chunk_end(rest)?;
         let (part, tail) = rest.split_at(split);
         control.emit(LiveOutput::new(stream, part)?).await?;
         rest = tail;
@@ -245,6 +236,18 @@ async fn emit_text(
         control.emit(LiveOutput::new(stream, "")?).await?;
     }
     Ok(())
+}
+
+fn output_chunk_end(text: &str) -> Result<usize, NodeRunnerError> {
+    if text.len() <= 8 * 1024 {
+        return Ok(text.len());
+    }
+    text.char_indices()
+        .map(|(index, _)| index)
+        .take_while(|index| *index <= 8 * 1024)
+        .last()
+        .filter(|index| *index > 0)
+        .ok_or(NodeRunnerError::UnsafeOutput)
 }
 
 #[cfg(test)]

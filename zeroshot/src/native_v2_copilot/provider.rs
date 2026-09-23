@@ -656,3 +656,7 @@ fn parse_headers(text: &str) -> Result<Map<String, Value>, NodeRunnerError> {
             Ok(headers)
         })
 }
+
+#[cfg(test)]
+#[path = "tests/provider.rs"]
+mod tests;

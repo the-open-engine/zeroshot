@@ -140,6 +140,123 @@ fn redactions_are_deduplicated_and_longest_first() {
 }
 
 #[test]
+fn streaming_events_are_semantic_bounded_and_do_not_duplicate_assistant_text() {
+    let mut transcript = ClaudeTranscript::new(Vec::new());
+    let mut bytes = Vec::new();
+    append_event(&mut bytes, json!({"type":"system","subtype":"api_retry"}));
+    append_event(&mut bytes, json!({"type":"stream_event"}));
+    append_event(
+        &mut bytes,
+        json!({"type":"stream_event","event":{"type":"future_event"}}),
+    );
+    append_event(
+        &mut bytes,
+        json!({"type":"stream_event","event":{"type":"content_block_delta"}}),
+    );
+    append_event(
+        &mut bytes,
+        json!({
+            "type":"stream_event",
+            "event":{"type":"content_block_delta","delta":{"type":"future_delta"}}
+        }),
+    );
+    let thinking = format!("{}é", "x".repeat(LIVE_CHUNK_BYTES - 1));
+    append_event(
+        &mut bytes,
+        json!({
+            "type":"stream_event",
+            "event":{"type":"content_block_delta","delta":{
+                "type":"thinking_delta","thinking":thinking
+            }}
+        }),
+    );
+    append_event(
+        &mut bytes,
+        json!({
+            "type":"stream_event",
+            "event":{"type":"content_block_delta","delta":{
+                "type":"text_delta","text":"visible"
+            }}
+        }),
+    );
+    append_event(
+        &mut bytes,
+        json!({
+            "type":"assistant",
+            "message":{"content":[{"type":"text","text":"duplicate"}]}
+        }),
+    );
+    append_event(&mut bytes, json!({"type":"result","is_error":true}));
+
+    let emissions = transcript.push(&bytes);
+    assert_eq!(
+        emissions
+            .iter()
+            .map(|emission| emission.stream)
+            .collect::<Vec<_>>(),
+        [
+            LiveOutputStream::System,
+            LiveOutputStream::System,
+            LiveOutputStream::System,
+            LiveOutputStream::Output,
+        ]
+    );
+    assert_eq!(
+        emissions.first().assert_value().text,
+        "Claude API retry 0/0: unknown"
+    );
+    assert_eq!(emissions[1].text.len(), LIVE_CHUNK_BYTES - 1);
+    assert_eq!(emissions[2].text, "é");
+    assert_eq!(emissions[3].text, "visible");
+    assert!(
+        emissions
+            .iter()
+            .all(|emission| emission.text != "duplicate")
+    );
+    assert!(!transcript.is_success());
+    assert!(transcript.push(b"ignored after terminal").is_empty());
+    let failure = failed_attempt(transcript.finish(None).assert_value());
+    assert!(failure.retryable);
+    assert_eq!(failure.diagnostic, "Claude result failed");
+}
+
+#[test]
+fn assistant_fallback_ignores_incomplete_blocks_before_emitting_visible_text_once() {
+    assert!(utf8_chunks("", LIVE_CHUNK_BYTES).is_empty());
+    let mut bytes = Vec::new();
+    for event in [
+        json!({"type":"assistant"}),
+        json!({"type":"assistant","message":{}}),
+        json!({
+            "type":"assistant",
+            "message":{"content":[7,{"type":"text"},{"type":"tool"}]}
+        }),
+        json!({
+            "type":"assistant",
+            "message":{"content":[{"type":"text","text":"fallback"}]}
+        }),
+        json!({
+            "type":"assistant",
+            "message":{"content":[{"type":"text","text":"duplicate"}]}
+        }),
+        success(json!("done"), "session-1"),
+    ] {
+        append_event(&mut bytes, event);
+    }
+
+    let decoded = decode(&bytes, 37, None);
+    assert_eq!(completed_response(decoded.attempt), json!("done"));
+    assert_eq!(
+        decoded
+            .emissions
+            .iter()
+            .map(|emission| emission.text.as_str())
+            .collect::<Vec<_>>(),
+        ["fallback"]
+    );
+}
+
+#[test]
 fn malformed_ancillary_records_do_not_hide_a_valid_result() {
     let mut bytes = b"not-json\n[]\n{}\n{\"type\":1}\n".to_vec();
     append_event(&mut bytes, success(json!("done"), "session-1"));

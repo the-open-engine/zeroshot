@@ -152,3 +152,7 @@ pub(in crate::native_v2_cli::execution) async fn materialize_profile(
         .map_err(NativeV2CliError::InvalidRun)?;
     Ok((graph, runtime))
 }
+
+#[cfg(test)]
+#[path = "profiles/tests.rs"]
+mod tests;

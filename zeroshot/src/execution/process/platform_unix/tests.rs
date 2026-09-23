@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::Read;
 use std::process::{Command, Stdio};
 
-use openengine_cluster_testkit::assertions::AssertValue;
+use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use super::*;
 
@@ -72,6 +72,245 @@ fn membership_uses_the_selected_kernel_identity_and_rejects_malformed_groups() {
     ] {
         assert_eq!(linux_matches_membership(malformed, group), None);
     }
+}
+
+#[test]
+fn proc_parsers_and_scans_preserve_kernel_identity_without_mutating_processes() {
+    assert_eq!(linux_process_group("123 (worker) S 10 20 30 40"), Some(20));
+    assert_eq!(
+        linux_process_group("123 (worker ) with spaces) S 10 21 30"),
+        Some(21)
+    );
+    for malformed in ["", "123 worker S 10 20", "123 (worker) S parent group"] {
+        assert_eq!(linux_process_group(malformed), None);
+    }
+    assert_eq!(linux_effective_uid("Uid:\t10 20 30 40\n"), Some(20));
+    assert_eq!(linux_effective_uid("Uid:\t10 invalid 30 40\n"), None);
+
+    // SAFETY: these calls only inspect the current process identity and process group.
+    let (uid, process_group) = unsafe { (libc::geteuid(), libc::getpgrp()) };
+    assert!(
+        process_group_has_live_members(process_group).assert_value(),
+        "the test process must appear in its own process group scan"
+    );
+    assert!(
+        worker_has_live_members(WorkerMembership::Uid(uid)).assert_value(),
+        "the test process must appear in its effective UID scan"
+    );
+    assert!(validate_linux_worker_boundary(WorkerMembership::Uid(uid)).is_err());
+
+    let absent = i32::MAX;
+    assert!(!process_group_has_live_members(absent).assert_value());
+    reap_process_group_children(absent).assert_value();
+    reap_linux_child(absent).assert_value();
+    assert!(zero_result(0).is_ok());
+    assert!(zero_result(1).is_err());
+    assert!(boolean_result(false).is_ok());
+    assert!(boolean_result(true).is_err());
+}
+
+#[test]
+fn proc_entry_parsing_distinguishes_non_processes_from_corrupt_process_metadata() {
+    let directory = tempfile::tempdir().assert_value();
+    for (name, stat) in [
+        ("123", "123 (valid worker) S 1 77 3"),
+        ("456", "malformed stat"),
+        ("not-a-pid", "ignored"),
+    ] {
+        let process = directory.path().join(name);
+        std::fs::create_dir(&process).assert_value();
+        std::fs::write(process.join("stat"), stat).assert_value();
+    }
+    let entries = std::fs::read_dir(directory.path())
+        .assert_value()
+        .map(|entry| {
+            let entry = entry.assert_value();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            (
+                name,
+                (linux_entry_pid(&entry), linux_entry_process_group(entry)),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    assert_eq!(entries["123"].0, Some(123));
+    assert_eq!(entries["123"].1.as_ref().assert_value(), &Some(77));
+    assert_eq!(entries["456"].0, Some(456));
+    assert_eq!(
+        entries["456"].1.as_ref().err().assert_value().kind(),
+        io::ErrorKind::InvalidData
+    );
+    assert_eq!(entries["not-a-pid"].0, None);
+    assert_eq!(entries["not-a-pid"].1.as_ref().assert_value(), &None);
+}
+
+#[test]
+fn wait_and_identity_decisions_cover_kernel_success_retry_absence_and_failure() {
+    for (target, result, error, expected) in [
+        (ReapTarget::ProcessGroup, 12, None, ReapAction::Retry),
+        (ReapTarget::ProcessGroup, 0, None, ReapAction::Complete),
+        (
+            ReapTarget::ProcessGroup,
+            -1,
+            Some(libc::ECHILD),
+            ReapAction::Complete,
+        ),
+        (
+            ReapTarget::ProcessGroup,
+            -1,
+            Some(libc::EINTR),
+            ReapAction::Retry,
+        ),
+        (
+            ReapTarget::ProcessGroup,
+            -1,
+            Some(libc::EIO),
+            ReapAction::Fail,
+        ),
+        (ReapTarget::Child, 12, None, ReapAction::Complete),
+        (ReapTarget::Child, 0, None, ReapAction::Complete),
+        (
+            ReapTarget::Child,
+            -1,
+            Some(libc::ESRCH),
+            ReapAction::Complete,
+        ),
+        (ReapTarget::Child, -1, Some(libc::EIO), ReapAction::Fail),
+        (ReapTarget::Child, -1, None, ReapAction::Fail),
+    ] {
+        assert_eq!(reap_action(target, result, error), expected);
+    }
+
+    let mut group_results = std::collections::VecDeque::from([
+        Ok(12),
+        Err(io::Error::from_raw_os_error(libc::EINTR)),
+        Ok(0),
+    ]);
+    reap_with(ReapTarget::ProcessGroup, || {
+        group_results.pop_front().assert_value()
+    })
+    .assert_value();
+    assert!(group_results.is_empty());
+    let error = reap_with(ReapTarget::Child, || {
+        Err(io::Error::from_raw_os_error(libc::EIO))
+    })
+    .err()
+    .assert_value();
+    assert_eq!(error.raw_os_error(), Some(libc::EIO));
+
+    assert!(process_is_missing(&io::Error::from_raw_os_error(
+        libc::ESRCH
+    )));
+    assert!(!process_is_missing(&io::Error::from_raw_os_error(
+        libc::EPERM
+    )));
+    assert!(validate_worker_membership(1).is_ok());
+    assert!(validate_worker_membership(0).is_err());
+    assert!(validate_worker_membership(u32::MAX).is_err());
+
+    assert!(linux_identity_matches(
+        10,
+        20,
+        None,
+        (10, 10, 20, 20),
+        (0, 0)
+    ));
+    assert!(linux_identity_matches(
+        10,
+        20,
+        Some(30),
+        (10, 10, 20, 20),
+        (1, 30)
+    ));
+    for mismatch in [
+        ((11, 10, 20, 20), (0, 0)),
+        ((10, 11, 20, 20), (0, 0)),
+        ((10, 10, 21, 20), (0, 0)),
+        ((10, 10, 20, 21), (0, 0)),
+        ((10, 10, 20, 20), (1, 30)),
+    ] {
+        assert!(!linux_identity_matches(
+            10, 20, None, mismatch.0, mismatch.1
+        ));
+    }
+    assert!(!linux_identity_matches(
+        10,
+        20,
+        Some(30),
+        (10, 10, 20, 20),
+        (1, 31)
+    ));
+}
+
+#[test]
+fn absent_worker_membership_cleanup_is_a_noop_with_positive_evidence() {
+    let absent = WorkerMembership::Uid(u32::MAX);
+    assert!(!worker_has_live_members(absent).assert_value());
+    assert!(!reap_and_kill_worker_processes(absent).assert_value());
+    kill_linux_worker_processes(absent).assert_value();
+}
+
+#[test]
+fn coverage_contract_linux_security_reducers_distinguish_authority_occupancy_and_kernel_state() {
+    validate_linux_supervisor(0).assert_value();
+    assert_eq!(
+        validate_linux_supervisor(1).assert_error().kind(),
+        io::ErrorKind::PermissionDenied
+    );
+    validate_linux_worker_availability(false).assert_value();
+    assert_eq!(
+        validate_linux_worker_availability(true)
+            .assert_error()
+            .kind(),
+        io::ErrorKind::AlreadyExists
+    );
+    validate_linux_subreaper(1).assert_value();
+    for state in [0, 2, -1] {
+        assert_eq!(
+            validate_linux_subreaper(state).assert_error().kind(),
+            io::ErrorKind::Other
+        );
+    }
+    validate_linux_identity_match(true).assert_value();
+    assert_eq!(
+        validate_linux_identity_match(false).assert_error().kind(),
+        io::ErrorKind::Other
+    );
+}
+
+#[tokio::test]
+async fn coverage_contract_process_group_configuration_and_fallback_cleanup_reap_immediate_children()
+ {
+    async fn blocked_child() -> tokio::process::Child {
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command
+            .args(["-c", "read ignored"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        configure_process(&mut command, ProcessContainment::ProcessGroup);
+        command.spawn().assert_value()
+    }
+
+    let mut grouped = blocked_child().await;
+    let pid = i32::try_from(grouped.id().assert_value()).assert_value();
+    // SAFETY: getpgid only inspects the live child created above.
+    assert_eq!(unsafe { libc::getpgid(pid) }, pid);
+    assert!(
+        kill_process_tree(Some(pid), ProcessContainment::ProcessGroup, &mut grouped).is_empty()
+    );
+    tokio::time::timeout(std::time::Duration::from_millis(250), grouped.wait())
+        .await
+        .assert_value()
+        .assert_value();
+
+    let mut fallback = blocked_child().await;
+    assert!(kill_process_tree(None, ProcessContainment::ProcessGroup, &mut fallback).is_empty());
+    tokio::time::timeout(std::time::Duration::from_millis(250), fallback.wait())
+        .await
+        .assert_value()
+        .assert_value();
 }
 
 #[tokio::test]

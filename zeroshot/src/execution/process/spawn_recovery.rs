@@ -201,26 +201,5 @@ fn c_string_storage_bytes(value: &str) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn launch_validation_accepts_domain_sized_schema_and_environment() {
-        let argv = vec!["--json-schema".to_owned(), "x".repeat(1024 * 1024)];
-        let environment = (0..4)
-            .map(|index| (format!("TOKEN_{index}"), "x".repeat(64 * 1024)))
-            .collect::<BTreeMap<_, _>>();
-
-        assert!(validate_launch_fields("claude", &argv, &environment).is_ok());
-    }
-
-    #[test]
-    fn launch_validation_retains_finite_allocation_guards() {
-        let oversized_argv = vec!["x".repeat(MAX_PROCESS_ARGV_BYTES)];
-        assert!(validate_launch_fields("claude", &oversized_argv, &BTreeMap::new()).is_err());
-
-        let oversized_environment =
-            BTreeMap::from([("TOKEN".to_owned(), "x".repeat(MAX_PROCESS_ENV_BYTES))]);
-        assert!(validate_launch_fields("claude", &[], &oversized_environment).is_err());
-    }
-}
+#[path = "spawn_recovery/tests.rs"]
+mod tests;

@@ -4,6 +4,99 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+fn resolver_wire(
+    endpoint: impl Into<String>,
+    bearer_token: impl Into<String>,
+    keys: Vec<ConnectionKey>,
+    source_connection: Option<ConnectionKey>,
+) -> TargetConnectionResolver {
+    TargetConnectionResolver {
+        endpoint: endpoint.into(),
+        bearer_token: bearer_token.into(),
+        keys,
+        source_connection,
+    }
+}
+
+fn key(value: &str) -> ConnectionKey {
+    ConnectionKey::new(value).assert_value()
+}
+
+#[test]
+fn hosting_source_contract_resolver_accepts_only_bounded_https_authority() {
+    let primary = key("primary");
+    let secondary = key("secondary");
+    let plan = build_connection_resolver(
+        RunId::new("resolver-plan"),
+        resolver_wire(
+            "https://resolver.example/v1/connections",
+            "private-token",
+            vec![secondary.clone(), primary.clone()],
+            Some(primary.clone()),
+        ),
+    )
+    .assert_value();
+    assert_eq!(plan.keys, BTreeSet::from([primary.clone(), secondary]));
+    assert_eq!(plan.source_connection, Some(primary.clone()));
+
+    for endpoint in [
+        "not a URL",
+        "http://resolver.example/connections",
+        "https://",
+        "https://user@resolver.example/connections",
+        "https://user:secret@resolver.example/connections",
+        "https://resolver.example/connections?run=1",
+        "https://resolver.example/connections#fragment",
+    ] {
+        let error = build_connection_resolver(
+            RunId::new("resolver-plan"),
+            resolver_wire(endpoint, "private-token", vec![primary.clone()], None),
+        )
+        .err()
+        .expect("invalid resolver endpoint must fail closed");
+        assert_eq!(error.message(), "connection resolver endpoint is invalid");
+    }
+    for token in [
+        String::new(),
+        "line\nbreak".to_owned(),
+        "x".repeat(16 * 1024 + 1),
+    ] {
+        let error = build_connection_resolver(
+            RunId::new("resolver-plan"),
+            resolver_wire(
+                "https://resolver.example/connections",
+                token,
+                vec![primary.clone()],
+                None,
+            ),
+        )
+        .err()
+        .expect("invalid resolver token must fail closed");
+        assert_eq!(
+            error.message(),
+            "connection resolver bearer token is invalid"
+        );
+    }
+    for (keys, source_connection) in [
+        (Vec::new(), None),
+        (vec![primary.clone(), primary.clone()], None),
+        (vec![primary.clone()], Some(key("outside"))),
+    ] {
+        let error = build_connection_resolver(
+            RunId::new("resolver-plan"),
+            resolver_wire(
+                "https://resolver.example/connections",
+                "private-token",
+                keys,
+                source_connection,
+            ),
+        )
+        .err()
+        .expect("invalid dynamic key authority must fail closed");
+        assert_eq!(error.message(), "connection resolver keys are invalid");
+    }
+}
+
 async fn response_result(
     response: Vec<u8>,
 ) -> Result<RunConnectionValues, ConnectionResolutionError> {

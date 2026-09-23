@@ -641,3 +641,7 @@ fn fresh_submission_key() -> Result<IdempotencyKey, NativeV2CliError> {
     }
     IdempotencyKey::new(key).map_err(|error| NativeV2CliError::Usage(error.to_owned()))
 }
+
+#[cfg(test)]
+#[path = "submission/tests.rs"]
+mod tests;

@@ -276,55 +276,5 @@ pub(super) async fn remove_endpoint_execution(
 }
 
 #[cfg(test)]
-mod tests {
-    use openengine_cluster_protocol::{MAX_SAFE_GENERATION, TokenCount};
-
-    use super::*;
-    use openengine_cluster_testkit::assertions::AssertValue;
-
-    fn usage(tokens: u64) -> TokenUsageDelta {
-        TokenUsageDelta {
-            input_tokens: TokenCount::new(tokens).assert_value(),
-            output_tokens: TokenCount::new(tokens).assert_value(),
-            cache_read_input_tokens: None,
-            cache_creation_input_tokens: None,
-        }
-    }
-
-    #[test]
-    fn usage_overflow_is_incomplete_and_overrides_cancellation() {
-        let mut metadata = TerminalMetadata::default();
-        metadata.retain(CapsuleNodeEvent::TokenUsage {
-            usage: Some(usage(MAX_SAFE_GENERATION)),
-        });
-        metadata.retain(CapsuleNodeEvent::TokenUsage {
-            usage: Some(usage(1)),
-        });
-
-        let events = metadata.into_events(Err(NodeRunnerError::Cancelled));
-        assert!(matches!(
-            events.as_slice(),
-            [
-                CapsuleNodeEvent::TokenUsage { usage: Some(known) },
-                CapsuleNodeEvent::TokenUsage { usage: None },
-                CapsuleNodeEvent::Failed {
-                    failure: CapsuleNodeFailure::ExecutionFailed
-                }
-            ] if known.input_tokens.get() == MAX_SAFE_GENERATION
-        ));
-    }
-    #[test]
-    fn cleanup_failure_survives_usage_overflow_and_wire_roundtrip() {
-        let metadata = TerminalMetadata {
-            overflowed: true,
-            ..TerminalMetadata::default()
-        };
-        let events = metadata.into_events(Err(NodeRunnerError::CleanupUnconfirmed));
-        let encoded = serde_json::to_string(&events).assert_value();
-        let decoded: Vec<CapsuleNodeEvent> = serde_json::from_str(&encoded).assert_value();
-        let [CapsuleNodeEvent::Failed { failure }] = decoded.as_slice() else {
-            panic!("cleanup failure must survive metadata and serialization");
-        };
-        assert_eq!(failure.into_runner(), NodeRunnerError::CleanupUnconfirmed);
-    }
-}
+#[path = "execution/tests.rs"]
+mod tests;

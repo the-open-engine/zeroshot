@@ -237,6 +237,35 @@ pub(super) struct SelectiveBlockingFactory {
     pub(super) started: watch::Sender<bool>,
 }
 
+pub(super) struct GatedFactory {
+    pub(super) opened: AtomicUsize,
+    pub(super) started: watch::Sender<bool>,
+    pub(super) release: watch::Receiver<bool>,
+    pub(super) sessions: Mutex<Vec<Arc<FakeSession>>>,
+}
+
+#[async_trait]
+impl SessionFactory for GatedFactory {
+    async fn open(
+        &self,
+        _invocation: &NodeInvocation,
+        _environment: &ResolvedEnvironment,
+    ) -> Result<Arc<dyn NodeSession>, NodeRunnerError> {
+        self.opened.fetch_add(1, Ordering::SeqCst);
+        let _ = self.started.send(true);
+        let mut release = self.release.clone();
+        while !*release.borrow_and_update() {
+            release
+                .changed()
+                .await
+                .map_err(|_| NodeRunnerError::SessionOpen)?;
+        }
+        let session = Arc::new(FakeSession::live());
+        self.sessions.lock().assert_value().push(session.clone());
+        Ok(session)
+    }
+}
+
 #[async_trait]
 impl SessionFactory for SelectiveBlockingFactory {
     async fn open(

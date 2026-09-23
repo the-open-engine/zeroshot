@@ -355,7 +355,20 @@ async fn idempotency_null_input_and_omitted_input_are_conflicting_requests() {
 async fn internal_verifier_failure_is_redacted_from_the_wire() {
     const SENTINEL: &str = "credential=fixture-secret-unverified-output";
     let graph = graph_fixture("worker", json!({"kind":"null"}));
-    let (client, _, store) = client(vec![ScriptedOutcome::fail(SENTINEL)]);
+    let (client, _, store) = client(vec![
+        ScriptedOutcome::fail(SENTINEL),
+        ScriptedOutcome::fail(SENTINEL),
+    ]);
+
+    let plan_error = client
+        .plan(PlanParams {
+            graph: graph.clone(),
+        })
+        .await
+        .assert_error();
+    let plan_rendered = format!("{plan_error:?}");
+    assert_eq!(rpc_code(plan_error), INTERNAL_ERROR_CODE);
+    assert!(!plan_rendered.contains(SENTINEL));
 
     let error = client
         .apply(committed(graph, json!(null), 0, "internal-failure"))

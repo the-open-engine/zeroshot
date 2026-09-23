@@ -2,12 +2,15 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use openengine_cluster_protocol::{
-    MergePlan, MergePlanState, NodeName, PositiveInteger, RunAttachEventNotification,
-    RunAttachParams, RunCheckpoint, RunCheckpointsParams, RunCheckpointsResult,
-    UnixTimestampMillis, RunConnectionRequirements, RunConnectionValues, RunForceParams, RunId,
-    RunListParams, RunLogEventNotification, RunLogsParams, RunProfile, RunProfileName,
-    RunProfileScope, RunResumeParams, RunStatusParams, RunSubmitResult, RunTitle, RunWatchParams,
-    RuntimePlan,
+    ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
+    ConnectionMutationResult, ConnectionSetRequest, ConnectionSummary, MergePlan, MergePlanState,
+    NodeName, PositiveInteger, RunAttachEventNotification, RunAttachParams, RunCheckpoint,
+    RunCheckpointsParams, RunCheckpointsResult, RunConnectionRequirements, RunConnectionValues,
+    RunForceParams, RunId, RunListParams, RunLogEventNotification, RunLogsParams, RunProfile,
+    RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
+    RunProfileListRequest, RunProfileListResult, RunProfileMutationResult, RunProfileName,
+    RunProfileScope, RunProfileSelector, RunProfileSetRequest, RunProfileSummary, RunResumeParams,
+    RunStatusParams, RunSubmitResult, RunTitle, RunWatchParams, RuntimePlan, UnixTimestampMillis,
 };
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{json, Value};
@@ -25,7 +28,7 @@ mod lifecycle;
 use lifecycle::{permanent_reopen_watch, queued_watch};
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum Call {
+pub(in crate::native_v2_cli) enum Call {
     TargetAdd {
         name: String,
         url: String,
@@ -33,6 +36,38 @@ pub(super) enum Call {
     },
     TargetLogin {
         name: String,
+    },
+    ConnectionList {
+        target: Option<String>,
+        request: ConnectionListRequest,
+    },
+    ConnectionSet {
+        target: Option<String>,
+        request: ConnectionSetRequest,
+    },
+    ConnectionDelete {
+        target: Option<String>,
+        request: ConnectionDeleteRequest,
+    },
+    ProfileList {
+        target: Option<String>,
+        request: RunProfileListRequest,
+    },
+    ProfileShow {
+        target: Option<String>,
+        selector: RunProfileSelector,
+    },
+    ProfileSet {
+        target: Option<String>,
+        request: RunProfileSetRequest,
+    },
+    ProfileDelete {
+        target: Option<String>,
+        selector: RunProfileSelector,
+    },
+    ProfileDefault {
+        target: Option<String>,
+        request: RunProfileDefaultRequest,
     },
     Submit {
         target: Option<String>,
@@ -97,7 +132,7 @@ impl SubmitGate {
     }
 }
 
-pub(super) struct FakeSubscription<E> {
+pub(in crate::native_v2_cli) struct FakeSubscription<E> {
     items: Option<VecDeque<FakeSubscriptionStep<E>>>,
 }
 
@@ -155,7 +190,7 @@ where
 }
 
 #[derive(Clone, Default)]
-pub(super) struct FakeBackend {
+pub(in crate::native_v2_cli) struct FakeBackend {
     calls: Arc<Mutex<Vec<Call>>>,
     failed_submit: bool,
     submit_gate: Option<SubmitGate>,
@@ -302,7 +337,7 @@ impl FakeBackend {
         }
     }
 
-    pub(super) fn calls(&self) -> Vec<Call> {
+    pub(in crate::native_v2_cli) fn calls(&self) -> Vec<Call> {
         self.calls.lock().assert_value().clone()
     }
 
@@ -338,6 +373,30 @@ fn merge_plan_profile() -> RunProfile {
             .assert_value(),
         runtime,
         is_default: false,
+    }
+}
+
+fn routed_profile(name: RunProfileName, scope: RunProfileScope) -> RunProfile {
+    RunProfile {
+        id: format!("profile-{}", name.as_str()),
+        name,
+        scope,
+        graph: serde_json::from_value(graph()).assert_value(),
+        runtime: runtime(),
+        is_default: false,
+    }
+}
+
+fn connection_summary(
+    key: openengine_cluster_protocol::ConnectionKey,
+    scope: openengine_cluster_protocol::ConnectionScope,
+    fields: Vec<openengine_cluster_protocol::EnvironmentVariableName>,
+) -> ConnectionSummary {
+    ConnectionSummary {
+        key,
+        scope,
+        kind: "static".to_owned(),
+        fields,
     }
 }
 
@@ -377,17 +436,143 @@ impl NativeV2CliBackend for FakeBackend {
         Ok(())
     }
 
+    async fn connection_list(
+        &self,
+        target: Option<&str>,
+        request: ConnectionListRequest,
+    ) -> Result<ConnectionListResult, NativeV2CliError> {
+        self.calls.lock().assert_value().push(Call::ConnectionList {
+            target: target.map(str::to_owned),
+            request: request.clone(),
+        });
+        Ok(ConnectionListResult {
+            connections: vec![connection_summary(
+                openengine_cluster_protocol::ConnectionKey::new("openai").assert_value(),
+                request.scope,
+                vec![
+                    openengine_cluster_protocol::EnvironmentVariableName::new("OPENAI_API_KEY")
+                        .assert_value(),
+                ],
+            )],
+        })
+    }
+
+    async fn connection_set(
+        &self,
+        target: Option<&str>,
+        request: ConnectionSetRequest,
+    ) -> Result<ConnectionMutationResult, NativeV2CliError> {
+        self.calls.lock().assert_value().push(Call::ConnectionSet {
+            target: target.map(str::to_owned),
+            request: request.clone(),
+        });
+        Ok(ConnectionMutationResult {
+            connection: connection_summary(
+                request.key,
+                request.scope,
+                request.values.field_names(),
+            ),
+        })
+    }
+
+    async fn connection_delete(
+        &self,
+        target: Option<&str>,
+        request: ConnectionDeleteRequest,
+    ) -> Result<ConnectionDeleteResult, NativeV2CliError> {
+        self.calls
+            .lock()
+            .assert_value()
+            .push(Call::ConnectionDelete {
+                target: target.map(str::to_owned),
+                request,
+            });
+        Ok(ConnectionDeleteResult { deleted: true })
+    }
+
+    async fn profile_list(
+        &self,
+        target: Option<&str>,
+        request: RunProfileListRequest,
+    ) -> Result<RunProfileListResult, NativeV2CliError> {
+        self.calls.lock().assert_value().push(Call::ProfileList {
+            target: target.map(str::to_owned),
+            request: request.clone(),
+        });
+        Ok(RunProfileListResult {
+            profiles: [("alpha", true), ("beta", false)]
+                .into_iter()
+                .map(|(name, is_default)| RunProfileSummary {
+                    id: format!("profile-{name}"),
+                    name: RunProfileName::new(name).assert_value(),
+                    scope: request.scope,
+                    is_default,
+                })
+                .collect(),
+        })
+    }
+
     async fn profile_show(
         &self,
-        _target: Option<&str>,
-        _selector: RunProfileSelector,
+        target: Option<&str>,
+        selector: RunProfileSelector,
     ) -> Result<RunProfile, NativeV2CliError> {
         if self.terminal_plan_state.is_some() {
             return Ok(merge_plan_profile());
         }
-        Err(NativeV2CliError::Target(
-            "target does not advertise profile management".to_owned(),
-        ))
+        self.calls.lock().assert_value().push(Call::ProfileShow {
+            target: target.map(str::to_owned),
+            selector: selector.clone(),
+        });
+        Ok(routed_profile(selector.name, selector.scope))
+    }
+
+    async fn profile_set(
+        &self,
+        target: Option<&str>,
+        request: RunProfileSetRequest,
+    ) -> Result<RunProfileMutationResult, NativeV2CliError> {
+        self.calls.lock().assert_value().push(Call::ProfileSet {
+            target: target.map(str::to_owned),
+            request: request.clone(),
+        });
+        Ok(RunProfileMutationResult {
+            profile: RunProfile {
+                id: format!("profile-{}", request.name.as_str()),
+                name: request.name,
+                scope: request.scope,
+                graph: request.graph,
+                runtime: request.runtime,
+                is_default: request.set_default,
+            },
+        })
+    }
+
+    async fn profile_delete(
+        &self,
+        target: Option<&str>,
+        selector: RunProfileSelector,
+    ) -> Result<RunProfileDeleteResult, NativeV2CliError> {
+        self.calls.lock().assert_value().push(Call::ProfileDelete {
+            target: target.map(str::to_owned),
+            selector,
+        });
+        Ok(RunProfileDeleteResult { deleted: true })
+    }
+
+    async fn profile_default(
+        &self,
+        target: Option<&str>,
+        request: RunProfileDefaultRequest,
+    ) -> Result<RunProfileDefaultResult, NativeV2CliError> {
+        self.calls.lock().assert_value().push(Call::ProfileDefault {
+            target: target.map(str::to_owned),
+            request: request.clone(),
+        });
+        Ok(RunProfileDefaultResult {
+            scope: request.scope,
+            name: request.name,
+        })
     }
 
     async fn merge_plan_submit(

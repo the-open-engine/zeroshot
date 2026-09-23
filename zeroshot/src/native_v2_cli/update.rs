@@ -130,13 +130,14 @@ fn http_client() -> Result<reqwest::Client, NativeV2CliError> {
 }
 
 async fn latest_version(client: &reqwest::Client) -> Result<ReleaseVersion, NativeV2CliError> {
-    let metadata = download(
-        client,
-        LATEST_RELEASE_URL,
-        MAX_RELEASE_BYTES,
-        "latest release",
-    )
-    .await?;
+    latest_version_at(client, LATEST_RELEASE_URL).await
+}
+
+async fn latest_version_at(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<ReleaseVersion, NativeV2CliError> {
+    let metadata = download(client, url, MAX_RELEASE_BYTES, "latest release").await?;
     let release: LatestRelease = serde_json::from_slice(&metadata)
         .map_err(|error| update_error(format!("latest release metadata is invalid: {error}")))?;
     let tag_version = release
@@ -156,6 +157,15 @@ async fn download_release(
     latest: ReleaseVersion,
 ) -> Result<ReleaseUpdate, NativeV2CliError> {
     let base_url = format!("{RELEASE_BASE_URL}/v{latest}");
+    download_release_at(client, current, latest, &base_url).await
+}
+
+async fn download_release_at(
+    client: &reqwest::Client,
+    current: ReleaseVersion,
+    latest: ReleaseVersion,
+    base_url: &str,
+) -> Result<ReleaseUpdate, NativeV2CliError> {
     let manifest = download(
         client,
         &format!("{base_url}/SHA256SUMS"),
@@ -165,7 +175,7 @@ async fn download_release(
     .await?;
     let release = VerifiedRelease {
         client,
-        base_url: &base_url,
+        base_url,
         manifest: &manifest,
     };
     let skill_contents = release.download(SKILL_ASSET, MAX_SKILL_BYTES).await?;
@@ -586,230 +596,5 @@ fn update_error(message: impl Into<String>) -> NativeV2CliError {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::cell::Cell;
-    use std::fs;
-
-    use flate2::{Compression, write::GzEncoder};
-    use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
-
-    use super::*;
-
-    #[test]
-    fn release_versions_are_canonical_and_ordered() {
-        assert_eq!(
-            ReleaseVersion::parse("8.2.1").assert_value().to_string(),
-            "8.2.1"
-        );
-        assert!(ReleaseVersion::parse("8.2").is_none());
-        assert!(ReleaseVersion::parse("v8.2.1").is_none());
-        assert!(ReleaseVersion::parse("8.2.beta").is_none());
-        assert!(release_version("08.2.1", "test").is_err());
-        assert!(
-            ReleaseVersion::parse("8.10.0").assert_value()
-                > ReleaseVersion::parse("8.9.9").assert_value()
-        );
-    }
-
-    #[test]
-    fn checksum_and_archive_validation_accept_the_release_shape() {
-        let binary = b"release binary";
-        let restic = b"restic binary";
-        let archive = test_archive(&[("zeroshot", binary), ("restic", restic)]);
-        let filename = "zeroshot-v8.2.1-x86_64-unknown-linux-musl.tar.gz";
-        let checksum = format!("{:x}", Sha256::digest(&archive));
-        let skill = b"canonical skill";
-        let skill_checksum = format!("{:x}", Sha256::digest(skill));
-        let manifest = format!("{checksum}  {filename}\n{skill_checksum}  {SKILL_ASSET}\n");
-
-        let expected = checksum_for(manifest.as_bytes(), filename).assert_value();
-        verify_checksum(filename, &archive, &expected).assert_value();
-        let expected_skill = checksum_for(manifest.as_bytes(), SKILL_ASSET).assert_value();
-        verify_checksum(SKILL_ASSET, skill, &expected_skill).assert_value();
-        let extracted = extract_executables(&archive, &["zeroshot", "restic"]).assert_value();
-        assert_eq!(extracted["zeroshot"], binary);
-        assert_eq!(extracted["restic"], restic);
-    }
-
-    #[test]
-    fn checksum_and_archive_validation_fail_closed() {
-        let filename = "zeroshot-v8.2.1-x86_64-unknown-linux-musl.tar.gz";
-        let manifest = format!("{}  {filename}\n", "0".repeat(64));
-        let expected = checksum_for(manifest.as_bytes(), filename).assert_value();
-        assert!(matches!(
-            verify_checksum(filename, b"tampered", &expected).assert_error(),
-            NativeV2CliError::Update(_)
-        ));
-
-        let duplicate = format!("{0}  other\n{0}  other\n", "0".repeat(64));
-        assert!(matches!(
-            checksum_for(duplicate.as_bytes(), filename).assert_error(),
-            NativeV2CliError::Update(_)
-        ));
-
-        let archive = test_archive(&[("other", b"binary")]);
-        assert!(matches!(
-            extract_executables(&archive, &["zeroshot", "restic"]).assert_error(),
-            NativeV2CliError::Update(_)
-        ));
-    }
-
-    #[test]
-    fn installation_stages_verifies_replaces_and_cleans_up() {
-        let directory = tempfile::tempdir().unwrap();
-        let current = directory
-            .path()
-            .join(format!("zeroshot{}", std::env::consts::EXE_SUFFIX));
-        let installed = directory.path().join("installed");
-        fs::write(&current, b"old binary").unwrap();
-        let verified = Cell::new(false);
-        let version = ReleaseVersion([8, 2, 1]);
-        let executables = test_executables();
-
-        install_at(
-            &current,
-            &executables,
-            version,
-            InstallOperations {
-                verify: |staged: &Path, actual_version| {
-                    assert_eq!(staged.parent(), current.parent());
-                    assert_eq!(actual_version, version);
-                    assert_eq!(fs::read(staged).unwrap(), b"new binary");
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-
-                        assert_eq!(
-                            fs::metadata(staged).unwrap().permissions().mode() & 0o777,
-                            0o755
-                        );
-                    }
-                    verified.set(true);
-                    Ok(())
-                },
-                verify_restic: |staged: &Path| {
-                    assert_eq!(fs::read(staged).unwrap(), b"new restic");
-                    Ok(())
-                },
-                replace: |staged: &Path| {
-                    assert!(verified.get());
-                    fs::copy(staged, &installed)
-                        .map(|_| ())
-                        .map_err(|error| update_error(format!("test replacement failed: {error}")))
-                },
-            },
-        )
-        .assert_value();
-
-        assert_eq!(fs::read(installed).unwrap(), b"new binary");
-        assert_eq!(
-            fs::read(directory.path().join("restic")).unwrap(),
-            b"new restic"
-        );
-        assert!(!directory.path().read_dir().unwrap().any(|entry| {
-            entry
-                .unwrap()
-                .file_name()
-                .to_string_lossy()
-                .starts_with(".zeroshot-update-")
-        }));
-        assert!(!directory.path().read_dir().unwrap().any(|entry| {
-            entry
-                .unwrap()
-                .file_name()
-                .to_string_lossy()
-                .starts_with(".restic-update-")
-        }));
-    }
-
-    #[test]
-    fn installation_stops_on_verification_or_replacement_failure() {
-        let directory = tempfile::tempdir().unwrap();
-        let current = directory.path().join("zeroshot");
-        fs::write(&current, b"old binary").unwrap();
-        fs::write(directory.path().join("restic"), b"old restic").unwrap();
-        let replaced = Cell::new(false);
-        let version = ReleaseVersion([8, 2, 1]);
-        let executables = test_executables();
-
-        let verification_error = install_at(
-            &current,
-            &executables,
-            version,
-            InstallOperations {
-                verify: |_: &Path, _| Err(update_error("verification failed")),
-                verify_restic: |_: &Path| Ok(()),
-                replace: |_: &Path| {
-                    replaced.set(true);
-                    Ok(())
-                },
-            },
-        )
-        .assert_error();
-        assert!(matches!(verification_error, NativeV2CliError::Update(_)));
-        assert!(!replaced.get());
-
-        let replacement_error = install_at(
-            &current,
-            &executables,
-            version,
-            InstallOperations {
-                verify: |_: &Path, _| Ok(()),
-                verify_restic: |_: &Path| Ok(()),
-                replace: |_: &Path| Err(update_error("replacement failed")),
-            },
-        )
-        .assert_error();
-        assert!(matches!(replacement_error, NativeV2CliError::Update(_)));
-        assert_eq!(
-            fs::read(directory.path().join("restic")).unwrap(),
-            b"old restic"
-        );
-    }
-
-    #[test]
-    fn smoke_and_result_reporting_require_the_exact_release_version() {
-        let version = ReleaseVersion([8, 2, 1]);
-        validate_smoke_result(true, b"zeroshot 8.2.1\n", version).assert_value();
-        assert!(validate_smoke_result(false, b"zeroshot 8.2.1\n", version).is_err());
-        assert!(validate_smoke_result(true, b"zeroshot 8.2.0\n", version).is_err());
-
-        let mut output = Vec::new();
-        write_result(
-            &mut output,
-            UpdateResult {
-                current_version: ReleaseVersion([8, 2, 0]).to_string(),
-                latest_version: version.to_string(),
-                updated: true,
-                skill_updated: true,
-            },
-        )
-        .assert_value();
-        assert_eq!(
-            output,
-            br#"{"currentVersion":"8.2.0","latestVersion":"8.2.1","updated":true,"skillUpdated":true}
-"#
-        );
-    }
-
-    fn test_archive(entries: &[(&str, &[u8])]) -> Vec<u8> {
-        let encoder = GzEncoder::new(Vec::new(), Compression::default());
-        let mut archive = tar::Builder::new(encoder);
-        for (name, contents) in entries {
-            let mut header = tar::Header::new_gnu();
-            header.set_size(contents.len() as u64);
-            header.set_mode(0o755);
-            header.set_cksum();
-            archive.append_data(&mut header, name, *contents).unwrap();
-        }
-        archive.into_inner().unwrap().finish().unwrap()
-    }
-
-    fn test_executables() -> ReleaseExecutables {
-        ReleaseExecutables {
-            zeroshot: b"new binary".to_vec(),
-            restic: b"new restic".to_vec(),
-            restic_name: "restic",
-        }
-    }
-}
+#[path = "update/tests.rs"]
+mod tests;

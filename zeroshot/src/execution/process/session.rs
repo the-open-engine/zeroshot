@@ -65,22 +65,7 @@ impl ProcessFrame {
     }
 
     pub fn with_framing(frame: Vec<u8>, message_bytes: usize) -> Result<Self, ProcessRunnerError> {
-        if message_bytes > frame.len() {
-            return Err(ProcessRunnerError::InvalidCommand(
-                "process frame message length exceeds frame length".to_owned(),
-            ));
-        }
-        if message_bytes > MAX_PROCESS_MESSAGE_BYTES {
-            return Err(ProcessRunnerError::InvalidCommand(format!(
-                "process message is {message_bytes} bytes; maximum is {MAX_PROCESS_MESSAGE_BYTES}"
-            )));
-        }
-        let framing_bytes = frame.len() - message_bytes;
-        if framing_bytes > MAX_PROCESS_FRAMING_OVERHEAD_BYTES {
-            return Err(ProcessRunnerError::InvalidCommand(format!(
-                "process framing overhead is {framing_bytes} bytes; maximum is {MAX_PROCESS_FRAMING_OVERHEAD_BYTES}"
-            )));
-        }
+        validate_frame_lengths(frame.len(), message_bytes)?;
         Ok(Self(frame))
     }
 
@@ -88,6 +73,29 @@ impl ProcessFrame {
     pub fn into_inner(self) -> Vec<u8> {
         self.0
     }
+}
+
+fn validate_frame_lengths(
+    frame_bytes: usize,
+    message_bytes: usize,
+) -> Result<(), ProcessRunnerError> {
+    if message_bytes > frame_bytes {
+        return Err(ProcessRunnerError::InvalidCommand(
+            "process frame message length exceeds frame length".to_owned(),
+        ));
+    }
+    if message_bytes > MAX_PROCESS_MESSAGE_BYTES {
+        return Err(ProcessRunnerError::InvalidCommand(format!(
+            "process message is {message_bytes} bytes; maximum is {MAX_PROCESS_MESSAGE_BYTES}"
+        )));
+    }
+    let framing_bytes = frame_bytes - message_bytes;
+    if framing_bytes > MAX_PROCESS_FRAMING_OVERHEAD_BYTES {
+        return Err(ProcessRunnerError::InvalidCommand(format!(
+            "process framing overhead is {framing_bytes} bytes; maximum is {MAX_PROCESS_FRAMING_OVERHEAD_BYTES}"
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -368,3 +376,7 @@ async fn await_completion(
         })?;
     }
 }
+
+#[cfg(test)]
+#[path = "session/tests.rs"]
+mod tests;

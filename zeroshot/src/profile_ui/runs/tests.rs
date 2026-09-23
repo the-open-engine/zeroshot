@@ -1,5 +1,6 @@
 use super::*;
 use std::sync::Arc;
+use axum::http::HeaderValue;
 use crate::full_v1_reducer::StructuralOccurrence;
 use crate::native_v2_contract::{
     AdmittedRun, ExecutionId, ExecutionRef, NodeCompletion, NodeInstanceId,
@@ -98,6 +99,75 @@ async fn empty_target_history_does_not_create_storage_or_a_controller() {
     );
     assert_eq!(target.list(None).await.assert_value()["runs"], json!([]));
     assert!(!root.exists());
+}
+
+#[tokio::test]
+async fn local_history_treats_missing_storage_as_empty_and_non_directories_as_unavailable() {
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test("profile-ui-history-paths");
+    let missing = root.path("missing-state");
+    let service = NativeRunHistory::new(missing.clone());
+    assert_eq!(service.list(None).await.assert_value()["runs"], json!([]));
+    assert!(!missing.exists());
+
+    let blocked = root.path("blocked-state");
+    std::fs::write(&blocked, b"not a directory").assert_value();
+    let error = NativeRunHistory::new(blocked)
+        .list(None)
+        .await
+        .err()
+        .assert_value();
+    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(error.code, "history_unavailable");
+}
+
+#[test]
+fn event_resume_cursor_requires_one_valid_header_and_precedes_the_query() {
+    let query = PageQuery {
+        after: Some("v2:3".to_owned()),
+    };
+    assert_eq!(
+        resume_cursor(query, &HeaderMap::new())
+            .assert_value()
+            .assert_value()
+            .as_str(),
+        "v2:3"
+    );
+
+    let mut headers = HeaderMap::new();
+    headers.insert("last-event-id", HeaderValue::from_static("v2:7"));
+    assert_eq!(
+        resume_cursor(
+            PageQuery {
+                after: Some("v2:3".to_owned())
+            },
+            &headers,
+        )
+        .assert_value()
+        .assert_value()
+        .as_str(),
+        "v2:7"
+    );
+
+    headers.append("last-event-id", HeaderValue::from_static("v2:8"));
+    assert_eq!(
+        resume_cursor(PageQuery { after: None }, &headers)
+            .err()
+            .assert_value()
+            .code,
+        "invalid_cursor"
+    );
+
+    for value in ["bad", "v2:not-a-number"] {
+        let mut headers = HeaderMap::new();
+        headers.insert("last-event-id", HeaderValue::from_str(value).assert_value());
+        assert_eq!(
+            resume_cursor(PageQuery { after: None }, &headers)
+                .err()
+                .assert_value()
+                .code,
+            "invalid_cursor"
+        );
+    }
 }
 
 #[tokio::test]

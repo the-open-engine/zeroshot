@@ -326,15 +326,31 @@ fn projects_provider_items_to_semantic_attach_messages() {
     let emissions = decoder.push(
         concat!(
             "{\"type\":\"item.updated\",\"item\":{\"type\":\"reasoning\",\"text\":\"checking tests\"}}\n",
+            "{\"type\":\"item.started\",\"item\":{\"type\":\"reasoning\"}}\n",
             "{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",",
             "\"command\":\"cargo test\",\"aggregated_output\":\"ok\",",
             "\"exit_code\":0,\"status\":\"completed\"}}\n",
+            "{\"type\":\"item.started\",\"item\":{\"type\":\"command_execution\"}}\n",
             "{\"type\":\"item.completed\",\"item\":{\"type\":\"file_change\",",
             "\"changes\":[{\"path\":\"src/lib.rs\",\"kind\":\"update\"}],",
             "\"status\":\"completed\"}}\n",
+            "{\"type\":\"item.updated\",\"item\":{\"type\":\"file_change\",",
+            "\"changes\":[{\"path\":7}]}}\n",
             "{\"type\":\"item.completed\",\"item\":{\"type\":\"mcp_tool_call\",",
             "\"server\":\"github\",\"tool\":\"get_pr\",",
             "\"result\":{\"number\":7},\"status\":\"completed\"}}\n",
+            "{\"type\":\"item.completed\",\"item\":{\"type\":\"mcp_tool_call\",",
+            "\"server\":\"github\",\"tool\":\"merge_pr\",",
+            "\"error\":{\"message\":\"policy blocked\"}}}\n",
+            "{\"type\":\"item.started\",\"item\":{\"type\":\"web_search\",",
+            "\"query\":\"Rust coverage\"}}\n",
+            "{\"type\":\"item.updated\",\"item\":{\"type\":\"web_search\"}}\n",
+            "{\"type\":\"item.updated\",\"item\":{\"type\":\"todo_list\",",
+            "\"items\":[{\"text\":\"inspect\",\"completed\":true},",
+            "{\"text\":\"test\",\"completed\":false},{\"text\":7}]}}\n",
+            "{\"type\":\"item.started\",\"item\":{\"type\":\"todo_list\"}}\n",
+            "{\"type\":\"item.completed\",\"item\":{\"type\":\"error\"}}\n",
+            "{\"type\":\"item.updated\",\"item\":{\"type\":\"future_activity\"}}\n",
         )
         .as_bytes(),
     );
@@ -347,9 +363,72 @@ fn projects_provider_items_to_semantic_attach_messages() {
         messages,
         [
             "Codex reasoning updated: checking tests",
+            "Codex reasoning started",
             "Codex command completed: cargo test [completed] exit=0\nok",
+            "Codex command started: unknown command",
             "Codex file change completed: update src/lib.rs",
+            "Codex file change updated: unknown changes",
             "Codex tool completed: github.get_pr result={\"number\":7}",
+            "Codex tool completed: github.merge_pr error=policy blocked",
+            "Codex web search started: Rust coverage",
+            "Codex web search updated: unknown query",
+            "Codex plan updated: done: inspect, pending: test",
+            "Codex plan started: empty",
+            "Codex activity error: unknown error",
+            "Codex activity updated: future_activity",
         ]
     );
+}
+
+#[test]
+fn settled_and_failed_decoders_ignore_trailing_data_and_keep_actionable_detail() {
+    let mut settled = CodexOutputDecoder::new();
+    settled.push(
+        br#"{"type":"item.completed","item":{"type":"agent_message","text":"done"}}
+{"type":"turn.completed"}
+"#,
+    );
+    assert!(
+        settled
+            .push(br#"{"type":"turn.failed","error":{"message":"late"}}"#)
+            .is_empty()
+    );
+    assert_eq!(settled.finish().failure_message(), None);
+
+    let mut failed = CodexOutputDecoder::new();
+    assert!(failed.accept_line(ProviderJsonLine::Oversized).is_none());
+    assert!(failed.push(b" \n").is_empty());
+    assert!(
+        failed
+            .push(
+                br#"{"type":"item.started","item":{"type":"agent_message"}}
+"#
+            )
+            .is_empty()
+    );
+    assert_eq!(
+        failed
+            .push(
+                br#"{"type":"turn.failed"}
+"#
+            )
+            .len(),
+        1
+    );
+    let failed = failed.finish();
+    assert_eq!(
+        failed.failure_message(),
+        Some(
+            "Codex turn failed without provider detail; ignored 0 malformed and 1 oversized output records"
+        )
+    );
+
+    let nested = CodexOutput::parse(br#"{"type":"error","error":{"message":"nested failure"}}"#);
+    assert_eq!(nested.failure_message(), Some("nested failure"));
+
+    let mut merged = CodexOutput::provider_failure(" first ".to_owned());
+    merged.merge_failure_detail("".to_owned());
+    merged.merge_failure_detail("first".to_owned());
+    merged.merge_failure_detail("second".to_owned());
+    assert_eq!(merged.failure_message(), Some("first; second"));
 }

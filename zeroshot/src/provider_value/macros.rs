@@ -323,3 +323,7 @@ pub(crate) use provider_contract_types;
 pub(crate) use provider_descriptor_type;
 pub(crate) use provider_id_type;
 pub(crate) use provider_ref_type;
+
+#[cfg(test)]
+#[path = "macros/tests.rs"]
+mod tests;

@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use super::*;
@@ -146,6 +146,97 @@ async fn explicit_and_channel_drop_shutdown_failures_retain_the_io_cause() {
         "PermissionDenied",
         "injected shutdown cause",
     );
+}
+
+#[tokio::test]
+async fn missing_child_pipes_report_immediate_static_failures() {
+    let (output, _output_rx) = mpsc::channel(1);
+    let (failures, mut failure_rx) = mpsc::unbounded_channel();
+    spawn_stdout_pump(None, output, failures)
+        .await
+        .assert_value();
+    assert_eq!(
+        failure_rx.recv().await.assert_value().into_detail(),
+        "process stdout pipe is unavailable"
+    );
+
+    let tail = std::sync::Arc::new(std::sync::Mutex::new(TailBuffer::new(16)));
+    let (failures, mut failure_rx) = mpsc::unbounded_channel();
+    spawn_stderr_pump(None, tail, failures).await.assert_value();
+    assert_eq!(
+        failure_rx.recv().await.assert_value().into_detail(),
+        "process stderr pipe is unavailable"
+    );
+
+    let (_commands, command_rx) = mpsc::channel(1);
+    let (_stop, stop_rx) = watch::channel(false);
+    let (failures, mut failure_rx) = mpsc::unbounded_channel();
+    spawn_writer(None, command_rx, stop_rx, failures)
+        .await
+        .assert_value();
+    assert_eq!(
+        failure_rx.recv().await.assert_value().into_detail(),
+        "process stdin pipe is unavailable"
+    );
+}
+
+#[tokio::test]
+async fn ordinary_readers_and_writer_preserve_small_payloads_and_clean_shutdown() {
+    let (output, mut output_rx) = mpsc::channel(1);
+    read_stdout(&b"stdout"[..], output).await.assert_value();
+    assert_eq!(output_rx.recv().await.assert_value().as_slice(), b"stdout");
+    assert!(output_rx.recv().await.is_none());
+
+    let tail = std::sync::Arc::new(std::sync::Mutex::new(TailBuffer::new(16)));
+    read_stderr(&b"stderr"[..], tail.clone())
+        .await
+        .assert_value();
+    assert_eq!(
+        tail.lock().assert_value().snapshot().bytes,
+        b"stderr".to_vec()
+    );
+
+    let (commands, command_rx) = mpsc::channel(2);
+    let (_stop, stop_rx) = watch::channel(false);
+    let (failures, mut failure_rx) = mpsc::unbounded_channel();
+    let (writer, mut reader) = tokio::io::duplex(32);
+    let (frame_ack, frame_acked) = oneshot::channel();
+    let (close_ack, close_acked) = oneshot::channel();
+    commands
+        .send(WriterCommand::Frame(b"input".to_vec(), frame_ack))
+        .await
+        .assert_value();
+    commands
+        .send(WriterCommand::Close(close_ack))
+        .await
+        .assert_value();
+    drop(commands);
+    run_writer(writer, command_rx, stop_rx, failures).await;
+    frame_acked.await.assert_value().assert_value();
+    close_acked.await.assert_value().assert_value();
+    let mut written = Vec::new();
+    reader.read_to_end(&mut written).await.assert_value();
+    assert_eq!(written, b"input");
+    assert!(failure_rx.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn writer_stop_and_release_failure_classification_are_deterministic() {
+    let (_commands, command_rx) = mpsc::channel(1);
+    let (stop, stop_rx) = watch::channel(false);
+    let (failures, mut failure_rx) = mpsc::unbounded_channel();
+    let writer = tokio::spawn(run_writer(tokio::io::sink(), command_rx, stop_rx, failures));
+    stop.send_replace(true);
+    writer.await.assert_value();
+    assert!(failure_rx.try_recv().is_err());
+
+    let ordinary = IoFailure::static_detail("ordinary");
+    assert!(ordinary.should_report(false));
+    assert!(ordinary.should_report(true));
+    let release = IoFailure::release_artifact("release artifact");
+    assert!(release.should_report(false));
+    assert!(!release.should_report(true));
+    assert_eq!(release.into_detail(), "release artifact");
 }
 
 async fn shutdown_case(explicit: bool) -> String {

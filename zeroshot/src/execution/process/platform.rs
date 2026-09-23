@@ -406,30 +406,5 @@ fn join_errors(errors: Vec<String>) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use openengine_cluster_testkit::assertions::AssertValue;
-
-    use super::*;
-
-    #[test]
-    fn cleanup_failure_retains_structured_io_evidence() {
-        let error = io::Error::new(io::ErrorKind::PermissionDenied, "injected cleanup cause");
-
-        let outcome = cleanup_failure("process group inspection failed", &error);
-        let detail = outcome.error.assert_value();
-
-        assert_eq!(outcome.cleanup, ProcessCleanupEvidence::TimedOut);
-        assert!(detail.starts_with("process group inspection failed"));
-        assert!(detail.contains("kind=PermissionDenied"));
-        assert!(detail.contains("raw_os_error=none"));
-        assert!(detail.contains("message=injected cleanup cause"));
-    }
-
-    #[test]
-    fn termination_errors_keep_all_observable_causes() {
-        assert_eq!(
-            join_errors(vec!["kill cause".to_owned(), "wait cause".to_owned()]),
-            Some("kill cause; wait cause".to_owned())
-        );
-    }
-}
+#[path = "platform/tests.rs"]
+mod tests;

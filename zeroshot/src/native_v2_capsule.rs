@@ -294,12 +294,12 @@ fn set_directory_boundary(
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::PermissionsExt;
 
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| CapsuleFilesystemError::InvalidLayout)?;
     fs::set_permissions(path, fs::Permissions::from_mode(mode))
         .map_err(CapsuleFilesystemError::Prepare)?;
-    let path = std::ffi::CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| CapsuleFilesystemError::InvalidLayout)?;
     // SAFETY: `path` is a live NUL-free C string and the IDs come from the validated pool.
-    if unsafe { libc::chown(path.as_ptr(), uid, gid) } != 0 {
+    if unsafe { libc::chown(c_path.as_ptr(), uid, gid) } != 0 {
         return Err(CapsuleFilesystemError::Prepare(io::Error::last_os_error()));
     }
     Ok(())

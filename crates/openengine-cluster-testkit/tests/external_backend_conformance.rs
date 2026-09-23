@@ -1,4 +1,6 @@
 use std::convert::Infallible;
+use std::error::Error;
+use std::fmt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -143,6 +145,22 @@ struct ScriptedBackendFactory {
     cleanups: AtomicUsize,
 }
 
+fn fixture_backend() -> FixtureBackend {
+    let (_client, _dispatcher, backend, _verifier, _store) = dispatcher_fixture(vec![]);
+    backend
+}
+
+fn registration_without_optional_capabilities() -> BackendRegistration<'static> {
+    BackendRegistration {
+        graph_profiles: &[],
+        optional: RegisteredOptionalCapabilities::default(),
+    }
+}
+
+fn record_factory_call(counter: &AtomicUsize) {
+    counter.fetch_add(1, Ordering::SeqCst);
+}
+
 impl ScriptedBackendFactory {
     fn new(profiles: Vec<GraphProfile>) -> Self {
         Self {
@@ -167,19 +185,89 @@ impl BackendFactory for ScriptedBackendFactory {
     }
 
     async fn create(&self) -> Result<Self::Backend, Self::Error> {
-        self.creates.fetch_add(1, Ordering::SeqCst);
-        let (_client, _dispatcher, backend, _verifier, _store) = dispatcher_fixture(vec![]);
-        Ok(backend)
+        record_factory_call(&self.creates);
+        Ok(fixture_backend())
     }
 
     async fn reset(&self, _backend: &Self::Backend) -> Result<(), Self::Error> {
-        self.resets.fetch_add(1, Ordering::SeqCst);
+        record_factory_call(&self.resets);
         Ok(())
     }
 
     async fn cleanup(&self, _backend: Self::Backend) -> Result<(), Self::Error> {
-        self.cleanups.fetch_add(1, Ordering::SeqCst);
+        record_factory_call(&self.cleanups);
         Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+enum LifecycleFailureMode {
+    Create,
+    ResetAndCleanup,
+}
+
+#[derive(Debug)]
+struct LifecycleFailure(&'static str);
+
+impl fmt::Display for LifecycleFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.0)
+    }
+}
+
+impl Error for LifecycleFailure {}
+
+struct LifecycleFailureFactory {
+    mode: LifecycleFailureMode,
+    creates: AtomicUsize,
+    resets: AtomicUsize,
+    cleanups: AtomicUsize,
+}
+
+impl LifecycleFailureFactory {
+    fn new(mode: LifecycleFailureMode) -> Self {
+        Self {
+            mode,
+            creates: AtomicUsize::new(0),
+            resets: AtomicUsize::new(0),
+            cleanups: AtomicUsize::new(0),
+        }
+    }
+
+    fn reset_or_cleanup_result(&self, message: &'static str) -> Result<(), LifecycleFailure> {
+        if matches!(self.mode, LifecycleFailureMode::ResetAndCleanup) {
+            Err(LifecycleFailure(message))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[async_trait]
+impl BackendFactory for LifecycleFailureFactory {
+    type Backend = FixtureBackend;
+    type Error = LifecycleFailure;
+
+    fn registration(&self) -> BackendRegistration<'_> {
+        registration_without_optional_capabilities()
+    }
+
+    async fn create(&self) -> Result<Self::Backend, Self::Error> {
+        record_factory_call(&self.creates);
+        if matches!(self.mode, LifecycleFailureMode::Create) {
+            return Err(LifecycleFailure("fixture create refusal"));
+        }
+        Ok(fixture_backend())
+    }
+
+    async fn reset(&self, _backend: &Self::Backend) -> Result<(), Self::Error> {
+        record_factory_call(&self.resets);
+        self.reset_or_cleanup_result("fixture reset refusal")
+    }
+
+    async fn cleanup(&self, _backend: Self::Backend) -> Result<(), Self::Error> {
+        record_factory_call(&self.cleanups);
+        self.reset_or_cleanup_result("fixture cleanup refusal")
     }
 }
 
@@ -300,10 +388,7 @@ impl BackendFactory for NonCloneFactory {
     type Error = Infallible;
 
     fn registration(&self) -> BackendRegistration<'_> {
-        BackendRegistration {
-            graph_profiles: &[],
-            optional: RegisteredOptionalCapabilities::default(),
-        }
+        registration_without_optional_capabilities()
     }
 
     async fn create(&self) -> Result<Self::Backend, Self::Error> {
@@ -348,6 +433,49 @@ async fn scripted_backend_factory_runs_every_portable_required_case() {
     assert_eq!(factory.creates.load(Ordering::SeqCst), report.passed());
     assert_eq!(factory.resets.load(Ordering::SeqCst), report.passed());
     assert_eq!(factory.cleanups.load(Ordering::SeqCst), report.passed());
+}
+
+#[tokio::test]
+async fn runner_reports_create_failures_without_attempting_reset_or_cleanup() {
+    let factory = LifecycleFailureFactory::new(LifecycleFailureMode::Create);
+    let failures = run_backend_conformance(&factory).await.assert_error();
+
+    assert_eq!(failures.failures().len(), 16);
+    let rendered = failures.to_string();
+    assert!(rendered.starts_with("16 portable backend conformance case(s) failed\n"));
+    assert!(rendered.contains("create failed: fixture create refusal"));
+    assert!(
+        failures
+            .failures()
+            .iter()
+            .all(|failure| failure.message() == "create failed: fixture create refusal")
+    );
+    assert_eq!(factory.creates.load(Ordering::SeqCst), 16);
+    assert_eq!(factory.resets.load(Ordering::SeqCst), 0);
+    assert_eq!(factory.cleanups.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn runner_reports_both_reset_and_cleanup_failures_for_each_created_backend() {
+    let factory = LifecycleFailureFactory::new(LifecycleFailureMode::ResetAndCleanup);
+    let failures = run_backend_conformance(&factory).await.assert_error();
+
+    assert_eq!(failures.failures().len(), 16);
+    for failure in failures.failures() {
+        assert!(
+            failure
+                .message()
+                .contains("reset failed: fixture reset refusal")
+        );
+        assert!(
+            failure
+                .message()
+                .contains("cleanup failed: fixture cleanup refusal")
+        );
+    }
+    assert_eq!(factory.creates.load(Ordering::SeqCst), 16);
+    assert_eq!(factory.resets.load(Ordering::SeqCst), 16);
+    assert_eq!(factory.cleanups.load(Ordering::SeqCst), 16);
 }
 
 #[tokio::test]

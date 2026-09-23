@@ -432,3 +432,7 @@ mod tests {
         assert!(github_repository("https://github.com/extra/open-engine/zeroshot").is_none());
     }
 }
+
+#[cfg(test)]
+#[path = "native_v2_local/tests.rs"]
+mod contract_tests;

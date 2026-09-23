@@ -4,7 +4,10 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use openengine_cluster_protocol::{
-    RunTitle, RuntimePlan, SourceBranchId, SourceRepositoryId, SourceRevisionId,
+    ConnectionScope, EnvironmentVariableName, ExecutionRef, MergePlanId, RunAttachParams,
+    RunDiscardWorkspaceParams, RunForceParams, RunListParams, RunLogsParams, RunProfileName,
+    RunProfileScope, RunResumeParams, RunStatusParams, RunTitle, RunWatchParams, RuntimePlan,
+    SourceBranchId, SourceRepositoryId, SourceRevisionId, StaticConnectionValues,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{json, Value};
@@ -21,13 +24,15 @@ mod connection_tests;
 mod environment_tests;
 #[path = "tests/lifecycle.rs"]
 mod lifecycle_tests;
+#[path = "tests/management.rs"]
+mod management_tests;
 #[path = "tests/outcome.rs"]
 mod outcome_tests;
 #[path = "tests/parser.rs"]
 mod parser_tests;
 
 #[path = "tests/support.rs"]
-mod support;
+pub(in crate::native_v2_cli) mod support;
 
 use support::*;
 
@@ -197,6 +202,258 @@ async fn rejected_without_backend_contact(
         .assert_error();
     assert!(backend.calls().is_empty());
     error
+}
+
+struct DefaultContractBackend;
+
+#[async_trait::async_trait]
+impl NativeV2CliBackend for DefaultContractBackend {
+    type Watch = FakeSubscription<CliRunWatchEventNotification>;
+    type Logs = FakeSubscription<RunLogEventNotification>;
+    type Attach = FakeSubscription<RunAttachEventNotification>;
+
+    async fn target_add(&self, _: TargetAdd) -> Result<(), NativeV2CliError> {
+        unreachable!("default-contract test does not route target operations")
+    }
+
+    async fn target_login(&self, _: &str) -> Result<(), NativeV2CliError> {
+        unreachable!("default-contract test does not route target operations")
+    }
+
+    async fn run_submit(
+        &self,
+        _: Option<&str>,
+        _: PreparedRunRequest,
+    ) -> Result<openengine_cluster_protocol::RunSubmitResult, NativeV2CliError> {
+        unreachable!("default-contract test does not route run operations")
+    }
+
+    async fn run_list(
+        &self,
+        _: Option<&str>,
+        _: RunListParams,
+    ) -> Result<CliRunListResult, NativeV2CliError> {
+        unreachable!("default-contract test does not route run operations")
+    }
+
+    async fn run_status(
+        &self,
+        _: Option<&str>,
+        _: RunStatusParams,
+    ) -> Result<CliRunStatusResult, NativeV2CliError> {
+        unreachable!("default-contract test does not route run operations")
+    }
+
+    async fn run_watch(
+        &self,
+        _: Option<&str>,
+        _: RunWatchParams,
+    ) -> Result<Self::Watch, NativeV2CliError> {
+        unreachable!("default-contract test does not route run operations")
+    }
+
+    async fn run_logs(
+        &self,
+        _: Option<&str>,
+        _: RunLogsParams,
+    ) -> Result<Self::Logs, NativeV2CliError> {
+        unreachable!("default-contract test does not route run operations")
+    }
+
+    async fn run_attach(
+        &self,
+        _: Option<&str>,
+        _: RunAttachParams,
+    ) -> Result<Self::Attach, NativeV2CliError> {
+        unreachable!("default-contract test does not route run operations")
+    }
+
+    async fn run_force(
+        &self,
+        _: Option<&str>,
+        _: RunForceParams,
+    ) -> Result<CliRunForceResult, NativeV2CliError> {
+        unreachable!("default-contract test does not route run operations")
+    }
+}
+
+#[tokio::test]
+async fn wave5_cli_contract_default_backend_refuses_unadvertised_management() {
+    let backend = DefaultContractBackend;
+    let key = ConnectionKey::new("provider").assert_value();
+    let field = EnvironmentVariableName::new("PROVIDER_TOKEN").assert_value();
+    let values =
+        StaticConnectionValues::new(BTreeMap::from([(field, "connection-secret".to_owned())]))
+            .assert_value();
+    let profile_name = RunProfileName::new("default-contract").assert_value();
+    let profile = RunProfileSelector {
+        name: profile_name.clone(),
+        scope: RunProfileScope::User,
+    };
+    let graph: openengine_cluster_protocol::GraphSpec =
+        serde_json::from_value(graph()).assert_value();
+    let runtime = runtime();
+
+    let errors = vec![
+        backend
+            .connection_list(
+                None,
+                ConnectionListRequest {
+                    scope: ConnectionScope::User,
+                },
+            )
+            .await
+            .assert_error(),
+        backend
+            .connection_set(
+                None,
+                ConnectionSetRequest {
+                    key: key.clone(),
+                    scope: ConnectionScope::User,
+                    values: values.clone(),
+                },
+            )
+            .await
+            .assert_error(),
+        backend
+            .connection_delete(
+                None,
+                ConnectionDeleteRequest {
+                    key: key.clone(),
+                    scope: ConnectionScope::User,
+                },
+            )
+            .await
+            .assert_error(),
+        backend
+            .profile_list(
+                None,
+                RunProfileListRequest {
+                    scope: RunProfileScope::User,
+                },
+            )
+            .await
+            .assert_error(),
+        backend
+            .profile_show(None, profile.clone())
+            .await
+            .assert_error(),
+        backend
+            .profile_set(
+                None,
+                RunProfileSetRequest {
+                    name: profile_name,
+                    scope: RunProfileScope::User,
+                    graph: graph.clone(),
+                    runtime: runtime.clone(),
+                    set_default: false,
+                },
+            )
+            .await
+            .assert_error(),
+        backend
+            .profile_delete(None, profile.clone())
+            .await
+            .assert_error(),
+        backend
+            .profile_default(
+                None,
+                RunProfileDefaultRequest {
+                    scope: RunProfileScope::User,
+                    name: Some(profile.name.clone()),
+                },
+            )
+            .await
+            .assert_error(),
+    ];
+    assert!(
+        errors
+            .iter()
+            .all(|error| matches!(error, NativeV2CliError::Target(_)))
+    );
+}
+
+#[tokio::test]
+async fn wave5_cli_contract_default_backend_bounds_recovery_and_redacts_requests() {
+    let backend = DefaultContractBackend;
+    let key = ConnectionKey::new("provider").assert_value();
+    let values = StaticConnectionValues::new(BTreeMap::from([(
+        EnvironmentVariableName::new("PROVIDER_TOKEN").assert_value(),
+        "connection-secret".to_owned(),
+    )]))
+    .assert_value();
+    let graph: openengine_cluster_protocol::GraphSpec =
+        serde_json::from_value(graph()).assert_value();
+    let runtime = runtime();
+    assert!(
+        backend
+            .merge_plan_status("target", MergePlanId::new("plan-default"))
+            .await
+            .is_err()
+    );
+    assert!(
+        backend
+            .merge_plan_force("target", MergePlanId::new("plan-default"))
+            .await
+            .is_err()
+    );
+    let run_id = RunId::new("run-default");
+    let requirements = BTreeMap::from([(
+        key.clone(),
+        vec![EnvironmentVariableName::new("PROVIDER_TOKEN").assert_value()],
+    )]);
+    assert_eq!(
+        backend
+            .authorize_resume_connection_requirements(None, &run_id, requirements.clone())
+            .await
+            .assert_value(),
+        requirements
+    );
+    assert!(
+        backend
+            .authorize_resume_connection_requirements(Some("target"), &run_id, BTreeMap::new(),)
+            .await
+            .is_err()
+    );
+    let resume = RunResumeParams {
+        run_id: run_id.clone(),
+        successor_run_id: RunId::new("run-successor"),
+        connections: BTreeMap::new(),
+        connection_resolver: None,
+        github_token: None,
+    };
+    assert!(backend.run_resume(None, resume).await.is_err());
+    assert!(
+        backend
+            .run_discard_workspace(
+                None,
+                RunDiscardWorkspaceParams {
+                    run_id: run_id.clone()
+                }
+            )
+            .await
+            .is_err()
+    );
+
+    let request = PreparedRunRequest {
+        run_id,
+        intent: TargetRunIntent {
+            title: RunTitle::new("Redacted request").assert_value(),
+            graph,
+            initial_input: serde_json::Value::Null,
+            runtime,
+            branch: None,
+            submission_key: IdempotencyKey::new("redacted-request").assert_value(),
+        },
+        connections: BTreeMap::from([(key, values)]),
+        github_token: Some("github-secret".to_owned()),
+        source: None,
+        profile: None,
+    };
+    let debug = format!("{request:?}");
+    assert!(debug.contains("[REDACTED]"));
+    assert!(!debug.contains("connection-secret"));
+    assert!(!debug.contains("github-secret"));
 }
 
 struct FixtureFiles {

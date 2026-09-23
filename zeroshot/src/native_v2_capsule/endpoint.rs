@@ -251,3 +251,7 @@ struct ReservedLocalStart {
     events: mpsc::Sender<CapsuleNodeEvent>,
     terminal: oneshot::Sender<Vec<CapsuleNodeEvent>>,
 }
+
+#[cfg(test)]
+#[path = "endpoint/tests.rs"]
+mod tests;

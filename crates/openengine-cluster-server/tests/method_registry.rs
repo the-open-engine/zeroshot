@@ -7,7 +7,8 @@ use openengine_cluster_protocol::{
     ServerCapabilities,
 };
 use openengine_cluster_server::method_registry::{
-    methods_requiring, MethodKind, SubscriptionKind, TransportRequirements, METHOD_REGISTRY,
+    method_descriptor, methods_requiring, MethodKind, SubscriptionKind, TransportRequirements,
+    METHOD_REGISTRY,
 };
 use openengine_cluster_server::{BackendError, ClusterBackend, ConnectionContext, Dispatcher};
 use serde_json::Value;
@@ -101,6 +102,11 @@ fn registry_is_the_exact_protocol_method_surface() {
         .map(|descriptor| descriptor.name)
         .collect::<Vec<_>>();
     assert_eq!(names, EXPECTED_METHODS);
+    for descriptor in METHOD_REGISTRY {
+        assert_eq!(method_descriptor(descriptor.name), Some(descriptor));
+    }
+    assert_eq!(method_descriptor(""), None);
+    assert_eq!(method_descriptor("WATCH"), None);
 
     let subscriptions = METHOD_REGISTRY
         .iter()

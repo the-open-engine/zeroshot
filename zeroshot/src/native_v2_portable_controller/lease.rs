@@ -136,3 +136,7 @@ fn reject_non_file(path: &Path) -> Result<(), ControllerLeaseError> {
         Err(_) => Err(ControllerLeaseError::InvalidPath),
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "lease/tests.rs"]
+mod tests;

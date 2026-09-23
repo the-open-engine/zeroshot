@@ -21,7 +21,7 @@ use crate::native_v2_contract::{
 use crate::native_v2_runner::{ResolvedEnvironment, remote_node_handle};
 use crate::worker_catalog::{self, ReasoningEffort};
 
-fn request(run: &str, execution: u64) -> NodeRunRequest {
+pub(super) fn request(run: &str, execution: u64) -> NodeRunRequest {
     let binding = NodeRuntimeBinding::Agent {
         model: worker_catalog::ModelId::new("gpt-5.6").assert_value(),
         effort: Some(ReasoningEffort::Max),
@@ -371,6 +371,146 @@ async fn hanging_close_is_bounded_and_promotes_loss() {
         handle.completion().await,
         Err(NodeRunnerError::ConnectionLost)
     );
+}
+
+#[test]
+fn boundary_contract_capsule_wire_mappings_preserve_streams_and_failure_classification() {
+    for (wire, live) in [
+        (CapsuleOutputStream::Output, LiveOutputStream::Output),
+        (CapsuleOutputStream::Error, LiveOutputStream::Error),
+        (CapsuleOutputStream::System, LiveOutputStream::System),
+    ] {
+        let output = CapsuleOutput {
+            stream: wire,
+            text: "detail".to_owned(),
+        };
+        let mapped = output.clone().into_live().assert_value();
+        assert_eq!(mapped.stream, live);
+        assert_eq!(CapsuleOutput::from(mapped), output);
+    }
+
+    for (failure, error) in [
+        (
+            CapsuleNodeFailure::CleanupUnconfirmed,
+            NodeRunnerError::CleanupUnconfirmed,
+        ),
+        (CapsuleNodeFailure::Cancelled, NodeRunnerError::Cancelled),
+        (
+            CapsuleNodeFailure::SessionLost,
+            NodeRunnerError::SessionLost,
+        ),
+        (CapsuleNodeFailure::RunClosed, NodeRunnerError::RunClosed),
+        (
+            CapsuleNodeFailure::ExecutionActive,
+            NodeRunnerError::ExecutionActive,
+        ),
+        (CapsuleNodeFailure::ExecutionFailed, NodeRunnerError::Driver),
+    ] {
+        assert_eq!(CapsuleNodeFailure::from_runner(&error), failure);
+        assert_eq!(failure.into_runner(), error);
+    }
+    assert_eq!(
+        CapsuleNodeFailure::from_runner(&NodeRunnerError::DriverDetail("safe".to_owned())),
+        CapsuleNodeFailure::ExecutionFailed
+    );
+    assert_eq!(
+        CapsuleNodeFailure::from_runner(&NodeRunnerError::InvalidRole),
+        CapsuleNodeFailure::ExecutionFailed
+    );
+}
+
+#[tokio::test]
+async fn coverage_contract_signal_wait_handles_initial_delivery_change_and_sender_loss() {
+    let (_sender, mut already_set) = watch::channel(true);
+    wait_for_signal(&mut already_set).await;
+
+    let (sender, mut changed) = watch::channel(false);
+    sender.send_replace(true);
+    wait_for_signal(&mut changed).await;
+
+    let (sender, mut closed) = watch::channel(false);
+    drop(sender);
+    wait_for_signal(&mut closed).await;
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn coverage_contract_filesystem_boundary_rejects_nul_paths_before_mutating_them() {
+    let error = set_directory_boundary(Path::new("invalid\0path"), 0o700, 1, 1).assert_error();
+    assert!(matches!(error, CapsuleFilesystemError::InvalidLayout));
+}
+
+#[tokio::test]
+async fn boundary_contract_bounded_execution_stream_drains_live_then_terminal_events_exactly_once()
+{
+    let (events, receiver) = mpsc::channel(1);
+    let (terminal, terminal_receiver) = oneshot::channel();
+    let mut stream = CapsuleExecutionStream::from_bounded_receiver(receiver, terminal_receiver);
+    events
+        .send(CapsuleNodeEvent::TokenUsage { usage: None })
+        .await
+        .assert_value();
+    drop(events);
+    terminal
+        .send(vec![CapsuleNodeEvent::Failed {
+            failure: CapsuleNodeFailure::SessionLost,
+        }])
+        .assert_value();
+
+    assert!(matches!(
+        stream.recv().await,
+        Some(CapsuleNodeEvent::TokenUsage { usage: None })
+    ));
+    assert!(matches!(
+        stream.recv().await,
+        Some(CapsuleNodeEvent::Failed {
+            failure: CapsuleNodeFailure::SessionLost
+        })
+    ));
+    assert!(stream.recv().await.is_none());
+
+    let (events, receiver) = mpsc::channel(1);
+    drop(events);
+    let (terminal, terminal_receiver) = oneshot::channel();
+    drop(terminal);
+    let mut stream = CapsuleExecutionStream::from_bounded_receiver(receiver, terminal_receiver);
+    assert!(stream.recv().await.is_none());
+}
+
+#[test]
+fn boundary_contract_filesystem_layout_helpers_reject_overlap_and_unsafe_entry_types() {
+    let root = tempfile::tempdir().assert_value();
+    let child = root.path().join("child");
+    assert!(paths_overlap(root.path(), &child));
+    assert!(paths_overlap(&child, root.path()));
+    assert!(!paths_overlap(
+        &root.path().join("left"),
+        &root.path().join("right")
+    ));
+
+    prepare_directory(&child).assert_value();
+    prepare_directory(&child).assert_value();
+
+    let file = root.path().join("file");
+    fs::write(&file, b"not a directory").assert_value();
+    assert!(matches!(
+        prepare_directory(&file),
+        Err(CapsuleFilesystemError::InvalidLayout)
+    ));
+    assert!(matches!(
+        prepare_directory(&root.path().join("missing/child")),
+        Err(CapsuleFilesystemError::Prepare(_))
+    ));
+
+    #[cfg(unix)]
+    {
+        let link = root.path().join("link");
+        std::os::unix::fs::symlink(&child, &link).assert_value();
+        assert!(matches!(
+            prepare_directory(&link),
+            Err(CapsuleFilesystemError::InvalidLayout)
+        ));
+    }
 }
 
 static TEMP_ID: AtomicU64 = AtomicU64::new(1);

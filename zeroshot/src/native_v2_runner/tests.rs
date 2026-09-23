@@ -15,7 +15,7 @@ mod backpressure;
 use super::*;
 use super::test_support::{
     admitted, binding, owner_runner, request, runner, BurstDriver, FakeDriver, FakeFactory,
-    SelectiveBlockingFactory,
+    GatedFactory, SelectiveBlockingFactory,
 };
 use crate::native_v2_contract::{DeclaredConnections, DeclaredEnvironment, EnvironmentVariableName};
 
@@ -26,6 +26,10 @@ async fn parallel_writers_and_verifiers_overlap() {
         .start(request("run", "left", (1, 1)))
         .await
         .assert_value();
+    assert!(matches!(
+        runner.start(request("run", "left", (1, 1))).await,
+        Err(NodeRunnerError::ExecutionActive)
+    ));
     let mut right = runner
         .start(request("run", "right", (2, 2)))
         .await
@@ -356,6 +360,70 @@ async fn stalled_session_open_is_cancellable_and_does_not_lock_other_nodes() {
         Err(NodeRunnerError::Cancelled)
     );
     assert_eq!(factory.opened.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn closing_an_opening_session_wakes_waiters_and_rejects_the_stale_open() {
+    let (started, mut started_receiver) = watch::channel(false);
+    let (release, release_receiver) = watch::channel(false);
+    let factory = Arc::new(GatedFactory {
+        opened: AtomicUsize::new(0),
+        started,
+        release: release_receiver,
+        sessions: std::sync::Mutex::new(Vec::new()),
+    });
+    let pool = SessionPool::new(factory.clone());
+    let first = request("gated", "looped", (1, 1));
+    let first_pool = pool.clone();
+    let first_task = tokio::spawn(async move {
+        let (_cancel, mut cancellation) = watch::channel(false);
+        first_pool
+            .checkout(
+                SessionCheckout {
+                    invocation: &first.invocation,
+                    environment: &first.environment,
+                    owner_slot: 1,
+                },
+                &mut cancellation,
+            )
+            .await
+    });
+    while !*started_receiver.borrow_and_update() {
+        started_receiver.changed().await.assert_value();
+    }
+
+    let waiting = request("gated", "looped", (1, 2));
+    let (_cancel, mut cancelled) = watch::channel(true);
+    assert!(matches!(
+        pool.checkout(
+            SessionCheckout {
+                invocation: &waiting.invocation,
+                environment: &waiting.environment,
+                owner_slot: 1,
+            },
+            &mut cancelled,
+        )
+        .await,
+        Err(NodeRunnerError::Cancelled)
+    ));
+
+    pool.close_run(&RunId::new("gated")).await;
+    release.send(true).assert_value();
+    assert!(matches!(
+        first_task.await.assert_value(),
+        Err(NodeRunnerError::SessionLost)
+    ));
+    assert_eq!(factory.opened.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        factory
+            .sessions
+            .lock()
+            .assert_value()
+            .assert_at(0)
+            .closed
+            .load(Ordering::SeqCst),
+        1
+    );
 }
 
 #[tokio::test]

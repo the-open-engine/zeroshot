@@ -752,6 +752,18 @@ mod tests {
         json!({"kind":"par","name":"plans","state":{"kind":"record","fields":{}},"branches":branches,"promotedStatePaths":[],"join":{"kind":"all"}})
     }
 
+    fn mapped(body: Value) -> Value {
+        json!({
+            "kind":"map", "name":"items", "state":{"kind":"record","fields":{}},
+            "body":body, "over":{"source":"state","path":["items"]},
+            "maxItems":8, "promotedStatePaths":[]
+        })
+    }
+
+    fn protected_graph(source: Value, node: &str) -> Value {
+        transform(source, json!({"kind":"protect","node":node})).assert_value()["graph"].clone()
+    }
+
     fn repeat(body: Value) -> Value {
         json!({"kind":"loop","name":"repeat","state":{"kind":"record","fields":{}},"body":body,"maxIterations":3,"promotedStatePaths":[]})
     }
@@ -968,7 +980,7 @@ mod tests {
 
     #[test]
     fn map_failure_uses_aggregate_errors_and_overflow_after_collection() {
-        let mapped = json!({"kind":"map","name":"items","state":{"kind":"record","fields":{}},"body":worker("draft"),"over":{"source":"state","path":["items"]},"maxItems":8,"promotedStatePaths":[]});
+        let mapped = mapped(worker("draft"));
         let result = transform(
             graph(vec![mapped.clone(), done()]),
             json!({"kind":"protect","node":"items"}),
@@ -1013,14 +1025,128 @@ mod tests {
             )
             .is_err()
         );
-        let mut protected = transform(
-            graph(vec![worker("write"), done()]),
-            json!({"kind":"protect","node":"write"}),
-        )
-        .assert_value()["graph"]
-            .clone();
+        let mut protected = protected_graph(graph(vec![worker("write"), done()]), "write");
         protected["root"]["children"][1]["branches"][0]["when"]["labels"] = json!(["crash"]);
         assert!(transform(protected, json!({"kind":"protect","node":"write"})).is_err());
+    }
+
+    #[test]
+    fn map_policy_refresh_preserves_overflow_and_adds_new_mapped_workers() {
+        let mut protected = protected_graph(graph(vec![mapped(worker("draft")), done()]), "items");
+        protected["root"]["children"][0]["body"] =
+            sequence("map_steps", vec![worker("draft"), worker("review")]);
+
+        let refreshed =
+            transform(protected, json!({"kind":"protect","node":"items"})).assert_value();
+        let guards = refreshed["graph"]["root"]["children"][1]["branches"][0]["when"]["guards"]
+            .as_array()
+            .assert_value();
+        assert_eq!(guards.len(), 3);
+        assert_eq!(guards[0]["value"]["field"], "overflow");
+        assert_eq!(guards[1]["value"]["name"], "draft");
+        assert_eq!(guards[2]["value"]["name"], "review");
+    }
+
+    #[test]
+    fn policy_refresh_refuses_to_overwrite_custom_continuation_handling() {
+        let mut protected = protected_graph(graph(vec![worker("write"), done()]), "write");
+        protected["root"]["children"][0] = parallel(vec![worker("write"), worker("review")]);
+        let custom_guard = json!({
+            "kind":"in", "value":{"name":"review","source":"error","field":null},
+            "labels":["crash"]
+        });
+        protected["root"]["children"][1]["otherwise"] = json!({
+            "kind":"choice", "name":"custom_review", "state":{"kind":"record","fields":{}},
+            "branches":[{
+                "when":custom_guard,
+                "node":{"kind":"fail","name":"custom_failed","reason":"review_failed"}
+            }],
+            "otherwise":done(), "promotedStatePaths":[]
+        });
+
+        let error = transform(protected, json!({"kind":"protect","node":"plans"}))
+            .err()
+            .assert_value();
+        assert!(
+            error.contains("continuation has custom handling"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn nested_custom_control_forms_block_automatic_failure_rewrites() {
+        let selector = || json!({"name":"write","source":"error","field":null});
+        let guarded_choice = json!({
+            "kind":"choice", "name":"custom_choice", "state":{"kind":"record","fields":{}},
+            "branches":[{
+                "when":{"kind":"k_of_n","count":1,"values":[selector()],"labels":["crash"]},
+                "node":worker("recover")
+            }],
+            "otherwise":done(), "promotedStatePaths":[]
+        });
+        let guarded_loop = json!({
+            "kind":"loop", "name":"custom_loop", "state":{"kind":"record","fields":{}},
+            "body":worker("retry"), "maxIterations":2, "promotedStatePaths":[],
+            "until":{"kind":"not","guard":{"kind":"in","value":selector(),"labels":["crash"]}}
+        });
+        let guarded_parallel = json!({
+            "kind":"par", "name":"custom_parallel", "state":{"kind":"record","fields":{}},
+            "branches":[worker("left"),worker("right")], "promotedStatePaths":[],
+            "join":{"kind":"first","when":{"kind":"in","value":selector(),"labels":["crash"]}}
+        });
+
+        for suffix in [guarded_choice, guarded_loop, guarded_parallel] {
+            let error = transform(
+                graph(vec![worker("write"), suffix]),
+                json!({"kind":"protect","node":"write"}),
+            )
+            .err()
+            .assert_value();
+            assert!(
+                error.contains("already handles this worker's outcomes"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn protection_accepts_one_live_choice_branch_and_rejects_terminal_targets() {
+        let accepted = json!({
+            "kind":"in", "value":{"name":"router","source":"signal","field":"verdict"},
+            "labels":["accepted"]
+        });
+        let route = json!({
+            "kind":"choice", "name":"route", "state":{"kind":"record","fields":{}},
+            "branches":[{
+                "when":accepted,
+                "node":worker("continue")
+            }],
+            "otherwise":{"kind":"fail","name":"rejected","reason":"rejected"},
+            "promotedStatePaths":[]
+        });
+        let protected = transform(
+            graph(vec![verifier("router"), route, done()]),
+            json!({"kind":"protect","node":"route"}),
+        )
+        .assert_value();
+        assert_eq!(
+            protected["graph"]["root"]["children"][2]["branches"][0]["when"]["kind"],
+            "all"
+        );
+
+        for terminal in [
+            done(),
+            json!({"kind":"fail","name":"failed","reason":"failed"}),
+        ] {
+            let name = terminal["name"].as_str().assert_value();
+            let error = transform(
+                graph(vec![terminal.clone(), worker("after")]),
+                json!({"kind":"protect","node":name}),
+            )
+            .err()
+            .assert_value();
+            assert!(error.contains("Choose an agent, worker"), "{error}");
+        }
     }
 
     #[tokio::test]

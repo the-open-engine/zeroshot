@@ -633,8 +633,26 @@ async fn schema_permissions_usage_and_resume_preserve_the_session() {
     verified(outcome);
     assert!(events.iter().any(
         |event| matches!(event, DurableNodeEvent::TokenUsage(Some(usage))
-        if usage.input_tokens.get() == 7 && usage.output_tokens.get() == 3)
+        if usage.input_tokens.get() == 7 && usage.output_tokens.get() == 3
+            && usage.cache_read_input_tokens.is_some_and(|value| value.get() == 2)
+            && usage.cache_creation_input_tokens.is_some_and(|value| value.get() == 1))
     ));
+    let logs = events
+        .iter()
+        .filter_map(|event| match event {
+            DurableNodeEvent::Output { output, .. } => Some(output.text.as_str()),
+            DurableNodeEvent::TokenUsage(_) => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(logs.contains(&"Copilot tool: contract-check"));
+    assert!(
+        logs.iter()
+            .any(|message| message.starts_with("Copilot tool failed: "))
+    );
+    assert!(
+        logs.iter()
+            .all(|message| !message.contains("ignored child output"))
+    );
     verified(complete(fixture.start(2).await).await.1);
     let capture = fixture.capture();
     let created = capture
@@ -656,6 +674,50 @@ async fn schema_permissions_usage_and_resume_preserve_the_session() {
             .join(".copilot")
             .exists()
     );
+}
+
+#[test]
+fn hosted_adapter_discards_user_only_credentials_and_provider_controls() {
+    let config = CopilotConfig {
+        executable: PathBuf::from("/provider/copilot"),
+        workspace: PathBuf::from("/candidate"),
+        runtime_home: PathBuf::from("/runtime"),
+        local_user: Some(CopilotLocalUser {
+            home: PathBuf::from("/user"),
+            copilot_home: PathBuf::from("/user/.copilot"),
+        }),
+        base_environment: BTreeMap::from([
+            (auth::TOKEN.to_owned(), "private-token".to_owned()),
+            ("GH_TOKEN".to_owned(), "private-alias".to_owned()),
+            (
+                "COPILOT_PROVIDER_BASE_URL".to_owned(),
+                "https://private.example".to_owned(),
+            ),
+            ("COPILOT_OFFLINE".to_owned(), "true".to_owned()),
+            ("SAFE_FIELD".to_owned(), "preserved".to_owned()),
+        ]),
+        local_command_environment: BTreeMap::from([(
+            "COMMAND_SECRET".to_owned(),
+            "private-command-value".to_owned(),
+        )]),
+        search_path: "/usr/bin:/bin".to_owned(),
+        process_pool: HostedProcessPool::hosted_default(),
+    };
+    let debug = format!("{config:?}");
+    assert!(debug.contains("base_environment_fields"));
+    assert!(!debug.contains("private-token"));
+    assert!(!debug.contains("private-command-value"));
+
+    let adapter = CopilotAdapter::new(config);
+    assert!(adapter.config.local_user.is_none());
+    assert_eq!(
+        adapter.config.base_environment,
+        BTreeMap::from([("SAFE_FIELD".to_owned(), "preserved".to_owned())])
+    );
+    assert!(adapter.config.local_command_environment.is_empty());
+    assert!(adapter.local_token.is_none());
+    assert!(adapter.local_provider.is_none());
+    assert!(adapter.runners.is_hosted());
 }
 
 #[tokio::test]

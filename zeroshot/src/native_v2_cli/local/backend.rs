@@ -45,7 +45,7 @@ impl LocalCliBackend {
         }))
     }
 
-    async fn start_local_successor(
+    pub(super) async fn start_local_successor(
         &self,
         params: openengine_cluster_protocol::RunResumeParams,
         mut recovery: LocalRecoveryDocument,
@@ -334,3 +334,7 @@ mod checkpoint_compatibility_tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "backend/tests.rs"]
+mod tests;

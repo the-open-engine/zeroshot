@@ -6,14 +6,21 @@
 
 use std::time::Duration;
 
-use openengine_cluster_client::{EventOrClosed, NdjsonTransport, NdjsonWatchClient};
-use openengine_cluster_protocol::{Cursor, RunId, SubscriptionCloseReason, WatchEvent, WatchParams};
+use async_trait::async_trait;
+use openengine_cluster_client::{
+    EventOrClosed, JsonRpcTransport, LogsSubscriptionClient, NdjsonTransport, NdjsonWatchClient,
+    PumpedSubscription, SubscriptionTransport, TransportError, WatchSubscriptionClient,
+};
+use openengine_cluster_protocol::{
+    Cursor, LogsParams, RequestId, RunId, SubscriptionCloseReason, SubscriptionId, WatchEvent,
+    WatchParams,
+};
 use serde_json::json;
 use tokio::io::DuplexStream;
 
 #[path = "support/mod.rs"]
 pub mod support;
-use support::AssertValue;
+use support::{AssertValue, JsonAt};
 
 #[path = "ndjson_test_support/mod.rs"]
 mod ndjson_test_support;
@@ -36,6 +43,77 @@ use cancel_scenario::run_cancel_stops_delivery_scenario;
 #[path = "reconnect_support/ndjson_scenario.rs"]
 mod ndjson_scenario;
 use ndjson_scenario::ndjson_overflow_and_reconnect_scenario;
+
+struct DetachedSubscriptionTransport;
+
+#[async_trait]
+impl JsonRpcTransport for DetachedSubscriptionTransport {
+    async fn request(&self, _request: String) -> Result<String, TransportError> {
+        Err(TransportError::Protocol("unused unary request".to_owned()))
+    }
+}
+
+#[async_trait]
+impl SubscriptionTransport for DetachedSubscriptionTransport {
+    async fn open_subscription(
+        &self,
+        request: String,
+        id: RequestId,
+    ) -> Result<(String, Option<PumpedSubscription>), TransportError> {
+        let request: serde_json::Value = serde_json::from_str(&request).assert_value();
+        let result = match request.assert_key("method").as_str() {
+            Some("watch") => json!({"subscriptionId":"detached","runId":null,"atCursor":null}),
+            Some("logs") => json!({"subscriptionId":"detached"}),
+            other => {
+                return Err(TransportError::Protocol(format!(
+                    "unexpected method {other:?}"
+                )));
+            }
+        };
+        Ok((
+            json!({"jsonrpc":"2.0","id":id,"result":result}).to_string(),
+            None,
+        ))
+    }
+
+    async fn cancel_subscription(&self, _id: SubscriptionId) -> Result<(), TransportError> {
+        panic!("detached receipts must be rejected before subscription cancellation")
+    }
+
+    async fn cancel_request(&self, _id: RequestId) -> Result<(), TransportError> {
+        panic!("detached receipts must be rejected before request cancellation")
+    }
+
+    fn next_watch_request_id(&self) -> RequestId {
+        RequestId::String("detached-request".to_owned())
+    }
+}
+
+#[tokio::test]
+async fn successful_subscription_receipts_without_a_notification_channel_fail_closed() {
+    let transport = DetachedSubscriptionTransport;
+    let watch_error = WatchSubscriptionClient::new(&transport)
+        .watch(WatchParams::default())
+        .await
+        .err()
+        .assert_value();
+    assert!(
+        watch_error
+            .to_string()
+            .contains("a successful watch response must carry a subscriptionId")
+    );
+
+    let logs_error = LogsSubscriptionClient::new(&transport)
+        .logs(LogsParams::default())
+        .await
+        .err()
+        .assert_value();
+    assert!(
+        logs_error
+            .to_string()
+            .contains("a successful logs response must carry a subscriptionId")
+    );
+}
 
 #[tokio::test]
 async fn reconnect_after_slow_consumer_recovers_with_no_gap_and_dedups_duplicates_over_ndjson() {
