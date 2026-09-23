@@ -58,7 +58,7 @@ impl Fixture {
             &self.workspace,
         )
         .await
-        .assert_value()
+        .unwrap_or_else(|error| panic!("checkpoint restore failed: {error:?}"))
     }
 
     async fn input_checkpoint(&self, node: &str) -> RunCheckpoint {
