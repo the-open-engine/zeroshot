@@ -528,6 +528,33 @@ async fn retained_capsule_moves_exclusively_to_successor_and_keeps_lineage() {
     );
 }
 
+#[tokio::test]
+async fn retained_workspace_without_a_checkpoint_catalog_still_restarts() {
+    let fixture = CheckoutFixture::new("").await;
+    fixture.retain_untracked_workspace().await;
+    let checkpoints = checkpoint_directory(fixture.root.path(), &fixture.run_id);
+    fs::remove_dir_all(&checkpoints).assert_value();
+    assert!(!checkpoints.join("latest.json").exists());
+
+    let successor = RunId::new("checkout-legacy-recovery-successor");
+    let resumed = fixture.allocate_retained(&successor).await.assert_value();
+    assert_eq!(
+        fs::read_to_string(
+            fixture
+                .allocator
+                .run_path(&successor)
+                .join("workspace/untracked.txt")
+        )
+        .assert_value(),
+        "resume me\n"
+    );
+    resumed
+        .cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Completed)
+        .await
+        .assert_value();
+}
+
 async fn capture_checkpoint(capsule: &AllocatedCapsule) {
     let boundary = ExecutionBoundary {
         node: NodeName::new("work").assert_value(),

@@ -470,10 +470,17 @@ impl ProductionCapsuleAllocator {
         source_run_id: &RunId,
         selection: CheckpointRestoreSelection,
     ) -> Result<Vec<crate::full_v1_reducer::DurableExecution>, CapsuleAllocationUnavailable> {
+        let directory = checkpoint_directory(&self.config.storage_root, source_run_id);
+        if matches!(&selection, CheckpointRestoreSelection::Latest)
+            && !checkpoints::latest_available(&directory)
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
+        {
+            return Ok(Vec::new());
+        }
         self.validate_retained_checkpoint(source_run_id, selection.clone())?;
         checkpoints::restore(
             &CheckpointRestore {
-                directory: checkpoint_directory(&self.config.storage_root, source_run_id),
+                directory,
                 selection,
             },
             &CapsuleBuildPaths::new(&self.config.storage_root, source_run_id).workspace,

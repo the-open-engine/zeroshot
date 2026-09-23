@@ -377,6 +377,15 @@ pub fn validate_selection(selection: &CheckpointRestore) -> Result<(), Checkpoin
     stored_snapshot(&selection.directory, &snapshot).map(|_| ())
 }
 
+/// A missing latest pointer is valid for workspaces retained before checkpoints existed or after
+/// capture failed. Those lineages can still restart from their retained workspace in place.
+pub(crate) fn latest_available(directory: &Path) -> Result<bool, CheckpointError> {
+    directory
+        .join("latest.json")
+        .try_exists()
+        .map_err(Into::into)
+}
+
 pub fn list(
     directory: &Path,
     params: RunCheckpointsParams,
