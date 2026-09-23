@@ -323,6 +323,10 @@ fn hosted_discovery(origin: &str) -> String {
                 "base_url": origin,
                 "route_templates": hosted_run_routes()
             },
+            "hosted_workspace_recovery": {
+                "kind": "openengine.hosted-workspace-recovery/v1",
+                "route_templates": hosted_workspace_recovery_routes()
+            },
             "merge_plans": {
                 "kind": "zeroshot.merge-plans/v1",
                 "baseUrl": origin,
@@ -350,14 +354,19 @@ fn hosted_discovery(origin: &str) -> String {
 
 fn hosted_run_routes() -> serde_json::Value {
     json!({
-        "resume": "/native-v2/runs/{run_id}/resume",
-        "checkpoints": "/native-v2/runs/{run_id}/checkpoints",
-        "discard_workspace": "/native-v2/runs/{run_id}/discard-workspace",
         "force": "/native-v2/runs/{run_id}/force",
         "list": "/native-v2/runs",
         "logs": "/native-v2/runs/{run_id}/logs{?from_cursor,execution}",
         "status": "/native-v2/runs/{run_id}",
         "watch": "/native-v2/runs/{run_id}/watch{?from_cursor}"
+    })
+}
+
+fn hosted_workspace_recovery_routes() -> serde_json::Value {
+    json!({
+        "resume": "/native-v2/runs/{run_id}/resume",
+        "checkpoints": "/native-v2/runs/{run_id}/checkpoints",
+        "discard_workspace": "/native-v2/runs/{run_id}/discard-workspace"
     })
 }
 
