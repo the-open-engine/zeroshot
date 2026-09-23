@@ -26,6 +26,14 @@ pub(crate) fn open_identity(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
+pub(crate) fn open_readonly_file(path: &Path) -> io::Result<File> {
+    let file = open_identity(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("path is not a regular file"));
+    }
+    Ok(file)
+}
+
 pub(crate) fn private_directory(path: &Path) -> io::Result<()> {
     std::fs::DirBuilder::new()
         .recursive(true)

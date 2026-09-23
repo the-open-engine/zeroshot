@@ -127,8 +127,9 @@ pub fn restore(snapshots_root: &Path, id: &SnapshotId, workspace: &Path) -> io::
 /// when restoration needs to be retryable after interruption.
 pub fn restore_staged(snapshot: &Path, workspace: &Path) -> io::Result<()> {
     let snapshot = existing_directory(snapshot)?;
+    platform::private_directory(&snapshot)?;
     let tree = existing_directory(&snapshot.join("workspace"))?;
-    let manifest = read_metadata::<serde_json::Value>(&snapshot)?;
+    let manifest = read_staged_metadata::<serde_json::Value>(&snapshot)?;
     let workspace = restore_destination(workspace)?;
     ensure_disjoint(&workspace, &snapshot)?;
     let target_git = git::restore_target(&workspace, manifest.git)?;
@@ -263,6 +264,17 @@ fn write_metadata<T: Serialize>(root: &Path, metadata: &SnapshotMetadata<T>) -> 
 
 fn read_metadata<T: DeserializeOwned>(root: &Path) -> io::Result<SnapshotMetadata<T>> {
     let file = platform::private_file(&root.join("metadata.json"), FileAccess::Read)?;
+    parse_metadata(file)
+}
+
+// The caller owns the private disposable stage. Restic may restore a file owner that differs from
+// the current Windows token, so validate the no-follow file shape instead of its inherited ACL.
+fn read_staged_metadata<T: DeserializeOwned>(root: &Path) -> io::Result<SnapshotMetadata<T>> {
+    let file = platform::open_readonly_file(&root.join("metadata.json"))?;
+    parse_metadata(file)
+}
+
+fn parse_metadata<T: DeserializeOwned>(file: fs::File) -> io::Result<SnapshotMetadata<T>> {
     if file.metadata()?.len() > MAX_METADATA_BYTES {
         return Err(invalid("snapshot metadata exceeds its bound"));
     }

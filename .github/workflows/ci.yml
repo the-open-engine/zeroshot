@@ -213,6 +213,14 @@ jobs:
           cargo check --locked --package zeroshot --lib --features workspace
           cargo clippy --package zeroshot --all-targets --features ui -- -D warnings
 
+      - name: Exercise Windows checkpoint storage before the full suite
+        if: runner.os == 'Windows'
+        shell: bash
+        run: >-
+          ZEROSHOT_RESTIC="$ZEROSHOT_RESTIC_TEST"
+          cargo test --package zeroshot --lib
+          native_v2_supervisor::checkpoints:: -- --nocapture
+
       - name: Run workspace tests
         if: runner.os != 'Windows'
         run: |

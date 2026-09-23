@@ -238,6 +238,15 @@ fn disposable_restic_stage_installs_without_a_second_workspace_copy() {
     fs::write(fixture.workspace.join("source"), "checkpoint").assert_value();
     let id = capture(&fixture.workspace, &fixture.snapshots, &()).assert_value();
     let stage = fixture.snapshots.join(id.as_str());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            stage.join("metadata.json"),
+            fs::Permissions::from_mode(0o644),
+        )
+        .assert_value();
+    }
     fs::write(fixture.workspace.join("source"), "later edits").assert_value();
     fs::write(fixture.workspace.join("extra"), "remove me").assert_value();
 

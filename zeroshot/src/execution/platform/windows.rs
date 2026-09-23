@@ -45,6 +45,14 @@ pub(crate) fn open_identity(path: &Path) -> io::Result<File> {
     )
 }
 
+pub(crate) fn open_readonly_file(path: &Path) -> io::Result<File> {
+    let file = open(path, GENERIC_READ, OPEN_EXISTING, None)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("path is not a regular file"));
+    }
+    Ok(file)
+}
+
 pub(crate) fn private_directory(path: &Path) -> io::Result<()> {
     create_directory(path)?;
     let file = open(

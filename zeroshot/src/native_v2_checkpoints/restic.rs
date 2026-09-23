@@ -218,14 +218,7 @@ impl Repository {
     async fn run(&self, directory: &Path, arguments: &[OsString]) -> io::Result<Vec<u8>> {
         #[cfg(test)]
         if self.program.in_process_test_fake {
-            let result = self.run_test_fake(directory, arguments);
-            if let Err(error) = &result {
-                eprintln!(
-                    "in-process Restic test fake failed for {:?}: {error:?}",
-                    arguments.first()
-                );
-            }
-            return result;
+            return self.run_test_fake(directory, arguments);
         }
         let mut environment = BTreeMap::new();
         platform::process_environment(&mut environment);
@@ -257,7 +250,7 @@ impl Repository {
             tokio::try_join!(bounded_output(stdout), bounded_output(stderr), child.wait())
         })
         .await;
-        let (output, _private_diagnostic, status) = match result {
+        let (output, private_diagnostic, status) = match result {
             Ok(Ok(value)) => value,
             _ => {
                 let _ = child.kill().await;
@@ -266,6 +259,15 @@ impl Repository {
             }
         };
         if !status.success() {
+            #[cfg(test)]
+            if arguments.first().and_then(|value| value.to_str()) != Some("cat") {
+                eprintln!(
+                    "real Restic {:?} failed: {}",
+                    arguments.first(),
+                    String::from_utf8_lossy(&private_diagnostic)
+                );
+            }
+            let _ = private_diagnostic;
             return Err(io::Error::other("restic operation failed"));
         }
         Ok(output)

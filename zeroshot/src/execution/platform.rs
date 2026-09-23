@@ -18,7 +18,7 @@ use windows as native;
 
 pub(crate) use native::{
     ControllerChild, FileIdentity, commit_file, create_private_directory, file_identity,
-    open_directory, open_identity, private_directory, spawn_controller,
+    open_directory, open_identity, open_readonly_file, private_directory, spawn_controller,
 };
 
 #[derive(Clone, Copy)]
