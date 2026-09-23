@@ -65,7 +65,7 @@ impl NodeRunner for NeverDispatched {
 }
 
 #[tokio::test]
-async fn successful_runs_delete_checkpoint_bytes_while_failures_retain_them() {
+async fn runtime_cleanup_preserves_checkpoint_bytes_until_terminal_policy_runs() {
     for exit in [
         RunRuntimeExit::Completed,
         RunRuntimeExit::Failed,
@@ -89,7 +89,10 @@ async fn successful_runs_delete_checkpoint_bytes_while_failures_retain_them() {
 
         cleanup.destroy_or_confirm_absent(exit).await.assert_value();
 
-        let retained = matches!(exit, RunRuntimeExit::Failed | RunRuntimeExit::RuntimeLost);
+        let retained = matches!(
+            exit,
+            RunRuntimeExit::Completed | RunRuntimeExit::Failed | RunRuntimeExit::RuntimeLost
+        );
         assert_eq!(directory.exists(), retained);
         assert_eq!(repository.exists(), retained);
         assert!(!directory.join("staging").exists());
