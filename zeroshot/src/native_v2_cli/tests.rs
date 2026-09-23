@@ -294,7 +294,7 @@ async fn wave5_cli_contract_default_backend_refuses_unadvertised_management() {
         serde_json::from_value(graph()).assert_value();
     let runtime = runtime();
 
-    let errors = vec![
+    let errors = [
         backend
             .connection_list(
                 None,

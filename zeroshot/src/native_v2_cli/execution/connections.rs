@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 
 use openengine_cluster_protocol::{
-    ConnectionDeleteRequest, ConnectionKey, ConnectionListRequest, ConnectionSetRequest,
-    EnvironmentVariableName, StaticConnectionValues,
+    ConnectionDeleteRequest, ConnectionListRequest, ConnectionSetRequest, EnvironmentVariableName,
+    StaticConnectionValues,
 };
 
 use crate::native_v2_cli::{
@@ -66,13 +66,22 @@ where
 {
     let ConnectionSetCommand { route, key, input } = command;
     let values = read_connection_values(input)?;
-    store_connection_values(route, key, values, backend, output).await
+    store_connection_values(
+        &route,
+        ConnectionSetRequest {
+            key,
+            scope: route.scope,
+            values,
+        },
+        backend,
+        output,
+    )
+    .await
 }
 
 async fn store_connection_values<B, W>(
-    route: ConnectionRoute,
-    key: ConnectionKey,
-    values: StaticConnectionValues,
+    route: &ConnectionRoute,
+    request: ConnectionSetRequest,
     backend: &B,
     output: &mut W,
 ) -> Result<CliOutcome, NativeV2CliError>
@@ -81,14 +90,7 @@ where
     W: Write,
 {
     let result = backend
-        .connection_set(
-            route.target.as_deref(),
-            ConnectionSetRequest {
-                key,
-                scope: route.scope,
-                values,
-            },
-        )
+        .connection_set(route.target.as_deref(), request)
         .await?;
     write_json(output, &result)?;
     Ok(CliOutcome::Completed)

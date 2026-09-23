@@ -395,7 +395,6 @@ async fn observer_reconciles_process_loss_without_constructing_or_dispatching_a_
     ));
     server_task.abort();
     assert!(server_task.await.assert_error().is_cancelled());
-    drop(client);
     drop(transport);
     drop(controller);
 }

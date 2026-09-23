@@ -15,6 +15,15 @@ fn canonical_fault() -> EngineFault {
 #[test]
 fn coverage_contract_module_evidence_accessors_preserve_only_typed_safe_state() {
     let diagnostic = RawDiagnostic::new(RedactionMarker::Credential, "secret").assert_value();
+    let ephemeral = diagnostic.ephemeral();
+    assert_eq!(ephemeral.marker(), RedactionMarker::Credential);
+    assert_eq!(ephemeral.sanitized(), "[credential redacted]");
+    assert_eq!(ephemeral.original_bytes(), "secret".len() as u16);
+    let debug = format!("{ephemeral:?}");
+    assert!(debug.contains("Credential"));
+    assert!(debug.contains("<redacted>"));
+    assert!(!debug.contains("secret"));
+
     let evidence = ModuleEvidence::new(
         FaultModule::Credential,
         FaultContext::Configuration,

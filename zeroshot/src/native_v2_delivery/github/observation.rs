@@ -278,12 +278,16 @@ mod tests {
         program
     }
 
+    struct ObservationOptions<'a> {
+        known_review: Option<&'a GitHubReviewReceipt>,
+        include_review: bool,
+    }
+
     async fn observe_fixture(
         list: Value,
         observed_review: Value,
         reference_action: String,
-        known_review: Option<&GitHubReviewReceipt>,
-        include_review: bool,
+        options: ObservationOptions<'_>,
     ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError> {
         let root = tempfile::tempdir().assert_value();
         let program = write_fixture(root.path(), list, observed_review, &reference_action);
@@ -294,8 +298,8 @@ mod tests {
             GitHubDeliveryRead {
                 target: &target,
                 head_branch: "zeroshot/v2-test",
-                known_review,
-                include_review,
+                known_review: options.known_review,
+                include_review: options.include_review,
             },
             GitHubCredential("test-token"),
         )
@@ -316,10 +320,17 @@ mod tests {
     #[tokio::test]
     async fn observation_discovers_optional_review_and_preserves_terminal_states() {
         let open = review("open", false, None, HEAD);
-        let snapshot =
-            observe_fixture(json!([]), open.clone(), present_reference(HEAD), None, true)
-                .await
-                .assert_value();
+        let snapshot = observe_fixture(
+            json!([]),
+            open.clone(),
+            present_reference(HEAD),
+            ObservationOptions {
+                known_review: None,
+                include_review: true,
+            },
+        )
+        .await
+        .assert_value();
         assert_eq!(snapshot.review, None);
         assert_eq!(snapshot.head_revision.as_deref(), Some(HEAD));
 
@@ -327,8 +338,10 @@ mod tests {
             json!([open.clone()]),
             open,
             present_reference(HEAD),
-            None,
-            true,
+            ObservationOptions {
+                known_review: None,
+                include_review: true,
+            },
         )
         .await
         .assert_value();
@@ -352,10 +365,17 @@ mod tests {
             ),
         ] {
             let known = receipt();
-            let snapshot =
-                observe_fixture(json!([]), wire, missing_reference(), Some(&known), true)
-                    .await
-                    .assert_value();
+            let snapshot = observe_fixture(
+                json!([]),
+                wire,
+                missing_reference(),
+                ObservationOptions {
+                    known_review: Some(&known),
+                    include_review: true,
+                },
+            )
+            .await
+            .assert_value();
             assert_eq!(
                 snapshot.review.as_ref().map(|review| &review.state),
                 Some(&expected)
@@ -371,8 +391,10 @@ mod tests {
             json!([open.clone(), open.clone()]),
             open.clone(),
             present_reference(HEAD),
-            None,
-            true,
+            ObservationOptions {
+                known_review: None,
+                include_review: true,
+            },
         )
         .await
         .assert_error();
@@ -383,8 +405,10 @@ mod tests {
             json!([]),
             open.clone(),
             present_reference(OTHER_HEAD),
-            Some(&known),
-            true,
+            ObservationOptions {
+                known_review: Some(&known),
+                include_review: true,
+            },
         )
         .await
         .assert_error();
@@ -399,8 +423,10 @@ mod tests {
                 json!([]),
                 invalid,
                 present_reference(HEAD),
-                Some(&known),
-                true,
+                ObservationOptions {
+                    known_review: Some(&known),
+                    include_review: true,
+                },
             )
             .await
             .assert_error();
@@ -411,8 +437,10 @@ mod tests {
             json!([open.clone(), open]),
             review("invalid", true, None, "invalid"),
             present_reference(HEAD),
-            Some(&known),
-            false,
+            ObservationOptions {
+                known_review: Some(&known),
+                include_review: false,
+            },
         )
         .await
         .assert_value();

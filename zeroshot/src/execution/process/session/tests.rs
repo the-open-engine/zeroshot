@@ -2,6 +2,14 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use super::*;
 
+type SessionFixture = (
+    ProcessSession,
+    mpsc::Receiver<WriterCommand>,
+    mpsc::Sender<ProcessOutputChunk>,
+    watch::Receiver<bool>,
+    watch::Sender<Option<Arc<ProcessSessionOutput>>>,
+);
+
 #[test]
 fn frame_validation_covers_all_bounds_without_allocating_at_the_limits() {
     assert!(validate_frame_lengths(0, 0).is_ok());
@@ -131,15 +139,7 @@ async fn session_reports_missing_writer_and_supervisor_and_release_is_observable
     assert!(*release.borrow());
 }
 
-fn session_fixture(
-    completion: Option<ProcessSessionOutput>,
-) -> (
-    ProcessSession,
-    mpsc::Receiver<WriterCommand>,
-    mpsc::Sender<ProcessOutputChunk>,
-    watch::Receiver<bool>,
-    watch::Sender<Option<Arc<ProcessSessionOutput>>>,
-) {
+fn session_fixture(completion: Option<ProcessSessionOutput>) -> SessionFixture {
     let (stdout, stdout_rx) = mpsc::channel(2);
     let (stdin, stdin_rx) = mpsc::channel(2);
     let (release, release_rx) = watch::channel(false);

@@ -45,9 +45,12 @@ async fn wave7_cli_contract_management_routes_values_without_secret_output() {
         .assert_value();
     let mut stored = Vec::new();
     store_connection_values(
-        route.clone(),
-        ConnectionKey::new("openai").assert_value(),
-        values,
+        &route,
+        ConnectionSetRequest {
+            key: ConnectionKey::new("openai").assert_value(),
+            scope: route.scope,
+            values,
+        },
         &backend,
         &mut stored,
     )

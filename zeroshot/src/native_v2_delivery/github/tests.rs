@@ -144,12 +144,27 @@ fn review_wire(request: &GitHubReviewRequest, title: Option<&str>, body: Option<
 }
 
 #[cfg(unix)]
-fn write_review_fixture(
-    root: &std::path::Path,
+struct ReviewFixtureResponses {
     listed: Value,
     current: Value,
     created: Value,
     patched: Value,
+}
+
+#[cfg(unix)]
+fn uniform_review_responses(listed: Value, exact: &Value) -> ReviewFixtureResponses {
+    ReviewFixtureResponses {
+        listed,
+        current: exact.clone(),
+        created: exact.clone(),
+        patched: exact.clone(),
+    }
+}
+
+#[cfg(unix)]
+fn write_review_fixture(
+    root: &std::path::Path,
+    responses: ReviewFixtureResponses,
 ) -> std::path::PathBuf {
     let program = root.join("gh-review-fixture");
     let reference = json!({
@@ -169,14 +184,22 @@ fn write_review_fixture(
            printf '%s\\n' {} ;;\n\
          *) exit 19 ;;\n\
          esac\n",
-        shell_literal(&listed.to_string()),
-        shell_literal(&created.to_string()),
-        shell_literal(&current.to_string()),
-        shell_literal(&patched.to_string()),
+        shell_literal(&responses.listed.to_string()),
+        shell_literal(&responses.created.to_string()),
+        shell_literal(&responses.current.to_string()),
+        shell_literal(&responses.patched.to_string()),
         shell_literal(&reference.to_string()),
     );
     write_executable(&program, source);
     program
+}
+
+#[cfg(unix)]
+fn review_authority(
+    root: &std::path::Path,
+    responses: ReviewFixtureResponses,
+) -> GhCliDeliveryAuthority {
+    authority(write_review_fixture(root, responses), root)
 }
 
 #[cfg(unix)]
@@ -874,31 +897,23 @@ async fn review_opening_rediscovery_and_metadata_refresh_are_identity_fenced() {
     let exact = review_wire(&request, Some(&request.title), Some(expected_body.as_str()));
 
     let existing_root = tempfile::tempdir().assert_value();
-    let existing_program = write_review_fixture(
+    let existing = review_authority(
         existing_root.path(),
-        json!([exact.clone()]),
-        exact.clone(),
-        exact.clone(),
-        exact.clone(),
-    );
-    let existing = authority(existing_program, existing_root.path())
-        .open_or_update_review(&request, GitHubCredential("test-token"))
-        .await
-        .assert_value();
+        uniform_review_responses(json!([exact.clone()]), &exact),
+    )
+    .open_or_update_review(&request, GitHubCredential("test-token"))
+    .await
+    .assert_value();
     assert_eq!(existing, review());
 
     let created_root = tempfile::tempdir().assert_value();
-    let created_program = write_review_fixture(
+    let created = review_authority(
         created_root.path(),
-        json!([]),
-        exact.clone(),
-        exact.clone(),
-        exact.clone(),
-    );
-    let created = authority(created_program, created_root.path())
-        .open_or_update_review(&request, GitHubCredential("test-token"))
-        .await
-        .assert_value();
+        uniform_review_responses(json!([]), &exact),
+    )
+    .open_or_update_review(&request, GitHubCredential("test-token"))
+    .await
+    .assert_value();
     assert_eq!(created, review());
 
     let refreshed_body = refresh_pull_request_body(Some("Human context."), &request).assert_value();
@@ -909,33 +924,28 @@ async fn review_opening_rediscovery_and_metadata_refresh_are_identity_fenced() {
         Some(refreshed_body.as_str()),
     );
     let refreshed_root = tempfile::tempdir().assert_value();
-    let refreshed_program = write_review_fixture(
+    review_authority(
         refreshed_root.path(),
-        json!([current.clone()]),
-        current,
-        refreshed.clone(),
-        refreshed,
-    );
-    authority(refreshed_program, refreshed_root.path())
-        .refresh_review_metadata(&request, &review(), GitHubCredential("test-token"))
-        .await
-        .assert_value();
+        ReviewFixtureResponses {
+            listed: json!([current.clone()]),
+            current,
+            created: refreshed.clone(),
+            patched: refreshed,
+        },
+    )
+    .refresh_review_metadata(&request, &review(), GitHubCredential("test-token"))
+    .await
+    .assert_value();
 
     let ambiguous_root = tempfile::tempdir().assert_value();
-    let ambiguous_program = write_review_fixture(
+    let ambiguous = review_authority(
         ambiguous_root.path(),
-        json!([exact.clone(), exact.clone()]),
-        exact.clone(),
-        exact.clone(),
-        exact.clone(),
-    );
-    assert_eq!(
-        authority(ambiguous_program, ambiguous_root.path())
-            .find_review(&request, GitHubCredential("test-token"))
-            .await
-            .assert_error(),
-        GitHubAuthorityError::Rejected
-    );
+        uniform_review_responses(json!([exact.clone(), exact.clone()]), &exact),
+    )
+    .find_review(&request, GitHubCredential("test-token"))
+    .await
+    .assert_error();
+    assert_eq!(ambiguous, GitHubAuthorityError::Rejected);
 
     let mismatched = review_wire(
         &request,
@@ -943,20 +953,19 @@ async fn review_opening_rediscovery_and_metadata_refresh_are_identity_fenced() {
         Some(&expected_body),
     );
     let mismatched_root = tempfile::tempdir().assert_value();
-    let mismatched_program = write_review_fixture(
+    let mismatched = review_authority(
         mismatched_root.path(),
-        json!([]),
-        exact.clone(),
-        mismatched.clone(),
-        mismatched,
-    );
-    assert_eq!(
-        authority(mismatched_program, mismatched_root.path())
-            .create_review(&request, GitHubCredential("test-token"))
-            .await
-            .assert_error(),
-        GitHubAuthorityError::Rejected
-    );
+        ReviewFixtureResponses {
+            listed: json!([]),
+            current: exact.clone(),
+            created: mismatched.clone(),
+            patched: mismatched,
+        },
+    )
+    .create_review(&request, GitHubCredential("test-token"))
+    .await
+    .assert_error();
+    assert_eq!(mismatched, GitHubAuthorityError::Rejected);
 }
 
 #[cfg(unix)]

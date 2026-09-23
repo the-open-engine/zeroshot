@@ -223,16 +223,12 @@ fn wait_and_identity_decisions_cover_kernel_success_retry_absence_and_failure() 
     assert!(validate_worker_membership(u32::MAX).is_err());
 
     assert!(linux_identity_matches(
-        10,
-        20,
-        None,
+        (10, 20, None),
         (10, 10, 20, 20),
         (0, 0)
     ));
     assert!(linux_identity_matches(
-        10,
-        20,
-        Some(30),
+        (10, 20, Some(30)),
         (10, 10, 20, 20),
         (1, 30)
     ));
@@ -244,13 +240,13 @@ fn wait_and_identity_decisions_cover_kernel_success_retry_absence_and_failure() 
         ((10, 10, 20, 20), (1, 30)),
     ] {
         assert!(!linux_identity_matches(
-            10, 20, None, mismatch.0, mismatch.1
+            (10, 20, None),
+            mismatch.0,
+            mismatch.1
         ));
     }
     assert!(!linux_identity_matches(
-        10,
-        20,
-        Some(30),
+        (10, 20, Some(30)),
         (10, 10, 20, 20),
         (1, 31)
     ));

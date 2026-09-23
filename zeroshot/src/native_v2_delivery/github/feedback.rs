@@ -282,13 +282,14 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn write_fixture(
-        root: &Path,
-        second_review_head: &str,
+    struct FeedbackPages {
         issue_comments: Value,
         reviews: Value,
         review_comments: Value,
-    ) -> PathBuf {
+    }
+
+    #[cfg(unix)]
+    fn write_fixture(root: &Path, second_review_head: &str, pages: FeedbackPages) -> PathBuf {
         let program = root.join("gh-feedback-fixture");
         let source = format!(
             "#!/bin/sh\n\
@@ -308,9 +309,9 @@ mod tests {
              esac\n",
             shell_literal(&review_wire(HEAD).to_string()),
             shell_literal(&review_wire(second_review_head).to_string()),
-            shell_literal(&issue_comments.to_string()),
-            shell_literal(&reviews.to_string()),
-            shell_literal(&review_comments.to_string()),
+            shell_literal(&pages.issue_comments.to_string()),
+            shell_literal(&pages.reviews.to_string()),
+            shell_literal(&pages.review_comments.to_string()),
         );
         write_executable(&program, source);
         program
@@ -390,31 +391,33 @@ mod tests {
         let program = write_fixture(
             root.path(),
             HEAD,
-            json!([[{
-                "id": 9,
-                "updated_at": "2026-09-19T00:00:00Z",
-                "user": {"login": "issue-author"},
-                "body": "issue body"
-            }], []]),
-            json!([[], [{
-                "id": 4,
-                "state": "CHANGES_REQUESTED",
-                "submitted_at": null,
-                "commit_id": null,
-                "user": {"login": "reviewer"},
-                "body": null
-            }]]),
-            json!([[{
-                "id": 2,
-                "updated_at": "2026-09-19T00:00:01Z",
-                "user": {"login": "inline"},
-                "body": "fix this",
-                "path": "src/lib.rs",
-                "line": null,
-                "original_line": 17,
-                "commit_id": HEAD,
-                "in_reply_to_id": 1
-            }]]),
+            FeedbackPages {
+                issue_comments: json!([[{
+                    "id": 9,
+                    "updated_at": "2026-09-19T00:00:00Z",
+                    "user": {"login": "issue-author"},
+                    "body": "issue body"
+                }], []]),
+                reviews: json!([[], [{
+                    "id": 4,
+                    "state": "CHANGES_REQUESTED",
+                    "submitted_at": null,
+                    "commit_id": null,
+                    "user": {"login": "reviewer"},
+                    "body": null
+                }]]),
+                review_comments: json!([[{
+                    "id": 2,
+                    "updated_at": "2026-09-19T00:00:01Z",
+                    "user": {"login": "inline"},
+                    "body": "fix this",
+                    "path": "src/lib.rs",
+                    "line": null,
+                    "original_line": 17,
+                    "commit_id": HEAD,
+                    "in_reply_to_id": 1
+                }]]),
+            },
         );
         let feedback = inspect(
             &authority(program, root.path()),
@@ -448,9 +451,11 @@ mod tests {
         let changed_program = write_fixture(
             changed_root.path(),
             OTHER_HEAD,
-            json!([[]]),
-            json!([[]]),
-            json!([[]]),
+            FeedbackPages {
+                issue_comments: json!([[]]),
+                reviews: json!([[]]),
+                review_comments: json!([[]]),
+            },
         );
         let changed = inspect(
             &authority(changed_program, changed_root.path()),
@@ -465,9 +470,11 @@ mod tests {
         let malformed_program = write_fixture(
             malformed_root.path(),
             HEAD,
-            json!({"not": "pages"}),
-            json!([[]]),
-            json!([[]]),
+            FeedbackPages {
+                issue_comments: json!({"not": "pages"}),
+                reviews: json!([[]]),
+                review_comments: json!([[]]),
+            },
         );
         let malformed = inspect(
             &authority(malformed_program, malformed_root.path()),

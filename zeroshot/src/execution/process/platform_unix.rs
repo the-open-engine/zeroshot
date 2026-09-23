@@ -367,9 +367,7 @@ fn verify_linux_identity(uid: u32, gid: u32, group: Option<u32>) -> Result<(), i
         )
     };
     let valid = linux_identity_matches(
-        uid,
-        gid,
-        group,
+        (uid, gid, group),
         (observed_uid, observed_euid, observed_gid, observed_egid),
         (observed_group_count, observed_group),
     );
@@ -515,12 +513,11 @@ fn validate_worker_membership(identity: u32) -> Result<(), io::Error> {
 
 #[cfg(target_os = "linux")]
 fn linux_identity_matches(
-    uid: u32,
-    gid: u32,
-    group: Option<u32>,
+    expected: (u32, u32, Option<u32>),
     observed_identity: (u32, u32, u32, u32),
     observed_group: (i32, u32),
 ) -> bool {
+    let (uid, gid, group) = expected;
     let (observed_uid, observed_euid, observed_gid, observed_egid) = observed_identity;
     observed_uid == uid
         && observed_euid == uid
