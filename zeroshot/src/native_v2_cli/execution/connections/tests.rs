@@ -11,7 +11,7 @@ use crate::native_v2_cli::tests::support::{Call, FakeBackend};
 use crate::native_v2_cli::ConnectionRoute;
 
 #[tokio::test]
-async fn management_contract_routes_connection_values_without_secret_output() {
+async fn wave7_cli_contract_management_routes_values_without_secret_output() {
     let backend = FakeBackend::default();
     let route = ConnectionRoute {
         target: Some("prod".to_owned()),
@@ -103,6 +103,36 @@ async fn management_contract_routes_connection_values_without_secret_output() {
             && delete_target == target
             && delete_request.scope == ConnectionScope::Org
             && delete_request.key.as_str() == "openai"
+    ));
+}
+
+#[tokio::test]
+async fn wave7_cli_contract_connection_dispatch_rejects_empty_and_wrong_operations() {
+    let backend = FakeBackend::default();
+    let rejected = execute_connection(
+        NativeV2CliCommand::ConnectionSet(ConnectionSetCommand {
+            route: ConnectionRoute {
+                target: Some("prod".to_owned()),
+                scope: ConnectionScope::Org,
+            },
+            key: ConnectionKey::new("empty").assert_value(),
+            input: ConnectionInput::Prompt(Vec::new()),
+        }),
+        &backend,
+        &mut Vec::new(),
+    )
+    .await;
+    assert!(matches!(rejected, Err(NativeV2CliError::Usage(_))));
+
+    assert!(matches!(
+        execute_connection(
+            NativeV2CliCommand::Version,
+            &backend,
+            &mut Vec::new()
+        )
+        .await,
+        Err(NativeV2CliError::Usage(message))
+            if message == "expected a connection operation"
     ));
 }
 

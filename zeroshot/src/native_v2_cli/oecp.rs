@@ -610,3 +610,7 @@ async fn forward<T, E, O>(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "oecp/tests.rs"]
+mod tests;

@@ -351,12 +351,14 @@ fn file_response(path: &str) -> Response {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
     use axum::http::HeaderName;
     use openengine_cluster_testkit::assertions::AssertValue;
 
     use super::*;
+    use crate::native_v2_observability::history::RunHistoryList;
 
     fn accepted_headers(origin: &BrowserOrigin) -> HeaderMap {
         let mut headers = HeaderMap::new();
@@ -471,8 +473,8 @@ mod tests {
         assert!(!origin.accepts(&non_text));
     }
 
-    #[test]
-    fn embedded_assets_have_explicit_types_and_missing_paths_are_not_fallbacks() {
+    #[tokio::test]
+    async fn embedded_assets_have_explicit_types_and_missing_paths_are_not_fallbacks() {
         for (path, expected) in [
             ("index.html", "text/html; charset=utf-8"),
             ("history-examples.json", "application/json; charset=utf-8"),
@@ -493,6 +495,83 @@ mod tests {
             assert_eq!(response.headers()[header::CONTENT_TYPE], expected, "{path}");
         }
         assert_eq!(file_response("missing.js").status(), StatusCode::NOT_FOUND);
+        assert_eq!(index().await.status(), StatusCode::OK);
+        assert_eq!(
+            asset(Path("missing.js".to_owned())).await.status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    struct EmptyRemoteHistory {
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl RunHistoryTransport for EmptyRemoteHistory {
+        async fn get(
+            &self,
+            request: super::super::RunHistoryRequest,
+        ) -> Result<super::super::RunHistoryResponse, super::super::RunHistoryTransportError>
+        {
+            assert!(matches!(
+                request,
+                super::super::RunHistoryRequest::List { after: None }
+            ));
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            super::super::RunHistoryResponse::new(
+                StatusCode::OK.as_u16(),
+                serde_json::to_vec(&RunHistoryList {
+                    runs: Vec::new(),
+                    next_cursor: None,
+                })
+                .assert_value(),
+            )
+        }
+    }
+
+    #[tokio::test]
+    async fn configured_remote_history_stays_behind_the_local_browser_boundary() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let target = RunHistoryTarget::remote(EmptyRemoteHistory {
+            calls: calls.clone(),
+        });
+        let root = openengine_cluster_testkit::TemporaryDirectory::for_test(
+            "profile-ui-remote-history-target",
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
+        let address = listener.local_addr().assert_value();
+        let origin = format!("http://{address}");
+        let state = UiState::new(
+            LocalRunProfileStore::new(root.path("profiles")),
+            target.runs,
+            &origin,
+            "local",
+        )
+        .assert_value();
+        let shutdown = state.shutdown.clone();
+        let app = router(state, false);
+        let task = tokio::spawn(async move { axum::serve(listener, app).await });
+
+        let response = reqwest::get(format!("{origin}/ui/api/runs"))
+            .await
+            .assert_value();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.json::<serde_json::Value>().await.assert_value(),
+            serde_json::json!({"runs": [], "nextCursor": null})
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        shutdown.cancel();
+        let stopped = reqwest::get(format!("{origin}/ui/api/runs"))
+            .await
+            .assert_value();
+        assert_eq!(stopped.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            stopped.json::<serde_json::Value>().await.assert_value()["code"],
+            "server_stopping"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        task.abort();
     }
 
     #[test]
@@ -544,6 +623,21 @@ mod tests {
             observations,
         )
         .assert_value();
+        let discovery = service.run_history_discovery().assert_value();
+        assert_eq!(discovery.kind, RUN_HISTORY_KIND);
+        assert_eq!(discovery.base_url, "https://target.example");
+        assert_eq!(
+            discovery.route_templates.list,
+            "/native-v2/run-history{?after}"
+        );
+        assert_eq!(
+            discovery.route_templates.detail,
+            "/native-v2/run-history/{run_id}"
+        );
+        assert_eq!(
+            discovery.route_templates.page,
+            "/native-v2/run-history/{run_id}/page{?after}"
+        );
         service.shutdown();
         assert!(*service.shutdown.0.borrow());
     }

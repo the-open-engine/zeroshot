@@ -98,6 +98,104 @@ fn graph_rejection_projects_its_first_safe_diagnostic() {
     );
 }
 
+#[test]
+fn cloud_failures_map_to_stable_target_error_classes() {
+    let cases = [
+        (
+            NativeV2CloudError::SubmissionIdentity,
+            TargetAuthorityErrorKind::Invalid,
+        ),
+        (
+            NativeV2CloudError::Ledger(RunLedgerError::AdmittedRunTooLarge),
+            TargetAuthorityErrorKind::Invalid,
+        ),
+        (
+            NativeV2CloudError::Ledger(RunLedgerError::SubmissionConflict {
+                existing_run_id: RunId::new("existing-run"),
+            }),
+            TargetAuthorityErrorKind::Conflict,
+        ),
+        (
+            NativeV2CloudError::Ledger(RunLedgerError::RunIdConflict),
+            TargetAuthorityErrorKind::Conflict,
+        ),
+        (
+            NativeV2CloudError::Ledger(RunLedgerError::Storage),
+            TargetAuthorityErrorKind::Unavailable,
+        ),
+        (
+            NativeV2CloudError::ResumeCredentials,
+            TargetAuthorityErrorKind::Unavailable,
+        ),
+    ];
+    for (source, expected) in cases {
+        let message = source.to_string();
+        let projected = project_cloud_error(source);
+        assert_eq!(projected.kind(), expected);
+        assert_eq!(projected.message(), message);
+    }
+}
+
+#[tokio::test]
+async fn production_storage_and_factory_reject_non_directory_roots_before_controller_effects() {
+    let root = TestDirectory::new("hosting-invalid-storage-root");
+    let storage = root.child("storage-file");
+    fs::write(&storage, "not a directory").assert_value();
+    assert_eq!(
+        prepare_storage_root(&storage),
+        Err(ProductionHostingError::Storage)
+    );
+
+    let factory = ProductionTargetControllerFactory::new(hosting_config(storage.clone()));
+    assert!(factory.supports_workspace_recovery());
+    let error = TargetControllerFactory::create(&factory)
+        .await
+        .assert_error();
+    assert_eq!(error.kind(), TargetAuthorityErrorKind::Unavailable);
+    assert_eq!(error.message(), ProductionHostingError::Storage.to_string());
+
+    let storage = root.child("storage-with-invalid-runs");
+    fs::create_dir(&storage).assert_value();
+    fs::write(storage.join("runs"), "not a directory").assert_value();
+    assert_eq!(
+        prepare_storage_root(&storage),
+        Err(ProductionHostingError::Storage)
+    );
+}
+
+#[test]
+fn capsule_configuration_requires_every_executable_boundary() {
+    let root = TestDirectory::new("hosting-invalid-capsule-config");
+    for missing in ["copilot", "codex", "claude", "git", "gh"] {
+        let mut config = capsule_config(root.path().join(missing));
+        match missing {
+            "copilot" => config.copilot_executable = PathBuf::new(),
+            "codex" => config.codex_executable = PathBuf::new(),
+            "claude" => config.claude_executable.clear(),
+            "git" => config.git_program = PathBuf::new(),
+            "gh" => config.gh_program = PathBuf::new(),
+            _ => unreachable!(),
+        }
+        assert!(matches!(
+            ProductionCapsuleAllocator::new(config),
+            Err(ProductionHostingError::CapsuleConfiguration)
+        ));
+    }
+}
+
+#[test]
+fn production_config_debug_exposes_capabilities_without_environment_or_pool_details() {
+    let root = TestDirectory::new("hosting-config-debug");
+    let config = hosting_config(root.path().to_owned());
+    let debug = format!("{config:?}");
+    let root_text = root.path().to_string_lossy().into_owned();
+    for expected in [root_text.as_str(), "/usr/bin/false", "/usr/bin/git"] {
+        assert!(debug.contains(expected), "{debug}");
+    }
+    assert!(!debug.contains("executable_search_path"));
+    assert!(!debug.contains("process_pool"));
+}
+
 #[tokio::test]
 async fn sqlite_controllers_share_one_durable_namespace_without_a_target_wide_claim() {
     let root = TestDirectory::new("hosting-controller");

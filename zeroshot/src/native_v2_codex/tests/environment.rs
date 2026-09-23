@@ -1,5 +1,101 @@
 use super::*;
-use crate::native_v2_capsule::provider_process::{redaction_values, safe_provider_text};
+use crate::native_v2_capsule::provider_process::{
+    LocalHarnessEnvironment, redaction_values, safe_provider_text,
+};
+
+fn local_configuration(
+    provider: CodexProvider,
+    native_environment: BTreeMap<String, String>,
+) -> NativeV2CodexConfig {
+    NativeV2CodexConfig {
+        provider,
+        executable: PathBuf::from("codex"),
+        workspace: PathBuf::from("/workspace"),
+        runtime_home: PathBuf::from("/runtime"),
+        local_user: Some(NativeV2CodexUser {
+            home: PathBuf::from("/user"),
+            codex_home: PathBuf::from("/user/.codex"),
+        }),
+        native_environment: LocalHarnessEnvironment::new(native_environment),
+        search_path: "/usr/bin:/bin".to_owned(),
+        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
+    }
+}
+
+#[test]
+fn coverage_contract_codex_local_configuration_filters_cross_provider_auth_but_keeps_transport() {
+    let native = BTreeMap::from([
+        ("CODEX_API_KEY".to_owned(), "codex-secret".to_owned()),
+        ("OPENAI_API_KEY".to_owned(), "openai-secret".to_owned()),
+        (
+            "OPENAI_BASE_URL".to_owned(),
+            "https://native.invalid".to_owned(),
+        ),
+        ("HTTPS_PROXY".to_owned(), "https://proxy.invalid".to_owned()),
+    ]);
+    let openai =
+        NativeV2CodexAdapter::new_local(local_configuration(CodexProvider::OpenAi, native.clone()));
+    assert!(openai.local_environment.contains_key("CODEX_API_KEY"));
+    assert!(openai.local_environment.contains_key("OPENAI_API_KEY"));
+
+    let openrouter =
+        NativeV2CodexAdapter::new_local(local_configuration(CodexProvider::OpenRouter, native));
+    assert!(!openrouter.local_environment.contains_key("CODEX_API_KEY"));
+    assert!(!openrouter.local_environment.contains_key("OPENAI_API_KEY"));
+    assert!(openrouter.local_environment.contains_key("OPENAI_BASE_URL"));
+    assert!(openrouter.local_environment.contains_key("HTTPS_PROXY"));
+}
+
+#[test]
+fn coverage_contract_codex_declared_auth_suppresses_ambient_auth_and_paths_fail_closed() {
+    let declared = binding(SessionScope::Execution, &["OPENAI_API_KEY"]);
+    let resolved = ResolvedEnvironment::exact(
+        &declared,
+        BTreeMap::from([(environment_name("OPENAI_API_KEY"), "declared".to_owned())]),
+    )
+    .assert_value();
+    let mut values = BTreeMap::new();
+    merge_local_environment(
+        &mut values,
+        &resolved,
+        &BTreeMap::from([
+            ("OPENAI_API_KEY".to_owned(), "ambient".to_owned()),
+            (
+                "OPENAI_BASE_URL".to_owned(),
+                "https://native.invalid".to_owned(),
+            ),
+        ]),
+    );
+    assert!(!values.contains_key("OPENAI_API_KEY"));
+    assert!(values.contains_key("OPENAI_BASE_URL"));
+
+    let empty_binding = binding(SessionScope::Execution, &[]);
+    let empty = ResolvedEnvironment::exact(&empty_binding, BTreeMap::new()).assert_value();
+    let adapter =
+        NativeV2CodexAdapter::new(local_configuration(CodexProvider::OpenAi, BTreeMap::new()));
+    let error = adapter
+        .provider_environment(&empty, Path::new(""))
+        .err()
+        .assert_value();
+    assert!(error.to_string().contains("runtime home"));
+
+    #[cfg(unix)]
+    {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let mut configuration = local_configuration(CodexProvider::OpenAi, BTreeMap::new());
+        configuration.local_user = Some(NativeV2CodexUser {
+            home: PathBuf::from(OsString::from_vec(vec![0xff])),
+            codex_home: PathBuf::from("/user/.codex"),
+        });
+        let error = NativeV2CodexAdapter::new_local(configuration)
+            .provider_environment(&empty, Path::new("/runtime"))
+            .err()
+            .assert_value();
+        assert!(error.to_string().contains("user home"));
+    }
+}
 
 #[test]
 fn command_is_exact_and_rejects_adapter_owned_collisions() {

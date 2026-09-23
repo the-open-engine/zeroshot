@@ -82,4 +82,69 @@ fn coverage_contract_rpc_stderr_diagnostics_mark_truncated_and_complete_tails() 
         );
         assert!(detail.contains(marker));
     }
+    let mut unchanged = "execution failed".to_owned();
+    append_stderr_detail(
+        &mut unchanged,
+        &ProcessSessionOutput {
+            launch_evidence: ProcessLaunchEvidence::MayHaveStarted,
+            exit_code: Some(1),
+            termination_signal: None,
+            core_dumped: false,
+            stderr_tail: Vec::new(),
+            stderr_tail_truncated: false,
+            cancelled: false,
+            timed_out: false,
+            cleanup: ProcessCleanupEvidence::Reaped,
+            post_launch_error: None,
+        },
+    );
+    assert_eq!(unchanged, "execution failed");
+}
+
+#[test]
+fn coverage_contract_rpc_protocol_session_and_dispatch_decisions_fail_closed() {
+    validate_protocol_version(&json!({"protocolVersion": 3})).assert_value();
+    for value in [
+        json!({}),
+        json!({"protocolVersion": 2}),
+        json!({"protocolVersion": "3"}),
+    ] {
+        assert!(validate_protocol_version(&value).is_err());
+    }
+    validate_session_identity(&json!({"sessionId": "expected"}), "expected").assert_value();
+    assert!(validate_session_identity(&json!({}), "expected").is_err());
+    assert!(validate_session_identity(&json!({"sessionId": "other"}), "expected").is_err());
+    validate_detach(&json!({"success": true})).assert_value();
+    assert!(validate_detach(&json!({"success": false})).is_err());
+
+    for (message, expected) in [
+        (json!({"method": "session.event"}), DispatchAction::Event),
+        (
+            json!({"method": "gitHubToken.getToken", "id": 1}),
+            DispatchAction::AcquireToken,
+        ),
+        (
+            json!({"method": "future.method", "id": 2}),
+            DispatchAction::Reject,
+        ),
+        (
+            json!({"method": "future.notification"}),
+            DispatchAction::Ignore,
+        ),
+    ] {
+        assert_eq!(dispatch_action(&message), expected);
+    }
+    assert!(request_ended("connect").to_string().contains("connect"));
+    assert_eq!(
+        failure_detail(NodeRunnerError::Driver).assert_value(),
+        "execution failed"
+    );
+    assert_eq!(
+        failure_detail(NodeRunnerError::DriverDetail("safe".to_owned())).assert_value(),
+        "safe"
+    );
+    assert!(matches!(
+        failure_detail(NodeRunnerError::Cancelled),
+        Err(NodeRunnerError::Cancelled)
+    ));
 }

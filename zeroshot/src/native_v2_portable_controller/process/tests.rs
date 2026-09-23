@@ -169,3 +169,42 @@ fn boundary_contract_path_validation_distinguishes_regular_files_directories_sym
         assert!(link.exists(), "unsafe endpoint entries are never removed");
     }
 }
+
+#[test]
+fn coverage_contract_bootstrap_parent_and_private_read_refuse_ambiguous_filesystem_entries() {
+    assert!(matches!(
+        prepare_bootstrap_parent(Path::new("/")),
+        Err(PortableControllerError::Path)
+    ));
+
+    let root = tempfile::tempdir().assert_value();
+    let regular_parent = root.path().join("regular-parent");
+    fs::write(&regular_parent, b"not a directory").assert_value();
+    assert!(prepare_bootstrap_parent(&regular_parent.join("bootstrap.json")).is_err());
+
+    let missing = root.path().join("missing-bootstrap.json");
+    assert!(matches!(
+        validate_private_bootstrap(&missing),
+        Err(PortableControllerError::BootstrapPermissions)
+    ));
+    assert!(matches!(
+        read_bounded_regular_file(root.path(), 16),
+        Err(PortableControllerError::Bootstrap | PortableControllerError::Io(_))
+    ));
+
+    #[cfg(unix)]
+    {
+        let source = root.path().join("source");
+        fs::write(&source, b"secret").assert_value();
+        let link = root.path().join("bootstrap-link");
+        std::os::unix::fs::symlink(&source, &link).assert_value();
+        assert!(matches!(
+            validate_private_bootstrap(&link),
+            Err(PortableControllerError::BootstrapPermissions)
+        ));
+        assert!(matches!(
+            read_bounded_regular_file(&link, 16),
+            Err(PortableControllerError::Io(_))
+        ));
+    }
+}

@@ -84,3 +84,31 @@ async fn boundary_contract_empty_ledger_has_no_existing_run_and_storage_rejects_
     assert!(lease.is_intact());
     drop((ledger, lease));
 }
+
+#[tokio::test]
+async fn coverage_contract_observer_refuses_storage_without_the_exact_durable_run() {
+    let root = tempfile::tempdir().assert_value();
+    let storage = root.path().join("state");
+    let (paths, lease, ledger) = open_controller_storage(&storage).assert_value();
+    drop((ledger, lease));
+
+    let result = PortableRunController::open_observer(paths, RunId::new("missing-run")).await;
+    assert!(matches!(
+        result,
+        Err(PortableControllerError::DurableIdentity)
+    ));
+}
+
+#[test]
+fn coverage_contract_workspace_loss_requires_all_three_sources_of_positive_evidence() {
+    for identity in [false, true] {
+        for workspace_lease in [false, true] {
+            for controller_lease in [false, true] {
+                assert_eq!(
+                    workspace_is_lost(identity, workspace_lease, controller_lease),
+                    !(identity && workspace_lease && controller_lease)
+                );
+            }
+        }
+    }
+}

@@ -633,6 +633,115 @@ fn remote_list_requires_descending_unique_ids_and_an_exact_page_cursor() {
     }
 }
 
+#[test]
+fn remote_summary_validation_preserves_terminal_authority() {
+    let id = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992");
+    let title = RunTitle::new("Remote run").assert_value();
+    let queued = RunHistorySummary {
+        run_id: id.clone(),
+        title: title.clone(),
+        phase: RunHistoryPhase::Queued,
+        cursor: None,
+        terminal: None,
+        source: None,
+        created_at: None,
+        history_available: false,
+        runtime_failure: None,
+    };
+    assert!(!invalid_remote_summary(&queued));
+
+    let failure = RuntimeFailure {
+        at_cursor: Cursor::new("v2:7"),
+        reason: "runtime_failed".into(),
+    };
+    let valid_failed = RunHistorySummary {
+        phase: RunHistoryPhase::Finished,
+        cursor: Some(failure.at_cursor.clone()),
+        terminal: Some(RunHistoryTerminalSynopsis::Failed {
+            reason: failure.reason.clone(),
+        }),
+        history_available: true,
+        runtime_failure: Some(failure),
+        ..queued.clone()
+    };
+    assert!(!invalid_remote_summary(&valid_failed));
+
+    let mut invalid = Vec::new();
+    invalid.push(RunHistorySummary {
+        run_id: RunId::new("not-a-run-id"),
+        ..queued.clone()
+    });
+    invalid.push(RunHistorySummary {
+        cursor: Some(Cursor::new("v2:18446744073709551616")),
+        history_available: true,
+        ..queued.clone()
+    });
+    invalid.push(RunHistorySummary {
+        cursor: Some(Cursor::new("v2:1")),
+        ..queued.clone()
+    });
+    invalid.push(RunHistorySummary {
+        phase: RunHistoryPhase::Unavailable,
+        cursor: Some(Cursor::new("v2:1")),
+        history_available: true,
+        ..queued.clone()
+    });
+    invalid.push(RunHistorySummary {
+        phase: RunHistoryPhase::Running,
+        terminal: Some(RunHistoryTerminalSynopsis::Succeeded {}),
+        ..queued.clone()
+    });
+    invalid.push(RunHistorySummary {
+        terminal: None,
+        ..valid_failed.clone()
+    });
+    invalid.push(RunHistorySummary {
+        phase: RunHistoryPhase::Running,
+        ..valid_failed.clone()
+    });
+    invalid.push(RunHistorySummary {
+        terminal: Some(RunHistoryTerminalSynopsis::Failed {
+            reason: "runtime_lost".into(),
+        }),
+        ..valid_failed
+    });
+    for summary in invalid {
+        assert!(invalid_remote_summary(&summary));
+    }
+}
+
+#[test]
+fn remote_problem_and_transport_failures_remain_bounded_and_typed() {
+    let problem = openengine_cluster_protocol::TargetHttpProblem::new(
+        "history_pending",
+        "History is still being prepared.",
+        None,
+    )
+    .assert_value();
+    let parsed = remote_problem(
+        StatusCode::SERVICE_UNAVAILABLE,
+        &serde_json::to_vec(&problem).assert_value(),
+    );
+    assert_eq!(parsed.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(parsed.code, "history_pending");
+    assert_eq!(parsed.message, "History is still being prepared.");
+
+    for body in [b"{".as_slice(), br#"{"code":"private","message":"hidden"}"#] {
+        assert_eq!(
+            remote_problem(StatusCode::BAD_GATEWAY, body).code,
+            "history_unavailable"
+        );
+    }
+    assert_eq!(
+        transport_error(RunHistoryTransportError::Incompatible).code,
+        "history_incompatible"
+    );
+    assert_eq!(
+        transport_error(RunHistoryTransportError::Unavailable).code,
+        "history_unavailable"
+    );
+}
+
 #[tokio::test]
 async fn hosted_pending_problem_reaches_history_and_initial_sse_read_unchanged() {
     let routes = Arc::new(Mutex::new(Vec::new()));

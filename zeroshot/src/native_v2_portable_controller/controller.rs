@@ -474,15 +474,24 @@ fn monitor_workspace_and_lease(monitor: WorkspaceMonitor, loss: watch::Sender<bo
             let Some(workspace_lease) = monitor.workspace_lease.upgrade() else {
                 return;
             };
-            if !monitor.identity.is_current(&monitor.workspace)
-                || !workspace_lease.is_intact()
-                || !controller_lease.is_intact()
-            {
+            if workspace_is_lost(
+                monitor.identity.is_current(&monitor.workspace),
+                workspace_lease.is_intact(),
+                controller_lease.is_intact(),
+            ) {
                 loss.send_replace(true);
                 return;
             }
         }
     });
+}
+
+fn workspace_is_lost(
+    identity_is_current: bool,
+    workspace_lease_is_intact: bool,
+    controller_lease_is_intact: bool,
+) -> bool {
+    !identity_is_current || !workspace_lease_is_intact || !controller_lease_is_intact
 }
 
 async fn validate_existing_run(

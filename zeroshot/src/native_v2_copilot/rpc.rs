@@ -147,17 +147,13 @@ impl<'a> CopilotRpc<'a> {
             "session.create"
         };
         let created = self.request(method, params).await?;
-        if created["sessionId"].as_str() != Some(self.session_id.as_str()) {
-            return Err(failure("Copilot returned a different session identity"));
-        }
+        validate_session_identity(&created, &self.session_id)?;
         *session.id.lock().await = Some(self.session_id.clone());
         let outcome = self.run_response().await?;
         let detached = self
             .request("session.detach", json!({"sessionId":self.session_id}))
             .await?;
-        if detached["success"].as_bool() != Some(true) {
-            return Err(failure("Copilot session could not be detached"));
-        }
+        validate_detach(&detached)?;
         Ok(outcome)
     }
 
@@ -168,12 +164,7 @@ impl<'a> CopilotRpc<'a> {
                 json!({"clientInfo":{"extensionName":"zeroshot"}}),
             )
             .await?;
-        if connected["protocolVersion"].as_u64() != Some(3) {
-            return Err(failure(
-                "Copilot RPC protocol version is incompatible; install CLI 1.0.86",
-            ));
-        }
-        Ok(())
+        validate_protocol_version(&connected)
     }
 
     async fn run_response(&mut self) -> Result<WorkerOutcome, NodeRunnerError> {
@@ -240,9 +231,7 @@ impl<'a> CopilotRpc<'a> {
                 return Ok(result);
             }
         }
-        Err(failure(format!(
-            "Copilot exited before replying to {method}"
-        )))
+        Err(request_ended(method))
     }
 
     fn response_message(
@@ -254,15 +243,12 @@ impl<'a> CopilotRpc<'a> {
     }
 
     async fn dispatch(&mut self, message: &Value) -> Result<(), NodeRunnerError> {
-        match message["method"].as_str() {
-            Some("session.event") => events::receive(self, &message["params"]).await,
-            Some("gitHubToken.getToken") if message.get("id").is_some() => {
-                self.acquire_token(message).await
-            }
-            _ if message.get("id").is_some() => self
-                .queue(json!({"jsonrpc":"2.0", "id":message["id"],
+        match dispatch_action(message) {
+            DispatchAction::Event => events::receive(self, &message["params"]).await,
+            DispatchAction::AcquireToken => self.acquire_token(message).await,
+            DispatchAction::Reject => self.queue(json!({"jsonrpc":"2.0", "id":message["id"],
                 "error":{"code":-32601,"message":"Method not supported by Zeroshot"}})),
-            _ => Ok(()),
+            DispatchAction::Ignore => Ok(()),
         }
     }
 
@@ -304,10 +290,9 @@ impl<'a> CopilotRpc<'a> {
         error: NodeRunnerError,
         completion: &crate::execution::process::ProcessSessionOutput,
     ) -> NodeRunnerError {
-        let mut detail = match error {
-            NodeRunnerError::Driver => "execution failed".to_owned(),
-            NodeRunnerError::DriverDetail(detail) => detail,
-            error => return error,
+        let mut detail = match failure_detail(error) {
+            Ok(detail) => detail,
+            Err(error) => return error,
         };
         append_stderr_detail(&mut detail, completion);
         failure(provider_failure_diagnostic(
@@ -343,6 +328,53 @@ impl<'a> CopilotRpc<'a> {
             }
         }
         Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DispatchAction {
+    Event,
+    AcquireToken,
+    Reject,
+    Ignore,
+}
+
+fn dispatch_action(message: &Value) -> DispatchAction {
+    match message["method"].as_str() {
+        Some("session.event") => DispatchAction::Event,
+        Some("gitHubToken.getToken") if message.get("id").is_some() => DispatchAction::AcquireToken,
+        _ if message.get("id").is_some() => DispatchAction::Reject,
+        _ => DispatchAction::Ignore,
+    }
+}
+
+fn validate_protocol_version(connected: &Value) -> Result<(), NodeRunnerError> {
+    (connected["protocolVersion"].as_u64() == Some(3))
+        .then_some(())
+        .ok_or_else(|| failure("Copilot RPC protocol version is incompatible; install CLI 1.0.86"))
+}
+
+fn validate_session_identity(created: &Value, expected: &str) -> Result<(), NodeRunnerError> {
+    (created["sessionId"].as_str() == Some(expected))
+        .then_some(())
+        .ok_or_else(|| failure("Copilot returned a different session identity"))
+}
+
+fn validate_detach(detached: &Value) -> Result<(), NodeRunnerError> {
+    (detached["success"].as_bool() == Some(true))
+        .then_some(())
+        .ok_or_else(|| failure("Copilot session could not be detached"))
+}
+
+fn request_ended(method: &str) -> NodeRunnerError {
+    failure(format!("Copilot exited before replying to {method}"))
+}
+
+fn failure_detail(error: NodeRunnerError) -> Result<String, NodeRunnerError> {
+    match error {
+        NodeRunnerError::Driver => Ok("execution failed".to_owned()),
+        NodeRunnerError::DriverDetail(detail) => Ok(detail),
+        error => Err(error),
     }
 }
 

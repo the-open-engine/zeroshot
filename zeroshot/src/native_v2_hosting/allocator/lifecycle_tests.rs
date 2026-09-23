@@ -202,3 +202,111 @@ fn hosting_source_contract_recovery_lineage_and_private_paths_are_bounded() {
     remove_run_directory(&disposable).assert_value();
     remove_run_directory(&disposable).assert_value();
 }
+
+#[test]
+fn recovery_confirmation_requires_matching_durable_identity_and_retained_shape() {
+    let root = TestDirectory::new("host-recovery-confirmation");
+    let run_id = RunId::new("confirmed-run");
+    let other_id = RunId::new("different-run");
+    let run_root = run_directory(root.path(), &run_id);
+    let recovery = recovery_path(root.path(), &run_id);
+    retained_workspace(&run_root);
+
+    for document in [
+        HostedRecoveryDocument {
+            recoverable: false,
+            ..recovery_document(&run_id)
+        },
+        HostedRecoveryDocument {
+            run_id: Some(other_id),
+            ..recovery_document(&run_id)
+        },
+    ] {
+        write_recovery(&recovery, &document).assert_value();
+        assert!(
+            !confirmed_retained_workspace(&run_root, &recovery, &run_id).assert_value(),
+            "unowned recovery metadata must never certify retained work"
+        );
+    }
+
+    std::fs::write(&recovery, b"not-json").assert_value();
+    assert!(!confirmed_retained_workspace(&run_root, &recovery, &run_id).assert_value());
+    write_recovery(&recovery, &recovery_document(&run_id)).assert_value();
+    std::fs::remove_dir_all(run_root.join("workspace")).assert_value();
+    assert!(!confirmed_retained_workspace(&run_root, &recovery, &run_id).assert_value());
+}
+
+#[test]
+fn retained_claim_rollback_restores_source_and_removes_successor_atomically() {
+    let root = TestDirectory::new("host-retained-claim-rollback");
+    let source_id = RunId::new("source-run");
+    let successor_id = RunId::new("successor-run");
+    let paths = RetainedAllocationPaths::new(root.path(), &source_id, &successor_id);
+    let original = recovery_document(&source_id);
+    let mut interrupted = original.clone();
+    interrupted.recoverable = false;
+    interrupted.successor_run_id = Some(successor_id.clone());
+    write_recovery(&paths.source_recovery, &interrupted).assert_value();
+    write_recovery(
+        &paths.run_recovery,
+        &HostedRecoveryDocument {
+            recoverable: false,
+            run_id: Some(successor_id.clone()),
+            delivery_run_id: Some(source_id.clone()),
+            resumed_from: Some(source_id.clone()),
+            successor_run_id: None,
+        },
+    )
+    .assert_value();
+
+    rollback_retained_claim(&paths, &original).assert_value();
+    let restored = read_recovery(&paths.source_recovery).assert_value();
+    assert!(restored.recoverable);
+    assert_eq!(restored.run_id, Some(source_id.clone()));
+    assert_eq!(restored.successor_run_id, None);
+    assert!(!paths.run_recovery.exists());
+
+    write_recovery(&paths.source_recovery, &interrupted).assert_value();
+    write_recovery(&paths.run_recovery, &recovery_document(&successor_id)).assert_value();
+    assert!(matches!(
+        retained_claim_failure(&paths, &original),
+        RetainedAllocationUnavailable::Settled(CapsuleAllocationUnavailable::Runtime)
+    ));
+    assert!(!paths.run_recovery.exists());
+}
+
+#[test]
+fn recovery_scans_ignore_incomplete_documents_but_report_unreadable_storage() {
+    let root = TestDirectory::new("host-recovery-scan-boundaries");
+    let source_id = RunId::new("source-run");
+    let source_path = recovery_path(root.path(), &source_id);
+
+    std::fs::create_dir_all(source_path.parent().assert_value()).assert_value();
+    std::fs::write(&source_path, b"not-json").assert_value();
+    reconcile_retained_document(root.path(), &source_path).assert_value();
+
+    write_recovery(
+        &source_path,
+        &HostedRecoveryDocument {
+            recoverable: false,
+            run_id: Some(source_id.clone()),
+            delivery_run_id: None,
+            resumed_from: None,
+            successor_run_id: Some(RunId::new("successor-run")),
+        },
+    )
+    .assert_value();
+    reconcile_retained_document(root.path(), &source_path).assert_value();
+    assert_eq!(
+        retained_delivery_run_id(root.path(), &source_id, &HostedRecoveryDocument::default()),
+        Some(source_id)
+    );
+
+    std::fs::remove_file(&source_path).assert_value();
+    std::fs::create_dir(&source_path).assert_value();
+    assert!(remove_recovery_file(&source_path).is_err());
+
+    let blocked = TestDirectory::new("host-recovery-scan-unreadable");
+    std::fs::write(blocked.child(RECOVERY_DIRECTORY), b"not a directory").assert_value();
+    assert!(reconcile_retained_allocations(blocked.path()).is_err());
+}

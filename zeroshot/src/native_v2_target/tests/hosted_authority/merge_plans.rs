@@ -1,4 +1,4 @@
-use openengine_cluster_protocol::{MergePlanId, RunListParams};
+use openengine_cluster_protocol::{MergePlanId, MergePlanSubmitRequest, RunListParams};
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{Value, json};
 
@@ -6,12 +6,93 @@ use super::{
     CapturedHttpRequest, bind_target_authority, hosted_discovery, oauth_metadata,
     read_http_request, test_authority, token_response, write_http_response_with_status,
 };
-use super::super::fixtures::{TempRoot, hosted_target, temp_root};
+use super::super::fixtures::{TempRoot, direct_target, hosted_target, temp_root};
 use super::super::super::controller_authority::{TargetCredentialStore, TargetHttpControlAuthority};
 use super::super::super::{TargetControlAuthority, TargetRecord};
 
 const DEFAULT_RESPONSE_LIMIT: usize = 64 * 1024;
 const MERGE_PLAN_RESPONSE_LIMIT: usize = 1024 * 1024;
+
+fn submission() -> MergePlanSubmitRequest {
+    serde_json::from_value(json!({
+        "submissionKey": "merge-plan-boundary",
+        "title": "Merge the queued changes",
+        "expiresAt": "2026-09-24T00:00:00Z",
+        "source": {"repository": "open-engine/zeroshot", "branch": "main"},
+        "profile": {"scope": "user", "name": "software-change"},
+        "runs": [{"name": "first", "initialInput": null}],
+        "connections": {},
+        "githubToken": "private-test-token"
+    }))
+    .assert_value()
+}
+
+#[tokio::test]
+async fn direct_targets_reject_every_merge_plan_operation_before_hosted_effects() {
+    let root = temp_root();
+    let (_, authority) = test_authority(&root);
+    let target = direct_target("http://127.0.0.1:1");
+    let plan_id = MergePlanId::new("plan-1");
+
+    let errors = [
+        authority
+            .merge_plan_submit(&target, &submission())
+            .await
+            .assert_error(),
+        authority
+            .merge_plan_status(&target, &plan_id)
+            .await
+            .assert_error(),
+        authority
+            .merge_plan_force(&target, &plan_id)
+            .await
+            .assert_error(),
+    ];
+    for error in errors {
+        assert_eq!(
+            error.to_string(),
+            "direct target does not support hosted merge plans"
+        );
+    }
+}
+
+#[tokio::test]
+async fn merge_plan_submission_and_force_stop_use_distinct_authenticated_routes() {
+    let body = merge_plan_body(vec![merge_plan_run("first", Vec::new(), None)]);
+    let harness = merge_plan_harness(vec![body.clone(), body]).await;
+
+    let submitted = harness
+        .authority
+        .merge_plan_submit(&harness.target, &submission())
+        .await
+        .assert_value();
+    let forced = harness
+        .authority
+        .merge_plan_force(&harness.target, &MergePlanId::new("plan-1"))
+        .await
+        .assert_value();
+    assert_eq!(submitted.plan_id.as_str(), "plan-1");
+    assert_eq!(forced.plan_id.as_str(), "plan-1");
+
+    let requests = harness.server.await.assert_value();
+    let create = requests
+        .iter()
+        .find(|request| request.path == "/native-v2/merge-plans")
+        .assert_value();
+    assert_eq!(create.method, "POST");
+    assert_eq!(create.authorization.as_deref(), Some("Bearer access-1"));
+    let create_body: Value = serde_json::from_str(&create.body).assert_value();
+    assert_eq!(create_body["submissionKey"], "merge-plan-boundary");
+    assert_eq!(create_body["githubToken"], "private-test-token");
+
+    let force = requests
+        .iter()
+        .find(|request| request.path == "/native-v2/merge-plans/plan-1/force")
+        .assert_value();
+    assert_eq!(force.method, "POST");
+    assert_eq!(force.authorization.as_deref(), Some("Bearer access-1"));
+    assert_eq!(force.body, "{}");
+}
 
 #[tokio::test]
 async fn merge_plan_polling_reuses_discovery_routes_and_access_token() {
@@ -341,29 +422,32 @@ async fn spawn_merge_plan_authority(
         let mut responses = responses.into_iter();
         for _ in 0..request_count {
             let (mut stream, request) = accept_merge_plan_request(&listener).await;
-            let (status, body) = match (request.method.as_str(), request.path.as_str()) {
-                ("GET", "/.well-known/zeroshot-native-v2") => {
-                    ("200 OK", hosted_discovery(&server_origin))
+            let operation = merge_plan_operation_response(&request, &mut responses);
+            let (status, body) = if let Some(response) = operation {
+                response
+            } else {
+                match (request.method.as_str(), request.path.as_str()) {
+                    ("GET", "/.well-known/zeroshot-native-v2") => {
+                        ("200 OK", hosted_discovery(&server_origin))
+                    }
+                    ("GET", "/oauth/metadata") => ("200 OK", oauth_metadata(&server_origin)),
+                    ("GET", "/native-v2/runs") => (
+                        "200 OK",
+                        super::hosted_run_response(&request).assert_value(),
+                    ),
+                    ("POST", "/oauth/token") => ("200 OK", token_response(&mut token_index)),
+                    ("GET", "/session") => (
+                        "200 OK",
+                        json!({
+                            "kind": "openengine.target-session/v1",
+                            "organization_id": "organization-1",
+                        })
+                        .to_string(),
+                    ),
+                    unexpected => None::<(&str, String)>.assert_value_with(&format!(
+                        "unexpected authority request: {unexpected:?}"
+                    )),
                 }
-                ("GET", "/oauth/metadata") => ("200 OK", oauth_metadata(&server_origin)),
-                ("GET", "/native-v2/runs") => (
-                    "200 OK",
-                    super::hosted_run_response(&request).assert_value(),
-                ),
-                ("POST", "/oauth/token") => ("200 OK", token_response(&mut token_index)),
-                ("GET", "/session") => (
-                    "200 OK",
-                    json!({
-                        "kind": "openengine.target-session/v1",
-                        "organization_id": "organization-1",
-                    })
-                    .to_string(),
-                ),
-                ("GET", path) if path.starts_with("/native-v2/merge-plans/") => {
-                    responses.next().assert_value()
-                }
-                unexpected => None::<(&str, String)>
-                    .assert_value_with(&format!("unexpected authority request: {unexpected:?}")),
             };
             write_http_response_with_status(&mut stream, status, &body).await;
             captured.push(request);
@@ -371,6 +455,23 @@ async fn spawn_merge_plan_authority(
         captured
     });
     (origin, server)
+}
+
+fn merge_plan_operation_response(
+    request: &CapturedHttpRequest,
+    responses: &mut impl Iterator<Item = (&'static str, String)>,
+) -> Option<(&'static str, String)> {
+    let is_operation = match (request.method.as_str(), request.path.as_str()) {
+        ("GET", path) if path.starts_with("/native-v2/merge-plans/") => true,
+        ("POST", "/native-v2/merge-plans") => true,
+        ("POST", path)
+            if path.starts_with("/native-v2/merge-plans/") && path.ends_with("/force") =>
+        {
+            true
+        }
+        _ => false,
+    };
+    is_operation.then(|| responses.next().assert_value())
 }
 
 async fn accept_merge_plan_request(

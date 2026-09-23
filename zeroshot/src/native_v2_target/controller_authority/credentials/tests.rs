@@ -1,6 +1,7 @@
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,7 +10,10 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use super::linux::LinuxTargetCredentialStore;
 use super::private_file::PrivateFileTargetCredentialStore;
 use super::test_support::{MemoryCredentialStore, UnavailableCredentialStore};
-use super::{CredentialStorePreparation, TargetCredentialStore};
+use super::{
+    CredentialStorePreparation, TargetCredentialStore, credential_service, open_refresh_lock,
+    refresh_lock_is_held,
+};
 
 const TARGET_ID: &str = "11111111-1111-4111-8111-111111111111";
 
@@ -19,6 +23,19 @@ async fn prepare_and_store(store: &dyn TargetCredentialStore) {
         CredentialStorePreparation::PrivateFile(_)
     ));
     store.set(TARGET_ID, "refresh-token").await.assert_value();
+}
+
+async fn assert_private_credential_rejected(
+    store: &PrivateFileTargetCredentialStore,
+    path: &Path,
+    bytes: &[u8],
+) {
+    std::fs::write(path, bytes).assert_value();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).assert_value();
+    assert_eq!(
+        store.get(TARGET_ID).await.assert_error().to_string(),
+        "private target credential store read failed"
+    );
 }
 
 #[tokio::test]
@@ -219,4 +236,130 @@ async fn an_explicit_system_store_never_downgrades() {
             .to_string(),
         "test credential store unavailable"
     );
+}
+
+#[test]
+fn credential_identity_and_refresh_lock_fail_closed_at_the_filesystem_boundary() {
+    assert_eq!(
+        credential_service(TARGET_ID).assert_value(),
+        format!("zeroshot-target-{TARGET_ID}")
+    );
+    for target_id in [
+        "",
+        "11111111-1111-4111-8111-11111111111",
+        "11111111-1111-4111-8111-1111111111111",
+        "11111111-1111-4111-8111-11111111111A",
+        "../../../../../../tmp/credential",
+    ] {
+        assert_eq!(
+            credential_service(target_id).assert_error().to_string(),
+            "stored target credential identity is invalid"
+        );
+    }
+
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test("zeroshot-refresh-lock");
+    let directory = root.path("locks");
+    let path = directory.join("target.lock");
+    assert!(!refresh_lock_is_held(&directory, &path).assert_value());
+    let guard = open_refresh_lock(&directory, &path).assert_value();
+    assert!(refresh_lock_is_held(&directory, &path).assert_value());
+    drop(guard);
+    assert!(!refresh_lock_is_held(&directory, &path).assert_value());
+}
+
+#[tokio::test]
+async fn private_file_store_rejects_malformed_tokens_metadata_and_backend_selection() {
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test(
+        "zeroshot-private-credential-refusals",
+    );
+    let directory = root.path("credentials");
+    let store = PrivateFileTargetCredentialStore::new(directory.clone());
+    store.prepare_for_login(TARGET_ID).await.assert_value();
+
+    assert_eq!(store.get(TARGET_ID).await.assert_value(), None);
+    assert_eq!(store.read_backend(TARGET_ID).await.assert_value(), None);
+    assert_eq!(
+        store
+            .write_backend(TARGET_ID, "ambient\n")
+            .await
+            .assert_error()
+            .to_string(),
+        "target credential store selection is invalid"
+    );
+    for backend in ["system\n", "file\n"] {
+        store.write_backend(TARGET_ID, backend).await.assert_value();
+        assert_eq!(
+            store
+                .read_backend(TARGET_ID)
+                .await
+                .assert_value()
+                .as_deref(),
+            Some(backend)
+        );
+    }
+
+    for token in [
+        String::new(),
+        "line\nbreak".to_owned(),
+        "nul\0byte".to_owned(),
+        "x".repeat(16 * 1024 + 1),
+    ] {
+        assert_eq!(
+            store
+                .set(TARGET_ID, &token)
+                .await
+                .assert_error()
+                .to_string(),
+            "refresh token is malformed"
+        );
+    }
+    assert_eq!(
+        store
+            .get("unsafe/target-id")
+            .await
+            .assert_error()
+            .to_string(),
+        "stored target credential identity is invalid"
+    );
+
+    let credential = directory.join(format!("{TARGET_ID}.json"));
+    for bytes in [
+        br#"{"version":2,"refreshToken":"token"}"#.as_slice(),
+        br#"{"version":1,"refreshToken":""}"#.as_slice(),
+        br#"{"version":1,"refreshToken":"token","extra":true}"#.as_slice(),
+        b"not-json".as_slice(),
+        b"\xff\xfe".as_slice(),
+    ] {
+        assert_private_credential_rejected(&store, &credential, bytes).await;
+    }
+
+    let oversized = vec![b'x'; 16 * 1024 * 2 + 257];
+    assert_private_credential_rejected(&store, &credential, &oversized).await;
+}
+
+#[tokio::test]
+async fn private_file_cleanup_removes_only_private_regular_credentials() {
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test(
+        "zeroshot-private-credential-cleanup",
+    );
+    let directory = root.path("credentials");
+    let store = PrivateFileTargetCredentialStore::new(directory.clone());
+    store.set(TARGET_ID, "refresh-token").await.assert_value();
+    let credential = directory.join(format!("{TARGET_ID}.json"));
+
+    std::fs::set_permissions(&credential, std::fs::Permissions::from_mode(0o644)).assert_value();
+    assert_eq!(
+        store
+            .remove_credential(TARGET_ID)
+            .await
+            .assert_error()
+            .to_string(),
+        "private target credential store cleanup failed"
+    );
+    assert!(credential.exists());
+
+    std::fs::set_permissions(&credential, std::fs::Permissions::from_mode(0o600)).assert_value();
+    store.remove_credential(TARGET_ID).await.assert_value();
+    assert!(!credential.exists());
+    store.remove_credential(TARGET_ID).await.assert_value();
 }

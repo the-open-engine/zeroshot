@@ -926,8 +926,16 @@ fn validate_single_string_record(payload: &PayloadType, field: &str) -> Result<(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
-    use openengine_cluster_testkit::assertions::AssertValue;
+    use openengine_cluster_protocol::{
+        ClaudeProvider, CodexProvider, CopilotProvider, DeclaredConnections, ModelId, NodeName,
+        RecordField, RunSize,
+    };
+    use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
+
+    use crate::native_v2_cli::{BuiltinGraphTemplate, TemplateDelivery};
 
     #[test]
     fn prompt_requires_exactly_one_nonempty_text_block() {
@@ -1010,5 +1018,240 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["OPENROUTER_API_KEY"]
         );
+    }
+
+    fn acp_graph() -> openengine_cluster_protocol::GraphSpec {
+        let field = || json!({"type":{"kind":"string"},"required":true});
+        let response = || json!({"kind":"record","fields":{"response":field()}});
+        let mut graph = serde_json::to_value(
+            BuiltinGraphTemplate::SingleWorker
+                .materialize(TemplateDelivery::None)
+                .assert_value(),
+        )
+        .assert_value();
+        for pointer in ["/root/state/fields", "/root/children/1/state/fields"] {
+            graph
+                .pointer_mut(pointer)
+                .and_then(Value::as_object_mut)
+                .expect("single-worker state fields")
+                .insert("response".to_owned(), field());
+        }
+        *graph
+            .pointer_mut("/root/children/0/output")
+            .expect("single-worker output") = response();
+        *graph
+            .pointer_mut("/root/children/0/writeBindings")
+            .expect("single-worker writes") = json!([{
+            "target":["response"],
+            "value":{"node":"worker","channel":"out","path":["response"]}
+        }]);
+        *graph
+            .pointer_mut("/root/children/1/otherwise/output")
+            .expect("single-worker success output") = response();
+        *graph
+            .pointer_mut("/root/children/1/otherwise/bindings")
+            .expect("single-worker success bindings") = json!([{
+            "target":["response"],
+            "value":{"source":"state","path":["response"]}
+        }]);
+        serde_json::from_value(graph).assert_value()
+    }
+
+    fn acp_profile(runtime: RuntimePlan) -> RunProfile {
+        RunProfile {
+            id: "profile-acp".to_owned(),
+            name: RunProfileName::new("acp").assert_value(),
+            scope: RunProfileScope::User,
+            graph: acp_graph(),
+            runtime,
+            is_default: false,
+        }
+    }
+
+    fn runtime(harness: &str, scope: &str, connections: Value) -> RuntimePlan {
+        let binding = NodeRuntimeBinding::Agent {
+            model: ModelId::new("provider-model").assert_value(),
+            effort: None,
+            session_scope: match scope {
+                "node_instance" => SessionScope::NodeInstance,
+                _ => SessionScope::Execution,
+            },
+            connections: serde_json::from_value::<DeclaredConnections>(connections).assert_value(),
+        };
+        let nodes = BTreeMap::from([(NodeName::new("worker").assert_value(), binding)]);
+        match harness {
+            "claude" => RuntimePlan::Claude {
+                provider: ClaudeProvider::Anthropic,
+                size: RunSize::Small,
+                nodes,
+            },
+            "copilot" => RuntimePlan::Copilot {
+                provider: CopilotProvider::Github,
+                size: RunSize::Small,
+                nodes,
+            },
+            _ => RuntimePlan::Codex {
+                provider: CodexProvider::OpenAi,
+                size: RunSize::Small,
+                nodes,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn wave7_cli_contract_acp_profile_validation_rejects_unsupported_shapes() {
+        let valid = runtime("codex", "node_instance", json!({}));
+        validate_profile(&acp_profile(valid.clone()))
+            .await
+            .unwrap_or_else(|error| panic!("valid ACP profile was rejected: {error}"));
+
+        let mut graph = serde_json::to_value(acp_graph()).assert_value();
+        graph["root"]["children"]
+            .as_array_mut()
+            .assert_value()
+            .pop();
+        let no_success = RunProfile {
+            graph: serde_json::from_value(graph).assert_value(),
+            ..acp_profile(valid.clone())
+        };
+        assert!(
+            validate_profile(&no_success)
+                .await
+                .assert_error()
+                .to_string()
+                .contains("at least one success")
+        );
+        assert!(
+            validate_profile(&acp_profile(runtime("copilot", "node_instance", json!({}))))
+                .await
+                .assert_error()
+                .to_string()
+                .contains("only Codex and Claude")
+        );
+        assert!(
+            validate_profile(&acp_profile(runtime(
+                "codex",
+                "node_instance",
+                json!({"provider":["TOKEN"]})
+            )))
+            .await
+            .assert_error()
+            .to_string()
+            .contains("connections are not supported")
+        );
+        assert!(
+            validate_profile(&acp_profile(runtime("claude", "execution", json!({}))))
+                .await
+                .assert_error()
+                .to_string()
+                .contains("node_instance session scope")
+        );
+
+        let map: GraphNode = serde_json::from_value(json!({
+            "kind":"map",
+            "name":"items",
+            "state":{"kind":"record","fields":{
+                "items":{"type":{"kind":"array","items":{"kind":"string"}},"required":true}
+            }},
+            "body":{
+                "kind":"succeed",
+                "name":"done",
+                "output":{"kind":"null"},
+                "bindings":[]
+            },
+            "over":{"source":"state","path":["items"]},
+            "maxItems":1,
+            "promotedStatePaths":[]
+        }))
+        .assert_value();
+        assert!(
+            validate_node(&map, &mut 0)
+                .assert_error()
+                .to_string()
+                .contains("map nodes")
+        );
+    }
+
+    #[test]
+    fn wave7_cli_contract_acp_turns_state_and_payloads_preserve_failure_semantics() {
+        let run_id = RunId::new("run-contract");
+        let cancelled = TurnResult::new(
+            run_id.clone(),
+            TerminalResult::Succeeded {
+                output: json!({"response":"ignored"}),
+            },
+            true,
+        )
+        .assert_value();
+        assert_eq!(cancelled.stop_reason, acp::StopReason::Cancelled);
+        assert!(cancelled.message.is_none());
+
+        let reason = openengine_cluster_protocol::EnumLabel::new("runtime_failed").assert_value();
+        let failed = TurnResult::new(
+            run_id,
+            TerminalResult::Failed {
+                reason: reason.clone(),
+            },
+            false,
+        )
+        .assert_value();
+        assert_eq!(failed.raw_output, json!({"failed":"runtime_failed"}));
+        assert_eq!(
+            failed.message.as_deref(),
+            Some("Zeroshot run failed: runtime_failed")
+        );
+        assert_eq!(
+            terminal_value(TerminalResult::Failed { reason }),
+            json!({"failed":"runtime_failed"})
+        );
+        assert!(
+            TurnResult::new(
+                RunId::new("run-malformed"),
+                TerminalResult::Succeeded {
+                    output: Value::Null
+                },
+                false,
+            )
+            .is_err()
+        );
+
+        let valid = PayloadType::Record {
+            fields: std::collections::BTreeMap::from([(
+                FieldName::new("task").assert_value(),
+                RecordField {
+                    value_type: PayloadType::String,
+                    required: true,
+                },
+            )]),
+        };
+        assert!(validate_single_string_record(&valid, "task").is_ok());
+        assert!(validate_single_string_record(&PayloadType::Null, "task").is_err());
+        assert!(validate_single_string_record(&valid, "missing").is_err());
+
+        let mut state = SessionState::default();
+        let active = state.start_turn().assert_value();
+        assert!(state.start_turn().is_err());
+        let unrelated = Arc::new(ActiveTurn::new());
+        state.finish_turn(&unrelated);
+        assert!(state.active.is_some());
+        state.finish_turn(&active);
+        assert!(state.active.is_none());
+        assert!(state.close_target().assert_value().is_none());
+        assert!(state.close_target().is_err());
+        assert!(state.cancel_target().is_none());
+        assert!(state.loss_target().is_none());
+
+        let active = ActiveTurn::new();
+        assert!(active.leases_are_intact());
+        assert!(!active.cancelled.load(Ordering::Acquire));
+        assert!(!active.lost.load(Ordering::Acquire));
+
+        let internal = AcpServeError::Transport("private detail".to_owned()).rpc_error();
+        assert_eq!(internal.code, acp::ErrorCode::InternalError);
+        assert!(!internal.message.contains("private detail"));
+        assert!(matches!(
+            prepare_session(Path::new("state"), PathBuf::from("relative")),
+            Err(AcpServeError::Request("session cwd must be absolute"))
+        ));
     }
 }

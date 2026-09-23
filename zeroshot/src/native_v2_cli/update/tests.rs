@@ -348,6 +348,47 @@ fn smoke_and_result_reporting_require_the_exact_release_version() {
     );
 }
 
+#[test]
+fn wave7_cli_contract_update_process_boundaries_fail_before_replacement() {
+    fn verify_noop(_: &Path, _: ReleaseVersion) -> Result<(), NativeV2CliError> {
+        Ok(())
+    }
+
+    fn replace_noop(_: &Path) -> Result<(), NativeV2CliError> {
+        Ok(())
+    }
+
+    let version = ReleaseVersion([8, 2, 1]);
+    let (target, executable) = release_target().assert_value();
+    assert!(!target.is_empty());
+    assert!(matches!(executable, "zeroshot" | "zeroshot.exe"));
+    assert!(extract_executable(b"not a gzip archive", executable).is_err());
+    assert!(
+        install_at(
+            Path::new(""),
+            b"binary",
+            version,
+            InstallOperations {
+                verify: verify_noop,
+                replace: replace_noop,
+            },
+        )
+        .is_err()
+    );
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir().assert_value();
+        let candidate = directory.path().join("zeroshot");
+        fs::write(&candidate, b"#!/bin/sh\nprintf 'zeroshot 8.2.1\\n'\n").assert_value();
+        fs::set_permissions(&candidate, fs::Permissions::from_mode(0o755)).assert_value();
+        smoke(&candidate, version).assert_value();
+        assert!(smoke(&candidate, ReleaseVersion([8, 2, 2])).is_err());
+    }
+}
+
 enum ArchiveEntry<'a> {
     File(&'a str, &'a [u8]),
     Directory(&'a str),

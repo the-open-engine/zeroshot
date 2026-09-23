@@ -5,7 +5,7 @@ use openengine_cluster_protocol::{
     Cursor, EnumLabel, RunResumeParams, RunSize, RunStatus, RunStatusResult, RunTitle,
     TerminalResult,
 };
-use openengine_cluster_testkit::assertions::AssertValue;
+use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::json;
 
 use super::*;
@@ -438,4 +438,38 @@ fn wave5_cli_contract_recovery_lineage_is_bounded_and_honors_root_delivery() {
         .write_recovery_document(&second, &second_document)
         .assert_value();
     assert!(backend.delivery_run_id(&first, &first_document).is_err());
+}
+
+#[tokio::test]
+async fn wave7_cli_contract_local_stale_state_and_readiness_fail_closed() {
+    let root = TestDirectory::new("local-wave7-boundaries");
+    let backend = contract_backend(root.path());
+    let run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000071");
+    let storage = backend.create_run_storage(&run_id).assert_value();
+    let bootstrap = storage.join(BOOTSTRAP_FILE);
+    std::fs::write(&bootstrap, b"stale").assert_value();
+    remove_stale_bootstrap(&bootstrap, Duration::ZERO).assert_value();
+    assert!(!bootstrap.exists());
+
+    std::fs::write(&bootstrap, b"stale").assert_value();
+    backend
+        .remove_stale_bootstraps(Duration::ZERO)
+        .assert_value();
+    assert!(!bootstrap.exists());
+    assert!(require_local(None).is_ok());
+    assert!(require_local(Some("prod")).is_err());
+
+    let paths = PortableControllerPaths::new(storage);
+    let mut exited = tokio::process::Command::new("sh")
+        .args(["-c", "exit 0"])
+        .spawn()
+        .assert_value();
+    exited.wait().await.assert_value();
+    assert!(
+        wait_for_controller(&mut exited, &paths, &run_id, Duration::ZERO)
+            .await
+            .assert_error()
+            .to_string()
+            .contains("exited before becoming ready")
+    );
 }

@@ -1,6 +1,6 @@
 use std::fs;
 #[cfg(target_os = "linux")]
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use openengine_cluster_testkit::assertions::AssertValue;
 #[cfg(unix)]
@@ -586,6 +586,14 @@ fn assert_pool_rejection_contracts() {
     );
     assert!(pool.active_run_slot(0, u64::MAX).is_err());
     assert!(pool.active_run_slot(u32::MAX, 1).is_err());
+    let sentinel = HostedProcessPool::new(1, 1, u32::MAX - 4, 2).assert_value();
+    assert!(sentinel.active_run_slot(0, 1).is_err());
+    let near_end = HostedProcessPool::new(1, 1, u32::MAX - 1, 2).assert_value();
+    assert!(
+        near_end
+            .identity(HostedProcessScope::VerifierExecution(2))
+            .is_err()
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -617,4 +625,29 @@ fn assert_runner_contracts() {
     );
     assert!(LocalProcessRunner::hosted_worker_identity(0, 1).is_err());
     assert!(LocalProcessRunner::hosted_worker_identity(1, 0).is_err());
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn coverage_contract_command_domain_preflight_checks_supervisor_authority_before_launch() {
+    let identity = HostedProcessPool::new(10_002, 10_002, 20_000, 20_000)
+        .assert_value()
+        .identity(HostedProcessScope::WriterExecution(65_536))
+        .assert_value();
+    let result = identity.prepare_command_domain();
+    // SAFETY: geteuid only observes this test process's effective identity.
+    if unsafe { libc::geteuid() } == 0 {
+        result.assert_value();
+    } else {
+        let detail = result.assert_error().to_string();
+        assert!(detail.contains("root supervisor"));
+    }
+
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    let invalid = PathBuf::from(OsString::from_vec(b"invalid\0home".to_vec()));
+    assert!(matches!(
+        super::set_private_directory_owner(&invalid, Some((10_002, 10_002))),
+        Err(ProcessRunnerError::InvalidCommand(_))
+    ));
 }

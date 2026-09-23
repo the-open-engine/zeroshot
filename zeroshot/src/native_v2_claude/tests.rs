@@ -14,7 +14,7 @@ mod limits;
 mod local_identity;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,8 +27,9 @@ use serde_json::{json, Value};
 use super::command::{
     ANTHROPIC_KEY, AWS_BEARER_TOKEN_BEDROCK, AWS_REGION, OPENROUTER_BASE_URL, OPENROUTER_KEY,
 };
-use super::{ClaudeAdapter, ClaudeAdapterConfig, ClaudeProcessEnvironment};
+use super::{ClaudeAdapter, ClaudeAdapterConfig, ClaudeAdapterConfigError, ClaudeProcessEnvironment};
 use crate::execution::{SessionScope, process::HostedProcessPool};
+use crate::native_v2_capsule::provider_process::LocalHarnessEnvironment;
 use crate::native_v2_candidate::test_support::{
     NodeRequestFixture, TestDirectory, admit, environment_name, full_graph, success_node,
 };
@@ -38,9 +39,175 @@ use crate::native_v2_contract::{
 };
 use crate::native_v2_runner::{
     AttachReceiveError, LiveOutputStream, NativeNodeRunner, NodeRunRequest, NodeRunner,
-    NodeRunnerError,
+    NodeRunnerError, ResolvedEnvironment,
 };
 use crate::worker_catalog::{self, ReasoningEffort};
+
+fn adapter_configuration(
+    provider: ClaudeProvider,
+    executable: &str,
+    native_environment: BTreeMap<String, String>,
+) -> ClaudeAdapterConfig {
+    ClaudeAdapterConfig {
+        provider,
+        executable: executable.to_owned(),
+        prefix_arguments: Vec::new(),
+        workspace: PathBuf::from("/workspace"),
+        runtime_home: PathBuf::from("/runtime"),
+        local_user_home: Some(PathBuf::from("/user")),
+        native_environment: LocalHarnessEnvironment::new(native_environment),
+        base_environment: ClaudeProcessEnvironment::new(BTreeMap::from([
+            ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
+            ("TERM".to_owned(), "dumb".to_owned()),
+        ]))
+        .assert_value(),
+        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
+    }
+}
+
+#[test]
+fn coverage_contract_claude_configuration_redacts_values_and_rejects_invalid_launch_inputs() {
+    let environment = ClaudeProcessEnvironment::new(BTreeMap::from([(
+        "PATH".to_owned(),
+        "secret-search-path".to_owned(),
+    )]))
+    .assert_value();
+    let debug = format!("{environment:?}");
+    assert!(debug.contains("PATH"));
+    assert!(!debug.contains("secret-search-path"));
+    assert!(matches!(
+        ClaudeProcessEnvironment::new(BTreeMap::from([(
+            "SECRET".to_owned(),
+            "value".to_owned(),
+        )])),
+        Err(ClaudeAdapterConfigError::NonMinimalEnvironment(name)) if name == "SECRET"
+    ));
+    assert!(matches!(
+        ClaudeProcessEnvironment::new(BTreeMap::from([(
+            "PATH".to_owned(),
+            "bad\0value".to_owned(),
+        )])),
+        Err(ClaudeAdapterConfigError::InvalidEnvironment)
+    ));
+    assert!(matches!(
+        ClaudeAdapter::new_local(adapter_configuration(
+            ClaudeProvider::Anthropic,
+            "",
+            BTreeMap::new(),
+        )),
+        Err(ClaudeAdapterConfigError::EmptyExecutable)
+    ));
+}
+
+#[test]
+fn coverage_contract_claude_local_configuration_preserves_only_provider_compatible_selectors() {
+    let native = BTreeMap::from([
+        ("ANTHROPIC_API_KEY".to_owned(), "ambient-key".to_owned()),
+        ("CLAUDE_CODE_USE_BEDROCK".to_owned(), "selector".to_owned()),
+        (
+            "ANTHROPIC_BASE_URL".to_owned(),
+            "https://native.invalid".to_owned(),
+        ),
+        ("HTTPS_PROXY".to_owned(), "https://proxy.invalid".to_owned()),
+    ]);
+    let anthropic = ClaudeAdapter::new_local(adapter_configuration(
+        ClaudeProvider::Anthropic,
+        "claude",
+        native.clone(),
+    ))
+    .assert_value();
+    assert_eq!(
+        anthropic.local_environment.get("ANTHROPIC_API_KEY"),
+        Some(&"ambient-key".to_owned())
+    );
+    assert!(
+        anthropic
+            .local_environment
+            .contains_key("CLAUDE_CODE_USE_BEDROCK")
+    );
+
+    let openrouter = ClaudeAdapter::new_local(adapter_configuration(
+        ClaudeProvider::OpenRouter,
+        "claude",
+        native,
+    ))
+    .assert_value();
+    assert!(
+        !openrouter
+            .local_environment
+            .contains_key("ANTHROPIC_API_KEY")
+    );
+    assert!(
+        !openrouter
+            .local_environment
+            .contains_key("CLAUDE_CODE_USE_BEDROCK")
+    );
+    assert!(
+        openrouter
+            .local_environment
+            .contains_key("ANTHROPIC_BASE_URL")
+    );
+    assert!(openrouter.local_environment.contains_key("HTTPS_PROXY"));
+
+    let hosted = ClaudeAdapter::new(adapter_configuration(
+        ClaudeProvider::Anthropic,
+        "claude",
+        BTreeMap::from([("ANTHROPIC_API_KEY".to_owned(), "secret".to_owned())]),
+    ))
+    .assert_value();
+    assert!(hosted.local_environment.is_empty());
+    assert!(hosted.local_user_home.is_none());
+}
+
+#[test]
+fn coverage_contract_claude_declared_auth_wins_and_reserved_or_invalid_paths_fail_closed() {
+    let adapter = ClaudeAdapter::new_local(adapter_configuration(
+        ClaudeProvider::Anthropic,
+        "claude",
+        BTreeMap::from([("ANTHROPIC_API_KEY".to_owned(), "ambient".to_owned())]),
+    ))
+    .assert_value();
+    let declared = agent_binding(
+        "claude-provider-model",
+        None,
+        SessionScope::Execution,
+        &["ANTHROPIC_API_KEY"],
+    );
+    let resolved = ResolvedEnvironment::exact(
+        &declared,
+        BTreeMap::from([(environment_name("ANTHROPIC_API_KEY"), "declared".to_owned())]),
+    )
+    .assert_value();
+    let environment = adapter
+        .process_environment(&resolved, Path::new("/runtime"))
+        .assert_value();
+    assert_eq!(
+        environment.get("ANTHROPIC_API_KEY").map(String::as_str),
+        Some("declared")
+    );
+    assert!(
+        adapter
+            .process_environment(&resolved, Path::new(""))
+            .is_err()
+    );
+
+    let reserved = agent_binding(
+        "claude-provider-model",
+        None,
+        SessionScope::Execution,
+        &["HOME"],
+    );
+    let reserved = ResolvedEnvironment::exact(
+        &reserved,
+        BTreeMap::from([(environment_name("HOME"), "declared-home".to_owned())]),
+    )
+    .assert_value();
+    let error = adapter
+        .process_environment(&reserved, Path::new("/runtime"))
+        .err()
+        .assert_value();
+    assert!(error.to_string().contains("reserved process configuration"));
+}
 
 fn agent_binding(
     model: &str,
