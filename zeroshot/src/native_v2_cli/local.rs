@@ -172,7 +172,8 @@ impl LocalCliBackend {
                     tokio::spawn(async move {
                         let _ = server.serve().await;
                     });
-                    return connect_transport(&paths).await.map_err(local_error);
+                    // The observer owns the lease now; reconnect through the same bounded loop so
+                    // Windows does not fail the handoff on one unavailable named-pipe instance.
                 }
                 Err(PortableControllerError::Lease(ControllerLeaseError::Held))
                     if Instant::now() < deadline =>
