@@ -301,6 +301,42 @@ describe('CI efficiency contract', () => {
   });
 });
 
+describe('Native coverage contract', () => {
+  it('measures both native test configurations and publishes line coverage', () => {
+    const workflow = yaml.load(read('.github/workflows/coverage.yml'));
+    const coverage = workflow.jobs.coverage;
+    const commands = coverage.steps.map((step) => step.run || '').join('\n');
+    const install = coverage.steps.find((step) => step.name === 'Install coverage tooling');
+    const publish = coverage.steps.find((step) => step.name === 'Publish coverage');
+
+    assert.deepEqual(workflow.on.push.branches, ['main']);
+    assert.deepEqual(workflow.on.pull_request.branches, ['main']);
+    assert.equal(Object.hasOwn(workflow.on, 'workflow_dispatch'), true);
+    assert.deepEqual(workflow.permissions, { contents: 'read' });
+    assert.match(commands, /npm --prefix ui run build/);
+    assert.match(commands, /cargo llvm-cov clean --workspace/);
+    assert.match(commands, /cargo llvm-cov --workspace --no-report/);
+    assert.match(commands, /cargo llvm-cov --package zeroshot --features ui --no-report/);
+    assert.match(commands, /cargo llvm-cov report --lcov --output-path lcov\.info/);
+    assert.equal(install.uses, 'taiki-e/install-action@7623a79cdfecb99d681017af368ca353d9f49bb5');
+    assert.deepEqual(install.with, {
+      tool: 'cargo-llvm-cov@0.9.0',
+      fallback: 'none',
+    });
+    assert.equal(
+      publish.uses,
+      'coverallsapp/github-action@8d6379e14d29928660c4ba802d8e85393440b329'
+    );
+    assert.deepEqual(publish.with, {
+      'github-token': '${{ secrets.GITHUB_TOKEN }}',
+      file: 'lcov.info',
+      format: 'lcov',
+      'fail-on-error': true,
+      'coverage-reporter-version': 'v0.6.22',
+    });
+  });
+});
+
 describe('Versioned documentation publication contract', () => {
   it('publishes Current from main and accepts exact releases for minor documentation', () => {
     const docs = yaml.load(read('.github/workflows/docs.yml'));
