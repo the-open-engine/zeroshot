@@ -482,9 +482,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Cargo's optional `ui` feature.
   Releases and target images embed it. Build, development, and feature checks: [ui/README.md](ui/README.md).
 - `zeroshot ui` serves local CLI profiles and ledgers at `http://127.0.0.1:4173/ui/` by default;
-  `--listen` accepts loopback only. Direct `target serve` mounts `/ui/` on its existing listener,
-  uses `--storage` for profiles/history, and initializes its single controller before UI reads.
-  Private/hosted targets reject this standalone mount. Opening the UI never starts a run.
+  `--listen` accepts loopback only. `zeroshot ui --target NAME` keeps profiles and authoring local
+  while its server discovers the target's `zeroshot.run-history/v1` bounded list/detail/page
+  routes; target coordinates and hosted credentials never enter the browser. The browser continues
+  to use only the local `/ui/api/runs` BFF. Hosted reads reuse the named target's OAuth authority
+  and refresh-token custody. Direct `target serve` mounts `/ui/` on its existing listener, uses
+  `--storage` for profiles/history, and advertises run history only with that UI mount. It
+  initializes its single controller before UI reads. Private/hosted targets reject this standalone
+  mount; their host may advertise the authenticated capability. Opening the UI never starts a run.
 - Browser access requires the configured public origin, exact Host, and valid Fetch-Site;
   forwarded headers cannot broaden authority. UI keepalive requests cannot reach target control
   endpoints. Keep JSON writes, request bounds, and connection-owned SSE readers/timers.
@@ -530,7 +535,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `workspace`. Git delivery keeps its fixed contracts and explicit pull-request/merge modes. Model suggestions are non-authoritative;
   identifiers remain opaque. Missing harness/provider links to runtime settings. JSON stays lossless.
 - `native_v2_observability::history` owns admitted definitions, bounded native pages and canonical
-  control records without the `ui` feature. Observer clones share its bounded projection cache.
+  control records without the `ui` feature. Its exported semantic validators are the single host
+  boundary for definition identity/version, canonical contiguous cursors, page/control coherence,
+  and the reserved `runtime_failed`/`runtime_lost` failure metadata; UI and Cloud readers must reuse
+  them after wire decoding. Definitions contain bounded admission and terminal facts, never the
+  accumulated execution snapshot; readers accept that legacy field only to strip it. Observer clones
+  share its bounded projection cache.
   `profile_ui/runs.rs` supplies local filesystem/list/SSE adapters; observation never creates, repairs
   or recovers a ledger or controller. Preserve ordered execution cursors, explicit gaps and string
   u64 IDs. SSE resumes after `Last-Event-ID` and drains through the terminal cursor before closing.

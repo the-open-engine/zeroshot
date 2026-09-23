@@ -128,14 +128,7 @@ async fn live_history_starts_empty_then_observes_appended_execution_and_terminal
 async fn terminal_stream_drains_bounded_pages_and_reconnect_resumes_exactly() {
     let fixture = Fixture::new().await;
     fixture.start(1).await;
-    let mut events = (0..MAX_REPLAY_EVENTS + 12)
-        .map(|index| RunEvent::SafeLog {
-            execution: Some(ExecutionId::new(1).assert_value()),
-            timestamp: UnixTimestampMillis::new(index as u64 + 1).assert_value(),
-            stream: SafeLogStream::Output,
-            line: SafeLogLine::new(format!("retained line {index}")).assert_value(),
-        })
-        .collect::<Vec<_>>();
+    let mut events = safe_logs(MAX_REPLAY_EVENTS + 12, "retained line");
     events.extend([completed(&fixture, 1), terminal()]);
     fixture
         .ledger
@@ -239,20 +232,7 @@ async fn sse_route_emits_named_pages_and_validates_resume_before_headers() {
         .append(&fixture.id, vec![completed(&fixture, 1), terminal()])
         .await
         .assert_value();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .assert_value();
-    let authority = listener.local_addr().assert_value().to_string();
-    let app = super::super::super::router(
-        UiState::new(
-            crate::native_v2_cli::LocalRunProfileStore::new(fixture.root.join("profiles")),
-            fixture.service.clone(),
-            &format!("http://{authority}"),
-            "local",
-        )
-        .assert_value(),
-    );
-    let task = tokio::spawn(async move { axum::serve(listener, app).await.assert_value() });
+    let (authority, task) = serve_local_ui(&fixture).await;
     let client = reqwest::Client::new();
     let url = format!(
         "http://{authority}/ui/api/runs/{}/events?after=v2%3A0",

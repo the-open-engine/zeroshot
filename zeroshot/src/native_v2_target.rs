@@ -43,6 +43,8 @@ use contract::{prepare_target, validate_bearer_token, validate_target_name};
 pub use oecp::{TargetOecpDialer, TargetOecpWebSocketDialer};
 pub use registry::{FileTargetRegistry, TargetRegistry, default_target_registry_path};
 pub use controller_authority::TargetHttpControlAuthority;
+#[cfg(feature = "ui")]
+pub use controller_authority::TargetRunHistoryTransport;
 pub use serve::{TargetServeError, serve_direct_target};
 pub use access::{TargetAccess, TargetOecpAccess};
 pub use authority::TargetControlAuthority;

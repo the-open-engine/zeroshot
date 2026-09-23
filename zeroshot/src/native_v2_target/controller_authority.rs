@@ -3,8 +3,13 @@ mod connections;
 mod contract;
 mod control;
 pub(super) mod credentials;
+#[cfg(feature = "ui")]
+mod history;
 mod hosted_runs;
 mod profiles;
+
+#[cfg(feature = "ui")]
+pub use history::TargetRunHistoryTransport;
 
 use std::path::PathBuf;
 use std::sync::Arc;

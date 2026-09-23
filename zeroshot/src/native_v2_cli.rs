@@ -260,6 +260,7 @@ pub enum NativeV2CliCommand {
     TargetServe(TargetServe),
     Ui {
         listen: SocketAddr,
+        target: Option<String>,
     },
     ConnectionList(ConnectionRoute),
     ConnectionSet(ConnectionSetCommand),

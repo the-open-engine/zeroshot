@@ -45,8 +45,7 @@ async fn confirmed_failure_reports_current_state_without_fabricating_history() {
         detail["runtimeFailure"],
         json!({"atCursor":"v2:2", "reason":"runtime_failed"})
     );
-    assert_eq!(detail["snapshot"]["phase"], "running");
-    assert!(detail["snapshot"]["terminal"].is_null());
+    assert!(detail.get("snapshot").is_none());
     assert_eq!(detail["history"]["complete"], false);
     let listed = source.list(None).await.assert_value();
     assert_eq!(
@@ -226,7 +225,8 @@ async fn caught_up_stream_reports_later_runtime_failure_without_an_extra_event()
 #[tokio::test]
 async fn missing_local_or_target_status_cannot_finish_or_repair_retained_history() {
     let mut fixture = Fixture::new().await;
-    fixture.service.status = Some(RuntimeStatusReader::Local(fixture.root.clone()));
+    fixture.service.local_for_test_mut().status =
+        Some(RuntimeStatusReader::Local(fixture.root.clone()));
     fixture.start(1).await;
     fixture
         .ledger

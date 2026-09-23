@@ -60,9 +60,17 @@ Open `http://127.0.0.1:4173/ui/` to edit profiles and inspect live or completed 
 Use `--listen 127.0.0.1:4185` to choose another loopback port. Ctrl-C stops the UI server;
 active runs continue. Restart the command to reconnect.
 
+To inspect runs on a configured target while keeping profiles in the local CLI store:
+
+```console
+zeroshot ui --target docker
+```
+
+Use `--target cloud` after signing in to inspect Cloud runs through the same local UI.
+
 **Profiles** edits graphs and runtime settings; the info icon explains authoring defaults.
-Saved profiles share the CLI's configuration store (`ZEROSHOT_CONFIG_DIR`); run history uses
-`ZEROSHOT_STATE_DIR`. Start a saved local profile from the CLI:
+Saved profiles share the CLI's configuration store (`ZEROSHOT_CONFIG_DIR`); without `--target`,
+run history uses `ZEROSHOT_STATE_DIR`. Start a saved local profile from the CLI:
 
 ```console
 zeroshot run --title "My task" --profile local:my-profile --input input.json

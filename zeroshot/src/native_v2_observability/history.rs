@@ -7,12 +7,19 @@ use serde_json::{json, Value};
 
 use crate::v2_run_ledger::{cursor_sequence, initial_cursor, RunLedger, RunLedgerError, RunSnapshot};
 
+mod contract;
 pub(crate) mod control;
 pub(crate) mod status;
 mod wire;
 pub use control::ControlRecord;
+pub use contract::{validate_history_page, validate_run_definition, RunHistoryContractError};
 pub use status::RuntimeFailure;
-pub use wire::{HistoryMetadata, HistoryPage, Observation, ObservationState, RunDefinition};
+pub use wire::{
+    HistoryMetadata, HistoryPage, HistoryProblemCode, Observation, ObservationState, RunDefinition,
+    RunHistoryList, RunHistoryPhase, RunHistorySummary, RunHistoryTerminalSynopsis,
+    RUN_HISTORY_DEFINITION_MAX_BYTES, RUN_HISTORY_LIST_MAX_BYTES, RUN_HISTORY_LIST_PAGE_SIZE,
+    RUN_HISTORY_PAGE_MAX_BYTES, RUN_HISTORY_PROBLEM_MAX_BYTES,
+};
 use control::ControlCache;
 use status::RuntimeStatusReader;
 
@@ -21,7 +28,7 @@ use status::RuntimeStatusReader;
 #[error("{message}")]
 pub struct HistoryError {
     pub status: u16,
-    pub code: &'static str,
+    pub code: HistoryProblemCode,
     pub message: String,
 }
 
@@ -46,7 +53,7 @@ impl RunHistoryService {
         }
     }
 
-    /// Returns the admitted definition, native snapshot and separate observation availability.
+    /// Returns the admitted definition and separate observation availability.
     pub async fn definition(&self, id: &RunId) -> Result<RunDefinition, HistoryError> {
         validate_run_id(id)?;
         let stored = self
@@ -64,12 +71,6 @@ impl RunHistoryService {
             policy: stored.admitted.graph.policy,
             root: stored.admitted.graph.root,
         };
-        let mut snapshot = serde_json::to_value(&stored.snapshot).map_err(|_| unavailable())?;
-        if let Some(executions) = snapshot["executions"].as_object_mut() {
-            for node in executions.values_mut() {
-                stringify_reference(&mut node["reference"]);
-            }
-        }
         let mut value = json!({
             "version":1, "projectionVersion":1,
             "runId":id, "title":stored.admitted.title, "createdAt":created_at(id),
@@ -77,7 +78,7 @@ impl RunHistoryService {
             "terminal":stored.snapshot.terminal,"historyAvailable":true,
             "graph":graph, "runtime":stored.admitted.runtime,
             "initialInput":stored.admitted.initial_input,"source":stored.admitted.source,
-            "snapshot":snapshot, "observation":observation,
+            "observation":observation,
             "history":{
                 "initialCursor":initial_cursor(),"cursor":stored.snapshot.cursor,
                 "complete":stored.snapshot.terminal.is_some(),
@@ -239,14 +240,14 @@ pub(crate) fn ledger_error(error: RunLedgerError) -> HistoryError {
 pub(crate) fn not_found() -> HistoryError {
     HistoryError {
         status: 404,
-        code: "run_not_found",
+        code: HistoryProblemCode::RunNotFound,
         message: "This run has no retained history.".into(),
     }
 }
 pub(crate) fn unavailable() -> HistoryError {
     HistoryError {
         status: 503,
-        code: "history_unavailable",
+        code: HistoryProblemCode::HistoryUnavailable,
         message: "This run's history is unavailable or uses an unsupported format.".into(),
     }
 }
@@ -254,7 +255,7 @@ pub(crate) fn unavailable() -> HistoryError {
 pub(crate) fn runtime_unavailable() -> HistoryError {
     HistoryError {
         status: 503,
-        code: "runtime_unavailable",
+        code: HistoryProblemCode::RuntimeUnavailable,
         message:
             "The run controller is unavailable. Retained history is shown; retry to reconnect."
                 .into(),
@@ -263,14 +264,14 @@ pub(crate) fn runtime_unavailable() -> HistoryError {
 fn history_gap() -> HistoryError {
     HistoryError {
         status: 409,
-        code: "history_gap",
+        code: HistoryProblemCode::HistoryGap,
         message: "The retained history has a gap; replay cannot continue.".into(),
     }
 }
 pub(crate) fn invalid_cursor() -> HistoryError {
     HistoryError {
         status: 400,
-        code: "invalid_cursor",
+        code: HistoryProblemCode::InvalidCursor,
         message: "The history cursor is invalid or ahead of this run.".into(),
     }
 }

@@ -153,6 +153,12 @@ fn authority_response(
     if let Some(response) = super::hosted_recovery::response(request) {
         return response;
     }
+    if request.method == "GET" && request.path == "/native-v2/workspaces/user/runs" {
+        return json!({"runs": [], "nextCursor": null}).to_string();
+    }
+    if request.method == "GET" && request.path.starts_with("/native-v2/workspaces/user/runs/") {
+        return json!({}).to_string();
+    }
     if let Some(response) = hosted_run_response(request) {
         return response;
     }
@@ -326,6 +332,15 @@ fn hosted_discovery(origin: &str) -> String {
             "hosted_workspace_recovery": {
                 "kind": "openengine.hosted-workspace-recovery/v1",
                 "route_templates": hosted_workspace_recovery_routes()
+            },
+            "run_history": {
+                "kind": "zeroshot.run-history/v1",
+                "baseUrl": origin,
+                "routeTemplates": {
+                    "list": "/native-v2/workspaces/user/runs{?after}",
+                    "detail": "/native-v2/workspaces/user/runs/{run_id}",
+                    "page": "/native-v2/workspaces/user/runs/{run_id}/history{?after}"
+                }
             },
             "merge_plans": {
                 "kind": "zeroshot.merge-plans/v1",

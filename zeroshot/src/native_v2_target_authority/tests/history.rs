@@ -315,9 +315,12 @@ async fn private_history_exports_native_definition_and_bounded_resumable_pages()
     assert_eq!(definition.source, before.admitted.source);
     assert_eq!(definition.runtime, before.admitted.runtime);
     assert_eq!(definition.initial_input, before.admitted.initial_input);
-    assert_eq!(
-        definition.snapshot["executions"]["9007199254740993"]["reference"]["execution"],
-        "9007199254740993"
+    assert!(definition.legacy_snapshot.is_none());
+    assert!(
+        serde_json::from_slice::<serde_json::Value>(&response.body)
+            .assert_value()
+            .get("snapshot")
+            .is_none()
     );
     let response = fixture.post(PAGE, json!({"runId":run_id()})).await;
     assert_eq!(response.status, 200);

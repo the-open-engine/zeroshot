@@ -9,7 +9,12 @@ import {
   readRuntimeFailure,
   readObservation,
 } from './history-contract';
-import type { HistoryEvent, HistoryPage, RunDetail, RunSummary } from './run-history';
+import type {
+  HistoryEvent,
+  HistoryPage,
+  RunDetail,
+  RunSummary,
+} from './run-history';
 
 /** A viewer needs a selected run, not knowledge of its host's run menu. */
 export interface RunHistoryReader {
@@ -86,6 +91,23 @@ export function createRunHistorySource(
   };
 }
 type Example = { detail: RunDetail; events: HistoryEvent[] };
+function exampleSummary(detail: RunDetail): RunSummary {
+  const terminal: RunSummary['terminal'] =
+    detail.terminal?.status === 'succeeded' ? { status: 'succeeded' } : detail.terminal;
+  return {
+    runId: detail.runId,
+    title: detail.title,
+    phase: detail.phase,
+    cursor: detail.cursor,
+    terminal,
+    runtimeFailure: detail.runtimeFailure,
+    createdAt: detail.createdAt,
+    historyAvailable: detail.historyAvailable,
+    observation: detail.observation,
+    source: detail.source,
+    example: true,
+  };
+}
 export function createExampleRunHistory(
   mount: URL,
   fetcher: typeof fetch = fetch
@@ -109,7 +131,7 @@ export function createExampleRunHistory(
   return {
     async list() {
       return {
-        runs: (await examples()).map(({ detail }) => ({ ...detail, example: true })),
+        runs: (await examples()).map(({ detail }) => exampleSummary(detail)),
         nextCursor: null,
       };
     },

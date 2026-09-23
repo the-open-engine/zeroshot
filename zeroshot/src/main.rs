@@ -19,6 +19,8 @@ use native_v2_target::{
     default_target_registry_path, serve_direct_target, FileTargetRegistry, NativeV2TargetConnector,
     TargetConnectorError, TargetHttpControlAuthority, TargetOecpWebSocketDialer, TargetServeError,
 };
+#[cfg(feature = "ui")]
+use native_v2_target::{TargetRegistry, TargetRunHistoryTransport};
 
 #[derive(Debug, Error)]
 enum ProcessError {
@@ -50,8 +52,8 @@ async fn dispatch(command: NativeV2CliCommand) -> Result<(), ProcessError> {
             serve_local_acp(profile).await?;
             Ok(())
         }
-        NativeV2CliCommand::Ui { listen } => {
-            serve_ui(listen).await?;
+        NativeV2CliCommand::Ui { listen, target } => {
+            serve_ui(listen, target).await?;
             Ok(())
         }
         NativeV2CliCommand::TargetServe(config) => {
@@ -201,16 +203,40 @@ fn write_process_error(error: &ProcessError) {
     }
 }
 
-async fn serve_ui(listen: std::net::SocketAddr) -> Result<(), NativeV2CliError> {
+async fn serve_ui(
+    listen: std::net::SocketAddr,
+    target: Option<String>,
+) -> Result<(), ProcessError> {
     #[cfg(feature = "ui")]
     {
-        zeroshot_engine::profile_ui::serve(listen).await
+        let target = target.map(resolve_ui_target).transpose()?;
+        zeroshot_engine::profile_ui::serve_with_target(listen, target).await?;
+        Ok(())
     }
     #[cfg(not(feature = "ui"))]
     {
-        let _ = listen;
-        Err(NativeV2CliError::Local("Build the editor with npm --prefix ui ci && npm --prefix ui run build, then cargo build -p zeroshot --features ui".to_owned()))
+        let _ = (listen, target);
+        let message = concat!(
+            "Build the editor with npm --prefix ui ci && npm --prefix ui run build, ",
+            "then cargo build -p zeroshot --features ui"
+        );
+        Err(NativeV2CliError::Local(message.to_owned()).into())
     }
+}
+
+#[cfg(feature = "ui")]
+fn resolve_ui_target(
+    name: String,
+) -> Result<zeroshot_engine::profile_ui::RunHistoryTarget, ProcessError> {
+    let registry = FileTargetRegistry::new(default_target_registry_path()?);
+    let target = registry.get(&name)?;
+    let authority =
+        TargetHttpControlAuthority::production().map_err(TargetConnectorError::Authority)?;
+    let transport = TargetRunHistoryTransport::new(authority, target)
+        .map_err(TargetConnectorError::Authority)?;
+    Ok(zeroshot_engine::profile_ui::RunHistoryTarget::remote(
+        transport,
+    ))
 }
 
 #[cfg(test)]

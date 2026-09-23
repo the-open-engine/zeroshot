@@ -8,7 +8,10 @@ use reqwest::Url;
 mod merge_plans;
 pub(crate) use merge_plans::{MergePlansDescriptor, build_merge_plans_descriptor};
 
-use super::{authority_error, same_origin_url, valid_literal_route_segment};
+use super::{
+    RunIdRouteSegment, authority_error, capability_base_url, compile_run_id_route_segments,
+    validate_route_template,
+};
 use crate::native_v2_target::TargetAuthorityError;
 
 const HOSTED_RUNS_KIND: &str = "zeroshot.hosted-runs/v1";
@@ -28,14 +31,8 @@ pub(in super::super) struct HostedRunsDescriptor {
 
 #[derive(Clone)]
 struct HostedRunRoute {
-    segments: Vec<HostedRunRouteSegment>,
+    segments: Vec<RunIdRouteSegment>,
     query: Vec<HostedRunQuery>,
-}
-
-#[derive(Clone)]
-enum HostedRunRouteSegment {
-    Literal(String),
-    RunId,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -161,8 +158,8 @@ impl HostedRunRoute {
         path.pop_if_empty();
         for segment in &self.segments {
             let value = match segment {
-                HostedRunRouteSegment::Literal(segment) => segment.as_str(),
-                HostedRunRouteSegment::RunId => run_id
+                RunIdRouteSegment::Literal(segment) => segment.as_str(),
+                RunIdRouteSegment::RunId => run_id
                     .ok_or_else(|| authority_error("hosted run route is incomplete"))?
                     .as_str(),
             };
@@ -199,15 +196,7 @@ pub(super) fn build_hosted_runs_descriptor(
     if wire.kind != HOSTED_RUNS_KIND {
         return Err(authority_error("hosted run discovery is incompatible"));
     }
-    let base_url = if origin
-        .as_str()
-        .strip_suffix('/')
-        .is_some_and(|root| root == wire.base_url)
-    {
-        origin.clone()
-    } else {
-        same_origin_url(origin, &wire.base_url)?
-    };
+    let base_url = capability_base_url(origin, &wire.base_url)?;
     let mut descriptor = compile_hosted_run_routes(base_url, &wire.route_templates)?;
     if let Some(recovery) = extensions.hosted_workspace_recovery.as_ref() {
         if recovery.kind != HOSTED_WORKSPACE_RECOVERY_KIND {
@@ -260,12 +249,12 @@ fn compile_hosted_run_route(
     requires_run_id: bool,
     expected_query: &[HostedRunQuery],
 ) -> Result<HostedRunRoute, TargetAuthorityError> {
-    validate_route_template(value)?;
+    validate_route_template(value, "hosted run")?;
     let (path, query) = split_route_query(value)?;
     if query != expected_query {
         return Err(unsupported_variables());
     }
-    let (segments, found_run_id) = compile_route_segments(path)?;
+    let (segments, found_run_id) = compile_run_id_route_segments(path, "hosted run")?;
     if found_run_id != requires_run_id {
         return Err(unsupported_variables());
     }
@@ -273,42 +262,6 @@ fn compile_hosted_run_route(
         segments,
         query: query.to_vec(),
     })
-}
-
-fn validate_route_template(value: &str) -> Result<(), TargetAuthorityError> {
-    if value.len() > 2_048
-        || !value.starts_with('/')
-        || value.starts_with("//")
-        || value.contains('\\')
-        || value.contains('#')
-        || value
-            .bytes()
-            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
-    {
-        return Err(authority_error("hosted run route template is invalid"));
-    }
-    Ok(())
-}
-
-fn compile_route_segments(
-    path: &str,
-) -> Result<(Vec<HostedRunRouteSegment>, bool), TargetAuthorityError> {
-    let mut found_run_id = false;
-    let mut segments = Vec::new();
-    for segment in path.split('/').skip(1) {
-        if segment == "{run_id}" {
-            if found_run_id {
-                return Err(unsupported_variables());
-            }
-            found_run_id = true;
-            segments.push(HostedRunRouteSegment::RunId);
-        } else if valid_literal_route_segment(segment) {
-            segments.push(HostedRunRouteSegment::Literal(segment.to_owned()));
-        } else {
-            return Err(authority_error("hosted run route template is invalid"));
-        }
-    }
-    Ok((segments, found_run_id))
 }
 
 fn unsupported_variables() -> TargetAuthorityError {

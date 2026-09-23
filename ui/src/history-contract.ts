@@ -23,7 +23,7 @@ export function readRuntimeFailure(value: unknown, head: unknown): RuntimeFailur
   const failure = value as Partial<RuntimeFailure> | null;
   try {
     if (
-      failure?.reason !== 'runtime_failed' ||
+      (failure?.reason !== 'runtime_failed' && failure?.reason !== 'runtime_lost') ||
       historyCursorSequence(failure.atCursor) > historyCursorSequence(head)
     )
       throw invalidRuntimeFailure();

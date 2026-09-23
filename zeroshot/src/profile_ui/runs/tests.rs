@@ -5,7 +5,10 @@ use crate::native_v2_contract::{
     AdmittedRun, ExecutionId, ExecutionRef, NodeCompletion, NodeInstanceId,
 };
 use crate::native_v2_observability::NativeV2Observability;
-use crate::v2_run_ledger::{CreateRun, RunEvent, SafeLogLine, SafeLogStream, MAX_REPLAY_EVENTS};
+use crate::native_v2_observability::history::RUN_HISTORY_DEFINITION_MAX_BYTES;
+use crate::v2_run_ledger::{
+    CreateRun, RunEvent, SafeLogLine, SafeLogStream, MAX_EVENT_BYTES, MAX_REPLAY_EVENTS,
+};
 use openengine_cluster_protocol::{
     CompiledGraphIr, IdempotencyKey, NodeName, PositiveInteger, RunSize, RunTitle, Sha256Digest,
     SourceBranchId, SourceRepositoryId, SourceRevisionId, ResolvedSource, TerminalResult,
@@ -15,7 +18,29 @@ use openengine_cluster_testkit::assertions::AssertValue;
 
 mod control;
 mod live;
+mod remote;
 mod status;
+
+async fn serve_local_ui(fixture: &Fixture) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .assert_value();
+    let authority = listener.local_addr().assert_value().to_string();
+    let app = super::super::router(
+        UiState::new(
+            crate::native_v2_cli::LocalRunProfileStore::new(fixture.root.join("profiles")),
+            fixture.service.clone(),
+            &format!("http://{authority}"),
+            "local",
+        )
+        .assert_value(),
+        false,
+    );
+    let task = tokio::spawn(async move {
+        axum::serve(listener, app).await.assert_value();
+    });
+    (authority, task)
+}
 
 #[tokio::test]
 async fn target_shared_ledger_uses_the_same_definition_and_replay_projection() {
@@ -87,7 +112,7 @@ async fn target_list_pages_are_stable_and_isolate_corrupt_run_payloads() {
         .assert_value()
         .admitted;
     let mut ids = vec![fixture.id.clone()];
-    for index in 0..LIST_PAGE_SIZE + 2 {
+    for index in 0..RUN_HISTORY_LIST_PAGE_SIZE + 2 {
         let id = RunId::new(uuid::Uuid::now_v7().to_string());
         fixture
             .ledger
@@ -113,7 +138,7 @@ async fn target_list_pages_are_stable_and_isolate_corrupt_run_payloads() {
     let first = target.list(None).await.assert_value();
     assert_eq!(
         first["runs"].as_array().assert_value().len(),
-        LIST_PAGE_SIZE
+        RUN_HISTORY_LIST_PAGE_SIZE
     );
     assert!(
         first["runs"]
@@ -158,6 +183,18 @@ struct Fixture {
     id: RunId,
     ledger: SqliteRunLedger,
 }
+
+fn safe_logs(count: usize, prefix: &str) -> Vec<RunEvent> {
+    (0..count)
+        .map(|index| RunEvent::SafeLog {
+            execution: Some(ExecutionId::new(1).assert_value()),
+            timestamp: UnixTimestampMillis::new(index as u64 + 1).assert_value(),
+            stream: SafeLogStream::Output,
+            line: SafeLogLine::new(format!("{prefix} {index}")).assert_value(),
+        })
+        .collect()
+}
+
 impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.root);
@@ -293,7 +330,7 @@ impl Fixture {
 }
 
 #[tokio::test]
-async fn snapshot_uses_admitted_definition_and_exact_browser_identities() {
+async fn definition_uses_admitted_inputs_and_history_preserves_browser_identities() {
     let fixture = Fixture::new().await;
     let identity = 9_007_199_254_740_993;
     fixture.start(identity).await;
@@ -327,16 +364,16 @@ async fn snapshot_uses_admitted_definition_and_exact_browser_identities() {
         .await
         .assert_value();
     let detail = fixture.service.detail(&fixture.id).await.assert_value();
+    let list = fixture.service.list(None).await.assert_value();
+    assert_eq!(list["runs"][0]["terminal"], json!({"status":"succeeded"}));
+    assert!(list["runs"][0]["terminal"].get("output").is_none());
     assert_eq!(
         detail["initialInput"]["request"],
         "Write a migration report"
     );
     assert!(detail["graph"].get("bounds").is_none());
     assert!(detail["graph"]["root"].is_object());
-    assert_eq!(
-        detail["snapshot"]["executions"][identity.to_string()]["reference"]["execution"],
-        identity.to_string()
-    );
+    assert!(detail.get("snapshot").is_none());
     let page = fixture.service.page(&fixture.id, None).await.assert_value();
     assert_eq!(
         page["events"][1]["event"]["reference"]["nodeInstance"],
@@ -367,17 +404,62 @@ async fn snapshot_uses_admitted_definition_and_exact_browser_identities() {
 }
 
 #[tokio::test]
+async fn large_accumulated_snapshot_does_not_expand_the_definition() {
+    let fixture = Fixture::new().await;
+    fixture
+        .ledger
+        .append(&fixture.id, vec![RunEvent::RunStarted])
+        .await
+        .assert_value();
+    let payload = "x".repeat(MAX_EVENT_BYTES - 2_048);
+    let mut events = Vec::new();
+    for execution in 1..=9 {
+        let reference = fixture.reference(execution);
+        events.push(RunEvent::NodeStarted {
+            reference: reference.clone(),
+            occurrence: StructuralOccurrence {
+                node: reference.node.clone(),
+                map_indices: vec![execution],
+            },
+            attempt: PositiveInteger::new(2).assert_value(),
+            input: json!({"payload": payload}),
+        });
+        events.push(RunEvent::NodeCompleted {
+            completion: NodeCompletion {
+                reference: fixture.reference(execution),
+                outcome: WorkerOutcome::Verified {
+                    output: Value::Null,
+                    artifacts: vec![],
+                },
+            },
+        });
+    }
+    fixture
+        .ledger
+        .append(&fixture.id, events)
+        .await
+        .assert_value();
+
+    let stored = fixture
+        .ledger
+        .get(&fixture.id)
+        .await
+        .assert_value()
+        .assert_value();
+    assert!(
+        serde_json::to_vec(&stored.snapshot).assert_value().len()
+            > RUN_HISTORY_DEFINITION_MAX_BYTES
+    );
+    let detail = fixture.service.detail(&fixture.id).await.assert_value();
+    assert!(detail.get("snapshot").is_none());
+    assert!(serde_json::to_vec(&detail).assert_value().len() <= RUN_HISTORY_DEFINITION_MAX_BYTES);
+}
+
+#[tokio::test]
 async fn pages_remain_bounded_and_terminal_does_not_skip_retained_output() {
     let fixture = Fixture::new().await;
     fixture.start(1).await;
-    let mut events = (0..(MAX_REPLAY_EVENTS + 12))
-        .map(|index| RunEvent::SafeLog {
-            execution: Some(ExecutionId::new(1).assert_value()),
-            timestamp: UnixTimestampMillis::new(index as u64 + 1).assert_value(),
-            stream: SafeLogStream::Output,
-            line: SafeLogLine::new(format!("line {index}")).assert_value(),
-        })
-        .collect::<Vec<_>>();
+    let mut events = safe_logs(MAX_REPLAY_EVENTS + 12, "line");
     events.push(RunEvent::NodeCompleted {
         completion: NodeCompletion {
             reference: fixture.reference(1),
@@ -545,22 +627,7 @@ async fn symlinked_run_and_ledger_are_not_followed() {
 async fn history_routes_keep_json_errors_and_the_local_browser_boundary() {
     let fixture = Fixture::new().await;
     fixture.start(1).await;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .assert_value();
-    let authority = listener.local_addr().assert_value().to_string();
-    let app = super::super::router(
-        UiState::new(
-            crate::native_v2_cli::LocalRunProfileStore::new(fixture.root.join("profiles")),
-            fixture.service.clone(),
-            &format!("http://{authority}"),
-            "local",
-        )
-        .assert_value(),
-    );
-    let task = tokio::spawn(async move {
-        axum::serve(listener, app).await.assert_value();
-    });
+    let (authority, task) = serve_local_ui(&fixture).await;
     let client = reqwest::Client::new();
     let url = format!(
         "http://{authority}/ui/api/runs/{}/history",
@@ -609,7 +676,7 @@ async fn history_routes_keep_json_errors_and_the_local_browser_boundary() {
 async fn list_cursor_is_stable_when_new_runs_arrive() {
     let fixture = Fixture::new().await;
     let mut ids = vec![fixture.id.clone()];
-    for _ in 0..LIST_PAGE_SIZE + 2 {
+    for _ in 0..RUN_HISTORY_LIST_PAGE_SIZE + 2 {
         let id = RunId::new(uuid::Uuid::now_v7().to_string());
         std::fs::create_dir_all(fixture.root.join("runs").join(id.as_str())).assert_value();
         ids.push(id);
@@ -617,7 +684,7 @@ async fn list_cursor_is_stable_when_new_runs_arrive() {
     let first = fixture.service.list(None).await.assert_value();
     assert_eq!(
         first["runs"].as_array().assert_value().len(),
-        LIST_PAGE_SIZE
+        RUN_HISTORY_LIST_PAGE_SIZE
     );
     let after = parse_id(first["nextCursor"].as_str().assert_value().to_owned())
         .ok()

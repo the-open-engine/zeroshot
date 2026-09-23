@@ -80,6 +80,23 @@ test('simulated histories use the same explicit definition version checks', asyn
   }
 });
 
+test('simulated run lists keep successful output only in detail', async () => {
+  const output = { report: 'large retained result' };
+  const run = {
+    ...detail(),
+    phase: 'finished',
+    terminal: { status: 'succeeded' as const, output },
+  };
+  const source = createExampleRunHistory(
+    new URL('https://example.test/ui/'),
+    async () => Response.json([{ detail: run, events: [] }])
+  );
+  const [summary] = (await source.list()).runs;
+  assert.deepEqual(summary.terminal, { status: 'succeeded' });
+  assert.equal('graph' in summary, false);
+  assert.deepEqual((await source.detail(run.runId)).terminal, { status: 'succeeded', output });
+});
+
 const record = (cursor: string): HistoryEvent => ({
   cursor,
   event: { kind: 'safe_log', execution: null, line: cursor },

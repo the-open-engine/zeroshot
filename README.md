@@ -108,7 +108,9 @@ zeroshot run \
 
 Run `zeroshot ui` to edit profiles and inspect live or completed runs in your browser.
 Open `http://127.0.0.1:4173/ui/`. It shares the CLI's saved profiles and history;
-Ctrl-C stops the UI server while runs continue. See [UI setup](docs/getting-started/install.md#open-the-workspace-ui).
+Ctrl-C stops the UI server while runs continue. Pass `--target NAME` to read history from a
+configured direct or hosted target while keeping profiles local. See
+[UI setup](docs/getting-started/install.md#open-the-workspace-ui).
 
 Experimental: expose a saved local profile as an ACP agent. Each prompt runs the graph as a
 durable local run while the ACP session keeps the workspace and node sessions alive:

@@ -2,6 +2,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Instant;
 
+use reqwest::header::{HeaderMap, HeaderValue, WWW_AUTHENTICATE};
 use reqwest::{Response, StatusCode, Url};
 
 use super::{
@@ -77,16 +78,26 @@ impl TargetHttpControlAuthority {
         auth: &HostedAuthDescriptor,
         audience: &str,
     ) -> Result<AccessToken, TargetAuthorityError> {
-        let mut cached = self.hosted_access.lock().await;
-        self.access_token_locked(
-            &mut cached,
-            HostedAccess {
-                target,
-                auth,
-                audience,
-            },
-        )
+        let cached = Arc::clone(&self.hosted_access).lock_owned().await;
+        let authority = self.clone();
+        let target = target.clone();
+        let auth = auth.clone();
+        let audience = audience.to_owned();
+        tokio::spawn(async move {
+            let mut cached = cached;
+            authority
+                .access_token_locked(
+                    &mut cached,
+                    HostedAccess {
+                        target: &target,
+                        auth: &auth,
+                        audience: &audience,
+                    },
+                )
+                .await
+        })
         .await
+        .map_err(|_| TargetAuthorityError::new("target access task failed"))?
     }
 
     pub(super) async fn access_token_locked(
@@ -134,12 +145,69 @@ impl TargetHttpControlAuthority {
         response: &Response,
         access: Option<&AccessToken>,
     ) {
-        if matches!(
-            response.status(),
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
-        ) && let Some(access) = access
+        if rejects_access(response.status(), response.headers())
+            && let Some(access) = access
         {
             self.invalidate_access(access).await;
         }
+    }
+}
+
+fn rejects_access(status: StatusCode, headers: &HeaderMap) -> bool {
+    status == StatusCode::UNAUTHORIZED
+        || (status == StatusCode::FORBIDDEN
+            && headers
+                .get_all(WWW_AUTHENTICATE)
+                .iter()
+                .any(is_invalid_bearer_token))
+}
+
+fn is_invalid_bearer_token(challenge: &HeaderValue) -> bool {
+    let Ok(challenge) = challenge.to_str() else {
+        return false;
+    };
+    let challenge = challenge.trim();
+    let Some(separator) = challenge.find(|character: char| character.is_ascii_whitespace()) else {
+        return false;
+    };
+    let (scheme, parameters) = challenge.split_at(separator);
+    scheme.eq_ignore_ascii_case("bearer")
+        && parameters.split(',').any(|parameter| {
+            let Some((name, value)) = parameter.trim().split_once('=') else {
+                return false;
+            };
+            name.trim().eq_ignore_ascii_case("error")
+                && matches!(value.trim(), "invalid_token" | r#""invalid_token""#)
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_authentication_rejections_invalidate_access() {
+        let empty = HeaderMap::new();
+        assert!(rejects_access(StatusCode::UNAUTHORIZED, &empty));
+        assert!(!rejects_access(StatusCode::FORBIDDEN, &empty));
+
+        let mut invalid_token = HeaderMap::new();
+        invalid_token.insert(
+            WWW_AUTHENTICATE,
+            HeaderValue::from_static(r#"Bearer realm="controller", error="invalid_token""#),
+        );
+        assert!(rejects_access(StatusCode::FORBIDDEN, &invalid_token));
+        invalid_token.insert(
+            WWW_AUTHENTICATE,
+            HeaderValue::from_static("Bearer error=invalid_token"),
+        );
+        assert!(rejects_access(StatusCode::FORBIDDEN, &invalid_token));
+
+        let mut insufficient_scope = HeaderMap::new();
+        insufficient_scope.insert(
+            WWW_AUTHENTICATE,
+            HeaderValue::from_static(r#"Bearer error="insufficient_scope""#),
+        );
+        assert!(!rejects_access(StatusCode::FORBIDDEN, &insufficient_scope));
     }
 }

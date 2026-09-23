@@ -62,7 +62,7 @@ impl CliCommand {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         match self {
             Self::Acp(args) => args.into_command(),
-            Self::Ui { listen } => Ok(NativeV2CliCommand::Ui { listen }),
+            Self::Ui { listen, target } => ui_command(listen, target),
             Self::Target { command } => command.into_command(),
             Self::Connection { command } => command.into_command(),
             Self::Profile { command } => command.into_command(),
@@ -72,6 +72,16 @@ impl CliCommand {
             Self::Utility(command) => command.into_command(),
         }
     }
+}
+
+fn ui_command(
+    listen: std::net::SocketAddr,
+    target: Option<String>,
+) -> Result<NativeV2CliCommand, NativeV2CliError> {
+    Ok(NativeV2CliCommand::Ui {
+        listen,
+        target: validated_target(target)?,
+    })
 }
 
 impl AcpArgs {

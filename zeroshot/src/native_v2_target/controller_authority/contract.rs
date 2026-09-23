@@ -7,12 +7,16 @@ use zeroshot_engine::native_v2_target_authority::{
 };
 
 mod connections;
+#[cfg(feature = "ui")]
+mod history;
 mod hosted_runs;
 mod http_error;
 mod profiles;
 
 use hosted_runs::{build_hosted_runs_descriptor, build_merge_plans_descriptor};
 pub(super) use hosted_runs::{HostedRunsDescriptor, MergePlansDescriptor};
+#[cfg(feature = "ui")]
+pub(super) use history::{RunHistoryDescriptor, build_run_history_descriptor};
 pub(super) use http_error::{http_error, read_success_json, read_success_json_with_limit};
 use connections::build_connections_descriptor;
 pub(super) use connections::ConnectionsDescriptor;
@@ -32,6 +36,7 @@ pub(super) struct OAuthMetadataWire {
     pub(super) revocation_endpoint: String,
 }
 
+#[derive(Clone)]
 pub(super) struct HostedAuthDescriptor {
     pub(super) metadata_url: Url,
     pub(super) device_authorization_endpoint: Url,
@@ -212,6 +217,53 @@ pub(super) fn valid_literal_route_segment(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~'))
+}
+
+#[derive(Clone)]
+pub(super) enum RunIdRouteSegment {
+    Literal(String),
+    RunId,
+}
+
+pub(super) fn validate_route_template(
+    value: &str,
+    kind: &'static str,
+) -> Result<(), TargetAuthorityError> {
+    if value.len() > 2_048
+        || !value.starts_with('/')
+        || value.starts_with("//")
+        || value.contains(['\\', '#'])
+        || value
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+    {
+        return Err(authority_error(format!("{kind} route template is invalid")));
+    }
+    Ok(())
+}
+
+pub(super) fn compile_run_id_route_segments(
+    path: &str,
+    kind: &'static str,
+) -> Result<(Vec<RunIdRouteSegment>, bool), TargetAuthorityError> {
+    let mut found_run_id = false;
+    let mut segments = Vec::new();
+    for segment in path.split('/').skip(1) {
+        if segment == "{run_id}" {
+            if found_run_id {
+                return Err(authority_error(format!(
+                    "{kind} route template declares unsupported variables"
+                )));
+            }
+            found_run_id = true;
+            segments.push(RunIdRouteSegment::RunId);
+        } else if valid_literal_route_segment(segment) {
+            segments.push(RunIdRouteSegment::Literal(segment.to_owned()));
+        } else {
+            return Err(authority_error(format!("{kind} route template is invalid")));
+        }
+    }
+    Ok((segments, found_run_id))
 }
 
 pub(super) fn compile_literal_route(

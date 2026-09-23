@@ -1,4 +1,7 @@
-use openengine_cluster_protocol::{TargetAuthentication, TargetDiscoveryDocument};
+use openengine_cluster_protocol::{
+    RUN_HISTORY_KIND, TargetAuthentication, TargetDiscoveryDocument, TargetRunHistoryDiscovery,
+    TargetRunHistoryRoutes,
+};
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::json;
 use tokio::net::TcpListener;
@@ -75,7 +78,11 @@ fn response(
     run_response: &RunResponse,
 ) -> (&'static str, String) {
     match (request.method.as_str(), request.path.as_str()) {
-        ("GET", "/.well-known/zeroshot-native-v2") => ("200 OK", discovery()),
+        ("GET", "/.well-known/zeroshot-native-v2") => ("200 OK", discovery(address)),
+        ("GET", path) if path.starts_with("/direct-history") => (
+            "200 OK",
+            json!({"runs": [], "nextCursor": null}).to_string(),
+        ),
         ("POST", "/native-v2/run") => run_submission_response(run_response),
         ("POST", "/native-v2/oecp-session") => (
             "200 OK",
@@ -86,11 +93,20 @@ fn response(
     }
 }
 
-fn discovery() -> String {
+fn discovery(address: std::net::SocketAddr) -> String {
     serde_json::to_string(
         &TargetDiscoveryDocument::direct(TargetAuthentication::None)
             .with_workspace_recovery()
-            .with_workspace_checkpoints(),
+            .with_workspace_checkpoints()
+            .with_run_history(TargetRunHistoryDiscovery {
+                kind: RUN_HISTORY_KIND.to_owned(),
+                base_url: format!("http://{address}"),
+                route_templates: TargetRunHistoryRoutes {
+                    list: "/direct-history{?after}".to_owned(),
+                    detail: "/direct-history/{run_id}".to_owned(),
+                    page: "/direct-history/{run_id}/page{?after}".to_owned(),
+                },
+            }),
     )
     .assert_value()
 }
