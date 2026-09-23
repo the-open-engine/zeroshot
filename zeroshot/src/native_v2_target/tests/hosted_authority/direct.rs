@@ -74,7 +74,11 @@ fn response(
     run_response: &RunResponse,
 ) -> (&'static str, String) {
     match (request.method.as_str(), request.path.as_str()) {
-        ("GET", "/.well-known/zeroshot-native-v2") => ("200 OK", discovery()),
+        ("GET", "/.well-known/zeroshot-native-v2") => ("200 OK", discovery(address)),
+        ("GET", path) if path.starts_with("/direct-history") => (
+            "200 OK",
+            json!({"runs": [], "nextCursor": null}).to_string(),
+        ),
         ("POST", "/native-v2/run") => run_submission_response(run_response),
         ("POST", "/native-v2/oecp-session") => (
             "200 OK",
@@ -85,7 +89,7 @@ fn response(
     }
 }
 
-fn discovery() -> String {
+fn discovery(address: std::net::SocketAddr) -> String {
     json!({
         "kind": "zeroshot.native-v2-target/v2",
         "authentication": "none",
@@ -96,6 +100,15 @@ fn discovery() -> String {
         "extensions": {
             "workspace_recovery": {
                 "kind": "openengine.workspace-recovery/v1"
+            },
+            "run_history": {
+                "kind": "zeroshot.run-history/v1",
+                "baseUrl": format!("http://{address}"),
+                "routeTemplates": {
+                    "list": "/direct-history{?after}",
+                    "detail": "/direct-history/{run_id}",
+                    "page": "/direct-history/{run_id}/page{?after}"
+                }
             }
         }
     })

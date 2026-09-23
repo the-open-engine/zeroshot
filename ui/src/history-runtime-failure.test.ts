@@ -26,7 +26,6 @@ const running = (): RunDetail => ({
   },
   runtime: { harness: 'codex', provider: 'openai', size: 'small', nodes: {} },
   initialInput: null,
-  snapshot: { phase: 'running', cursor: 'v2:3', terminal: null },
   history: { initialCursor: 'v2:0', cursor: 'v2:3', complete: false, limitations: [] },
 });
 const events = (): HistoryEvent[] => [
@@ -54,7 +53,7 @@ const failedPage = (): HistoryPage => ({
 const invalidFailure = (error: unknown) =>
   error instanceof ApiError && error.code === 'invalid_runtime_failure';
 
-test('confirmed runtime failure settles current status without changing the replay or snapshot', () => {
+test('confirmed runtime failure settles current status without changing the replay', () => {
   const detail = running();
   const retained = events();
   const before = structuredClone({ detail, retained });
@@ -65,7 +64,6 @@ test('confirmed runtime failure settles current status without changing the repl
   assert.deepEqual(finished.terminal, { status: 'failed', reason: 'runtime_failed' });
   assert.deepEqual(finished.runtimeFailure, failure);
   assert.equal(finished.history.complete, false);
-  assert.deepEqual(finished.snapshot, detail.snapshot);
   assert.deepEqual(collected, retained);
   assert.deepEqual({ detail, retained }, before);
   assert.equal(readRunDetail(finished, detail.runId), finished);
@@ -114,6 +112,17 @@ test('later durable settlement supersedes the fallback and makes history complet
 
 test('failure anchors use canonical bounded cursors at or before the durable head', () => {
   const detail = finishRunHistory(running(), events(), failedPage());
+  const lostFailure = { ...failure, reason: 'runtime_lost' } as const;
+  const lostDetail = {
+    ...detail,
+    terminal: { status: 'failed', reason: 'runtime_lost' } as const,
+    runtimeFailure: lostFailure,
+  };
+  assert.equal(readRunDetail(lostDetail, detail.runId), lostDetail);
+  assert.deepEqual(
+    appendHistory(events(), { ...failedPage(), runtimeFailure: lostFailure }),
+    events()
+  );
   for (const atCursor of ['v2:0', 'v2:2', 'v2:3']) {
     const value = { ...detail, runtimeFailure: { ...failure, atCursor } };
     assert.equal(readRunDetail(value, detail.runId), value);

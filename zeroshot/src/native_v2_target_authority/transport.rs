@@ -399,12 +399,19 @@ impl NativeV2TargetServer {
     }
 
     fn discovery_document(&self) -> TargetDiscoveryDocument {
-        let document = TargetDiscoveryDocument::direct(self.access.authentication());
+        let mut document = TargetDiscoveryDocument::direct(self.access.authentication());
         if self.workspace_recovery() {
-            document.with_workspace_recovery()
-        } else {
-            document
+            document = document.with_workspace_recovery();
         }
+        #[cfg(feature = "ui")]
+        if let Some(capability) = self
+            .ui
+            .as_ref()
+            .and_then(crate::profile_ui::UiService::run_history_discovery)
+        {
+            document = document.with_run_history(capability);
+        }
+        document
     }
 
     async fn authenticate_oecp(

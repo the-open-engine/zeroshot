@@ -15,11 +15,15 @@ cargo run -p zeroshot --features ui -- ui
 ```
 
 Open `http://127.0.0.1:4173/ui/`; use `--listen 127.0.0.1:PORT` for another loopback port.
+Run this loopback server only on a trusted single-user host. It is not an isolation boundary from
+other OS users or local processes.
 The optional Cargo `ui` feature embeds `ui/dist`. Release binaries and target images enable it;
 Node is needed only at build time. Rebuild the frontend before Rust after UI edits.
 
 Local profiles share the CLI store (`ZEROSHOT_CONFIG_DIR`); ledgers use `ZEROSHOT_STATE_DIR`.
-Use temporary absolute directories for isolated tests. Ctrl-C stops the UI while detached runs continue.
+Pass `--target NAME` to keep those profiles local while reading history from a configured direct or
+hosted target. Hosted credentials stay in the local UI server and never enter the browser. Use
+temporary absolute directories for isolated tests. Ctrl-C stops the UI while detached runs continue.
 Direct `target serve` mounts `/ui/` on its existing listener, stores profiles/history under
 `--storage`, and requires the browser's exact `--public-origin`. Private/hosted targets exclude
 this mount. See the [target image guide](../docker/zeroshot-target/README.md) for persistence and restart behavior.
@@ -54,6 +58,9 @@ history retained. Observation never starts or recovers a controller.
 
 The history endpoints are `GET /ui/api/runs`, `GET /ui/api/runs/{id}`,
 `GET /ui/api/runs/{id}/history?after=CURSOR`, and `GET /ui/api/runs/{id}/events?after=CURSOR`.
+These are the local browser BFF routes. A selected target is read server-side through its discovered
+`zeroshot.run-history/v1` list/detail/page templates; target URLs and authorization are not browser
+contracts.
 Omit `after` to begin. SSE resumes from `Last-Event-ID` and closes after the terminal cursor drains.
 
 ## Cloud integration

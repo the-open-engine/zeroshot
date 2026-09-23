@@ -6,27 +6,30 @@ import type { WorkflowNodeObservation } from './workflow-observation';
 export type ExecutionId = string;
 export type RunTerminal =
   { status: 'succeeded'; output: unknown } | { status: 'failed'; reason: string };
-export type RuntimeFailure = { atCursor: string; reason: 'runtime_failed' };
+type RunTerminalSynopsis =
+  { status: 'succeeded' } | { status: 'failed'; reason: string };
+export type RuntimeFailure = { atCursor: string; reason: 'runtime_failed' | 'runtime_lost' };
 export type RunSummary = {
   runId: string;
   title: string;
   phase: string;
-  cursor: string;
-  terminal?: RunTerminal | null;
+  cursor: string | null;
+  terminal?: RunTerminalSynopsis | null;
   runtimeFailure?: RuntimeFailure;
   createdAt?: number | null;
   historyAvailable: boolean;
   observation?: HistoryObservation;
-  source?: Record<string, unknown>;
+  source?: Record<string, unknown> | null;
   example?: boolean;
 };
-export type RunDetail = RunSummary & {
+export type RunDetail = Omit<RunSummary, 'cursor' | 'terminal'> & {
   version: 1;
   projectionVersion: 1;
+  cursor: string;
+  terminal?: RunTerminal | null;
   graph: Document['graph'];
   runtime: Document['runtime'];
   initialInput: unknown;
-  snapshot?: { terminal?: RunTerminal | null; [key: string]: unknown };
   history: { initialCursor: string; cursor: string; complete: boolean; limitations: string[] };
 };
 export type Reference = {

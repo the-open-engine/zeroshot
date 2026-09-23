@@ -13,16 +13,20 @@ use axum::Router;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::service::TowerToHyperService;
 use include_dir::{include_dir, Dir};
+use openengine_cluster_protocol::{TargetRunHistoryDiscovery, TargetRunHistoryRoutes, RUN_HISTORY_KIND};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 
 use super::{
     local_error, problem, router, runs::NativeRunHistory, LocalRunProfileStore, NativeV2CliError,
-    UiState,
+    RunHistoryTransport, UiState,
 };
 
 static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../ui/dist");
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
+pub(super) const TARGET_RUN_HISTORY_LIST_PATH: &str = "/native-v2/run-history";
+pub(super) const TARGET_RUN_HISTORY_DETAIL_PATH: &str = "/native-v2/run-history/{id}";
+pub(super) const TARGET_RUN_HISTORY_PAGE_PATH: &str = "/native-v2/run-history/{id}/page";
 
 #[derive(Clone)]
 pub(super) struct Shutdown(watch::Sender<bool>);
@@ -49,13 +53,39 @@ impl Shutdown {
 pub struct UiService {
     router: Router,
     shutdown: Shutdown,
+    history_discovery: Option<TargetRunHistoryDiscovery>,
+}
+
+/// A configured target whose run history is read by the local UI server. Target coordinates and
+/// hosted authority stay server-side; browsers continue to use only the local UI origin.
+pub struct RunHistoryTarget {
+    runs: NativeRunHistory,
+}
+
+impl RunHistoryTarget {
+    /// Uses one server-side target transport. Browser requests never receive its authority state.
+    pub fn remote(transport: impl RunHistoryTransport + 'static) -> Self {
+        Self {
+            runs: NativeRunHistory::transported(std::sync::Arc::new(transport)),
+        }
+    }
 }
 
 impl UiService {
-    fn new(state: UiState) -> Self {
+    fn new(state: UiState, target_history: bool) -> Self {
+        let history_discovery = target_history.then(|| TargetRunHistoryDiscovery {
+            kind: RUN_HISTORY_KIND.to_owned(),
+            base_url: state.origin.origin.clone(),
+            route_templates: TargetRunHistoryRoutes {
+                list: format!("{TARGET_RUN_HISTORY_LIST_PATH}{{?after}}"),
+                detail: "/native-v2/run-history/{run_id}".to_owned(),
+                page: "/native-v2/run-history/{run_id}/page{?after}".to_owned(),
+            },
+        });
         Self {
             shutdown: state.shutdown.clone(),
-            router: router(state),
+            router: router(state, target_history),
+            history_discovery,
         }
     }
 
@@ -71,12 +101,19 @@ impl UiService {
                 "target UI storage must be absolute".into(),
             ));
         }
-        Ok(Self::new(UiState::new(
-            LocalRunProfileStore::new(storage.clone()),
-            NativeRunHistory::target(storage, observations),
-            public_origin,
-            "target",
-        )?))
+        Ok(Self::new(
+            UiState::new(
+                LocalRunProfileStore::new(storage.clone()),
+                NativeRunHistory::target(storage, observations),
+                public_origin,
+                "target",
+            )?,
+            true,
+        ))
+    }
+
+    pub(crate) fn run_history_discovery(&self) -> Option<TargetRunHistoryDiscovery> {
+        self.history_discovery.clone()
     }
 
     /// Serves only UI routes on an already-routed target connection, including its keepalive
@@ -109,8 +146,16 @@ impl UiService {
     }
 }
 
-/// Runs the local workspace in this process, using the CLI's profile store and retained ledgers.
+/// Runs the local workspace in this process with local CLI profiles and run history.
 pub async fn serve(listen: SocketAddr) -> Result<(), NativeV2CliError> {
+    serve_with_target(listen, None).await
+}
+
+/// Runs the local workspace with profiles kept local and optional configured-target history.
+pub async fn serve_with_target(
+    listen: SocketAddr,
+    target: Option<RunHistoryTarget>,
+) -> Result<(), NativeV2CliError> {
     if !listen.ip().is_loopback() {
         return Err(NativeV2CliError::Local(
             "the local UI must listen on a loopback address".into(),
@@ -119,12 +164,18 @@ pub async fn serve(listen: SocketAddr) -> Result<(), NativeV2CliError> {
     let listener = TcpListener::bind(listen).await.map_err(local_error)?;
     let address = listener.local_addr().map_err(local_error)?;
     let origin = format!("http://{address}");
-    let service = UiService::new(UiState::new(
-        LocalRunProfileStore::production()?,
-        NativeRunHistory::production()?,
-        &origin,
-        "local",
-    )?);
+    let service = UiService::new(
+        UiState::new(
+            LocalRunProfileStore::production()?,
+            match target {
+                Some(target) => target.runs,
+                None => NativeRunHistory::production()?,
+            },
+            &origin,
+            "local",
+        )?,
+        false,
+    );
     let stopped = service.shutdown.clone();
     let server = axum::serve(listener, service.router.clone())
         .with_graceful_shutdown(async move { stopped.cancelled().await })
@@ -169,20 +220,9 @@ pub(super) struct BrowserOrigin {
 
 impl BrowserOrigin {
     pub(super) fn new(value: &str) -> Result<Self, NativeV2CliError> {
-        let url = url::Url::parse(value)
-            .map_err(|_| NativeV2CliError::Local("invalid UI public origin".into()))?;
-        if !matches!(url.scheme(), "http" | "https")
-            || url.host().is_none()
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.path() != "/"
-            || url.query().is_some()
-            || url.fragment().is_some()
-        {
-            return Err(NativeV2CliError::Local(
-                "UI public origin must be an HTTP(S) origin".into(),
-            ));
-        }
+        let url = parse_http_origin(value).map_err(|()| {
+            NativeV2CliError::Local("UI public origin must be an HTTP(S) origin".into())
+        })?;
         Ok(Self {
             origin: url.origin().ascii_serialization(),
             authority: url[url::Position::BeforeHost..url::Position::AfterPort].to_owned(),
@@ -197,6 +237,27 @@ impl BrowserOrigin {
             && origin.is_ok_and(|value| value.is_none_or(|value| value == self.origin))
             && site.is_ok_and(|value| matches!(value, None | Some("same-origin" | "none")))
     }
+}
+
+pub(super) fn parse_http_origin(value: &str) -> Result<url::Url, ()> {
+    if value
+        .bytes()
+        .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+    {
+        return Err(());
+    }
+    let url = url::Url::parse(value).map_err(|_| ())?;
+    valid_http_origin(&url).then_some(url).ok_or(())
+}
+
+fn valid_http_origin(url: &url::Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
+        && url.host().is_some()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.path() == "/"
+        && url.query().is_none()
+        && url.fragment().is_none()
 }
 
 fn exact_header<'a>(headers: &'a HeaderMap, name: &str) -> Result<Option<&'a str>, ()> {

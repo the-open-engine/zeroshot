@@ -5,7 +5,7 @@ use super::{
     CACHE_CONTROL, MergePlansDescriptor, TargetAccess, TargetAuthorityError,
     TargetHttpControlAuthority, TargetRecord, authority_error,
 };
-use super::super::access::{AccessToken, HostedAccess};
+use super::super::access::AccessToken;
 
 const MAX_MERGE_PLAN_RESPONSE_BYTES: usize = 1024 * 1024;
 
@@ -26,8 +26,7 @@ impl TargetHttpControlAuthority {
                 "direct target does not support hosted merge plans",
             ));
         }
-        let mut cached = self.hosted_access.lock().await;
-        if let Some(access) = cached.as_ref()
+        if let Some(access) = self.hosted_access.lock().await.as_ref()
             && let Some(access) = access.merge_plan_access(target)
         {
             return Ok(access);
@@ -37,14 +36,7 @@ impl TargetHttpControlAuthority {
             authority_error("hosted target does not advertise zeroshot.merge-plans/v1")
         })?;
         let access = self
-            .access_token_locked(
-                &mut cached,
-                HostedAccess {
-                    target,
-                    auth: &auth,
-                    audience: &controller.audience,
-                },
-            )
+            .access_token(target, &auth, &controller.audience)
             .await?;
         Ok((routes, access))
     }
@@ -102,6 +94,7 @@ impl TargetHttpControlAuthority {
                 .await
             {
                 Err(error) if error.is_http_auth_rejection() => {
+                    self.invalidate_access(&access).await;
                     if retried {
                         return Err(error);
                     }

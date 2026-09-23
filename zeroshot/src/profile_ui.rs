@@ -20,9 +20,13 @@ use crate::native_v2_cli::{
     profile_revision, LocalRunProfileStore, NativeV2CliError, ProfileSaveConflict,
 };
 
+mod run_history_transport;
 mod runs;
 mod server;
-pub use server::{serve, UiService};
+pub use run_history_transport::{
+    RunHistoryRequest, RunHistoryResponse, RunHistoryTransport, RunHistoryTransportError,
+};
+pub use server::{serve, serve_with_target, RunHistoryTarget, UiService};
 
 const MAX_BODY: usize = 2 * 1024 * 1024;
 
@@ -60,8 +64,8 @@ impl UiState {
     }
 }
 
-fn router(state: UiState) -> Router {
-    Router::new()
+fn router(state: UiState, target_history: bool) -> Router {
+    let router = Router::new()
         .route("/", get(|| async { Redirect::temporary("/ui/") }))
         .route("/ui", get(|| async { Redirect::temporary("/ui/") }))
         .route("/ui/", get(server::index))
@@ -75,7 +79,16 @@ fn router(state: UiState) -> Router {
         .route("/ui/api/validate", post(validate))
         .route("/ui/api/authoring", post(author))
         .route("/ui/api/data", post(data_author))
-        .route("/ui/{*asset}", get(server::asset))
+        .route("/ui/{*asset}", get(server::asset));
+    let router = if target_history {
+        router
+            .route(server::TARGET_RUN_HISTORY_LIST_PATH, get(runs::list))
+            .route(server::TARGET_RUN_HISTORY_DETAIL_PATH, get(runs::show))
+            .route(server::TARGET_RUN_HISTORY_PAGE_PATH, get(runs::history))
+    } else {
+        router
+    };
+    router
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -262,6 +275,13 @@ mod tests {
     use super::*;
     use crate::native_v2_cli::{BuiltinGraphTemplate, TemplateDelivery};
     use openengine_cluster_testkit::assertions::AssertValue;
+
+    #[test]
+    fn serve_api_retains_the_local_one_argument_entry_point() {
+        let future = serve("127.0.0.1:0".parse().assert_value());
+        drop(future);
+    }
+
     struct Server {
         url: String,
         task: tokio::task::JoinHandle<()>,
@@ -288,7 +308,7 @@ mod tests {
         )
         .assert_value();
         let workspace = state.workspace.id.clone();
-        let app = router(state);
+        let app = router(state, false);
         let task = tokio::spawn(async move {
             axum::serve(listener, app).await.assert_value();
         });

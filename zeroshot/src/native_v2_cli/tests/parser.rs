@@ -29,6 +29,36 @@ fn acp_accepts_only_an_explicit_local_profile() {
 }
 
 #[test]
+fn ui_defaults_to_local_history_and_accepts_a_named_target() {
+    let local = parse_native_v2_args(args(&["ui"])).assert_value();
+    assert!(matches!(
+        local,
+        NativeV2CliCommand::Ui {
+            target: None,
+            listen
+        } if listen == "127.0.0.1:4173".parse().assert_value()
+    ));
+
+    let remote = parse_native_v2_args(args(&[
+        "ui",
+        "--target",
+        "docker",
+        "--listen",
+        "127.0.0.1:4185",
+    ]))
+    .assert_value();
+    assert!(matches!(
+        remote,
+        NativeV2CliCommand::Ui {
+            target: Some(target),
+            listen
+        } if target == "docker" && listen == "127.0.0.1:4185".parse().assert_value()
+    ));
+
+    assert!(parse_native_v2_args(args(&["ui", "--target", ""])).is_err());
+}
+
+#[test]
 fn parser_exposes_the_closed_hosted_plan_surface() {
     let submit = parse_native_v2_args(args(&[
         "plan",

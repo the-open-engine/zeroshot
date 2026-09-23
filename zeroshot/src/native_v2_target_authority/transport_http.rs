@@ -132,7 +132,11 @@ fn parse_request_head(bytes: &[u8]) -> io::Result<Option<RequestHead>> {
 
 fn is_ui_target(target: &str) -> bool {
     let path = target.split('?').next().unwrap_or(target);
-    path == "/" || path == "/ui" || path.starts_with("/ui/")
+    path == "/"
+        || path == "/ui"
+        || path.starts_with("/ui/")
+        || path == "/native-v2/run-history"
+        || path.starts_with("/native-v2/run-history/")
 }
 
 fn invalid_http(error: impl std::fmt::Display) -> io::Error {

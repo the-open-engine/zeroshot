@@ -206,6 +206,7 @@ async fn software_change_choice_and_early_finish_have_exact_prefix_control_activ
     // A later cached projection may never leak a future decision into an earlier page.
     let cached = fixture
         .service
+        .local_for_test()
         .control
         .project(&fixture.ledger, &fixture.id, 0..6)
         .await;

@@ -166,10 +166,21 @@ mod ui {
         assert_eq!(bootstrap.json::<Value>().await.assert_value()["version"], 1);
         assert_eq!(factory.controllers.load(Ordering::SeqCst), 0);
 
+        let discovery = target_discovery(address).await;
+        let history = discovery.extensions.run_history.assert_value();
+        assert_eq!(history.kind, openengine_cluster_protocol::RUN_HISTORY_KIND);
+        assert_eq!(history.base_url, format!("http://{address}"));
         assert_eq!(
-            http(address, TestHttpRequest::empty("GET", DISCOVERY_PATH, None))
-                .await
-                .status,
+            history.route_templates.list,
+            "/native-v2/run-history{?after}"
+        );
+        assert_eq!(
+            http(
+                address,
+                TestHttpRequest::empty("GET", "/native-v2/run-history", None)
+            )
+            .await
+            .status,
             200
         );
         let mut stream = TcpStream::connect(address).await.assert_value();
@@ -225,7 +236,19 @@ mod ui {
             }
             .assert_value();
             let task = tokio::spawn(Arc::new(server).serve(listener));
-            for path in ["/ui/", "/ui/api/profiles", "/ui/api/runs?after=v2:0"] {
+            assert!(
+                target_discovery(address)
+                    .await
+                    .extensions
+                    .run_history
+                    .is_none()
+            );
+            for path in [
+                "/ui/",
+                "/ui/api/profiles",
+                "/ui/api/runs?after=v2:0",
+                "/native-v2/run-history?after=v2:0",
+            ] {
                 http(
                     address,
                     TestHttpRequest::empty("GET", path, Some("control-token")),

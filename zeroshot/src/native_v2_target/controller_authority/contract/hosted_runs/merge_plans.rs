@@ -1,9 +1,8 @@
 use openengine_cluster_protocol::{MERGE_PLANS_KIND, MergePlanId, TargetDiscoveryExtensions};
 use reqwest::Url;
 
-use super::validate_route_template;
 use crate::native_v2_target::controller_authority::contract::{
-    authority_error, capability_base_url, valid_literal_route_segment,
+    authority_error, capability_base_url, valid_literal_route_segment, validate_route_template,
 };
 use crate::native_v2_target::TargetAuthorityError;
 
@@ -95,7 +94,7 @@ fn compile_route(
     value: &str,
     requires_plan_id: bool,
 ) -> Result<MergePlanRoute, TargetAuthorityError> {
-    validate_route_template(value)?;
+    validate_route_template(value, "merge-plan")?;
     let mut found_plan_id = false;
     let mut segments = Vec::new();
     for segment in value.split('/').skip(1) {

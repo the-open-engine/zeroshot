@@ -82,5 +82,5 @@ impl NativeV2TargetServer {
 }
 
 fn history_error(error: HistoryError) -> HttpResponse {
-    HttpResponse::problem(error.status, error.code, &error.message)
+    HttpResponse::problem(error.status, error.code.as_str(), &error.message)
 }

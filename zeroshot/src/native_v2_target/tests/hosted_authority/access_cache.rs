@@ -5,8 +5,12 @@ use openengine_cluster_protocol::{
     RunProfileListRequest, RunProfileScope, TargetOecpSessionRequest,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
+#[cfg(feature = "ui")]
+use zeroshot_engine::profile_ui::{RunHistoryRequest, RunHistoryTransport, RunHistoryTransportError};
 
-use super::super::fixtures::{hosted_target, temp_root};
+use super::super::fixtures::{hosted_target, temp_root, TempRoot};
+#[cfg(feature = "ui")]
+use super::super::fixtures::direct_target;
 use super::*;
 use crate::native_v2_target::controller_authority::credentials::test_support::MemoryDeviceCodeNotifier;
 
@@ -80,6 +84,195 @@ async fn mixed_hosted_operations_reuse_one_validated_persisted_token() {
     );
 }
 
+#[tokio::test]
+#[cfg(feature = "ui")]
+async fn hosted_history_uses_discovered_routes_and_the_shared_validated_token() {
+    let root = temp_root();
+    let (origin, server) = spawn_target_authority(6).await;
+    let transport = history_transport(&root, origin).await;
+    let id = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c991");
+    transport
+        .get(RunHistoryRequest::list(None))
+        .await
+        .assert_value();
+    transport
+        .get(RunHistoryRequest::detail(id.clone()))
+        .await
+        .assert_value();
+
+    let requests = server.await.assert_value();
+    let history = requests
+        .iter()
+        .filter(|request| request.path.starts_with("/native-v2/workspaces/user/runs"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        history
+            .iter()
+            .map(|request| request.path.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "/native-v2/workspaces/user/runs",
+            "/native-v2/workspaces/user/runs/018f5e78-7f95-7c22-8d98-3f15af20c991"
+        ]
+    );
+    assert!(history.iter().all(|request| {
+        request.method == "GET" && request.authorization.as_deref() == Some("Bearer access-1")
+    }));
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.path == "/oauth/token")
+            .count(),
+        1
+    );
+    for path in ["/.well-known/zeroshot-native-v2", "/oauth/metadata"] {
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.path == path)
+                .count(),
+            1,
+            "repeated {path}"
+        );
+    }
+}
+
+#[tokio::test]
+#[cfg(feature = "ui")]
+async fn hosted_history_auth_rejection_invalidates_without_replaying_the_read() {
+    let root = temp_root();
+    let (origin, server) = spawn_custom_authority(
+        8,
+        reject_first("/native-v2/workspaces/user/runs", "401 Unauthorized"),
+    )
+    .await;
+    let transport = history_transport(&root, origin).await;
+    transport
+        .get(RunHistoryRequest::list(None))
+        .await
+        .assert_value();
+    transport
+        .get(RunHistoryRequest::list(None))
+        .await
+        .assert_value();
+
+    let requests = server.await.assert_value();
+    let history = requests
+        .iter()
+        .filter(|request| request.path == "/native-v2/workspaces/user/runs")
+        .collect::<Vec<_>>();
+    assert_eq!(history.len(), 2);
+    assert_eq!(
+        history
+            .iter()
+            .filter_map(|request| request.authorization.as_deref())
+            .collect::<Vec<_>>(),
+        ["Bearer access-1", "Bearer access-2"]
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.path == "/oauth/token")
+            .count(),
+        2
+    );
+}
+
+#[tokio::test]
+#[cfg(feature = "ui")]
+async fn direct_history_uses_discovered_routes_without_authorization() {
+    let root = temp_root();
+    let (origin, server) = spawn_direct_target_authority(3).await;
+    let (_, authority) = test_authority(&root);
+    let transport = TargetRunHistoryTransport::new(authority, direct_target(origin)).assert_value();
+    let id = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c991");
+    transport
+        .get(RunHistoryRequest::list(Some(id.clone())))
+        .await
+        .assert_value();
+    transport
+        .get(RunHistoryRequest::detail(id.clone()))
+        .await
+        .assert_value();
+
+    let requests = server.await.assert_value();
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request.path.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "/.well-known/zeroshot-native-v2",
+            "/direct-history?after=018f5e78-7f95-7c22-8d98-3f15af20c991",
+            "/direct-history/018f5e78-7f95-7c22-8d98-3f15af20c991"
+        ]
+    );
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.authorization.is_none())
+    );
+}
+
+#[tokio::test]
+#[cfg(feature = "ui")]
+async fn history_rejects_absent_or_unsafe_discovered_capabilities_explicitly() {
+    for case in 0..4 {
+        let root = temp_root();
+        let (origin, server) = spawn_custom_authority(1, move |request, body| {
+            if request.path != "/.well-known/zeroshot-native-v2" {
+                return ("200 OK", body);
+            }
+            let mut discovery: serde_json::Value = serde_json::from_str(&body).assert_value();
+            match case {
+                0 => {
+                    discovery["extensions"]
+                        .as_object_mut()
+                        .assert_value()
+                        .remove("run_history");
+                }
+                1 => {
+                    discovery["extensions"]["run_history"]["kind"] =
+                        json!("zeroshot.run-history/v2")
+                }
+                2 => {
+                    discovery["extensions"]["run_history"]["baseUrl"] =
+                        json!("https://attacker.example")
+                }
+                _ => {
+                    discovery["extensions"]["run_history"]["routeTemplates"]["list"] =
+                        json!("/../runs{?after}")
+                }
+            }
+            ("200 OK", discovery.to_string())
+        })
+        .await;
+        let (_, authority) = test_authority(&root);
+        let transport = TargetRunHistoryTransport::new(authority, hosted_target("cloud", origin))
+            .assert_value();
+        assert_eq!(
+            transport
+                .get(RunHistoryRequest::list(None))
+                .await
+                .err()
+                .assert_value(),
+            RunHistoryTransportError::Incompatible
+        );
+        server.await.assert_value();
+    }
+}
+
+#[cfg(feature = "ui")]
+async fn history_transport(root: &TempRoot, origin: String) -> TargetRunHistoryTransport {
+    let (credentials, authority) = test_authority(root);
+    let target = hosted_target("cloud", origin);
+    credentials
+        .set(&target.id, "refresh-0")
+        .await
+        .assert_value();
+    TargetRunHistoryTransport::new(authority, target).assert_value()
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn authority_clone_misses_coalesce_before_reading_refresh_credentials() {
     let root = temp_root();
@@ -107,6 +300,36 @@ async fn authority_clone_misses_coalesce_before_reading_refresh_credentials() {
             .count(),
         1
     );
+}
+
+#[tokio::test]
+async fn cancelled_access_waiter_cannot_cancel_refresh_rotation() {
+    let root = temp_root();
+    let (origin, server) = spawn_target_authority(7).await;
+    let credentials = Arc::new(PersistenceBlockingCredentialStore::new("refresh-0"));
+    let authority = authority_with_credentials(&root, credentials.clone());
+    let target = hosted_target("local", origin);
+    let cancelled_authority = authority.clone();
+    let cancelled_target = target.clone();
+    let cancelled = tokio::spawn(async move {
+        cancelled_authority
+            .hosted_run_list(&cancelled_target, RunListParams {})
+            .await
+    });
+    credentials.wait_until_persisting().await;
+    cancelled.abort();
+    assert!(cancelled.await.assert_error().is_cancelled());
+    credentials.release_persistence();
+    credentials.wait_until_persisted().await;
+
+    authority
+        .hosted_run_list(&target, RunListParams {})
+        .await
+        .assert_value();
+    assert_eq!(credentials.value(), "refresh-1");
+    let requests = server.await.assert_value();
+    assert_eq!(request_count(&requests, "/oauth/token"), 1);
+    assert_eq!(request_count(&requests, "/native-v2/runs"), 1);
 }
 
 #[tokio::test]
@@ -149,58 +372,80 @@ async fn short_lived_access_tokens_are_never_reused() {
 
 #[tokio::test]
 async fn hosted_auth_rejection_invalidates_without_replaying_the_operation() {
-    for rejection in ["401 Unauthorized", "403 Forbidden"] {
-        let root = temp_root();
-        let mut rejected = false;
-        let (origin, server) = spawn_custom_authority(13, move |request, body| {
-            if request.path == "/native-v2/oecp-session" && !rejected {
-                rejected = true;
-                (
-                    rejection,
-                    json!({"code": "unauthorized", "message": "revoked"}).to_string(),
-                )
-            } else {
-                ("200 OK", body)
-            }
-        })
-        .await;
-        let (credentials, authority) = test_authority(&root);
-        let target = hosted_target("local", origin);
-        credentials
-            .set(&target.id, "refresh-0")
-            .await
-            .assert_value();
-        authority
-            .hosted_run_list(&target, RunListParams {})
-            .await
-            .assert_value();
-        authority
-            .oecp_session(&target, &TargetOecpSessionRequest { run_id: None })
-            .await
-            .assert_error();
-        authority
-            .hosted_run_list(&target, RunListParams {})
-            .await
-            .assert_value();
-        let requests = server.await.assert_value();
-        assert_eq!(
-            requests
-                .iter()
-                .filter(|request| request.path == "/native-v2/oecp-session")
-                .count(),
-            1
-        );
-        assert_eq!(
-            requests
-                .iter()
-                .filter(|request| request.path == "/oauth/token")
-                .count(),
-            2
-        );
-        assert_eq!(
-            requests.last().assert_value().authorization.as_deref(),
-            Some("Bearer access-2")
-        );
+    assert_rejection_cache_effect(13, "401 Unauthorized", 2, "Bearer access-2").await;
+}
+
+#[tokio::test]
+async fn hosted_resource_forbidden_preserves_the_cached_issuance() {
+    assert_rejection_cache_effect(11, "403 Forbidden", 1, "Bearer access-1").await;
+}
+
+async fn assert_rejection_cache_effect(
+    request_count: usize,
+    rejection: &'static str,
+    expected_token_requests: usize,
+    expected_authorization: &str,
+) {
+    let root = temp_root();
+    let (origin, server) = spawn_custom_authority(
+        request_count,
+        reject_first("/native-v2/oecp-session", rejection),
+    )
+    .await;
+    let (credentials, authority) = test_authority(&root);
+    let target = hosted_target("local", origin);
+    credentials
+        .set(&target.id, "refresh-0")
+        .await
+        .assert_value();
+    authority
+        .hosted_run_list(&target, RunListParams {})
+        .await
+        .assert_value();
+    authority
+        .oecp_session(&target, &TargetOecpSessionRequest { run_id: None })
+        .await
+        .assert_error();
+    authority
+        .hosted_run_list(&target, RunListParams {})
+        .await
+        .assert_value();
+    let requests = server.await.assert_value();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.path == "/native-v2/oecp-session")
+            .count(),
+        1
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.path == "/oauth/token")
+            .count(),
+        expected_token_requests
+    );
+    assert_eq!(
+        requests.last().assert_value().authorization.as_deref(),
+        Some(expected_authorization)
+    );
+}
+
+fn reject_first(
+    path: &'static str,
+    status: &'static str,
+) -> impl FnMut(&CapturedHttpRequest, String) -> (&'static str, String) + Send + 'static {
+    let mut rejected = false;
+    move |request, body| {
+        if request.path == path && !rejected {
+            rejected = true;
+            (
+                status,
+                json!({"code": "unauthorized", "message": "revoked"}).to_string(),
+            )
+        } else {
+            ("200 OK", body)
+        }
     }
 }
 
@@ -480,6 +725,73 @@ async fn failed_refresh_persistence_never_publishes_an_access_token() {
 
 struct FailingPersistenceStore {
     reads: AtomicUsize,
+}
+
+fn authority_with_credentials(
+    root: &TempRoot,
+    credentials: Arc<dyn TargetCredentialStore>,
+) -> TargetHttpControlAuthority {
+    TargetHttpControlAuthority::with_dependencies(
+        credentials,
+        Arc::new(MemoryDeviceCodeNotifier::default()),
+        root.path("refresh-locks"),
+    )
+}
+
+fn request_count(requests: &[CapturedHttpRequest], path: &str) -> usize {
+    requests
+        .iter()
+        .filter(|request| request.path == path)
+        .count()
+}
+
+struct PersistenceBlockingCredentialStore {
+    value: Mutex<String>,
+    persist_started: Notify,
+    persist_release: Notify,
+    persist_completed: Notify,
+}
+
+impl PersistenceBlockingCredentialStore {
+    fn new(value: &str) -> Self {
+        Self {
+            value: Mutex::new(value.to_owned()),
+            persist_started: Notify::new(),
+            persist_release: Notify::new(),
+            persist_completed: Notify::new(),
+        }
+    }
+
+    async fn wait_until_persisting(&self) {
+        self.persist_started.notified().await;
+    }
+
+    fn release_persistence(&self) {
+        self.persist_release.notify_one();
+    }
+
+    async fn wait_until_persisted(&self) {
+        self.persist_completed.notified().await;
+    }
+
+    fn value(&self) -> String {
+        self.value.lock().assert_value().clone()
+    }
+}
+
+#[async_trait]
+impl TargetCredentialStore for PersistenceBlockingCredentialStore {
+    async fn get(&self, _target_id: &str) -> Result<Option<String>, TargetAuthorityError> {
+        Ok(Some(self.value()))
+    }
+
+    async fn set(&self, _target_id: &str, refresh_token: &str) -> Result<(), TargetAuthorityError> {
+        self.persist_started.notify_one();
+        self.persist_release.notified().await;
+        *self.value.lock().assert_value() = refresh_token.to_owned();
+        self.persist_completed.notify_one();
+        Ok(())
+    }
 }
 
 #[async_trait]

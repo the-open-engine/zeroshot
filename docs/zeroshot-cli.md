@@ -64,7 +64,7 @@ Options:
 ```text
 Serve the local profile editor and live or recorded run history.
 
-Open the printed /ui/ URL. Uses the CLI's saved profiles and local run history. Ctrl-C stops the UI server; active runs continue.
+Open the printed /ui/ URL. Profiles always use the CLI's local store. Run history uses the local controller unless --target selects a configured target. Ctrl-C stops the UI server; active runs continue.
 
 Usage: zeroshot ui [OPTIONS]
 
@@ -73,6 +73,9 @@ Options:
           Loopback address for the local UI
 
           [default: 127.0.0.1:4173]
+
+      --target <NAME>
+          Read run history from this configured target. Profiles remain local
 
   -h, --help
           Print help (see a summary with '-h')

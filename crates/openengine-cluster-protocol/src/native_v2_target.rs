@@ -30,6 +30,7 @@ pub const TARGET_OPERATOR_DIAGNOSTICS_PATH_PREFIX: &str = "/native-v2/operator-d
 pub const TARGET_DISCOVERY_KIND: &str = "zeroshot.native-v2-target/v2";
 pub const TARGET_CONTROLLER_AUDIENCE: &str = "controller";
 pub const HOSTED_RUNS_KIND: &str = "zeroshot.hosted-runs/v1";
+pub const RUN_HISTORY_KIND: &str = "zeroshot.run-history/v1";
 pub const CONNECTIONS_KIND: &str = "zeroshot.connections/v1";
 pub const STATIC_CONNECTION_KIND: &str = "static";
 /// A GitHub App installation whose repository-scoped token is minted by the hosted target.
@@ -374,6 +375,24 @@ pub struct TargetHostedRunsDiscovery {
     pub route_templates: TargetHostedRunRoutes,
 }
 
+/// Read-only routes for the bounded native run-history projection.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct TargetRunHistoryRoutes {
+    pub list: String,
+    pub detail: String,
+    pub page: String,
+}
+
+/// One same-origin native run-history capability advertised by a target host.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct TargetRunHistoryDiscovery {
+    pub kind: String,
+    pub base_url: String,
+    pub route_templates: TargetRunHistoryRoutes,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TargetConnectionRoutes {
@@ -406,6 +425,8 @@ pub struct TargetWorkspaceRecoveryDiscovery {
 pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hosted_runs: Option<TargetHostedRunsDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_history: Option<TargetRunHistoryDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub merge_plans: Option<crate::TargetMergePlansDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -440,6 +461,7 @@ impl TargetDiscoveryExtensions {
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.hosted_runs.is_none()
+            && self.run_history.is_none()
             && self.merge_plans.is_none()
             && self.connections.is_none()
             && self.run_profiles.is_none()
@@ -476,6 +498,13 @@ impl TargetDiscoveryDocument {
                 kind: WORKSPACE_RECOVERY_KIND.to_owned(),
             });
         }
+        self
+    }
+
+    /// Adds a read-only run-history extension to a target that mounted those routes.
+    #[must_use]
+    pub fn with_run_history(mut self, capability: TargetRunHistoryDiscovery) -> Self {
+        self.extensions.run_history = Some(capability);
         self
     }
 }
@@ -540,6 +569,33 @@ mod tests {
                 .extensions
                 .workspace_recovery
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn run_history_discovery_uses_the_versioned_camel_case_wire_shape() {
+        let document = TargetDiscoveryDocument::direct(TargetAuthentication::None)
+            .with_run_history(TargetRunHistoryDiscovery {
+                kind: RUN_HISTORY_KIND.to_owned(),
+                base_url: "http://127.0.0.1:8080".to_owned(),
+                route_templates: TargetRunHistoryRoutes {
+                    list: "/native-v2/run-history{?after}".to_owned(),
+                    detail: "/native-v2/run-history/{run_id}".to_owned(),
+                    page: "/native-v2/run-history/{run_id}/page{?after}".to_owned(),
+                },
+            });
+        let value = serde_json::to_value(document).assert_value();
+        assert_eq!(
+            value["extensions"]["run_history"],
+            serde_json::json!({
+                "kind": "zeroshot.run-history/v1",
+                "baseUrl": "http://127.0.0.1:8080",
+                "routeTemplates": {
+                    "list": "/native-v2/run-history{?after}",
+                    "detail": "/native-v2/run-history/{run_id}",
+                    "page": "/native-v2/run-history/{run_id}/page{?after}"
+                }
+            })
         );
     }
 
