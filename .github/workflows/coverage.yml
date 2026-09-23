@@ -1,0 +1,102 @@
+name: Native coverage
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/coverage.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'crates/**'
+      - 'rust-toolchain.toml'
+      - 'ui/**'
+      - 'zeroshot/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/coverage.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'crates/**'
+      - 'rust-toolchain.toml'
+      - 'ui/**'
+      - 'zeroshot/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: Rust line coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: 1.97.0
+          components: llvm-tools-preview
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.27.1
+          cache: false
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-on-failure: true
+
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build pinned Restic sidecar for coverage
+        shell: bash
+        run: |
+          output_root="$RUNNER_TEMP/zeroshot-restic"
+          target=x86_64-unknown-linux-musl
+          scripts/distribution/build-restic.sh "$output_root" "$target"
+          restic_path="$output_root/$target/restic"
+          "$restic_path" version
+          printf 'ZEROSHOT_RESTIC=%s\n' "$restic_path" >> "$GITHUB_ENV"
+
+      - name: Build embedded UI
+        run: |
+          npm --prefix ui ci --ignore-scripts
+          npm --prefix ui run build
+
+      - name: Install coverage tooling
+        uses: taiki-e/install-action@7623a79cdfecb99d681017af368ca353d9f49bb5 # v2.87.19
+        with:
+          tool: cargo-llvm-cov@0.9.0
+          fallback: none
+
+      - name: Measure native coverage
+        run: |
+          cargo llvm-cov clean --workspace
+          mkdir -p target/llvm-cov-target/debug
+          cp "$ZEROSHOT_RESTIC" target/llvm-cov-target/debug/restic
+          chmod +x target/llvm-cov-target/debug/restic
+          cargo llvm-cov --workspace --no-report
+          cargo llvm-cov --package zeroshot --features ui --no-report
+          cargo llvm-cov report --lcov --output-path lcov.info
+          cargo llvm-cov report --summary-only
+
+      - name: Publish coverage
+        uses: coverallsapp/github-action@8d6379e14d29928660c4ba802d8e85393440b329 # v2.3.8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          file: lcov.info
+          format: lcov
+          fail-on-error: true
+          coverage-reporter-version: v0.6.22
