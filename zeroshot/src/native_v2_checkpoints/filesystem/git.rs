@@ -274,11 +274,17 @@ fn resolved_head(workspace: &Path, layout: &GitLayout) -> io::Result<String> {
 }
 
 fn git(workspace: &Path) -> Command {
+    git_command(workspace, Some(workspace))
+}
+
+fn git_command(workspace: &Path, working_directory: Option<&Path>) -> Command {
     let mut command = Command::new("git");
     let mut safe_directory = std::ffi::OsString::from("safe.directory=");
     safe_directory.push(git_path(workspace).as_os_str());
+    if let Some(working_directory) = working_directory {
+        command.current_dir(working_directory);
+    }
     command
-        .current_dir(workspace)
         .arg("-c")
         .arg(safe_directory)
         .stdin(Stdio::null())
@@ -370,11 +376,12 @@ fn git_config(path: &Path) -> io::Result<Command> {
     let directory = path
         .parent()
         .ok_or_else(|| invalid("Git config has no parent"))?;
-    let mut command = git(directory);
+    // The config path is explicit. Avoid making the disposable capture tree the process working
+    // directory: CreateProcessW rejects working directories longer than MAX_PATH even when Git
+    // itself supports long paths.
+    let mut command = git_command(directory, None);
     command
-        .arg("--work-tree")
-        .arg(git_path(directory).as_os_str())
-        .args(["config", "--file"])
+        .args(["config", "--no-includes", "--file"])
         .arg(git_path(path).as_os_str());
     Ok(command)
 }
