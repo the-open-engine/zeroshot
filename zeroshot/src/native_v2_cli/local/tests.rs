@@ -431,8 +431,10 @@ async fn local_bootstrap_and_resume_failures_leave_recoverable_state() {
 async fn local_enumeration_and_readiness_fail_closed_without_controller() {
     let root = TestDirectory::new("ler");
     let backend = contract_backend(root.path()).with_ready_timeout(Duration::ZERO);
-    std::fs::create_dir_all(root.child("runs/not-a-run")).assert_value();
-    std::fs::write(root.child("runs/also-not-a-run"), b"ignored").assert_value();
+    let runs = root.child("runs");
+    crate::execution::platform::private_directory(&runs).assert_value();
+    std::fs::create_dir(runs.join("not-a-run")).assert_value();
+    std::fs::write(runs.join("also-not-a-run"), b"ignored").assert_value();
     assert!(backend.list_local().await.assert_value().runs.is_empty());
     assert!(
         backend
@@ -648,7 +650,7 @@ async fn local_list_observes_a_durable_run_without_a_controller_process() {
             .local_run_ids()
             .is_err()
     );
-    assert!(remove_stale_bootstrap(&invalid_root.child("runs/bootstrap"), Duration::ZERO).is_err());
+    assert!(remove_stale_bootstrap(&invalid_root.child("bootstrap\0"), Duration::ZERO).is_err());
 }
 
 #[cfg(unix)]
