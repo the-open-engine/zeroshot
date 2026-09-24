@@ -608,8 +608,6 @@ async fn assert_observer_recovers_durable_local_status_without_controller_proces
         )
         .await
         .assert_value();
-    drop(ledger);
-
     let status = backend
         .status_local(RunStatusParams {
             run_id: run_id.clone(),
@@ -621,6 +619,7 @@ async fn assert_observer_recovers_durable_local_status_without_controller_proces
     let listed = backend.list_local().await.assert_value();
     assert_eq!(listed.runs.len(), 1);
     assert_eq!(listed.runs[0].run_id, run_id);
+    drop(ledger);
 
     let invalid_root = TestDirectory::new("local-wave9-invalid-runs");
     std::fs::write(invalid_root.child("runs"), b"not a directory").assert_value();
