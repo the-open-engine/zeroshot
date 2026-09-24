@@ -96,6 +96,7 @@ async fn direct_targets_reject_every_profile_wrapper_before_any_hosted_effect() 
         Arc::new(MemoryDeviceCodeNotifier::default()),
         root.path("locks"),
     );
+    let authority: &dyn crate::native_v2_target::TargetControlAuthority = &authority;
     let target = direct_target();
     let expected = "direct target does not advertise profile management";
 

@@ -119,3 +119,7 @@ fn compile_route(
 fn unsupported_variables() -> TargetAuthorityError {
     authority_error("merge-plan route template declares unsupported variables")
 }
+
+#[cfg(test)]
+#[path = "merge_plans/tests.rs"]
+mod tests;

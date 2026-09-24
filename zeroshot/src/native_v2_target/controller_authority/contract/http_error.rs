@@ -83,3 +83,7 @@ fn http_error_details(status: u16, details: Option<Value>) -> Value {
     details.insert("httpStatus".to_owned(), json!(status));
     Value::Object(details)
 }
+
+#[cfg(test)]
+#[path = "http_error/tests.rs"]
+mod tests;

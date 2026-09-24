@@ -32,6 +32,7 @@ struct ScriptedSubscriptionTransport {
     result: Value,
     notifications: Vec<String>,
     provide_stream: bool,
+    overflowed: bool,
     expected_method: &'static str,
     next_id: AtomicI64,
 }
@@ -50,9 +51,15 @@ impl ScriptedSubscriptionTransport {
                 .map(|value| value.to_string())
                 .collect(),
             provide_stream,
+            overflowed: false,
             expected_method,
             next_id: AtomicI64::new(1),
         }
+    }
+
+    fn with_overflow(mut self) -> Self {
+        self.overflowed = true;
+        self
     }
 }
 
@@ -88,7 +95,7 @@ impl SubscriptionTransport for ScriptedSubscriptionTransport {
             response,
             Some(PumpedSubscription {
                 receiver,
-                overflowed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                overflowed: Arc::new(std::sync::atomic::AtomicBool::new(self.overflowed)),
             }),
         ))
     }
@@ -108,6 +115,22 @@ impl SubscriptionTransport for ScriptedSubscriptionTransport {
 
 fn watch_result() -> Value {
     json!({"subscriptionId":"watch-1","runId":"run-1","atCursor":"v2:7"})
+}
+
+fn watch_event(subscription_id: &str, cursor: &str) -> Value {
+    json!({
+        "jsonrpc":"2.0","method":"event","params":{
+            "subscriptionId":subscription_id,"runId":"run-1","cursor":cursor,
+            "title":"Protocol client test",
+            "source":{
+                "repository":"open-engine/zeroshot",
+                "branch":"main",
+                "revision":"0123456789abcdef0123456789abcdef01234567"
+            },
+            "size":"small",
+            "status":{"phase":"running","activeExecutions":[]}
+        }
+    })
 }
 
 #[tokio::test]
@@ -131,37 +154,13 @@ async fn close_retains_the_local_cursor_and_is_terminal() {
         RUN_WATCH_METHOD,
         watch_result(),
         vec![
-            json!({
-                "jsonrpc":"2.0","method":"event","params":{
-                    "subscriptionId":"watch-1","runId":"run-1","cursor":"v2:8",
-                    "title":"Protocol client test",
-                    "source":{
-                        "repository":"open-engine/zeroshot",
-                        "branch":"main",
-                        "revision":"0123456789abcdef0123456789abcdef01234567"
-                    },
-                    "size":"small",
-                    "status":{"phase":"running","activeExecutions":[]}
-                }
-            }),
+            watch_event("watch-1", "v2:8"),
             json!({
                 "jsonrpc":"2.0","method":"subscription/closed","params":{
                     "subscriptionId":"watch-1","reason":"done"
                 }
             }),
-            json!({
-                "jsonrpc":"2.0","method":"event","params":{
-                    "subscriptionId":"watch-1","runId":"run-1","cursor":"v2:9",
-                    "title":"Protocol client test",
-                    "source":{
-                        "repository":"open-engine/zeroshot",
-                        "branch":"main",
-                        "revision":"0123456789abcdef0123456789abcdef01234567"
-                    },
-                    "size":"small",
-                    "status":{"phase":"running","activeExecutions":[]}
-                }
-            }),
+            watch_event("watch-1", "v2:9"),
         ],
         true,
     );
@@ -187,6 +186,46 @@ async fn close_retains_the_local_cursor_and_is_terminal() {
     );
     assert!(stream.next().await.is_none());
     assert_eq!(stream.last_delivered_cursor(), Some(&Cursor::new("v2:8")));
+}
+
+#[tokio::test]
+async fn stream_reports_overflow_and_rejects_cross_subscription_events() {
+    let overflow =
+        ScriptedSubscriptionTransport::new(RUN_WATCH_METHOD, watch_result(), vec![], true)
+            .with_overflow();
+    let (_, mut overflow_stream) = checked_result(
+        RunSubscriptionClient::new(&overflow)
+            .run_watch(RunWatchParams {
+                run_id: RunId::new("run-1"),
+                from_cursor: None,
+            })
+            .await,
+    );
+    assert_eq!(
+        checked_result(checked_option(overflow_stream.next().await)),
+        RunSubscriptionEvent::Closed {
+            reason: SubscriptionCloseReason::SlowConsumer,
+            last_delivered_cursor: None,
+        }
+    );
+    assert!(overflow_stream.next().await.is_none());
+
+    let mismatch = ScriptedSubscriptionTransport::new(
+        RUN_WATCH_METHOD,
+        watch_result(),
+        vec![watch_event("another-subscription", "v2:8")],
+        true,
+    );
+    let (_, mut mismatch_stream) = checked_result(
+        RunSubscriptionClient::new(&mismatch)
+            .run_watch(RunWatchParams {
+                run_id: RunId::new("run-1"),
+                from_cursor: None,
+            })
+            .await,
+    );
+    let error = checked_error(checked_option(mismatch_stream.next().await));
+    assert!(matches!(error, ClientError::InvalidResponse(message) if message.contains("mismatch")));
 }
 
 #[tokio::test]
