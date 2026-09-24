@@ -97,6 +97,16 @@ fn malformed_or_incomplete_configuration_never_enables_bypass() {
     values[1]["response"]["subtype"] = json!("error");
     assert_ne!(permission_policy(&values), PermissionPolicy::Unset);
     assert_ne!(permission_policy(&[]), PermissionPolicy::Unset);
+
+    for initialize in [
+        json!({}),
+        json!({"type":"future_control_response","response":{"subtype":"success","response":{}}}),
+        json!({"type":"control_response","response":{"subtype":"error"}}),
+    ] {
+        let mut values = responses(json!({"effective":{},"sources":[]}));
+        values[0] = initialize;
+        assert_eq!(permission_policy(&values), PermissionPolicy::Unavailable);
+    }
 }
 
 #[test]
@@ -127,23 +137,49 @@ fn configured_policy_is_distinct_from_unavailable_inspection() {
 
 #[test]
 fn explicit_command_and_environment_policy_remains_authoritative() {
-    assert!(configured_arguments(&["--permission-mode=plan".to_owned()]));
-    assert!(configured_arguments(&[
-        "--settings".to_owned(),
-        "settings.json".to_owned()
-    ]));
+    for argument in [
+        "--permission-mode=plan",
+        "--restricted",
+        "--dangerously-skip-permissions",
+        "--allow-dangerously-skip-permissions",
+        "--allowedTools=Bash",
+        "--allowed-tools=Bash",
+        "--disallowedTools=WebFetch",
+        "--disallowed-tools=WebFetch",
+        "--permission-prompt-tool=approval",
+        "--settings=settings.json",
+        "--agent=reviewer",
+        "--agents=reviewer",
+    ] {
+        assert!(
+            configured_arguments(&[argument.to_owned()]),
+            "permission control {argument} must suppress the permissive default"
+        );
+    }
     assert!(!configured_arguments(&[
         "--model".to_owned(),
         "opaque-model".to_owned()
     ]));
-    for value in ["1", "true", " TRUE ", "yes", "on"] {
-        assert!(permission_environment("CLAUDE_CODE_FORCE_SANDBOX", value));
-    }
-    for value in ["", "0", "false", "off", "no"] {
-        assert!(!permission_environment("CLAUDE_CODE_FORCE_SANDBOX", value));
+
+    for name in [
+        "CLAUDE_CODE_FORCE_SANDBOX",
+        "CLAUDE_CODE_RESTRICTED",
+        "CLAUDE_CODE_AUTO_MODE_EXTERNAL_PERMISSIONS",
+    ] {
+        for value in ["1", "true", " TRUE ", "yes", "on"] {
+            assert!(permission_environment(name, value));
+        }
+        for value in ["", "0", "false", "off", "no"] {
+            assert!(!permission_environment(name, value));
+        }
     }
     assert!(permission_environment(
         "CLAUDE_BG_SESSION_PERMISSION_RULES",
         r#"{"deny":["Bash"]}"#
     ));
+    assert!(!permission_environment(
+        "CLAUDE_BG_SESSION_PERMISSION_RULES",
+        "  "
+    ));
+    assert!(!permission_environment("ANTHROPIC_API_KEY", "present"));
 }

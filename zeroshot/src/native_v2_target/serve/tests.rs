@@ -2,6 +2,8 @@ use super::*;
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 #[cfg(unix)]
+use futures_util::FutureExt;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 struct Storage(std::path::PathBuf);
@@ -96,6 +98,30 @@ async fn direct_serve_rejects_an_invalid_public_origin_before_preparing_storage(
     }
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn shutdown_waits_for_an_explicit_process_signal() {
+    assert!(shutdown_signal().assert_value().now_or_never().is_none());
+}
+
+#[tokio::test]
+async fn direct_serve_surfaces_hosting_preparation_failures() {
+    let root =
+        openengine_cluster_testkit::TemporaryDirectory::for_test("target-serve-hosting-refusal");
+    let storage = root.path("storage-blocker");
+    std::fs::write(&storage, b"not a storage directory").assert_value();
+
+    let error = serve_direct_target(TargetServe {
+        listen: "127.0.0.1:0".parse().assert_value(),
+        public_origin: "http://127.0.0.1:8080".to_owned(),
+        storage,
+        bootstrap_key_file: None,
+    })
+    .await
+    .assert_error();
+    assert!(matches!(error, TargetServeError::Hosting(_)));
+}
+
 #[tokio::test]
 async fn preparation_fails_closed_before_hosting_for_invalid_private_inputs() {
     let root = openengine_cluster_testkit::TemporaryDirectory::for_test(
@@ -169,4 +195,38 @@ async fn private_preparation_consumes_the_bootstrap_key_before_serving() {
     assert!(config.storage.join("runs.sqlite3").is_file());
     drop(listener);
     drop(server);
+}
+
+#[tokio::test]
+async fn direct_target_reaches_a_live_listener_and_remains_active_until_cancelled() {
+    let root =
+        openengine_cluster_testkit::TemporaryDirectory::for_test("target-serve-live-listener");
+    let reservation = std::net::TcpListener::bind("127.0.0.1:0").assert_value();
+    let listen = reservation.local_addr().assert_value();
+    drop(reservation);
+    let storage = root.path("storage");
+    let task = tokio::spawn(serve_direct_target(TargetServe {
+        listen,
+        public_origin: format!("http://{listen}"),
+        storage: storage.clone(),
+        bootstrap_key_file: None,
+    }));
+
+    let stream = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            match tokio::net::TcpStream::connect(listen).await {
+                Ok(stream) => return stream,
+                Err(_) if !task.is_finished() => tokio::task::yield_now().await,
+                Err(error) => panic!("direct target stopped before listening: {error}"),
+            }
+        }
+    })
+    .await
+    .assert_value();
+    assert!(storage.join("runs.sqlite3").is_file());
+    assert!(!task.is_finished());
+    drop(stream);
+
+    task.abort();
+    assert!(task.await.assert_error().is_cancelled());
 }

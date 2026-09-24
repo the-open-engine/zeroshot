@@ -3,6 +3,93 @@ use tokio::io::AsyncWriteExt;
 
 use super::*;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
+#[cfg(unix)]
+const DISCOVERY_PROBE_MODE: &str = "ZEROSHOT_RESTIC_TEST_DISCOVERY";
+
+#[cfg(unix)]
+fn failing_restic(root: &Path) -> PathBuf {
+    let executable = root.join("restic");
+    std::fs::write(
+        &executable,
+        "#!/bin/sh\nprintf '%s' 'private child diagnostic' >&2\nexit 19\n",
+    )
+    .assert_value();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).assert_value();
+    executable
+}
+
+#[cfg(unix)]
+fn run_discovery_probe(configured: Option<&Path>, search_path: &Path, expected: Option<&Path>) {
+    let mut command = std::process::Command::new(std::env::current_exe().assert_value());
+    command
+        .args([
+            "--exact",
+            "native_v2_supervisor::checkpoints::restic::tests::restic_discovery_probe",
+            "--ignored",
+        ])
+        .env(DISCOVERY_PROBE_MODE, "1")
+        .env("PATH", search_path)
+        .env_remove("ZEROSHOT_RESTIC");
+    if let Some(configured) = configured {
+        command.env("ZEROSHOT_RESTIC", configured);
+    }
+    if let Some(expected) = expected {
+        command.env("ZEROSHOT_RESTIC_TEST_EXPECTED", expected);
+    } else {
+        command.env_remove("ZEROSHOT_RESTIC_TEST_EXPECTED");
+    }
+    let output = command.output().assert_value();
+    assert!(
+        output.status.success(),
+        "discovery probe failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "executed in an isolated subprocess by restic_discovery_and_failure_contracts"]
+fn restic_discovery_probe() {
+    assert_eq!(std::env::var(DISCOVERY_PROBE_MODE).as_deref(), Ok("1"));
+    match std::env::var_os("ZEROSHOT_RESTIC_TEST_EXPECTED") {
+        Some(expected) => assert_eq!(
+            ResticProgram::discover().assert_value().executable,
+            std::fs::canonicalize(expected).assert_value()
+        ),
+        None => assert_eq!(
+            ResticProgram::discover().unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        ),
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn restic_discovery_and_child_failures_are_bounded_and_sanitized() {
+    let root = tempfile::tempdir().assert_value();
+    let executable = failing_restic(root.path());
+    let empty_path = root.path().join("empty-path");
+    std::fs::create_dir(&empty_path).assert_value();
+
+    run_discovery_probe(Some(&executable), &empty_path, Some(executable.as_path()));
+    run_discovery_probe(None, root.path(), Some(executable.as_path()));
+    run_discovery_probe(None, &empty_path, None);
+
+    let repository = Repository::new(
+        ResticProgram::test(executable, Vec::new()).assert_value(),
+        root.path().join("state"),
+    );
+    let error = repository
+        .run(root.path(), &arguments(["cat"]))
+        .await
+        .unwrap_err();
+    assert_eq!(error.to_string(), "restic operation failed");
+    assert!(!error.to_string().contains("private child diagnostic"));
+}
+
 #[test]
 fn program_and_snapshot_validation_rejects_ambiguous_executables_and_identities() {
     let root = tempfile::tempdir().assert_value();

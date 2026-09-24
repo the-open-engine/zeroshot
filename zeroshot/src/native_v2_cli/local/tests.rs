@@ -83,7 +83,7 @@ fn contract_status(submission: &RunSubmission, run_id: RunId, failed: bool) -> R
     }
 }
 
-async fn create_contract_run(
+pub(super) async fn create_contract_run(
     backend: &LocalCliBackend,
     run_id: &RunId,
     submission: &RunSubmission,

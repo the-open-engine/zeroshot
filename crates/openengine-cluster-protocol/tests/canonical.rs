@@ -10,9 +10,13 @@ mod json_mut;
 use assert_value::AssertValue;
 use openengine_cluster_protocol::{
     admission_fingerprint, canonical_value_bytes, diff_compiled_graphs, CanonicalError,
-    CompiledGraphIr, GraphIdentity,
+    CompiledGraphIr, GraphIdentity, NodeName,
 };
 use serde_json::{json, Value};
+
+fn node_names(nodes: &[NodeName]) -> Vec<&str> {
+    nodes.iter().map(NodeName::as_str).collect()
+}
 
 #[test]
 fn attempts_per_node_keys_obey_node_name_bounds_in_rust_and_schema() {
@@ -228,13 +232,7 @@ fn authored_instructions_participate_in_identity_and_node_diff() {
         changed.identity().assert_value()
     );
     let diff = diff_compiled_graphs(Some(&baseline), &changed).assert_value();
-    assert_eq!(
-        diff.changed
-            .iter()
-            .map(|name| name.as_str())
-            .collect::<Vec<_>>(),
-        ["work"]
-    );
+    assert_eq!(node_names(&diff.changed), ["work"]);
 }
 
 #[test]
@@ -328,6 +326,7 @@ fn admission_fingerprint_sorts_json_keys_and_binds_the_method() {
     )
     .assert_value();
     assert_eq!(left, reordered);
+    assert_eq!(left.as_str(), left.to_string());
     assert_ne!(
         left,
         admission_fingerprint(
@@ -336,6 +335,94 @@ fn admission_fingerprint_sorts_json_keys_and_binds_the_method() {
         )
         .assert_value()
     );
+}
+
+fn nested_control_flow_ir(instructions: &str) -> CompiledGraphIr {
+    let selector = || json!({"name":"verify","source":"signal","field":"verdict"});
+    serde_json::from_value(json!({
+        "profile":"openengine.graph.full/v1",
+        "initialInput":{"kind":"record","fields":{}},
+        "policy":{"policy":"policy.default@1","default":"deny"},
+        "root":{
+            "kind":"choice","name":"route","state":{"kind":"record","fields":{}},
+            "branches":[{
+                "when":{"kind":"any","guards":[
+                    {"kind":"not","guard":{"kind":"in","value":selector(),"labels":["rejected"]}},
+                    {"kind":"k_of_map","count":1,"value":selector(),"labels":["accepted"]},
+                    {"kind":"any","guards":[
+                        {"kind":"in","value":selector(),"labels":["accepted"]}
+                    ]}
+                ]},
+                "node":{
+                    "kind":"loop","name":"repeat","state":{"kind":"record","fields":{}},
+                    "body":{
+                        "kind":"map","name":"each","state":{"kind":"record","fields":{}},
+                        "body":{
+                            "kind":"verifier","name":"verify","worker":"worker.validator@1",
+                            "instructions":instructions,
+                            "input":{"kind":"null"},"output":{"kind":"boolean"},
+                            "inputBindings":[],"writeBindings":[],"attempts":1,
+                            "signals":{"verdict":["accepted","rejected"]},
+                            "diagnostic":{"kind":"string"}
+                        },
+                        "over":{"source":"state","path":["items"]},
+                        "maxItems":4,"promotedStatePaths":[]
+                    },
+                    "until":{"kind":"all","guards":[
+                        {"kind":"k_of_n","count":1,"values":[selector()],"labels":["accepted"]},
+                        {"kind":"all","guards":[
+                            {"kind":"in","value":selector(),"labels":["accepted"]}
+                        ]}
+                    ]},
+                    "maxIterations":2,"promotedStatePaths":[]
+                }
+            }],
+            "otherwise":{"kind":"fail","name":"rejected","reason":"rejected"},
+            "promotedStatePaths":[]
+        },
+        "bounds":{
+            "termination":{"kind":"acyclic","order":["route","repeat","each","verify","rejected"]},
+            "maxNodeExecutions":8,"peakConcurrency":1,
+            "attemptsPerNode":{"route":1,"repeat":2,"each":4,"verify":1,"rejected":1}
+        }
+    }))
+    .assert_value()
+}
+
+#[test]
+fn nested_node_diff_invalidates_each_ancestor_but_not_unchanged_siblings() {
+    let baseline = nested_control_flow_ir("Verify the candidate.");
+    let changed = nested_control_flow_ir("Verify the candidate and report evidence.");
+
+    let created = diff_compiled_graphs(None, &baseline).assert_value();
+    assert_eq!(
+        node_names(&created.added),
+        ["each", "rejected", "repeat", "route", "verify"]
+    );
+
+    let diff = diff_compiled_graphs(Some(&baseline), &changed).assert_value();
+    assert_eq!(
+        node_names(&diff.changed),
+        ["each", "repeat", "route", "verify"]
+    );
+    assert!(diff.added.is_empty());
+    assert!(diff.removed.is_empty());
+
+    let mut without_optional_routes = serde_json::to_value(&baseline).assert_value();
+    json_mut::json_at_mut(&mut without_optional_routes, "/root")
+        .as_object_mut()
+        .assert_value()
+        .remove("otherwise");
+    json_mut::json_at_mut(&mut without_optional_routes, "/root/branches/0/node")
+        .as_object_mut()
+        .assert_value()
+        .remove("until");
+    let without_optional_routes: CompiledGraphIr =
+        serde_json::from_value(without_optional_routes).assert_value();
+    let diff = diff_compiled_graphs(Some(&baseline), &without_optional_routes).assert_value();
+    assert_eq!(node_names(&diff.changed), ["repeat", "route"]);
+    assert_eq!(node_names(&diff.removed), ["rejected"]);
+    assert!(diff.added.is_empty());
 }
 
 #[test]
@@ -359,9 +446,8 @@ fn canonical_request_values_sort_recursively_without_changing_scalar_meaning() {
 fn compiled_node_diff_is_sorted_and_rejects_duplicate_names() {
     let baseline = ir(&["a", "b"], &["one", "two"]);
     let created = diff_compiled_graphs(None, &baseline).assert_value();
-    let created_names: Vec<_> = created.added.iter().map(|name| name.as_str()).collect();
     assert_eq!(
-        created_names,
+        node_names(&created.added),
         ["a", "b", "one", "ordered", "parallel", "root", "two"]
     );
 

@@ -238,6 +238,170 @@ async fn an_explicit_system_store_never_downgrades() {
     );
 }
 
+async fn assert_system_selection_is_sticky(root: &openengine_cluster_testkit::TemporaryDirectory) {
+    let system_directory = root.path("system-credentials");
+    let system = Arc::new(MemoryCredentialStore::default());
+    system
+        .set(TARGET_ID, "system-refresh-token")
+        .await
+        .assert_value();
+    let automatic_system = LinuxTargetCredentialStore::with_dependencies(
+        system_directory.clone(),
+        system,
+        Some("auto"),
+        false,
+    )
+    .assert_value();
+    assert_eq!(
+        automatic_system
+            .get(TARGET_ID)
+            .await
+            .assert_value()
+            .as_deref(),
+        Some("system-refresh-token")
+    );
+
+    let restarted = LinuxTargetCredentialStore::with_dependencies(
+        system_directory,
+        Arc::new(UnavailableCredentialStore),
+        None,
+        false,
+    )
+    .assert_value();
+    assert_eq!(
+        restarted.get(TARGET_ID).await.assert_error().to_string(),
+        "test credential store unavailable"
+    );
+}
+
+async fn assert_automatic_backend_defaults(root: &openengine_cluster_testkit::TemporaryDirectory) {
+    let desktop_directory = root.path("desktop-credentials");
+    let desktop_system = Arc::new(MemoryCredentialStore::default());
+    let desktop = LinuxTargetCredentialStore::with_dependencies(
+        desktop_directory,
+        desktop_system.clone(),
+        None,
+        true,
+    )
+    .assert_value();
+    assert_eq!(
+        desktop.prepare_for_login(TARGET_ID).await.assert_value(),
+        CredentialStorePreparation::Managed
+    );
+    desktop
+        .set(TARGET_ID, "desktop-refresh-token")
+        .await
+        .assert_value();
+    assert_eq!(
+        desktop_system
+            .get(TARGET_ID)
+            .await
+            .assert_value()
+            .as_deref(),
+        Some("desktop-refresh-token")
+    );
+
+    let headless_directory = root.path("headless-credentials");
+    let headless = LinuxTargetCredentialStore::with_dependencies(
+        headless_directory,
+        Arc::new(MemoryCredentialStore::default()),
+        None,
+        false,
+    )
+    .assert_value();
+    assert!(matches!(
+        headless.prepare_for_login(TARGET_ID).await.assert_value(),
+        CredentialStorePreparation::PrivateFile(_)
+    ));
+
+    let discovered_directory = root.path("discovered-file-credentials");
+    let private = PrivateFileTargetCredentialStore::new(discovered_directory.clone());
+    private
+        .set(TARGET_ID, "discovered-refresh-token")
+        .await
+        .assert_value();
+    let automatic_file = LinuxTargetCredentialStore::with_dependencies(
+        discovered_directory.clone(),
+        Arc::new(MemoryCredentialStore::default()),
+        None,
+        false,
+    )
+    .assert_value();
+    assert_eq!(
+        automatic_file
+            .get(TARGET_ID)
+            .await
+            .assert_value()
+            .as_deref(),
+        Some("discovered-refresh-token")
+    );
+    let restarted_file = LinuxTargetCredentialStore::with_dependencies(
+        discovered_directory,
+        Arc::new(UnavailableCredentialStore),
+        None,
+        true,
+    )
+    .assert_value();
+    assert_eq!(
+        restarted_file
+            .get(TARGET_ID)
+            .await
+            .assert_value()
+            .as_deref(),
+        Some("discovered-refresh-token")
+    );
+}
+
+async fn assert_malformed_backend_selection_is_rejected(
+    root: &openengine_cluster_testkit::TemporaryDirectory,
+) {
+    let malformed_directory = root.path("malformed-selection");
+    let malformed_private = PrivateFileTargetCredentialStore::new(malformed_directory.clone());
+    malformed_private
+        .prepare_for_login(TARGET_ID)
+        .await
+        .assert_value();
+    let malformed_selection = malformed_directory.join(format!("{TARGET_ID}.store"));
+    std::fs::write(&malformed_selection, "ambient\n").assert_value();
+    std::fs::set_permissions(&malformed_selection, std::fs::Permissions::from_mode(0o600))
+        .assert_value();
+    let malformed = LinuxTargetCredentialStore::with_dependencies(
+        malformed_directory,
+        Arc::new(MemoryCredentialStore::default()),
+        None,
+        false,
+    )
+    .assert_value();
+    assert_eq!(
+        malformed.get(TARGET_ID).await.assert_error().to_string(),
+        "target credential store selection is malformed"
+    );
+
+    for invalid in ["invalid", "SYSTEM", " file"] {
+        assert_eq!(
+            LinuxTargetCredentialStore::with_dependencies(
+                root.path(&format!("invalid-{invalid:?}")),
+                Arc::new(MemoryCredentialStore::default()),
+                Some(invalid),
+                false,
+            )
+            .assert_error()
+            .to_string(),
+            "ZEROSHOT_CREDENTIAL_STORE must be auto, system, or file"
+        );
+    }
+}
+
+#[tokio::test]
+async fn automatic_backend_selection_is_persisted_and_never_silently_reinterpreted() {
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test(
+        "zeroshot-automatic-credential-selection",
+    );
+    assert_system_selection_is_sticky(&root).await;
+    assert_automatic_backend_defaults(&root).await;
+    assert_malformed_backend_selection_is_rejected(&root).await;
+}
+
 #[test]
 fn credential_identity_and_refresh_lock_fail_closed_at_the_filesystem_boundary() {
     assert_eq!(

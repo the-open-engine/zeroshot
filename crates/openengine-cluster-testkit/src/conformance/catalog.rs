@@ -6,6 +6,10 @@ use async_trait::async_trait;
 use openengine_cluster_protocol::{GraphProfile, SCHEMA_VIOLATION};
 use openengine_cluster_server::ClusterBackend;
 
+#[cfg(test)]
+#[path = "catalog/tests.rs"]
+mod tests;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConformanceModule {
     Initialize,

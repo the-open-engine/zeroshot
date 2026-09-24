@@ -2,15 +2,15 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use openengine_cluster_protocol::{
-    ConnectionKey, ConnectionScope, EnvironmentVariableName, ExecutionRef, RunCheckpointsParams,
-    RunDiscardWorkspaceParams, RunProfileName, RunProfileScope, RunResumeParams,
-    StaticConnectionValues,
+    ConnectionKey, ConnectionScope, EnumLabel, EnvironmentVariableName, ExecutionRef,
+    RunCheckpointsParams, RunDiscardWorkspaceParams, RunProfileName, RunProfileScope,
+    RunResumeParams, StaticConnectionValues, TerminalResult,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::json;
 
 use super::*;
-use super::super::local_contract_tests::contract_submission;
+use super::super::local_contract_tests::{contract_submission, create_contract_run};
 use crate::native_v2_candidate::test_support::{TestDirectory, full_graph, success_node};
 
 fn run_id(value: &str) -> RunId {
@@ -423,6 +423,72 @@ async fn local_resume_rejects_an_unusable_state_root_before_observing_the_run() 
         .await
         .unwrap_err();
     assert!(matches!(error, NativeV2CliError::Local(_)));
+}
+
+#[tokio::test]
+async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
+    let root = TestDirectory::new("lrr");
+    let backend = LocalCliBackend::new(
+        root.path().to_path_buf(),
+        root.child("missing-controller"),
+        root.path().to_path_buf(),
+        PathBuf::from("git"),
+    )
+    .with_ready_timeout(std::time::Duration::ZERO);
+    let original = run_id("0199f33f-3b44-7d21-9000-000000000044");
+    let successor = run_id("0199f33f-3b44-7d21-9000-000000000045");
+    let submission = contract_submission("resume-reconcile");
+    let ledger = create_contract_run(&backend, &original, &submission).await;
+    ledger
+        .append(
+            &original,
+            vec![
+                crate::v2_run_ledger::RunEvent::RunStarted,
+                crate::v2_run_ledger::RunEvent::Terminal {
+                    result: TerminalResult::Failed {
+                        reason: EnumLabel::new("runtime_failed").assert_value(),
+                    },
+                },
+            ],
+        )
+        .await
+        .assert_value();
+    let workspace = root.child("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    backend
+        .write_recovery_document(
+            &original,
+            &LocalRecoveryDocument {
+                submission,
+                workspace,
+                resumed_from: None,
+                delivery_run_id: Some(original.clone()),
+                successor_run_id: None,
+            },
+        )
+        .assert_value();
+
+    let error = backend
+        .resume_local(RunResumeParams {
+            run_id: original.clone(),
+            successor_run_id: successor.clone(),
+            from: None,
+            connections: BTreeMap::new(),
+            connection_resolver: None,
+            github_token: None,
+        })
+        .await
+        .assert_error();
+
+    assert!(matches!(error, NativeV2CliError::Local(_)));
+    let restored = backend
+        .claimable_recovery_document(&original, true)
+        .assert_value();
+    assert_eq!(
+        restored.delivery_run_id,
+        Some(original),
+        "failed successor startup must restore the original delivery lineage"
+    );
 }
 
 #[test]

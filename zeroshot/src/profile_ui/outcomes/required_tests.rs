@@ -245,3 +245,27 @@ fn new_required_dependency_receives_default_checkpoint_without_existing_handler(
         json!("execution_failed")
     );
 }
+
+#[test]
+fn invalid_required_dependency_selections_are_rejected_atomically() {
+    let cases = [
+        ("missing", "assemble", "Select uniquely named"),
+        ("left", "left", "Select an earlier output"),
+        ("assemble", "left", "Select an earlier output"),
+        ("left", "right", "Select an earlier output"),
+    ];
+    for (source, consumer, expected) in cases {
+        let mut graph = fixture();
+        let before = serde_json::to_value(&graph).assert_value();
+        let error = ensure_required_output(
+            &mut graph,
+            &json!({"nodes":{"on_error":{}}}),
+            &NodeName::new(source).assert_value(),
+            &NodeName::new(consumer).assert_value(),
+        )
+        .unwrap_err();
+
+        assert!(error.message.contains(expected), "{source} -> {consumer}");
+        assert_eq!(serde_json::to_value(graph).assert_value(), before);
+    }
+}

@@ -24,19 +24,66 @@ fn assert_target_serve_is_part_of_the_public_command_schema() {
     assert!(matches!(command, NativeV2CliCommand::TargetServe(_)));
 }
 
-fn assert_process_routing_follows_the_authored_target() {
-    let cases: &[(&[&str], bool)] = &[
-        (&["list"], true),
-        (&["list", "--target", "prod"], false),
-        (&["status", "run-1"], true),
-        (&["force-stop", "run-1", "--target", "prod"], false),
-        (&["resume", "run-1"], true),
-        (&["discard-workspace", "run-1", "--target", "prod"], false),
-        (&["watch", "run-1"], true),
-        (&["logs", "run-1", "--target", "prod"], false),
-        (&["attach", "run-1", "exec-1"], true),
-        (&["connection", "list"], true),
+type RoutePair<'a> = (&'a [&'a str], &'a [&'a str]);
+
+fn assert_route_pairs(route_pairs: &[RoutePair<'_>]) {
+    for (local, remote) in route_pairs {
+        for (arguments, expected_local) in [(local, true), (remote, false)] {
+            let command =
+                parse_native_v2_args(arguments.iter().copied().map(OsString::from)).assert_value();
+            assert_eq!(
+                is_local_command(&command),
+                expected_local,
+                "unexpected route for {arguments:?}"
+            );
+        }
+    }
+}
+
+fn assert_run_routing_follows_the_authored_target() {
+    assert_route_pairs(&[
+        (&["list"], &["list", "--target", "prod"]),
         (
+            &["status", "run-1"],
+            &["status", "run-1", "--target", "prod"],
+        ),
+        (
+            &["force-stop", "run-1"],
+            &["force-stop", "run-1", "--target", "prod"],
+        ),
+        (
+            &["resume", "run-1"],
+            &["resume", "run-1", "--target", "prod"],
+        ),
+        (
+            &["checkpoints", "run-1"],
+            &["checkpoints", "run-1", "--target", "prod"],
+        ),
+        (
+            &["discard-workspace", "run-1"],
+            &["discard-workspace", "run-1", "--target", "prod"],
+        ),
+        (&["watch", "run-1"], &["watch", "run-1", "--target", "prod"]),
+        (&["logs", "run-1"], &["logs", "run-1", "--target", "prod"]),
+        (
+            &["attach", "run-1", "exec-1"],
+            &["attach", "run-1", "exec-1", "--target", "prod"],
+        ),
+    ]);
+}
+
+fn assert_management_routing_follows_the_authored_target() {
+    assert_route_pairs(&[
+        (
+            &["connection", "list"],
+            &["connection", "list", "--target", "prod"],
+        ),
+        (
+            &["connection", "delete", "provider"],
+            &["connection", "delete", "provider", "--target", "prod"],
+        ),
+        (
+            &["connection", "set", "openai", "--field", "OPENAI_API_KEY"],
             &[
                 "connection",
                 "set",
@@ -46,24 +93,50 @@ fn assert_process_routing_follows_the_authored_target() {
                 "--field",
                 "OPENAI_API_KEY",
             ],
-            false,
         ),
-        (&["profile", "show", "reviewer"], true),
         (
-            &["profile", "default", "reviewer", "--target", "prod"],
-            false,
+            &["profile", "list"],
+            &["profile", "list", "--target", "prod"],
         ),
-        (&["template", "list"], false),
-    ];
-    for (arguments, expected_local) in cases {
-        let command =
-            parse_native_v2_args(arguments.iter().copied().map(OsString::from)).assert_value();
-        assert_eq!(
-            is_local_command(&command),
-            *expected_local,
-            "unexpected route for {arguments:?}"
-        );
-    }
+        (
+            &["profile", "show", "reviewer"],
+            &["profile", "show", "reviewer", "--target", "prod"],
+        ),
+        (
+            &["profile", "remove", "reviewer"],
+            &["profile", "remove", "reviewer", "--target", "prod"],
+        ),
+        (
+            &["profile", "default", "reviewer"],
+            &["profile", "default", "reviewer", "--target", "prod"],
+        ),
+        (
+            &[
+                "profile",
+                "set",
+                "reviewer",
+                "--template",
+                "single-worker",
+                "--runtime-config",
+                "runtime.json",
+            ],
+            &[
+                "profile",
+                "set",
+                "reviewer",
+                "--target",
+                "prod",
+                "--template",
+                "single-worker",
+                "--runtime-config",
+                "runtime.json",
+            ],
+        ),
+    ]);
+
+    let static_command =
+        parse_native_v2_args(["template", "list"].map(OsString::from)).assert_value();
+    assert!(!is_local_command(&static_command));
 }
 
 async fn assert_private_bootstrap_is_exact_and_public_startup_stays_public() {
@@ -108,63 +181,6 @@ async fn assert_private_bootstrap_is_exact_and_public_startup_stays_public() {
 }
 
 async fn assert_static_dispatch_and_remaining_management_routes_are_exact() {
-    for (arguments, expected_local) in [
-        (vec!["connection", "list"], true),
-        (vec!["connection", "list", "--target", "prod"], false),
-        (vec!["connection", "delete", "provider"], true),
-        (
-            vec!["connection", "delete", "provider", "--target", "prod"],
-            false,
-        ),
-        (
-            vec![
-                "profile",
-                "set",
-                "reviewer",
-                "--template",
-                "single-worker",
-                "--runtime-config",
-                "runtime.json",
-            ],
-            true,
-        ),
-        (
-            vec![
-                "profile",
-                "set",
-                "reviewer",
-                "--target",
-                "prod",
-                "--template",
-                "single-worker",
-                "--runtime-config",
-                "runtime.json",
-            ],
-            false,
-        ),
-        (vec!["profile", "list"], true),
-        (vec!["profile", "list", "--target", "prod"], false),
-        (vec!["profile", "show", "reviewer"], true),
-        (
-            vec!["profile", "show", "reviewer", "--target", "prod"],
-            false,
-        ),
-        (vec!["profile", "remove", "reviewer"], true),
-        (
-            vec!["profile", "remove", "reviewer", "--target", "prod"],
-            false,
-        ),
-        (vec!["profile", "default", "reviewer"], true),
-        (
-            vec!["profile", "default", "reviewer", "--target", "prod"],
-            false,
-        ),
-    ] {
-        let command =
-            parse_native_v2_args(arguments.into_iter().map(OsString::from)).assert_value();
-        assert_eq!(is_local_command(&command), expected_local);
-    }
-
     dispatch(NativeV2CliCommand::Version).await.assert_value();
     let templates = parse_native_v2_args(["template", "list"].map(OsString::from)).assert_value();
     dispatch(templates).await.assert_value();
@@ -207,7 +223,8 @@ async fn assert_static_dispatch_and_remaining_management_routes_are_exact() {
 #[tokio::test]
 async fn wave10_cli_contract_process_dispatch_and_routing_matrix_is_exact() {
     assert_target_serve_is_part_of_the_public_command_schema();
-    assert_process_routing_follows_the_authored_target();
+    assert_run_routing_follows_the_authored_target();
+    assert_management_routing_follows_the_authored_target();
     assert_private_bootstrap_is_exact_and_public_startup_stays_public().await;
     assert_static_dispatch_and_remaining_management_routes_are_exact().await;
 }

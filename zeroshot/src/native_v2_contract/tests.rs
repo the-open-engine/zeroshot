@@ -201,5 +201,63 @@ fn environment_names_and_execution_identities_are_bounded() {
     assert!(EnvironmentVariableName::new("1TOKEN").is_err());
     assert!(NodeInstanceId::new(0).is_err());
     assert!(ExecutionId::new(0).is_err());
-    assert_eq!(ExecutionId::new(7).assert_value().get(), 7);
+    let execution = ExecutionId::try_from(7).assert_value();
+    assert_eq!(execution.get(), 7);
+    assert_eq!(execution.to_string(), "7");
+    assert_eq!(serde_json::to_value(execution).assert_value(), json!(7));
+    assert_eq!(
+        serde_json::from_value::<ExecutionId>(json!(7)).assert_value(),
+        execution
+    );
+    assert!(serde_json::from_value::<ExecutionId>(json!(0)).is_err());
+    assert!(serde_json::from_value::<ExecutionId>(json!("7")).is_err());
+}
+
+#[test]
+fn submission_intent_preserves_caller_input_but_not_resolved_source() {
+    let submission: RunSubmission = serde_json::from_value(canonical_submission()).assert_value();
+    let intent = RunSubmissionIntent::from(&submission);
+
+    assert_eq!(intent.title, submission.title);
+    assert_eq!(intent.graph, submission.graph);
+    assert_eq!(intent.initial_input, submission.initial_input);
+    assert_eq!(intent.runtime, submission.runtime);
+    assert_eq!(intent.submission_key, submission.submission_key);
+    assert_eq!(intent.branch, None);
+}
+
+#[test]
+fn token_usage_parser_accepts_complete_counts_and_rejects_partial_or_unsafe_values() {
+    assert_eq!(parse_token_usage_delta(None, None, None), None);
+    let usage = json!({
+        "input_tokens": 11,
+        "output_tokens": 7,
+        "cache_read": 5,
+        "cache_write": 3
+    });
+    let parsed = parse_token_usage_delta(Some(&usage), Some("cache_read"), Some("cache_write"))
+        .assert_value();
+    assert_eq!(parsed.input_tokens.get(), 11);
+    assert_eq!(parsed.output_tokens.get(), 7);
+    assert_eq!(parsed.cache_read_input_tokens.assert_value().get(), 5);
+    assert_eq!(parsed.cache_creation_input_tokens.assert_value().get(), 3);
+
+    let required_only = json!({"input_tokens":2,"output_tokens":1});
+    let parsed =
+        parse_token_usage_delta(Some(&required_only), None, Some("missing")).assert_value();
+    assert_eq!(parsed.cache_read_input_tokens, None);
+    assert_eq!(parsed.cache_creation_input_tokens, None);
+
+    for malformed in [
+        Value::Null,
+        json!({"input_tokens":1}),
+        json!({"input_tokens":-1,"output_tokens":1}),
+        json!({"input_tokens":1,"output_tokens":1,"cache_read":"many"}),
+        json!({"input_tokens":1,"output_tokens":1,"cache_write":"many"}),
+    ] {
+        assert_eq!(
+            parse_token_usage_delta(Some(&malformed), Some("cache_read"), Some("cache_write")),
+            None
+        );
+    }
 }

@@ -45,6 +45,40 @@ fn profile_operations() -> (
     (target, selector, set, run)
 }
 
+#[test]
+fn profile_run_debug_exposes_routing_identity_and_redacts_every_secret_value() {
+    let (_, _, _, mut run) = profile_operations();
+    run.connections.insert(
+        ConnectionKey::new("provider").assert_value(),
+        StaticConnectionValues::new(std::collections::BTreeMap::from([(
+            EnvironmentVariableName::new("API_KEY").assert_value(),
+            "connection-secret".to_owned(),
+        )]))
+        .assert_value(),
+    );
+    run.github_token = Some("github-secret".to_owned());
+
+    let diagnostic = format!("{run:?}");
+    for public in [
+        "RunProfileRunRequest",
+        run.run_id.as_str(),
+        run.profile.name.as_str(),
+        "provider",
+        "[REDACTED]",
+    ] {
+        assert!(
+            diagnostic.contains(public),
+            "missing {public:?}: {diagnostic}"
+        );
+    }
+    for secret in ["connection-secret", "github-secret", "API_KEY"] {
+        assert!(
+            !diagnostic.contains(secret),
+            "debug output exposed {secret:?}: {diagnostic}"
+        );
+    }
+}
+
 fn hosted_connector(
     authority: FakeAuthority,
 ) -> NativeV2TargetConnector<MemoryRegistry, FakeAuthority, FakeDialer> {

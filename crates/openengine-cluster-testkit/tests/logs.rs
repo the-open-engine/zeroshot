@@ -1,7 +1,9 @@
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use openengine_cluster_protocol::{
-    GraphProfileSet, InitializeParams, LogEventNotification, ServerCapabilities, PROTOCOL_VERSION,
+    BoundedLogMessage, BoundedLogTarget, GraphProfileSet, InitializeParams, LogEventNotification,
+    LogLevel, LogRecord, ServerCapabilities, PROTOCOL_VERSION,
 };
 use openengine_cluster_server::admission::AdmissionCoordinator;
 use openengine_cluster_server::logs::LogStore;
@@ -18,6 +20,34 @@ fn initialize_params() -> InitializeParams {
     InitializeParams {
         protocol_version: PROTOCOL_VERSION.to_owned(),
     }
+}
+
+fn record(message: &str) -> LogRecord {
+    LogRecord {
+        level: LogLevel::Info,
+        target: BoundedLogTarget::new("testkit").assert_value(),
+        message: BoundedLogMessage::new(message).assert_value(),
+    }
+}
+
+#[tokio::test]
+async fn in_memory_store_drops_cancelled_and_overflowed_subscribers_independently() {
+    let store = InMemoryLogStore::new();
+    let mut slow = store.subscribe(0).await;
+    let cancelled = store.subscribe(1).await;
+    drop(cancelled.receiver);
+
+    store.publish(record("first")).await;
+    assert!(!slow.overflowed.load(Ordering::Acquire));
+    store.publish(record("second")).await;
+    assert!(slow.overflowed.load(Ordering::Acquire));
+
+    assert_eq!(slow.receiver.recv().await, Some(record("first")));
+    store.publish(record("after-overflow")).await;
+    assert!(matches!(
+        slow.receiver.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Disconnected)
+    ));
 }
 
 #[tokio::test]

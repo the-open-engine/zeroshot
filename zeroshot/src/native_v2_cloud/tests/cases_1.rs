@@ -103,6 +103,72 @@ impl CapsuleAllocator for RetainedCleanupFailureAllocator {
 }
 
 #[tokio::test]
+async fn allocator_defaults_are_explicit_fail_closed_and_side_effect_free() {
+    assert_eq!(
+        CapsuleAllocationUnavailable::Runtime.failure_code(),
+        "runtime_unavailable"
+    );
+    assert_eq!(
+        CapsuleAllocationUnavailable::SourceCheckout.failure_code(),
+        "source_checkout_unavailable"
+    );
+    let submission = request(Value::Null).submission;
+    let admitted = NativeV2Admission
+        .admit(submission)
+        .await
+        .assert_value_with("default allocator fixture admission");
+    let ledger = Arc::new(FakeRunLedger::new());
+    let cleanup = Arc::new(FakeCleanup::new(ledger));
+    let driver = Arc::new(FakeDriver::new(Behavior::Complete));
+    let allocator = TestAllocator::<ImmediateAllocation>::new(driver.clone(), cleanup.clone());
+    let source_run_id = RunId::new("default-source");
+    let run_id = RunId::new("default-successor");
+
+    assert!(matches!(
+        allocator
+            .allocate_from_retained(RetainedAllocationRequest {
+                selection:
+                    crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection::Latest,
+                source_run_id: &source_run_id,
+                run_id: &run_id,
+                admitted: &admitted,
+                github_token: None,
+            })
+            .await,
+        Err(RetainedAllocationUnavailable::Settled(
+            CapsuleAllocationUnavailable::Runtime
+        ))
+    ));
+    assert_eq!(
+        allocator.workspace_recovery(&run_id).await,
+        openengine_cluster_protocol::WorkspaceRecovery::default()
+    );
+    let checkpoint_error = allocator
+        .checkpoints(openengine_cluster_protocol::RunCheckpointsParams {
+            run_id: run_id.clone(),
+            after: None,
+            limit: None,
+        })
+        .await
+        .expect_err("default allocator must reject workspace checkpoints");
+    assert_eq!(
+        checkpoint_error.to_string(),
+        "workspace checkpoint is unavailable"
+    );
+    assert!(!allocator.discard_workspace(&run_id).await.assert_value());
+
+    let runner = Arc::new(
+        NativeNodeRunner::new(&admitted, driver, Arc::new(FakeSessionFactory::default()))
+            .assert_value_with("default allocated capsule runner"),
+    );
+    let (_loss_sender, loss) = watch::channel(false);
+    let allocated = AllocatedCapsule::new(runner, loss, cleanup);
+    assert!(allocated.checkpoints.is_none());
+    assert!(allocated.execution_seed.is_empty());
+    assert!(!*allocated.loss.borrow());
+}
+
+#[tokio::test]
 async fn wave8_cli_contract_submission_rejects_missing_secrets_and_invalid_graphs_before_effects() {
     let harness = harness(Behavior::Complete).await;
     assert!(matches!(

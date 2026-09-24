@@ -95,6 +95,23 @@ fn session_change_prefix() -> Vec<u8> {
     bytes
 }
 
+#[test]
+fn structured_error_lists_keep_only_nonempty_string_diagnostics_in_order() {
+    for (value, expected) in [
+        (None, None),
+        (Some(json!(null)), None),
+        (Some(json!({"message":"not an array"})), None),
+        (Some(json!([])), None),
+        (Some(json!(["", "  ", null, 7])), None),
+        (
+            Some(json!(["first failure", null, " second failure ", 7])),
+            Some("first failure;  second failure ".to_owned()),
+        ),
+    ] {
+        assert_eq!(error_list(value.as_ref()), expected);
+    }
+}
+
 fn assert_failed_with_usage(
     decoded: Decoded,
     expected_diagnostic: &str,

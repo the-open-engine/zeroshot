@@ -1,5 +1,10 @@
-use openengine_cluster_protocol::{IdempotencyKey, Sha256Digest};
+use openengine_cluster_protocol::{
+    ExecutionRef, GetParams, IdempotencyKey, InitializeParams, NOT_FOUND, PROTOCOL_VERSION,
+    RunAttachParams, RunCheckpointsParams, RunForceParams, RunLogsParams, RunStatus,
+    RunStatusParams, RunWatchParams, Sha256Digest,
+};
 use openengine_cluster_testkit::assertions::AssertValue;
+use openengine_cluster_server::{ClusterBackend, ConnectionContext};
 
 use super::*;
 use crate::v2_run_ledger::{CreateRun, RunLedger, fake::FakeRunLedger};
@@ -34,6 +39,35 @@ fn observer_storage(root: &Path) -> (PortableControllerPaths, Arc<SqliteRunLedge
     let paths = PortableControllerPaths::new(&state);
     let ledger = Arc::new(SqliteRunLedger::open(paths.ledger()).assert_value());
     (paths, ledger)
+}
+
+async fn terminal_observer(root: &Path, run_id: RunId) -> PortableRunController {
+    let (paths, ledger) = observer_storage(root);
+    ledger
+        .create_or_get(CreateRun {
+            run_id: run_id.clone(),
+            submission_key: IdempotencyKey::new("durable-observer-key").assert_value(),
+            submission_digest: Sha256Digest::new("c".repeat(64)).assert_value(),
+            admitted: crate::native_v2_runner::test_support::admitted(),
+        })
+        .await
+        .assert_value_with("durable observer fixture creation");
+    ledger
+        .append(
+            &run_id,
+            vec![crate::v2_run_ledger::RunEvent::Terminal {
+                result: openengine_cluster_protocol::TerminalResult::Succeeded {
+                    output: serde_json::Value::Null,
+                },
+            }],
+        )
+        .await
+        .assert_value_with("durable observer fixture settlement");
+    let controller = PortableRunController::open_observer(paths, run_id)
+        .await
+        .assert_value_with("durable observer reopen");
+    drop(ledger);
+    controller
 }
 
 #[tokio::test]
@@ -164,38 +198,136 @@ async fn coverage_contract_observer_refuses_storage_without_the_exact_durable_ru
 #[tokio::test]
 async fn coverage_contract_observer_reopens_one_exact_durable_run_and_keeps_identity_fenced() {
     let root = tempfile::tempdir().assert_value();
-    let (paths, ledger) = observer_storage(root.path());
     let run_id = RunId::new("durable-observer-run");
-    ledger
-        .create_or_get(CreateRun {
-            run_id: run_id.clone(),
-            submission_key: IdempotencyKey::new("durable-observer-key").assert_value(),
-            submission_digest: Sha256Digest::new("c".repeat(64)).assert_value(),
-            admitted: crate::native_v2_runner::test_support::admitted(),
-        })
-        .await
-        .assert_value_with("durable observer fixture creation");
-    ledger
-        .append(
-            &run_id,
-            vec![crate::v2_run_ledger::RunEvent::Terminal {
-                result: openengine_cluster_protocol::TerminalResult::Succeeded {
-                    output: serde_json::Value::Null,
-                },
-            }],
-        )
-        .await
-        .assert_value_with("durable observer fixture settlement");
-    // The observer contract serves terminal truth without reconstructing or reconciling a
-    // runtime. Keep the existing connection open to prove another reader sees committed state.
-    let controller = PortableRunController::open_observer(paths.clone(), run_id.clone())
-        .await
-        .assert_value_with("durable observer reopen");
-    drop(ledger);
+    let controller = terminal_observer(root.path(), run_id.clone()).await;
     assert_eq!(controller.run_id(), &run_id);
-    assert_eq!(controller.paths().storage(), paths.storage());
+    assert_eq!(
+        controller.paths().storage(),
+        root.path().join("observer-state")
+    );
     assert!(controller.require_run(&run_id).is_ok());
     assert!(controller.require_run(&RunId::new("other-run")).is_err());
+}
+
+async fn assert_exact_backend_delegation(
+    controller: &PortableRunController,
+    context: &ConnectionContext,
+    run_id: &RunId,
+) {
+    let initialized = ClusterBackend::initialize(
+        controller,
+        context,
+        InitializeParams {
+            protocol_version: PROTOCOL_VERSION.to_owned(),
+        },
+    )
+    .await
+    .assert_value();
+    assert_eq!(initialized.protocol_version, PROTOCOL_VERSION);
+    ClusterBackend::get(controller, context, GetParams::default())
+        .await
+        .assert_value();
+
+    let checkpoints = ClusterBackend::run_checkpoints(
+        controller,
+        context,
+        RunCheckpointsParams {
+            run_id: run_id.clone(),
+            after: None,
+            limit: None,
+        },
+    )
+    .await
+    .assert_value();
+    assert_eq!(&checkpoints.run_id, run_id);
+    assert!(checkpoints.checkpoints.is_empty());
+
+    let status = ClusterBackend::run_status(
+        controller,
+        context,
+        RunStatusParams {
+            run_id: run_id.clone(),
+        },
+    )
+    .await
+    .assert_value();
+    assert!(matches!(status.status, RunStatus::Finished { .. }));
+    let (watch, watch_stream) = ClusterBackend::run_watch(
+        controller,
+        context,
+        RunWatchParams {
+            run_id: run_id.clone(),
+            from_cursor: None,
+        },
+    )
+    .await
+    .assert_value();
+    assert_eq!(&watch.run_id, run_id);
+    drop(watch_stream);
+    let (logs, log_stream) = ClusterBackend::run_logs(
+        controller,
+        context,
+        RunLogsParams {
+            run_id: run_id.clone(),
+            from_cursor: None,
+            execution: None,
+        },
+    )
+    .await
+    .assert_value();
+    assert_eq!(&logs.run_id, run_id);
+    drop(log_stream);
+
+    let missing_execution = ExecutionRef::new("missing-execution").assert_value();
+    let Err(attach_error) = ClusterBackend::run_attach(
+        controller,
+        context,
+        RunAttachParams {
+            run_id: run_id.clone(),
+            execution: missing_execution,
+        },
+    )
+    .await
+    else {
+        panic!("terminal run unexpectedly exposed a live execution");
+    };
+    assert_eq!(attach_error.code, NOT_FOUND);
+    assert_eq!(attach_error.message, "execution was not found");
+
+    let forced = ClusterBackend::run_force(
+        controller,
+        context,
+        RunForceParams {
+            run_id: run_id.clone(),
+        },
+    )
+    .await
+    .assert_value();
+    assert_eq!(&forced.run_id, run_id);
+    assert!(matches!(forced.status, RunStatus::Finished { .. }));
+}
+
+#[tokio::test]
+async fn portable_backend_delegates_exact_run_operations_and_fences_foreign_ids() {
+    let root = tempfile::tempdir().assert_value();
+    let run_id = RunId::new("portable-backend-run");
+    let controller = terminal_observer(root.path(), run_id.clone()).await;
+    let context = ConnectionContext::default();
+
+    assert_exact_backend_delegation(&controller, &context, &run_id).await;
+    let Err(error) = ClusterBackend::run_status(
+        &controller,
+        &context,
+        RunStatusParams {
+            run_id: RunId::new("portable-backend-foreign"),
+        },
+    )
+    .await
+    else {
+        panic!("portable backend accepted a foreign run identity");
+    };
+    assert_eq!(error.code, NOT_FOUND);
+    assert_eq!(error.message, "run was not found");
 }
 
 #[test]
