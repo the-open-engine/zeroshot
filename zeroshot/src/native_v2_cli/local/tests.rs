@@ -362,7 +362,8 @@ fn local_recovery_contract_preserves_lineage_and_recoverability() {
     ));
 }
 
-async fn assert_bootstrap_and_resume_failures_leave_recoverable_state() {
+#[tokio::test]
+async fn local_bootstrap_and_resume_failures_leave_recoverable_state() {
     let root = TestDirectory::new("lbr");
     let backend = LocalCliBackend::new(
         root.path().to_owned(),
@@ -426,7 +427,8 @@ async fn assert_bootstrap_and_resume_failures_leave_recoverable_state() {
     );
 }
 
-async fn assert_enumeration_and_readiness_fail_closed_without_controller() {
+#[tokio::test]
+async fn local_enumeration_and_readiness_fail_closed_without_controller() {
     let root = TestDirectory::new("ler");
     let backend = contract_backend(root.path()).with_ready_timeout(Duration::ZERO);
     std::fs::create_dir_all(root.child("runs/not-a-run")).assert_value();
@@ -466,7 +468,8 @@ async fn assert_enumeration_and_readiness_fail_closed_without_controller() {
     ));
 }
 
-fn assert_recovery_lineage_is_bounded_and_honors_root_delivery() {
+#[test]
+fn local_recovery_lineage_is_bounded_and_honors_root_delivery() {
     let root = TestDirectory::new("local-bounded-lineage");
     let backend = contract_backend(root.path());
     let first = RunId::new("0199f33f-3b44-7d21-9000-000000000061");
@@ -504,7 +507,8 @@ fn assert_recovery_lineage_is_bounded_and_honors_root_delivery() {
     assert!(backend.delivery_run_id(&first, &first_document).is_err());
 }
 
-async fn assert_local_stale_state_and_readiness_fail_closed() {
+#[tokio::test]
+async fn local_stale_state_and_readiness_fail_closed() {
     let root = TestDirectory::new("local-wave7-boundaries");
     let backend = contract_backend(root.path());
     let run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000071");
@@ -588,10 +592,14 @@ async fn assert_local_stale_state_and_readiness_fail_closed() {
     }
 }
 
-async fn assert_observer_recovers_durable_local_status_without_controller_process() {
-    let root = TestDirectory::new("l9o");
+async fn observable_local_run(
+    label: &str,
+    run_id: &str,
+) -> (TestDirectory, LocalCliBackend, RunId, SqliteRunLedger) {
+    // Local controller sockets have a small Unix path budget, so callers use short unique labels.
+    let root = TestDirectory::new(label);
     let backend = contract_backend(root.path()).with_ready_timeout(Duration::ZERO);
-    let run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000091");
+    let run_id = RunId::new(run_id);
     let submission = contract_submission("observer-recovery");
     let ledger = create_contract_run(&backend, &run_id, &submission).await;
     ledger
@@ -608,6 +616,13 @@ async fn assert_observer_recovers_durable_local_status_without_controller_proces
         )
         .await
         .assert_value();
+    (root, backend, run_id, ledger)
+}
+
+#[tokio::test]
+async fn local_status_observes_a_durable_run_without_a_controller_process() {
+    let (_root, backend, run_id, _ledger) =
+        observable_local_run("l9s", "0199f33f-3b44-7d21-9000-000000000091").await;
     let status = backend
         .status_local(RunStatusParams {
             run_id: run_id.clone(),
@@ -616,10 +631,15 @@ async fn assert_observer_recovers_durable_local_status_without_controller_proces
     assert!(status.is_ok(), "observer status failed: {status:?}");
     let status = status.assert_value();
     assert_eq!(status.run_id, run_id);
+}
+
+#[tokio::test]
+async fn local_list_observes_a_durable_run_without_a_controller_process() {
+    let (_root, backend, run_id, _ledger) =
+        observable_local_run("l9l", "0199f33f-3b44-7d21-9000-000000000092").await;
     let listed = backend.list_local().await.assert_value();
     assert_eq!(listed.runs.len(), 1);
     assert_eq!(listed.runs[0].run_id, run_id);
-    drop(ledger);
 
     let invalid_root = TestDirectory::new("local-wave9-invalid-runs");
     std::fs::write(invalid_root.child("runs"), b"not a directory").assert_value();
@@ -629,15 +649,6 @@ async fn assert_observer_recovers_durable_local_status_without_controller_proces
             .is_err()
     );
     assert!(remove_stale_bootstrap(&invalid_root.child("runs/bootstrap"), Duration::ZERO).is_err());
-}
-
-#[tokio::test]
-async fn wave10_cli_contract_local_recovery_and_observer_matrix_is_lean_and_fail_closed() {
-    assert_bootstrap_and_resume_failures_leave_recoverable_state().await;
-    assert_enumeration_and_readiness_fail_closed_without_controller().await;
-    assert_recovery_lineage_is_bounded_and_honors_root_delivery();
-    assert_local_stale_state_and_readiness_fail_closed().await;
-    assert_observer_recovers_durable_local_status_without_controller_process().await;
 }
 
 #[cfg(unix)]

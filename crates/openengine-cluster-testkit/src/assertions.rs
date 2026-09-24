@@ -1,48 +1,59 @@
 //! Small assertion helpers for fixture and integration-test code.
 
+#[track_caller]
+fn assert_one<T>(values: impl IntoIterator<Item = T>, context: &str) -> T {
+    let mut values = values.into_iter().collect::<Vec<_>>();
+    assert_eq!(values.len(), 1, "{context}");
+    values.swap_remove(0)
+}
+
 pub trait AssertValue<T> {
+    #[track_caller]
     fn assert_value(self) -> T;
+    #[track_caller]
     fn assert_value_with(self, context: &str) -> T;
 }
 
 impl<T, E> AssertValue<T> for Result<T, E> {
+    #[track_caller]
     fn assert_value(self) -> T {
         self.assert_value_with("expected a successful result")
     }
 
+    #[track_caller]
     fn assert_value_with(self, context: &str) -> T {
-        let mut values = self.into_iter().collect::<Vec<_>>();
-        assert_eq!(values.len(), 1, "{context}");
-        values.swap_remove(0)
+        assert_one(self, context)
     }
 }
 
 impl<T> AssertValue<T> for Option<T> {
+    #[track_caller]
     fn assert_value(self) -> T {
         self.assert_value_with("expected a present value")
     }
 
+    #[track_caller]
     fn assert_value_with(self, context: &str) -> T {
-        let mut values = self.into_iter().collect::<Vec<_>>();
-        assert_eq!(values.len(), 1, "{context}");
-        values.swap_remove(0)
+        assert_one(self, context)
     }
 }
 
 pub trait AssertError<E> {
+    #[track_caller]
     fn assert_error(self) -> E;
+    #[track_caller]
     fn assert_error_with(self, context: &str) -> E;
 }
 
 impl<T, E> AssertError<E> for Result<T, E> {
+    #[track_caller]
     fn assert_error(self) -> E {
         self.assert_error_with("expected an error result")
     }
 
+    #[track_caller]
     fn assert_error_with(self, context: &str) -> E {
-        let mut errors = self.err().into_iter().collect::<Vec<_>>();
-        assert_eq!(errors.len(), 1, "{context}");
-        errors.swap_remove(0)
+        assert_one(self.err(), context)
     }
 }
 
