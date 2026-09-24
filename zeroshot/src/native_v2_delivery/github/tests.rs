@@ -983,43 +983,41 @@ async fn failed_check_logs_are_enriched_but_transport_failures_remain_typed() {
         )]),
         (false, None),
     );
-    for (log_action, expected) in [
-        (
-            "printf '%s\\n' 'setup passed' 'assertion failed at boundary'",
-            "assertion failed at boundary",
-        ),
-        (
-            "printf '%s\\n' 'gh: Resource not accessible (HTTP 403)' >&2; exit 1",
-            "GitHub job log unavailable",
-        ),
-    ] {
-        let root = tempfile::tempdir().assert_value();
-        let program = write_policy_fixture(root.path(), &page, log_action);
-        let observation = authority(program, root.path())
-            .inspect_review(&review(), GitHubCredential("test-token"))
-            .await
-            .assert_value();
-        let GitHubReviewState::Open {
-            checks: GitHubChecks::Failed { diagnostic },
-        } = observation.state
-        else {
-            panic!("required failed check must remain failed");
-        };
-        assert!(diagnostic.contains(expected), "{diagnostic}");
-    }
-
     let root = tempfile::tempdir().assert_value();
     let program = write_policy_fixture(
         root.path(),
         &page,
-        "printf '%s\\n' 'gh: rate limited (HTTP 429)' >&2; exit 1",
+        "printf '%s\\n' 'setup passed' 'assertion failed at boundary'",
     );
-    let error = authority(program, root.path())
+    let observation = authority(program, root.path())
         .inspect_review(&review(), GitHubCredential("test-token"))
         .await
+        .assert_value();
+    let GitHubReviewState::Open {
+        checks: GitHubChecks::Failed { diagnostic },
+    } = observation.state
+    else {
+        panic!("required failed check must remain failed");
+    };
+    assert!(diagnostic.contains("assertion failed at boundary"));
+
+    let unavailable = job_log_excerpt(Err(GitHubAuthorityError::api(
+        Some(403),
+        "resource not accessible",
+    )))
+    .assert_value();
+    assert!(unavailable.contains("GitHub job log unavailable"));
+
+    for status in [401, 429] {
+        let error = job_log_excerpt(Err(GitHubAuthorityError::api(
+            Some(status),
+            "transport refusal",
+        )))
         .assert_error();
-    assert_eq!(error.api_status(), Some(429));
-    assert!(error.retryable_operation());
+        assert_eq!(error.api_status(), Some(status));
+        assert_eq!(error.authentication_failed(), status == 401);
+        assert_eq!(error.retryable_operation(), status == 429);
+    }
 }
 
 #[cfg(unix)]

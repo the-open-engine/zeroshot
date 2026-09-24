@@ -152,3 +152,7 @@ impl From<super::GitCommandFailure> for GitHubAuthorityError {
         Self::Command(Box::new(failure))
     }
 }
+
+#[cfg(test)]
+#[path = "authority_error/tests.rs"]
+mod tests;

@@ -135,8 +135,10 @@ async fn nonexecutable_api_program_preserves_permission_error() {
 }
 
 #[cfg(unix)]
-#[tokio::test]
-async fn explicit_rate_limit_403s_are_temporary_but_permission_403_is_terminal() {
+#[test]
+fn explicit_rate_limit_403s_are_temporary_but_permission_403_is_terminal() {
+    use std::os::unix::process::ExitStatusExt;
+
     for (message, retryable) in [
         ("API rate limit exceeded for user ID 123.", true),
         (
@@ -145,14 +147,15 @@ async fn explicit_rate_limit_403s_are_temporary_but_permission_403_is_terminal()
         ),
         ("Resource not accessible by integration", false),
     ] {
-        let root = TemporaryDirectory::for_test("github-api-rate-limit");
-        let source = format!("printf '%s\\n' 'gh: {message} (HTTP 403)' >&2\nexit 1\n");
-        let program = script(root.as_path(), &source);
-        let error = authority(program, Duration::from_secs(10))
-            .api_output(&[], GitHubCredential("test-token"))
-            .await
-            .err()
-            .assert_value();
+        let error = ApiOutput {
+            stdout: Vec::new(),
+            stderr: format!("gh: {message} (HTTP 403)\n").into_bytes(),
+        }
+        .failure(
+            Some(std::process::ExitStatus::from_raw(1 << 8)),
+            "fixture failure",
+            GitHubCredential("test-token"),
+        );
 
         assert_eq!(error.api_status(), Some(403));
         assert_eq!(error.retryable_review_sync(), retryable);

@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use openengine_cluster_protocol::{DataSelector, IdempotencyKey, RecordField, RunSubmission, RunTitle};
 use openengine_cluster_server::admission::VerifiedGraph;
-use openengine_cluster_testkit::assertions::AssertValue;
+use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{Value, json};
 
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
@@ -203,10 +203,17 @@ fn auto_research_has_ten_gated_iterations_and_optional_checkpoint() {
         assert_auto_research_materialization(delivery, expected_deliveries);
     }
     for delivery in [TemplateDelivery::PullRequest, TemplateDelivery::Merge] {
-        assert!(matches!(
-            BuiltinGraphTemplate::AutoResearch.materialize(delivery),
-            Err(BuiltinTemplateError::UnsupportedDelivery { .. })
-        ));
+        let expected = BuiltinTemplateError::UnsupportedDelivery {
+            template: "auto-research",
+            delivery,
+        };
+        assert_eq!(
+            BuiltinGraphTemplate::AutoResearch
+                .materialize(delivery)
+                .assert_error(),
+            expected
+        );
+        assert_eq!(auto_research_graph(delivery).assert_error(), expected);
     }
 }
 

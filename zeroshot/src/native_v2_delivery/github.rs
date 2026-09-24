@@ -219,16 +219,10 @@ impl GhCliDeliveryAuthority {
         let mut snapshot = self.policy_snapshot(review, credential).await?;
         let mut logs = Vec::new();
         for job in &snapshot.failed_job_ids {
-            let output = self
-                .job_log_output(&review.repository, *job, credential)
-                .await;
-            let log = match output {
-                Ok(output) => check_log_tail(&output),
-                Err(error) if error.authentication_failed() || error.retryable_operation() => {
-                    return Err(error);
-                }
-                Err(error) => format!("GitHub job log unavailable: {error}"),
-            };
+            let log = job_log_excerpt(
+                self.job_log_output(&review.repository, *job, credential)
+                    .await,
+            )?;
             logs.push((*job, log));
         }
         include_check_logs(&mut snapshot, &logs);
@@ -424,6 +418,16 @@ impl GitHubDeliveryAuthority for GhCliDeliveryAuthority {
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubConflictOutcome, GitHubAuthorityError> {
         conflict::materialize(self, request, credential).await
+    }
+}
+
+fn job_log_excerpt(
+    output: Result<Vec<u8>, GitHubAuthorityError>,
+) -> Result<String, GitHubAuthorityError> {
+    match output {
+        Ok(output) => Ok(check_log_tail(&output)),
+        Err(error) if error.authentication_failed() || error.retryable_operation() => Err(error),
+        Err(error) => Ok(format!("GitHub job log unavailable: {error}")),
     }
 }
 
