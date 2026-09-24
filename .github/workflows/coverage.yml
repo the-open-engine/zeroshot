@@ -113,7 +113,7 @@ jobs:
 
           for (const file of report.files) {
             const { lines, regions } = file.summary;
-            if (regions.count < 150 || (lines.percent >= 75 && regions.percent >= 75)) continue;
+            if (regions.count < 150 || (lines.percent >= 80 && regions.percent >= 80)) continue;
             const path = file.filename.replace(`${process.cwd()}/`, '');
             failures.push(
               `${path}: ${lines.percent.toFixed(2)}% lines, ${regions.percent.toFixed(2)}% regions`,

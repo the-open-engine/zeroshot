@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::Write;
+use std::process::{Command, Stdio};
 
 use openengine_cluster_protocol::{
     ConnectionKey, ConnectionScope, EnvironmentVariableName, StaticConnectionValues,
@@ -13,6 +14,8 @@ use crate::native_v2_cli::tests::support::{Call, FakeBackend};
 use crate::native_v2_cli::ConnectionRoute;
 
 struct UnavailableOutput;
+
+const STDIN_READER_CHILD: &str = "ZEROSHOT_TEST_CONNECTION_STDIN_READER";
 
 impl Write for UnavailableOutput {
     fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
@@ -230,6 +233,34 @@ fn wave6_cli_contract_connection_inputs_are_bounded_and_fail_closed() {
     .unwrap_err();
     assert!(matches!(prompt_error, NativeV2CliError::Output(_)));
     assert_eq!(prompts, 2, "prompting must stop at the first I/O failure");
+}
+
+#[test]
+fn connection_json_reader_consumes_the_process_stdin_contract() {
+    if std::env::var_os(STDIN_READER_CHILD).is_some() {
+        let values = read_connection_values(ConnectionInput::JsonStdin).assert_value();
+        let field = EnvironmentVariableName::new("OPENAI_API_KEY").assert_value();
+        assert_eq!(
+            values.as_map().get(&field).map(String::as_str),
+            Some("child-secret")
+        );
+        return;
+    }
+
+    let mut child = Command::new(std::env::current_exe().assert_value())
+        .arg("connection_json_reader_consumes_the_process_stdin_contract")
+        .env(STDIN_READER_CHILD, "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .assert_value();
+    child
+        .stdin
+        .take()
+        .assert_value()
+        .write_all(br#"{"OPENAI_API_KEY":"child-secret"}"#)
+        .assert_value();
+    assert!(child.wait().assert_value().success());
 }
 
 #[tokio::test]

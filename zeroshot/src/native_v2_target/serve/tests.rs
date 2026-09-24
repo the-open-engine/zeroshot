@@ -8,6 +8,9 @@ use std::os::unix::fs::PermissionsExt;
 
 struct Storage(std::path::PathBuf);
 
+#[cfg(unix)]
+const DIRECT_SERVE_CHILD: &str = "ZEROSHOT_TEST_DIRECT_SERVE_CHILD";
+
 impl Drop for Storage {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
@@ -96,6 +99,58 @@ async fn direct_serve_rejects_an_invalid_public_origin_before_preparing_storage(
         assert!(matches!(error, TargetServeError::InvalidOrigin(_)));
         assert!(!path.exists(), "invalid origin prepared storage for {case}");
     }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn direct_serve_shuts_down_cleanly_on_process_signal() {
+    if let Some(storage) = std::env::var_os(DIRECT_SERVE_CHILD) {
+        serve_direct_target(TargetServe {
+            listen: "127.0.0.1:0".parse().assert_value(),
+            public_origin: "http://127.0.0.1:8080".to_owned(),
+            storage: storage.into(),
+            bootstrap_key_file: None,
+        })
+        .await
+        .assert_value();
+        return;
+    }
+
+    let root =
+        openengine_cluster_testkit::TemporaryDirectory::for_test("target-serve-signal-shutdown");
+    let storage = root.path("storage");
+    let mut command = tokio::process::Command::new(std::env::current_exe().assert_value());
+    let null_stdio = std::process::Stdio::null;
+    command
+        .arg("direct_serve_shuts_down_cleanly_on_process_signal")
+        .env(DIRECT_SERVE_CHILD, &storage)
+        .stdin(null_stdio())
+        .stdout(null_stdio())
+        .stderr(null_stdio())
+        .kill_on_drop(true);
+    let mut child = command.spawn().assert_value();
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while !storage.join("runs.sqlite3").is_file() {
+            assert!(
+                child.try_wait().assert_value().is_none(),
+                "direct target stopped during preparation"
+            );
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .assert_value();
+
+    let pid = i32::try_from(child.id().assert_value()).assert_value();
+    // SAFETY: pid identifies the live child owned by this test; SIGTERM is handled by the server.
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(2), child.wait())
+            .await
+            .assert_value()
+            .assert_value()
+            .success()
+    );
 }
 
 #[cfg(unix)]

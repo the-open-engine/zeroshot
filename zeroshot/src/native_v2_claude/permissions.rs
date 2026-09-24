@@ -56,34 +56,41 @@ impl ClaudeAdapter {
         {
             return Ok(PermissionPolicy::Configured);
         }
-        command.argv.clone_from(&self.prefix_arguments);
-        command.argv.extend([
-            "--print".to_owned(),
-            "--input-format".to_owned(),
-            "stream-json".to_owned(),
-            "--output-format".to_owned(),
-            "stream-json".to_owned(),
-            "--verbose".to_owned(),
-            "--no-session-persistence".to_owned(),
-            "--safe-mode".to_owned(),
-            // Safe mode leaves managed hooks eligible. Disable hooks for this inspection,
-            // without changing the permissions or sandbox settings being inspected.
-            "--settings".to_owned(),
-            concat!(
-                r#"{"disableAllHooks":true,"apiKeyHelper":"","awsAuthRefresh":"","awsCredentialExport":"","#,
-                r#""gcpAuthRefresh":"","proxyAuthHelper":""}"#,
-            ).to_owned(),
-        ]);
-        let requests = vec![
-            configuration_request("zeroshot-initialize", "initialize"),
-            configuration_request("zeroshot-settings", "get_settings"),
-        ];
+        let (arguments, requests) = permission_inspection(&self.prefix_arguments);
+        command.argv = arguments;
         let Some(responses) = inspect_configuration(files, command, control, requests).await?
         else {
             return Ok(PermissionPolicy::Unavailable);
         };
         Ok(permission_policy(&responses))
     }
+}
+
+fn permission_inspection(prefix_arguments: &[String]) -> (Vec<String>, Vec<ConfigurationRequest>) {
+    let mut arguments = prefix_arguments.to_vec();
+    arguments.extend([
+        "--print".to_owned(),
+        "--input-format".to_owned(),
+        "stream-json".to_owned(),
+        "--output-format".to_owned(),
+        "stream-json".to_owned(),
+        "--verbose".to_owned(),
+        "--no-session-persistence".to_owned(),
+        "--safe-mode".to_owned(),
+        // Safe mode leaves managed hooks eligible. Disable hooks for this inspection,
+        // without changing the permissions or sandbox settings being inspected.
+        "--settings".to_owned(),
+        concat!(
+            r#"{"disableAllHooks":true,"apiKeyHelper":"","awsAuthRefresh":"","awsCredentialExport":"","#,
+            r#""gcpAuthRefresh":"","proxyAuthHelper":""}"#,
+        )
+        .to_owned(),
+    ]);
+    let requests = vec![
+        configuration_request("zeroshot-initialize", "initialize"),
+        configuration_request("zeroshot-settings", "get_settings"),
+    ];
+    (arguments, requests)
 }
 
 fn configuration_request(id: &'static str, subtype: &'static str) -> ConfigurationRequest {

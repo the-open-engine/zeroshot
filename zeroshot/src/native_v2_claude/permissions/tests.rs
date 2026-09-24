@@ -10,6 +10,59 @@ fn responses(settings: Value) -> Vec<Value> {
 }
 
 #[test]
+fn inspection_probe_is_minimal_ordered_and_disables_native_helpers() {
+    let prefix = vec!["--model".to_owned(), "opaque-model".to_owned()];
+    let (arguments, requests) = permission_inspection(&prefix);
+
+    assert_eq!(&arguments[..prefix.len()], prefix);
+    assert_eq!(
+        &arguments[prefix.len()..arguments.len() - 1],
+        [
+            "--print",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--no-session-persistence",
+            "--safe-mode",
+            "--settings",
+        ]
+    );
+    let inspection_settings: Value =
+        serde_json::from_str(arguments.last().expect("inline inspection settings"))
+            .expect("valid inline inspection settings");
+    assert_eq!(
+        inspection_settings,
+        json!({
+            "disableAllHooks": true,
+            "apiKeyHelper": "",
+            "awsAuthRefresh": "",
+            "awsCredentialExport": "",
+            "gcpAuthRefresh": "",
+            "proxyAuthHelper": "",
+        })
+    );
+
+    assert_eq!(requests.len(), 2);
+    for (request, (id, subtype)) in requests.iter().zip([
+        ("zeroshot-initialize", "initialize"),
+        ("zeroshot-settings", "get_settings"),
+    ]) {
+        assert_eq!(request.response_pointer, "/response/request_id");
+        assert_eq!(request.response_id, json!(id));
+        assert_eq!(
+            request.messages,
+            [json!({
+                "type": "control_request",
+                "request_id": id,
+                "request": { "subtype": subtype },
+            })]
+        );
+    }
+}
+
+#[test]
 fn native_empty_configuration_receives_the_default() {
     let responses: Vec<Value> =
         serde_json::from_str(include_str!("../permissions-empty-2.1.237.json"))
@@ -19,6 +72,7 @@ fn native_empty_configuration_receives_the_default() {
 
 #[test]
 fn only_unconfigured_policy_receives_the_permissive_default() {
+    assert!(!unconfigured_policy(&Value::Null));
     for effective in [
         json!({}),
         json!({"permissions":{},"sandbox":{}}),
@@ -109,6 +163,7 @@ fn malformed_or_incomplete_configuration_never_enables_bypass() {
         json!({"type":"control_response","response":{}}),
         json!({"type":"control_response","response":{"subtype":7,"response":{}}}),
         json!({"type":"control_response","response":{"subtype":"error"}}),
+        json!({"type":"control_response","response":{"subtype":"success","response":{}}}),
         json!({"type":"control_response","response":{"subtype":"success"}}),
     ] {
         for response_index in [0, 1] {

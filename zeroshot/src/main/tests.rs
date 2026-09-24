@@ -6,6 +6,18 @@ use openengine_cluster_testkit::assertions::AssertValue;
 
 use super::*;
 
+struct RejectWrites;
+
+impl std::io::Write for RejectWrites {
+    fn write(&mut self, _buffer: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::other("output is closed"))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Err(std::io::Error::other("output is closed"))
+    }
+}
+
 fn assert_target_serve_is_part_of_the_public_command_schema() {
     let arguments = [
         "target",
@@ -197,6 +209,10 @@ async fn assert_private_bootstrap_is_exact_and_public_startup_stays_public() {
             Err(NativeV2CliError::Usage(message)) if message.contains("malformed")
         ));
     }
+    assert!(matches!(
+        run_private_controller(&[OsString::from(LOCAL_CONTROLLER_MODE)]).await,
+        Err(ProcessError::Cli(NativeV2CliError::Usage(message))) if message.contains("malformed")
+    ));
     let valid = [
         OsString::from(LOCAL_CONTROLLER_MODE),
         OsString::from("--bootstrap"),
@@ -255,11 +271,12 @@ fn assert_process_diagnostics_preserve_cli_detail_and_classify_runtime_failures(
 }
 
 #[cfg(feature = "ui")]
-fn assert_ui_target_resolution_is_local_and_validates_stored_origins() {
+async fn assert_ui_target_resolution_is_local_and_validates_stored_origins() {
     use native_v2_target::{TargetAccess, TargetRecord};
 
     let root = openengine_cluster_testkit::TemporaryDirectory::for_test("main-ui-target");
-    let registry = FileTargetRegistry::new(root.path("targets.json"));
+    let registry_path = root.path("targets.json");
+    let registry = FileTargetRegistry::new(registry_path.clone());
     registry
         .insert(TargetRecord {
             id: "00000000-0000-4000-8000-000000000001".to_owned(),
@@ -268,7 +285,7 @@ fn assert_ui_target_resolution_is_local_and_validates_stored_origins() {
             access: TargetAccess::Direct,
         })
         .assert_value();
-    assert!(resolve_ui_target_from_registry("local".to_owned(), &registry).is_ok());
+    assert!(resolve_ui_target("local".to_owned(), || Ok(registry_path.clone())).is_ok());
 
     let error = build_ui_target(TargetRecord {
         id: "00000000-0000-4000-8000-000000000002".to_owned(),
@@ -286,9 +303,46 @@ fn assert_ui_target_resolution_is_local_and_validates_stored_origins() {
         "unexpected stored-origin failure: {error}"
     );
     assert!(matches!(
-        resolve_ui_target_from_registry("missing".to_owned(), &registry),
+        resolve_ui_target("missing".to_owned(), || Ok(registry_path)),
         Err(ProcessError::Target(TargetConnectorError::NotFound(name))) if name == "missing"
     ));
+    assert!(matches!(
+        resolve_ui_target("unreachable".to_owned(), || Err(
+            TargetConnectorError::RegistryPath("test path")
+        )),
+        Err(ProcessError::Target(TargetConnectorError::RegistryPath(
+            "test path"
+        )))
+    ));
+
+    let service_error = serve_ui_with_registry_path(
+        "127.0.0.1:0".parse().assert_value(),
+        Some("missing".to_owned()),
+        || Ok(root.path("targets.json")),
+    )
+    .await
+    .err()
+    .assert_value();
+    assert!(matches!(
+        service_error,
+        ProcessError::Target(TargetConnectorError::NotFound(name)) if name == "missing"
+    ));
+}
+
+fn validation_command(input: &std::path::Path, runtime: &std::path::Path) -> NativeV2CliCommand {
+    parse_native_v2_args(vec![
+        OsString::from("run"),
+        OsString::from("--title"),
+        OsString::from("Validate public routing"),
+        OsString::from("--input"),
+        input.as_os_str().to_owned(),
+        OsString::from("--template"),
+        OsString::from("single-worker"),
+        OsString::from("--runtime-config"),
+        runtime.as_os_str().to_owned(),
+        OsString::from("--validate-only"),
+    ])
+    .assert_value()
 }
 
 async fn assert_static_dispatch_and_remaining_management_routes_are_exact() {
@@ -315,20 +369,81 @@ async fn assert_static_dispatch_and_remaining_management_routes_are_exact() {
         }"#,
     )
     .assert_value();
-    let validate = parse_native_v2_args(vec![
-        OsString::from("run"),
-        OsString::from("--title"),
-        OsString::from("Validate public routing"),
-        OsString::from("--input"),
-        input.path().as_os_str().to_owned(),
-        OsString::from("--template"),
-        OsString::from("single-worker"),
-        OsString::from("--runtime-config"),
-        runtime.path().as_os_str().to_owned(),
-        OsString::from("--validate-only"),
-    ])
-    .assert_value();
+    let validate = validation_command(input.path(), runtime.path());
     run_public_command(validate).await.assert_value();
+
+    let static_error = execute_public_command(NativeV2CliCommand::Version, &mut RejectWrites)
+        .await
+        .err()
+        .assert_value();
+    assert!(matches!(
+        static_error,
+        ProcessError::Cli(NativeV2CliError::Output(_))
+    ));
+
+    let missing_input = input.path().with_extension("missing");
+    let preflight_error = execute_public_command(
+        validation_command(&missing_input, runtime.path()),
+        &mut Vec::new(),
+    )
+    .await
+    .err()
+    .assert_value();
+    assert!(
+        matches!(
+            preflight_error,
+            ProcessError::Cli(NativeV2CliError::Read { kind: "input", ref path, .. })
+                if *path == missing_input
+        ),
+        "unexpected validation failure: {preflight_error}"
+    );
+
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test("main-local-backend");
+    let backend = LocalCliBackend::new(
+        root.path("state"),
+        std::env::current_exe().assert_value(),
+        std::env::current_dir().assert_value(),
+        PathBuf::from("git"),
+    );
+    let invalid_status =
+        parse_native_v2_args(["status", "run-1"].map(OsString::from)).assert_value();
+    let backend_error = execute_backend_command(
+        invalid_status,
+        &backend,
+        &mut CtrlCDetachSignal,
+        &mut Vec::new(),
+    )
+    .await
+    .err()
+    .assert_value();
+    assert!(matches!(
+        backend_error,
+        ProcessError::Cli(NativeV2CliError::Local(message))
+            if message.contains("not a local controller identity")
+    ));
+
+    let remote_list =
+        parse_native_v2_args(["list", "--target", "missing"].map(OsString::from)).assert_value();
+    let connector = NativeV2TargetConnector::new(
+        FileTargetRegistry::new(root.path("targets.json")),
+        TargetHttpControlAuthority::production().assert_value(),
+        TargetOecpWebSocketDialer,
+    );
+    let backend = NamedTargetCliBackend::new(connector);
+    let named_error = execute_backend_command(
+        remote_list,
+        &backend,
+        &mut CtrlCDetachSignal,
+        &mut Vec::new(),
+    )
+    .await
+    .err()
+    .assert_value();
+    assert!(matches!(
+        named_error,
+        ProcessError::Cli(NativeV2CliError::Target(message))
+            if message.contains("missing") && message.contains("not found")
+    ));
 }
 
 #[tokio::test]
@@ -340,7 +455,7 @@ async fn wave10_cli_contract_process_dispatch_and_routing_matrix_is_exact() {
     assert_static_dispatch_and_remaining_management_routes_are_exact().await;
     assert_process_diagnostics_preserve_cli_detail_and_classify_runtime_failures();
     #[cfg(feature = "ui")]
-    assert_ui_target_resolution_is_local_and_validates_stored_origins();
+    assert_ui_target_resolution_is_local_and_validates_stored_origins().await;
 }
 
 #[tokio::test]
