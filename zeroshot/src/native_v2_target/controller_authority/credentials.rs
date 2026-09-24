@@ -81,13 +81,7 @@ impl TargetCredentialStore for KeyringTargetCredentialStore {
     async fn get(&self, target_id: &str) -> Result<Option<String>, TargetAuthorityError> {
         let service = credential_service(target_id)?;
         tokio::task::spawn_blocking(move || {
-            let entry = keyring::Entry::new(&service, "refresh-token")
-                .map_err(|_| authority_error("target credential store is unavailable"))?;
-            match entry.get_password() {
-                Ok(token) => Ok(Some(token)),
-                Err(keyring::Error::NoEntry) => Ok(None),
-                Err(_) => Err(authority_error("target credential store read failed")),
-            }
+            read_keyring_password(keyring::Entry::new(&service, "refresh-token"))
         })
         .await
         .map_err(|_| authority_error("target credential store task failed"))?
@@ -97,15 +91,35 @@ impl TargetCredentialStore for KeyringTargetCredentialStore {
         let service = credential_service(target_id)?;
         let refresh_token = refresh_token.to_owned();
         tokio::task::spawn_blocking(move || {
-            let entry = keyring::Entry::new(&service, "refresh-token")
-                .map_err(|_| authority_error("target credential store is unavailable"))?;
-            entry
-                .set_password(&refresh_token)
-                .map_err(|_| authority_error("target credential store write failed"))
+            write_keyring_password(
+                keyring::Entry::new(&service, "refresh-token"),
+                &refresh_token,
+            )
         })
         .await
         .map_err(|_| authority_error("target credential store task failed"))?
     }
+}
+
+fn read_keyring_password(
+    entry: keyring::Result<keyring::Entry>,
+) -> Result<Option<String>, TargetAuthorityError> {
+    let entry = entry.map_err(|_| authority_error("target credential store is unavailable"))?;
+    match entry.get_password() {
+        Ok(token) => Ok(Some(token)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(_) => Err(authority_error("target credential store read failed")),
+    }
+}
+
+fn write_keyring_password(
+    entry: keyring::Result<keyring::Entry>,
+    refresh_token: &str,
+) -> Result<(), TargetAuthorityError> {
+    let entry = entry.map_err(|_| authority_error("target credential store is unavailable"))?;
+    entry
+        .set_password(refresh_token)
+        .map_err(|_| authority_error("target credential store write failed"))
 }
 
 pub(super) fn credential_service(target_id: &str) -> Result<String, TargetAuthorityError> {

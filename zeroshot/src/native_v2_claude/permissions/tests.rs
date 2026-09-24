@@ -38,12 +38,15 @@ fn only_unconfigured_policy_receives_the_permissive_default() {
         json!({"sandbox":{"enabled":false}}),
         json!({"permissions":{"disableBypassPermissionsMode":"disable"}}),
         json!({"allowManagedPermissionRulesOnly":true}),
+        json!({"agent":null}),
         json!({"permissions":null}),
+        json!({"env":"CLAUDE_CODE_FORCE_SANDBOX=true"}),
+        json!({"env":{"CLAUDE_CODE_FORCE_SANDBOX":true}}),
         json!({"env":{"CLAUDE_CODE_FORCE_SANDBOX":"yes"}}),
     ] {
-        assert_ne!(
+        assert_eq!(
             permission_policy(&responses(json!({"effective":effective,"sources":[]}))),
-            PermissionPolicy::Unset
+            PermissionPolicy::Configured
         );
     }
 }
@@ -80,57 +83,51 @@ fn malformed_or_incomplete_configuration_never_enables_bypass() {
         json!({}),
         json!({"effective":{}}),
         json!({"effective":null,"sources":[]}),
+        json!({"effective":{},"sources":{}}),
         json!({"effective":{},"sources":[{}]}),
+        json!({"effective":{},"sources":[{"source":"","settings":{}}]}),
+        json!({"effective":{},"sources":[{"source":7,"settings":{}}]}),
+        json!({"effective":{},"sources":[{"source":"userSettings"}]}),
         json!({"effective":{},"sources":[{"source":"userSettings","settings":null}]}),
         json!({"effective":{},"sources":[],"errors":[{"message":"Invalid or malformed JSON"}]}),
         json!({"effective":{},"sources":[],"errors":null}),
-    ] {
-        assert_ne!(
-            permission_policy(&responses(settings)),
-            PermissionPolicy::Unset
-        );
-    }
-    let mut values = responses(json!({"effective":{},"sources":[]}));
-    values[0]["response"]["response"]["current_permission_mode"] = json!("plan");
-    assert_ne!(permission_policy(&values), PermissionPolicy::Unset);
-    values[0]["response"]["response"]["current_permission_mode"] = json!("default");
-    values[1]["response"]["subtype"] = json!("error");
-    assert_ne!(permission_policy(&values), PermissionPolicy::Unset);
-    assert_ne!(permission_policy(&[]), PermissionPolicy::Unset);
-
-    for initialize in [
-        json!({}),
-        json!({"type":"future_control_response","response":{"subtype":"success","response":{}}}),
-        json!({"type":"control_response","response":{"subtype":"error"}}),
-    ] {
-        let mut values = responses(json!({"effective":{},"sources":[]}));
-        values[0] = initialize;
-        assert_eq!(permission_policy(&values), PermissionPolicy::Unavailable);
-    }
-}
-
-#[test]
-fn configured_policy_is_distinct_from_unavailable_inspection() {
-    assert_eq!(
-        permission_policy(&responses(
-            json!({"effective":{"permissions":{"defaultMode":"plan"}},"sources":[]})
-        )),
-        PermissionPolicy::Configured
-    );
-    for settings in [
-        json!({}),
-        json!({"effective":{},"sources":[{}]}),
-        json!({"effective":{},"sources":[],"errors":["invalid"]}),
     ] {
         assert_eq!(
             permission_policy(&responses(settings)),
             PermissionPolicy::Unavailable
         );
     }
-    assert_eq!(permission_policy(&[]), PermissionPolicy::Unavailable);
     let mut values = responses(json!({"effective":{},"sources":[]}));
-    values[0]["response"]["response"]["current_permission_mode"] = Value::Null;
+    values[1]["response"]["subtype"] = json!("error");
     assert_eq!(permission_policy(&values), PermissionPolicy::Unavailable);
+    assert_eq!(permission_policy(&[]), PermissionPolicy::Unavailable);
+
+    for malformed_response in [
+        json!({}),
+        json!({"type":7,"response":{"subtype":"success","response":{}}}),
+        json!({"type":"future_control_response","response":{"subtype":"success","response":{}}}),
+        json!({"type":"control_response","response":{}}),
+        json!({"type":"control_response","response":{"subtype":7,"response":{}}}),
+        json!({"type":"control_response","response":{"subtype":"error"}}),
+        json!({"type":"control_response","response":{"subtype":"success"}}),
+    ] {
+        for response_index in [0, 1] {
+            let mut values = responses(json!({"effective":{},"sources":[]}));
+            values[response_index] = malformed_response.clone();
+            assert_eq!(permission_policy(&values), PermissionPolicy::Unavailable);
+        }
+    }
+}
+
+#[test]
+fn configured_policy_is_classified_exactly() {
+    assert_eq!(
+        permission_policy(&responses(
+            json!({"effective":{"permissions":{"defaultMode":"plan"}},"sources":[]})
+        )),
+        PermissionPolicy::Configured
+    );
+    let mut values = responses(json!({"effective":{},"sources":[]}));
     values[0]["response"]["response"]["current_permission_mode"] = json!("plan");
     assert_eq!(permission_policy(&values), PermissionPolicy::Configured);
 }
@@ -182,4 +179,9 @@ fn explicit_command_and_environment_policy_remains_authoritative() {
         "  "
     ));
     assert!(!permission_environment("ANTHROPIC_API_KEY", "present"));
+
+    let mut environment = BTreeMap::from([("ANTHROPIC_API_KEY".to_owned(), "present".to_owned())]);
+    assert!(!configured_environment(&environment));
+    environment.insert("CLAUDE_CODE_RESTRICTED".to_owned(), " true ".to_owned());
+    assert!(configured_environment(&environment));
 }

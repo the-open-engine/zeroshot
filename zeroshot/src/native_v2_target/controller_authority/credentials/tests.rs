@@ -5,6 +5,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use keyring::credential::CredentialApi;
+use keyring::mock::MockCredential;
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use super::linux::LinuxTargetCredentialStore;
@@ -12,10 +14,27 @@ use super::private_file::PrivateFileTargetCredentialStore;
 use super::test_support::{MemoryCredentialStore, UnavailableCredentialStore};
 use super::{
     CredentialStorePreparation, KeyringTargetCredentialStore, TargetCredentialStore,
-    credential_service, open_refresh_lock, refresh_lock_is_held,
+    credential_service, open_refresh_lock, read_keyring_password, refresh_lock_is_held,
+    write_keyring_password,
 };
 
 const TARGET_ID: &str = "11111111-1111-4111-8111-111111111111";
+
+fn mock_keyring_entry(password: Option<&str>, fail_next_operation: bool) -> keyring::Entry {
+    let credential = MockCredential::default();
+    if let Some(password) = password {
+        credential
+            .set_password(password)
+            .expect("mock credential accepts a bounded token");
+    }
+    if fail_next_operation {
+        credential.set_error(keyring::Error::Invalid(
+            "refresh-token".to_owned(),
+            "test refusal".to_owned(),
+        ));
+    }
+    keyring::Entry::new_with_credential(Box::new(credential))
+}
 
 async fn prepare_and_store(store: &dyn TargetCredentialStore) {
     assert!(matches!(
@@ -443,6 +462,47 @@ async fn malformed_identity_is_rejected_before_keyring_access() {
             error.to_string(),
             "stored target credential identity is invalid"
         );
+    }
+}
+
+#[test]
+fn keyring_adapter_preserves_absence_values_and_failure_boundaries() {
+    assert_eq!(
+        read_keyring_password(Ok(mock_keyring_entry(None, false))).assert_value(),
+        None
+    );
+    assert_eq!(
+        read_keyring_password(Ok(mock_keyring_entry(Some("stored-refresh-token"), false,)))
+            .assert_value()
+            .as_deref(),
+        Some("stored-refresh-token")
+    );
+    write_keyring_password(Ok(mock_keyring_entry(None, false)), "new-refresh-token").assert_value();
+
+    assert_eq!(
+        read_keyring_password(Ok(mock_keyring_entry(None, true)))
+            .assert_error()
+            .to_string(),
+        "target credential store read failed"
+    );
+    assert_eq!(
+        write_keyring_password(Ok(mock_keyring_entry(None, true)), "new-refresh-token",)
+            .assert_error()
+            .to_string(),
+        "target credential store write failed"
+    );
+
+    let unavailable = || {
+        Err(keyring::Error::Invalid(
+            "service".to_owned(),
+            "test refusal".to_owned(),
+        ))
+    };
+    for error in [
+        read_keyring_password(unavailable()).assert_error(),
+        write_keyring_password(unavailable(), "new-refresh-token").assert_error(),
+    ] {
+        assert_eq!(error.to_string(), "target credential store is unavailable");
     }
 }
 

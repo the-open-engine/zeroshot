@@ -42,6 +42,32 @@ fn assert_route_pairs(route_pairs: &[RoutePair<'_>]) {
 
 fn assert_run_routing_follows_the_authored_target() {
     assert_route_pairs(&[
+        (
+            &[
+                "run",
+                "--title",
+                "Route locally",
+                "--input",
+                "input.json",
+                "--template",
+                "single-worker",
+                "--runtime-config",
+                "runtime.json",
+            ],
+            &[
+                "run",
+                "--title",
+                "Route remotely",
+                "--input",
+                "input.json",
+                "--template",
+                "single-worker",
+                "--runtime-config",
+                "runtime.json",
+                "--target",
+                "prod",
+            ],
+        ),
         (&["list"], &["list", "--target", "prod"]),
         (
             &["status", "run-1"],
@@ -148,15 +174,29 @@ async fn assert_private_bootstrap_is_exact_and_public_startup_stays_public() {
     );
     assert!(!run_private_controller(&public).await.assert_value());
 
-    let malformed = [
-        OsString::from(LOCAL_CONTROLLER_MODE),
-        OsString::from("--wrong"),
-        OsString::from("bootstrap.json"),
-    ];
-    assert!(matches!(
-        private_controller_bootstrap(&malformed),
-        Err(NativeV2CliError::Usage(message)) if message.contains("malformed")
-    ));
+    for malformed in [
+        vec![OsString::from(LOCAL_CONTROLLER_MODE)],
+        vec![
+            OsString::from(LOCAL_CONTROLLER_MODE),
+            OsString::from("--bootstrap"),
+        ],
+        vec![
+            OsString::from(LOCAL_CONTROLLER_MODE),
+            OsString::from("--wrong"),
+            OsString::from("bootstrap.json"),
+        ],
+        vec![
+            OsString::from(LOCAL_CONTROLLER_MODE),
+            OsString::from("--bootstrap"),
+            OsString::from("bootstrap.json"),
+            OsString::from("extra"),
+        ],
+    ] {
+        assert!(matches!(
+            private_controller_bootstrap(&malformed),
+            Err(NativeV2CliError::Usage(message)) if message.contains("malformed")
+        ));
+    }
     let valid = [
         OsString::from(LOCAL_CONTROLLER_MODE),
         OsString::from("--bootstrap"),
@@ -166,6 +206,19 @@ async fn assert_private_bootstrap_is_exact_and_public_startup_stays_public() {
         private_controller_bootstrap(&valid).assert_value(),
         Some(PathBuf::from("bootstrap.json"))
     );
+    let missing_bootstrap = tempfile::tempdir()
+        .assert_value()
+        .path()
+        .join("missing-bootstrap.json");
+    let private = [
+        OsString::from(LOCAL_CONTROLLER_MODE),
+        OsString::from("--bootstrap"),
+        missing_bootstrap.into_os_string(),
+    ];
+    assert!(matches!(
+        run_private_controller(&private).await,
+        Err(ProcessError::Portable(_))
+    ));
 
     #[cfg(not(feature = "ui"))]
     assert!(
@@ -178,6 +231,64 @@ async fn assert_private_bootstrap_is_exact_and_public_startup_stays_public() {
         .to_string()
         .contains("cargo build -p zeroshot --features ui")
     );
+}
+
+fn assert_process_diagnostics_preserve_cli_detail_and_classify_runtime_failures() {
+    let cli = process_error_diagnostic(&ProcessError::Cli(NativeV2CliError::Usage(
+        "invalid invocation".to_owned(),
+    )));
+    let cli = serde_json::to_value(cli).assert_value();
+    assert_eq!(cli["kind"], "invalid_request");
+    assert_eq!(cli["code"], "request.invalid");
+    assert_eq!(cli["message"], "invalid invocation");
+
+    let output = process_error_diagnostic(&ProcessError::Output(std::io::Error::other(
+        "closed output",
+    )));
+    let output = serde_json::to_value(output).assert_value();
+    assert_eq!(output["kind"], "target");
+    assert_eq!(output["code"], "target.unavailable");
+    assert_eq!(
+        output["message"],
+        "could not write CLI output: closed output"
+    );
+}
+
+#[cfg(feature = "ui")]
+fn assert_ui_target_resolution_is_local_and_validates_stored_origins() {
+    use native_v2_target::{TargetAccess, TargetRecord};
+
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test("main-ui-target");
+    let registry = FileTargetRegistry::new(root.path("targets.json"));
+    registry
+        .insert(TargetRecord {
+            id: "00000000-0000-4000-8000-000000000001".to_owned(),
+            name: "local".to_owned(),
+            origin: "http://127.0.0.1:4123".to_owned(),
+            access: TargetAccess::Direct,
+        })
+        .assert_value();
+    assert!(resolve_ui_target_from_registry("local".to_owned(), &registry).is_ok());
+
+    let error = build_ui_target(TargetRecord {
+        id: "00000000-0000-4000-8000-000000000002".to_owned(),
+        name: "invalid-origin".to_owned(),
+        origin: "not an origin".to_owned(),
+        access: TargetAccess::Direct,
+    })
+    .err()
+    .assert_value();
+    assert!(
+        matches!(
+            error,
+            ProcessError::Target(TargetConnectorError::Authority(_))
+        ),
+        "unexpected stored-origin failure: {error}"
+    );
+    assert!(matches!(
+        resolve_ui_target_from_registry("missing".to_owned(), &registry),
+        Err(ProcessError::Target(TargetConnectorError::NotFound(name))) if name == "missing"
+    ));
 }
 
 async fn assert_static_dispatch_and_remaining_management_routes_are_exact() {
@@ -227,6 +338,9 @@ async fn wave10_cli_contract_process_dispatch_and_routing_matrix_is_exact() {
     assert_management_routing_follows_the_authored_target();
     assert_private_bootstrap_is_exact_and_public_startup_stays_public().await;
     assert_static_dispatch_and_remaining_management_routes_are_exact().await;
+    assert_process_diagnostics_preserve_cli_detail_and_classify_runtime_failures();
+    #[cfg(feature = "ui")]
+    assert_ui_target_resolution_is_local_and_validates_stored_origins();
 }
 
 #[tokio::test]

@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::sync::Arc;
 
 use openengine_cluster_server::identity::{
@@ -49,6 +50,18 @@ pub async fn serve_direct_target(config: TargetServe) -> Result<(), TargetServeE
     if config.bootstrap_key_file.is_none() {
         eprintln!("Zeroshot UI: {public_origin}/ui/");
     }
+    serve_prepared(server, listener, shutdown).await?;
+    Ok(())
+}
+
+async fn serve_prepared<F>(
+    server: Arc<NativeV2TargetServer>,
+    listener: TcpListener,
+    shutdown: F,
+) -> Result<(), TargetServeError>
+where
+    F: Future<Output = ()>,
+{
     server.serve_until(listener, shutdown).await?;
     Ok(())
 }

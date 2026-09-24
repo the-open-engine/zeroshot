@@ -198,19 +198,21 @@ async fn private_preparation_consumes_the_bootstrap_key_before_serving() {
 }
 
 #[tokio::test]
-async fn direct_target_reaches_a_live_listener_and_remains_active_until_cancelled() {
+async fn prepared_target_reaches_a_live_listener_and_remains_active_until_cancelled() {
     let root =
         openengine_cluster_testkit::TemporaryDirectory::for_test("target-serve-live-listener");
-    let reservation = std::net::TcpListener::bind("127.0.0.1:0").assert_value();
-    let listen = reservation.local_addr().assert_value();
-    drop(reservation);
     let storage = root.path("storage");
-    let task = tokio::spawn(serve_direct_target(TargetServe {
-        listen,
-        public_origin: format!("http://{listen}"),
+    let config = TargetServe {
+        listen: "127.0.0.1:0".parse().assert_value(),
+        public_origin: "http://127.0.0.1:8080".to_owned(),
         storage: storage.clone(),
         bootstrap_key_file: None,
-    }));
+    };
+    let (server, listener) = prepare_server(&config, &config.public_origin)
+        .await
+        .assert_value();
+    let listen = listener.local_addr().assert_value();
+    let task = tokio::spawn(serve_prepared(server, listener, std::future::pending()));
 
     let stream = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {

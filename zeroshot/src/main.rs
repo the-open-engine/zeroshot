@@ -20,7 +20,7 @@ use native_v2_target::{
     TargetConnectorError, TargetHttpControlAuthority, TargetOecpWebSocketDialer, TargetServeError,
 };
 #[cfg(feature = "ui")]
-use native_v2_target::{TargetRegistry, TargetRunHistoryTransport};
+use native_v2_target::{TargetRecord, TargetRegistry, TargetRunHistoryTransport};
 
 #[derive(Debug, Error)]
 enum ProcessError {
@@ -190,16 +190,20 @@ async fn main() {
 
 fn write_process_error(error: &ProcessError) {
     if std::env::var(ERROR_FORMAT_ENV).as_deref() == Ok(JSON_ERROR_FORMAT) {
-        let diagnostic = match error {
-            ProcessError::Cli(error) => error.diagnostic(),
-            error => NativeV2CliDiagnostic::target(error.to_string()),
-        };
+        let diagnostic = process_error_diagnostic(error);
         match serde_json::to_string(&diagnostic) {
             Ok(encoded) => eprintln!("{encoded}"),
             Err(_) => eprintln!("zeroshot: {error}"),
         }
     } else {
         eprintln!("zeroshot: {error}");
+    }
+}
+
+fn process_error_diagnostic(error: &ProcessError) -> NativeV2CliDiagnostic {
+    match error {
+        ProcessError::Cli(error) => error.diagnostic(),
+        error => NativeV2CliDiagnostic::target(error.to_string()),
     }
 }
 
@@ -229,7 +233,22 @@ fn resolve_ui_target(
     name: String,
 ) -> Result<zeroshot_engine::profile_ui::RunHistoryTarget, ProcessError> {
     let registry = FileTargetRegistry::new(default_target_registry_path()?);
+    resolve_ui_target_from_registry(name, &registry)
+}
+
+#[cfg(feature = "ui")]
+fn resolve_ui_target_from_registry(
+    name: String,
+    registry: &impl TargetRegistry,
+) -> Result<zeroshot_engine::profile_ui::RunHistoryTarget, ProcessError> {
     let target = registry.get(&name)?;
+    build_ui_target(target)
+}
+
+#[cfg(feature = "ui")]
+fn build_ui_target(
+    target: TargetRecord,
+) -> Result<zeroshot_engine::profile_ui::RunHistoryTarget, ProcessError> {
     let authority =
         TargetHttpControlAuthority::production().map_err(TargetConnectorError::Authority)?;
     let transport = TargetRunHistoryTransport::new(authority, target)

@@ -132,6 +132,7 @@ jobs:
               });
             console.warn(`Coverage goals not yet met:\n- ${failures.join('\n- ')}`);
             console.warn(`Weakest files with at least 100 regions:\n- ${weakest.join('\n- ')}`);
+            process.exitCode = 1;
           } else {
             console.log('Coverage goals met.');
           }

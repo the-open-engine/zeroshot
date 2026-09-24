@@ -8,6 +8,8 @@ use std::os::unix::fs::PermissionsExt;
 
 #[cfg(unix)]
 const DISCOVERY_PROBE_MODE: &str = "ZEROSHOT_RESTIC_TEST_DISCOVERY";
+#[cfg(unix)]
+const DISCOVERY_PROBE_SENTINEL: &str = "zeroshot-restic-discovery-probe-ran";
 
 #[cfg(unix)]
 fn failing_restic(root: &Path) -> PathBuf {
@@ -29,6 +31,7 @@ fn run_discovery_probe(configured: Option<&Path>, search_path: &Path, expected: 
             "--exact",
             "native_v2_supervisor::checkpoints::restic::tests::restic_discovery_probe",
             "--ignored",
+            "--nocapture",
         ])
         .env(DISCOVERY_PROBE_MODE, "1")
         .env("PATH", search_path)
@@ -47,6 +50,11 @@ fn run_discovery_probe(configured: Option<&Path>, search_path: &Path, expected: 
         "discovery probe failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains(DISCOVERY_PROBE_SENTINEL),
+        "discovery probe filter matched no test:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
 }
 
 #[cfg(unix)]
@@ -64,6 +72,7 @@ fn restic_discovery_probe() {
             io::ErrorKind::NotFound
         ),
     }
+    println!("{DISCOVERY_PROBE_SENTINEL}");
 }
 
 #[cfg(unix)]
