@@ -17,7 +17,10 @@ fn program_and_snapshot_validation_rejects_ambiguous_executables_and_identities(
 
     let executable = std::env::current_exe().assert_value();
     let program = ResticProgram::from_path(executable.clone()).assert_value();
-    assert_eq!(program.executable, executable);
+    assert_eq!(
+        program.executable,
+        std::fs::canonicalize(executable).assert_value()
+    );
     assert!(program.arguments.is_empty());
 
     let valid = "a".repeat(64);
