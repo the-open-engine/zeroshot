@@ -339,7 +339,7 @@ describe('Native coverage contract', () => {
     );
     assert.match(commands, /const floors = \{ lines: 95, regions: 92, functions: 92 \}/);
     assert.match(commands, /regions\.count < 150/);
-    assert.match(commands, /lines\.percent >= 75 && regions\.percent >= 75/);
+    assert.match(commands, /lines\.percent >= 80 && regions\.percent >= 80/);
     assert.match(commands, /Weakest files with at least 100 regions/);
     assert.doesNotMatch(commands, /process\.exit\(1\)/);
     assert.equal(install.uses, 'taiki-e/install-action@7623a79cdfecb99d681017af368ca353d9f49bb5');
