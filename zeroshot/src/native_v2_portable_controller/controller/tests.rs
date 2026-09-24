@@ -29,14 +29,11 @@ fn private_directory(root: &Path, name: &str) -> PathBuf {
     directory
 }
 
-fn controller_storage(
-    root: &Path,
-) -> (
-    PortableControllerPaths,
-    Arc<ControllerLease>,
-    Arc<SqliteRunLedger>,
-) {
-    open_controller_storage(&root.join("state")).assert_value()
+fn observer_storage(root: &Path) -> (PortableControllerPaths, Arc<SqliteRunLedger>) {
+    let state = private_directory(root, "observer-state");
+    let paths = PortableControllerPaths::new(&state);
+    let ledger = Arc::new(SqliteRunLedger::open(paths.ledger()).assert_value());
+    (paths, ledger)
 }
 
 #[tokio::test]
@@ -149,11 +146,9 @@ async fn boundary_contract_empty_ledger_has_no_existing_run_and_storage_rejects_
 #[tokio::test]
 async fn coverage_contract_observer_refuses_storage_without_the_exact_durable_run() {
     let root = tempfile::tempdir().assert_value();
-    let (paths, lease, ledger) = controller_storage(root.path());
+    let (paths, ledger) = observer_storage(root.path());
     // Keep the initialized database open while the observer takes its own connection. Closing the
     // final SQLite connection here would test connection teardown instead of durable identity.
-    drop(lease);
-
     let result = PortableRunController::open_observer(paths, RunId::new("missing-run")).await;
     drop(ledger);
     let error = match result {
@@ -169,7 +164,7 @@ async fn coverage_contract_observer_refuses_storage_without_the_exact_durable_ru
 #[tokio::test]
 async fn coverage_contract_observer_reopens_one_exact_durable_run_and_keeps_identity_fenced() {
     let root = tempfile::tempdir().assert_value();
-    let (paths, lease, ledger) = controller_storage(root.path());
+    let (paths, ledger) = observer_storage(root.path());
     let run_id = RunId::new("durable-observer-run");
     ledger
         .create_or_get(CreateRun {
@@ -193,8 +188,6 @@ async fn coverage_contract_observer_reopens_one_exact_durable_run_and_keeps_iden
         .assert_value_with("durable observer fixture settlement");
     // The observer contract serves terminal truth without reconstructing or reconciling a
     // runtime. Keep the existing connection open to prove another reader sees committed state.
-    drop(lease);
-
     let controller = PortableRunController::open_observer(paths.clone(), run_id.clone())
         .await
         .assert_value_with("durable observer reopen");
