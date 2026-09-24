@@ -170,6 +170,16 @@ async fn wait_terminal(
     .assert_value_with("portable run became terminal")
 }
 
+async fn wait_absent(path: &std::path::Path) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while path.exists() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .assert_value_with("post-terminal checkpoint cleanup completed");
+}
+
 #[tokio::test]
 async fn one_run_server_is_ready_reconnectable_and_rejects_external_submission() {
     let root = TestDirectory::new("server");
@@ -236,8 +246,10 @@ async fn one_run_server_is_ready_reconnectable_and_rejects_external_submission()
         ));
     }
 
+    let checkpoint_repository = storage.join("checkpoint-repository");
+    wait_absent(&checkpoint_repository).await;
     assert!(!storage.join("checkpoints").exists());
-    assert!(!storage.join("checkpoint-repository").exists());
+    assert!(!checkpoint_repository.exists());
     assert_eq!(
         std::fs::read_to_string(root.child("workspace").join("user.txt")).assert_value(),
         "keep local workspace"
