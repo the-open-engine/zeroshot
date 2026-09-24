@@ -3,9 +3,7 @@ use std::path::{Path, PathBuf};
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{Value, json};
 
-use super::test_support::{
-    HEAD, OTHER_HEAD, assert_retryable_api, authority, receipt, shell_literal, write_executable,
-};
+use super::test_support::{HEAD, OTHER_HEAD, assert_retryable_api, authority, receipt};
 use super::*;
 use crate::native_v2_delivery::DeliveryTarget;
 
@@ -46,26 +44,22 @@ fn reference(head: &str) -> Value {
     })
 }
 
-fn write_fixture(
-    root: &Path,
-    list: Value,
-    observed_review: Value,
-    reference_action: &str,
-) -> PathBuf {
-    let program = root.join("gh-observation-fixture");
-    let source = format!(
-        "#!/bin/sh\ncase \"$2\" in\n\
-         repos/acme/project/pulls) printf '%s\\n' {} ;;\n\
-         repos/acme/project/pulls/17) printf '%s\\n' {} ;;\n\
-         repos/acme/project/git/ref/heads/zeroshot/v2-test) {} ;;\n\
-         *) exit 19 ;;\n\
-         esac\n",
-        shell_literal(&list.to_string()),
-        shell_literal(&observed_review.to_string()),
-        reference_action,
-    );
-    write_executable(&program, source);
-    program
+enum FixtureReference {
+    Present(Value),
+    Missing,
+}
+
+fn write_fixture(root: &Path, list: Value, observed_review: Value, reference: FixtureReference) {
+    std::fs::write(root.join("reviews.json"), list.to_string()).assert_value();
+    std::fs::write(root.join("review.json"), observed_review.to_string()).assert_value();
+    if let FixtureReference::Present(reference) = reference {
+        std::fs::write(root.join("reference.json"), reference.to_string()).assert_value();
+    }
+}
+
+fn fixture_program() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/native_v2_delivery/github/observation/gh-fixture.sh")
 }
 
 struct ObservationOptions<'a> {
@@ -76,12 +70,12 @@ struct ObservationOptions<'a> {
 async fn observe_fixture(
     list: Value,
     observed_review: Value,
-    reference_action: String,
+    reference: FixtureReference,
     options: ObservationOptions<'_>,
 ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError> {
     let root = tempfile::tempdir().assert_value();
-    let program = write_fixture(root.path(), list, observed_review, &reference_action);
-    let authority = authority(program, root.path());
+    write_fixture(root.path(), list, observed_review, reference);
+    let authority = authority(fixture_program(), root.path());
     let target = target();
     observe(
         &authority,
@@ -96,15 +90,12 @@ async fn observe_fixture(
     .await
 }
 
-fn present_reference(head: &str) -> String {
-    format!(
-        "printf '%s\\n' {}",
-        shell_literal(&reference(head).to_string())
-    )
+fn present_reference(head: &str) -> FixtureReference {
+    FixtureReference::Present(reference(head))
 }
 
-fn missing_reference() -> String {
-    "printf '%s\\n' 'gh: Not Found (HTTP 404)' >&2; exit 1".to_owned()
+fn missing_reference() -> FixtureReference {
+    FixtureReference::Missing
 }
 
 #[tokio::test]

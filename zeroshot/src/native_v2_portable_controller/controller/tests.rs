@@ -146,13 +146,20 @@ async fn boundary_contract_empty_ledger_has_no_existing_run_and_storage_rejects_
 async fn coverage_contract_observer_refuses_storage_without_the_exact_durable_run() {
     let root = tempfile::tempdir().assert_value();
     let (paths, lease, ledger) = controller_storage(root.path());
-    drop((ledger, lease));
+    // Keep the initialized database open while the observer takes its own connection. Closing the
+    // final SQLite connection here would test connection teardown instead of durable identity.
+    drop(lease);
 
     let result = PortableRunController::open_observer(paths, RunId::new("missing-run")).await;
-    assert!(matches!(
-        result,
-        Err(PortableControllerError::DurableIdentity)
-    ));
+    drop(ledger);
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("observer accepted an empty durable ledger"),
+    };
+    assert!(
+        matches!(error, PortableControllerError::DurableIdentity),
+        "observer must reject an empty durable ledger, got {error:?}"
+    );
 }
 
 #[tokio::test]
