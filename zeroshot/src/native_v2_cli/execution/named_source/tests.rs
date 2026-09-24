@@ -103,6 +103,13 @@ async fn repository_inference_requires_one_github_remote_and_ignores_missing_ups
             .assert_value()
             .is_none()
     );
+    assert!(
+        upstream(&root.0.join("missing-worktree"), branch.trim())
+            .await
+            .assert_error()
+            .to_string()
+            .contains("could not inspect the attached branch upstream")
+    );
 
     let missing = select_repository(&root.0, None).await.assert_error();
     assert!(missing.to_string().contains("no GitHub remote"));
@@ -272,6 +279,19 @@ async fn wave6_cli_contract_remote_tip_is_exact_and_missing_branches_fail_closed
         })
         .await
         .is_err()
+    );
+    assert!(
+        remote_tip(RevisionSelection {
+            root: &client.0,
+            repository: &repository,
+            branch: &branch,
+            remote: Some("missing-remote"),
+            token: None,
+        })
+        .await
+        .assert_error()
+        .to_string()
+        .contains("could not resolve the selected remote branch tip")
     );
 
     let explicit = SourceRevisionId::new(revision.trim()).assert_value();

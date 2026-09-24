@@ -34,7 +34,7 @@ where
             Ok(CliOutcome::Completed)
         }
         NativeV2CliCommand::ConnectionSet(command) => {
-            execute_connection_set(command, backend, output).await
+            execute_connection_set(command, backend, output, read_connection_values).await
         }
         NativeV2CliCommand::ConnectionDelete { route, key } => {
             let result = backend
@@ -59,13 +59,14 @@ async fn execute_connection_set<B, W>(
     command: ConnectionSetCommand,
     backend: &B,
     output: &mut W,
+    read_values: fn(ConnectionInput) -> Result<StaticConnectionValues, NativeV2CliError>,
 ) -> Result<CliOutcome, NativeV2CliError>
 where
     B: NativeV2CliBackend,
     W: Write,
 {
     let ConnectionSetCommand { route, key, input } = command;
-    let values = read_connection_values(input)?;
+    let values = read_values(input)?;
     store_connection_values(
         &route,
         ConnectionSetRequest {

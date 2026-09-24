@@ -56,6 +56,13 @@ struct WorkspaceMonitor {
     workspace_lease: std::sync::Weak<ControllerLease>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceMonitorAction {
+    Continue,
+    Stop,
+    Lost,
+}
+
 struct PreparedControllerStart {
     admitted: AdmittedRun,
     environment: RunEnvironment,
@@ -468,19 +475,31 @@ fn monitor_workspace_and_lease(monitor: WorkspaceMonitor, loss: watch::Sender<bo
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(WORKSPACE_MONITOR_INTERVAL).await;
-            let Some((controller_lease, workspace_lease)) = active_monitor_leases(&monitor) else {
-                return;
-            };
-            if workspace_is_lost(
-                monitor.identity.is_current(&monitor.workspace),
-                workspace_lease.is_intact(),
-                controller_lease.is_intact(),
-            ) {
-                loss.send_replace(true);
-                return;
+            match workspace_monitor_action(&monitor) {
+                WorkspaceMonitorAction::Continue => {}
+                WorkspaceMonitorAction::Stop => return,
+                WorkspaceMonitorAction::Lost => {
+                    loss.send_replace(true);
+                    return;
+                }
             }
         }
     });
+}
+
+fn workspace_monitor_action(monitor: &WorkspaceMonitor) -> WorkspaceMonitorAction {
+    let Some((controller_lease, workspace_lease)) = active_monitor_leases(monitor) else {
+        return WorkspaceMonitorAction::Stop;
+    };
+    if workspace_is_lost(
+        monitor.identity.is_current(&monitor.workspace),
+        workspace_lease.is_intact(),
+        controller_lease.is_intact(),
+    ) {
+        WorkspaceMonitorAction::Lost
+    } else {
+        WorkspaceMonitorAction::Continue
+    }
 }
 
 fn active_monitor_leases(

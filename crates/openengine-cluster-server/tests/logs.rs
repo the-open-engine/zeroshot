@@ -21,6 +21,7 @@ use tokio::io::BufReader;
 mod capability_default_support;
 #[path = "ndjson_test_support/mod.rs"]
 mod ndjson_test_support;
+use ndjson_test_support::{read_value, request_line, write_line};
 #[path = "oversized_event_wire_support/mod.rs"]
 mod oversized_event_wire_support;
 #[path = "oversized_id_backend_support/mod.rs"]
@@ -156,6 +157,61 @@ oversized_id_backend! {
         let subscription_id = SubscriptionId::new("s".repeat(MAX_LOG_EVENT_ENCODED_BYTES));
         Ok(subscribe_and_stream_logs(&store, subscription_id, queue_capacity).await)
     },
+}
+
+oversized_id_backend! {
+    name: TightLogsBackend,
+    inner: LogsFixtureBackend,
+    method: logs,
+    params: LogsParams,
+    result: openengine_cluster_protocol::LogsResult,
+    stream: openengine_cluster_server::logs::LogEventStream,
+    handle: openengine_cluster_server::logs::LogsHandle,
+    body: |self, _params, _queue_capacity| {
+        let store: Arc<dyn LogStore> = Arc::clone(&self.inner.store) as Arc<dyn LogStore>;
+        Ok(subscribe_and_stream_logs(&store, SubscriptionId::new("tight-logs"), 1).await)
+    },
+}
+
+#[tokio::test]
+async fn logs_wire_rejects_invalid_params_and_reports_slow_consumers() {
+    let store = Arc::new(LogsFixtureStore::new());
+    let (mut write, read, server) = spawn_ndjson(TightLogsBackend {
+        inner: LogsFixtureBackend::new(Arc::clone(&store)),
+    });
+    let mut read = BufReader::new(read);
+
+    write_line(
+        &mut write,
+        &request_line(1, "logs", json!({"unexpected": true})),
+    )
+    .await;
+    let invalid = read_value(&mut read).await;
+    assert_eq!(invalid["error"]["code"], -32602);
+    assert!(
+        invalid.to_string().contains("SCHEMA_VIOLATION"),
+        "{invalid}"
+    );
+
+    write_line(&mut write, &request_line(2, "logs", json!({}))).await;
+    let opened = read_value(&mut read).await;
+    assert_eq!(opened["result"]["subscriptionId"], "tight-logs");
+    store.publish(sample_log_record("first")).await;
+    store.publish(sample_log_record("overflow")).await;
+
+    loop {
+        let notification = read_value(&mut read).await;
+        assert_eq!(notification["params"]["subscriptionId"], "tight-logs");
+        if notification["method"] == "subscription/closed" {
+            assert_eq!(notification["params"]["reason"], "SLOW_CONSUMER");
+            break;
+        }
+        assert_eq!(notification["method"], "event");
+        assert_eq!(notification["params"]["record"]["message"], "first");
+    }
+
+    drop(write);
+    await_ndjson_shutdown(server).await;
 }
 
 #[tokio::test]

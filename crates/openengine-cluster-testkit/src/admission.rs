@@ -410,3 +410,7 @@ pub(crate) fn enforce_generation(
         Err(StoreError::GenerationConflict { current })
     }
 }
+
+#[cfg(test)]
+#[path = "admission/tests.rs"]
+mod tests;

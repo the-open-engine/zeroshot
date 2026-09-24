@@ -327,7 +327,7 @@ describe('Native coverage contract', () => {
     );
     assert.equal(
       measure.env.COVERAGE_IGNORE_REGEX,
-      '(^|/)(tests(/|\\.rs$)|[^/]+[_-]tests\\.rs$)'
+      '(^|/)(tests(/|\\.rs$)|test_support\\.rs$|[^/]+[_-]tests\\.rs$)'
     );
     assert.match(
       commands,

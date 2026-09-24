@@ -24,6 +24,17 @@ impl Write for UnavailableOutput {
     }
 }
 
+fn decoded_management_values(
+    input: ConnectionInput,
+) -> Result<StaticConnectionValues, NativeV2CliError> {
+    assert!(matches!(input, ConnectionInput::JsonStdin));
+    Ok(StaticConnectionValues::new(BTreeMap::from([(
+        EnvironmentVariableName::new("OPENAI_API_KEY").assert_value(),
+        "provider-secret".to_owned(),
+    )]))
+    .assert_value())
+}
+
 #[tokio::test]
 async fn wave7_cli_contract_management_routes_values_without_secret_output() {
     let backend = FakeBackend::default();
@@ -55,18 +66,16 @@ async fn wave7_cli_contract_management_routes_values_without_secret_output() {
 
     let secret = "provider-secret";
     let field = EnvironmentVariableName::new("OPENAI_API_KEY").assert_value();
-    let values = StaticConnectionValues::new(BTreeMap::from([(field.clone(), secret.to_owned())]))
-        .assert_value();
     let mut stored = Vec::new();
-    store_connection_values(
-        &route,
-        ConnectionSetRequest {
+    execute_connection_set(
+        ConnectionSetCommand {
+            route: route.clone(),
             key: ConnectionKey::new("openai").assert_value(),
-            scope: route.scope,
-            values,
+            input: ConnectionInput::JsonStdin,
         },
         &backend,
         &mut stored,
+        decoded_management_values,
     )
     .await
     .assert_value();

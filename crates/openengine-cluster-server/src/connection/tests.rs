@@ -4,6 +4,7 @@ use openengine_cluster_protocol::{RunId, INVALID_PARAMS, INVALID_PHASE, SCHEMA_V
 use serde_json::json;
 
 use super::*;
+use crate::agent_attach::fixtures::{AgentAttachFixtureBackend, AgentAttachFixtureStore};
 use crate::watch::fixtures::{FixtureBackend, FixtureStore};
 use crate::ConnectionContext;
 
@@ -72,6 +73,86 @@ async fn subscription_is_registered_before_its_response_send_can_complete() {
         "subscription task must terminate cleanly"
     );
     assert!(subscriptions.lock().is_empty());
+}
+
+#[tokio::test]
+async fn agent_attach_dispatch_rejects_bad_params_before_backend_effects() {
+    let invalid = fixture_dispatcher()
+        .dispatch_agent_attach(RequestId::Integer(40), json!({}))
+        .await;
+    assert!(invalid.1.is_none());
+    let invalid: Value = serde_json::from_str(&invalid.0).unwrap();
+    assert_eq!(invalid.pointer("/error/code"), Some(&json!(INVALID_PARAMS)));
+    assert_eq!(
+        invalid.pointer("/error/data/code"),
+        Some(&json!(SCHEMA_VIOLATION))
+    );
+}
+
+#[tokio::test]
+async fn agent_attach_connection_encodes_live_events_and_slow_consumer_close() {
+    let store = Arc::new(AgentAttachFixtureStore::new());
+    let execution: openengine_cluster_protocol::ExecutionRef =
+        serde_json::from_str("\"execution-1\"").unwrap();
+    store.register_active(execution.clone()).await;
+    let dispatcher = Dispatcher::new(
+        AgentAttachFixtureBackend::new(Arc::clone(&store)),
+        ConnectionContext::default(),
+    );
+    let (outbound_tx, mut outbound_rx) = mpsc::channel::<String>(2);
+    let ConnectionSetup { state, .. } = new_connection_setup(&outbound_tx);
+    let id = RequestId::Integer(41);
+    state.in_flight_ids.lock().insert(id.clone());
+
+    let task = tokio::spawn(agent_attach::run_agent_attach_subscription(
+        dispatcher,
+        id,
+        json!({"execution": "execution-1"}),
+        state.clone(),
+    ));
+    let response: Value = serde_json::from_str(&outbound_rx.recv().await.unwrap()).unwrap();
+    assert_eq!(
+        response.pointer("/result/subscriptionId"),
+        Some(&json!("sub-1"))
+    );
+
+    store
+        .publish(
+            &execution,
+            openengine_cluster_protocol::AgentAttachEvent::Working {},
+        )
+        .await;
+    let notification: Value = serde_json::from_str(&outbound_rx.recv().await.unwrap()).unwrap();
+    assert_eq!(notification.pointer("/method"), Some(&json!("event")));
+    assert_eq!(
+        notification.pointer("/params/event/type"),
+        Some(&json!("working"))
+    );
+
+    for _ in 0..=(openengine_cluster_protocol::DEFAULT_SUBSCRIPTION_QUEUE_CAPACITY * 2) {
+        store
+            .publish(
+                &execution,
+                openengine_cluster_protocol::AgentAttachEvent::Working {},
+            )
+            .await;
+    }
+    let mut close = None;
+    for _ in 0..=(openengine_cluster_protocol::DEFAULT_SUBSCRIPTION_QUEUE_CAPACITY + 4) {
+        let notification: Value = serde_json::from_str(&outbound_rx.recv().await.unwrap()).unwrap();
+        if notification.pointer("/method") == Some(&json!("subscription/closed")) {
+            close = Some(notification);
+            break;
+        }
+    }
+    assert_eq!(
+        close
+            .as_ref()
+            .and_then(|notification| notification.pointer("/params/reason")),
+        Some(&json!("SLOW_CONSUMER"))
+    );
+    task.await.unwrap();
+    assert!(state.subscriptions.lock().is_empty());
 }
 
 #[tokio::test]

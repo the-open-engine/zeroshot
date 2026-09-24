@@ -1,5 +1,5 @@
 //! Host lifecycle and browser boundary for the shared workspace.
-use std::future::IntoFuture;
+use std::future::{Future, IntoFuture};
 use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -162,6 +162,14 @@ pub async fn serve_with_target(
         ));
     }
     let listener = TcpListener::bind(listen).await.map_err(local_error)?;
+    let (service, origin) = prepare_local_service(&listener, target)?;
+    serve_listener_until(listener, service, origin, shutdown_signal()).await
+}
+
+fn prepare_local_service(
+    listener: &TcpListener,
+    target: Option<RunHistoryTarget>,
+) -> Result<(UiService, String), NativeV2CliError> {
     let address = listener.local_addr().map_err(local_error)?;
     let origin = format!("http://{address}");
     let service = UiService::new(
@@ -176,15 +184,25 @@ pub async fn serve_with_target(
         )?,
         false,
     );
+    Ok((service, origin))
+}
+
+async fn serve_listener_until(
+    listener: TcpListener,
+    service: UiService,
+    origin: String,
+    shutdown: impl Future<Output = io::Result<()>>,
+) -> Result<(), NativeV2CliError> {
     let stopped = service.shutdown.clone();
     let server = axum::serve(listener, service.router.clone())
         .with_graceful_shutdown(async move { stopped.cancelled().await })
         .into_future();
     tokio::pin!(server);
+    tokio::pin!(shutdown);
     eprintln!("Zeroshot UI: {origin}/ui/");
     tokio::select! {
         result = &mut server => return result.map_err(local_error),
-        result = shutdown_signal() => result.map_err(local_error)?,
+        result = &mut shutdown => result.map_err(local_error)?,
     }
     service.shutdown();
     tokio::time::timeout(DRAIN_TIMEOUT, server)

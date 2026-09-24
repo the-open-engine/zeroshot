@@ -686,6 +686,80 @@ async fn assert_local_start_deduplicates_before_controller_launch() {
 }
 
 #[cfg(unix)]
+async fn assert_successor_claim_and_submission_lock_edges(
+    backend: &LocalCliBackend,
+    root: &TestDirectory,
+) {
+    let successor = RunId::new("0199f33f-3b44-7d21-9000-0000000000a5");
+    let successor_storage = backend.create_run_storage(&successor).assert_value();
+    let successor_paths = PortableControllerPaths::new(successor_storage.clone());
+    let lease = ControllerLease::acquire(successor_paths.lease()).assert_value();
+    assert!(
+        backend
+            .successor_claim_is_live_or_admitted(&successor, &successor_storage,)
+            .await
+            .assert_value()
+    );
+    drop(lease);
+
+    let blocked_state = root.child("blocked-state");
+    std::fs::write(&blocked_state, b"not a directory").assert_value();
+    assert!(
+        LocalCliBackend::new(
+            blocked_state,
+            PathBuf::from("/bin/true"),
+            root.path().to_owned(),
+            PathBuf::from("git"),
+        )
+        .acquire_submission_lock()
+        .await
+        .is_err()
+    );
+
+    let absent_run = RunId::new("0199f33f-3b44-7d21-9000-0000000000a6");
+    assert!(backend.claim_recovery_workspace(&absent_run).is_err());
+    assert!(
+        backend
+            .recovery_workspace_is_unclaimed(&RunId::new("invalid-local-run"))
+            .is_err()
+    );
+
+    let retry_backend = contract_backend(root.path()).with_ready_timeout(Duration::from_millis(25));
+    let retry_run = RunId::new("0199f33f-3b44-7d21-9000-0000000000a7");
+    let retry_storage = retry_backend.create_run_storage(&retry_run).assert_value();
+    assert!(
+        !retry_backend
+            .successor_claim_is_live_or_admitted(&retry_run, &retry_storage)
+            .await
+            .assert_value()
+    );
+
+    let submission_lock =
+        ControllerLease::acquire(root.path().join(SUBMISSION_LOCK_FILE)).assert_value();
+    let waiting_backend = contract_backend(root.path());
+    let waiting = tokio::spawn(async move { waiting_backend.acquire_submission_lock().await });
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    drop(submission_lock);
+    drop(
+        tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .assert_value()
+            .assert_value()
+            .assert_value(),
+    );
+
+    assert!(retryable_controller_handoff(
+        &PortableControllerError::Lease(ControllerLeaseError::Held)
+    ));
+    assert!(retryable_controller_handoff(&PortableControllerError::Io(
+        std::io::Error::other("retryable handoff")
+    )));
+    assert!(!retryable_controller_handoff(
+        &PortableControllerError::Readiness
+    ));
+}
+
+#[cfg(unix)]
 async fn assert_zero_deadline_cleanup_and_recovery_claim_edges() {
     let root = TestDirectory::new("l11c");
     let backend = LocalCliBackend::new(
@@ -733,32 +807,7 @@ async fn assert_zero_deadline_cleanup_and_recovery_claim_edges() {
         .reconcile_local_resume_claim(&recovery_run)
         .await
         .assert_value();
-
-    let successor = RunId::new("0199f33f-3b44-7d21-9000-0000000000a5");
-    let successor_storage = backend.create_run_storage(&successor).assert_value();
-    let successor_paths = PortableControllerPaths::new(successor_storage.clone());
-    let lease = ControllerLease::acquire(successor_paths.lease()).assert_value();
-    assert!(
-        backend
-            .successor_claim_is_live_or_admitted(&successor, &successor_storage,)
-            .await
-            .assert_value()
-    );
-    drop(lease);
-
-    let blocked_state = root.child("blocked-state");
-    std::fs::write(&blocked_state, b"not a directory").assert_value();
-    assert!(
-        LocalCliBackend::new(
-            blocked_state,
-            PathBuf::from("/bin/true"),
-            root.path().to_owned(),
-            PathBuf::from("git"),
-        )
-        .acquire_submission_lock()
-        .await
-        .is_err()
-    );
+    assert_successor_claim_and_submission_lock_edges(&backend, &root).await;
 }
 
 #[cfg(unix)]

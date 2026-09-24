@@ -1,6 +1,35 @@
 use super::*;
 
 #[tokio::test]
+async fn oecp_capabilities_and_empty_graph_snapshot_are_exact() {
+    let harness = harness(Behavior::Complete).await;
+    let context = ConnectionContext::default();
+    let initialized = ClusterBackend::initialize(
+        &harness.controller,
+        &context,
+        InitializeParams {
+            protocol_version: openengine_cluster_protocol::PROTOCOL_VERSION.to_owned(),
+        },
+    )
+    .await
+    .assert_value_with("OECP initialize");
+    assert!(
+        initialized
+            .capabilities
+            .graph_profiles
+            .contains(GraphProfile::Full)
+    );
+    assert!(initialized.capabilities.logs);
+    assert!(initialized.capabilities.agent_attach);
+    assert_eq!(initialized.status, ClusterStatus::empty());
+
+    let snapshot = ClusterBackend::get(&harness.controller, &context, GetParams::default())
+        .await
+        .assert_value_with("empty OECP snapshot");
+    assert_eq!(snapshot, GetResult::empty());
+}
+
+#[tokio::test]
 async fn internal_submission_and_oecp_listing_share_the_same_public_run_identity() {
     let harness = harness(Behavior::Complete).await;
     let submitted = submit_test_request(&harness.controller, request(Value::Null))

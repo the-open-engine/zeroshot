@@ -13,15 +13,25 @@ impl LocalCliBackend {
                 run_id: params.run_id.clone(),
             })
             .await?;
-        if !status.workspace_recovery.recoverable {
+        let recovery = self
+            .claimable_recovery_document(&params.run_id, status.workspace_recovery.recoverable)?;
+        let _claim = self.claim_recovery_workspace(&params.run_id)?;
+        self.start_local_successor(params, recovery).await
+    }
+
+    fn claimable_recovery_document(
+        &self,
+        run_id: &RunId,
+        recoverable: bool,
+    ) -> Result<LocalRecoveryDocument, NativeV2CliError> {
+        if !recoverable {
             return Err(local_message("run does not have a recoverable workspace"));
         }
-        let recovery = self.read_recovery_document(&params.run_id)?;
+        let recovery = self.read_recovery_document(run_id)?;
         if recovery.successor_run_id.is_some() {
             return Err(local_message("retained workspace was already claimed"));
         }
-        let _claim = self.claim_recovery_workspace(&params.run_id)?;
-        self.start_local_successor(params, recovery).await
+        Ok(recovery)
     }
 
     fn checkpoint_selection(

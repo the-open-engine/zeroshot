@@ -1,6 +1,23 @@
 use super::*;
 
 #[test]
+fn issue_contract_accessors_preserve_canonical_identity_and_public_evidence() {
+    let reference = issue_ref("issue.linear", 1);
+    let resolved = resolved_linear_issue(reference.clone());
+    assert_eq!(resolved.issue().as_str(), "ENG-7");
+    assert_eq!(resolved.state(), IssueState::Open);
+    assert!(resolved.public_urls().is_empty());
+
+    let resolve = issue_resolve_request(reference.clone());
+    assert_eq!(resolve.credential_handle().as_str(), "linear-lease");
+
+    let close = issue_close_request(reference);
+    let receipt = issue_close_receipt(&close);
+    assert_eq!(receipt.state(), IssueClosedState::Closed);
+    assert!(receipt.public_urls().is_empty());
+}
+
+#[test]
 fn source_registry_exact_lookup_and_errors_are_deterministic() {
     let reference = source_ref("source.github", 1);
     let provider = Arc::new(FakeSourceProvider::new(

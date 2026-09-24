@@ -398,6 +398,197 @@ fn coverage_contract_worker_signal_batch_ignores_disappearance_but_stops_on_real
 }
 
 #[test]
+fn final_contract_cleanup_boundary_reports_each_authority_failure_and_only_falls_back_when_required()
+ {
+    use std::cell::Cell;
+
+    let root_calls = Cell::new(0);
+    let errors = kill_process_tree_with(
+        Some(77),
+        Err(io::Error::from_raw_os_error(libc::EIO)),
+        |group| {
+            assert_eq!(group, 77);
+            Err(io::Error::from_raw_os_error(libc::ESRCH))
+        },
+        || {
+            root_calls.set(root_calls.get() + 1);
+            Ok(())
+        },
+    );
+    assert_eq!(root_calls.get(), 0, "an absent group needs no fallback");
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].contains("worker process termination failed"));
+
+    let root_calls = Cell::new(0);
+    let errors = kill_process_tree_with(
+        Some(88),
+        Ok(()),
+        |_| Err(io::Error::from_raw_os_error(libc::EPERM)),
+        || {
+            root_calls.set(root_calls.get() + 1);
+            Err(io::Error::from_raw_os_error(libc::EIO))
+        },
+    );
+    assert_eq!(root_calls.get(), 1);
+    assert_eq!(errors.len(), 2);
+    assert!(errors[0].contains("process group termination failed"));
+    assert!(errors[1].contains("root process termination fallback failed"));
+
+    let errors = kill_process_tree_with(
+        None,
+        Ok(()),
+        |_| panic!("a missing group must not be signalled"),
+        || Err(io::Error::from_raw_os_error(libc::EACCES)),
+    );
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].contains("root process termination failed"));
+}
+
+#[test]
+fn final_contract_worker_boundary_validation_short_circuits_and_preserves_occupancy_errors() {
+    use std::cell::Cell;
+
+    for membership in [
+        WorkerMembership::Uid(10_001),
+        WorkerMembership::SupplementaryGroup(20_001),
+    ] {
+        let inspected = Cell::new(false);
+        assert_eq!(
+            validate_linux_worker_boundary_with(1, membership, |_| {
+                inspected.set(true);
+                Ok(false)
+            })
+            .assert_error()
+            .kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        assert!(!inspected.get());
+
+        validate_linux_worker_boundary_with(0, membership, |observed| {
+            assert_eq!(observed, membership);
+            Ok(false)
+        })
+        .assert_value();
+        assert_eq!(
+            validate_linux_worker_boundary_with(0, membership, |_| Ok(true))
+                .assert_error()
+                .kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(
+            validate_linux_worker_boundary_with(0, membership, |_| {
+                Err(io::Error::from_raw_os_error(libc::EIO))
+            })
+            .assert_error()
+            .raw_os_error(),
+            Some(libc::EIO)
+        );
+    }
+
+    let inspected = Cell::new(false);
+    assert_eq!(
+        validate_linux_worker_boundary_with(0, WorkerMembership::Uid(0), |_| {
+            inspected.set(true);
+            Ok(false)
+        })
+        .assert_error()
+        .kind(),
+        io::ErrorKind::InvalidInput
+    );
+    assert!(!inspected.get());
+}
+
+#[test]
+fn final_contract_worker_cleanup_kills_before_reaping_and_propagates_the_first_unconfirmed_step() {
+    let mut killed = Vec::new();
+    let mut reaped = Vec::new();
+    assert!(
+        kill_and_reap_linux_pids_with(
+            &[11, 12],
+            |pid| {
+                killed.push(pid);
+                Ok(())
+            },
+            |pid| {
+                reaped.push(pid);
+                Ok(())
+            },
+        )
+        .assert_value()
+    );
+    assert_eq!(killed, [11, 12]);
+    assert_eq!(reaped, [11, 12]);
+
+    let mut reaped = Vec::new();
+    let error = kill_and_reap_linux_pids_with(
+        &[21, 22, 23],
+        |_| Ok(()),
+        |pid| {
+            reaped.push(pid);
+            if pid == 22 {
+                Err(io::Error::from_raw_os_error(libc::ECHILD))
+            } else {
+                Ok(())
+            }
+        },
+    )
+    .assert_error();
+    assert_eq!(error.raw_os_error(), Some(libc::ECHILD));
+    assert_eq!(reaped, [21, 22]);
+
+    let mut reaped = false;
+    assert_eq!(
+        kill_and_reap_linux_pids_with(
+            &[31],
+            |_| Err(io::Error::from_raw_os_error(libc::EPERM)),
+            |_| {
+                reaped = true;
+                Ok(())
+            },
+        )
+        .assert_error()
+        .raw_os_error(),
+        Some(libc::EPERM)
+    );
+    assert!(!reaped);
+    assert!(!kill_and_reap_linux_pids_with(&[], |_| Ok(()), |_| Ok(())).assert_value());
+}
+
+#[test]
+fn final_contract_process_status_classifies_match_disappearance_corruption_and_io_failure() {
+    let membership = WorkerMembership::Uid(42);
+    assert_eq!(
+        linux_process_membership(7, Ok("Uid:\t1 42 3 4\n".to_owned()), membership).assert_value(),
+        Some(true)
+    );
+    assert_eq!(
+        linux_process_membership(7, Ok("Uid:\t1 41 3 4\n".to_owned()), membership).assert_value(),
+        Some(false)
+    );
+    assert_eq!(
+        linux_process_membership(
+            7,
+            Err(io::Error::from_raw_os_error(libc::ENOENT)),
+            membership,
+        )
+        .assert_value(),
+        None
+    );
+    assert_eq!(
+        linux_process_membership(7, Ok("Uid:\tinvalid\n".to_owned()), membership)
+            .assert_error()
+            .kind(),
+        io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        linux_process_membership(7, Err(io::Error::from_raw_os_error(libc::EIO)), membership,)
+            .assert_error()
+            .raw_os_error(),
+        Some(libc::EIO)
+    );
+}
+
+#[test]
 fn coverage_contract_kernel_identity_verification_is_read_only_and_rejects_mismatches() {
     assert_eq!(
         verify_linux_identity(u32::MAX, u32::MAX, None)

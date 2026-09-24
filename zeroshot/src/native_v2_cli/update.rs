@@ -229,13 +229,20 @@ fn release_version(value: &str, kind: &str) -> Result<ReleaseVersion, NativeV2Cl
 }
 
 fn release_target() -> Result<(&'static str, &'static str, &'static str), NativeV2CliError> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
+    release_target_for(std::env::consts::OS, std::env::consts::ARCH)
+}
+
+fn release_target_for(
+    os: &str,
+    arch: &str,
+) -> Result<(&'static str, &'static str, &'static str), NativeV2CliError> {
+    match (os, arch) {
         ("linux", "x86_64") => Ok(("x86_64-unknown-linux-musl", "zeroshot", "restic")),
         ("linux", "aarch64") => Ok(("aarch64-unknown-linux-musl", "zeroshot", "restic")),
         ("macos", "x86_64") => Ok(("x86_64-apple-darwin", "zeroshot", "restic")),
         ("macos", "aarch64") => Ok(("aarch64-apple-darwin", "zeroshot", "restic")),
         ("windows", "x86_64") => Ok(("x86_64-pc-windows-msvc", "zeroshot.exe", "restic.exe")),
-        (os, arch) => Err(update_error(format!(
+        _ => Err(update_error(format!(
             "no prebuilt Zeroshot release exists for {os}/{arch}"
         ))),
     }

@@ -33,6 +33,18 @@ fn embedded_asset_with_extension(directory: &Dir<'_>, extension: &str) -> Option
         })
 }
 
+fn target_service(root: &openengine_cluster_testkit::TemporaryDirectory) -> UiService {
+    let observations = crate::native_v2_observability::NativeV2Observability::new(Arc::new(
+        crate::v2_run_ledger::fake::FakeRunLedger::new(),
+    ));
+    UiService::for_target(
+        root.as_path().to_owned(),
+        "https://target.example",
+        observations,
+    )
+    .assert_value()
+}
+
 #[test]
 fn browser_origins_are_exact_http_authorities_without_url_components() {
     for (value, authority, serialized) in [
@@ -290,17 +302,9 @@ async fn shutdown_and_target_service_boundaries_are_immediate_and_shared() {
 
 #[tokio::test]
 async fn target_connection_serves_one_http_lifetime_and_drains_on_shutdown() {
-    let observations = crate::native_v2_observability::NativeV2Observability::new(Arc::new(
-        crate::v2_run_ledger::fake::FakeRunLedger::new(),
-    ));
     let root =
         openengine_cluster_testkit::TemporaryDirectory::for_test("profile-ui-target-connection");
-    let service = UiService::for_target(
-        root.as_path().to_owned(),
-        "https://target.example",
-        observations,
-    )
-    .assert_value();
+    let service = target_service(&root);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
     let address = listener.local_addr().assert_value();
@@ -341,4 +345,75 @@ async fn standalone_ui_rejects_non_loopback_before_binding() {
         .err()
         .assert_value();
     assert!(error.to_string().contains("loopback"));
+}
+
+#[tokio::test]
+async fn standalone_ui_reports_an_occupied_loopback_listener_without_starting() {
+    let occupied = TcpListener::bind("127.0.0.1:0").await.assert_value();
+    let address = occupied.local_addr().assert_value();
+    let error = serve(address).await.err().assert_value();
+    assert!(matches!(
+        error,
+        NativeV2CliError::Local(message) if !message.is_empty()
+    ));
+}
+
+#[tokio::test]
+async fn malformed_http_is_rejected_by_the_target_connection_boundary() {
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test(
+        "profile-ui-target-malformed-connection",
+    );
+    let service = target_service(&root);
+    let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
+    let address = listener.local_addr().assert_value();
+    let mut client = TcpStream::connect(address).await.assert_value();
+    let (server_stream, _) = listener.accept().await.assert_value();
+
+    client.write_all(b"not HTTP\r\n\r\n").await.assert_value();
+    client.shutdown().await.assert_value();
+    let error = service
+        .serve_connection(server_stream)
+        .await
+        .err()
+        .assert_value();
+    assert_eq!(error.kind(), io::ErrorKind::Other);
+}
+
+#[tokio::test]
+async fn standalone_listener_drains_immediately_after_an_owned_shutdown() {
+    let root =
+        openengine_cluster_testkit::TemporaryDirectory::for_test("profile-ui-owned-shutdown");
+    let service = target_service(&root);
+    let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
+    let origin = format!("http://{}", listener.local_addr().assert_value());
+
+    serve_listener_until(
+        listener,
+        service.clone(),
+        origin,
+        std::future::ready(Ok(())),
+    )
+    .await
+    .assert_value();
+    assert!(*service.shutdown.0.borrow());
+}
+
+#[tokio::test]
+async fn local_service_preparation_selects_remote_or_native_history_without_serving() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let target = RunHistoryTarget::remote(EmptyRemoteHistory {
+        calls: calls.clone(),
+    });
+    let (remote, origin) = prepare_local_service(&listener, Some(target)).assert_value();
+    assert_eq!(
+        origin,
+        format!("http://{}", listener.local_addr().assert_value())
+    );
+    assert!(remote.run_history_discovery().is_none());
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    let (native, native_origin) = prepare_local_service(&listener, None).assert_value();
+    assert_eq!(native_origin, origin);
+    assert!(native.run_history_discovery().is_none());
 }

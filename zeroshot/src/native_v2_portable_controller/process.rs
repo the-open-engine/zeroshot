@@ -51,10 +51,12 @@ struct PortableBootstrapDocument {
 
 impl PortableBootstrapDocument {
     fn validate(self) -> Result<PortableControllerBootstrap, PortableControllerError> {
-        require_absolute(&self.workspace)?;
-        require_absolute(&self.workspace_lease)?;
-        require_absolute(&self.checkpoint_repository)?;
-        require_absolute(&self.storage)?;
+        validate_bootstrap_paths(
+            &self.workspace,
+            &self.workspace_lease,
+            &self.checkpoint_repository,
+            &self.storage,
+        )?;
         let environment = RunEnvironment::exact(&self.submission.runtime, self.connections)?;
         Ok(PortableControllerBootstrap {
             checkpoint: self.checkpoint,
@@ -175,10 +177,12 @@ pub fn write_bootstrap_file(
 fn encode_bootstrap(
     bootstrap: &PortableControllerBootstrap,
 ) -> Result<Vec<u8>, PortableControllerError> {
-    require_absolute(&bootstrap.workspace)?;
-    require_absolute(&bootstrap.workspace_lease)?;
-    require_absolute(&bootstrap.checkpoint_repository)?;
-    require_absolute(&bootstrap.storage)?;
+    validate_bootstrap_paths(
+        &bootstrap.workspace,
+        &bootstrap.workspace_lease,
+        &bootstrap.checkpoint_repository,
+        &bootstrap.storage,
+    )?;
     let environment = bootstrap
         .environment
         .for_runtime(&bootstrap.submission.runtime)?;
@@ -202,6 +206,18 @@ fn encode_bootstrap(
         return Err(PortableControllerError::Bootstrap);
     }
     Ok(bytes)
+}
+
+fn validate_bootstrap_paths(
+    workspace: &Path,
+    workspace_lease: &Path,
+    checkpoint_repository: &Path,
+    storage: &Path,
+) -> Result<(), PortableControllerError> {
+    for path in [workspace, workspace_lease, checkpoint_repository, storage] {
+        require_absolute(path)?;
+    }
+    Ok(())
 }
 
 fn prepare_bootstrap_parent(path: &Path) -> Result<(), PortableControllerError> {

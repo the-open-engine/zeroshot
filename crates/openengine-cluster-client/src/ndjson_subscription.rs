@@ -368,3 +368,7 @@ macro_rules! impl_ndjson_event_subscription {
 }
 
 pub(crate) use impl_ndjson_event_subscription;
+
+#[cfg(test)]
+#[path = "ndjson_subscription/tests.rs"]
+mod tests;

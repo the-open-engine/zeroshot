@@ -1,7 +1,9 @@
 use openengine_cluster_protocol::{
-    MergePlanId, RunForceParams, RunId, RunListParams, RunLogsParams, RunProfileDefaultRequest,
-    RunProfileListRequest, RunProfileName, RunProfileRunRequest, RunProfileScope,
-    RunProfileSelector, RunProfileSetRequest, RunStatusParams, RunWatchParams,
+    ConnectionDeleteRequest, ConnectionKey, ConnectionListRequest, ConnectionScope,
+    ConnectionSetRequest, EnvironmentVariableName, MergePlanId, RunForceParams, RunId,
+    RunListParams, RunLogsParams, RunProfileDefaultRequest, RunProfileListRequest, RunProfileName,
+    RunProfileRunRequest, RunProfileScope, RunProfileSelector, RunProfileSetRequest,
+    RunStatusParams, RunWatchParams, StaticConnectionValues,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
@@ -220,6 +222,65 @@ async fn connector_preserves_fail_closed_profile_and_merge_plan_errors() {
                 .contains("hosted merge plans are unavailable")
         );
     }
+    assert!(authority.calls().is_empty());
+}
+
+#[tokio::test]
+async fn connector_preserves_connection_and_checkpoint_authority_failures() {
+    let authority = FakeAuthority::new("ws://127.0.0.1:1/native-v2/oecp");
+    let connector = hosted_connector(authority.clone());
+    let key = ConnectionKey::new("github").assert_value();
+    let values = StaticConnectionValues::new(std::collections::BTreeMap::from([(
+        EnvironmentVariableName::new("GH_TOKEN").assert_value(),
+        "private".to_owned(),
+    )]))
+    .assert_value();
+    let errors = [
+        connector
+            .connection_list(
+                "cloud",
+                ConnectionListRequest {
+                    scope: ConnectionScope::User,
+                },
+            )
+            .await
+            .assert_error(),
+        connector
+            .connection_set(
+                "cloud",
+                ConnectionSetRequest {
+                    key: key.clone(),
+                    scope: ConnectionScope::User,
+                    values,
+                },
+            )
+            .await
+            .assert_error(),
+        connector
+            .connection_delete(
+                "cloud",
+                ConnectionDeleteRequest {
+                    key,
+                    scope: ConnectionScope::User,
+                },
+            )
+            .await
+            .assert_error(),
+    ];
+    assert!(errors.iter().all(|error| {
+        error
+            .to_string()
+            .contains("fake connection management is unavailable")
+    }));
+    let checkpoint_error = connector
+        .connect_workspace_checkpoints("cloud", RunId::new("checkpoint-run"))
+        .await
+        .assert_error()
+        .to_string();
+    assert!(
+        checkpoint_error.contains("does not advertise workspace checkpoints"),
+        "{checkpoint_error}"
+    );
     assert!(authority.calls().is_empty());
 }
 

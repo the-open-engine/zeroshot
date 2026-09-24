@@ -91,3 +91,7 @@ fn default_unix_state_root() -> Result<PathBuf, NativeV2CliError> {
         "controller state path must be absolute",
     )
 }
+
+#[cfg(test)]
+#[path = "support/tests.rs"]
+mod tests;

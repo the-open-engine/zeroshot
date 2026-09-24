@@ -96,6 +96,143 @@ impl Fixture {
 }
 
 #[tokio::test]
+async fn catalog_pages_exclusively_and_rejects_invalid_or_unknown_cursors() {
+    let fixture = Fixture::new();
+    let first = fixture.input_checkpoint("writer").await;
+    let snapshot = catalog::point(&fixture.directory, &first.checkpoint_id)
+        .assert_value()
+        .snapshot;
+    for node in ["reader", "writer"] {
+        catalog::publish(
+            &fixture.directory,
+            boundary(node),
+            snapshot.clone(),
+            Vec::new(),
+        )
+        .assert_value();
+    }
+
+    let run_id = RunId::new("checkpoint-pages");
+    assert_eq!(
+        catalog::list(
+            &fixture.directory,
+            RunCheckpointsParams {
+                run_id: run_id.clone(),
+                after: None,
+                limit: Some(0),
+            },
+        )
+        .unwrap_err()
+        .0
+        .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+
+    let first_page = catalog::list(
+        &fixture.directory,
+        RunCheckpointsParams {
+            run_id: run_id.clone(),
+            after: None,
+            limit: Some(1),
+        },
+    )
+    .assert_value();
+    assert_eq!(first_page.checkpoints, vec![first.clone()]);
+    assert_eq!(first_page.next_after, Some(first.checkpoint_id.clone()));
+
+    let tail = catalog::list(
+        &fixture.directory,
+        RunCheckpointsParams {
+            run_id: run_id.clone(),
+            after: first_page.next_after,
+            limit: Some(100),
+        },
+    )
+    .assert_value();
+    assert_eq!(tail.run_id, run_id);
+    assert_eq!(tail.checkpoints.len(), 2);
+    assert!(tail.next_after.is_none());
+
+    let error = catalog::list(
+        &fixture.directory,
+        RunCheckpointsParams {
+            run_id: RunId::new("checkpoint-pages"),
+            after: Some(CheckpointId::new("unknown-checkpoint").assert_value()),
+            limit: Some(1),
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.0.kind(), std::io::ErrorKind::InvalidData);
+}
+
+#[tokio::test]
+async fn catalog_rejects_tampered_point_identity_and_format_and_malformed_metadata() {
+    let fixture = Fixture::new();
+    let checkpoint = fixture.input_checkpoint("writer").await;
+    let point_path = fs::read_dir(fixture.directory.join("points"))
+        .assert_value()
+        .next()
+        .assert_value()
+        .assert_value()
+        .path();
+    let original: serde_json::Value =
+        serde_json::from_slice(&fs::read(&point_path).assert_value()).assert_value();
+
+    let mut incompatible = original.clone();
+    incompatible["version"] = json!(RECOVERY_POINT_FORMAT + 1);
+    fs::write(
+        &point_path,
+        serde_json::to_vec(&incompatible).assert_value(),
+    )
+    .assert_value();
+    assert_eq!(
+        catalog::point(&fixture.directory, &checkpoint.checkpoint_id)
+            .unwrap_err()
+            .0
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+
+    let mut mismatched = original;
+    mismatched["descriptor"]["checkpointId"] = json!("different-checkpoint");
+    fs::write(&point_path, serde_json::to_vec(&mismatched).assert_value()).assert_value();
+    assert_eq!(
+        catalog::point(&fixture.directory, &checkpoint.checkpoint_id)
+            .unwrap_err()
+            .0
+            .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+
+    fs::write(fixture.directory.join("index.json"), b"{").assert_value();
+    assert_eq!(
+        catalog::list(
+            &fixture.directory,
+            RunCheckpointsParams {
+                run_id: RunId::new("malformed-catalog"),
+                after: None,
+                limit: None,
+            },
+        )
+        .unwrap_err()
+        .0
+        .kind(),
+        std::io::ErrorKind::InvalidData
+    );
+}
+
+#[test]
+fn catalog_atomic_write_removes_temporary_data_when_serialization_fails() {
+    let root = tempfile::tempdir().assert_value();
+    let destination = root.path().join("point.json");
+    let invalid_json_object = std::collections::BTreeMap::from([(vec![0_u8], ())]);
+    let error = catalog::write_atomic(&destination, &invalid_json_object).unwrap_err();
+    assert_eq!(error.0.kind(), std::io::ErrorKind::InvalidData);
+    assert!(!destination.exists());
+    assert_eq!(fs::read_dir(root.path()).assert_value().count(), 0);
+}
+
+#[tokio::test]
 async fn restart_restores_latest_workspace_without_reading_the_checkpoint_seed() {
     let fixture = Fixture::new();
     let point = fixture.input_checkpoint("writer").await;
@@ -386,6 +523,69 @@ async fn invalid_restic_snapshot_mapping_is_rejected_before_workspace_changes() 
         .is_err()
     );
     assert_eq!(fixture.source(), "live edits");
+}
+
+#[tokio::test]
+async fn storage_identity_and_snapshot_formats_fail_closed_without_losing_the_prior_point() {
+    let fixture = Fixture::new();
+    let point = fixture.input_checkpoint("writer").await;
+    let storage_path = fixture.directory.join("storage.json");
+    let storage: serde_json::Value =
+        serde_json::from_slice(&fs::read(&storage_path).assert_value()).assert_value();
+    let mapping_path = fs::read_dir(fixture.directory.join("snapshots"))
+        .assert_value()
+        .next()
+        .assert_value()
+        .assert_value()
+        .path();
+    let mapping: serde_json::Value =
+        serde_json::from_slice(&fs::read(&mapping_path).assert_value()).assert_value();
+
+    let mut changed_storage = storage.clone();
+    changed_storage["repository"] = json!(fixture._root.path().join("other-repository"));
+    fs::write(
+        &storage_path,
+        serde_json::to_vec(&changed_storage).assert_value(),
+    )
+    .assert_value();
+    let reopened = fake_checkpoint_store(
+        fixture._root.path(),
+        fixture.directory.clone(),
+        fixture.workspace.clone(),
+        BTreeSet::from([NodeName::new("writer").assert_value()]),
+    );
+    assert!(
+        reopened
+            .enter(&boundary("reader"), &[settled("writer", 1)])
+            .await
+            .is_err()
+    );
+    assert_eq!(fixture.points(), vec![point.clone()]);
+
+    let restore_metadata = || {
+        fs::write(&storage_path, serde_json::to_vec(&storage).assert_value()).assert_value();
+        fs::write(&mapping_path, serde_json::to_vec(&mapping).assert_value()).assert_value();
+    };
+    for (path, original) in [(&storage_path, &storage), (&mapping_path, &mapping)] {
+        restore_metadata();
+        let mut incompatible = original.clone();
+        incompatible["format"] = json!(STORAGE_FORMAT + 1);
+        fs::write(path, serde_json::to_vec(&incompatible).assert_value()).assert_value();
+        assert!(
+            validate_selection(&CheckpointRestore {
+                directory: fixture.directory.clone(),
+                selection: CheckpointRestoreSelection::Checkpoint {
+                    checkpoint_id: point.checkpoint_id.clone(),
+                },
+            })
+            .is_err()
+        );
+    }
+
+    restore_metadata();
+    fs::write(fixture.workspace.join("source"), "live edits").assert_value();
+    fixture.restore(&point).await;
+    assert_eq!(fixture.source(), "initial");
 }
 
 #[tokio::test]

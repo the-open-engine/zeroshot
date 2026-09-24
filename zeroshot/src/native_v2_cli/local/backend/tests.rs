@@ -1,19 +1,29 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use openengine_cluster_protocol::{
-    ConnectionKey, ConnectionScope, EnvironmentVariableName, ExecutionRef,
+    ConnectionKey, ConnectionScope, EnvironmentVariableName, ExecutionRef, RunCheckpointsParams,
     RunDiscardWorkspaceParams, RunProfileName, RunProfileScope, RunResumeParams,
     StaticConnectionValues,
 };
-use openengine_cluster_testkit::assertions::AssertValue;
+use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::json;
 
 use super::*;
+use super::super::local_contract_tests::contract_submission;
 use crate::native_v2_candidate::test_support::{full_graph, success_node};
 
 fn run_id(value: &str) -> RunId {
     RunId::new(value)
+}
+
+fn local_backend(root: &Path) -> LocalCliBackend {
+    LocalCliBackend::new(
+        root.to_path_buf(),
+        PathBuf::from("zeroshot"),
+        root.to_path_buf(),
+        PathBuf::from("git"),
+    )
 }
 
 fn prepared_request(run_id: RunId) -> PreparedRunRequest {
@@ -173,6 +183,18 @@ async fn exercise_named_run_rejections(backend: &LocalCliBackend) {
     );
     assert_named_target_rejected(
         backend
+            .run_checkpoints(
+                Some("prod"),
+                RunCheckpointsParams {
+                    run_id: run_id.clone(),
+                    after: None,
+                    limit: None,
+                },
+            )
+            .await,
+    );
+    assert_named_target_rejected(
+        backend
             .run_resume(
                 Some("prod"),
                 RunResumeParams {
@@ -262,6 +284,19 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
     );
     assert!(
         backend
+            .run_checkpoints(
+                None,
+                RunCheckpointsParams {
+                    run_id: run_id.clone(),
+                    after: None,
+                    limit: None,
+                },
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        backend
             .run_resume(
                 None,
                 RunResumeParams {
@@ -281,12 +316,7 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
 #[tokio::test]
 async fn local_backend_contract_delegates_storage_and_rejects_remote_routes() {
     let root = tempfile::tempdir().assert_value();
-    let backend = LocalCliBackend::new(
-        root.path().to_path_buf(),
-        PathBuf::from("zeroshot"),
-        root.path().to_path_buf(),
-        PathBuf::from("git"),
-    );
+    let backend = local_backend(root.path());
     let key = ConnectionKey::new("openai").assert_value();
     let field = EnvironmentVariableName::new("OPENAI_API_KEY").assert_value();
     let values = StaticConnectionValues::new(BTreeMap::from([(
@@ -393,4 +423,44 @@ async fn local_resume_rejects_an_unusable_state_root_before_observing_the_run() 
         .await
         .unwrap_err();
     assert!(matches!(error, NativeV2CliError::Local(_)));
+}
+
+#[test]
+fn local_resume_claimability_fails_closed_before_controller_effects() {
+    let root = tempfile::tempdir().assert_value();
+    let backend = local_backend(root.path());
+    let original_run_id = run_id("0199f33f-3b44-7d21-9000-000000000052");
+    let unavailable = backend
+        .claimable_recovery_document(&original_run_id, false)
+        .assert_error()
+        .to_string();
+    assert!(unavailable.contains("does not have a recoverable workspace"));
+
+    backend.create_run_storage(&original_run_id).assert_value();
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    let mut recovery = LocalRecoveryDocument {
+        submission: contract_submission("backend-claimability"),
+        workspace,
+        resumed_from: None,
+        delivery_run_id: Some(original_run_id.clone()),
+        successor_run_id: Some(run_id("0199f33f-3b44-7d21-9000-000000000053")),
+    };
+    backend
+        .write_recovery_document(&original_run_id, &recovery)
+        .assert_value();
+    let claimed = backend
+        .claimable_recovery_document(&original_run_id, true)
+        .assert_error()
+        .to_string();
+    assert!(claimed.contains("already claimed"));
+
+    recovery.successor_run_id = None;
+    backend
+        .write_recovery_document(&original_run_id, &recovery)
+        .assert_value();
+    let available = backend
+        .claimable_recovery_document(&original_run_id, true)
+        .assert_value();
+    assert_eq!(available.delivery_run_id, Some(original_run_id));
 }

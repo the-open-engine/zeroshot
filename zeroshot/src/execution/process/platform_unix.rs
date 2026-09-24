@@ -46,20 +46,38 @@ pub(super) fn kill_process_tree(
     containment: ProcessContainment,
     child: &mut tokio::process::Child,
 ) -> Vec<String> {
-    let mut errors = Vec::new();
     #[cfg(target_os = "linux")]
-    if let Some(membership) = containment.membership() {
-        if let Err(error) = kill_linux_worker_processes(membership) {
-            errors.push(super::io_error_detail(
-                "worker process termination failed",
-                &error,
-            ));
-        }
-    }
+    let worker_termination = containment
+        .membership()
+        .map_or(Ok(()), kill_linux_worker_processes);
     #[cfg(not(target_os = "linux"))]
-    let _ = containment;
+    let worker_termination = {
+        let _ = containment;
+        Ok(())
+    };
+    kill_process_tree_with(
+        process_group_id,
+        worker_termination,
+        kill_process_group,
+        || child.start_kill(),
+    )
+}
+
+fn kill_process_tree_with(
+    process_group_id: Option<i32>,
+    worker_termination: Result<(), io::Error>,
+    mut kill_group: impl FnMut(i32) -> Result<(), io::Error>,
+    mut kill_root: impl FnMut() -> Result<(), io::Error>,
+) -> Vec<String> {
+    let mut errors = Vec::new();
+    if let Err(error) = worker_termination {
+        errors.push(super::io_error_detail(
+            "worker process termination failed",
+            &error,
+        ));
+    }
     let Some(process_group_id) = process_group_id else {
-        if let Err(error) = child.start_kill() {
+        if let Err(error) = kill_root() {
             errors.push(super::io_error_detail(
                 "root process termination failed",
                 &error,
@@ -67,13 +85,13 @@ pub(super) fn kill_process_tree(
         }
         return errors;
     };
-    if let Err(error) = kill_process_group(process_group_id) {
+    if let Err(error) = kill_group(process_group_id) {
         if !process_is_missing(&error) {
             errors.push(super::io_error_detail(
                 "process group termination failed",
                 &error,
             ));
-            if let Err(error) = child.start_kill() {
+            if let Err(error) = kill_root() {
                 errors.push(super::io_error_detail(
                     "root process termination fallback failed",
                     &error,
@@ -124,9 +142,18 @@ pub(super) fn reap_and_kill_worker_processes(
     membership: WorkerMembership,
 ) -> Result<bool, io::Error> {
     let pids = linux_worker_processes(membership)?;
-    kill_linux_pids(&pids, kernel_kill)?;
-    for pid in &pids {
-        reap_linux_child(*pid)?;
+    kill_and_reap_linux_pids_with(&pids, kernel_kill, reap_linux_child)
+}
+
+#[cfg(target_os = "linux")]
+fn kill_and_reap_linux_pids_with(
+    pids: &[i32],
+    kill: impl FnMut(i32) -> Result<(), io::Error>,
+    mut reap: impl FnMut(i32) -> Result<(), io::Error>,
+) -> Result<bool, io::Error> {
+    kill_linux_pids(pids, kill)?;
+    for pid in pids {
+        reap(*pid)?;
     }
     Ok(!pids.is_empty())
 }
@@ -166,12 +193,23 @@ fn linux_entry_process_group(entry: std::fs::DirEntry) -> Result<Option<i32>, io
 
 #[cfg(target_os = "linux")]
 fn validate_linux_worker_boundary(membership: WorkerMembership) -> Result<(), io::Error> {
-    validate_linux_supervisor(unsafe { libc::geteuid() })?;
+    validate_linux_worker_boundary_with(unsafe { libc::geteuid() }, membership, |membership| {
+        Ok(!linux_worker_processes(membership)?.is_empty())
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn validate_linux_worker_boundary_with(
+    effective_uid: u32,
+    membership: WorkerMembership,
+    occupied: impl FnOnce(WorkerMembership) -> Result<bool, io::Error>,
+) -> Result<(), io::Error> {
+    validate_linux_supervisor(effective_uid)?;
     validate_worker_membership(match membership {
         WorkerMembership::Uid(uid) => uid,
         WorkerMembership::SupplementaryGroup(group) => group,
     })?;
-    validate_linux_worker_availability(!linux_worker_processes(membership)?.is_empty())
+    validate_linux_worker_availability(occupied(membership)?)
 }
 
 #[cfg(target_os = "linux")]
@@ -537,22 +575,38 @@ fn linux_worker_processes(membership: WorkerMembership) -> Result<Vec<i32>, io::
         let Some(pid) = linux_entry_pid(&entry) else {
             continue;
         };
-        let Some(status) =
-            resolve_linux_process_read(std::fs::read_to_string(entry.path().join("status")))?
+        let Some(matches) = linux_process_membership(
+            pid,
+            std::fs::read_to_string(entry.path().join("status")),
+            membership,
+        )?
         else {
             continue;
         };
-        let matches = linux_matches_membership(&status, membership).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("invalid Linux process status for {pid}"),
-            )
-        })?;
         if matches {
             pids.push(pid);
         }
     }
     Ok(pids)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_membership(
+    pid: i32,
+    read: io::Result<String>,
+    membership: WorkerMembership,
+) -> io::Result<Option<bool>> {
+    let Some(status) = resolve_linux_process_read(read)? else {
+        return Ok(None);
+    };
+    linux_matches_membership(&status, membership)
+        .map(Some)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("invalid Linux process status for {pid}"),
+            )
+        })
 }
 
 #[cfg(target_os = "linux")]

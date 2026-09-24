@@ -150,6 +150,23 @@ fn boundary_contract_path_validation_distinguishes_regular_files_directories_sym
     remove_existing_regular_file(&removable).assert_value();
     assert!(!removable.exists());
 
+    let blocking_file = root.path().join("blocking-file");
+    fs::write(&blocking_file, b"not a directory").assert_value();
+    let blocked_child = blocking_file.join("child");
+    assert!(matches!(
+        validate_ledger_path(&blocked_child),
+        Err(PortableControllerError::LedgerPath)
+    ));
+    assert!(matches!(
+        remove_existing_regular_file(&blocked_child),
+        Err(PortableControllerError::Io(_))
+    ));
+
+    let paths = PortableControllerPaths::new(root.path());
+    fs::write(paths.ready(), b"stale readiness").assert_value();
+    clear_stale_endpoint(&paths).assert_value();
+    assert!(!paths.ready().exists());
+
     #[cfg(unix)]
     {
         let link = root.path().join("link");
@@ -207,6 +224,40 @@ fn coverage_contract_bootstrap_parent_and_private_read_refuse_ambiguous_filesyst
             Err(PortableControllerError::Io(_))
         ));
     }
+}
+
+#[test]
+fn final_contract_all_private_bootstrap_paths_must_be_absolute() {
+    let root = tempfile::tempdir().assert_value();
+    let valid = [
+        root.path().join("workspace"),
+        root.path().join("workspace.lock"),
+        root.path().join("repository"),
+        root.path().join("state"),
+    ];
+    validate_bootstrap_paths(&valid[0], &valid[1], &valid[2], &valid[3]).assert_value();
+
+    for relative_index in 0..valid.len() {
+        let mut paths = valid.clone();
+        paths[relative_index] = PathBuf::from("relative");
+        assert!(matches!(
+            validate_bootstrap_paths(&paths[0], &paths[1], &paths[2], &paths[3]),
+            Err(PortableControllerError::Path)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn final_contract_controller_entry_consumes_a_rejected_bootstrap_before_any_effect() {
+    let root = tempfile::tempdir().assert_value();
+    let path = root.path().join("controller.bootstrap.json");
+    write_private_new_file(&path, b"{").assert_value();
+
+    assert!(matches!(
+        run_controller_process(&path).await,
+        Err(PortableControllerError::Bootstrap)
+    ));
+    assert!(!path.exists());
 }
 
 #[test]

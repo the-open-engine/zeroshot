@@ -132,12 +132,14 @@ async fn bounded_download_accepts_success_and_rejects_status_and_both_oversize_f
         fixed_response("503 Service Unavailable", b"unavailable"),
         fixed_response("200 OK", b"large"),
         chunked_response(&[b"abc", b"def"]),
+        truncated_response(8, b"short"),
     ]);
     let client = http_client().assert_value();
     let success = download(&client, &server.url("success"), 4, "success").await;
     let status = download(&client, &server.url("status"), 64, "status").await;
     let declared = download(&client, &server.url("declared"), 4, "declared").await;
     let chunked = download(&client, &server.url("chunked"), 5, "chunked").await;
+    let truncated = download(&client, &server.url("truncated"), 8, "truncated").await;
     server.finish();
 
     assert_eq!(success.assert_value(), b"data");
@@ -153,6 +155,12 @@ async fn bounded_download_accepts_success_and_rejects_status_and_both_oversize_f
             .assert_error()
             .to_string()
             .contains("chunked exceeds 5 bytes")
+    );
+    assert!(
+        truncated
+            .assert_error()
+            .to_string()
+            .contains("could not read truncated")
     );
 }
 
@@ -243,6 +251,7 @@ fn assert_installation_stages_verifies_replaces_and_cleans_up() {
         .join(format!("zeroshot{}", std::env::consts::EXE_SUFFIX));
     let installed = directory.path().join("installed");
     fs::write(&current, b"old binary").unwrap();
+    fs::write(directory.path().join("restic"), b"old restic").unwrap();
     let verified = Cell::new(false);
     let version = ReleaseVersion([8, 2, 1]);
     let executables = test_executables();
@@ -329,6 +338,30 @@ fn assert_installation_stops_on_verification_or_replacement_failure() {
     assert!(matches!(verification_error, NativeV2CliError::Update(_)));
     assert!(!replaced.get());
 
+    let restic_verification_error = install_at(
+        &current,
+        &executables,
+        version,
+        InstallOperations {
+            verify: |_: &Path, _| Ok(()),
+            verify_restic: |_: &Path| Err(update_error("Restic verification failed")),
+            replace: |_: &Path| {
+                replaced.set(true);
+                Ok(())
+            },
+        },
+    )
+    .assert_error();
+    assert!(matches!(
+        restic_verification_error,
+        NativeV2CliError::Update(_)
+    ));
+    assert!(!replaced.get());
+    assert_eq!(
+        fs::read(directory.path().join("restic")).unwrap(),
+        b"old restic"
+    );
+
     let replacement_error = install_at(
         &current,
         &executables,
@@ -345,6 +378,81 @@ fn assert_installation_stops_on_verification_or_replacement_failure() {
         fs::read(directory.path().join("restic")).unwrap(),
         b"old restic"
     );
+
+    let missing_staged = directory.path().join("missing-staged-restic");
+    let sidecar_error =
+        SidecarReplacement::install(&missing_staged, &directory.path().join("restic"))
+            .assert_error()
+            .to_string();
+    assert!(sidecar_error.contains("could not install the Restic sidecar"));
+    assert_eq!(
+        fs::read(directory.path().join("restic")).unwrap(),
+        b"old restic"
+    );
+    assert!(!directory.path().read_dir().unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".restic-update-backup-")
+    }));
+}
+
+fn assert_sidecar_recovery_failures_are_explicit_and_bounded() {
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("missing");
+    let rollback_error = SidecarReplacement {
+        destination: missing.clone(),
+        backup: None,
+    }
+    .rollback()
+    .assert_error()
+    .to_string();
+    assert!(rollback_error.contains("could not roll back the Restic sidecar"));
+
+    let installed = directory.path().join("installed-restic");
+    fs::write(&installed, b"new restic").unwrap();
+    let restore_error = SidecarReplacement {
+        destination: installed.clone(),
+        backup: Some(missing),
+    }
+    .rollback()
+    .assert_error()
+    .to_string();
+    assert!(restore_error.contains("could not restore the Restic sidecar"));
+    assert!(!installed.exists());
+
+    let retained_backup = directory.path().join("retained-backup");
+    fs::create_dir(&retained_backup).unwrap();
+    fs::write(retained_backup.join("entry"), b"retained").unwrap();
+    SidecarReplacement {
+        destination: directory.path().join("unused"),
+        backup: Some(retained_backup.clone()),
+    }
+    .commit();
+    assert!(retained_backup.is_dir());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let locked = directory.path().join("locked");
+        fs::create_dir(&locked).unwrap();
+        let destination = locked.join("restic");
+        fs::write(&destination, b"old restic").unwrap();
+        let staged = directory.path().join("staged-restic");
+        fs::write(&staged, b"new restic").unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+        let result = SidecarReplacement::install(&staged, &destination);
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        let error = result.assert_error().to_string();
+        assert!(error.contains("could not preserve the installed Restic sidecar"));
+        assert_eq!(fs::read(destination).unwrap(), b"old restic");
+        assert_eq!(fs::read(staged).unwrap(), b"new restic");
+    }
 }
 
 fn assert_smoke_and_result_reporting_require_the_exact_release_version() {
@@ -385,6 +493,39 @@ fn assert_update_process_boundaries_fail_before_replacement() {
     assert!(!target.is_empty());
     assert!(matches!(executable, "zeroshot" | "zeroshot.exe"));
     assert!(matches!(restic, "restic" | "restic.exe"));
+    for (os, arch, expected) in [
+        (
+            "linux",
+            "x86_64",
+            ("x86_64-unknown-linux-musl", "zeroshot", "restic"),
+        ),
+        (
+            "linux",
+            "aarch64",
+            ("aarch64-unknown-linux-musl", "zeroshot", "restic"),
+        ),
+        (
+            "macos",
+            "x86_64",
+            ("x86_64-apple-darwin", "zeroshot", "restic"),
+        ),
+        (
+            "macos",
+            "aarch64",
+            ("aarch64-apple-darwin", "zeroshot", "restic"),
+        ),
+        (
+            "windows",
+            "x86_64",
+            ("x86_64-pc-windows-msvc", "zeroshot.exe", "restic.exe"),
+        ),
+    ] {
+        assert_eq!(release_target_for(os, arch).assert_value(), expected);
+    }
+    let unsupported = release_target_for("plan9", "mips")
+        .assert_error()
+        .to_string();
+    assert!(unsupported.contains("plan9/mips"));
     assert!(extract_executables(b"not a gzip archive", &[executable, restic]).is_err());
     assert!(
         install_at(
@@ -413,6 +554,27 @@ fn assert_update_process_boundaries_fail_before_replacement() {
         let missing = directory.path().join("missing");
         assert!(make_executable(&missing).is_err());
         assert!(smoke(&missing, version).is_err());
+
+        let restic = directory.path().join("restic");
+        fs::write(
+            &restic,
+            b"#!/bin/sh\nprintf 'restic 0.19.1 compiled with go1.25\\n'\n",
+        )
+        .assert_value();
+        fs::set_permissions(&restic, fs::Permissions::from_mode(0o755)).assert_value();
+        smoke_restic(&restic).assert_value();
+        for invalid in [
+            b"#!/bin/sh\nprintf 'restic 0.19.0 compiled with go1.25\\n'\n".as_slice(),
+            b"#!/bin/sh\nexit 1\n".as_slice(),
+        ] {
+            fs::write(&restic, invalid).assert_value();
+            assert!(smoke_restic(&restic).is_err());
+        }
+        assert!(smoke_restic(&missing).is_err());
+
+        let not_a_directory = directory.path().join("not-a-directory");
+        fs::write(&not_a_directory, b"file").assert_value();
+        assert!(stage_executable(&not_a_directory, ".test-", "", b"binary").is_err());
     }
 }
 
@@ -466,6 +628,7 @@ async fn wave10_cli_contract_release_integrity_pipeline_is_lean_and_fail_closed(
     assert_release_archive_rejects_wrong_paths_types_duplicates_and_missing_executables();
     assert_installation_stages_verifies_replaces_and_cleans_up();
     assert_installation_stops_on_verification_or_replacement_failure();
+    assert_sidecar_recovery_failures_are_explicit_and_bounded();
     assert_smoke_and_result_reporting_require_the_exact_release_version();
     assert_update_process_boundaries_fail_before_replacement();
     assert_update_short_circuits_and_serializes_without_release_io().await;
@@ -598,5 +761,14 @@ fn chunked_response(chunks: &[&[u8]]) -> Vec<u8> {
         response.extend_from_slice(b"\r\n");
     }
     response.extend_from_slice(b"0\r\n\r\n");
+    response
+}
+
+fn truncated_response(declared_length: usize, body: &[u8]) -> Vec<u8> {
+    let mut response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {declared_length}\r\nConnection: close\r\n\r\n"
+    )
+    .into_bytes();
+    response.extend_from_slice(body);
     response
 }

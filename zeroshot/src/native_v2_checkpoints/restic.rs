@@ -154,20 +154,7 @@ impl Repository {
             arguments.push(parent.as_str().into());
         }
         let output = self.run(source, &arguments).await?;
-        let mut snapshot = None;
-        for line in output
-            .split(|byte| *byte == b'\n')
-            .filter(|line| !line.is_empty())
-        {
-            let value: serde_json::Value = serde_json::from_slice(line)
-                .map_err(|_| io::Error::other("restic returned invalid JSON"))?;
-            if value["message_type"] == "summary" {
-                snapshot = value["snapshot_id"].as_str().map(str::to_owned);
-            }
-        }
-        SnapshotId::parse(
-            snapshot.ok_or_else(|| io::Error::other("restic did not commit a snapshot"))?,
-        )
+        backup_snapshot(&output)
     }
 
     pub(super) async fn restore(&self, snapshot: &SnapshotId, target: &Path) -> io::Result<()> {
@@ -347,6 +334,21 @@ impl Repository {
     }
 }
 
+fn backup_snapshot(output: &[u8]) -> io::Result<SnapshotId> {
+    let mut snapshot = None;
+    for line in output
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+    {
+        let value: serde_json::Value = serde_json::from_slice(line)
+            .map_err(|_| io::Error::other("restic returned invalid JSON"))?;
+        if value["message_type"] == "summary" {
+            snapshot = value["snapshot_id"].as_str().map(str::to_owned);
+        }
+    }
+    SnapshotId::parse(snapshot.ok_or_else(|| io::Error::other("restic did not commit a snapshot"))?)
+}
+
 #[cfg(test)]
 fn copy_test_children(source: &Path, target: &Path) -> io::Result<()> {
     for entry in std::fs::read_dir(source)? {
@@ -374,3 +376,7 @@ async fn bounded_output(reader: impl tokio::io::AsyncRead + Unpin) -> io::Result
     }
     Ok(bytes)
 }
+
+#[cfg(test)]
+#[path = "restic/tests.rs"]
+mod tests;

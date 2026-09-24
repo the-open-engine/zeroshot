@@ -5,6 +5,37 @@ struct RetainedCleanupFailureAllocator {
     cleanup_calls: StdMutex<Vec<(RunId, RunRuntimeExit)>>,
 }
 
+async fn assert_reconstructed_discard_contracts(
+    controller: &NativeV2CloudController,
+    successor_run_id: RunId,
+) {
+    assert!(matches!(
+        controller
+            .discard_workspace(RunDiscardWorkspaceParams {
+                run_id: RunId::new("missing-run"),
+            })
+            .await,
+        Err(NativeV2CloudError::Ledger(RunLedgerError::RunNotFound))
+    ));
+    assert!(matches!(
+        controller
+            .checkpoints(openengine_cluster_protocol::RunCheckpointsParams {
+                run_id: RunId::new("missing-run"),
+                after: None,
+                limit: None,
+            })
+            .await,
+        Err(NativeV2CloudError::Ledger(RunLedgerError::RunNotFound))
+    ));
+    let discarded = controller
+        .discard_workspace(RunDiscardWorkspaceParams {
+            run_id: successor_run_id,
+        })
+        .await
+        .assert_value_with("workspace discard");
+    assert!(!discarded.discarded);
+}
+
 impl RetainedCleanupFailureAllocator {
     fn new() -> Self {
         Self {
@@ -91,6 +122,27 @@ async fn wave8_cli_contract_submission_rejects_missing_secrets_and_invalid_graph
             .assert_value_with("list")
             .is_empty()
     );
+
+    let submission = request(Value::Null).submission;
+    let admitted = NativeV2Admission
+        .admit(submission)
+        .await
+        .assert_value_with("admitted resolver fixture");
+    let error = resume_secret_envelope(ResumeSecretRequest {
+        admitted: &admitted,
+        successor_run_id: &RunId::new("resolver-successor"),
+        connections: BTreeMap::new(),
+        connection_resolver: Some(openengine_cluster_protocol::TargetConnectionResolver {
+            endpoint: "http://resolver.example".to_owned(),
+            bearer_token: "private-token".to_owned(),
+            keys: vec![ConnectionKey::new("test").assert_value_with("resolver key")],
+            source_connection: None,
+        }),
+        github_token: None,
+    })
+    .err()
+    .expect("insecure resolver authority must fail closed");
+    assert!(matches!(error, NativeV2CloudError::ResumeCredentials));
 }
 
 #[tokio::test]
@@ -201,21 +253,7 @@ async fn wave8_cli_contract_retained_cleanup_and_discard_fail_closed_across_reco
     ));
     assert!(status.workspace_recovery.recoverable);
 
-    assert!(matches!(
-        replacement
-            .discard_workspace(RunDiscardWorkspaceParams {
-                run_id: RunId::new("missing-run"),
-            })
-            .await,
-        Err(NativeV2CloudError::Ledger(RunLedgerError::RunNotFound))
-    ));
-    let discarded = replacement
-        .discard_workspace(RunDiscardWorkspaceParams {
-            run_id: successor_run_id,
-        })
-        .await
-        .assert_value_with("workspace discard");
-    assert!(!discarded.discarded);
+    assert_reconstructed_discard_contracts(&replacement, successor_run_id).await;
 }
 
 #[tokio::test]

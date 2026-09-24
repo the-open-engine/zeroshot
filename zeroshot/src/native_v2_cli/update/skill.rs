@@ -256,11 +256,15 @@ fn frontmatter_end(document: &[u8]) -> Option<usize> {
 #[cfg(unix)]
 fn reject_sudo_install() -> Result<(), NativeV2CliError> {
     let sudo_user = std::env::var_os("SUDO_USER");
-    if unsafe { libc::geteuid() } == 0
-        && sudo_user
-            .as_deref()
-            .is_some_and(|user| user != OsStr::new("root"))
-    {
+    reject_sudo_install_for(unsafe { libc::geteuid() } == 0, sudo_user.as_deref())
+}
+
+#[cfg(unix)]
+fn reject_sudo_install_for(
+    effective_root: bool,
+    sudo_user: Option<&OsStr>,
+) -> Result<(), NativeV2CliError> {
+    if effective_root && sudo_user.is_some_and(|user| user != OsStr::new("root")) {
         return Err(update_error(
             "refusing to update user skills through sudo; use a user-owned installation",
         ));

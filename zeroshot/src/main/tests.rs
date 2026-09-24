@@ -211,3 +211,39 @@ async fn wave10_cli_contract_process_dispatch_and_routing_matrix_is_exact() {
     assert_private_bootstrap_is_exact_and_public_startup_stays_public().await;
     assert_static_dispatch_and_remaining_management_routes_are_exact().await;
 }
+
+#[tokio::test]
+async fn service_dispatch_preserves_public_listener_and_origin_refusals() {
+    #[cfg(feature = "ui")]
+    {
+        let error = dispatch(NativeV2CliCommand::Ui {
+            listen: "0.0.0.0:0".parse().assert_value(),
+            target: None,
+        })
+        .await
+        .err()
+        .assert_value();
+        assert!(matches!(error, ProcessError::Cli(_)));
+        assert!(error.to_string().contains("loopback"));
+    }
+
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test(
+        "main-target-serve-invalid-origin",
+    );
+    let error = dispatch(NativeV2CliCommand::TargetServe(
+        zeroshot_engine::native_v2_cli::TargetServe {
+            listen: "127.0.0.1:0".parse().assert_value(),
+            public_origin: "https://target.example/private".to_owned(),
+            storage: root.path("storage"),
+            bootstrap_key_file: None,
+        },
+    ))
+    .await
+    .err()
+    .assert_value();
+    assert!(matches!(
+        error,
+        ProcessError::Serve(TargetServeError::InvalidOrigin(_))
+    ));
+    assert!(!root.path("storage").exists());
+}

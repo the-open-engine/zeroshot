@@ -198,6 +198,18 @@ fn does_not_follow_skill_directory_or_file_symlinks() {
 #[cfg(unix)]
 #[test]
 fn wave9_cli_contract_skill_install_guard_matches_effective_sudo_identity() {
+    for (effective_root, sudo_user, refused) in [
+        (false, Some(OsStr::new("alice")), false),
+        (true, None, false),
+        (true, Some(OsStr::new("root")), false),
+        (true, Some(OsStr::new("alice")), true),
+    ] {
+        assert_eq!(
+            reject_sudo_install_for(effective_root, sudo_user).is_err(),
+            refused
+        );
+    }
+
     let sudo_user = std::env::var_os("SUDO_USER");
     let should_refuse = unsafe { libc::geteuid() } == 0
         && sudo_user

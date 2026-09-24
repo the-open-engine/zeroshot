@@ -85,7 +85,7 @@ jobs:
         env:
           CARGO_INCREMENTAL: '0'
           CARGO_PROFILE_TEST_DEBUG: '1'
-          COVERAGE_IGNORE_REGEX: '(^|/)(tests(/|\.rs$)|[^/]+[_-]tests\.rs$)'
+          COVERAGE_IGNORE_REGEX: '(^|/)(tests(/|\.rs$)|test_support\.rs$|[^/]+[_-]tests\.rs$)'
           RUST_TEST_THREADS: '4'
         run: |
           cargo llvm-cov clean --workspace
