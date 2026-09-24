@@ -308,7 +308,9 @@ describe('Native coverage contract', () => {
     const commands = coverage.steps.map((step) => step.run || '').join('\n');
     const measure = coverage.steps.find((step) => step.name === 'Measure native coverage');
     const install = coverage.steps.find((step) => step.name === 'Install coverage tooling');
+    const summarize = coverage.steps.find((step) => step.name === 'Summarize coverage quality');
     const publish = coverage.steps.find((step) => step.name === 'Publish coverage');
+    const enforce = coverage.steps.find((step) => step.name === 'Enforce coverage quality');
 
     assert.deepEqual(workflow.on.push.branches, ['main']);
     assert.deepEqual(workflow.on.pull_request.branches, ['main']);
@@ -317,10 +319,7 @@ describe('Native coverage contract', () => {
     assert.match(commands, /npm --prefix ui run build/);
     assert.match(commands, /cargo llvm-cov clean --workspace/);
     assert.match(commands, /cargo llvm-cov --workspace --no-report/);
-    assert.match(
-      commands,
-      /cargo llvm-cov --package zeroshot --features ui --no-report/
-    );
+    assert.match(commands, /cargo llvm-cov --package zeroshot --features ui --no-report/);
     assert.doesNotMatch(
       commands,
       /cargo llvm-cov --package zeroshot --bin zeroshot --features ui --no-clean --summary-only/
@@ -347,10 +346,13 @@ describe('Native coverage contract', () => {
       tool: 'cargo-llvm-cov@0.9.0',
       fallback: 'none',
     });
+    assert.equal(summarize.id, 'coverage_quality');
+    assert.equal(summarize['continue-on-error'], true);
     assert.equal(
       publish.uses,
       'coverallsapp/github-action@8d6379e14d29928660c4ba802d8e85393440b329'
     );
+    assert.equal(publish.if, '${{ always() }}');
     assert.deepEqual(publish.with, {
       'github-token': '${{ secrets.GITHUB_TOKEN }}',
       file: 'lcov.info',
@@ -358,6 +360,12 @@ describe('Native coverage contract', () => {
       'fail-on-error': true,
       'coverage-reporter-version': 'v0.6.22',
     });
+    assert.equal(enforce.if, '${{ always() }}');
+    assert.deepEqual(enforce.env, {
+      COVERAGE_QUALITY_OUTCOME: '${{ steps.coverage_quality.outcome }}',
+    });
+    assert.match(enforce.run, /test "\$COVERAGE_QUALITY_OUTCOME" = success/);
+    assert.ok(coverage.steps.indexOf(publish) < coverage.steps.indexOf(enforce));
   });
 });
 
