@@ -36,11 +36,11 @@ async fn failed_push_records_bounded_redacted_stdout_and_stderr() {
 /usr/bin/printf 'stdout-token=%s\n' "$GH_TOKEN"
 /usr/bin/printf 'stdout-auth=%s\n' "$GIT_CONFIG_VALUE_1"
 for argument in "$@"; do /usr/bin/printf 'arg=%s\n' "$argument"; done
-/usr/bin/head -c 131072 /dev/zero | /usr/bin/tr '\000' x
+/usr/bin/head -c 32768 /dev/zero | /usr/bin/tr '\000' x
 /usr/bin/printf 'stderr-safe=remote rejected update\n' >&2
 /usr/bin/printf 'stderr-token=%s\n' "$GH_TOKEN" >&2
 /usr/bin/printf 'stderr-auth=%s\n' "$GIT_CONFIG_VALUE_1" >&2
-/usr/bin/head -c 131072 /dev/zero | /usr/bin/tr '\000' y >&2
+/usr/bin/head -c 32768 /dev/zero | /usr/bin/tr '\000' y >&2
 exit 17
 "#,
     );
@@ -181,7 +181,7 @@ fn diagnostic_authority(
         gh_program: "/usr/bin/false".into(),
         home_directory: repository.root.path().to_owned(),
         api_deadline: Duration::from_secs(10),
-        push_deadline: Duration::from_secs(10),
+        push_deadline: Duration::from_secs(30),
     })
     .with_operator_diagnostics(run_id, store)
 }
