@@ -110,7 +110,8 @@ async fn local_history_treats_missing_storage_as_empty_and_non_directories_as_un
     assert!(!missing.exists());
 
     let blocked = root.path("blocked-state");
-    std::fs::write(&blocked, b"not a directory").assert_value();
+    std::fs::create_dir(&blocked).assert_value();
+    std::fs::write(blocked.join("runs"), b"not a directory").assert_value();
     let error = NativeRunHistory::new(blocked)
         .list(None)
         .await

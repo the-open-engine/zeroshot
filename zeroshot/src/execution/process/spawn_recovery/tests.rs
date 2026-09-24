@@ -3,9 +3,13 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use super::*;
 
 fn blocking_child_command() -> Command {
-    let mut command = Command::new("/bin/sh");
+    #[cfg(unix)]
+    let (program, arguments) = ("/bin/sh", ["-c", "read ignored"].as_slice());
+    #[cfg(windows)]
+    let (program, arguments) = ("cmd.exe", ["/D", "/Q", "/C", "set /p ignored="].as_slice());
+    let mut command = Command::new(program);
     command
-        .args(["-c", "read ignored"])
+        .args(arguments)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -43,12 +47,14 @@ fn coverage_contract_child_command_is_sanitized_and_preserves_the_validated_spec
         ["first", "two words"]
     );
     assert_eq!(command.get_current_dir(), Some(directory.path()));
+    let mut effective_environment = environment;
+    crate::execution::platform::process_environment(&mut effective_environment);
     assert_eq!(
         command
             .get_envs()
             .map(|(key, value)| (key.to_owned(), value.map(ToOwned::to_owned)))
             .collect::<BTreeMap<_, _>>(),
-        environment
+        effective_environment
             .iter()
             .map(|(key, value)| {
                 (

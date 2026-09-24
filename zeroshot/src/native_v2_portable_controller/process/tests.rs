@@ -153,14 +153,22 @@ fn boundary_contract_path_validation_distinguishes_regular_files_directories_sym
     let blocking_file = root.path().join("blocking-file");
     fs::write(&blocking_file, b"not a directory").assert_value();
     let blocked_child = blocking_file.join("child");
+    #[cfg(unix)]
     assert!(matches!(
         validate_ledger_path(&blocked_child),
         Err(PortableControllerError::LedgerPath)
     ));
+    // Windows reports a path below a regular file as absent. The later open still fails closed;
+    // the path-only admission check cannot distinguish it from an ordinary missing ledger.
+    #[cfg(windows)]
+    assert!(validate_ledger_path(&blocked_child).is_ok());
+    #[cfg(unix)]
     assert!(matches!(
         remove_existing_regular_file(&blocked_child),
         Err(PortableControllerError::Io(_))
     ));
+    #[cfg(windows)]
+    assert!(remove_existing_regular_file(&blocked_child).is_ok());
 
     let paths = PortableControllerPaths::new(root.path());
     fs::write(paths.ready(), b"stale readiness").assert_value();

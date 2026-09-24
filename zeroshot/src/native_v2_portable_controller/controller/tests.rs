@@ -23,6 +23,12 @@ fn workspace_identity(root: &Path) -> (PathBuf, WorkspaceIdentity) {
     (workspace, identity)
 }
 
+fn private_directory(root: &Path, name: &str) -> PathBuf {
+    let directory = root.join(name);
+    crate::execution::platform::create_private_directory(&directory).assert_value();
+    directory
+}
+
 fn controller_storage(
     root: &Path,
 ) -> (
@@ -37,12 +43,11 @@ fn controller_storage(
 async fn boundary_contract_single_run_allocator_refuses_foreign_runs_and_confirms_absent_runtime_cleanup()
  {
     let root = tempfile::tempdir().assert_value();
+    let state = private_directory(root.path(), "allocator-state");
     let run_id = RunId::new("run-single-allocator");
     let foreign = RunId::new("run-foreign");
-    let lease =
-        Arc::new(ControllerLease::acquire(root.path().join("controller.lock")).assert_value());
-    let allocator =
-        SingleRunAllocator::new(run_id.clone(), None, lease, root.path().join("checkpoints"));
+    let lease = Arc::new(ControllerLease::acquire(state.join("controller.lock")).assert_value());
+    let allocator = SingleRunAllocator::new(run_id.clone(), None, lease, state.join("checkpoints"));
 
     assert!(allocator.require_run(&run_id).is_ok());
     assert!(allocator.require_run(&foreign).is_err());
@@ -127,8 +132,7 @@ async fn boundary_contract_empty_ledger_has_no_existing_run_and_storage_rejects_
     ));
 
     let root = tempfile::tempdir().assert_value();
-    let unsafe_storage = root.path().join("unsafe-state");
-    std::fs::create_dir(&unsafe_storage).assert_value();
+    let unsafe_storage = private_directory(root.path(), "unsafe-state");
     std::fs::create_dir(unsafe_storage.join("runs.sqlite3")).assert_value();
     assert!(matches!(
         open_controller_storage(&unsafe_storage),
@@ -250,11 +254,12 @@ fn coverage_contract_workspace_loss_requires_all_three_sources_of_positive_evide
 #[test]
 fn final_contract_workspace_monitor_distinguishes_continue_loss_and_owner_shutdown() {
     let root = tempfile::tempdir().assert_value();
-    let (workspace, identity) = workspace_identity(root.path());
+    let state = private_directory(root.path(), "monitor-state");
+    let (workspace, identity) = workspace_identity(&state);
     let controller =
-        Arc::new(ControllerLease::acquire(root.path().join("controller.lock")).assert_value());
+        Arc::new(ControllerLease::acquire(state.join("controller.lock")).assert_value());
     let workspace_lease =
-        Arc::new(ControllerLease::acquire(root.path().join("workspace.lock")).assert_value());
+        Arc::new(ControllerLease::acquire(state.join("workspace.lock")).assert_value());
     let monitor = WorkspaceMonitor {
         workspace,
         identity,
@@ -274,7 +279,7 @@ fn final_contract_workspace_monitor_distinguishes_continue_loss_and_owner_shutdo
     );
 
     let replacement =
-        Arc::new(ControllerLease::acquire(root.path().join("replacement.lock")).assert_value());
+        Arc::new(ControllerLease::acquire(state.join("replacement.lock")).assert_value());
     let monitor = WorkspaceMonitor {
         workspace: monitor.workspace,
         identity: monitor.identity,
@@ -282,7 +287,7 @@ fn final_contract_workspace_monitor_distinguishes_continue_loss_and_owner_shutdo
         workspace_lease: Arc::downgrade(&replacement),
     };
     assert!(active_monitor_leases(&monitor).is_some());
-    let moved = root.path().join("moved-workspace");
+    let moved = state.join("moved-workspace");
     std::fs::rename(&monitor.workspace, &moved).assert_value();
     std::fs::create_dir(&monitor.workspace).assert_value();
     assert_eq!(

@@ -316,6 +316,7 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
 #[tokio::test]
 async fn local_backend_contract_delegates_storage_and_rejects_remote_routes() {
     let root = tempfile::tempdir().assert_value();
+    crate::execution::platform::private_directory(root.path()).assert_value();
     let backend = local_backend(root.path());
     let key = ConnectionKey::new("openai").assert_value();
     let field = EnvironmentVariableName::new("OPENAI_API_KEY").assert_value();

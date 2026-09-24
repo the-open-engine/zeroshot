@@ -224,12 +224,13 @@ async fn catalog_rejects_tampered_point_identity_and_format_and_malformed_metada
 #[test]
 fn catalog_atomic_write_removes_temporary_data_when_serialization_fails() {
     let root = tempfile::tempdir().assert_value();
-    let destination = root.path().join("point.json");
+    let directory = root.path().join("catalog");
+    let destination = directory.join("point.json");
     let invalid_json_object = std::collections::BTreeMap::from([(vec![0_u8], ())]);
     let error = catalog::write_atomic(&destination, &invalid_json_object).unwrap_err();
     assert_eq!(error.0.kind(), std::io::ErrorKind::InvalidData);
     assert!(!destination.exists());
-    assert_eq!(fs::read_dir(root.path()).assert_value().count(), 0);
+    assert_eq!(fs::read_dir(directory).assert_value().count(), 0);
 }
 
 #[tokio::test]
