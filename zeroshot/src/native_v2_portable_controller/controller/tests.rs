@@ -169,8 +169,19 @@ async fn coverage_contract_observer_reopens_one_exact_durable_run_and_keeps_iden
         })
         .await
         .assert_value_with("durable observer fixture creation");
-    // Release controller ownership while retaining the open ledger connection. This exercises a
-    // real observer reopen without racing SQLite connection teardown in the parallel test suite.
+    ledger
+        .append(
+            &run_id,
+            vec![crate::v2_run_ledger::RunEvent::Terminal {
+                result: openengine_cluster_protocol::TerminalResult::Succeeded {
+                    output: serde_json::Value::Null,
+                },
+            }],
+        )
+        .await
+        .assert_value_with("durable observer fixture settlement");
+    // The observer contract serves terminal truth without reconstructing or reconciling a
+    // runtime. Keep the existing connection open to prove another reader sees committed state.
     drop(lease);
 
     let controller = PortableRunController::open_observer(paths.clone(), run_id.clone())
