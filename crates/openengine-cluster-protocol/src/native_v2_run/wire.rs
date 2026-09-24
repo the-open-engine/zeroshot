@@ -106,10 +106,13 @@ pub struct RunResumeParams {
     /// Omission preserves restarting from the latest retained workspace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<super::RunResumeFrom>,
+    /// Fresh static connection values for the successor attempt.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub connections: RunConnectionValues,
+    /// Run-scoped callback used to resolve fresh dynamic connection values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_resolver: Option<TargetConnectionResolver>,
+    /// Fresh GitHub credential for private source checkout or Git delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,
 }

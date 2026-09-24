@@ -413,7 +413,7 @@ Lists checkpoints in increasing sequence order. The after cursor is exclusive. O
 
 ### <code>run/resume</code>
 
-Omitting from or selecting restart starts the graph at its root on the latest retained workspace. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Original admission and delivery metadata remain fixed; provider sessions are not resumed.
+Omitting from or selecting restart starts the graph at its root on the latest retained workspace. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Original admission and delivery metadata remain fixed. Credentials are resolved again for the successor; provider sessions are not resumed.
 
 | Parameter structure | Transport | Server push | Inbound notifications |
 | --- | --- | --- | --- |
@@ -426,9 +426,9 @@ Omitting from or selecting restart starts the graph at its root on the latest re
 | <code>runId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>successorRunId</code> | Yes | <code>{&quot;type&quot;:&quot;string&quot;}</code> |
 | <code>from</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/RunResumeFrom&quot;},{&quot;type&quot;:&quot;null&quot;}],&quot;description&quot;:&quot;Omission preserves restarting from the latest retained workspace.&quot;}</code> |
-| <code>connections</code> | No | <code>{&quot;additionalProperties&quot;:false,&quot;patternProperties&quot;:{&quot;^[^\\u0000-\\u001f\\u007f-\\u009f]+$&quot;:{&quot;$ref&quot;:&quot;#/$defs/StaticConnectionValues&quot;}},&quot;type&quot;:&quot;object&quot;}</code> |
-| <code>connectionResolver</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/TargetConnectionResolver&quot;},{&quot;type&quot;:&quot;null&quot;}]}</code> |
-| <code>githubToken</code> | No | <code>{&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
+| <code>connections</code> | No | <code>{&quot;additionalProperties&quot;:false,&quot;description&quot;:&quot;Fresh static connection values for the successor attempt.&quot;,&quot;patternProperties&quot;:{&quot;^[^\\u0000-\\u001f\\u007f-\\u009f]+$&quot;:{&quot;$ref&quot;:&quot;#/$defs/StaticConnectionValues&quot;}},&quot;type&quot;:&quot;object&quot;}</code> |
+| <code>connectionResolver</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/TargetConnectionResolver&quot;},{&quot;type&quot;:&quot;null&quot;}],&quot;description&quot;:&quot;Run-scoped callback used to resolve fresh dynamic connection values.&quot;}</code> |
+| <code>githubToken</code> | No | <code>{&quot;description&quot;:&quot;Fresh GitHub credential for private source checkout or Git delivery.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 
 #### Result
 

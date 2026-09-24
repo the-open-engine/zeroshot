@@ -152,6 +152,19 @@ zeroshot target login cloud
 Open the printed link to sign in with the device code already filled in. Use `--target cloud` when
 submitting runs.
 
+When a failed run has a recoverable workspace, restart its graph on the latest saved files or choose
+an earlier node boundary:
+
+```bash
+zeroshot resume RUN_ID
+zeroshot checkpoints RUN_ID
+zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID
+```
+
+Add `--target NAME` for Docker or Cloud. See
+[Restart or resume a failed run](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run)
+for restore rules and retention.
+
 ## Reference
 
 - [Versioned documentation](https://the-open-engine.github.io/zeroshot/)

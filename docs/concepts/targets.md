@@ -113,7 +113,8 @@ zeroshot target add local-target \
 The target keeps running between runs. Docker restarts it after a reboot or unexpected exit with
 `--restart unless-stopped`; manually stopping it keeps it stopped until `docker start zeroshot-target`.
 Docker itself must be running. Stopping the target stops its runtime; restart retains history and
-marks interrupted runs as lost.
+marks interrupted runs as lost. When recovery data is available, start a successor with
+`zeroshot resume RUN_ID --target local-target`.
 
 The image's `target serve` process also serves the UI at `http://127.0.0.1:8080/ui/`.
 Profiles and run history persist under `--storage` in the named `zeroshot-data` volume, including

@@ -134,6 +134,8 @@ enum UtilityCommand {
     ///
     /// By default, restart the original graph using its latest retained workspace.
     /// Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`.
+    /// The successor resolves credentials again. Export GH_TOKEN before resuming a named-target
+    /// run that needs it for private source checkout or Git delivery.
     Resume(RunResumeArgs),
 
     /// List one page of a run's saved workspace checkpoints as JSON.

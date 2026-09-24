@@ -1060,9 +1060,11 @@
     },
     "WorkspaceRecovery": {
       "additionalProperties": false,
+      "description": "Public recovery state. It never contains credentials, workspace paths, or checkpoint bytes.",
       "properties": {
         "connectionRequirements": {
           "additionalProperties": false,
+          "description": "Exact connection fields that the successor must resolve again.",
           "patternProperties": {
             "^[^\\u0000-\\u001f\\u007f-\\u009f]+$": {
               "items": {
@@ -1077,15 +1079,18 @@
           "type": "object"
         },
         "recoverable": {
+          "description": "Whether this run can admit a successor from retained workspace state.",
           "type": "boolean"
         },
         "resumedFrom": {
+          "description": "Immediate predecessor when this run is itself a recovery successor.",
           "type": [
             "string",
             "null"
           ]
         },
         "successorRunId": {
+          "description": "Successor already admitted from this run, if one exists.",
           "type": [
             "string",
             "null"

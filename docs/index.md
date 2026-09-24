@@ -75,8 +75,9 @@ charter, use `auto-research`; custom graphs follow the same protocol contracts.
 
 [How execution works](concepts/execution.md) describes the graph and reduction model. Read
 [Runtimes and connections](concepts/runtimes-and-connections.md) before choosing models or supplying
-credentials; [Observe and control runs](guides/observe-and-control.md) covers durable status and log
-streams. [Use a local graph as an ACP agent](guides/acp.md) covers the experimental stdio endpoint.
+credentials; [Observe and control runs](guides/observe-and-control.md) covers failed-run recovery,
+durable status, and log streams. [Use a local graph as an ACP agent](guides/acp.md) covers the
+experimental stdio endpoint.
 
 The reference section is built from product-owned definitions:
 

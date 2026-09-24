@@ -45,8 +45,9 @@ zeroshot target add local --url http://127.0.0.1:8080 --direct
 
 Closing the browser leaves runs active.
 Stopping the container stops its runtime; on restart, interrupted runs are reconciled as lost,
-not restarted. Completed histories remain readable. Private cloud target containers do not expose
-the unauthenticated standalone UI.
+not restarted automatically. When recovery data is available, start a successor with
+`zeroshot resume RUN_ID --target local`. Completed histories remain readable. Private cloud target
+containers do not expose the unauthenticated standalone UI.
 
 If the browser uses another port or an HTTPS reverse proxy, set `--public-origin` to that exact
 origin. For example:

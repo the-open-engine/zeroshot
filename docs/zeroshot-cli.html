@@ -918,7 +918,7 @@ Options:
 <section id="zeroshot-resume"><h3><code>zeroshot resume</code></h3>
 <pre><code>Start a new attempt from a failed run&#39;s retained workspace or a saved checkpoint.
 
-By default, restart the original graph using its latest retained workspace. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`.
+By default, restart the original graph using its latest retained workspace. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. The successor resolves credentials again. Export GH_TOKEN before resuming a named-target run that needs it for private source checkout or Git delivery.
 
 Usage: zeroshot resume [OPTIONS] &lt;RUN_ID&gt;
 
