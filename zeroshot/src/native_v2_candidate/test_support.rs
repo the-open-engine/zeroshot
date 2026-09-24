@@ -36,8 +36,11 @@ impl TestDirectory {
             "zeroshot-native-v2-{label}-{}-{serial}",
             std::process::id()
         ));
+        #[cfg(windows)]
         crate::execution::platform::private_directory(&path)
             .assert_value_with("create private temporary test directory");
+        #[cfg(not(windows))]
+        fs::create_dir_all(&path).assert_value_with("create temporary test directory");
         Self(path)
     }
 
