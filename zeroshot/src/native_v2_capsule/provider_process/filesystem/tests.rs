@@ -283,7 +283,7 @@ async fn root_workers_and_reviewers_share_files_and_cleanup_independently() {
         return;
     }
     let fixture = Fixture::new();
-    let pool = HostedProcessPool::new(91_002, 91_002, 92_000, 92_000).assert_value();
+    let pool = HostedProcessPool::new(91_002, 91_002, 92_000).assert_value();
     crate::native_v2_capsule::prepare_capsule_filesystem(
         crate::native_v2_capsule::CapsuleFilesystemSpec {
             workspace: &fixture.candidate,

@@ -53,7 +53,9 @@ export function EnvironmentWorkspace({
         )}
         {model.notice && <p role="status">{model.notice}</p>}
         {readOnly && <p className="helper">This environment is read-only.</p>}
-        {model.draft && <EnvironmentForm model={model} readOnly={readOnly} />}
+        {model.draft && (
+          <EnvironmentForm key={model.editorGeneration} model={model} readOnly={readOnly} />
+        )}
       </main>
     </div>
   );

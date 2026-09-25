@@ -290,7 +290,7 @@ touch "$CANDIDATE/shared-write"
 printf inspected > probe-write
 {SEQUENTIAL}"#
     ));
-    let pool = HostedProcessPool::new(111_002, 111_002, 112_000, 112_000).assert_value();
+    let pool = HostedProcessPool::new(111_002, 111_002, 112_000).assert_value();
     crate::native_v2_capsule::prepare_capsule_filesystem(
         crate::native_v2_capsule::CapsuleFilesystemSpec {
             workspace: &fixture.driver.workspace,

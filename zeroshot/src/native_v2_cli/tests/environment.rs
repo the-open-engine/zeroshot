@@ -1,9 +1,7 @@
 use std::ffi::OsString;
 
 use openengine_cluster_protocol::RuntimePlan;
-use openengine_cluster_testkit::assertions::AssertValue;
-#[cfg(unix)]
-use openengine_cluster_testkit::assertions::AssertError;
+use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::json;
 
 use super::*;
@@ -646,4 +644,79 @@ async fn no_environment_is_an_explicit_empty_override_and_omission_stays_unselec
         ))
         .is_err()
     );
+}
+
+#[tokio::test]
+async fn preparation_hooks_require_a_target_during_validation_and_submission() {
+    use crate::native_v2_cli::execution::try_execute_native_v2_preflight;
+
+    let directory = tempfile::tempdir().assert_value();
+    let path = directory.path().join("environment.json");
+    for definition in [
+        json!({"setup":"echo install"}),
+        json!({"startup":"npm ci"}),
+        json!({"connections":{"registry":["NPM_TOKEN"]}}),
+    ] {
+        std::fs::write(&path, serde_json::to_vec(&definition).assert_value()).assert_value();
+        for contained in [false, true] {
+            let (_files, mut command) = uniform_runtime_command_for_placement(
+                "Validate preparation placement",
+                json!({"harness":"codex", "provider":"openai", "model":"test-model"}),
+                contained,
+            );
+            let NativeV2CliCommand::Run(run) = &mut command else {
+                unreachable!()
+            };
+            run.environment = Some(RunEnvironmentInput::File(path.clone()));
+            run.validate_only = true;
+            let result = try_execute_native_v2_preflight(&command, &mut Vec::new()).await;
+            if contained {
+                assert_eq!(result.assert_value(), Some(CliOutcome::Completed));
+                continue;
+            }
+            let expected = result.assert_error().to_string();
+            assert!(expected.contains("setup and startup require a Docker target"));
+            let NativeV2CliCommand::Run(run) = &mut command else {
+                unreachable!()
+            };
+            run.validate_only = false;
+            let backend = FakeBackend::default();
+            let result = execute_with_environment(command, &backend, &|_| {
+                panic!("local hook rejection must precede credential reads")
+            })
+            .await;
+            assert_eq!(result.assert_error().to_string(), expected);
+            assert!(backend.calls().is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn local_environment_validation_allows_empty_base_and_public_variables() {
+    use crate::native_v2_cli::execution::try_execute_native_v2_preflight;
+
+    let directory = tempfile::tempdir().assert_value();
+    let path = directory.path().join("environment.json");
+    std::fs::write(&path, br#"{"variables":{"CI":"true"}}"#).assert_value();
+    for environment in [
+        Some(RunEnvironmentInput::Empty),
+        Some(RunEnvironmentInput::File(path)),
+        None,
+    ] {
+        let (_files, mut command) = local_uniform_runtime_command(
+            "Validate local environment",
+            json!({"harness":"codex", "provider":"openai", "model":"test-model"}),
+        );
+        let NativeV2CliCommand::Run(run) = &mut command else {
+            unreachable!()
+        };
+        run.environment = environment;
+        run.validate_only = true;
+        assert_eq!(
+            try_execute_native_v2_preflight(&command, &mut Vec::new())
+                .await
+                .assert_value(),
+            Some(CliOutcome::Completed)
+        );
+    }
 }

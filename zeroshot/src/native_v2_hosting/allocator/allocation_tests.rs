@@ -64,7 +64,7 @@ exec /usr/bin/git "$@"
             executable_search_path: "/usr/local/bin:/usr/bin:/bin".to_owned(),
             git_program: program,
             gh_program: PathBuf::from("/usr/bin/false"),
-            process_pool: HostedProcessPool::new(uid - 1, uid - 1, uid, uid).assert_value(),
+            process_pool: HostedProcessPool::new(uid - 1, uid - 1, uid).assert_value(),
             operator_diagnostics: Arc::new(OperatorDiagnosticStore::default()),
         })
         .assert_value()

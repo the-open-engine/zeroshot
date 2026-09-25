@@ -172,7 +172,7 @@ fn adapter_with_configuration(
         local_user: None,
         native_environment: Default::default(),
         search_path: "/usr/bin:/bin".to_owned(),
-        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
+        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000).assert_value(),
     }))
 }
 

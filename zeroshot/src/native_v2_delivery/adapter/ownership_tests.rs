@@ -135,7 +135,7 @@ fn probe(directory: &TestDirectory, fault: Fault) -> Arc<FenceProbe> {
         Fault::Panic => 121_002,
         Fault::CleanupDenied => 123_002,
     };
-    let identity = HostedProcessPool::new(uid, uid, uid + 100, uid + 100)
+    let identity = HostedProcessPool::new(uid, uid, uid + 100)
         .assert_value()
         .identity(HostedProcessScope::Writer)
         .assert_value();

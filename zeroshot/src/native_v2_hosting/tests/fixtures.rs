@@ -201,11 +201,10 @@ pub(super) fn test_process_pool() -> HostedProcessPool {
     let uid = unsafe { libc::geteuid() };
     let gid = unsafe { libc::getegid() };
     if uid == 0 || gid == 0 {
-        HostedProcessPool::new(31_002, 31_002, 32_000, 32_000).assert_value_with("root test pool")
+        HostedProcessPool::new(31_002, 31_002, 32_000).assert_value_with("root test pool")
     } else {
         let verifier_base = uid.checked_add(10_000).assert_value_with("test UID range");
-        HostedProcessPool::new(uid, gid, verifier_base, gid)
-            .assert_value_with("current-user test pool")
+        HostedProcessPool::new(uid, gid, verifier_base).assert_value_with("current-user test pool")
     }
 }
 
@@ -213,11 +212,10 @@ fn allocator_process_pool() -> HostedProcessPool {
     let uid = unsafe { libc::geteuid() };
     let gid = unsafe { libc::getegid() };
     if uid == 0 || gid == 0 {
-        HostedProcessPool::new(31_002, 31_002, 32_000, 32_000)
-            .assert_value_with("root allocator pool")
+        test_process_pool()
     } else {
         let source_uid = uid.checked_sub(1).assert_value_with("allocator source UID");
-        HostedProcessPool::new(source_uid, gid, uid, gid)
+        HostedProcessPool::new(source_uid, gid, uid)
             .assert_value_with("current-user allocator pool")
     }
 }

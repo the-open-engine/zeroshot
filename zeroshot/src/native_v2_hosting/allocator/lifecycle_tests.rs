@@ -52,8 +52,7 @@ fn test_allocator(root: &Path) -> ProductionCapsuleAllocator {
         executable_search_path: "/usr/bin:/bin".to_owned(),
         git_program: harness.clone(),
         gh_program: harness,
-        process_pool: HostedProcessPool::new(8_000_000, 8_000_000, 8_001_000, 8_001_000)
-            .assert_value(),
+        process_pool: HostedProcessPool::new(8_000_000, 8_000_000, 8_001_000).assert_value(),
         operator_diagnostics: Arc::new(OperatorDiagnosticStore::default()),
     })
     .assert_value()

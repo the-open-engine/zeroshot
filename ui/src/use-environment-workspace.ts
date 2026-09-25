@@ -1,9 +1,9 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useEnvironmentDraft } from './environment-draft';
 import { useEnvironmentCatalog } from './use-environment-catalog';
 import { useEnvironmentOperation } from './use-environment-operation';
 import { flushPendingEdits, hasPendingEdits, usePendingEdits } from './pending-edits';
-import type { EnvironmentDraft, EnvironmentStore } from './environment-store';
+import type { Environment, EnvironmentDraft, EnvironmentStore } from './environment-store';
 
 export function useEnvironmentWorkspace(
   store: EnvironmentStore,
@@ -13,7 +13,17 @@ export function useEnvironmentWorkspace(
   const catalog = useEnvironmentCatalog(store);
   const { items, setItems, loading } = catalog;
   const recovery = useEnvironmentDraft(draftKey);
-  const { draft, saved, dirty, adopt, discard } = recovery;
+  const { draft, saved, dirty } = recovery;
+  // Adopting a document also discards field-local text, even when saved values are unchanged.
+  const [editorGeneration, setEditorGeneration] = useState(0);
+  function adopt(value?: Environment) {
+    recovery.adopt(value);
+    setEditorGeneration((generation) => generation + 1);
+  }
+  function discard() {
+    recovery.discard();
+    setEditorGeneration((generation) => generation + 1);
+  }
   const operation = useEnvironmentOperation(store, loading);
   const { busy, error, notice, setError, setNotice, perform } = operation;
   const pending = usePendingEdits();
@@ -24,6 +34,7 @@ export function useEnvironmentWorkspace(
   }
   return {
     items,
+    editorGeneration,
     draft,
     saved,
     busy,
@@ -35,12 +46,6 @@ export function useEnvironmentWorkspace(
     discard,
     change: (value: EnvironmentDraft) => {
       if (!readOnly) recovery.change(value);
-    },
-    guard: (action: () => void) => {
-      if (!busy && !loading && leave()) {
-        discard();
-        action();
-      }
     },
     create: () => {
       if (readOnly || busy || loading || !leave()) return;

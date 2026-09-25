@@ -19,7 +19,7 @@ fn boundary_contract_runner_selection_and_agent_workspace_access_follow_the_exec
 
     let local = ProviderProcessRunners::local();
     assert!(!local.is_hosted());
-    let pool = HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value();
+    let pool = HostedProcessPool::new(10_002, 10_002, 20_000).assert_value();
     assert!(ProviderProcessRunners::hosted(pool).is_hosted());
 
     let root = tempfile::tempdir().assert_value();

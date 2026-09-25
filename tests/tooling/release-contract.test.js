@@ -320,6 +320,14 @@ describe('Native coverage contract', () => {
     assert.match(commands, /cargo llvm-cov clean --workspace/);
     assert.match(commands, /cargo llvm-cov --workspace --no-report/);
     assert.match(commands, /cargo llvm-cov --package zeroshot --features ui --no-report/);
+    assert.match(
+      measure.run,
+      /CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER='sudo -n --preserve-env=LLVM_PROFILE_FILE'/
+    );
+    assert.match(
+      measure.run,
+      /cargo llvm-cov test --package zeroshot --lib --no-report root_ -- --test-threads=1/
+    );
     assert.doesNotMatch(
       commands,
       /cargo llvm-cov --package zeroshot --bin zeroshot --features ui --no-clean --summary-only/

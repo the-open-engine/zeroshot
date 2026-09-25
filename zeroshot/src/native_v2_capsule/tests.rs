@@ -449,7 +449,7 @@ fn coverage_contract_capsule_layout_rejects_aliases_and_applies_an_owned_directo
     let invalid = prepare_capsule_filesystem(CapsuleFilesystemSpec {
         workspace: root.path(),
         runtime_home: root.path(),
-        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
+        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000).assert_value(),
     });
     assert!(matches!(
         invalid,

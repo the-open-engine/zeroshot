@@ -69,7 +69,7 @@ async fn hosted_case(harness: &str, verifier: bool, policy: &str, native: Option
     let runtime = fixture.child("runtime");
     fs::create_dir(&workspace).assert_value();
     fs::create_dir(&runtime).assert_value();
-    let pool = HostedProcessPool::new(83_002, 83_002, 84_000, 84_000).assert_value();
+    let pool = HostedProcessPool::new(83_002, 83_002, 84_000).assert_value();
     super::prepare_capsule_filesystem(super::CapsuleFilesystemSpec {
         workspace: &workspace,
         runtime_home: &runtime,

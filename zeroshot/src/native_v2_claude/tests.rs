@@ -61,7 +61,7 @@ fn adapter_configuration(
             ("TERM".to_owned(), "dumb".to_owned()),
         ]))
         .assert_value(),
-        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
+        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000).assert_value(),
     }
 }
 
@@ -343,7 +343,7 @@ async fn runner_with_command(
             local_user_home: None,
             native_environment: Default::default(),
             base_environment,
-            process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
+            process_pool: HostedProcessPool::new(10_002, 10_002, 20_000).assert_value(),
         })
         .assert_value(),
     );

@@ -314,8 +314,8 @@ fn hosted_worker_cannot_read_the_ledger_or_another_candidate() {
         fs::create_dir(run_root).assert_value();
         fs::set_permissions(run_root, fs::Permissions::from_mode(0o711)).assert_value();
     }
-    let first_pool = HostedProcessPool::new(31_002, 31_002, 32_000, 32_000).assert_value();
-    let second_pool = HostedProcessPool::new(31_003, 31_003, 33_000, 33_000).assert_value();
+    let first_pool = HostedProcessPool::new(31_002, 31_002, 32_000).assert_value();
+    let second_pool = HostedProcessPool::new(31_003, 31_003, 33_000).assert_value();
     let first = prepare_capsule_filesystem(CapsuleFilesystemSpec {
         workspace: &first_root.join("workspace"),
         runtime_home: &first_root.join("runtime"),

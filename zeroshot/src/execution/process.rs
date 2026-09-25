@@ -93,7 +93,6 @@ pub struct HostedProcessPool {
     writer_uid: u32,
     writer_gid: u32,
     session_identity_base: u32,
-    verifier_gid: u32,
 }
 
 /// Stable containment and runtime-home scope for one provider session.
@@ -217,7 +216,6 @@ impl HostedProcessPool {
             writer_uid: HOSTED_WORKER_UID,
             writer_gid: HOSTED_WORKER_GID,
             session_identity_base: 20_000,
-            verifier_gid: 20_000,
         }
     }
 
@@ -225,12 +223,10 @@ impl HostedProcessPool {
         writer_uid: u32,
         writer_gid: u32,
         session_identity_base: u32,
-        verifier_gid: u32,
     ) -> Result<Self, ProcessRunnerError> {
         if writer_uid == 0
             || writer_gid == 0
             || session_identity_base == 0
-            || verifier_gid == 0
             || session_identity_base == u32::MAX
             || writer_uid >= session_identity_base
         {
@@ -242,7 +238,6 @@ impl HostedProcessPool {
             writer_uid,
             writer_gid,
             session_identity_base,
-            verifier_gid,
         })
     }
 
@@ -291,12 +286,7 @@ impl HostedProcessPool {
         if highest_uid == u32::MAX {
             return Err(identity_range_exhausted());
         }
-        Self::new(
-            writer_uid,
-            self.writer_gid,
-            session_identity_base,
-            self.verifier_gid,
-        )
+        Self::new(writer_uid, self.writer_gid, session_identity_base)
     }
 
     pub fn identity(

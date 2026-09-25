@@ -125,7 +125,7 @@ pub fn prepare_local_run(
     })
 }
 
-fn validate_local_environment(
+pub(crate) fn validate_local_environment(
     environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
 ) -> Result<(), LocalCompositionError> {
     if environment.is_some_and(|environment| {

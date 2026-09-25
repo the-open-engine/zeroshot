@@ -121,7 +121,7 @@ impl RetryAllocator {
             local_user: None,
             native_environment: Default::default(),
             search_path: "/usr/bin:/bin".to_owned(),
-            process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000)
+            process_pool: HostedProcessPool::new(10_002, 10_002, 20_000)
                 .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
         }));
         let runner = NativeNodeRunner::new(admitted, adapter.clone(), adapter)
@@ -152,7 +152,7 @@ impl RetryAllocator {
                 local_user_home: None,
                 native_environment: Default::default(),
                 base_environment,
-                process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000)
+                process_pool: HostedProcessPool::new(10_002, 10_002, 20_000)
                     .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
             })
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,

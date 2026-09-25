@@ -213,9 +213,7 @@ export function RunHistoryView({
   const nodeControls = projection?.controls.filter((visit) => visit.node === node?.name) ?? [];
   const showExecutions =
     node && (['step', 'verifier'].includes(node.kind) || node.name === document?.graph.root.name);
-  const preparing =
-    run?.phase === 'admitted' &&
-    !events.some(({ event }) => event.kind === 'run_started' || event.kind === 'node_started');
+  const preparing = isPreparingEnvironment(run, events);
   const currentState =
     projection?.terminal?.status ??
     (loadedHead && run?.runtimeFailure
@@ -337,6 +335,13 @@ export function RunHistoryView({
         />
       )}
     </main>
+  );
+}
+
+function isPreparingEnvironment(run: RunDetail | undefined, events: HistoryEvent[]): boolean {
+  return (
+    run?.phase === 'admitted' &&
+    !events.some(({ event }) => event.kind === 'run_started' || event.kind === 'node_started')
   );
 }
 

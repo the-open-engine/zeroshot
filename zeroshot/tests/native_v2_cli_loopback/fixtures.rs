@@ -391,7 +391,7 @@ pub(crate) fn live_hosting_config(root: &TempRoot, lane: LiveLane) -> Production
             .unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_owned()),
         git_program: PathBuf::from("/usr/bin/git"),
         gh_program: PathBuf::from("/usr/bin/gh"),
-        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000)
+        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000)
             .assert_value_with("production process pool"),
     }
 }

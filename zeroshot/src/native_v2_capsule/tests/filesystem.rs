@@ -12,7 +12,7 @@ fn temporary_root() -> PathBuf {
 fn capsule_filesystem_rejects_nested_workspace_and_runtime_roots() {
     let root = temporary_root();
     fs::create_dir(&root).assert_value();
-    let pool = HostedProcessPool::new(31_002, 31_002, 32_000, 32_000).assert_value();
+    let pool = HostedProcessPool::new(31_002, 31_002, 32_000).assert_value();
 
     let workspace = root.join("workspace-parent");
     fs::create_dir(&workspace).assert_value();
@@ -69,7 +69,7 @@ fn root_capsule_permissions_share_workspace_and_keep_distinct_session_homes() {
     fs::create_dir(&root).assert_value();
     let workspace = root.join("workspace");
     let runtime_home = root.join("runtime-home");
-    let pool = HostedProcessPool::new(31_002, 31_002, 32_000, 32_000).assert_value();
+    let pool = HostedProcessPool::new(31_002, 31_002, 32_000).assert_value();
     assert!(matches!(
         prepare_capsule_filesystem(CapsuleFilesystemSpec {
             workspace: &workspace,

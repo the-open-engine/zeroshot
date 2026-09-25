@@ -35,7 +35,7 @@ impl Fixture {
         std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o755))
             .assert_value();
         let uid = NEXT_UID.fetch_add(100_000, Ordering::Relaxed);
-        let pool = HostedProcessPool::new(uid, uid, uid + 10, uid + 10).assert_value();
+        let pool = HostedProcessPool::new(uid, uid, uid + 10).assert_value();
         let identity = pool
             .identity(HostedProcessScope::Environment)
             .assert_value();

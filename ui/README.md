@@ -20,7 +20,14 @@ other OS users or local processes.
 The optional Cargo `ui` feature embeds `ui/dist`. Release binaries and target images enable it;
 Node is needed only at build time. Rebuild the frontend before Rust after UI edits.
 
-Local profiles use the CLI store (`ZEROSHOT_CONFIG_DIR`); ledgers use `ZEROSHOT_STATE_DIR`.
+Local profiles share the CLI store (`ZEROSHOT_CONFIG_DIR`); ledgers use `ZEROSHOT_STATE_DIR`.
+Pass `--target NAME` to keep those profiles local while reading history from a configured direct or
+hosted target. Hosted credentials stay in the local UI server and never enter the browser. Use
+temporary absolute directories for isolated tests. Ctrl-C stops the UI while detached runs continue.
+Direct `target serve` mounts `/ui/` on its existing listener, stores profiles/history under
+`--storage`, and requires the browser's exact `--public-origin`. Private/hosted targets exclude
+this mount. See the [target image guide](../docker/zeroshot-target/README.md) for persistence and restart behavior.
+
 Profiles contain graphs and agent runtime configuration. Environments belong to run submission,
 not profile authoring. Plain local UI has no environment catalog or management page.
 
@@ -134,9 +141,6 @@ Set `view: "environments"` and an explicit `environmentApi` collection URL in `i
 The manager reuses the same theme, state, and guarded navigation messages, with one document identity
 for its mounted surface. It handles resource selection and conditional CRUD through the service below;
 profile-specific bridge commands are unavailable. Failed writes preserve the draft and saved revision.
-Committed environment edits also recover from session storage after Back/Forward or remount, scoped
-to the same origin, mount, workspace kind, and workspace identity as profile drafts. Recovery retains
-the original CAS revision. Saving, deleting, or explicitly discarding clears that recovered draft.
 
 ### Authenticated service paths and history lifecycle
 
@@ -164,3 +168,35 @@ catalog. Plain local services never create this adapter. Profiles reject `runtim
 Committed drafts and their original CAS baseline recover in the same authority and collection
 context. Save, delete, and explicit discard clear recovery. Storage errors or size overflow warn
 that recovery is unavailable; accepted runs retain their already resolved environment snapshot.
+
+The shared fetch SSE reader retains HTTP/stream problem codes and details, reconnects network
+interruptions using the last accepted `Last-Event-ID`, and cancels readers/timers on disposal.
+Frames have an 8 MiB browser limit. HTTP denials and invalid history stop automatic reconnect.
+
+Definition wrappers and pages may carry
+`observation: {state: "active" | "collecting" | "complete" | "incomplete" | "expired" | "unavailable", code?}`.
+This metadata describes retained observation; current run termination remains separate.
+A `finished` run can still follow `active` or `collecting` observation. Completion closes the stream
+only after `page.complete` drains the observed head. Cloud retains these execution cursors and native
+control records across archive handoff; Cloud status cursors never enter graph playback.
+
+## Verification
+
+Start with the UI tests and native service tests:
+
+```sh
+npm --prefix ui test
+npm --prefix ui run build
+cargo test -p zeroshot --features ui profile_ui --lib
+```
+
+For native UI/server changes, also run the affected crate with the feature enabled:
+
+```sh
+cargo clippy -p zeroshot --all-targets --features ui -- -D warnings
+cargo test -p zeroshot --features ui # Unix; Windows: powershell -NoProfile -File scripts/test-windows.ps1 -Ui
+```
+
+Default Cargo checks omit `ui`. Browser scenarios and evidence:
+[example processes](qa/real-user-processes.md), [replay](qa/replay-real-runs.md),
+[live runs](qa/live-run-review.md), and [standalone lifecycle](qa/standalone-integration.md).

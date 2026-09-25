@@ -7,7 +7,8 @@ import type { WorkflowNodeObservation } from './workflow-observation';
 export type ExecutionId = string;
 export type RunTerminal =
   { status: 'succeeded'; output: unknown } | { status: 'failed'; reason: string };
-type RunTerminalSynopsis = { status: 'succeeded' } | { status: 'failed'; reason: string };
+type RunTerminalSynopsis =
+  { status: 'succeeded' } | { status: 'failed'; reason: string };
 export type RuntimeFailure = { atCursor: string; reason: 'runtime_failed' | 'runtime_lost' };
 export type RunSummary = {
   runId: string;
@@ -364,11 +365,7 @@ type HistoryProjection = {
   systemLogs: Invocation['logs'];
 };
 
-function readHistoryEvent(
-  event: HistoryEvent['event'],
-  index: number,
-  projection: HistoryProjection
-) {
+function readHistoryEvent(event: HistoryEvent['event'], index: number, projection: HistoryProjection) {
   const { invocations, byId, latestVisit, references, systemLogs } = projection;
   if (event.kind === 'node_started' && event.reference) {
     const id = identity(event.reference.execution);
@@ -382,16 +379,8 @@ function readHistoryEvent(
     const retry = attempt > 1 && previous?.instance === instance && attempt > previous.attempt;
     const visit = retry ? previous.visit : (previous?.visit ?? 0) + 1;
     const invocation: Invocation = {
-      id,
-      node,
-      instance,
-      attempt,
-      mapIndices: [...mapIndices],
-      visit,
-      start: index,
-      input: event.input,
-      state: 'running',
-      logs: [],
+      id, node, instance, attempt, mapIndices: [...mapIndices], visit, start: index,
+      input: event.input, state: 'running', logs: [],
     };
     latestVisit.set(scope, invocation);
     references.set(id, event.reference);
@@ -400,33 +389,20 @@ function readHistoryEvent(
   } else if (event.kind === 'node_completed' && event.completion) {
     const reference = event.completion.reference;
     const invocation = byId.get(identity(reference.execution));
-    if (
-      invocation &&
-      sameReference(references.get(invocation.id), reference) &&
-      invocation.end === undefined
-    ) {
+    if (invocation && sameReference(references.get(invocation.id), reference) && invocation.end === undefined) {
       invocation.end = index;
       invocation.outcome = event.completion.outcome;
       invocation.state = event.completion.outcome.status === 'error' ? 'failed' : 'succeeded';
     }
   } else if (event.kind === 'execution_voided' && event.reference) {
     const invocation = byId.get(identity(event.reference.execution));
-    if (
-      invocation &&
-      sameReference(references.get(invocation.id), event.reference) &&
-      invocation.end === undefined
-    ) {
+    if (invocation && sameReference(references.get(invocation.id), event.reference) && invocation.end === undefined) {
       invocation.end = index;
       invocation.state = 'skipped';
       invocation.reason = event.reason;
     }
   } else if (event.kind === 'safe_log') {
-    const log = {
-      index,
-      timestamp: event.timestamp,
-      stream: event.stream ?? 'output',
-      text: event.line ?? '',
-    };
+    const log = { index, timestamp: event.timestamp, stream: event.stream ?? 'output', text: event.line ?? '' };
     const invocation = event.execution == null ? undefined : byId.get(identity(event.execution));
     (invocation?.logs ?? systemLogs).push(log);
   } else if (event.kind === 'token_usage_observed' && event.execution != null) {

@@ -11,7 +11,7 @@ fn local_anthropic_config(directory: &TestDirectory) -> ClaudeAdapterConfig {
         local_user_home: Some(directory.child("home")),
         native_environment: Default::default(),
         base_environment: ClaudeProcessEnvironment::default(),
-        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
+        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000).assert_value(),
     }
 }
 
@@ -33,7 +33,7 @@ fn local_claude_user_reuses_home_without_moving_session_state() {
             ("TMPDIR".to_owned(), "/shared/tmp".to_owned()),
         ]))
         .assert_value(),
-        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
+        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000).assert_value(),
     })
     .assert_value();
     let binding = agent_binding(

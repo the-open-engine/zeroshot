@@ -161,7 +161,7 @@ pub(super) fn candidate_config(
     repository: &TempRepository,
     github: Arc<ScriptedGitHub>,
 ) -> NativeV2CandidateConfig {
-    let pool = HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value_with("pool");
+    let pool = HostedProcessPool::new(10_002, 10_002, 20_000).assert_value_with("pool");
     let harness = match kind {
         RuntimePlanKind::Codex => NativeV2HarnessConfig::Codex(NativeV2CodexConfig {
             base_environment: Default::default(),

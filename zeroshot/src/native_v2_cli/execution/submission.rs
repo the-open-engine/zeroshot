@@ -136,6 +136,10 @@ where
     materialize_provider_access(&mut resolved.runtime, placement)
         .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
     let intent = prepare_intent(run, resolved.graph, resolved.runtime)?;
+    if run.target.is_none() {
+        crate::native_v2_local::validate_local_environment(intent.environment.as_ref())
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+    }
     let connections = select_connections(&intent.runtime, intent.environment.as_ref(), &available)?;
     let github_token = run
         .target

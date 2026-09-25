@@ -103,12 +103,7 @@ test('runtime model editing does not offer implicit conversion of unknown or mis
       };
     assertDocument(doc);
     const before = structuredClone(doc);
-    const view = RuntimeEditor({
-      document: doc,
-      schema: {},
-      edit: () => {},
-      openJson: () => {},
-    });
+    const view = RuntimeEditor({ document: doc, schema: {}, edit: () => {}, openJson: () => {} });
     assert.equal(elements(view).filter((element) => element.type === ModelPicker).length, 0);
     assert.deepEqual(doc, before);
   }

@@ -358,3 +358,44 @@ test('hosted collection contexts recover only their own drafts', async (t) => {
   await ui.remount('test', '?context=first');
   assert.equal(ui.label('Startup script').value, 'first repository draft');
 });
+
+for (const action of ['reload', 'switch'] as const) {
+  test(`${action} discards pending field edits after loading the environment`, async (t) => {
+    const { ui } = await pendingNameFixture(t);
+    if (action === 'reload') await ui.click('Reload environment');
+    else await ui.input('Select environment', 'env-2', 'change');
+    assert.equal(ui.label('Variable MODE name').value, 'MODE');
+    assert.equal(ui.messages.at(-1).pending, false);
+    assert.equal(ui.messages.at(-1).dirty, false);
+  });
+}
+
+test('failed reload preserves pending field edits', async (t) => {
+  const { store, ui } = await pendingNameFixture(t);
+  store.load = async () => {
+    throw new Error('Environment unavailable');
+  };
+  await ui.click('Reload environment');
+  assert.equal(ui.label('Variable MODE name').value, 'bad name');
+  assert.equal(ui.messages.at(-1).pending, true);
+  assert.match(ui.dom.window.document.body.textContent!, /Environment unavailable/);
+});
+
+async function pendingNameFixture(t: TestContext) {
+  const { store } = fixture();
+  const environments = ['env-1', 'env-2'].map((id) => ({
+    id,
+    name: id,
+    revision: 'r1',
+    definition: { variables: { MODE: 'test' } },
+  }));
+  store.list = async () => ({ environments });
+  store.load = async (id) => structuredClone(environments.find((item) => item.id === id)!);
+  const ui = await renderWorkspace(t, store);
+  await ui.input('Select environment', 'env-1', 'change');
+  await act(async () => ui.label('Variable MODE name').focus());
+  await ui.input('Variable MODE name', 'bad name');
+  await act(async () => ui.label('Variable MODE name').blur());
+  assert.equal(ui.messages.at(-1).pending, true);
+  return { store, ui };
+}

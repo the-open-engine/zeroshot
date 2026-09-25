@@ -25,7 +25,7 @@ use crate::native_v2_candidate::test_support::TestDirectory;
 #[test]
 #[cfg(target_os = "linux")]
 fn hosted_scopes_keep_loop_sessions_stable_and_executions_disjoint() {
-    let pool = HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value();
+    let pool = HostedProcessPool::new(10_002, 10_002, 20_000).assert_value();
     let loop_scope = HostedProcessScope::VerifierNodeInstance(7);
     let repeated = pool.identity(loop_scope).assert_value();
     let first_execution = pool
@@ -66,7 +66,7 @@ fn hosted_scopes_keep_loop_sessions_stable_and_executions_disjoint() {
 #[test]
 #[cfg(target_os = "linux")]
 fn active_run_slots_are_disjoint_from_source_and_each_other() {
-    let host = HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value();
+    let host = HostedProcessPool::new(10_002, 10_002, 20_000).assert_value();
     let first = host.active_run_slot(0, 65_536).assert_value();
     let second = host.active_run_slot(1, 65_536).assert_value();
 
@@ -81,7 +81,7 @@ fn active_run_slots_are_disjoint_from_source_and_each_other() {
         20_000
     );
     assert!(host.active_run_slot(u32::MAX, 65_536).is_err());
-    let sentinel = HostedProcessPool::new(1, 1, u32::MAX - 4, 2).assert_value();
+    let sentinel = HostedProcessPool::new(1, 1, u32::MAX - 4).assert_value();
     assert!(sentinel.active_run_slot(0, 2).is_err());
 }
 
@@ -172,7 +172,7 @@ async fn root_writer_exit_reaps_detached_descendants_without_stopping_peer() {
         eprintln!("root-only writer cleanup gate skipped outside the capsule identity");
         return;
     }
-    let pool = HostedProcessPool::new(191_002, 191_002, 192_000, 192_000).assert_value();
+    let pool = HostedProcessPool::new(191_002, 191_002, 192_000).assert_value();
     let (cancel, _) = tokio::sync::watch::channel(false);
     let mut peer = writer_process(
         pool,
@@ -457,7 +457,7 @@ fn writer_identity(pool: HostedProcessPool) -> (u32, u32) {
 fn writer_and_verifier_memberships_are_disjoint_across_runs() {
     use super::platform::WorkerMembership;
 
-    let host = HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value();
+    let host = HostedProcessPool::new(10_002, 10_002, 20_000).assert_value();
     let mut memberships = std::collections::BTreeSet::new();
     for slot in 0..2 {
         let pool = host.active_run_slot(slot, 8).assert_value();
@@ -561,21 +561,14 @@ fn assert_scope_contracts() {
 
 #[cfg(target_os = "linux")]
 fn assert_pool_rejection_contracts() {
-    for arguments in [
-        (0, 2, 3, 4),
-        (1, 0, 3, 4),
-        (1, 2, 0, 4),
-        (1, 2, 3, 0),
-        (1, 2, u32::MAX, 4),
-        (3, 2, 3, 4),
-    ] {
+    for arguments in [(0, 2, 3), (1, 0, 3), (1, 2, 0), (1, 2, u32::MAX), (3, 2, 3)] {
         assert!(matches!(
-            HostedProcessPool::new(arguments.0, arguments.1, arguments.2, arguments.3),
+            HostedProcessPool::new(arguments.0, arguments.1, arguments.2),
             Err(ProcessRunnerError::InvalidCommand(_))
         ));
     }
 
-    let pool = HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value();
+    let pool = HostedProcessPool::new(10_002, 10_002, 20_000).assert_value();
     assert_eq!(
         pool.writer()
             .assert_value()
@@ -594,9 +587,9 @@ fn assert_pool_rejection_contracts() {
     );
     assert!(pool.active_run_slot(0, u64::MAX).is_err());
     assert!(pool.active_run_slot(u32::MAX, 1).is_err());
-    let sentinel = HostedProcessPool::new(1, 1, u32::MAX - 4, 2).assert_value();
+    let sentinel = HostedProcessPool::new(1, 1, u32::MAX - 4).assert_value();
     assert!(sentinel.active_run_slot(0, 1).is_err());
-    let near_end = HostedProcessPool::new(1, 1, u32::MAX - 1, 2).assert_value();
+    let near_end = HostedProcessPool::new(1, 1, u32::MAX - 1).assert_value();
     assert!(
         near_end
             .identity(HostedProcessScope::VerifierExecution(2))
@@ -638,7 +631,7 @@ fn assert_runner_contracts() {
 #[test]
 #[cfg(target_os = "linux")]
 fn coverage_contract_command_domain_preflight_checks_supervisor_authority_before_launch() {
-    let identity = HostedProcessPool::new(10_002, 10_002, 20_000, 20_000)
+    let identity = HostedProcessPool::new(10_002, 10_002, 20_000)
         .assert_value()
         .identity(HostedProcessScope::WriterExecution(65_536))
         .assert_value();
