@@ -130,7 +130,15 @@ mod tests {
             match fs2::FileExt::try_lock_shared(&probe) {
                 Ok(()) => {
                     fs2::FileExt::unlock(&probe).expect("unlock probe");
-                    std::thread::yield_now();
+                    match result.try_recv() {
+                        Ok(finished) => {
+                            panic!("lock handoff finished before taking its lock: {finished:?}")
+                        }
+                        Err(mpsc::TryRecvError::Empty) => std::thread::yield_now(),
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            panic!("lock handoff result sender disconnected")
+                        }
+                    }
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(error) => panic!("probe lock failed: {error}"),
