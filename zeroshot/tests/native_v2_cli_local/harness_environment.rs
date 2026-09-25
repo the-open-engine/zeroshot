@@ -335,12 +335,12 @@ fn install_configuration_probe(
     response: &ProbeResponse,
 ) {
     let executable = fixture.root.path("bin").join(harness);
-    fs::write(
+    openengine_cluster_testkit::fixture::write_executable(
         &executable,
         with_configuration_probe(script.as_bytes(), harness, response),
+        0o755,
     )
     .assert_value();
-    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).assert_value();
 }
 
 async fn submit_succeeded(fixture: &LocalFixture) -> String {

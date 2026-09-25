@@ -580,7 +580,9 @@ fn recursive_submodules_restore_as_self_contained_repositories_with_valid_status
 fn stale_private_git_locks_are_captured_and_replaced_without_blocking_repair() {
     let fixture = Fixture::new();
     fixture.initialize_git();
-    let clean = capture(&fixture.workspace, &fixture.snapshots, &()).assert_value();
+    let clean = capture(&fixture.workspace, &fixture.snapshots, &());
+    assert!(clean.is_ok(), "initial clean capture failed: {clean:?}");
+    let clean = clean.assert_value();
     let administrative = fixture.workspace.join(".git");
     for name in [
         "HEAD.lock",

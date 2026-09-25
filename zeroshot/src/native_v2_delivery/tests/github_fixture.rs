@@ -1,5 +1,4 @@
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -831,10 +830,8 @@ async fn push_succeeded(request: &GitHubPushRequest, remote: &Path) -> bool {
 
 pub(super) fn write_executable(directory: &Path, name: &str, contents: &str) -> PathBuf {
     let path = directory.join(name);
-    fs::write(&path, contents).assert_value();
-    let mut permissions = fs::metadata(&path).assert_value().permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&path, permissions).assert_value();
+    openengine_cluster_testkit::fixture::write_executable(&path, contents, 0o700)
+        .assert_value_with("write test executable");
     path
 }
 

@@ -77,6 +77,29 @@ impl Drop for TemporaryDirectory {
     }
 }
 
+/// Writes a Unix executable and waits out writable descriptors inherited by concurrent forks.
+///
+/// The lock handoff closes the `fork`/`CLOEXEC` window that can otherwise make an immediate spawn
+/// fail with `ETXTBSY`.
+#[cfg(unix)]
+pub fn write_executable(path: &Path, contents: impl AsRef<[u8]>, mode: u32) -> io::Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)?;
+    file.write_all(contents.as_ref())?;
+    file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+    fs2::FileExt::lock_exclusive(&file)?;
+    drop(file);
+
+    let file = std::fs::File::open(path)?;
+    fs2::FileExt::lock_shared(&file)
+}
+
 pub type FixtureBackend = AdmissionCoordinator<ScriptedVerifier, InMemoryAdmissionStore>;
 pub type FixtureClient = ClusterClient<InProcessTransport<FixtureBackend>>;
 

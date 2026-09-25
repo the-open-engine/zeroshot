@@ -191,18 +191,17 @@ fn install_shim(bin: &Path, node: &str) {
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
         let shim = bin.join("codex");
-        std::fs::write(
+        openengine_cluster_testkit::fixture::write_executable(
             &shim,
             format!(
                 "#!/bin/sh\nexec '{}' '{}' \"$@\"\n",
                 node.replace('\'', "'\\''"),
                 bin.join("harness.cjs").display()
             ),
+            0o700,
         )
         .unwrap();
-        std::fs::set_permissions(shim, std::fs::Permissions::from_mode(0o700)).unwrap();
     }
 }
 

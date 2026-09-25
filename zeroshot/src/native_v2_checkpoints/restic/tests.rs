@@ -4,9 +4,6 @@ use tokio::io::AsyncWriteExt;
 use super::*;
 
 #[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-
-#[cfg(unix)]
 const DISCOVERY_PROBE_MODE: &str = "ZEROSHOT_RESTIC_TEST_DISCOVERY";
 #[cfg(unix)]
 const DISCOVERY_PROBE_SENTINEL: &str = "zeroshot-restic-discovery-probe-ran";
@@ -14,12 +11,12 @@ const DISCOVERY_PROBE_SENTINEL: &str = "zeroshot-restic-discovery-probe-ran";
 #[cfg(unix)]
 fn failing_restic(root: &Path) -> PathBuf {
     let executable = root.join("restic");
-    std::fs::write(
+    openengine_cluster_testkit::fixture::write_executable(
         &executable,
         "#!/bin/sh\nprintf '%s' 'private child diagnostic' >&2\nexit 19\n",
+        0o700,
     )
-    .assert_value();
-    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).assert_value();
+    .assert_value_with("write failing Restic fixture");
     executable
 }
 

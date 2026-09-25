@@ -107,11 +107,13 @@ async fn missing_api_executable_preserves_os_error_and_redacts_command() {
 
 #[cfg(unix)]
 fn script(root: &std::path::Path, source: &str) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
     let program = root.join("gh-fixture");
-    std::fs::write(&program, format!("#!/bin/sh\n{source}")).assert_value();
-    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).assert_value();
+    openengine_cluster_testkit::fixture::write_executable(
+        &program,
+        format!("#!/bin/sh\n{source}"),
+        0o755,
+    )
+    .assert_value_with("write GitHub API fixture");
     program
 }
 

@@ -4,10 +4,6 @@ use crate::native_v2_target_authority::MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES;
 const REDACTED: &str = "[REDACTED]";
 
 #[cfg(unix)]
-use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-#[cfg(unix)]
 use std::sync::Arc;
 #[cfg(unix)]
 use crate::native_v2_delivery::git_auth::encode_basic_credential;
@@ -189,7 +185,7 @@ fn diagnostic_authority(
 #[cfg(unix)]
 fn executable(directory: &std::path::Path, name: &str, contents: &str) -> std::path::PathBuf {
     let path = directory.join(name);
-    fs::write(&path, contents).assert_value();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).assert_value();
+    openengine_cluster_testkit::fixture::write_executable(&path, contents, 0o700)
+        .assert_value_with("write test executable");
     path
 }

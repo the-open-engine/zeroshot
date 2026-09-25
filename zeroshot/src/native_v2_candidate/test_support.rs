@@ -1,8 +1,6 @@
 #[cfg(unix)]
 use std::collections::BTreeMap;
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -67,12 +65,8 @@ impl TestDirectory {
     #[cfg(unix)]
     pub(crate) fn write_executable(&self, name: &str, contents: &str) -> PathBuf {
         let path = self.child(name);
-        fs::write(&path, contents).assert_value_with("write test executable");
-        let mut permissions = fs::metadata(&path)
-            .assert_value_with("read test executable metadata")
-            .permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&path, permissions).assert_value_with("make test executable");
+        openengine_cluster_testkit::fixture::write_executable(&path, contents, 0o755)
+            .assert_value_with("write test executable");
         path
     }
 }
