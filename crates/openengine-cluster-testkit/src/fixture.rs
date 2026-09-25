@@ -93,11 +93,61 @@ pub fn write_executable(path: &Path, contents: impl AsRef<[u8]>, mode: u32) -> i
         .open(path)?;
     file.write_all(contents.as_ref())?;
     file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+    finish_executable_write(file, path)
+}
+
+#[cfg(unix)]
+fn finish_executable_write(file: std::fs::File, path: &Path) -> io::Result<()> {
     fs2::FileExt::lock_exclusive(&file)?;
     drop(file);
 
     let file = std::fs::File::open(path)?;
     fs2::FileExt::lock_shared(&file)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    #[test]
+    fn duplicated_writer_holds_the_lock_handoff_until_it_closes() {
+        let directory = TemporaryDirectory::for_test("executable-lock-handoff");
+        let path = directory.path("fixture");
+        let writer = std::fs::File::create(&path).expect("create executable fixture");
+        let inherited_writer = writer.try_clone().expect("duplicate executable writer");
+        let waiting_path = path.clone();
+        let (finished, result) = mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            finished
+                .send(finish_executable_write(writer, &waiting_path))
+                .expect("report lock handoff result");
+        });
+
+        let probe = std::fs::File::open(&path).expect("open lock probe");
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            match fs2::FileExt::try_lock_shared(&probe) {
+                Ok(()) => {
+                    fs2::FileExt::unlock(&probe).expect("unlock probe");
+                    assert!(Instant::now() < deadline, "lock handoff never started");
+                    std::thread::yield_now();
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                Err(error) => panic!("probe lock failed: {error}"),
+            }
+        }
+        assert!(matches!(result.try_recv(), Err(mpsc::TryRecvError::Empty)));
+
+        drop(inherited_writer);
+        result
+            .recv_timeout(Duration::from_secs(1))
+            .expect("lock handoff should finish after the inherited writer closes")
+            .expect("lock handoff should succeed");
+        waiter.join().expect("join lock handoff waiter");
+    }
 }
 
 pub type FixtureBackend = AdmissionCoordinator<ScriptedVerifier, InMemoryAdmissionStore>;
