@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use openengine_cluster_protocol::{
     IdempotencyKey, MergePlan, MergePlanRunName, MergePlanRunRequest, MergePlanSource,
-    MergePlanState, RunProfile, RunProfileName, RunProfileScope, RunProfileSelector, RunTitle,
-    MAX_MERGE_PLAN_RUNS, MERGE_PLAN_SCHEMA,
+    MergePlanState, ResolvedRunProfile as RunProfile, RunProfileName, RunProfileScope,
+    RunProfileSelector, RunTitle, MAX_MERGE_PLAN_RUNS, MERGE_PLAN_SCHEMA,
 };
 use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;
@@ -101,6 +101,12 @@ where
         .backend
         .profile_show(Some(&command.target), manifest.profile.clone())
         .await?;
+    let profile = super::submission::resolve_authored_profile(
+        context.backend,
+        Some(&command.target),
+        profile,
+    )
+    .await?;
     validate_profile_and_inputs(&profile, &manifest.runs).await?;
     let request = prepared_request(
         command.submission_key,

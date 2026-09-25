@@ -37,8 +37,8 @@ impl ProviderAccessContract {
     }
 }
 
-pub(crate) fn materialize_provider_access(
-    runtime: &mut RuntimePlan,
+pub(crate) fn materialize_provider_access<E>(
+    runtime: &mut RuntimePlan<E>,
     placement: ProviderAccessPlacement,
 ) -> Result<(), NativeV2RunValueError> {
     let contract = provider_access_contract(runtime);
@@ -48,7 +48,7 @@ pub(crate) fn materialize_provider_access(
     Ok(())
 }
 
-fn provider_access_contract(runtime: &RuntimePlan) -> ProviderAccessContract {
+fn provider_access_contract<E>(runtime: &RuntimePlan<E>) -> ProviderAccessContract {
     match runtime {
         RuntimePlan::Copilot { .. } => ProviderAccessContract::new(
             true,
@@ -124,8 +124,8 @@ fn claude_contract(provider: ClaudeProvider) -> ProviderAccessContract {
     }
 }
 
-fn runtime_nodes_mut(
-    runtime: &mut RuntimePlan,
+fn runtime_nodes_mut<E>(
+    runtime: &mut RuntimePlan<E>,
 ) -> &mut BTreeMap<openengine_cluster_protocol::NodeName, NodeRuntimeBinding> {
     match runtime {
         RuntimePlan::Copilot { nodes, .. }

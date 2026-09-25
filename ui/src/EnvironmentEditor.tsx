@@ -1,18 +1,13 @@
-import { Plus, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
+import { AddEnvironmentField } from './AddEnvironmentField';
 import { ControlText } from './ControlFields';
 import { Field } from './Field';
 import { PreparationConnections } from './PreparationConnections';
-type RuntimeEnvironment = {
-  setup?: string;
-  startup?: string;
-  variables?: Record<string, string>;
-  connections?: Record<string, string[]>;
-  [key: string]: unknown;
-};
+import type { EnvironmentDefinition } from './environment-store';
 
 type Props = {
-  value: RuntimeEnvironment;
-  onChange: (value: RuntimeEnvironment, key: string) => void;
+  value: EnvironmentDefinition;
+  onChange: (value: EnvironmentDefinition, key: string) => void;
 };
 
 export function EnvironmentEditor({ value, onChange }: Props) {
@@ -64,7 +59,7 @@ export function EnvironmentEditor({ value, onChange }: Props) {
       <PreparationConnections
         value={value.connections ?? {}}
         onChange={(connections) => {
-          const next: RuntimeEnvironment = { ...value, connections };
+          const next: EnvironmentDefinition = { ...value, connections };
           if (!Object.keys(connections).length) delete next.connections;
           onChange(next, 'connections');
         }}
@@ -76,7 +71,7 @@ export function EnvironmentEditor({ value, onChange }: Props) {
 function EnvironmentVariables({ value, onChange }: Props) {
   const variables = value.variables ?? {};
   function update(next: Record<string, string>) {
-    const environment: RuntimeEnvironment = { ...value, variables: next };
+    const environment: EnvironmentDefinition = { ...value, variables: next };
     if (!Object.keys(next).length) delete environment.variables;
     onChange(environment, 'variables');
   }
@@ -99,8 +94,8 @@ function EnvironmentVariables({ value, onChange }: Props) {
   return (
     <div aria-label="Environment variables">
       <p className="helper">
-        These values are saved in the profile and passed to scripts and agents. Use connections for
-        secrets. Keep PATH and harness home settings platform-managed.
+        These values are saved in the environment and passed to scripts and agents. Use connections
+        for secrets. Keep PATH and harness home settings platform-managed.
       </p>
       {Object.entries(variables).map(([name, entry]) => (
         <div className="runtime-variable" key={name}>
@@ -115,6 +110,7 @@ function EnvironmentVariables({ value, onChange }: Props) {
             onChange={(event) => update({ ...variables, [name]: event.target.value })}
           />
           <button
+            type="button"
             className="icon-button"
             aria-label={`Remove variable ${name}`}
             onClick={() =>
@@ -125,9 +121,7 @@ function EnvironmentVariables({ value, onChange }: Props) {
           </button>
         </div>
       ))}
-      <button className="text-button" onClick={add}>
-        <Plus size={14} /> Add variable
-      </button>
+      <AddEnvironmentField onClick={add}>Add variable</AddEnvironmentField>
     </div>
   );
 }

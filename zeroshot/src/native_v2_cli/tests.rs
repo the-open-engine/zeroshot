@@ -345,7 +345,7 @@ async fn wave5_cli_contract_default_backend_refuses_unadvertised_management() {
                     name: profile_name,
                     scope: RunProfileScope::User,
                     graph: graph.clone(),
-                    runtime: runtime.clone(),
+                    runtime: runtime.clone().map_environment(|_| None),
                     set_default: false,
                 },
             )

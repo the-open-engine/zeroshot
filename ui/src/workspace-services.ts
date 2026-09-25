@@ -7,6 +7,7 @@ import {
   type Summary,
 } from './api';
 import type { Document } from './domain';
+import { createEnvironmentStore, type EnvironmentStore } from './environment-store';
 import type { NodeDataAction } from './node-data';
 import { createRunHistorySource, type RunHistorySource } from './run-history-source';
 
@@ -30,6 +31,7 @@ export interface WorkspaceServices {
   readonly mount: URL;
   catalog(signal?: AbortSignal): Promise<Bootstrap>;
   profiles: ProfileStore;
+  environments: EnvironmentStore;
   authoring: AuthoringService;
   history: RunHistorySource;
 }
@@ -62,8 +64,18 @@ export function createWorkspaceServices(
     );
     return { ...document, ...response };
   }
+  function identity(): string {
+    if (workspaceId === undefined)
+      throw new ApiError(
+        409,
+        'workspace_required',
+        'Reload Zeroshot to identify the workspace before saving.'
+      );
+    return workspaceId;
+  }
   return {
     mount,
+    environments: createEnvironmentStore(api, identity),
     catalog: async (signal) => {
       const value = readBootstrap(await api('bootstrap', undefined, signal));
       if (workspaceId !== undefined && value.workspace.id !== workspaceId)

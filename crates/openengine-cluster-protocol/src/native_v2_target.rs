@@ -459,6 +459,8 @@ pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_profiles: Option<TargetRunProfilesDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_environments: Option<crate::TargetRuntimeEnvironmentsDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_recovery: Option<TargetWorkspaceRecoveryDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_checkpoints: Option<TargetWorkspaceCheckpointsDiscovery>,
@@ -494,6 +496,7 @@ impl TargetDiscoveryExtensions {
             && self.merge_plans.is_none()
             && self.connections.is_none()
             && self.run_profiles.is_none()
+            && self.runtime_environments.is_none()
             && self.workspace_recovery.is_none()
             && self.workspace_checkpoints.is_none()
             && self.hosted_workspace_recovery.is_none()

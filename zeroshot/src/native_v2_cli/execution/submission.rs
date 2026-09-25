@@ -30,8 +30,8 @@ mod profiles;
 
 #[path = "named_source.rs"]
 mod named_source;
-pub(super) use profiles::materialize_profile;
-use profiles::{ResolvedRunProfile, resolve_run_profile};
+pub(super) use profiles::{materialize_authored_profile, resolve_authored_profile};
+use profiles::{ResolvedRunProfile, resolve_run_profile, materialize_profile};
 
 /// Executes commands that need no target registry, credentials, or controller state.
 pub async fn try_execute_native_v2_preflight(
@@ -388,11 +388,11 @@ fn template_feedback(selection: &RunGraph) -> crate::native_v2_contract::PullReq
     }
 }
 
-fn apply_template_runtime(
+fn apply_template_runtime<E>(
     selection: &RunGraph,
-    mut runtime: RuntimePlan,
+    mut runtime: RuntimePlan<E>,
     feedback: crate::native_v2_contract::PullRequestFeedback,
-) -> Result<RuntimePlan, NativeV2CliError> {
+) -> Result<RuntimePlan<E>, NativeV2CliError> {
     let RunGraph::Template {
         template,
         delivery,
@@ -574,8 +574,8 @@ fn connection(key: &str, names: &[&str]) -> Result<DeclaredConnections, NativeV2
         .map_err(|error| NativeV2CliError::Usage(error.to_string()))
 }
 
-fn insert_template_binding(
-    runtime: &mut RuntimePlan,
+fn insert_template_binding<E>(
+    runtime: &mut RuntimePlan<E>,
     name: openengine_cluster_protocol::NodeName,
     binding: NodeRuntimeBinding,
     override_feedback: bool,

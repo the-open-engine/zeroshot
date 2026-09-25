@@ -72,6 +72,16 @@ pub trait TargetControlAuthority: Send + Sync {
         target: &TargetRecord,
         request: ConnectionDeleteRequest,
     ) -> Result<ConnectionDeleteResult, TargetAuthorityError>;
+    async fn environment_show(
+        &self,
+        _target: &TargetRecord,
+        _scope: openengine_cluster_protocol::RunProfileScope,
+        _id: openengine_cluster_protocol::EnvironmentId,
+    ) -> Result<openengine_cluster_protocol::RuntimeEnvironmentResource, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise environment resources",
+        ))
+    }
     async fn profile_list(
         &self,
         _target: &TargetRecord,

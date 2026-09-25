@@ -20,7 +20,9 @@ other OS users or local processes.
 The optional Cargo `ui` feature embeds `ui/dist`. Release binaries and target images enable it;
 Node is needed only at build time. Rebuild the frontend before Rust after UI edits.
 
-Local profiles share the CLI store (`ZEROSHOT_CONFIG_DIR`); ledgers use `ZEROSHOT_STATE_DIR`.
+Local profiles and reusable environments share the CLI store (`ZEROSHOT_CONFIG_DIR`);
+ledgers use `ZEROSHOT_STATE_DIR`. Profiles reference environments by ID. New runs resolve the latest
+saved definition; accepted runs and resumes retain their captured definition.
 Pass `--target NAME` to keep those profiles local while reading history from a configured direct or
 hosted target. Hosted credentials stay in the local UI server and never enter the browser. Use
 temporary absolute directories for isolated tests. Ctrl-C stops the UI while detached runs continue.
@@ -98,7 +100,7 @@ The authenticated bootstrap must return `version: 1` and
 `workspace: {kind: "cloud", id: workspaceId}`. Bind this ID to user, organization and profile
 scope. Recreating the iframe binds a different authority; protect the old draft before doing so.
 Optional CSRF configuration contains names only. The iframe reads the existing cookie for each
-service POST and rejects missing/duplicate cookies. Cloud omits this configuration only for its
+service write and rejects missing/duplicate cookies. Cloud omits this configuration only for its
 server-selected local authentication mode. Credentials never enter messages.
 
 After `init`, every message carries `version`, `workspaceId`, `documentId`, `generation` and
@@ -131,7 +133,16 @@ only settles its captured snapshot, preserving later edits. A save-as name drops
 
 Unsolicited `state` messages report `dirty`, `pending`, `validation`, `saving`, `loading` and profile
 `name`. Command replies report `accepted` or a structured `problem`. `navigate` messages from the
-workspace request the host's `save` or `defaults` action. The host keeps selection and outer menus.
+workspace request the host's `save`, `defaults`, or `environments` action. The host keeps selection and outer menus.
+
+Set optional `view: "environments"` in `init` to mount the independent environment manager;
+`readOnly: true` disables mutation controls. The server remains responsible for write authorization.
+The manager reuses the same theme, state, and guarded navigation messages, with one document identity
+for its mounted surface. It handles resource selection and conditional CRUD through the service below;
+profile-specific bridge commands are unavailable. Failed writes preserve the draft and saved revision.
+Committed environment edits also recover from session storage after Back/Forward or remount, scoped
+to the same origin, mount, workspace kind, and workspace identity as profile drafts. Recovery retains
+the original CAS revision. Saving, deleting, or explicitly discarding clears that recovered draft.
 
 ### Authenticated service paths and history lifecycle
 
@@ -140,12 +151,20 @@ paths beneath it; its profile load/save work passes through the host bridge inst
 
 | Request                              | Response                                                                 |
 | ------------------------------------ | ------------------------------------------------------------------------ |
+| `GET environments` | `{environments: [{id, name, revision}]}`. |
+| `GET environments/{id}` | `{id, name, definition, revision}`. |
+| `POST environments` | Save `{id?, name, definition, expectedRevision: string or null}`; returns the saved resource. |
+| `DELETE environments/{id}` | Delete with `{expectedRevision}`; returns `{deleted: true}`. |
 | `GET bootstrap`                      | Existing workspace bootstrap with templates, workers and runtime schema. |
 | `POST validate`                      | Native validation of `{graph, runtime}`.                                 |
 | `POST authoring`, `POST data`        | Native draft transform of `{graph, runtime, action}`.                    |
 | `GET runs/{id}`                      | Version 1 admitted definition with projection version 1.                 |
 | `GET runs/{id}/history?after=CURSOR` | Existing ordered native history page.                                    |
 | `GET runs/{id}/events?after=CURSOR`  | SSE `history` pages and structured `history_error` problems.             |
+
+Environment writes carry the pinned `X-Zeroshot-Workspace` bootstrap identity. Referenced
+environments cannot be deleted. Profile runtimes carry only `environment: {id}`; the environment
+manager owns scripts, variables, and preparation connection declarations.
 
 The shared fetch SSE reader retains HTTP/stream problem codes and details, reconnects network
 interruptions using the last accepted `Last-Event-ID`, and cancels readers/timers on disposal.

@@ -1,4 +1,5 @@
-import { Plus, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
+import { AddEnvironmentField } from './AddEnvironmentField';
 import { ControlText } from './ControlFields';
 
 export function PreparationConnections({
@@ -49,6 +50,7 @@ export function PreparationConnections({
             onCommit={(next) => fields(name, next)}
           />
           <button
+            type="button"
             className="icon-button"
             aria-label={`Remove preparation connection ${name}`}
             onClick={() => {
@@ -61,9 +63,7 @@ export function PreparationConnections({
           </button>
         </div>
       ))}
-      <button className="text-button" onClick={add}>
-        <Plus size={14} /> Add preparation connection
-      </button>
+      <AddEnvironmentField onClick={add}>Add preparation connection</AddEnvironmentField>
     </section>
   );
 }

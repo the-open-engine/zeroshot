@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 use super::support::{CommitPaths, cleanup_temporary, write_and_commit};
 use super::{NativeV2CliError, absolute_user_path, nonempty_environment};
 
+mod environments;
+
 const PROFILES_FILE: &str = "profiles.json";
 const PROFILES_LOCK_FILE: &str = "profiles.lock";
 
@@ -24,6 +26,11 @@ struct StoredProfiles {
     profiles: BTreeMap<RunProfileName, StoredProfile>,
     #[serde(default)]
     default: Option<RunProfileName>,
+    #[serde(default)]
+    environments: BTreeMap<
+        openengine_cluster_protocol::EnvironmentId,
+        openengine_cluster_protocol::RuntimeEnvironmentResource,
+    >,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -31,7 +38,7 @@ struct StoredProfiles {
 struct StoredProfile {
     id: String,
     graph: openengine_cluster_protocol::GraphSpec,
-    runtime: openengine_cluster_protocol::RuntimePlan,
+    runtime: openengine_cluster_protocol::ProfileRuntimePlan,
 }
 
 #[derive(Clone)]
@@ -177,6 +184,7 @@ impl LocalRunProfileStore {
                 return Ok(None);
             }
         }
+        environments::resolve_runtime(&stored, &request.runtime)?;
         let id = stored
             .profiles
             .get(&request.name)

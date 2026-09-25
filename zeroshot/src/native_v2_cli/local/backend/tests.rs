@@ -86,7 +86,7 @@ async fn exercise_named_profile_rejections(backend: &LocalCliBackend) {
                     name: profile_name.clone(),
                     scope: RunProfileScope::User,
                     graph: request.intent.graph.clone(),
-                    runtime: request.intent.runtime.clone(),
+                    runtime: request.intent.runtime.clone().map_environment(|_| None),
                     set_default: true,
                 },
             )

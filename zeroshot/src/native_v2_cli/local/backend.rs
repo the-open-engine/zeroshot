@@ -145,6 +145,21 @@ impl NativeV2CliBackend for LocalCliBackend {
         LocalConnectionStore::new(self.state_root.clone()).delete(request)
     }
 
+    async fn environment_show(
+        &self,
+        target: Option<&str>,
+        scope: openengine_cluster_protocol::RunProfileScope,
+        id: openengine_cluster_protocol::EnvironmentId,
+    ) -> Result<openengine_cluster_protocol::RuntimeEnvironmentResource, NativeV2CliError> {
+        require_local(target)?;
+        if scope != openengine_cluster_protocol::RunProfileScope::User {
+            return Err(local_message(
+                "organization environments require a hosted target",
+            ));
+        }
+        LocalRunProfileStore::production()?.environment(&id)
+    }
+
     async fn profile_list(
         &self,
         target: Option<&str>,

@@ -134,7 +134,7 @@ function StandaloneRunsContent({ services, bootstrap }: StandaloneRunsProps) {
         section="runs"
         workspace={bootstrap.workspace}
         navigate={(section) => {
-          if (section === 'profiles') window.location.hash = '';
+          window.location.hash = section === 'profiles' ? '' : section;
         }}
       >
         <button

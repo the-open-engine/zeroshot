@@ -123,7 +123,9 @@ pub fn prepare_local_run(
     })
 }
 
-fn validate_local_environment(runtime: &RuntimePlan) -> Result<(), LocalCompositionError> {
+pub(crate) fn validate_local_environment(
+    runtime: &RuntimePlan,
+) -> Result<(), LocalCompositionError> {
     if runtime.environment().is_some_and(|environment| {
         environment.setup.is_some()
             || environment.startup.is_some()

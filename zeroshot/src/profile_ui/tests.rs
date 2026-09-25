@@ -101,8 +101,10 @@ async fn direct_profile_handlers_round_trip_without_a_transport() {
 #[tokio::test]
 async fn direct_authoring_and_validation_handlers_preserve_drafts_and_reject_bad_json() {
     let request = profile_request();
+    let root = tempfile::tempdir().assert_value();
+    let state = state(root.path().to_owned(), "https://target.example");
     let document = json!({"graph":request["graph"],"runtime":request["runtime"]});
-    let Json(valid) = validate(Ok(Bytes::from(document.to_string())))
+    let Json(valid) = validate(State(state.clone()), Ok(Bytes::from(document.to_string())))
         .await
         .assert_value();
     assert_eq!(valid, json!({"valid":true}));
@@ -124,7 +126,7 @@ async fn direct_authoring_and_validation_handlers_preserve_drafts_and_reject_bad
     );
 
     for malformed in ["{", r#"{"graph":null,"runtime":null,"extra":true}"#] {
-        let error = validate(Ok(Bytes::from(malformed.to_owned())))
+        let error = validate(State(state.clone()), Ok(Bytes::from(malformed.to_owned())))
             .await
             .err()
             .assert_value();
@@ -402,3 +404,6 @@ async fn static_assets_and_bootstrap_are_native_and_self_contained() {
     assert_eq!(bootstrap["workers"].as_array().assert_value().len(), 4);
     assert!(bootstrap["runtimeSchema"]["$defs"].is_object());
 }
+
+#[path = "tests/environments.rs"]
+mod environments;

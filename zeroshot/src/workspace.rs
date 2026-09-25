@@ -1,7 +1,7 @@
 //! Native authoring services shared by standalone and hosted browser workspaces.
 //! These operations only produce drafts or validate them; they never store profiles or run graphs.
 
-use openengine_cluster_protocol::{GraphSpec, RuntimePlan};
+use openengine_cluster_protocol::{GraphSpec, ProfileRuntimePlan};
 use serde_json::{json, Value};
 
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
@@ -46,7 +46,7 @@ pub fn catalog() -> Result<Value, WorkspaceError> {
         "version": 1,
         "templates": catalog::templates()?,
         "workers": catalog::workers()?,
-        "runtimeSchema": schemars::schema_for!(RuntimePlan),
+        "runtimeSchema": schemars::schema_for!(ProfileRuntimePlan),
     }))
 }
 
@@ -67,10 +67,14 @@ pub fn data(request: Value) -> Result<Value, WorkspaceError> {
 /// Validate a stored profile using the same admission policy as the standalone editor.
 pub async fn validate_profile(
     graph: &GraphSpec,
-    runtime: &RuntimePlan,
+    runtime: &ProfileRuntimePlan,
 ) -> Result<(), WorkspaceError> {
     NativeV2Admission
-        .validate_profile(graph, runtime, DeliveryPolicy::Optional)
+        .validate_profile(
+            graph,
+            &runtime.clone().map_environment(|_| None),
+            DeliveryPolicy::Optional,
+        )
         .await
         .map_err(|error| WorkspaceError::invalid(error.to_string()))
 }

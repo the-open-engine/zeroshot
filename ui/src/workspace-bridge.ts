@@ -17,6 +17,8 @@ export type WorkspaceInit = {
   authority: WorkspaceAuthority;
   apiBase: string;
   theme: 'light' | 'dark';
+  view?: 'profiles' | 'environments';
+  readOnly?: boolean;
   csrf?: { cookieName: string; headerName: string };
 };
 export type HostCommand = Envelope &
@@ -134,6 +136,9 @@ function readInit(
   )
     return;
   if (!validCsrf(value.csrf)) return;
+  if (value.view !== undefined && !['profiles', 'environments'].includes(String(value.view)))
+    return;
+  if (value.readOnly !== undefined && typeof value.readOnly !== 'boolean') return;
   if (typeof value.apiBase !== 'string' || !value.apiBase.startsWith('/')) return;
   let base: URL;
   try {

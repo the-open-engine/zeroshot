@@ -392,3 +392,24 @@ fn wave7_cli_contract_acp_turns_state_and_payloads_preserve_failure_semantics() 
         Err(AcpServeError::Request("session cwd must be absolute"))
     ));
 }
+
+#[tokio::test]
+async fn acp_rejects_environment_hooks_before_starting_a_session() {
+    for definition in [
+        json!({"setup":"echo root"}),
+        json!({"startup":"echo checkout"}),
+    ] {
+        let runtime = runtime("codex", "node_instance", json!({}))
+            .map_environment(|_| Some(serde_json::from_value(definition).assert_value()));
+        assert!(matches!(
+            validate_profile(&acp_profile(runtime)).await,
+            Err(AcpServeError::Composition(
+                LocalCompositionError::PreparationRequiresTarget
+            ))
+        ));
+    }
+    let runtime = runtime("codex", "node_instance", json!({})).map_environment(|_| {
+        Some(serde_json::from_value(json!({"variables":{"CI":"true"}})).assert_value())
+    });
+    validate_profile(&acp_profile(runtime)).await.assert_value();
+}

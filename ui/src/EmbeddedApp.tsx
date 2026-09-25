@@ -3,6 +3,7 @@ import { RunHistoryView } from './RunHistoryView';
 import { RunHistoryBoundary } from './RunHistoryBoundary';
 import { createEmbeddedFetch } from './embedded-fetch';
 import { App } from './App';
+import { EnvironmentWorkspace } from './EnvironmentWorkspace';
 import { WorkspaceBridge, type WorkspaceInit } from './workspace-bridge';
 import { createWorkspaceServices, type WorkspaceServices } from './workspace-services';
 import { ApiError, type Bootstrap } from './api';
@@ -77,6 +78,15 @@ export function EmbeddedApp() {
         <h1>{error ? 'Could not open workspace' : 'Opening workspace'}</h1>
         {error && <p role="alert">{error}</p>}
       </main>
+    );
+  if (configuration?.view === 'environments')
+    return (
+      <EnvironmentWorkspace
+        services={loaded.services}
+        bootstrap={loaded.bootstrap}
+        host={host}
+        readOnly={configuration.readOnly}
+      />
     );
   return (
     <App

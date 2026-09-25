@@ -174,3 +174,47 @@ async fn wave6_cli_contract_remote_profile_resolution_preserves_selector_and_pay
         Err(NativeV2CliError::Usage(message)) if message == "profile missing was not found"
     ));
 }
+
+#[tokio::test]
+async fn hosted_profile_environment_preview_selects_only_declared_credentials() {
+    let resource: openengine_cluster_protocol::RuntimeEnvironmentResource =
+        serde_json::from_value(json!({
+            "id":"shared-env", "name":"shared", "revision":"revision-one",
+            "definition":{"startup":"echo ready", "connections":{"registry":["NPM_TOKEN"]}}
+        }))
+        .assert_value();
+    let backend = FakeBackend::with_environment(resource.clone());
+    let (graph, runtime) = materialization_fixture();
+    let profile = RunProfile {
+        id: "profile-one".into(),
+        name: RunProfileName::new("one").assert_value(),
+        scope: RunProfileScope::Org,
+        graph,
+        runtime: runtime.map_environment(|_| {
+            Some(openengine_cluster_protocol::EnvironmentReference {
+                id: resource.id.clone(),
+            })
+        }),
+        is_default: false,
+    };
+    let resolved = resolve_authored_profile(&backend, Some("cloud"), profile.clone())
+        .await
+        .assert_value();
+    assert_eq!(resolved.runtime.environment(), Some(&resource.definition));
+    let values = super::super::select_connections(&resolved.runtime, |name| {
+        Some(std::ffi::OsString::from(name))
+    })
+    .assert_value();
+    assert_eq!(
+        serde_json::to_value(values).assert_value(),
+        json!({"registry":{"NPM_TOKEN":"NPM_TOKEN"}})
+    );
+    assert!(matches!(backend.calls().as_slice(),
+            [Call::EnvironmentShow {target, scope:RunProfileScope::Org, id}]
+            if target.as_deref() == Some("cloud") && *id == resource.id));
+    assert!(
+        resolve_authored_profile(&FakeBackend::default(), Some("cloud"), profile)
+            .await
+            .is_err()
+    );
+}

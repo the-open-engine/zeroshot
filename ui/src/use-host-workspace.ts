@@ -33,7 +33,7 @@ export function useHostWorkspace(host: WorkspaceBridge | undefined, editor: Edit
     showingRun: session.showingRun,
     restore: (id?: string) => session.restore(id),
     requestSave: () => session.navigate('save'),
-    navigate: (action: 'defaults') => session.navigate(action),
+    navigate: (action: 'defaults' | 'environments') => session.navigate(action),
   };
 }
 

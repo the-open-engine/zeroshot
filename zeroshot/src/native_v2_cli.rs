@@ -388,6 +388,14 @@ pub enum NativeV2CliError {
     InitialInput(String),
     #[error("run validation failed: {0}")]
     InvalidRun(#[source] NativeV2AdmissionError),
+    #[error("environment {0} was not found in this profile's resource store")]
+    EnvironmentMissing(openengine_cluster_protocol::EnvironmentId),
+    #[error("environment changed elsewhere, or its name is already taken")]
+    EnvironmentConflict,
+    #[error("environment is referenced by a profile")]
+    EnvironmentInUse,
+    #[error("environment workspace changed; reload before saving")]
+    EnvironmentWorkspaceChanged,
     #[error("declared environment variable {0} is unavailable or is not valid UTF-8")]
     Environment(EnvironmentVariableName),
     #[error(transparent)]
@@ -498,6 +506,17 @@ pub trait NativeV2CliBackend: Send + Sync {
     ) -> Result<ConnectionDeleteResult, NativeV2CliError> {
         Err(NativeV2CliError::Target(
             "target does not advertise connection management".to_owned(),
+        ))
+    }
+
+    async fn environment_show(
+        &self,
+        _target: Option<&str>,
+        _scope: openengine_cluster_protocol::RunProfileScope,
+        _id: openengine_cluster_protocol::EnvironmentId,
+    ) -> Result<openengine_cluster_protocol::RuntimeEnvironmentResource, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise environment resources".into(),
         ))
     }
 

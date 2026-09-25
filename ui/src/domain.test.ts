@@ -239,3 +239,34 @@ test('generated identities cannot rebind dangling guards or output references', 
   assert.equal(uniqueName(second.graph.root, 'worker'), 'worker_2');
   assert.equal(uniqueName(second.graph.root, 'mentioned_in_prose'), 'mentioned_in_prose');
 });
+
+test('profile JSON accepts only a saved environment reference and never hidden inline scripts', () => {
+  const doc = fixture();
+  assertDocument(doc);
+  doc.runtime.environment = { id: 'environment-1' };
+  assertDocument(doc);
+  for (const environment of [
+    { setup: 'apt-get install make' },
+    { startup: 'npm ci' },
+    { id: 'environment-1', startup: 'hidden override' },
+    {},
+    [],
+    null,
+    { id: '' },
+    { id: ' ' },
+    { id: 'x'.repeat(257) },
+  ]) {
+    assert.throws(
+      () =>
+        assertDocument(
+          JSON.parse(
+            JSON.stringify({
+              ...doc,
+              runtime: { ...doc.runtime, environment },
+            })
+          )
+        ),
+      /reference a saved environment by id/
+    );
+  }
+});

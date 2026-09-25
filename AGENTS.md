@@ -370,7 +370,17 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   cleanup uses session group markers so it cannot terminate a peer or a startup service. Workspace
   roots are run-owner `0700`, runtime roots supervisor-owned `0711`, and production ledgers `0600`.
   Session homes disappear only after confirmed cleanup; node-instance homes survive loop revisits.
-- An optional `runtime.environment` carries public setup/startup scripts, nonsecret variables, and
+- Profiles use `ProfileRuntimePlan` with an optional `runtime.environment: {id}` reference to a
+  reusable environment resource in the same owner scope. Stores reject missing references and
+  deletion while referenced. Local profiles and environments share one lock/file; hosted owners
+  supply their own storage and authorization. The native workspace validator accepts authored
+  profiles only; concrete definitions use full admission validation. Resolve the latest resource
+  once before accepting a new run and store the full definition in `RunSubmission`; queued runs
+  and resume never consult mutable resources again. CLI hosted preview reads through optional
+  `zeroshot.runtime-environments/v1` discovery solely to select declared caller credentials;
+  the hosted profile-run endpoint remains authoritative. Direct Docker targets accept concrete
+  runtime definitions and do not require a catalog. Revisions guard authoring writes, not execution.
+- An execution's optional `runtime.environment` carries public setup/startup scripts, nonsecret variables, and
   explicit hook connection references. Hosted preparation is accepted asynchronously and owns its
   controller lease before allocation. Setup runs as root before checkout or checkpoint restore;
   startup runs as the workspace owner in the restored checkout before graph dispatch. Both rerun

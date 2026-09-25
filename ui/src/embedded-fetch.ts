@@ -16,7 +16,8 @@ export function createEmbeddedFetch(
       init?.method ?? (input instanceof Request ? input.method : 'GET')
     ).toUpperCase();
     const request = { ...init, redirect: 'error' as const, credentials: 'same-origin' as const };
-    if (!csrf || method !== 'POST') return fetcher(input instanceof Request ? input : url, request);
+    if (!csrf || !['POST', 'DELETE', 'PUT', 'PATCH'].includes(method))
+      return fetcher(input instanceof Request ? input : url, request);
     const token = csrfToken(cookie(), csrf.cookieName);
     const headers = new Headers(
       init?.headers ?? (input instanceof Request ? input.headers : undefined)

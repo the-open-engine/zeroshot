@@ -1,6 +1,27 @@
 # Prepare a runtime environment
 
-Docker targets accept an optional `environment` in the runtime plan:
+Create an environment once and select it from each profile that needs it. The shared Zeroshot
+editor has a separate **Environments** view; a profile stores only its stable resource ID:
+
+```json
+{ "environment": { "id": "01990000-0000-7000-8000-000000000001" } }
+```
+
+A user profile references an environment owned by that user. An organization profile references
+an environment in that organization. There is no fallback between scopes. A new run resolves the
+latest saved definition and stores the complete result before acceptance. Editing an environment
+affects future runs, including runs from other profiles that reference it. Queued and resumed runs
+keep their accepted definition. Renaming an environment preserves its ID; delete it only after
+removing its profile references.
+
+`zeroshot acp` captures its local profile and environment when the ACP server starts. Restart that
+server to use resource edits. ACP accepts public variables, while setup/startup hooks require a
+Docker target and fail validation before an ACP session starts.
+
+Direct Docker submission APIs still accept an exact environment definition in the runtime plan.
+They do not need an environment catalog. A local CLI profile resolves its environment from the
+local authoring store before sending the same concrete request to the target:
+
 
 ```json
 {
@@ -13,10 +34,8 @@ Docker targets accept an optional `environment` in the runtime plan:
 }
 ```
 
-Keep this object in the same user- or organization-scoped profile as the graph and runtime.
-A submitted run keeps its immutable profile definition; editing the profile affects new runs.
-Connection values are resolved through the existing target connection mechanism and never belong
-in scripts or variables stored in the profile. Only explicitly declared hook connections reach
+Store this definition in the environment resource when using profiles. Keep connection values
+in the existing target connection store; scripts and public variables must not contain secrets. Only explicitly declared hook connections reach
 preparation. Node connections remain independently declared.
 
 Submission returns after admission and durable acceptance. While the run is `admitted`, setup runs
@@ -58,3 +77,33 @@ terminated by the target's process cleanup. Direct target operators or scripts m
 names, reuse, and removal. When the daemon runs inside a disposable run machine, destroying that
 machine removes its Docker resources. Local execution uses the invoking machine and rejects setup
 and startup hooks.
+
+## Local authoring API
+
+`zeroshot ui` serves the resource API alongside profiles. Read `GET /ui/api/bootstrap` and include
+its `workspace.id` as the `X-Zeroshot-Workspace` header on every write. Requests use JSON and the
+same origin as the UI. These authoring operations never run hooks.
+
+| Request | Result |
+| --- | --- |
+| `GET /ui/api/environments` | `{ "environments": [{ "id", "name", "revision" }] }` |
+| `GET /ui/api/environments/{id}` | Resource with `id`, `name`, `definition`, and `revision` |
+| `POST /ui/api/environments` | Creates or updates a resource |
+| `DELETE /ui/api/environments/{id}` | Deletes an unreferenced resource |
+
+Create a resource with this body:
+
+```json
+{
+  "name": "node-project",
+  "definition": { "setup": "apt-get update && apt-get install -y jq", "startup": "npm ci" },
+  "expectedRevision": null
+}
+```
+
+To update it, include its `id` and replace `expectedRevision` with the last returned revision.
+Deletion requires `{ "expectedRevision": "<current revision>" }`. A stale revision or a duplicate
+name returns `409 environment_conflict`; a referenced resource returns `409 environment_in_use`.
+Missing resources return `404 environment_not_found`. Resource IDs remain stable across edits,
+while revisions change after each save. Profile runtime JSON accepts the reference form shown
+above; inline definitions belong only in concrete run submissions.

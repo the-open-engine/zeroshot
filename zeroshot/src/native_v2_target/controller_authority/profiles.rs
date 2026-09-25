@@ -10,6 +10,9 @@ use super::TargetHttpControlAuthority;
 use super::access::AccessToken;
 use crate::native_v2_target::{TargetAccess, TargetAuthorityError, TargetRecord};
 
+// Includes worst-case JSON escaping of both scripts and the bounded public-variable map.
+const MAX_ENVIRONMENT_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+
 enum ProfileOperation {
     List,
     Show,
@@ -44,6 +47,47 @@ impl ProfileOperation {
 }
 
 impl TargetHttpControlAuthority {
+    pub(super) async fn environment_show(
+        &self,
+        target: &TargetRecord,
+        scope: openengine_cluster_protocol::RunProfileScope,
+        id: openengine_cluster_protocol::EnvironmentId,
+    ) -> Result<openengine_cluster_protocol::RuntimeEnvironmentResource, TargetAuthorityError> {
+        if matches!(target.access, TargetAccess::Direct) {
+            return Err(authority_error(
+                "direct targets accept resolved environments",
+            ));
+        }
+        let (auth, controller) = self.descriptors(target).await?;
+        let routes = auth
+            .runtime_environments
+            .as_ref()
+            .ok_or_else(|| authority_error("target does not advertise environment resources"))?;
+        let url = routes.show(scope, &id)?;
+        let access = self
+            .access_token(target, &auth, &controller.audience)
+            .await?;
+        let builder = self
+            .authorized(self.client.get(url), &access)?
+            .header(ACCEPT, "application/json")
+            .header(CACHE_CONTROL, "no-store");
+        let resource: openengine_cluster_protocol::RuntimeEnvironmentResource = self
+            .hosted_json(
+                (builder, &access),
+                "environment show",
+                Some(MAX_ENVIRONMENT_RESPONSE_BYTES),
+            )
+            .await?;
+        if resource.id != id {
+            return Err(authority_error("target returned another environment"));
+        }
+        resource
+            .definition
+            .validate()
+            .map_err(|error| authority_error(error.to_string()))?;
+        Ok(resource)
+    }
+
     async fn profile_access(
         &self,
         target: &TargetRecord,

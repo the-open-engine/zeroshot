@@ -219,6 +219,19 @@ where
             .map_err(|error| error.into_cli(&target))
     }
 
+    async fn environment_show(
+        &self,
+        name: &str,
+        scope: openengine_cluster_protocol::RunProfileScope,
+        id: openengine_cluster_protocol::EnvironmentId,
+    ) -> Result<openengine_cluster_protocol::RuntimeEnvironmentResource, NativeV2CliError> {
+        let target = self.target(name)?;
+        self.authority
+            .environment_show(&target, scope, id)
+            .await
+            .map_err(|error| error.into_cli(&target))
+    }
+
     async fn profile_list(
         &self,
         name: &str,

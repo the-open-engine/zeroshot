@@ -14,32 +14,37 @@ use super::{
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, tag = "harness", rename_all = "snake_case")]
-pub enum RuntimePlan {
+#[serde(
+    deny_unknown_fields,
+    tag = "harness",
+    rename_all = "snake_case",
+    bound(deserialize = "E: Deserialize<'de>")
+)]
+pub enum RuntimePlan<E = super::RuntimeEnvironment> {
     Copilot {
         provider: CopilotProvider,
         size: RunSize,
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        environment: Option<super::RuntimeEnvironment>,
+        environment: Option<E>,
     },
     Codex {
         provider: CodexProvider,
         size: RunSize,
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        environment: Option<super::RuntimeEnvironment>,
+        environment: Option<E>,
     },
     Claude {
         provider: ClaudeProvider,
         size: RunSize,
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        environment: Option<super::RuntimeEnvironment>,
+        environment: Option<E>,
     },
 }
 
-impl RuntimePlan {
+impl<E> RuntimePlan<E> {
     #[must_use]
     pub const fn size(&self) -> RunSize {
         match self {
@@ -59,7 +64,7 @@ impl RuntimePlan {
     }
 
     #[must_use]
-    pub const fn environment(&self) -> Option<&super::RuntimeEnvironment> {
+    pub const fn environment(&self) -> Option<&E> {
         match self {
             Self::Copilot { environment, .. }
             | Self::Codex { environment, .. }
@@ -67,6 +72,51 @@ impl RuntimePlan {
         }
     }
 
+    /// Replace authoring references with the exact definition selected for this run.
+    #[must_use]
+    pub fn map_environment<T>(self, map: impl FnOnce(Option<E>) -> Option<T>) -> RuntimePlan<T> {
+        match self {
+            Self::Copilot {
+                provider,
+                size,
+                nodes,
+                environment,
+            } => RuntimePlan::Copilot {
+                provider,
+                size,
+                nodes,
+                environment: map(environment),
+            },
+            Self::Codex {
+                provider,
+                size,
+                nodes,
+                environment,
+            } => RuntimePlan::Codex {
+                provider,
+                size,
+                nodes,
+                environment: map(environment),
+            },
+            Self::Claude {
+                provider,
+                size,
+                nodes,
+                environment,
+            } => RuntimePlan::Claude {
+                provider,
+                size,
+                nodes,
+                environment: map(environment),
+            },
+        }
+    }
+}
+
+/// Author-owned profile runtime. Environments are reusable resources, never inline definitions.
+pub type ProfileRuntimePlan = RuntimePlan<super::EnvironmentReference>;
+
+impl RuntimePlan {
     /// Union of the fields required from each connection key across all executable nodes.
     #[must_use]
     pub fn connection_requirements(

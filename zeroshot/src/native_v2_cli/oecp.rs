@@ -166,6 +166,17 @@ where
             .await
     }
 
+    async fn environment_show(
+        &self,
+        target: Option<&str>,
+        scope: openengine_cluster_protocol::RunProfileScope,
+        id: openengine_cluster_protocol::EnvironmentId,
+    ) -> Result<openengine_cluster_protocol::RuntimeEnvironmentResource, NativeV2CliError> {
+        self.connector
+            .environment_show(require_named_target(target)?, scope, id)
+            .await
+    }
+
     async fn profile_list(
         &self,
         target: Option<&str>,

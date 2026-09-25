@@ -4723,7 +4723,7 @@
     },
     "RuntimeEnvironment": {
       "additionalProperties": false,
-      "description": "Setup runs as root before checkout; startup runs as the workspace user after checkout or restore.\nBoth hooks run again on a new attempt. Values here are public profile data, never secrets.",
+      "description": "Setup runs as root before checkout; startup runs as the workspace user after checkout or restore.\nBoth hooks run again on a new attempt. Values here are public environment data, never secrets.",
       "properties": {
         "connections": {
           "$ref": "#/$defs/DeclaredConnections",

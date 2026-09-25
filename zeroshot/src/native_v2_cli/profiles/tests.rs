@@ -4,7 +4,7 @@ use serde_json::json;
 
 use super::*;
 
-fn profile_request(name: &str, node: &str, set_default: bool) -> RunProfileSetRequest {
+pub(super) fn profile_request(name: &str, node: &str, set_default: bool) -> RunProfileSetRequest {
     RunProfileSetRequest {
         name: RunProfileName::new(name).assert_value(),
         scope: RunProfileScope::User,
@@ -23,7 +23,7 @@ fn profile_request(name: &str, node: &str, set_default: bool) -> RunProfileSetRe
     }
 }
 
-fn selector(name: &str) -> RunProfileSelector {
+pub(super) fn selector(name: &str) -> RunProfileSelector {
     RunProfileSelector {
         scope: RunProfileScope::User,
         name: RunProfileName::new(name).assert_value(),

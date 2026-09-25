@@ -7,7 +7,7 @@ use openengine_cluster_protocol::{
 use super::super::{
     CliOutcome, NativeV2CliBackend, NativeV2CliCommand, NativeV2CliError, ProfileSetCommand,
 };
-use super::submission::materialize_profile;
+use super::submission::materialize_authored_profile;
 use super::write_json;
 use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
 
@@ -77,7 +77,7 @@ async fn set<B: NativeV2CliBackend>(
         runtime,
         set_default,
     } = command;
-    let (graph, mut runtime) = materialize_profile(&graph, &runtime).await?;
+    let (graph, mut runtime) = materialize_authored_profile(&graph, &runtime).await?;
     materialize_stored_provider_access(&mut runtime, route.target.is_some())?;
     let result = backend
         .profile_set(
@@ -95,7 +95,7 @@ async fn set<B: NativeV2CliBackend>(
 }
 
 fn materialize_stored_provider_access(
-    runtime: &mut openengine_cluster_protocol::RuntimePlan,
+    runtime: &mut openengine_cluster_protocol::ProfileRuntimePlan,
     contained: bool,
 ) -> Result<(), NativeV2CliError> {
     if contained {

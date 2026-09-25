@@ -12,9 +12,9 @@ use agent_client_protocol as acp;
 use acp::Client as _;
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    FieldName, GraphNode, IdempotencyKey, PayloadType, RunConnectionValues, RunId, RunProfile,
-    RunProfileName, RunProfileScope, RunProfileSelector, RunSubmission, RunTitle, RuntimePlan,
-    SessionScope, TerminalResult,
+    FieldName, GraphNode, IdempotencyKey, PayloadType, RunConnectionValues, RunId,
+    ResolvedRunProfile as RunProfile, RunProfileName, RunProfileScope, RunProfileSelector,
+    RunSubmission, RunTitle, RuntimePlan, SessionScope, TerminalResult,
 };
 use serde_json::{json, Map, Value};
 use thiserror::Error;
@@ -94,7 +94,7 @@ impl AcpServeError {
 
 /// Serves one local profile over ACP stdio until the client disconnects.
 pub async fn serve_local_acp(profile_name: RunProfileName) -> Result<(), AcpServeError> {
-    let mut profile = LocalRunProfileStore::production()?.show(RunProfileSelector {
+    let mut profile = LocalRunProfileStore::production()?.resolve_profile(RunProfileSelector {
         scope: RunProfileScope::User,
         name: profile_name,
     })?;
@@ -843,6 +843,7 @@ fn submission(
 
 async fn validate_profile(profile: &RunProfile) -> Result<(), AcpServeError> {
     validate_task_type(&profile.graph.initial_input)?;
+    crate::native_v2_local::validate_local_environment(&profile.runtime)?;
     if !matches!(
         profile.runtime,
         RuntimePlan::Codex { .. } | RuntimePlan::Claude { .. }

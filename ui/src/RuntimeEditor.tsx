@@ -1,7 +1,8 @@
 import { Braces } from 'lucide-react';
 import { allNodes, bindingFor, clone, executable, type Document } from './domain';
 import { Field } from './Field';
-import { EnvironmentEditor } from './EnvironmentEditor';
+import { EnvironmentSelector } from './EnvironmentSelector';
+import type { EnvironmentStore } from './environment-store';
 import { ModelPicker } from './ModelPicker';
 
 const harnessLabels = new Map([
@@ -15,6 +16,8 @@ export function RuntimeEditor(p: {
   schema: any;
   edit: (next: Document, key?: string) => void;
   openJson: () => void;
+  environments: EnvironmentStore;
+  manageEnvironments: () => void;
 }) {
   const doc = p.document;
   const variants = p.schema?.oneOf ?? p.schema?.anyOf ?? [];
@@ -114,13 +117,15 @@ export function RuntimeEditor(p: {
           </div>
         ))}
       <div className="section-rule" />
-      <EnvironmentEditor
-        value={doc.runtime.environment ?? {}}
-        onChange={(environment, key) => {
+      <EnvironmentSelector
+        value={doc.runtime.environment}
+        store={p.environments}
+        manage={p.manageEnvironments}
+        onChange={(environment) => {
           const next = clone(doc);
-          if (Object.keys(environment).length) next.runtime.environment = environment;
+          if (environment) next.runtime.environment = environment;
           else delete next.runtime.environment;
-          p.edit(next, `runtime.environment.${key}`);
+          p.edit(next, 'runtime.environment');
         }}
       />
       <button className="text-button json-link" onClick={p.openJson}>

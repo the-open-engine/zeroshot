@@ -1118,3 +1118,38 @@ h2 {
 .embedded-app > .app-body {
   flex: 1;
 }
+
+.environment-app {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+.environment-workspace {
+  width: min(100%, 960px);
+  margin: 0 auto;
+  padding: 28px;
+  overflow: auto;
+}
+.environment-toolbar {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.environment-toolbar .field {
+  min-width: 240px;
+  margin: 0;
+}
+.environment-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.environment-fields textarea {
+  width: 100%;
+}
+.environment-fields:disabled {
+  opacity: 0.8;
+}

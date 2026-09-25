@@ -29,7 +29,7 @@ fn profile_operations() -> (
         name: selector.name.clone(),
         scope: selector.scope,
         graph: prepared.intent.graph.clone(),
-        runtime: prepared.intent.runtime.clone(),
+        runtime: prepared.intent.runtime.clone().map_environment(|_| None),
         set_default: true,
     };
     let run = RunProfileRunRequest {

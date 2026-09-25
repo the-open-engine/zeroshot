@@ -54,6 +54,7 @@ async fn acp_turns_reuse_provider_session_and_remain_observable() {
     let capture = std::fs::read_to_string(&fixture.capture).unwrap();
     assert_eq!(capture.matches("arg=resume\n").count(), 1);
     assert_eq!(capture.matches("arg=acp-test-thread\n").count(), 1);
+    assert_eq!(capture.matches("environment=prepared\n").count(), 2);
     fixture.assert_durable_runs(&run_ids);
 }
 
@@ -282,6 +283,16 @@ impl AcpFixture {
     }
 
     fn install_profile(&self) {
+        // Seed the same authoring-store resource shape used by the environment API.
+        let resources = json!({"environments":{"acp-public":{
+            "id":"acp-public", "name":"acp-public", "revision":"fixture-revision",
+            "definition":{"variables":{"ACP_PUBLIC_SETTING":"prepared"}}
+        }}});
+        std::fs::write(
+            self.config.join("profiles.json"),
+            serde_json::to_vec(&resources).unwrap(),
+        )
+        .unwrap();
         let (graph, runtime) = write_profile_files(self._root.path());
         let profile = Command::new(&self.executable)
             .args([
@@ -617,6 +628,7 @@ if [ -e {gate:?} ]; then
 fi
 {{
   for argument in "$@"; do /usr/bin/printf 'arg=%s\n' "$argument"; done
+  /usr/bin/printf 'environment=%s\n' "${{ACP_PUBLIC_SETTING-}}"
   /usr/bin/printf '%s\n' '---'
 }} >> {capture:?}
 /usr/bin/printf '%s\n' '{{"type":"thread.started","thread_id":"acp-test-thread"}}'
@@ -688,6 +700,7 @@ fn write_profile_files(root: &Path) -> (PathBuf, PathBuf) {
         "harness":"codex",
         "provider":"openai",
         "size":"medium",
+        "environment":{"id":"acp-public"},
         "nodes":{"worker":{
             "kind":"agent",
             "model":"test-model",
