@@ -192,7 +192,7 @@ class Client:
 
         Cancellation detaches observation and leaves the durable run active.
         """
-        submitted = await self._submit(task, _overrides(options))
+        submitted = await self._submit(task, _overrides(options, _RunOptions.__annotations__))
         return await submitted.wait(wait_timeout=options.get("wait_timeout"))
 
     @overload
@@ -228,7 +228,7 @@ class Client:
         Exact RunRequest values cannot be combined with string-submission overrides. Preflight
         completes before local controller startup or direct-target contact.
         """
-        return await self._submit(task, _overrides(options))
+        return await self._submit(task, _overrides(options, _SubmitOptions.__annotations__))
 
     async def submit_plan(self, request: MergePlanRequest) -> MergePlan:
         """Validate and atomically submit one merge-only DAG to a hosted target.
@@ -761,7 +761,10 @@ def _submission_key() -> str:
     return f"python-{uuid.uuid4().hex}"
 
 
-def _overrides(options: _SubmitOptions) -> _Overrides:
+def _overrides(options: _SubmitOptions, allowed: Mapping[str, object]) -> _Overrides:
+    unknown = options.keys() - allowed.keys()
+    if unknown:
+        raise TypeError(f"unexpected keyword argument: {sorted(unknown)[0]}")
     return _Overrides(
         options.get("title"),
         options.get("preset"),
