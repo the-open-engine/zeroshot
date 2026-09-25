@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use openengine_cluster_protocol::WorkerOutcome;
+use openengine_cluster_protocol::{TokenCount, WorkerOutcome};
 use tokio::sync::Mutex;
 
 use crate::native_v2_capsule::provider_process::{ProviderSessionCore, impl_provider_node_session};
-use crate::native_v2_contract::{NodeInvocation, NodeRuntimeBinding};
+use crate::native_v2_contract::{NodeInvocation, NodeRuntimeBinding, TokenUsageDelta};
 use crate::native_v2_runner::{
     AgentResponse, DriverControl, DriverInvocation, NodeDriver, NodeRunnerError, NodeSession,
     ResolvedEnvironment, SessionFactory,
@@ -17,6 +17,7 @@ use super::output::CodexOutput;
 pub(super) struct CodexSession {
     pub(super) core: ProviderSessionCore,
     pub(super) thread_id: Mutex<Option<String>>,
+    usage: Mutex<Option<TokenUsageDelta>>,
 }
 
 impl CodexSession {
@@ -24,6 +25,44 @@ impl CodexSession {
         Self {
             core: ProviderSessionCore::new(),
             thread_id: Mutex::new(None),
+            usage: Mutex::new(None),
+        }
+    }
+
+    pub(super) async fn usage_delta(
+        &self,
+        observed: Option<TokenUsageDelta>,
+        resumed: bool,
+    ) -> Option<TokenUsageDelta> {
+        let observed = observed?;
+        let previous = *self.usage.lock().await;
+        if !resumed {
+            return Some(observed);
+        }
+        Some(previous.map_or(observed, |previous| {
+            if usage_reset(previous, observed) {
+                observed
+            } else {
+                TokenUsageDelta {
+                    input_tokens: token_delta(previous.input_tokens, observed.input_tokens),
+                    output_tokens: token_delta(previous.output_tokens, observed.output_tokens),
+                    cache_read_input_tokens: optional_token_delta(
+                        previous.cache_read_input_tokens,
+                        observed.cache_read_input_tokens,
+                    ),
+                    cache_creation_input_tokens: optional_token_delta(
+                        previous.cache_creation_input_tokens,
+                        observed.cache_creation_input_tokens,
+                    ),
+                }
+            }
+        }))
+    }
+
+    pub(super) async fn commit_usage(&self, observed: Option<TokenUsageDelta>, resumed: bool) {
+        // Missing usage preserves only the baseline of the thread being resumed.
+        if !resumed || observed.is_some() {
+            *self.usage.lock().await = observed;
         }
     }
 
@@ -88,6 +127,38 @@ impl CodexSession {
             }
         )
         .then_some("Codex output did not provide a thread ID required for reusable session")
+    }
+}
+
+fn usage_reset(previous: TokenUsageDelta, observed: TokenUsageDelta) -> bool {
+    observed.input_tokens < previous.input_tokens
+        || observed.output_tokens < previous.output_tokens
+        || optional_counter_decreased(
+            previous.cache_read_input_tokens,
+            observed.cache_read_input_tokens,
+        )
+        || optional_counter_decreased(
+            previous.cache_creation_input_tokens,
+            observed.cache_creation_input_tokens,
+        )
+}
+
+fn optional_counter_decreased(previous: Option<TokenCount>, observed: Option<TokenCount>) -> bool {
+    matches!((previous, observed), (Some(previous), Some(observed)) if observed < previous)
+}
+
+fn token_delta(previous: TokenCount, observed: TokenCount) -> TokenCount {
+    TokenCount::new(observed.get().saturating_sub(previous.get())).unwrap_or(observed)
+}
+
+fn optional_token_delta(
+    previous: Option<TokenCount>,
+    observed: Option<TokenCount>,
+) -> Option<TokenCount> {
+    match (previous, observed) {
+        (Some(previous), Some(observed)) => Some(token_delta(previous, observed)),
+        (None, Some(observed)) => Some(observed),
+        (_, None) => None,
     }
 }
 

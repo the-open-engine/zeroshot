@@ -165,13 +165,16 @@ printf '%s%s\n' \
     assert_actionable_retry(&error, &logs);
     assert!(logs.contains("Codex output contained conflicting thread IDs"));
     assert_eq!(usages.len(), 2);
-    for usage in usages {
-        let usage = usage.assert_value();
-        assert_eq!(usage.input_tokens.get(), 43);
-        assert_eq!(usage.output_tokens.get(), 19);
-        assert_eq!(usage.cache_read_input_tokens.assert_value().get(), 13);
-        assert_eq!(usage.cache_creation_input_tokens.assert_value().get(), 5);
-    }
+    let first = usages.first().copied().flatten().assert_value();
+    assert_eq!(first.input_tokens.get(), 43);
+    assert_eq!(first.output_tokens.get(), 19);
+    assert_eq!(first.cache_read_input_tokens.assert_value().get(), 13);
+    assert_eq!(first.cache_creation_input_tokens.assert_value().get(), 5);
+    let second = usages.get(1).copied().flatten().assert_value();
+    assert_eq!(second.input_tokens.get(), 0);
+    assert_eq!(second.output_tokens.get(), 0);
+    assert_eq!(second.cache_read_input_tokens.assert_value().get(), 0);
+    assert_eq!(second.cache_creation_input_tokens.assert_value().get(), 0);
 }
 
 #[tokio::test]

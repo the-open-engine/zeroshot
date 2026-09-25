@@ -24,7 +24,9 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use openengine_cluster_protocol::{IdempotencyKey, NodeName, RunSize, RunTitle, WorkerOutcome};
+use openengine_cluster_protocol::{
+    IdempotencyKey, NodeName, RunSize, RunTitle, TokenCount, WorkerOutcome,
+};
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{json, Value};
 
@@ -36,7 +38,7 @@ use crate::native_v2_candidate::test_support::{
 };
 use crate::native_v2_contract::{
     AdmittedRun, DeclaredConnections, DeclaredEnvironment, EnvironmentVariableName,
-    NodeRuntimeBinding, RunSubmission, RuntimePlan,
+    NodeRuntimeBinding, RunSubmission, RuntimePlan, TokenUsageDelta,
 };
 use crate::native_v2_runner::{
     AttachReceiveError, NativeNodeRunner, NodeHandle, NodeRunRequest, NodeRunner,
@@ -122,6 +124,29 @@ fi
   '"cache_write_input_tokens":3,"output_tokens":2}}'
 "#;
 
+const RESUMED_USAGE_SCRIPT: &str = r#"#!/bin/sh
+set -eu
+resumed=false
+for argument in "$@"; do
+  if [ "$argument" = "resume" ]; then
+    resumed=true
+  fi
+done
+/usr/bin/printf '%s\n' '{"type":"thread.started","thread_id":"thread-usage"}'
+if [ "${CORRECT_OUTPUT-false}" = true ] && [ "$resumed" = false ]; then
+  /usr/bin/printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"response\":{\"answer\":\"wrong\"}}"}}'
+elif [ "$resumed" = true ]; then
+  /usr/bin/printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"response\":{\"answer\":43}}"}}'
+else
+  /usr/bin/printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"{\"response\":{\"answer\":42}}"}}'
+fi
+if [ "$resumed" = true ]; then
+  /usr/bin/printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":3,"cached_input_tokens":2,"cache_write_input_tokens":4,"output_tokens":5}}'
+else
+  /usr/bin/printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":1,"cache_write_input_tokens":3,"output_tokens":2}}'
+fi
+"#;
+
 const SUCCESS_OUTPUT_SCRIPT: &str = r#"
 /usr/bin/printf '%s%s\n' \
   '{"type":"item.completed","item":{"type":"agent_message",' \
@@ -134,6 +159,22 @@ fn script_with_success(prefix: &str) -> String {
     script.push_str(prefix);
     script.push_str(SUCCESS_OUTPUT_SCRIPT);
     script
+}
+
+fn token_usage(
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_input_tokens: Option<u64>,
+    cache_creation_input_tokens: Option<u64>,
+) -> TokenUsageDelta {
+    TokenUsageDelta {
+        input_tokens: TokenCount::new(input_tokens).assert_value(),
+        output_tokens: TokenCount::new(output_tokens).assert_value(),
+        cache_read_input_tokens: cache_read_input_tokens
+            .map(|value| TokenCount::new(value).assert_value()),
+        cache_creation_input_tokens: cache_creation_input_tokens
+            .map(|value| TokenCount::new(value).assert_value()),
+    }
 }
 
 fn scripted_adapter(
@@ -518,6 +559,86 @@ async fn verifiers_and_workers_share_permission_defaults_and_preserve_authored_p
             );
         }
     }
+}
+
+#[tokio::test]
+async fn node_instance_session_reports_per_turn_codex_usage_deltas() {
+    let directory = TestDirectory::new("codex-resumed-usage");
+    let (admitted, runtime) = openai_scripted_runtime(
+        &directory,
+        OpenAiScript {
+            scope: SessionScope::NodeInstance,
+            environment: &["OPENAI_API_KEY"],
+            name: "codex-resumed-usage",
+            body: RESUMED_USAGE_SCRIPT,
+        },
+    )
+    .await;
+    let values = [("OPENAI_API_KEY", "fake-openai-key".to_owned())];
+
+    let mut first_handle = start(&runtime, &admitted, 1, &values).await;
+    let mut first_output = first_handle.take_initial_output().assert_value();
+    assert!(matches!(
+        first_handle.completion().await.assert_value().outcome,
+        WorkerOutcome::Verified { output, .. } if output == json!({"answer":42})
+    ));
+    assert_eq!(
+        first_output
+            .recv_usage()
+            .await
+            .assert_value()
+            .assert_value(),
+        token_usage(1, 2, Some(1), Some(3))
+    );
+
+    let mut second_handle = start(&runtime, &admitted, 2, &values).await;
+    let mut second_output = second_handle.take_initial_output().assert_value();
+    assert!(matches!(
+        second_handle.completion().await.assert_value().outcome,
+        WorkerOutcome::Verified { output, .. } if output == json!({"answer":43})
+    ));
+    assert_eq!(
+        second_output
+            .recv_usage()
+            .await
+            .assert_value()
+            .assert_value(),
+        token_usage(2, 3, Some(1), Some(1))
+    );
+}
+
+#[tokio::test]
+async fn execution_session_normalizes_usage_for_correction_resume() {
+    let directory = TestDirectory::new("codex-correction-usage");
+    let (admitted, runtime) = openai_scripted_runtime(
+        &directory,
+        OpenAiScript {
+            scope: SessionScope::Execution,
+            environment: &["CORRECT_OUTPUT", "OPENAI_API_KEY"],
+            name: "codex-correction-usage",
+            body: RESUMED_USAGE_SCRIPT,
+        },
+    )
+    .await;
+    let values = [
+        ("CORRECT_OUTPUT", "true".to_owned()),
+        ("OPENAI_API_KEY", "fake-openai-key".to_owned()),
+    ];
+    let mut handle = start(&runtime, &admitted, 1, &values).await;
+    let mut output = handle.take_initial_output().assert_value();
+
+    assert!(matches!(
+        handle.completion().await.assert_value().outcome,
+        WorkerOutcome::Verified { output, .. } if output == json!({"answer":43})
+    ));
+    assert_eq!(
+        output.recv_usage().await.assert_value().assert_value(),
+        token_usage(1, 2, Some(1), Some(3))
+    );
+    assert_eq!(
+        output.recv_usage().await.assert_value().assert_value(),
+        token_usage(2, 3, Some(1), Some(1))
+    );
 }
 
 #[tokio::test]

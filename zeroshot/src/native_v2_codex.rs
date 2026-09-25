@@ -37,7 +37,7 @@ use command::{
     configure_provider_auth, process_environment, path_text,
 };
 use output::CodexOutput;
-use process::{ProcessOpen, exchange_turn, open_process};
+use process::{ProcessOpen, ProcessTurnContext, exchange_turn, open_process};
 use schema_file::CodexSchemaFile;
 use session::CodexSession;
 use turn::{CodexCommandInput, CodexTurnProcess, CodexTurnProcessOpen};
@@ -335,10 +335,15 @@ impl NativeV2CodexAdapter {
             provider_redactions(&turn.invocation.environment, &self.local_environment);
         redactions.extend(turn_process.native_redactions.iter().cloned());
         let redactions = redaction_values(redactions.iter().map(String::as_str));
+        let context = ProcessTurnContext {
+            control: turn.control,
+            session: turn.session,
+            resumed: execution.resume.is_some(),
+        };
         exchange_turn(
             &mut turn_process.process,
             execution.prompt,
-            turn.control,
+            &context,
             &redactions,
         )
         .await

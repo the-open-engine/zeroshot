@@ -169,6 +169,73 @@ async fn terminal_failure_usage_is_recorded_before_the_retry() {
 }
 
 #[tokio::test]
+async fn new_thread_without_usage_drops_the_previous_attempt_baseline() {
+    const SCRIPT: &str = r#"#!/bin/sh
+set -eu
+/usr/bin/cat >/dev/null
+resumed=false
+for argument in "$@"; do
+  if [ "$argument" = resume ]; then resumed=true; fi
+done
+if [ ! -e "$STATE_PATH" ]; then
+  : > "$STATE_PATH"
+  printf '%s%s\n' \
+    '{"type":"turn.failed","usage":{"input_tokens":13,"output_tokens":5},' \
+    '"error":{"message":"failed without a resumable thread ID"}}'
+  exit 1
+fi
+printf '%s\n' '{"type":"thread.started","thread_id":"new-thread"}'
+printf '%s%s\n' \
+  '{"type":"item.completed","item":{"type":"agent_message",' \
+  '"text":"{\"response\":{\"answer\":42}}"}}'
+if [ "$resumed" = true ]; then
+  printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"output_tokens":8}}'
+else
+  printf '%s\n' '{"type":"turn.completed"}'
+fi
+"#;
+    let directory = TestDirectory::new("codex-new-thread-usage");
+    let state = directory.child("state");
+    let (admitted, runtime) = openai_scripted_runtime(
+        &directory,
+        OpenAiScript {
+            scope: SessionScope::NodeInstance,
+            environment: &["OPENAI_API_KEY", "STATE_PATH"],
+            name: "new-thread-usage",
+            body: SCRIPT,
+        },
+    )
+    .await;
+    let values = [
+        ("OPENAI_API_KEY", "fake-openai-key".to_owned()),
+        ("STATE_PATH", state.display().to_string()),
+    ];
+    let mut first = start(&runtime, &admitted, 1, &values).await;
+    let mut first_output = first.take_initial_output().assert_value();
+    assert!(matches!(
+        first.completion().await.assert_value().outcome,
+        WorkerOutcome::Verified { .. }
+    ));
+    assert_eq!(
+        first_output.recv_usage().await.assert_value(),
+        Some(token_usage(13, 5, None, None))
+    );
+    assert_eq!(first_output.recv_usage().await.assert_value(), None);
+
+    let mut second = start(&runtime, &admitted, 2, &values).await;
+    let mut second_output = second.take_initial_output().assert_value();
+    assert!(matches!(
+        second.completion().await.assert_value().outcome,
+        WorkerOutcome::Verified { .. }
+    ));
+    assert_eq!(
+        second_output.recv_usage().await.assert_value(),
+        Some(token_usage(20, 8, None, None)),
+        "a new thread's cumulative usage must not subtract the failed attempt's usage"
+    );
+}
+
+#[tokio::test]
 async fn no_session_retries_the_original_prompt_once() {
     let directory = TestDirectory::new("codex-provider-retry-no-session");
     let (admitted, runtime, state) =
