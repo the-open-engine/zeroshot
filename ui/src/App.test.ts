@@ -138,7 +138,6 @@ test('mounted App applies graph JSON and saves the edited profile', async (t) =>
       data: async (document) => document,
     },
     history: {} as WorkspaceServices['history'],
-    environments: unusedEnvironments,
   };
   const container = document.createElement('div');
   document.body.append(container);
@@ -199,14 +198,3 @@ test('mounted App applies graph JSON and saves the edited profile', async (t) =>
   await unmount();
   unmount = undefined;
 });
-
-const unusedEnvironments: WorkspaceServices['environments'] = {
-  list: async () => ({ environments: [] }),
-  load: async () => {
-    throw new Error('Unused environment load');
-  },
-  save: async () => {
-    throw new Error('Unused environment save');
-  },
-  remove: async () => {},
-};

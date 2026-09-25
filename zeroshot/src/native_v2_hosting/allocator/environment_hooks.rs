@@ -14,7 +14,7 @@ impl ProductionCapsuleAllocator {
         filesystem: &CapsuleFilesystem,
         context: HookContext<'_>,
     ) -> Result<(), CapsuleAllocationUnavailable> {
-        let Some(definition) = request.admitted.runtime.environment() else {
+        let Some(definition) = request.admitted.environment.as_ref() else {
             return Ok(());
         };
         let HookContext {
@@ -34,7 +34,7 @@ impl ProductionCapsuleAllocator {
         let mut values = request
             .preparation
             .environment
-            .preparation_values(&request.admitted.runtime)
+            .preparation_values(definition)
             .await
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let redactions: Vec<String> = definition

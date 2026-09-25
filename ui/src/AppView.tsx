@@ -16,7 +16,6 @@ import {
   X,
 } from 'lucide-react';
 import { RuntimeEditor } from './RuntimeEditor';
-import { EnvironmentWorkspace } from './EnvironmentWorkspace';
 import { AuthoringProvider } from './AuthoringProvider';
 import { WorkflowCanvas } from './WorkflowCanvas';
 import { parallelSiblingCandidates } from './workflow-authoring';
@@ -50,7 +49,6 @@ export function AppView({ model }: { model: AppModel }) {
   const {
     numericDrafts,
     defaultsPage,
-    environmentsPage,
     historyPage,
     hosted,
     setSidebar,
@@ -67,7 +65,7 @@ export function AppView({ model }: { model: AppModel }) {
       <AuthoringProvider value={services.authoring}>
         <div
           className={`app ${host ? 'embedded-app' : ''}`}
-          hidden={defaultsPage || environmentsPage || historyPage || hosted.showingRun}
+          hidden={defaultsPage || historyPage || hosted.showingRun}
         >
           {!host && (
             <AppHeader
@@ -91,9 +89,9 @@ export function AppView({ model }: { model: AppModel }) {
           )}
           <div className="app-body">
             {!host && <ProfileSidebar model={model} />}
-            {!environmentsPage && <ProfileWorkspace model={model} />}
+            <ProfileWorkspace model={model} />
           </div>
-          {!environmentsPage && <AppDialogs model={model} />}
+          <AppDialogs model={model} />
           {confirm && (
             <Modal title={confirm.title} close={() => setConfirm(null)}>
               <p>{confirm.body}</p>
@@ -118,9 +116,6 @@ export function AppView({ model }: { model: AppModel }) {
           <div className="app embedded-app">{renderRun?.(hosted.runId)}</div>
         )}
         {!host && historyPage && <StandaloneRuns services={services} bootstrap={bootstrap} />}
-        {!host && environmentsPage && (
-          <EnvironmentWorkspace services={services} bootstrap={bootstrap} />
-        )}
         {defaultsPage && (
           <DefaultsPage
             back={() => {
@@ -200,15 +195,6 @@ function AppDialogs({ model }: { model: AppModel }) {
               schema={bootstrap?.runtimeSchema}
               edit={apply}
               openJson={() => openJson('runtime')}
-              environments={model.services.environments}
-              manageEnvironments={() => {
-                if (model.host) model.hosted.navigate('environments');
-                else
-                  model.guard(() => {
-                    model.setModal(null);
-                    window.location.hash = 'environments';
-                  });
-              }}
             />
           )}
           <BodyContent model={model} />

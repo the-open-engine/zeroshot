@@ -34,11 +34,12 @@ async function renderWorkspace(t: TestContext, store: EnvironmentStore, readOnly
   const { WorkspaceBridge } = await server.ssrLoadModule('/src/workspace-bridge.ts');
   const messages: any[] = [];
   let bridge = initializeBridge(WorkspaceBridge, messages);
-  async function mount(workspaceId = 'test') {
+  async function mount(workspaceId = 'test', context = '') {
     await act(async () =>
       root.render(
         createElement(EnvironmentWorkspace, {
-          services: { mount: new URL('https://example.test/ui/'), environments: store },
+          store,
+          collection: new URL(`https://example.test/ui/${context}`),
           bootstrap: { workspace: { kind: 'local', id: workspaceId } },
           host: bridge.host,
           readOnly,
@@ -61,12 +62,12 @@ async function renderWorkspace(t: TestContext, store: EnvironmentStore, readOnly
   return {
     dom,
     messages,
-    remount: async (workspaceId = 'test') => {
+    remount: async (workspaceId = 'test', context = '') => {
       await act(async () => root.unmount());
       bridge.host.dispose();
       bridge = initializeBridge(WorkspaceBridge, messages, workspaceId);
       root = createRoot(container);
-      await mount(workspaceId);
+      await mount(workspaceId, context);
     },
     command: async (command: Partial<HostCommand>) =>
       act(async () =>
@@ -157,13 +158,13 @@ test('focused pending variable names are committed before capturing the environm
   assert.deepEqual(writes[0].definition.variables, { PROJECT_MODE: '' });
 });
 
-test('failed save and referenced deletion retain the environment draft and saved revision', async (t) => {
+test('failed save and deletion retain the environment draft and saved revision', async (t) => {
   const { store } = fixture();
   store.save = async () => {
     throw new Error('Environment changed. Reload before saving.');
   };
   store.remove = async () => {
-    throw new Error('This environment is used by a profile.');
+    throw new Error('This environment was changed in another tab.');
   };
   const ui = await renderWorkspace(t, store);
   await ui.input('Select environment', 'env-1', 'change');
@@ -176,7 +177,7 @@ test('failed save and referenced deletion retain the environment draft and saved
   assert.equal(ui.label('Startup script').value, 'local unsaved work');
   ui.dom.window.confirm = () => true;
   await ui.click('Delete environment');
-  assert.match(ui.dom.window.document.body.textContent!, /used by a profile/);
+  assert.match(ui.dom.window.document.body.textContent!, /changed in another tab/);
   assert.equal(ui.label('Startup script').value, 'local unsaved work');
   await ui.click('Reload environment');
   assert.equal(ui.label('Startup script').value, 'npm ci');
@@ -233,6 +234,7 @@ function initializeBridge(Bridge: any, messages: any[], workspaceId = 'test') {
     apiBase: '/ui/api/',
     theme: 'light',
     view: 'environments',
+    environmentApi: '/ui/api/environments',
   });
   assert.ok(host.configuration, 'The real workspace bridge must accept host initialization');
   return { host, receive };
@@ -343,4 +345,16 @@ test('oversized unsaved drafts report recovery unavailable and remove stale reco
   await ui.input('Startup script', 'x'.repeat(8 * 1024 * 1024));
   assert.match(ui.dom.window.document.body.textContent!, /Draft recovery is unavailable/);
   assert.equal(ui.dom.window.sessionStorage.getItem(key), null);
+});
+
+test('hosted collection contexts recover only their own drafts', async (t) => {
+  const { store } = fixture();
+  const ui = await renderWorkspace(t, store);
+  await ui.remount('test', '?context=first');
+  await ui.input('Select environment', 'env-1', 'change');
+  await ui.input('Startup script', 'first repository draft');
+  await ui.remount('test', '?context=second');
+  assert.equal(ui.dom.window.document.querySelector('textarea'), null);
+  await ui.remount('test', '?context=first');
+  assert.equal(ui.label('Startup script').value, 'first repository draft');
 });

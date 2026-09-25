@@ -450,6 +450,7 @@ async fn submit_through_cli(
     let mut output = Vec::new();
     let outcome = execute_native_v2_cli_with_context(
         NativeV2CliCommand::Run(RunCommand {
+            environment: None,
             target: Some("candidate-cloud".to_owned()),
             title: RunTitle::new("Candidate end to end").assert_value_with("title"),
             selection: crate::native_v2_cli::RunSelection::Inline {

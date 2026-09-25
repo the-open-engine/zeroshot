@@ -20,7 +20,6 @@ async fn software_fixture() -> Fixture {
         .materialize(TemplateDelivery::None)
         .assert_value();
     let runtime = crate::native_v2_contract::RuntimePlan::Codex {
-        environment: None,
         provider: crate::native_v2_contract::CodexProvider::OpenAi,
         size: RunSize::Small,
         nodes: ["worker", "acceptance", "code", "review_repair"]
@@ -39,6 +38,7 @@ async fn software_fixture() -> Fixture {
     let initial_input = json!({"task":"Implement atomic quota reservation with regression tests"});
     let admitted = NativeV2Admission
         .admit(RunSubmission {
+            environment: None,
             title: RunTitle::new("Inspect control flow").assert_value(),
             graph,
             initial_input: initial_input.clone(),

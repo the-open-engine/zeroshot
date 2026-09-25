@@ -432,7 +432,6 @@ fn hosted_copilot_harness_and_invalid_filesystem_layout_preserve_capsule_boundar
     let mut admitted = crate::native_v2_runner::test_support::admitted();
     let nodes = admitted.runtime.nodes().clone();
     admitted.runtime = RuntimePlan::Copilot {
-        environment: None,
         provider: crate::native_v2_contract::CopilotProvider::Github,
         size: crate::native_v2_contract::RunSize::Medium,
         nodes,

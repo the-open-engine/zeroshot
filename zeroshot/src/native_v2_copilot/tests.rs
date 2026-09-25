@@ -66,11 +66,11 @@ async fn admitted(binding: NodeRuntimeBinding, instructions: &str) -> AdmittedRu
         success_node(),
     ]);
     admit(RunSubmission {
+        environment: None,
         title: RunTitle::new("Copilot contract test").assert_value(),
         graph,
         initial_input: Value::Null,
         runtime: RuntimePlan::Copilot {
-            environment: None,
             provider: CopilotProvider::Github,
             size: RunSize::Medium,
             nodes: BTreeMap::from([(NodeName::new("work").assert_value(), binding)]),

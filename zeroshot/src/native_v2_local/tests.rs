@@ -223,9 +223,8 @@ fn parses_canonical_github_remote_forms() {
 fn local_preparation_rejects_target_hooks_before_resolving_source_or_installing_anything() {
     for field in ["setup", "startup"] {
         let mut request = local_request(RunId::new("target-only-hooks"));
-        let mut runtime = serde_json::to_value(&request.intent.runtime).assert_value();
-        runtime["environment"] = json!({field: "touch must-not-run"});
-        request.intent.runtime = serde_json::from_value(runtime).assert_value();
+        request.intent.environment =
+            Some(serde_json::from_value(json!({field: "touch must-not-run"})).assert_value());
         assert!(matches!(
             prepare_local_run(
                 request,

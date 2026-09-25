@@ -14,37 +14,26 @@ use super::{
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(
-    deny_unknown_fields,
-    tag = "harness",
-    rename_all = "snake_case",
-    bound(deserialize = "E: Deserialize<'de>")
-)]
-pub enum RuntimePlan<E = super::RuntimeEnvironment> {
+#[serde(deny_unknown_fields, tag = "harness", rename_all = "snake_case")]
+pub enum RuntimePlan {
     Copilot {
         provider: CopilotProvider,
         size: RunSize,
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        environment: Option<E>,
     },
     Codex {
         provider: CodexProvider,
         size: RunSize,
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        environment: Option<E>,
     },
     Claude {
         provider: ClaudeProvider,
         size: RunSize,
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        environment: Option<E>,
     },
 }
 
-impl<E> RuntimePlan<E> {
+impl RuntimePlan {
     #[must_use]
     pub const fn size(&self) -> RunSize {
         match self {
@@ -63,60 +52,6 @@ impl<E> RuntimePlan<E> {
         }
     }
 
-    #[must_use]
-    pub const fn environment(&self) -> Option<&E> {
-        match self {
-            Self::Copilot { environment, .. }
-            | Self::Codex { environment, .. }
-            | Self::Claude { environment, .. } => environment.as_ref(),
-        }
-    }
-
-    /// Replace authoring references with the exact definition selected for this run.
-    #[must_use]
-    pub fn map_environment<T>(self, map: impl FnOnce(Option<E>) -> Option<T>) -> RuntimePlan<T> {
-        match self {
-            Self::Copilot {
-                provider,
-                size,
-                nodes,
-                environment,
-            } => RuntimePlan::Copilot {
-                provider,
-                size,
-                nodes,
-                environment: map(environment),
-            },
-            Self::Codex {
-                provider,
-                size,
-                nodes,
-                environment,
-            } => RuntimePlan::Codex {
-                provider,
-                size,
-                nodes,
-                environment: map(environment),
-            },
-            Self::Claude {
-                provider,
-                size,
-                nodes,
-                environment,
-            } => RuntimePlan::Claude {
-                provider,
-                size,
-                nodes,
-                environment: map(environment),
-            },
-        }
-    }
-}
-
-/// Author-owned profile runtime. Environments are reusable resources, never inline definitions.
-pub type ProfileRuntimePlan = RuntimePlan<super::EnvironmentReference>;
-
-impl RuntimePlan {
     /// Union of the fields required from each connection key across all executable nodes.
     #[must_use]
     pub fn connection_requirements(
@@ -125,14 +60,6 @@ impl RuntimePlan {
         let mut requirements = BTreeMap::<ConnectionKey, BTreeSet<EnvironmentVariableName>>::new();
         for binding in self.nodes().values() {
             for (key, fields) in binding.declared_connections().iter() {
-                requirements
-                    .entry(key.clone())
-                    .or_default()
-                    .extend(fields.iter().cloned());
-            }
-        }
-        if let Some(environment) = self.environment() {
-            for (key, fields) in environment.connections.iter() {
                 requirements
                     .entry(key.clone())
                     .or_default()
@@ -151,8 +78,38 @@ pub struct RunSubmission {
     pub graph: GraphSpec,
     pub initial_input: Value,
     pub runtime: RuntimePlan,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<super::RuntimeEnvironment>,
     pub source: ResolvedSource,
     pub submission_key: IdempotencyKey,
+}
+
+impl RunSubmission {
+    /// Exact fields required by all nodes and the accepted preparation definition.
+    #[must_use]
+    pub fn connection_requirements(
+        &self,
+    ) -> BTreeMap<ConnectionKey, BTreeSet<EnvironmentVariableName>> {
+        run_connection_requirements(&self.runtime, self.environment.as_ref())
+    }
+}
+
+/// Combine node and preparation requirements without resolving any connection values.
+#[must_use]
+pub fn run_connection_requirements(
+    runtime: &RuntimePlan,
+    environment: Option<&super::RuntimeEnvironment>,
+) -> BTreeMap<ConnectionKey, BTreeSet<EnvironmentVariableName>> {
+    let mut requirements = runtime.connection_requirements();
+    if let Some(environment) = environment {
+        for (key, fields) in environment.connections.iter() {
+            requirements
+                .entry(key.clone())
+                .or_default()
+                .extend(fields.iter().cloned());
+        }
+    }
+    requirements
 }
 
 /// Trusted controller bootstrap admission. The host assigns the only public run identity before

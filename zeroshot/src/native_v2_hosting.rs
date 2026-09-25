@@ -178,9 +178,18 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
         let environment = match connection_resolver {
             Some(wire) => {
                 let resolution = build_connection_resolver(run_id.clone(), wire)?;
-                RunEnvironment::with_resolver(&submission.runtime, connections, resolution)
+                RunEnvironment::with_resolver(
+                    &submission.runtime,
+                    submission.environment.as_ref(),
+                    connections,
+                    resolution,
+                )
             }
-            None => RunEnvironment::exact(&submission.runtime, connections),
+            None => RunEnvironment::exact(
+                &submission.runtime,
+                submission.environment.as_ref(),
+                connections,
+            ),
         }
         .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
         let receipt = controller

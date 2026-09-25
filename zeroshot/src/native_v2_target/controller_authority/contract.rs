@@ -21,8 +21,7 @@ pub(super) use http_error::{http_error, read_success_json, read_success_json_wit
 use connections::build_connections_descriptor;
 pub(super) use connections::ConnectionsDescriptor;
 use profiles::build_profiles_descriptor;
-pub(super) use profiles::{RunProfilesDescriptor, EnvironmentsDescriptor};
-use profiles::build_environments_descriptor;
+pub(super) use profiles::RunProfilesDescriptor;
 
 use super::DEVICE_GRANT;
 use crate::native_v2_target::TargetAuthorityError;
@@ -50,7 +49,6 @@ pub(super) struct HostedAuthDescriptor {
     pub(super) merge_plans: Option<MergePlansDescriptor>,
     pub(super) connections: Option<ConnectionsDescriptor>,
     pub(super) run_profiles: Option<RunProfilesDescriptor>,
-    pub(super) runtime_environments: Option<EnvironmentsDescriptor>,
 }
 
 pub(super) struct ControllerDescriptor {
@@ -395,7 +393,6 @@ pub(super) fn build_auth_descriptor(
         merge_plans: capabilities.merge_plans,
         connections: capabilities.connections,
         run_profiles: capabilities.run_profiles,
-        runtime_environments: capabilities.runtime_environments,
     })
 }
 
@@ -403,7 +400,6 @@ struct OptionalCapabilities {
     merge_plans: Option<MergePlansDescriptor>,
     connections: Option<ConnectionsDescriptor>,
     run_profiles: Option<RunProfilesDescriptor>,
-    runtime_environments: Option<EnvironmentsDescriptor>,
 }
 
 fn build_optional_capabilities(
@@ -414,7 +410,6 @@ fn build_optional_capabilities(
         merge_plans: build_merge_plans_descriptor(origin, extensions)?,
         connections: build_connections_descriptor(origin, extensions)?,
         run_profiles: build_profiles_descriptor(origin, extensions)?,
-        runtime_environments: build_environments_descriptor(origin, extensions)?,
     })
 }
 

@@ -89,6 +89,7 @@ pub(super) async fn create_delivery_run(
     let environments = Arc::new(
         RunEnvironment::exact(
             &admitted.runtime,
+            admitted.environment.as_ref(),
             BTreeMap::from([(
                 ConnectionKey::new("github").assert_value(),
                 StaticConnectionValues::new(BTreeMap::from([(
@@ -340,11 +341,11 @@ async fn admitted_routing_graph(base_revision: &str) -> crate::native_v2_contrac
     };
     NativeV2Admission
         .admit(RunSubmission {
+            environment: None,
             title: RunTitle::new("Delivery routing test").assert_value(),
             graph,
             initial_input: routing_initial_input(base_revision),
             runtime: RuntimePlan::Codex {
-                environment: None,
                 provider: crate::native_v2_contract::CodexProvider::OpenAi,
                 size: RunSize::Medium,
                 nodes: BTreeMap::from([

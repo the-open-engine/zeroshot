@@ -342,7 +342,6 @@ pub(crate) fn codex_runtime(
     >,
 ) -> crate::native_v2_contract::RuntimePlan {
     crate::native_v2_contract::RuntimePlan::Codex {
-        environment: None,
         provider: openengine_cluster_protocol::CodexProvider::OpenAi,
         size: openengine_cluster_protocol::RunSize::Small,
         nodes,

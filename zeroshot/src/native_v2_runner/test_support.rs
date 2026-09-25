@@ -117,6 +117,7 @@ pub(crate) fn admitted() -> AdmittedRun {
         })
         .collect();
     AdmittedRun {
+        environment: None,
         title: RunTitle::new("Runner test run").assert_value(),
         graph: CompiledGraphIr {
             profile: graph.profile,
@@ -137,7 +138,6 @@ pub(crate) fn admitted() -> AdmittedRun {
         },
         initial_input: Value::Null,
         runtime: RuntimePlan::Codex {
-            environment: None,
             provider: CodexProvider::OpenAi,
             size: RunSize::Medium,
             nodes: runtime_nodes,

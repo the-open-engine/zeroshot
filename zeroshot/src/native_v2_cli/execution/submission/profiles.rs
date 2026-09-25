@@ -1,6 +1,5 @@
 use openengine_cluster_protocol::{
-    GraphSpec, RunProfile, ProfileRuntimePlan, RunProfileListRequest, RunProfileScope,
-    RunProfileSelector, RuntimePlan,
+    GraphSpec, RunProfile, RunProfileListRequest, RunProfileScope, RunProfileSelector, RuntimePlan,
 };
 
 use super::{materialize_graph, materialize_runtime, validate_graph_profile};
@@ -56,31 +55,13 @@ where
             scope: selected.scope,
             name: selected.name,
         };
-        let profile = selected_profile(
-            backend,
-            target,
-            selector.clone(),
-            scope.is_none().then_some(&local),
-        )
-        .await?;
+        let profile = match scope {
+            None => local.show(selector.clone())?,
+            Some(_) => backend.profile_show(target, selector.clone()).await?,
+        };
         return Ok(from_profile(profile, scope.map(|_| selector)));
     }
     Err(profile_not_found(reference))
-}
-
-async fn selected_profile<B: NativeV2CliBackend>(
-    backend: &B,
-    target: Option<&str>,
-    selector: RunProfileSelector,
-    local: Option<&LocalRunProfileStore>,
-) -> Result<openengine_cluster_protocol::ResolvedRunProfile, NativeV2CliError> {
-    match local {
-        Some(local) => local.resolve_profile(selector),
-        None => {
-            let authored = backend.profile_show(target, selector).await?;
-            resolve_authored_profile(backend, target, authored).await
-        }
-    }
 }
 
 fn profile_scopes(
@@ -148,7 +129,7 @@ fn profile_not_found(reference: Option<&ProfileReference>) -> NativeV2CliError {
 }
 
 fn from_profile(
-    profile: openengine_cluster_protocol::ResolvedRunProfile,
+    profile: RunProfile,
     remote_selector: Option<RunProfileSelector>,
 ) -> ResolvedRunProfile {
     ResolvedRunProfile {
@@ -156,50 +137,6 @@ fn from_profile(
         runtime: profile.runtime,
         remote_selector,
     }
-}
-
-pub(in crate::native_v2_cli::execution) async fn resolve_authored_profile<B: NativeV2CliBackend>(
-    backend: &B,
-    target: Option<&str>,
-    profile: RunProfile,
-) -> Result<openengine_cluster_protocol::ResolvedRunProfile, NativeV2CliError> {
-    let definition = match profile.runtime.environment() {
-        Some(reference) => Some(
-            backend
-                .environment_show(target, profile.scope, reference.id.clone())
-                .await?
-                .definition,
-        ),
-        None => None,
-    };
-    Ok(profile.map_environment(|_| definition))
-}
-
-pub(in crate::native_v2_cli::execution) async fn materialize_authored_profile(
-    selection: &RunGraph,
-    source: &RunRuntime,
-) -> Result<(GraphSpec, ProfileRuntimePlan), NativeV2CliError> {
-    let graph = materialize_graph(selection)?;
-    validate_graph_profile(&graph)?;
-    let runtime = match source {
-        RunRuntime::Exact(path) => super::apply_template_runtime(
-            selection,
-            super::read_json::<ProfileRuntimePlan>("profile runtime config", path)?,
-            super::template_feedback(selection),
-        )?,
-        RunRuntime::Uniform(_) => {
-            materialize_runtime(selection, &graph, source)?.map_environment(|_| None)
-        }
-    };
-    NativeV2Admission
-        .validate_profile(
-            &graph,
-            &runtime.clone().map_environment(|_| None),
-            DeliveryPolicy::Optional,
-        )
-        .await
-        .map_err(NativeV2CliError::InvalidRun)?;
-    Ok((graph, runtime))
 }
 
 pub(in crate::native_v2_cli::execution) async fn materialize_profile(

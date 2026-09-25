@@ -118,7 +118,7 @@ impl CapsulePreparation {
         runtime: &crate::native_v2_contract::RuntimePlan,
     ) -> Result<Self, crate::native_v2_supervisor::RunEnvironmentError> {
         Ok(Self {
-            environment: RunEnvironment::exact(runtime, Default::default())?,
+            environment: RunEnvironment::exact(runtime, None, Default::default())?,
             progress: Arc::new(QuietPreparation),
         })
     }

@@ -1016,11 +1016,11 @@ async fn admitted_with_feedback(
     };
     NativeV2Admission
         .admit(RunSubmission {
+            environment: None,
             title: RunTitle::new("Delivery test").assert_value(),
             graph,
             initial_input: Value::Null,
             runtime: RuntimePlan::Codex {
-                environment: None,
                 provider: CodexProvider::OpenAi,
                 size: RunSize::Medium,
                 nodes: BTreeMap::from([(NodeName::new("deliver").assert_value(), binding)]),

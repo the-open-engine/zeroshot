@@ -11,7 +11,7 @@ use axum::{
 };
 use openengine_cluster_protocol::{
     GraphSpec, RunProfile, RunProfileListRequest, RunProfileName, RunProfileScope,
-    RunProfileSelector, RunProfileSetRequest, ProfileRuntimePlan, RuntimePlan,
+    RunProfileSelector, RunProfileSetRequest, RuntimePlan,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -20,7 +20,6 @@ use crate::native_v2_cli::{
     profile_revision, LocalRunProfileStore, NativeV2CliError, ProfileSaveConflict,
 };
 
-mod environments;
 mod run_history_transport;
 mod runs;
 mod server;
@@ -30,8 +29,6 @@ pub use run_history_transport::{
 pub use server::{serve, serve_with_target, RunHistoryTarget, UiService};
 
 const MAX_BODY: usize = 2 * 1024 * 1024;
-const MAX_ENVIRONMENT_BODY: usize = 4 * 1024 * 1024;
-type RequestBody = Result<Bytes, axum::extract::rejection::BytesRejection>;
 
 #[derive(Clone)]
 struct UiState {
@@ -75,16 +72,6 @@ fn router(state: UiState, target_history: bool) -> Router {
         .route("/ui/api/bootstrap", get(bootstrap))
         .route("/ui/api/profiles", get(list).post(save))
         .route("/ui/api/profiles/{name}", get(show))
-        .route(
-            "/ui/api/environments",
-            get(environments::list)
-                .post(environments::save)
-                .layer(DefaultBodyLimit::max(MAX_ENVIRONMENT_BODY)),
-        )
-        .route(
-            "/ui/api/environments/{id}",
-            get(environments::show).delete(environments::delete),
-        )
         .route("/ui/api/runs", get(runs::list))
         .route("/ui/api/runs/{id}", get(runs::show))
         .route("/ui/api/runs/{id}/history", get(runs::history))
@@ -143,36 +130,38 @@ async fn show(
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct ProfileDocument {
     graph: GraphSpec,
-    runtime: ProfileRuntimePlan,
+    runtime: RuntimePlan,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct SaveRequest {
     name: RunProfileName,
     graph: GraphSpec,
-    runtime: ProfileRuntimePlan,
+    runtime: RuntimePlan,
     expected_revision: Option<String>,
 }
 
 async fn validate(
-    State(state): State<UiState>,
-    bytes: RequestBody,
+    bytes: Result<Bytes, axum::extract::rejection::BytesRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let document: ProfileDocument = decode(bytes)?;
-    let runtime = blocking(move || state.store.resolve_runtime(&document.runtime)).await?;
-    admit(&document.graph, &runtime).await?;
+    admit(&document.graph, &document.runtime).await?;
     Ok(Json(json!({"valid":true})))
 }
-async fn author(bytes: RequestBody) -> Result<Json<Value>, ApiError> {
+async fn author(
+    bytes: Result<Bytes, axum::extract::rejection::BytesRejection>,
+) -> Result<Json<Value>, ApiError> {
     Ok(Json(workspace::author(decode(bytes)?)?))
 }
-async fn data_author(bytes: RequestBody) -> Result<Json<Value>, ApiError> {
+async fn data_author(
+    bytes: Result<Bytes, axum::extract::rejection::BytesRejection>,
+) -> Result<Json<Value>, ApiError> {
     Ok(Json(workspace::data(decode(bytes)?)?))
 }
 async fn save(
     State(state): State<UiState>,
     headers: HeaderMap,
-    bytes: RequestBody,
+    bytes: Result<Bytes, axum::extract::rejection::BytesRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let mut workspace = headers.get_all("x-zeroshot-workspace").iter();
     if workspace.next().and_then(|value| value.to_str().ok()) != Some(state.workspace.id.as_str())
@@ -181,10 +170,7 @@ async fn save(
         return Err(workspace_changed());
     }
     let request: SaveRequest = decode(bytes)?;
-    let store = state.store.clone();
-    let runtime = request.runtime.clone();
-    let resolved = blocking(move || store.resolve_runtime(&runtime)).await?;
-    admit(&request.graph, &resolved).await?;
+    admit(&request.graph, &request.runtime).await?;
     let result = blocking(move || {
         state.store.set_checked(
             RunProfileSetRequest {
@@ -213,18 +199,15 @@ fn workspace_changed() -> ApiError {
     }
 }
 async fn admit(graph: &GraphSpec, runtime: &RuntimePlan) -> Result<(), ApiError> {
-    crate::native_v2_admission::NativeV2Admission
-        .validate_profile(
-            graph,
-            runtime,
-            crate::native_v2_admission::DeliveryPolicy::Optional,
-        )
+    workspace::validate_profile(graph, runtime)
         .await
-        .map_err(|error| ApiError::invalid(error.to_string()))
+        .map_err(Into::into)
 }
-fn decode<T: serde::de::DeserializeOwned>(bytes: RequestBody) -> Result<T, ApiError> {
+fn decode<T: serde::de::DeserializeOwned>(
+    bytes: Result<Bytes, axum::extract::rejection::BytesRejection>,
+) -> Result<T, ApiError> {
     let bytes = bytes
-        .map_err(|_| ApiError::invalid("The request exceeds the endpoint's body limit.".into()))?;
+        .map_err(|_| ApiError::invalid("The profile exceeds the 2 MiB request limit.".into()))?;
     serde_json::from_slice(&bytes)
         .map_err(|e| ApiError::invalid(format!("Invalid profile JSON: {e}")))
 }
@@ -243,7 +226,7 @@ async fn blocking<T: Send + 'static>(
     tokio::task::spawn_blocking(operation)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
-        .map_err(environments::local_error)
+        .map_err(|e| ApiError::internal(e.to_string()))
 }
 fn local_error(error: std::io::Error) -> NativeV2CliError {
     NativeV2CliError::Local(error.to_string())

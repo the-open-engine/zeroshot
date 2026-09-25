@@ -44,6 +44,9 @@ pub struct MergePlanSubmitRequest {
     pub source: MergePlanSource,
     pub profile: RunProfileSelector,
     pub runs: Vec<MergePlanRunRequest>,
+    /// Shared preparation for every plan run; omission permits a host default, `{}` selects base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<crate::RuntimeEnvironment>,
     #[serde(default, skip_serializing_if = "RunConnectionValues::is_empty")]
     pub connections: RunConnectionValues,
     #[serde(default, skip_serializing_if = "Option::is_none")]

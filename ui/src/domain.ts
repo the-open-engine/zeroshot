@@ -478,7 +478,10 @@ export function assertDocument(value: any): asserts value is Document {
   if (value.name !== undefined && typeof value.name !== 'string')
     throw new Error('Profile name must be text.');
   assertRuntime(value);
-  assertEnvironmentReference(value.runtime.environment);
+  if (Object.hasOwn(value.runtime, 'environment'))
+    throw new Error(
+      'Environments belong to run submission, not profiles. Remove runtime.environment.'
+    );
   let count = 0;
   const names = new Set<string>();
   function inspect(n: any, depth: number): void {
@@ -495,21 +498,4 @@ export function assertDocument(value: any): asserts value is Document {
 
 export function bindingFor(runtime: Runtime, name: string): Binding | undefined {
   return Object.hasOwn(runtime.nodes, name) ? runtime.nodes[name] : undefined;
-}
-
-function assertEnvironmentReference(value: unknown) {
-  if (value === undefined) return;
-  const reference = value as { id?: unknown } | null;
-  if (
-    !reference ||
-    typeof reference !== 'object' ||
-    Array.isArray(reference) ||
-    Object.keys(reference).length !== 1 ||
-    typeof reference.id !== 'string' ||
-    !reference.id.trim() ||
-    reference.id.length > 256
-  )
-    throw new Error(
-      'Profile environments must reference a saved environment by id. Edit scripts in Environments.'
-    );
 }

@@ -5,12 +5,6 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ModelPicker } from './ModelPicker';
 import { RuntimeEditor } from './RuntimeEditor';
 import { assertDocument, type Document } from './domain';
-import { createEnvironmentStore } from './environment-store';
-import { createApiClient } from './api';
-const environments = createEnvironmentStore(
-  createApiClient(new URL('https://test.invalid/')),
-  () => 'test'
-);
 
 function elements(value: ReactNode): ReactElement<any>[] {
   if (Array.isArray(value)) return value.flatMap(elements);
@@ -68,8 +62,6 @@ test('each new preset selection reaches the runtime binding through the rendered
       schema: {},
       edit: (next) => edits.push(next),
       openJson: () => {},
-      environments,
-      manageEnvironments: () => {},
     });
     const pickers = elements(view).filter((element) => element.type === ModelPicker);
     assert.equal(pickers.length, 1, 'delivery must not have a model picker');
@@ -116,8 +108,6 @@ test('runtime model editing does not offer implicit conversion of unknown or mis
       schema: {},
       edit: () => {},
       openJson: () => {},
-      environments,
-      manageEnvironments: () => {},
     });
     assert.equal(elements(view).filter((element) => element.type === ModelPicker).length, 0);
     assert.deepEqual(doc, before);

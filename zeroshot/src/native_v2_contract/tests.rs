@@ -261,3 +261,37 @@ fn token_usage_parser_accepts_complete_counts_and_rejects_partial_or_unsafe_valu
         );
     }
 }
+
+#[test]
+fn run_environment_is_separate_from_agent_runtime_and_preserves_explicit_empty() {
+    let plain: RunSubmission = serde_json::from_value(canonical_submission()).assert_value();
+    assert!(plain.environment.is_none());
+    let mut with_environment = canonical_submission();
+    with_environment["environment"] = json!({});
+    let empty: RunSubmission = serde_json::from_value(with_environment.clone()).assert_value();
+    assert_eq!(
+        serde_json::to_value(empty).assert_value()["environment"],
+        json!({})
+    );
+    with_environment["environment"] = json!({
+        "startup":"npm ci", "variables":{"CI":"true"},
+        "connections":{"registry":["NPM_TOKEN"]}
+    });
+    let request: RunSubmission = serde_json::from_value(with_environment).assert_value();
+    assert_eq!(request.runtime, plain.runtime);
+    assert!(
+        request
+            .connection_requirements()
+            .contains_key(&ConnectionKey::new("registry").assert_value())
+    );
+    let intent = RunSubmissionIntent::from(&request);
+    assert_eq!(intent.environment, request.environment);
+    assert!(
+        intent
+            .connection_requirements()
+            .contains_key(&ConnectionKey::new("registry").assert_value())
+    );
+    let mut invalid = canonical_submission();
+    invalid["runtime"]["environment"] = json!({"startup":"npm ci"});
+    assert!(serde_json::from_value::<RunSubmission>(invalid).is_err());
+}

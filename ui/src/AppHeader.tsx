@@ -8,8 +8,8 @@ export function AppHeader({
   children,
   workspace,
 }: {
-  section: 'profiles' | 'runs' | 'environments';
-  navigate: (section: 'profiles' | 'runs' | 'environments') => void;
+  section: 'profiles' | 'runs';
+  navigate: (section: 'profiles' | 'runs') => void;
   children?: ReactNode;
   workspace: WorkspaceIdentity;
 }) {
@@ -33,12 +33,6 @@ export function AppHeader({
           onClick={() => navigate('runs')}
         >
           Runs
-        </button>
-        <button
-          aria-current={section === 'environments' ? 'page' : undefined}
-          onClick={() => navigate('environments')}
-        >
-          Environments
         </button>
       </nav>
       <ThemeControl />

@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use openengine_cluster_protocol::{
     IdempotencyKey, MergePlan, MergePlanRunName, MergePlanRunRequest, MergePlanSource,
-    MergePlanState, ResolvedRunProfile as RunProfile, RunProfileName, RunProfileScope,
-    RunProfileSelector, RunTitle, MAX_MERGE_PLAN_RUNS, MERGE_PLAN_SCHEMA,
+    MergePlanState, RunProfile, RunProfileName, RunProfileScope, RunProfileSelector, RunTitle,
+    MAX_MERGE_PLAN_RUNS, MERGE_PLAN_SCHEMA,
 };
 use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;
@@ -32,6 +32,8 @@ struct MergePlanManifest {
     profile: String,
     expires_at: String,
     runs: BTreeMap<String, MergePlanManifestRun>,
+    #[serde(default)]
+    environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
 }
 
 #[derive(Deserialize)]
@@ -48,6 +50,7 @@ struct ValidatedMergePlan {
     profile: RunProfileSelector,
     expires_at: String,
     runs: Vec<MergePlanRunRequest>,
+    environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
 }
 
 pub(super) fn validate_file(
@@ -101,12 +104,6 @@ where
         .backend
         .profile_show(Some(&command.target), manifest.profile.clone())
         .await?;
-    let profile = super::submission::resolve_authored_profile(
-        context.backend,
-        Some(&command.target),
-        profile,
-    )
-    .await?;
     validate_profile_and_inputs(&profile, &manifest.runs).await?;
     let request = prepared_request(
         command.submission_key,
@@ -141,7 +138,13 @@ fn prepared_request(
     profile: &RunProfile,
     environment: &dyn Fn(&str) -> Option<OsString>,
 ) -> Result<PreparedMergePlanRequest, NativeV2CliError> {
-    let connections = select_connections(&profile.runtime, environment)?;
+    crate::native_v2_admission::validate_run_environment(
+        &profile.runtime,
+        manifest.environment.as_ref(),
+    )
+    .map_err(NativeV2CliError::InvalidRun)?;
+    let connections =
+        select_connections(&profile.runtime, manifest.environment.as_ref(), environment)?;
     let github_token = environment("GH_TOKEN")
         .map(|value| {
             value
@@ -158,6 +161,7 @@ fn prepared_request(
         source: manifest.source,
         profile: manifest.profile,
         runs: manifest.runs,
+        environment: manifest.environment,
         connections,
         github_token,
     })
@@ -290,6 +294,11 @@ fn load_manifest(path: &Path) -> Result<ValidatedMergePlan, NativeV2CliError> {
     if manifest.schema != MERGE_PLAN_SCHEMA {
         return Err(plan_usage(format!("schema must be {MERGE_PLAN_SCHEMA:?}")));
     }
+    if let Some(environment) = &manifest.environment {
+        environment
+            .validate()
+            .map_err(|error| plan_usage(error.to_string()))?;
+    }
     validate_deadline(&manifest.expires_at)?;
     let profile = parse_profile(&manifest.profile)?;
     let runs = compile_runs(&manifest.title, manifest.runs)?;
@@ -298,6 +307,7 @@ fn load_manifest(path: &Path) -> Result<ValidatedMergePlan, NativeV2CliError> {
         source: manifest.source,
         profile,
         expires_at: manifest.expires_at,
+        environment: manifest.environment,
         runs,
     })
 }
@@ -617,3 +627,7 @@ fn wave6_cli_contract_manifest_validation_and_terminal_outcomes_are_closed() {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "merge_plans/environment_tests.rs"]
+mod environment_tests;

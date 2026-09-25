@@ -342,11 +342,11 @@ impl Fixture {
                 submission_key: IdempotencyKey::new("test-history").assert_value(),
                 submission_digest: Sha256Digest::new("a".repeat(64)).assert_value(),
                 admitted: AdmittedRun {
+                    environment: None,
                     title: RunTitle::new("Inspect retained changes").assert_value(),
                     graph,
                     initial_input,
                     runtime: crate::native_v2_contract::RuntimePlan::Codex {
-                        environment: None,
                         provider: crate::native_v2_contract::CodexProvider::OpenAi,
                         size: RunSize::Small,
                         nodes: Default::default(),

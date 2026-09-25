@@ -325,6 +325,12 @@ impl RunArgs {
             title: RunTitle::new(self.title)
                 .map_err(|error| usage(format!("invalid --title: {error}")))?,
             input: self.input,
+            environment: if self.no_environment {
+                Some(crate::native_v2_cli::RunEnvironmentInput::Empty)
+            } else {
+                self.environment
+                    .map(crate::native_v2_cli::RunEnvironmentInput::File)
+            },
             selection,
             repository: route.repository,
             branch: route.branch,

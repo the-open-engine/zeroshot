@@ -3,7 +3,7 @@ use crate::native_v2_delivery::contract::{
     delivery_diagnostic_schema, delivery_result_schema, delivery_signal_labels,
 };
 use crate::native_v2_delivery::{DeliveryMode, DELIVERY_SIGNAL_FIELD};
-use openengine_cluster_protocol::ProfileRuntimePlan;
+use openengine_cluster_protocol::RuntimePlan;
 use openengine_cluster_testkit::assertions::AssertValue;
 
 #[test]
@@ -87,7 +87,7 @@ async fn template_variants_keep_exact_factory_graphs_and_admit_with_factory_bind
             }
             pending.extend(graph_node_children(node));
         }
-        let runtime: ProfileRuntimePlan = serde_json::from_value(
+        let runtime: RuntimePlan = serde_json::from_value(
             json!({"harness":"codex","provider":"openai","size":"small","nodes":bindings}),
         )
         .assert_value();

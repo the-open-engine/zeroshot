@@ -3,13 +3,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use openengine_cluster_client::SubscriptionTransport;
 use openengine_cluster_protocol::{
-    EnvironmentId, RuntimeEnvironmentResource, RunProfileScope, ConnectionDeleteRequest,
-    ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult, ConnectionMutationResult,
-    ConnectionSetRequest, MergePlan, MergePlanId, RunForceParams, RunConnectionRequirements,
-    RunListParams, RunLogEventNotification, RunLogsParams, RunProfile, RunProfileDefaultRequest,
-    RunProfileDefaultResult, RunProfileDeleteResult, RunProfileListRequest, RunProfileListResult,
-    RunProfileMutationResult, RunProfileSelector, RunProfileSetRequest, RunResumeParams,
-    RunStatusParams, RunSubmitResult, RunWatchParams,
+    ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
+    ConnectionMutationResult, ConnectionSetRequest, MergePlan, MergePlanId, RunForceParams,
+    RunConnectionRequirements, RunListParams, RunLogEventNotification, RunLogsParams, RunProfile,
+    RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
+    RunProfileListRequest, RunProfileListResult, RunProfileMutationResult, RunProfileSelector,
+    RunProfileSetRequest, RunResumeParams, RunStatusParams, RunSubmitResult, RunWatchParams,
 };
 
 use super::BoxedSubscription;
@@ -40,16 +39,6 @@ pub trait TargetConnector: Send + Sync {
         name: &str,
         request: ConnectionDeleteRequest,
     ) -> Result<ConnectionDeleteResult, NativeV2CliError>;
-    async fn environment_show(
-        &self,
-        _name: &str,
-        _scope: RunProfileScope,
-        _id: EnvironmentId,
-    ) -> Result<RuntimeEnvironmentResource, NativeV2CliError> {
-        Err(NativeV2CliError::Target(
-            "target does not advertise environment resources".into(),
-        ))
-    }
     async fn profile_list(
         &self,
         name: &str,

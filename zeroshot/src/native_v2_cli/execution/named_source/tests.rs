@@ -307,6 +307,7 @@ async fn wave6_cli_contract_remote_tip_is_exact_and_missing_branches_fail_closed
 
 fn test_run_command() -> RunCommand {
     RunCommand {
+        environment: None,
         target: None,
         title: RunTitle::new("Source selection").assert_value(),
         input: "unused.json".into(),

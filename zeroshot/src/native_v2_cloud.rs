@@ -198,7 +198,11 @@ impl NativeV2CloudController {
         &self,
         request: RunSubmitParams,
     ) -> Result<CloudRunReceipt, NativeV2CloudError> {
-        let environment = RunEnvironment::exact(&request.submission.runtime, BTreeMap::new())?;
+        let environment = RunEnvironment::exact(
+            &request.submission.runtime,
+            request.submission.environment.as_ref(),
+            BTreeMap::new(),
+        )?;
         self.submit_inner(request, environment, None).await
     }
 
@@ -235,7 +239,8 @@ impl NativeV2CloudController {
         let admitted = NativeV2Admission
             .admit_with_policy(submission, self.delivery_policy)
             .await?;
-        let environment = environment.for_runtime(&admitted.runtime)?;
+        let environment =
+            environment.for_runtime(&admitted.runtime, admitted.environment.as_ref())?;
         let created = self
             .ledger
             .create_or_get(CreateRun {
@@ -569,10 +574,11 @@ impl NativeV2CloudController {
         }
         if failed && result.workspace_recovery.recoverable {
             if let Some(stored) = self.ledger.get(&result.run_id).await? {
-                result.workspace_recovery.connection_requirements = stored
-                    .admitted
-                    .runtime
-                    .connection_requirements()
+                result.workspace_recovery.connection_requirements =
+                    openengine_cluster_protocol::run_connection_requirements(
+                        &stored.admitted.runtime,
+                        stored.admitted.environment.as_ref(),
+                    )
                     .into_iter()
                     .map(|(key, fields)| (key, fields.into_iter().collect()))
                     .collect();
@@ -758,11 +764,16 @@ fn resume_secret_envelope(
     let environment = match connection_resolver {
         Some(wire) => RunEnvironment::with_resolver(
             &admitted.runtime,
+            admitted.environment.as_ref(),
             connections,
             crate::native_v2_hosting::build_connection_resolver(successor_run_id.clone(), wire)
                 .map_err(|_| NativeV2CloudError::ResumeCredentials)?,
         ),
-        None => RunEnvironment::exact(&admitted.runtime, connections),
+        None => RunEnvironment::exact(
+            &admitted.runtime,
+            admitted.environment.as_ref(),
+            connections,
+        ),
     }?;
     Ok(RunSecretEnvelope {
         environment: Arc::new(environment),

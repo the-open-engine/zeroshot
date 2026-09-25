@@ -4,16 +4,13 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{
-    DeclaredConnections, EnvironmentId, EnvironmentName, EnvironmentRevision,
-    EnvironmentVariableName, NativeV2RunValueError,
-};
+use super::{DeclaredConnections, EnvironmentVariableName, NativeV2RunValueError};
 
 pub const MAX_RUNTIME_SCRIPT_BYTES: usize = 64 * 1024;
 pub const MAX_RUNTIME_VARIABLE_BYTES: usize = 256 * 1024;
 
 /// Setup runs as root before checkout; startup runs as the workspace user after checkout or restore.
-/// Both hooks run again on a new attempt. Values here are public environment data, never secrets.
+/// Both hooks run again on a new attempt. Values here are public run configuration, never secrets.
 #[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RuntimeEnvironment {
@@ -85,85 +82,6 @@ fn reserved_variable(name: &str) -> bool {
             | "CLAUDE_CONFIG_DIR"
             | "COPILOT_HOME"
     )
-}
-
-/// Stable reference resolved by the resource owner before a run is accepted.
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct EnvironmentReference {
-    pub id: EnvironmentId,
-}
-
-/// A reusable definition. The hosting store owns scope and authorization.
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct RuntimeEnvironmentResource {
-    pub id: EnvironmentId,
-    pub name: EnvironmentName,
-    pub definition: RuntimeEnvironment,
-    pub revision: EnvironmentRevision,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct RuntimeEnvironmentSummary {
-    pub id: EnvironmentId,
-    pub name: EnvironmentName,
-    pub revision: EnvironmentRevision,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct RuntimeEnvironmentListResult {
-    pub environments: Vec<RuntimeEnvironmentSummary>,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct RuntimeEnvironmentSaveRequest {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id: Option<EnvironmentId>,
-    pub name: EnvironmentName,
-    pub definition: RuntimeEnvironment,
-    #[serde(deserialize_with = "required_environment_revision")]
-    pub expected_revision: Option<EnvironmentRevision>,
-}
-
-fn required_environment_revision<'de, D: serde::Deserializer<'de>>(
-    value: D,
-) -> Result<Option<EnvironmentRevision>, D::Error> {
-    Option::<EnvironmentRevision>::deserialize(value)
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct RuntimeEnvironmentDeleteRequest {
-    pub id: EnvironmentId,
-    pub expected_revision: EnvironmentRevision,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct RuntimeEnvironmentDeleteResult {
-    pub deleted: bool,
-}
-
-pub const RUNTIME_ENVIRONMENTS_KIND: &str = "zeroshot.runtime-environments/v1";
-
-/// Read-only resource discovery used when previewing a hosted profile's connection requirements.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct TargetRuntimeEnvironmentsDiscovery {
-    pub kind: String,
-    pub base_url: String,
-    pub route_templates: TargetRuntimeEnvironmentRoutes,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct TargetRuntimeEnvironmentRoutes {
-    /// GET route with exact {scope} and {environment_id} path segments.
-    pub show: String,
 }
 
 #[cfg(test)]

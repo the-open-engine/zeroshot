@@ -28,11 +28,11 @@ fn admitted_run() -> AdmittedRun {
     ))
     .assert_value();
     AdmittedRun {
+        environment: None,
         title: RunTitle::new("Ledger test").assert_value(),
         graph,
         initial_input: Value::Null,
         runtime: RuntimePlan::Codex {
-            environment: None,
             provider: CodexProvider::OpenAi,
             size: RunSize::Medium,
             nodes: Default::default(),

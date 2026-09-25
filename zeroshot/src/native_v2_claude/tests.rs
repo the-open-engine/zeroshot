@@ -305,12 +305,12 @@ async fn runner_with_command(
         command,
     } = configuration;
     let runtime = RuntimePlan::Claude {
-        environment: None,
         provider,
         size: RunSize::Medium,
         nodes: BTreeMap::from([(NodeName::new("agent").assert_value(), binding)]),
     };
     let admitted = admit(RunSubmission {
+        environment: None,
         title: RunTitle::new("Claude adapter test").assert_value(),
         graph: graph(verifier),
         initial_input: Value::Null,

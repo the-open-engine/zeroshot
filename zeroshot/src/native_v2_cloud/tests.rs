@@ -358,6 +358,7 @@ fn exact_test_environment(request: &RunSubmitParams) -> Result<RunEnvironment, N
     ]);
     Ok(RunEnvironment::from_available(
         &request.submission.runtime,
+        request.submission.environment.as_ref(),
         &available,
     )?)
 }

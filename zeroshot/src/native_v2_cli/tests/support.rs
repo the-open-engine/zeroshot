@@ -2,11 +2,10 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use openengine_cluster_protocol::{
-    EnvironmentId, RuntimeEnvironmentResource, ConnectionDeleteRequest, ConnectionDeleteResult,
-    ConnectionListRequest, ConnectionListResult, ConnectionMutationResult, ConnectionSetRequest,
-    ConnectionSummary, MergePlan, MergePlanState, NodeName, PositiveInteger,
-    RunAttachEventNotification, RunAttachParams, RunCheckpoint, RunCheckpointsParams,
-    RunCheckpointsResult, RunConnectionRequirements, RunConnectionValues,
+    ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
+    ConnectionMutationResult, ConnectionSetRequest, ConnectionSummary, MergePlan, MergePlanState,
+    NodeName, PositiveInteger, RunAttachEventNotification, RunAttachParams, RunCheckpoint,
+    RunCheckpointsParams, RunCheckpointsResult, RunConnectionRequirements, RunConnectionValues,
     RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunForceParams, RunId, RunListParams,
     RunLogEventNotification, RunLogsParams, RunProfile, RunProfileDefaultRequest,
     RunProfileDefaultResult, RunProfileDeleteResult, RunProfileListRequest, RunProfileListResult,
@@ -51,11 +50,6 @@ pub(in crate::native_v2_cli) enum Call {
         target: Option<String>,
         request: ConnectionDeleteRequest,
     },
-    EnvironmentShow {
-        target: Option<String>,
-        scope: RunProfileScope,
-        id: EnvironmentId,
-    },
     ProfileList {
         target: Option<String>,
         request: RunProfileListRequest,
@@ -80,6 +74,7 @@ pub(in crate::native_v2_cli) enum Call {
         target: Option<String>,
         title: RunTitle,
         runtime: RuntimePlan,
+        environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
         input: Value,
         connections: RunConnectionValues,
         github_token: Option<String>,
@@ -214,7 +209,6 @@ pub(in crate::native_v2_cli) struct FakeBackend {
     failed_watch: bool,
     queued_lifecycle: bool,
     terminal_plan_state: Option<MergePlanState>,
-    environment_resource: Option<RuntimeEnvironmentResource>,
     resume_requirements: Option<RunConnectionRequirements>,
     trusted_resume_requirements: Option<RunConnectionRequirements>,
 }
@@ -226,12 +220,6 @@ pub(super) enum CursorCallKind {
 }
 
 impl FakeBackend {
-    pub(in crate::native_v2_cli) fn with_environment(resource: RuntimeEnvironmentResource) -> Self {
-        Self {
-            environment_resource: Some(resource),
-            ..Self::default()
-        }
-    }
     pub(super) fn with_failed_submit() -> Self {
         Self {
             failed_submit: true,
@@ -400,7 +388,7 @@ fn routed_profile(name: RunProfileName, scope: RunProfileScope) -> RunProfile {
         name,
         scope,
         graph: serde_json::from_value(graph()).assert_value(),
-        runtime: runtime().map_environment(|_| None),
+        runtime: runtime(),
         is_default: false,
     }
 }
@@ -506,27 +494,6 @@ impl NativeV2CliBackend for FakeBackend {
                 request,
             });
         Ok(ConnectionDeleteResult { deleted: true })
-    }
-
-    async fn environment_show(
-        &self,
-        target: Option<&str>,
-        scope: RunProfileScope,
-        id: EnvironmentId,
-    ) -> Result<RuntimeEnvironmentResource, NativeV2CliError> {
-        self.calls
-            .lock()
-            .assert_value()
-            .push(Call::EnvironmentShow {
-                target: target.map(str::to_owned),
-                scope,
-                id: id.clone(),
-            });
-        self.environment_resource
-            .as_ref()
-            .filter(|resource| resource.id == id)
-            .cloned()
-            .ok_or(NativeV2CliError::EnvironmentMissing(id))
     }
 
     async fn profile_list(
@@ -655,6 +622,7 @@ impl NativeV2CliBackend for FakeBackend {
             target: target.map(str::to_owned),
             title: intent.title,
             runtime: intent.runtime,
+            environment: intent.environment,
             input: intent.initial_input,
             connections,
             github_token,

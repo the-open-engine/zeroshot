@@ -41,14 +41,14 @@ fn run_environment_is_exact_and_request_debug_is_redacted() {
         (declared.clone(), "openai-secret".to_owned()),
         (unused, "unused-secret".to_owned()),
     ]);
-    let selected = RunEnvironment::from_available(&runtime, &available)
+    let selected = RunEnvironment::from_available(&runtime, None, &available)
         .assert_value_with("select declared environment");
     let supplied = BTreeMap::from([(
         ConnectionKey::new("provider").assert_value_with("connection key"),
         StaticConnectionValues::new(available.clone()).assert_value_with("connection values"),
     )]);
     assert!(matches!(
-        RunEnvironment::exact(&runtime, supplied.clone()),
+        RunEnvironment::exact(&runtime, None, supplied.clone()),
         Err(RunEnvironmentError::UndeclaredField(_, _))
     ));
     let selected_debug = format!("{selected:?}");
@@ -369,7 +369,6 @@ async fn invalid_submission_fails_before_run_allocation() {
         "invalid-before-effects",
     );
     sourceful.runtime = RuntimePlan::Codex {
-        environment: None,
         provider: crate::native_v2_contract::CodexProvider::OpenAi,
         size: RunSize::Small,
         nodes: BTreeMap::new(),

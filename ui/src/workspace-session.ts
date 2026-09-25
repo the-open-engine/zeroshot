@@ -60,7 +60,7 @@ export class WorkspaceSession {
       this.identity()
     );
   }
-  navigate(action: 'save' | 'defaults' | 'environments') {
+  navigate(action: 'save' | 'defaults') {
     this.host?.send('navigate', { action }, this.identity());
   }
   async receive(command: HostCommand) {

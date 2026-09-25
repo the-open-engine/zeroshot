@@ -4579,6 +4579,16 @@
       "additionalProperties": false,
       "description": "Immutable, secret-free native-v2 submission admitted by the selected target.",
       "properties": {
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeEnvironment"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "graph": {
           "$ref": "#/$defs/GraphSpec"
         },
@@ -4723,7 +4733,7 @@
     },
     "RuntimeEnvironment": {
       "additionalProperties": false,
-      "description": "Setup runs as root before checkout; startup runs as the workspace user after checkout or restore.\nBoth hooks run again on a new attempt. Values here are public environment data, never secrets.",
+      "description": "Setup runs as root before checkout; startup runs as the workspace user after checkout or restore.\nBoth hooks run again on a new attempt. Values here are public run configuration, never secrets.",
       "properties": {
         "connections": {
           "$ref": "#/$defs/DeclaredConnections",
@@ -4758,16 +4768,6 @@
         {
           "additionalProperties": false,
           "properties": {
-            "environment": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/RuntimeEnvironment"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "harness": {
               "const": "copilot",
               "type": "string"
@@ -4799,16 +4799,6 @@
         {
           "additionalProperties": false,
           "properties": {
-            "environment": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/RuntimeEnvironment"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "harness": {
               "const": "codex",
               "type": "string"
@@ -4840,16 +4830,6 @@
         {
           "additionalProperties": false,
           "properties": {
-            "environment": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/RuntimeEnvironment"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "harness": {
               "const": "claude",
               "type": "string"

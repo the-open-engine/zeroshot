@@ -30,8 +30,8 @@ mod profiles;
 
 #[path = "named_source.rs"]
 mod named_source;
-pub(super) use profiles::{materialize_authored_profile, resolve_authored_profile};
-use profiles::{ResolvedRunProfile, resolve_run_profile, materialize_profile};
+pub(super) use profiles::materialize_profile;
+use profiles::{ResolvedRunProfile, resolve_run_profile};
 
 /// Executes commands that need no target registry, credentials, or controller state.
 pub async fn try_execute_native_v2_preflight(
@@ -136,7 +136,7 @@ where
     materialize_provider_access(&mut resolved.runtime, placement)
         .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
     let intent = prepare_intent(run, resolved.graph, resolved.runtime)?;
-    let connections = select_connections(&intent.runtime, &available)?;
+    let connections = select_connections(&intent.runtime, intent.environment.as_ref(), &available)?;
     let github_token = run
         .target
         .as_ref()
@@ -287,6 +287,13 @@ fn prepare_intent(
         graph,
         initial_input,
         runtime,
+        environment: match &run.environment {
+            None => None,
+            Some(crate::native_v2_cli::RunEnvironmentInput::Empty) => Some(Default::default()),
+            Some(crate::native_v2_cli::RunEnvironmentInput::File(path)) => {
+                Some(read_json("run environment", path)?)
+            }
+        },
         branch: run.branch.clone(),
         submission_key,
     })
@@ -294,13 +301,16 @@ fn prepare_intent(
 
 pub(super) fn select_connections<F>(
     runtime: &RuntimePlan,
+    definition: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
     available: F,
 ) -> Result<RunConnectionValues, NativeV2CliError>
 where
     F: Fn(&str) -> Option<OsString>,
 {
     let mut selected = BTreeMap::new();
-    for (key, fields) in runtime.connection_requirements() {
+    for (key, fields) in
+        openengine_cluster_protocol::run_connection_requirements(runtime, definition)
+    {
         let mut values = BTreeMap::new();
         for name in fields {
             let Some(value) = available(name.as_str()) else {
@@ -388,11 +398,11 @@ fn template_feedback(selection: &RunGraph) -> crate::native_v2_contract::PullReq
     }
 }
 
-fn apply_template_runtime<E>(
+fn apply_template_runtime(
     selection: &RunGraph,
-    mut runtime: RuntimePlan<E>,
+    mut runtime: RuntimePlan,
     feedback: crate::native_v2_contract::PullRequestFeedback,
-) -> Result<RuntimePlan<E>, NativeV2CliError> {
+) -> Result<RuntimePlan, NativeV2CliError> {
     let RunGraph::Template {
         template,
         delivery,
@@ -504,20 +514,17 @@ impl UniformRuntimePlan {
         match harness {
             UniformHarness::Copilot if self.provider == UniformProvider::Github => {
                 Ok(RuntimePlan::Copilot {
-                    environment: None,
                     provider: crate::native_v2_contract::CopilotProvider::Github,
                     size: self.size,
                     nodes,
                 })
             }
             UniformHarness::Codex => Ok(RuntimePlan::Codex {
-                environment: None,
                 provider: self.provider.codex().ok_or_else(incompatible)?,
                 size: self.size,
                 nodes,
             }),
             UniformHarness::Claude => Ok(RuntimePlan::Claude {
-                environment: None,
                 provider: self.provider.claude().ok_or_else(incompatible)?,
                 size: self.size,
                 nodes,
@@ -574,8 +581,8 @@ fn connection(key: &str, names: &[&str]) -> Result<DeclaredConnections, NativeV2
         .map_err(|error| NativeV2CliError::Usage(error.to_string()))
 }
 
-fn insert_template_binding<E>(
-    runtime: &mut RuntimePlan<E>,
+fn insert_template_binding(
+    runtime: &mut RuntimePlan,
     name: openengine_cluster_protocol::NodeName,
     binding: NodeRuntimeBinding,
     override_feedback: bool,

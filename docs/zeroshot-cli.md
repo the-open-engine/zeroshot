@@ -782,6 +782,12 @@ Options:
       --uniform-runtime-config <FILE>
           Expand one secret-free agent runtime across every executable graph node
 
+      --environment <FILE>
+          Load setup, startup, public variables, and hook connections for this run
+
+      --no-environment
+          Use the target's base environment instead of a configured default
+
       --profile <[SCOPE:]NAME>
           Use a profile: NAME, local:NAME, user:NAME, or org:NAME.
 

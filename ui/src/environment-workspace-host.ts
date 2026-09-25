@@ -3,7 +3,15 @@ import { ApiError } from './api';
 import { hasPendingEdits } from './pending-edits';
 import type { WorkspaceBridge, HostCommand } from './workspace-bridge';
 
-type State = { dirty: boolean; pending: boolean; busy: boolean; loading: boolean; name?: string };
+type State = {
+  dirty: boolean;
+  pending: boolean;
+  busy: boolean;
+  loading: boolean;
+  name?: string;
+  resourceId: string | null;
+  resourceRevision: string | null;
+};
 /** The host owns navigation and authority; environment persistence uses the generic service. */
 export function useEnvironmentHost(
   host: WorkspaceBridge | undefined,
@@ -43,10 +51,22 @@ export function useEnvironmentHost(
         saving: state.busy,
         loading: state.loading,
         name: state.name,
+        resourceId: state.resourceId,
+        resourceRevision: state.resourceRevision,
       },
       { documentId, generation: 0 }
     );
-  }, [host, state.dirty, state.pending, state.busy, state.loading, state.name, documentId]);
+  }, [
+    host,
+    state.dirty,
+    state.pending,
+    state.busy,
+    state.loading,
+    state.name,
+    state.resourceId,
+    state.resourceRevision,
+    documentId,
+  ]);
   useEffect(() => {
     const unload = (event: BeforeUnloadEvent) => {
       if (latest.current.state.dirty || latest.current.state.busy || hasPendingEdits()) {

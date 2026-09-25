@@ -345,7 +345,7 @@ async fn wave5_cli_contract_default_backend_refuses_unadvertised_management() {
                     name: profile_name,
                     scope: RunProfileScope::User,
                     graph: graph.clone(),
-                    runtime: runtime.clone().map_environment(|_| None),
+                    runtime: runtime.clone(),
                     set_default: false,
                 },
             )
@@ -439,6 +439,7 @@ async fn wave5_cli_contract_default_backend_bounds_recovery_and_redacts_requests
     let request = PreparedRunRequest {
         run_id,
         intent: TargetRunIntent {
+            environment: None,
             title: RunTitle::new("Redacted request").assert_value(),
             graph,
             initial_input: serde_json::Value::Null,
@@ -627,6 +628,7 @@ async fn run_follows_by_default_and_forwards_per_run_intent_unchanged() {
                 target: Some("prod".to_owned()),
                 title: RunTitle::new("Repair checkout").assert_value(),
                 runtime: runtime(),
+                environment: None,
                 input: json!({"task":"ship it"}),
                 connections: BTreeMap::new(),
                 github_token: None,

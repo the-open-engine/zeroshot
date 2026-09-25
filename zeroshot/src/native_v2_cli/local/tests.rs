@@ -114,7 +114,12 @@ fn prepared_local_run(
     PreparedLocalRun {
         delivery_run_id: run_id.clone(),
         run_id,
-        environment: RunEnvironment::exact(&submission.runtime, BTreeMap::new()).assert_value(),
+        environment: RunEnvironment::exact(
+            &submission.runtime,
+            submission.environment.as_ref(),
+            BTreeMap::new(),
+        )
+        .assert_value(),
         submission,
         github_token: None,
         workspace,
@@ -128,6 +133,7 @@ fn prepared_request(run_id: RunId, submission_key: &str) -> PreparedRunRequest {
     PreparedRunRequest {
         run_id,
         intent: TargetRunIntent {
+            environment: None,
             title: submission.title,
             graph: submission.graph,
             initial_input: submission.initial_input,

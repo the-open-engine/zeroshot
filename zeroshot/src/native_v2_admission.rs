@@ -119,11 +119,6 @@ impl NativeV2Admission {
         if graph.profile != GraphProfile::Full {
             return Err(NativeV2AdmissionError::UnsupportedGraphProfile);
         }
-        if let Some(environment) = runtime.environment() {
-            environment
-                .validate()
-                .map_err(|error| NativeV2AdmissionError::InvalidEnvironment(error.to_string()))?;
-        }
         let declarations = executable_declarations(&graph.root);
         validate_executable_bindings(&declarations, runtime, delivery_policy)?;
         validate_delivery_concurrency(&graph.root)?;
@@ -188,6 +183,7 @@ impl NativeV2Admission {
             graph,
             initial_input,
             runtime,
+            environment,
             source,
             submission_key,
         } = submission;
@@ -197,6 +193,7 @@ impl NativeV2Admission {
                 graph,
                 initial_input,
                 runtime,
+                environment,
                 branch: None,
                 submission_key,
             },
@@ -209,6 +206,7 @@ impl NativeV2Admission {
             graph: verified,
             initial_input: prepared.initial_input,
             runtime: prepared.runtime,
+            environment: prepared.environment,
             source,
         })
     }
@@ -229,6 +227,7 @@ struct PreparedSubmission {
     graph: GraphSpec,
     initial_input: serde_json::Value,
     runtime: RuntimePlan,
+    environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
     declarations: Vec<ExecutableDeclaration>,
 }
 
@@ -241,14 +240,11 @@ fn prepare_submission(
         graph,
         initial_input,
         runtime,
+        environment,
         branch: _,
         submission_key: _,
     } = intent;
-    if let Some(environment) = runtime.environment() {
-        environment
-            .validate()
-            .map_err(|error| NativeV2AdmissionError::InvalidEnvironment(error.to_string()))?;
-    }
+    validate_run_environment(&runtime, environment.as_ref())?;
     validate_graph_input(&graph, &initial_input)?;
     let declarations = executable_declarations(&graph.root);
     validate_executable_bindings(&declarations, &runtime, delivery_policy)?;
@@ -259,8 +255,21 @@ fn prepare_submission(
         graph,
         initial_input,
         runtime,
+        environment,
         declarations,
     })
+}
+
+pub(crate) fn validate_run_environment(
+    runtime: &RuntimePlan,
+    environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
+) -> Result<(), NativeV2AdmissionError> {
+    if let Some(environment) = environment {
+        environment
+            .validate()
+            .map_err(|error| NativeV2AdmissionError::InvalidEnvironment(error.to_string()))?;
+    }
+    validation::validate_declared_environment(runtime, environment)
 }
 
 async fn verify_submission(

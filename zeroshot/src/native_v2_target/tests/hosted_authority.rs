@@ -169,11 +169,6 @@ fn authority_response(
         return response;
     }
     match (request.method.as_str(), request.path.as_str()) {
-        ("GET", "/native-v2/workspaces/org/environments/shared-env") => json!({
-            "id":"shared-env", "name":"shared", "revision":"revision-one",
-            "definition":{"setup":"x".repeat(65536), "startup":"echo ready"}
-        })
-        .to_string(),
         ("POST", "/native-v2/profiles/list") => json!({"profiles": []}).to_string(),
         ("GET", "/oauth/metadata") => oauth_metadata(origin),
         ("GET", "/.well-known/zeroshot-native-v2") => hosted_discovery(origin),
@@ -317,10 +312,6 @@ fn hosted_discovery(origin: &str) -> String {
             "cachePolicy": "no-store"
         },
         "extensions": {
-            "runtime_environments": {
-                "kind":"zeroshot.runtime-environments/v1", "baseUrl":origin,
-                "routeTemplates":{"show":"/native-v2/workspaces/{scope}/environments/{environment_id}"}
-            },
             "run_profiles": {
                 "kind": "zeroshot.run-profiles/v1",
                 "baseUrl": origin,

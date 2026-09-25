@@ -471,11 +471,11 @@ async fn start_delivery(fixture: &OwnershipFixture) -> crate::native_v2_runner::
     };
     let node = NodeName::new("deliver").assert_value();
     let admitted = admit(contract::RunSubmission {
+        environment: None,
         title: contract::RunTitle::new("Ownership handoff").assert_value(),
         graph: full_graph(vec![git_delivery_node(), success_node()]),
         initial_input: serde_json::Value::Null,
         runtime: contract::RuntimePlan::Codex {
-            environment: None,
             provider: contract::CodexProvider::OpenAi,
             size: contract::RunSize::Small,
             nodes: BTreeMap::from([(node.clone(), binding.clone())]),

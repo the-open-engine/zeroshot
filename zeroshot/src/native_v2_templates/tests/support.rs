@@ -71,7 +71,6 @@ pub(super) fn runtime_for(
         nodes.insert(name, binding);
     }
     RuntimePlan::Codex {
-        environment: None,
         provider: CodexProvider::OpenAi,
         size: RunSize::Medium,
         nodes,

@@ -101,8 +101,9 @@ pub fn prepare_local_run(
         source: _,
         profile: _,
     } = request;
-    validate_local_environment(&intent.runtime)?;
-    let environment = RunEnvironment::exact(&intent.runtime, connections)?;
+    validate_local_environment(intent.environment.as_ref())?;
+    let environment =
+        RunEnvironment::exact(&intent.runtime, intent.environment.as_ref(), connections)?;
     let (workspace, source) = local_resolved_source(current_directory, git_program)?;
     let native_environment = capture_local_native_environment(current_directory)?;
     Ok(PreparedLocalRun {
@@ -113,6 +114,7 @@ pub fn prepare_local_run(
             graph: intent.graph,
             initial_input: intent.initial_input,
             runtime: intent.runtime,
+            environment: intent.environment,
             source,
             submission_key: intent.submission_key,
         },
@@ -123,10 +125,10 @@ pub fn prepare_local_run(
     })
 }
 
-pub(crate) fn validate_local_environment(
-    runtime: &RuntimePlan,
+fn validate_local_environment(
+    environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
 ) -> Result<(), LocalCompositionError> {
-    if runtime.environment().is_some_and(|environment| {
+    if environment.is_some_and(|environment| {
         environment.setup.is_some()
             || environment.startup.is_some()
             || !environment.connections.is_empty()
@@ -279,7 +281,7 @@ fn build_local_candidate_config(
     request: LocalProcessCandidateRequest<'_>,
     owner_scoped: bool,
 ) -> Result<NativeNodeRunner, LocalCompositionError> {
-    validate_local_environment(&request.admitted.runtime)?;
+    validate_local_environment(request.admitted.environment.as_ref())?;
     let LocalProcessCandidateRequest {
         admitted,
         delivery_run_id,

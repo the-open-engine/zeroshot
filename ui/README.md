@@ -20,15 +20,9 @@ other OS users or local processes.
 The optional Cargo `ui` feature embeds `ui/dist`. Release binaries and target images enable it;
 Node is needed only at build time. Rebuild the frontend before Rust after UI edits.
 
-Local profiles and reusable environments share the CLI store (`ZEROSHOT_CONFIG_DIR`);
-ledgers use `ZEROSHOT_STATE_DIR`. Profiles reference environments by ID. New runs resolve the latest
-saved definition; accepted runs and resumes retain their captured definition.
-Pass `--target NAME` to keep those profiles local while reading history from a configured direct or
-hosted target. Hosted credentials stay in the local UI server and never enter the browser. Use
-temporary absolute directories for isolated tests. Ctrl-C stops the UI while detached runs continue.
-Direct `target serve` mounts `/ui/` on its existing listener, stores profiles/history under
-`--storage`, and requires the browser's exact `--public-origin`. Private/hosted targets exclude
-this mount. See the [target image guide](../docker/zeroshot-target/README.md) for persistence and restart behavior.
+Local profiles use the CLI store (`ZEROSHOT_CONFIG_DIR`); ledgers use `ZEROSHOT_STATE_DIR`.
+Profiles contain graphs and agent runtime configuration. Environments belong to run submission,
+not profile authoring. Plain local UI has no environment catalog or management page.
 
 For frontend development, keep the native server running:
 
@@ -133,9 +127,9 @@ only settles its captured snapshot, preserving later edits. A save-as name drops
 
 Unsolicited `state` messages report `dirty`, `pending`, `validation`, `saving`, `loading` and profile
 `name`. Command replies report `accepted` or a structured `problem`. `navigate` messages from the
-workspace request the host's `save`, `defaults`, or `environments` action. The host keeps selection and outer menus.
+workspace request the host's `save` or `defaults` action. The host keeps selection and outer menus.
 
-Set optional `view: "environments"` in `init` to mount the independent environment manager;
+Set `view: "environments"` and an explicit `environmentApi` collection URL in `init` to mount the hosted environment manager;
 `readOnly: true` disables mutation controls. The server remains responsible for write authorization.
 The manager reuses the same theme, state, and guarded navigation messages, with one document identity
 for its mounted surface. It handles resource selection and conditional CRUD through the service below;
@@ -151,10 +145,10 @@ paths beneath it; its profile load/save work passes through the host bridge inst
 
 | Request                              | Response                                                                 |
 | ------------------------------------ | ------------------------------------------------------------------------ |
-| `GET environments` | `{environments: [{id, name, revision}]}`. |
-| `GET environments/{id}` | `{id, name, definition, revision}`. |
-| `POST environments` | Save `{id?, name, definition, expectedRevision: string or null}`; returns the saved resource. |
-| `DELETE environments/{id}` | Delete with `{expectedRevision}`; returns `{deleted: true}`. |
+| `GET environmentApi` | `{environments: [{id, name, revision}]}`. |
+| `GET environmentApi/{id}` | `{id, name, definition, revision}`. |
+| `POST environmentApi` | Save `{id?, name, definition, expectedRevision: string or null}`; returns the saved resource. |
+| `DELETE environmentApi/{id}` | Delete with `{expectedRevision}`; returns `{deleted: true}`. |
 | `GET bootstrap`                      | Existing workspace bootstrap with templates, workers and runtime schema. |
 | `POST validate`                      | Native validation of `{graph, runtime}`.                                 |
 | `POST authoring`, `POST data`        | Native draft transform of `{graph, runtime, action}`.                    |
@@ -162,38 +156,11 @@ paths beneath it; its profile load/save work passes through the host bridge inst
 | `GET runs/{id}/history?after=CURSOR` | Existing ordered native history page.                                    |
 | `GET runs/{id}/events?after=CURSOR`  | SSE `history` pages and structured `history_error` problems.             |
 
-Environment writes carry the pinned `X-Zeroshot-Workspace` bootstrap identity. Referenced
-environments cannot be deleted. Profile runtimes carry only `environment: {id}`; the environment
-manager owns scripts, variables, and preparation connection declarations.
-
-The shared fetch SSE reader retains HTTP/stream problem codes and details, reconnects network
-interruptions using the last accepted `Last-Event-ID`, and cancels readers/timers on disposal.
-Frames have an 8 MiB browser limit. HTTP denials and invalid history stop automatic reconnect.
-
-Definition wrappers and pages may carry
-`observation: {state: "active" | "collecting" | "complete" | "incomplete" | "expired" | "unavailable", code?}`.
-This metadata describes retained observation; current run termination remains separate.
-A `finished` run can still follow `active` or `collecting` observation. Completion closes the stream
-only after `page.complete` drains the observed head. Cloud retains these execution cursors and native
-control records across archive handoff; Cloud status cursors never enter graph playback.
-
-## Verification
-
-Start with the UI tests and native service tests:
-
-```sh
-npm --prefix ui test
-npm --prefix ui run build
-cargo test -p zeroshot --features ui profile_ui --lib
-```
-
-For native UI/server changes, also run the affected crate with the feature enabled:
-
-```sh
-cargo clippy -p zeroshot --all-targets --features ui -- -D warnings
-cargo test -p zeroshot --features ui # Unix; Windows: powershell -NoProfile -File scripts/test-windows.ps1 -Ui
-```
-
-Default Cargo checks omit `ui`. Browser scenarios and evidence:
-[example processes](qa/real-user-processes.md), [replay](qa/replay-real-runs.md),
-[live runs](qa/live-run-review.md), and [standalone lifecycle](qa/standalone-integration.md).
+Environment writes carry the pinned `X-Zeroshot-Workspace` bootstrap identity. The generic hosted
+manager preserves the explicit collection URL's query parameters for CRUD and draft recovery;
+the host owns repository matching, defaults, authorization, and any additional resource fields.
+It reports opaque `resourceId`/`resourceRevision` state changes so host controls can refresh their
+catalog. Plain local services never create this adapter. Profiles reject `runtime.environment`.
+Committed drafts and their original CAS baseline recover in the same authority and collection
+context. Save, delete, and explicit discard clear recovery. Storage errors or size overflow warn
+that recovery is unavailable; accepted runs retain their already resolved environment snapshot.

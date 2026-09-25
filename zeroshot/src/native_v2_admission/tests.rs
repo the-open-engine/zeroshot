@@ -119,11 +119,11 @@ fn resolved_source() -> ResolvedSource {
 
 fn submission(graph: GraphSpec, nodes: BTreeMap<NodeName, NodeRuntimeBinding>) -> RunSubmission {
     RunSubmission {
+        environment: None,
         title: RunTitle::new("Admission test").assert_value(),
         graph,
         initial_input: json!({"items":[null]}),
         runtime: RuntimePlan::Claude {
-            environment: None,
             provider: ClaudeProvider::Anthropic,
             size: RunSize::Medium,
             nodes,
@@ -347,11 +347,11 @@ async fn rejects_inconsistent_worker_reuse() {
 async fn admits_bedrock_for_both_harnesses_and_preserves_provider_owned_models() {
     let graph = graph(vec![null_step("work", "agent.work@1"), succeed("done")]);
     let codex_runtime = RunSubmission {
+        environment: None,
         title: RunTitle::new("Opaque Codex model").assert_value(),
         graph: graph.clone(),
         initial_input: json!({"items":[null]}),
         runtime: RuntimePlan::Codex {
-            environment: None,
             provider: CodexProvider::Bedrock,
             size: RunSize::Small,
             nodes: BTreeMap::from([(
@@ -505,6 +505,7 @@ mod concurrency;
 
 fn submission_intent(request: &RunSubmission) -> RunSubmissionIntent {
     RunSubmissionIntent {
+        environment: request.environment.clone(),
         title: request.title.clone(),
         graph: request.graph.clone(),
         initial_input: request.initial_input.clone(),
@@ -531,20 +532,21 @@ async fn environment_name_limit_counts_distinct_names_across_nodes_hooks_and_var
         if extra_variable {
             definition["variables"]["PUBLIC_THREE"] = json!("over limit");
         }
-        let RuntimePlan::Claude { environment, .. } = &mut request.runtime else {
-            panic!("fixture must select Claude");
-        };
-        *environment = Some(serde_json::from_value(definition).assert_value());
+        request.environment = Some(serde_json::from_value(definition).assert_value());
         let expected = if extra_variable {
             Err(NativeV2AdmissionError::DeclaredEnvironmentTooLarge { found: 65 })
         } else {
             Ok(())
         };
+        NativeV2Admission
+            .validate_profile(&request.graph, &request.runtime, DeliveryPolicy::Optional)
+            .await
+            .assert_value();
         assert_eq!(
             NativeV2Admission
-                .validate_profile(&request.graph, &request.runtime, DeliveryPolicy::Optional)
+                .validate_intent(&submission_intent(&request), DeliveryPolicy::Optional)
                 .await,
-            expected,
+            expected
         );
         assert_eq!(NativeV2Admission.admit(request).await.map(|_| ()), expected);
     }

@@ -1,23 +1,33 @@
-import { AppHeader } from './AppHeader';
 import { EnvironmentEditor } from './EnvironmentEditor';
 import { Field } from './Field';
 import { workspaceStorageKeys } from './workspace-storage';
-import { EnvironmentOptions } from './EnvironmentSelector';
+import { EnvironmentOptions } from './EnvironmentOptions';
 import { useEnvironmentWorkspace } from './use-environment-workspace';
 import { useEnvironmentHost } from './environment-workspace-host';
-import type { WorkspaceServices } from './workspace-services';
+import type { EnvironmentStore } from './environment-store';
 import type { Bootstrap } from './api';
 import type { WorkspaceBridge } from './workspace-bridge';
 
 type Props = {
-  services: WorkspaceServices;
+  store: EnvironmentStore;
+  collection: URL;
   bootstrap: Bootstrap;
-  host?: WorkspaceBridge;
+  host: WorkspaceBridge;
   readOnly?: boolean;
 };
-export function EnvironmentWorkspace({ services, bootstrap, host, readOnly = false }: Props) {
-  const draftKey = workspaceStorageKeys(services.mount, bootstrap.workspace).environmentDraft;
-  const model = useEnvironmentWorkspace(services.environments, readOnly, draftKey);
+export function EnvironmentWorkspace({
+  store,
+  collection,
+  bootstrap,
+  host,
+  readOnly = false,
+}: Props) {
+  const draftKey = workspaceStorageKeys(collection, bootstrap.workspace).environmentDraft;
+  const model = useEnvironmentWorkspace(
+    store,
+    readOnly,
+    collection.search ? `${draftKey}:${collection.search}` : draftKey
+  );
   useEnvironmentHost(
     host,
     {
@@ -26,22 +36,13 @@ export function EnvironmentWorkspace({ services, bootstrap, host, readOnly = fal
       busy: model.busy,
       loading: model.loading,
       name: model.draft?.name,
+      resourceId: model.saved?.id ?? null,
+      resourceRevision: model.saved?.revision ?? null,
     },
     model.discard
   );
   return (
-    <div className={`app environment-app ${host ? 'embedded-app' : ''}`}>
-      {!host && (
-        <AppHeader
-          section="environments"
-          workspace={bootstrap.workspace}
-          navigate={(section) =>
-            model.guard(() => {
-              window.location.hash = section === 'profiles' ? '' : section;
-            })
-          }
-        />
-      )}
+    <div className="app environment-app embedded-app">
       <main className="environment-workspace">
         <EnvironmentSelection model={model} readOnly={readOnly} />
         {model.loading && <p role="status">Loading environments…</p>}
@@ -88,8 +89,8 @@ function EnvironmentForm({
         />
       </fieldset>
       <p className="helper">
-        Saving updates every referencing profile for new runs. Accepted runs and resumes keep their
-        saved environment.
+        New runs use the latest saved definition when this environment is selected. Accepted runs
+        and resumes keep their saved environment.
       </p>
       <div className="environment-toolbar">
         {!readOnly && (

@@ -171,15 +171,6 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         TargetHttpControlAuthority::connection_delete(self, target, request).await
     }
 
-    async fn environment_show(
-        &self,
-        target: &TargetRecord,
-        scope: openengine_cluster_protocol::RunProfileScope,
-        id: openengine_cluster_protocol::EnvironmentId,
-    ) -> Result<openengine_cluster_protocol::RuntimeEnvironmentResource, TargetAuthorityError> {
-        TargetHttpControlAuthority::environment_show(self, target, scope, id).await
-    }
-
     async fn profile_list(
         &self,
         target: &TargetRecord,

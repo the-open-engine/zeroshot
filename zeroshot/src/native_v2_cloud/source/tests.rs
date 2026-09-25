@@ -56,13 +56,13 @@ async fn source_checkout_resolves_again_instead_of_reusing_an_earlier_token() {
         .assert_value(),
     };
     let runtime = RuntimePlan::Codex {
-        environment: None,
         provider: CodexProvider::OpenAi,
         size: RunSize::Small,
         nodes: BTreeMap::from([(NodeName::new("deliver").assert_value(), node)]),
     };
     let environment = RunEnvironment::with_resolver(
         &runtime,
+        None,
         BTreeMap::new(),
         DynamicConnectionPlan {
             resolver: Arc::new(RotatingResolver::default()),

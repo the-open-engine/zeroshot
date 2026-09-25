@@ -564,3 +564,86 @@ async fn local_copilot_uniform_runtime_preserves_model_without_inventing_a_token
     assert_eq!(runtime["nodes"]["worker"]["model"], "opaque-future-model");
     assert!(runtime["nodes"]["worker"]["connections"].is_null());
 }
+
+#[tokio::test]
+async fn explicit_run_environment_is_independent_of_inline_or_named_profile_selection() {
+    let directory = tempfile::tempdir().assert_value();
+    let path = directory.path().join("environment.json");
+    let definition = json!({"setup":"echo install", "startup":"npm ci", "variables":{"CI":"true"},
+        "connections":{"registry":["NPM_TOKEN"]}});
+    std::fs::write(&path, serde_json::to_vec(&definition).assert_value()).assert_value();
+    for named in [false, true] {
+        let (_files, mut command) =
+            environment_command(&["--environment", path.to_str().unwrap(), "-d"]);
+        if named {
+            let NativeV2CliCommand::Run(run) = &mut command else {
+                unreachable!()
+            };
+            run.selection = RunSelection::Profile(Some(ProfileReference {
+                qualifier: Some(ProfileQualifier::Org),
+                name: openengine_cluster_protocol::RunProfileName::new("alpha").assert_value(),
+            }));
+        }
+        let backend = FakeBackend::default();
+        let available =
+            |name: &str| (name == "NPM_TOKEN").then(|| OsString::from("package-secret"));
+        execute_with_environment(command, &backend, &available)
+            .await
+            .assert_value();
+        let calls = backend.calls();
+        let (environment, connections) = calls
+            .iter()
+            .find_map(|call| match call {
+                Call::Submit {
+                    environment,
+                    connections,
+                    ..
+                } => Some((environment, connections)),
+                _ => None,
+            })
+            .assert_value();
+        assert_eq!(serde_json::to_value(environment).assert_value(), definition);
+        let token = connections
+            .get(&ConnectionKey::new("registry").assert_value())
+            .assert_value();
+        assert_eq!(
+            token.as_map().values().collect::<Vec<_>>(),
+            vec!["package-secret"]
+        );
+    }
+}
+
+#[tokio::test]
+async fn no_environment_is_an_explicit_empty_override_and_omission_stays_unselected() {
+    for flag in [false, true] {
+        let extra: &[&str] = if flag {
+            &["--no-environment", "-d"]
+        } else {
+            &["-d"]
+        };
+        let (_files, command) = environment_command(extra);
+        let backend = FakeBackend::default();
+        execute_with_environment(command, &backend, &|_| None)
+            .await
+            .assert_value();
+        let calls = backend.calls();
+        let Some(Call::Submit { environment, .. }) = calls.last() else {
+            panic!("expected submit")
+        };
+        assert_eq!(environment.as_ref(), flag.then_some(&Default::default()));
+    }
+    let files = FixtureFiles::with_runtime(
+        environment_graph(),
+        json!({"task":"ship it"}),
+        runtime_with_environment(),
+    );
+    assert!(
+        parse_native_v2_args(run_args(
+            &files.graph,
+            &files.input,
+            &files.runtime,
+            &["--environment", "environment.json", "--no-environment"]
+        ))
+        .is_err()
+    );
+}

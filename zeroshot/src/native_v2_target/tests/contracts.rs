@@ -29,10 +29,11 @@ fn profile_operations() -> (
         name: selector.name.clone(),
         scope: selector.scope,
         graph: prepared.intent.graph.clone(),
-        runtime: prepared.intent.runtime.clone().map_environment(|_| None),
+        runtime: prepared.intent.runtime.clone(),
         set_default: true,
     };
     let run = RunProfileRunRequest {
+        environment: prepared.intent.environment.clone(),
         run_id: prepared.run_id,
         profile: selector.clone(),
         title: prepared.intent.title,

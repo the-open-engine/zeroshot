@@ -203,7 +203,11 @@ impl LocalCliBackend {
             .await
             .map_err(NativeV2CliError::InvalidRun)?;
         request.connections = LocalConnectionStore::new(self.state_root.clone())
-            .resolve(&request.intent.runtime, &request.connections)?
+            .resolve(
+                &request.intent.runtime,
+                request.intent.environment.as_ref(),
+                &request.connections,
+            )?
             .bootstrap_values();
         let prepared = prepare_local_run(request, &self.current_directory, &self.git_program)
             .map_err(local_error)?;
@@ -674,7 +678,6 @@ impl LocalCliBackend {
                 && self.recovery_workspace_is_unclaimed(&status.run_id)?,
             connection_requirements: document
                 .submission
-                .runtime
                 .connection_requirements()
                 .into_iter()
                 .map(|(key, fields)| (key, fields.into_iter().collect()))

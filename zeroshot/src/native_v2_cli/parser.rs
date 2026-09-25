@@ -477,6 +477,14 @@ struct RunArgs {
     #[arg(long, value_name = "FILE")]
     uniform_runtime_config: Option<PathBuf>,
 
+    /// Load setup, startup, public variables, and hook connections for this run.
+    #[arg(long, value_name = "FILE", conflicts_with = "no_environment")]
+    environment: Option<PathBuf>,
+
+    /// Use the target's base environment instead of a configured default.
+    #[arg(long, conflicts_with = "environment")]
+    no_environment: bool,
+
     /// Use a profile: NAME, local:NAME, user:NAME, or org:NAME.
     ///
     /// When no profile or inline graph/runtime is supplied, scoped defaults are checked.

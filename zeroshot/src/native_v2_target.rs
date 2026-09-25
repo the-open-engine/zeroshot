@@ -219,19 +219,6 @@ where
             .map_err(|error| error.into_cli(&target))
     }
 
-    async fn environment_show(
-        &self,
-        name: &str,
-        scope: openengine_cluster_protocol::RunProfileScope,
-        id: openengine_cluster_protocol::EnvironmentId,
-    ) -> Result<openengine_cluster_protocol::RuntimeEnvironmentResource, NativeV2CliError> {
-        let target = self.target(name)?;
-        self.authority
-            .environment_show(&target, scope, id)
-            .await
-            .map_err(|error| error.into_cli(&target))
-    }
-
     async fn profile_list(
         &self,
         name: &str,
@@ -313,6 +300,7 @@ where
                     source: request.source,
                     profile: request.profile,
                     runs: request.runs,
+                    environment: request.environment,
                     connections: request.connections,
                     github_token: request.github_token,
                 },
@@ -371,6 +359,7 @@ where
                     &RunProfileRunRequest {
                         run_id: request.run_id,
                         profile,
+                        environment: request.intent.environment,
                         title: request.intent.title,
                         initial_input: request.intent.initial_input,
                         source,
@@ -392,6 +381,7 @@ where
                             graph: request.intent.graph,
                             initial_input: request.intent.initial_input,
                             runtime: request.intent.runtime,
+                            environment: request.intent.environment,
                             source,
                             submission_key: request.intent.submission_key,
                         },
@@ -679,7 +669,7 @@ where
         if !matches!(target.access, TargetAccess::Direct) {
             return Ok(None);
         }
-        let requirements = runtime_connection_requirements(&request.intent.runtime);
+        let requirements = request.intent.connection_requirements();
         self.registry
             .record_recovery_authorization(&target.id, &request.run_id, &requirements)
             .map_err(cli_target_error)?;
@@ -714,16 +704,6 @@ where
         }
         Ok(target)
     }
-}
-
-fn runtime_connection_requirements(
-    runtime: &openengine_cluster_protocol::RuntimePlan,
-) -> RunConnectionRequirements {
-    runtime
-        .connection_requirements()
-        .into_iter()
-        .map(|(key, fields)| (key, fields.into_iter().collect()))
-        .collect()
 }
 
 fn connection_values_match_requirements(

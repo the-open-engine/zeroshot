@@ -252,21 +252,6 @@ fn validate_profile_name(value: &str) -> Result<(), NativeV2RunValueError> {
     }
 }
 
-fn validate_environment_identity(value: &str) -> Result<(), NativeV2RunValueError> {
-    if value.is_empty()
-        || value.len() > 128
-        || value
-            .chars()
-            .any(|ch| ch.is_whitespace() || ch.is_control())
-    {
-        Err(NativeV2RunValueError(
-            "environment identity must be 1..=128 bytes without whitespace or control characters",
-        ))
-    } else {
-        Ok(())
-    }
-}
-
 fn validate_non_control_text(
     value: &str,
     maximum: usize,
@@ -365,25 +350,6 @@ native_v2_string_kind!(
     })
 );
 
-native_v2_string_kind!(
-    EnvironmentIdKind,
-    EnvironmentId,
-    validate_environment_identity,
-    json_schema!({"type":"string","minLength":1,"maxLength":128,"pattern":r"^[^\s\u0000-\u001f\u007f-\u009f]+$"})
-);
-native_v2_string_kind!(
-    EnvironmentRevisionKind,
-    EnvironmentRevision,
-    validate_environment_identity,
-    json_schema!({"type":"string","minLength":1,"maxLength":128,"pattern":r"^[^\s\u0000-\u001f\u007f-\u009f]+$"})
-);
-native_v2_string_kind!(
-    EnvironmentNameKind,
-    EnvironmentName,
-    validate_profile_name,
-    json_schema!({"type":"string","minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"})
-);
-
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ResolvedSource {
@@ -472,9 +438,9 @@ pub use checkpoints::*;
 
 mod wire;
 pub use wire::{
-    ProfileRuntimePlan, RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunListParams,
-    RunListResult, RunResumeParams, RunResumeResult, RunSubmission, RunSubmitParams,
-    RunSubmitResult, RuntimePlan,
+    RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunListParams, RunListResult,
+    RunResumeParams, RunResumeResult, RunSubmission, RunSubmitParams, RunSubmitResult, RuntimePlan,
+    run_connection_requirements,
 };
 
 #[cfg(test)]

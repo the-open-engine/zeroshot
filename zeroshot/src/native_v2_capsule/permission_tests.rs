@@ -219,20 +219,19 @@ async fn admission(harness: &str, verifier: bool, binding: NodeRuntimeBinding) -
     let nodes = BTreeMap::from([(NodeName::new("work").assert_value(), binding)]);
     let runtime = if harness == "codex" {
         RuntimePlan::Codex {
-            environment: None,
             provider: CodexProvider::OpenAi,
             size: RunSize::Medium,
             nodes,
         }
     } else {
         RuntimePlan::Claude {
-            environment: None,
             provider: ClaudeProvider::Anthropic,
             size: RunSize::Medium,
             nodes,
         }
     };
     admit(RunSubmission {
+        environment: None,
         title: RunTitle::new("Hosted permissions").assert_value(),
         graph: full_graph(vec![node, success_node()]),
         initial_input: Value::Null,

@@ -43,13 +43,11 @@ pub(super) fn runtime(kind: RuntimePlanKind) -> RuntimePlan {
     ]);
     match kind {
         RuntimePlanKind::Codex => RuntimePlan::Codex {
-            environment: None,
             provider: CodexProvider::OpenAi,
             size: RunSize::Medium,
             nodes,
         },
         RuntimePlanKind::Claude => RuntimePlan::Claude {
-            environment: None,
             provider: crate::native_v2_contract::ClaudeProvider::Anthropic,
             size: RunSize::Medium,
             nodes,
@@ -141,6 +139,7 @@ pub(super) fn shipping_graph() -> GraphSpec {
 pub(super) async fn admitted(kind: RuntimePlanKind) -> AdmittedRun {
     NativeV2Admission
         .admit(RunSubmission {
+            environment: None,
             title: RunTitle::new("Candidate config").assert_value_with("title"),
             graph: shipping_graph(),
             initial_input: json!({}),

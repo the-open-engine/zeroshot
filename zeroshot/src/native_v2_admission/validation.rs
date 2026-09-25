@@ -35,7 +35,7 @@ pub(super) fn validate_executable_bindings(
     validate_binding_coverage(declarations, bindings)?;
     validate_binding_kinds(declarations, bindings)?;
     validate_delivery_policy(delivery_policy, declarations)?;
-    validate_declared_environment(runtime)
+    validate_declared_environment(runtime, None)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -308,13 +308,16 @@ fn validate_delivery_declaration(
     })
 }
 
-fn validate_declared_environment(runtime: &RuntimePlan) -> Result<(), NativeV2AdmissionError> {
+pub(super) fn validate_declared_environment(
+    runtime: &RuntimePlan,
+    environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
+) -> Result<(), NativeV2AdmissionError> {
     let mut declared = runtime
         .nodes()
         .values()
         .flat_map(|binding| binding.declared_connections().environment_names())
         .collect::<BTreeSet<_>>();
-    if let Some(environment) = runtime.environment() {
+    if let Some(environment) = environment {
         declared.extend(environment.connections.environment_names());
         declared.extend(environment.variables.keys());
     }

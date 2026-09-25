@@ -100,6 +100,7 @@ async fn runtime_cleanup_preserves_checkpoint_bytes_until_terminal_policy_runs()
 
 fn submission(key: &str) -> RunSubmission {
     RunSubmission {
+        environment: None,
         title: RunTitle::new("Portable controller test").assert_value_with("title"),
         graph: full_graph(vec![success_node()]),
         initial_input: Value::Null,
@@ -121,8 +122,12 @@ fn bootstrap(
     workspace: PathBuf,
     storage: PathBuf,
 ) -> PortableControllerBootstrap {
-    let environment = RunEnvironment::exact(&submission.runtime, BTreeMap::new())
-        .assert_value_with("exact empty environment");
+    let environment = RunEnvironment::exact(
+        &submission.runtime,
+        submission.environment.as_ref(),
+        BTreeMap::new(),
+    )
+    .assert_value_with("exact empty environment");
     PortableControllerBootstrap {
         checkpoint: None,
         delivery_run_id: run_id.clone(),

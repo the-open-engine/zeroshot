@@ -53,7 +53,6 @@ async fn same_environment_name_can_resolve_from_different_keys_on_different_node
     let first = binding("first", &name);
     let second = binding("second", &name);
     let runtime = RuntimePlan::Codex {
-        environment: None,
         provider: CodexProvider::OpenAi,
         size: RunSize::Small,
         nodes: BTreeMap::from([
@@ -67,6 +66,7 @@ async fn same_environment_name_can_resolve_from_different_keys_on_different_node
     };
     let environment = RunEnvironment::exact(
         &runtime,
+        None,
         BTreeMap::from([
             (
                 ConnectionKey::new("first").assert_value(),
@@ -136,6 +136,7 @@ fn dynamic_environment(
     let key = ConnectionKey::new("github").assert_value();
     let environment = RunEnvironment::with_resolver(
         &runtime,
+        None,
         BTreeMap::new(),
         DynamicConnectionPlan {
             keys: BTreeSet::from([key.clone()]),
@@ -201,22 +202,25 @@ async fn rebind_uses_admitted_public_variables_without_replacing_connection_valu
     let token = EnvironmentVariableName::new("TOKEN").assert_value();
     let setting = EnvironmentVariableName::new("NODE_ENV").assert_value();
     let node = binding("registry", &token);
-    let plan = |value: &str| RuntimePlan::Codex {
+    let runtime = RuntimePlan::Codex {
         provider: CodexProvider::OpenAi,
         size: RunSize::Small,
         nodes: BTreeMap::from([(NodeName::new("agent").assert_value(), node.clone())]),
-        environment: Some(openengine_cluster_protocol::RuntimeEnvironment {
-            variables: BTreeMap::from([(setting.clone(), value.to_owned())]),
-            ..Default::default()
-        }),
+    };
+    let definition = |value: &str| RuntimeEnvironment {
+        variables: BTreeMap::from([(setting.clone(), value.to_owned())]),
+        ..Default::default()
     };
     let original = RunEnvironment::from_available(
-        &plan("old"),
+        &runtime,
+        Some(&definition("old")),
         &BTreeMap::from([(token.clone(), "private-value".to_owned())]),
     )
     .assert_value();
-    let admitted = plan("new");
-    let rebound = original.for_runtime(&admitted).assert_value();
+    let admitted = definition("new");
+    let rebound = original
+        .for_runtime(&runtime, Some(&admitted))
+        .assert_value();
     let resolved = rebound.resolve(&node).await.assert_value();
     assert_eq!(resolved.get(&setting), Some("new"));
     assert_eq!(resolved.get(&token), Some("private-value"));

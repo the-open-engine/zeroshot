@@ -57,7 +57,11 @@ impl PortableBootstrapDocument {
             &self.checkpoint_repository,
             &self.storage,
         )?;
-        let environment = RunEnvironment::exact(&self.submission.runtime, self.connections)?;
+        let environment = RunEnvironment::exact(
+            &self.submission.runtime,
+            self.submission.environment.as_ref(),
+            self.connections,
+        )?;
         Ok(PortableControllerBootstrap {
             checkpoint: self.checkpoint,
             run_id: self.run_id,
@@ -183,9 +187,10 @@ fn encode_bootstrap(
         &bootstrap.checkpoint_repository,
         &bootstrap.storage,
     )?;
-    let environment = bootstrap
-        .environment
-        .for_runtime(&bootstrap.submission.runtime)?;
+    let environment = bootstrap.environment.for_runtime(
+        &bootstrap.submission.runtime,
+        bootstrap.submission.environment.as_ref(),
+    )?;
     let document = PortableBootstrapDocument {
         checkpoint: bootstrap.checkpoint.clone(),
         run_id: bootstrap.run_id.clone(),

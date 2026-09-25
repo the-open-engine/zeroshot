@@ -122,6 +122,7 @@ pub struct RunCommand {
     pub target: Option<String>,
     pub title: RunTitle,
     pub selection: RunSelection,
+    pub environment: Option<RunEnvironmentInput>,
     pub input: PathBuf,
     pub repository: Option<SourceRepositoryId>,
     pub branch: Option<SourceBranchId>,
@@ -129,6 +130,12 @@ pub struct RunCommand {
     pub detach: bool,
     pub validate_only: bool,
     pub submission_key: Option<IdempotencyKey>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RunEnvironmentInput {
+    File(PathBuf),
+    Empty,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -179,6 +186,7 @@ pub struct PreparedMergePlanRequest {
     pub source: MergePlanSource,
     pub profile: RunProfileSelector,
     pub runs: Vec<MergePlanRunRequest>,
+    pub environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
     pub connections: RunConnectionValues,
     pub github_token: Option<String>,
 }
@@ -388,14 +396,6 @@ pub enum NativeV2CliError {
     InitialInput(String),
     #[error("run validation failed: {0}")]
     InvalidRun(#[source] NativeV2AdmissionError),
-    #[error("environment {0} was not found in this profile's resource store")]
-    EnvironmentMissing(openengine_cluster_protocol::EnvironmentId),
-    #[error("environment changed elsewhere, or its name is already taken")]
-    EnvironmentConflict,
-    #[error("environment is referenced by a profile")]
-    EnvironmentInUse,
-    #[error("environment workspace changed; reload before saving")]
-    EnvironmentWorkspaceChanged,
     #[error("declared environment variable {0} is unavailable or is not valid UTF-8")]
     Environment(EnvironmentVariableName),
     #[error(transparent)]
@@ -506,17 +506,6 @@ pub trait NativeV2CliBackend: Send + Sync {
     ) -> Result<ConnectionDeleteResult, NativeV2CliError> {
         Err(NativeV2CliError::Target(
             "target does not advertise connection management".to_owned(),
-        ))
-    }
-
-    async fn environment_show(
-        &self,
-        _target: Option<&str>,
-        _scope: openengine_cluster_protocol::RunProfileScope,
-        _id: openengine_cluster_protocol::EnvironmentId,
-    ) -> Result<openengine_cluster_protocol::RuntimeEnvironmentResource, NativeV2CliError> {
-        Err(NativeV2CliError::Target(
-            "target does not advertise environment resources".into(),
         ))
     }
 

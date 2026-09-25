@@ -55,7 +55,6 @@ async fn admitted_with_delivery() -> AdmittedRun {
         success_node(),
     ]);
     let runtime = RuntimePlan::Codex {
-        environment: None,
         provider: CodexProvider::OpenAi,
         size: RunSize::Medium,
         nodes: BTreeMap::from([
@@ -73,6 +72,7 @@ async fn admitted_with_delivery() -> AdmittedRun {
     NativeV2Admission
         .admit_with_policy(
             RunSubmission {
+                environment: None,
                 title: RunTitle::new("Required delivery gate").assert_value(),
                 graph,
                 initial_input: Value::Null,
@@ -89,11 +89,11 @@ async fn admitted_with_delivery() -> AdmittedRun {
 async fn admitted_without_delivery() -> AdmittedRun {
     NativeV2Admission
         .admit(RunSubmission {
+            environment: None,
             title: RunTitle::new("Local optional run").assert_value(),
             graph: full_graph(vec![success_node()]),
             initial_input: Value::Null,
             runtime: RuntimePlan::Codex {
-                environment: None,
                 provider: CodexProvider::OpenAi,
                 size: RunSize::Medium,
                 nodes: BTreeMap::new(),
@@ -502,6 +502,7 @@ async fn cancellation_delivery_supervisor(
     let submission_key = IdempotencyKey::new("cancelled-writer-delivery").assert_value();
     let admitted = NativeV2Admission
         .admit(RunSubmission {
+            environment: None,
             title: RunTitle::new("Cancelled writer delivery").assert_value(),
             graph,
             initial_input: Value::Null,
@@ -540,8 +541,12 @@ async fn cancellation_delivery_supervisor(
     } else {
         local
     };
-    let environment =
-        super::RunEnvironment::exact(&admitted.runtime, BTreeMap::new()).assert_value();
+    let environment = super::RunEnvironment::exact(
+        &admitted.runtime,
+        admitted.environment.as_ref(),
+        BTreeMap::new(),
+    )
+    .assert_value();
     (
         super::NativeV2Supervisor::new(
             run_id,

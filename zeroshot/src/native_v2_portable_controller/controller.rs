@@ -242,7 +242,9 @@ async fn prepare_controller_start(
     let admitted = NativeV2Admission
         .admit_with_policy(bootstrap.submission.clone(), bootstrap.delivery_policy)
         .await?;
-    let environment = bootstrap.environment.for_runtime(&admitted.runtime)?;
+    let environment = bootstrap
+        .environment
+        .for_runtime(&admitted.runtime, admitted.environment.as_ref())?;
     let (paths, lease, ledger) = open_controller_storage(&bootstrap.storage)?;
     let existing = validate_existing_run(ledger.as_ref(), &bootstrap.run_id).await?;
     Ok(PreparedControllerStart {

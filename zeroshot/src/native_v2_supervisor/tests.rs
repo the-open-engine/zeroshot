@@ -378,6 +378,7 @@ async fn harness_with_options(
     let environment = match options.resolver {
         Some(resolver) => RunEnvironment::with_resolver(
             &admitted.runtime,
+            admitted.environment.as_ref(),
             BTreeMap::new(),
             DynamicConnectionPlan {
                 resolver,
@@ -389,7 +390,11 @@ async fn harness_with_options(
                 source_connection: None,
             },
         ),
-        None => RunEnvironment::exact(&admitted.runtime, BTreeMap::new()),
+        None => RunEnvironment::exact(
+            &admitted.runtime,
+            admitted.environment.as_ref(),
+            BTreeMap::new(),
+        ),
     }
     .assert_value_with("run environment");
     Harness {

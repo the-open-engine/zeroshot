@@ -1,4 +1,4 @@
-import { ApiError, type ApiClient } from './api';
+import { ApiError, createApiClient } from './api';
 
 export type EnvironmentDefinition = {
   setup?: string;
@@ -19,15 +19,26 @@ export interface EnvironmentStore {
   remove(id: string, expectedRevision: string, signal?: AbortSignal): Promise<void>;
 }
 
-export function createEnvironmentStore(api: ApiClient, identity: () => string): EnvironmentStore {
-  const headers = () => ({ 'X-Zeroshot-Workspace': identity() });
+/** Hosted storage is explicit; local profile services have no environment catalog. */
+export function createEnvironmentStore(
+  collection: URL,
+  workspaceId: string,
+  fetcher: typeof fetch
+): EnvironmentStore {
+  const api = createApiClient(collection, fetcher);
+  const headers = () => ({ 'X-Zeroshot-Workspace': workspaceId });
+  function endpoint(id?: string) {
+    const url = new URL(collection);
+    if (id !== undefined) url.pathname += `/${encodeURIComponent(id)}`;
+    return url.href;
+  }
   return {
-    list: (signal) => api('environments', undefined, signal),
-    load: (id, signal) => api(`environments/${encodeURIComponent(id)}`, undefined, signal),
-    save: async (value, signal) => api('environments', value, signal, headers()),
+    list: (signal) => api(endpoint(), undefined, signal),
+    load: (id, signal) => api(endpoint(id), undefined, signal),
+    save: (value, signal) => api(endpoint(), value, signal, headers()),
     remove: async (id, expectedRevision, signal) => {
       const result = await api<{ deleted: boolean }>(
-        `environments/${encodeURIComponent(id)}`,
+        endpoint(id),
         { expectedRevision },
         signal,
         headers(),

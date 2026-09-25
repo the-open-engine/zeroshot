@@ -72,9 +72,6 @@ function useAppState({ services, bootstrap, host }: AppProps) {
   const [historyPage, setHistoryPage] = useState(
     () => !host && window.location.hash.startsWith('#runs')
   );
-  const [environmentsPage, setEnvironmentsPage] = useState(
-    () => !host && window.location.hash === '#environments'
-  );
   const [defaultsPage, setDefaultsPage] = useState(
     () => !host && window.location.hash === '#defaults'
   );
@@ -82,7 +79,6 @@ function useAppState({ services, bootstrap, host }: AppProps) {
     if (host) return;
     const changed = () => {
       setDefaultsPage(window.location.hash === '#defaults');
-      setEnvironmentsPage(window.location.hash === '#environments');
       setHistoryPage(window.location.hash.startsWith('#runs'));
     };
     window.addEventListener('hashchange', changed);
@@ -216,7 +212,6 @@ function useAppState({ services, bootstrap, host }: AppProps) {
     numericDrafts,
     historyPage,
     defaultsPage,
-    environmentsPage,
     profiles,
     setProfiles,
     doc,
@@ -692,7 +687,6 @@ function useProfileActions(
     numericDrafts,
     historyPage,
     defaultsPage,
-    environmentsPage,
     doc,
     setDoc,
     base,
@@ -818,8 +812,7 @@ function useProfileActions(
   }
   useEffect(() => {
     function shortcut(e: KeyboardEvent) {
-      if (modal || confirm || defaultsPage || environmentsPage || historyPage || hosted.showingRun)
-        return;
+      if (modal || confirm || defaultsPage || historyPage || hosted.showingRun) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         saveAction.current();

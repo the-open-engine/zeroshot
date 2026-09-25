@@ -9,9 +9,6 @@ use crate::{
     RunTitle, RuntimePlan,
 };
 
-/// Fully resolved authoring profile used only while constructing immutable run submissions.
-pub type ResolvedRunProfile = RunProfile<super::RuntimeEnvironment>;
-
 pub const RUN_PROFILES_KIND: &str = "zeroshot.run-profiles/v1";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -23,27 +20,13 @@ pub enum RunProfileScope {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct RunProfile<E = super::EnvironmentReference> {
+pub struct RunProfile {
     pub id: String,
     pub name: RunProfileName,
     pub scope: RunProfileScope,
     pub graph: GraphSpec,
-    pub runtime: RuntimePlan<E>,
+    pub runtime: RuntimePlan,
     pub is_default: bool,
-}
-
-impl<E> RunProfile<E> {
-    #[must_use]
-    pub fn map_environment<T>(self, map: impl FnOnce(Option<E>) -> Option<T>) -> RunProfile<T> {
-        RunProfile {
-            id: self.id,
-            name: self.name,
-            scope: self.scope,
-            graph: self.graph,
-            runtime: self.runtime.map_environment(map),
-            is_default: self.is_default,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -61,7 +44,7 @@ pub struct RunProfileSetRequest {
     pub name: RunProfileName,
     pub scope: RunProfileScope,
     pub graph: GraphSpec,
-    pub runtime: super::ProfileRuntimePlan,
+    pub runtime: RuntimePlan,
     #[serde(default)]
     pub set_default: bool,
 }
@@ -122,6 +105,9 @@ pub struct RunProfileRunRequest {
     pub initial_input: serde_json::Value,
     pub source: ResolvedSource,
     pub submission_key: IdempotencyKey,
+    /// Omission permits a host default; an empty definition explicitly selects its base environment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<super::RuntimeEnvironment>,
     pub connections: RunConnectionValues,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,

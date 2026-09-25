@@ -112,7 +112,6 @@ impl HistoryServer {
             .assert_value();
         submission.initial_input = json!({"task":"Inspect native history"});
         submission.runtime = RuntimePlan::Codex {
-            environment: None,
             provider: CodexProvider::OpenAi,
             size: RunSize::Small,
             nodes: BTreeMap::from([(
