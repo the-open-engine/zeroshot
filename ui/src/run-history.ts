@@ -273,72 +273,12 @@ export function projectHistory(
   const latestVisit = new Map<string, Invocation>();
   const references = new Map<string, Reference>();
   const systemLogs: Invocation['logs'] = [];
+  const projection = { invocations, byId, latestVisit, references, systemLogs };
   let terminal: RunTerminal | undefined;
   for (let index = 0; index <= Math.min(through, events.length - 1); index++) {
     const event = events[index].event;
-    if (event.kind === 'node_started' && event.reference) {
-      const id = identity(event.reference.execution);
-      const instance = identity(event.reference.nodeInstance);
-      if (byId.has(id)) continue;
-      const node = event.reference.node;
-      const mapIndices = event.occurrence?.mapIndices ?? [];
-      const scope = JSON.stringify([node, mapIndices]);
-      const previous = latestVisit.get(scope);
-      const attempt = event.attempt ?? 1;
-      const retry = attempt > 1 && previous?.instance === instance && attempt > previous.attempt;
-      const visit = retry ? previous.visit : (previous?.visit ?? 0) + 1;
-      const invocation: Invocation = {
-        id,
-        node,
-        instance,
-        attempt,
-        mapIndices: [...mapIndices],
-        visit,
-        start: index,
-        input: event.input,
-        state: 'running',
-        logs: [],
-      };
-      latestVisit.set(scope, invocation);
-      references.set(id, event.reference);
-      byId.set(id, invocation);
-      invocations.push(invocation);
-    } else if (event.kind === 'node_completed' && event.completion) {
-      const reference = event.completion.reference;
-      const invocation = byId.get(identity(reference.execution));
-      if (
-        invocation &&
-        sameReference(references.get(invocation.id), reference) &&
-        invocation.end === undefined
-      ) {
-        invocation.end = index;
-        invocation.outcome = event.completion.outcome;
-        invocation.state = event.completion.outcome.status === 'error' ? 'failed' : 'succeeded';
-      }
-    } else if (event.kind === 'execution_voided' && event.reference) {
-      const invocation = byId.get(identity(event.reference.execution));
-      if (
-        invocation &&
-        sameReference(references.get(invocation.id), event.reference) &&
-        invocation.end === undefined
-      ) {
-        invocation.end = index;
-        invocation.state = 'skipped';
-        invocation.reason = event.reason;
-      }
-    } else if (event.kind === 'safe_log') {
-      const log = {
-        index,
-        timestamp: event.timestamp,
-        stream: event.stream ?? 'output',
-        text: event.line ?? '',
-      };
-      const invocation = event.execution == null ? undefined : byId.get(identity(event.execution));
-      (invocation?.logs ?? systemLogs).push(log);
-    } else if (event.kind === 'token_usage_observed' && event.execution != null) {
-      const invocation = byId.get(identity(event.execution));
-      if (invocation) invocation.usage = accumulateUsage(invocation.usage, event.usage);
-    } else if (event.kind === 'terminal') terminal = event.result;
+    if (event.kind === 'terminal') terminal = event.result;
+    else readHistoryEvent(event, index, projection);
   }
   const nodes: Record<string, WorkflowNodeObservation> = Object.create(null);
   for (const node of allNodes(document.graph.root)) {
@@ -413,6 +353,60 @@ export function projectHistory(
       state: terminal.status === 'succeeded' ? 'succeeded' : 'failed',
     };
   return { invocations, nodes, terminal, systemLogs, controls };
+}
+
+type HistoryProjection = {
+  invocations: Invocation[];
+  byId: Map<string, Invocation>;
+  latestVisit: Map<string, Invocation>;
+  references: Map<string, Reference>;
+  systemLogs: Invocation['logs'];
+};
+
+function readHistoryEvent(event: HistoryEvent['event'], index: number, projection: HistoryProjection) {
+  const { invocations, byId, latestVisit, references, systemLogs } = projection;
+  if (event.kind === 'node_started' && event.reference) {
+    const id = identity(event.reference.execution);
+    const instance = identity(event.reference.nodeInstance);
+    if (byId.has(id)) return;
+    const node = event.reference.node;
+    const mapIndices = event.occurrence?.mapIndices ?? [];
+    const scope = JSON.stringify([node, mapIndices]);
+    const previous = latestVisit.get(scope);
+    const attempt = event.attempt ?? 1;
+    const retry = attempt > 1 && previous?.instance === instance && attempt > previous.attempt;
+    const visit = retry ? previous.visit : (previous?.visit ?? 0) + 1;
+    const invocation: Invocation = {
+      id, node, instance, attempt, mapIndices: [...mapIndices], visit, start: index,
+      input: event.input, state: 'running', logs: [],
+    };
+    latestVisit.set(scope, invocation);
+    references.set(id, event.reference);
+    byId.set(id, invocation);
+    invocations.push(invocation);
+  } else if (event.kind === 'node_completed' && event.completion) {
+    const reference = event.completion.reference;
+    const invocation = byId.get(identity(reference.execution));
+    if (invocation && sameReference(references.get(invocation.id), reference) && invocation.end === undefined) {
+      invocation.end = index;
+      invocation.outcome = event.completion.outcome;
+      invocation.state = event.completion.outcome.status === 'error' ? 'failed' : 'succeeded';
+    }
+  } else if (event.kind === 'execution_voided' && event.reference) {
+    const invocation = byId.get(identity(event.reference.execution));
+    if (invocation && sameReference(references.get(invocation.id), event.reference) && invocation.end === undefined) {
+      invocation.end = index;
+      invocation.state = 'skipped';
+      invocation.reason = event.reason;
+    }
+  } else if (event.kind === 'safe_log') {
+    const log = { index, timestamp: event.timestamp, stream: event.stream ?? 'output', text: event.line ?? '' };
+    const invocation = event.execution == null ? undefined : byId.get(identity(event.execution));
+    (invocation?.logs ?? systemLogs).push(log);
+  } else if (event.kind === 'token_usage_observed' && event.execution != null) {
+    const invocation = byId.get(identity(event.execution));
+    if (invocation) invocation.usage = accumulateUsage(invocation.usage, event.usage);
+  }
 }
 
 /** The backend transports native u64 identities as strings; accept only lossless legacy numbers. */

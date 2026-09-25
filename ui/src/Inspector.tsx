@@ -46,11 +46,9 @@ export function Inspector(p: InspectorProps) {
   const numericDrafts = useNumericDrafts();
   const { document: doc, node } = p;
   const scroll = useRef<HTMLDivElement>(null);
-  const [accessError, setAccessError] = useState('');
   useEffect(() => {
     if (scroll.current) scroll.current.scrollTop = 0;
   }, [node?.name]);
-  useEffect(() => setAccessError(''), [node]);
   const binding = node ? bindingFor(doc.runtime, node.name) : undefined;
   const delivery = binding?.kind === 'git_delivery';
   const foldedFailures = new Set(
@@ -60,13 +58,6 @@ export function Inspector(p: InspectorProps) {
   );
   const graphChange = (key: string, value: any) => {
     if (node) p.updateNode({ ...node, [key]: value });
-  };
-  const bindingChange = (key: string, value: any) => {
-    if (!node) return;
-    const next = clone(doc);
-    if (value === '') delete next.runtime.nodes[node.name][key];
-    else next.runtime.nodes[node.name][key] = value;
-    p.edit(next, `binding.${node.name}.${key}`);
   };
   return (
     <aside className="inspector" aria-label="Profile inspector">
@@ -175,128 +166,13 @@ export function Inspector(p: InspectorProps) {
                 )}
               </div>
             )}
-            {executable(node) && (
-              <WorkerControl
-                key={`${node.name}-worker`}
-                document={doc}
-                node={node}
-                workers={p.workers}
-                onChange={p.edit}
-              />
-            )}
-            {editableActivityRole(node, binding) && (
-              <div>
-                <button
-                  type="button"
-                  className="text-button"
-                  title={node.kind === 'step' ? 'Make read-only Verifier' : 'Make writing Agent'}
-                  onClick={() => {
-                    try {
-                      p.edit(
-                        (node.kind === 'step' ? makeReadOnlyVerifier : makeWritingAgent)(
-                          doc,
-                          node.name
-                        )
-                      );
-                      setAccessError('');
-                    } catch (cause) {
-                      setAccessError((cause as Error).message);
-                    }
-                  }}
-                >
-                  {node.kind === 'step' ? 'Make read-only Verifier' : 'Make writing Agent'}
-                </button>
-                {accessError && (
-                  <p className="error-text" role="alert">
-                    {accessError}
-                  </p>
-                )}
-              </div>
-            )}
-            {executable(node) && !delivery && (
-              <>
-                <Field label="Instructions">
-                  <textarea
-                    rows={7}
-                    value={node.instructions ?? ''}
-                    onChange={(e) => graphChange('instructions', e.target.value)}
-                    placeholder="What should this agent do?"
-                  />
-                </Field>
-                {binding?.kind === 'agent' && (
-                  <>
-                    <ModelPicker
-                      label="Model"
-                      harness={doc.runtime.harness}
-                      provider={doc.runtime.provider}
-                      value={binding.model ?? ''}
-                      onChange={(value) => bindingChange('model', value)}
-                      openRuntime={p.openRuntime}
-                    />
-                    <div className="field-row">
-                      <Field label="Reasoning">
-                        <select
-                          value={binding.effort ?? ''}
-                          onChange={(e) => bindingChange('effort', e.target.value)}
-                        >
-                          <option value="">Default</option>
-                          {(p.schema?.$defs?.ReasoningEffort?.enum ?? []).map((v: string) => (
-                            <option key={v}>{v}</option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Field label="Session">
-                        <select
-                          value={binding.sessionScope ?? 'execution'}
-                          onChange={(e) => bindingChange('sessionScope', e.target.value)}
-                        >
-                          <option value="execution">Per execution</option>
-                          <option value="node_instance">Per node</option>
-                        </select>
-                      </Field>
-                    </div>
-                  </>
-                )}
-                <div className="field-row">
-                  {node.kind === 'verifier' && editableActivityRole(node, binding) && (
-                    <Field label="Attempts">
-                      {[1, 2].includes(node.attempts) ? (
-                        <select
-                          value={node.attempts}
-                          onChange={(event) => graphChange('attempts', Number(event.target.value))}
-                        >
-                          <option value={1}>1</option>
-                          <option value={2}>2</option>
-                        </select>
-                      ) : (
-                        <button
-                          className="text-button"
-                          aria-label="Attempts JSON"
-                          onClick={() => p.openJson(node.name)}
-                        >
-                          {String(node.attempts ?? 'JSON')} <Braces size={14} />
-                        </button>
-                      )}
-                    </Field>
-                  )}
-                  <NumberField
-                    key={`${node.name}-timeout`}
-                    node={node.name}
-                    field="timeoutMs"
-                    label="Timeout (ms)"
-                    value={node.timeoutMs}
-                    optional
-                    placeholder="No limit"
-                    onChange={(value) => {
-                      const next = { ...node };
-                      if (value === undefined) delete next.timeoutMs;
-                      else next.timeoutMs = value;
-                      p.updateNode(next);
-                    }}
-                  />
-                </div>
-              </>
-            )}
+            <ActivitySettings
+              p={p}
+              node={node}
+              binding={binding}
+              delivery={delivery}
+              graphChange={graphChange}
+            />
             {node.kind === 'loop' && (
               <div className="loop-reviewers">
                 {reviewSources(node).map((name) => (
@@ -415,6 +291,153 @@ export function Inspector(p: InspectorProps) {
     </aside>
   );
 }
+function ActivitySettings({
+  p,
+  node,
+  binding,
+  delivery,
+  graphChange,
+}: {
+  p: InspectorProps;
+  node: GraphNode;
+  binding: ReturnType<typeof bindingFor>;
+  delivery: boolean;
+  graphChange: (key: string, value: any) => void;
+}) {
+  const doc = p.document;
+  const [accessError, setAccessError] = useState('');
+  useEffect(() => setAccessError(''), [node]);
+  const bindingChange = (key: string, value: any) => {
+    const next = clone(doc);
+    if (value === '') delete next.runtime.nodes[node.name][key];
+    else next.runtime.nodes[node.name][key] = value;
+    p.edit(next, `binding.${node.name}.${key}`);
+  };
+  return (
+    <>
+      {executable(node) && (
+        <WorkerControl
+          key={`${node.name}-worker`}
+          document={doc}
+          node={node}
+          workers={p.workers}
+          onChange={p.edit}
+        />
+      )}
+      {editableActivityRole(node, binding) && (
+        <div>
+          <button
+            type="button"
+            className="text-button"
+            title={node.kind === 'step' ? 'Make read-only Verifier' : 'Make writing Agent'}
+            onClick={() => {
+              try {
+                p.edit(
+                  (node.kind === 'step' ? makeReadOnlyVerifier : makeWritingAgent)(doc, node.name)
+                );
+                setAccessError('');
+              } catch (cause) {
+                setAccessError((cause as Error).message);
+              }
+            }}
+          >
+            {node.kind === 'step' ? 'Make read-only Verifier' : 'Make writing Agent'}
+          </button>
+          {accessError && (
+            <p className="error-text" role="alert">
+              {accessError}
+            </p>
+          )}
+        </div>
+      )}
+      {executable(node) && !delivery && (
+        <>
+          <Field label="Instructions">
+            <textarea
+              rows={7}
+              value={node.instructions ?? ''}
+              onChange={(e) => graphChange('instructions', e.target.value)}
+              placeholder="What should this agent do?"
+            />
+          </Field>
+          {binding?.kind === 'agent' && (
+            <>
+              <ModelPicker
+                label="Model"
+                harness={doc.runtime.harness}
+                provider={doc.runtime.provider}
+                value={binding.model ?? ''}
+                onChange={(value) => bindingChange('model', value)}
+                openRuntime={p.openRuntime}
+              />
+              <div className="field-row">
+                <Field label="Reasoning">
+                  <select
+                    value={binding.effort ?? ''}
+                    onChange={(e) => bindingChange('effort', e.target.value)}
+                  >
+                    <option value="">Default</option>
+                    {(p.schema?.$defs?.ReasoningEffort?.enum ?? []).map((v: string) => (
+                      <option key={v}>{v}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Session">
+                  <select
+                    value={binding.sessionScope ?? 'execution'}
+                    onChange={(e) => bindingChange('sessionScope', e.target.value)}
+                  >
+                    <option value="execution">Per execution</option>
+                    <option value="node_instance">Per node</option>
+                  </select>
+                </Field>
+              </div>
+            </>
+          )}
+          <div className="field-row">
+            {node.kind === 'verifier' && editableActivityRole(node, binding) && (
+              <Field label="Attempts">
+                {[1, 2].includes(node.attempts) ? (
+                  <select
+                    value={node.attempts}
+                    onChange={(event) => graphChange('attempts', Number(event.target.value))}
+                  >
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                  </select>
+                ) : (
+                  <button
+                    className="text-button"
+                    aria-label="Attempts JSON"
+                    onClick={() => p.openJson(node.name)}
+                  >
+                    {String(node.attempts ?? 'JSON')} <Braces size={14} />
+                  </button>
+                )}
+              </Field>
+            )}
+            <NumberField
+              key={`${node.name}-timeout`}
+              node={node.name}
+              field="timeoutMs"
+              label="Timeout (ms)"
+              value={node.timeoutMs}
+              optional
+              placeholder="No limit"
+              onChange={(value) => {
+                const next = { ...node };
+                if (value === undefined) delete next.timeoutMs;
+                else next.timeoutMs = value;
+                p.updateNode(next);
+              }}
+            />
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 function NameField({ name, onChange }: { name: string; onChange: (n: string) => void }) {
   const [value, setValue] = useState(name),
     [error, setError] = useState('');

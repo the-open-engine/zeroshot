@@ -152,17 +152,19 @@ function readInit(
     return;
   return value as unknown as WorkspaceInit;
 }
-function readCommand(value: Record<string, unknown>, workspaceId: string): HostCommand | undefined {
-  if (
+function invalidCommandEnvelope(value: Record<string, unknown>, workspaceId: string): boolean {
+  return (
     value.version !== 1 ||
     value.workspaceId !== workspaceId ||
     !token(value.requestId) ||
     !(value.documentId === null || token(value.documentId)) ||
     !Number.isSafeInteger(value.generation) ||
-    Number(value.generation) < 0
-  )
-    return;
-  if (value.discard !== undefined && typeof value.discard !== 'boolean') return;
+    Number(value.generation) < 0 ||
+    (value.discard !== undefined && typeof value.discard !== 'boolean')
+  );
+}
+function readCommand(value: Record<string, unknown>, workspaceId: string): HostCommand | undefined {
+  if (invalidCommandEnvelope(value, workspaceId)) return;
   switch (value.type) {
     case 'open_profile':
       return readProfileCommand(value);

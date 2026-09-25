@@ -586,6 +586,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Unix tests that create executable fixtures use
   `openengine_cluster_testkit::fixture::write_executable`; its lock handoff covers writable
   descriptors inherited by concurrent process spawns.
+- `.opcore.json` owns the full-source Opcore policy. `.github/workflows/opcore.yml` runs the Fast
+  and native Rust providers on every PR and main commit. Its two exact PowerShell exclusions reflect
+  unsupported parsing; the Windows native CI lane still runs those scripts.
 - Preserve bounded values, explicit overflow, cancellation safety, and exact source provenance at
   every public boundary.
 - Add focused tests beside the owning crate/module.

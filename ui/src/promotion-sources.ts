@@ -197,6 +197,47 @@ function isParallelConflict(
   );
 }
 
+function parallelWriteIssues(
+  document: Document,
+  writer: GraphNode,
+  path: string[],
+  planned: Set<string>
+): string[] {
+  const issues: string[] = [];
+  for (const other of allNodes(document.graph.root).filter(executable)) {
+    if (
+      other.name !== writer.name &&
+      isParallelConflict(document.graph.root, writer, other, path, planned) &&
+      list(other.writeBindings).some((binding) => overlaps(binding?.target, path))
+    ) {
+      issues.push(
+        `${other.name} also writes this field in a parallel branch. Resolve the conflict first.`
+      );
+    }
+  }
+  return issues;
+}
+
+function addChainRouteChecks(
+  chainNodes: GraphNode[],
+  path: string[],
+  notes: string[],
+  issues: string[]
+) {
+  if (
+    chainNodes.some(
+      (node) => node.kind === 'choice' || (node.kind === 'par' && node.join?.kind !== 'all')
+    )
+  )
+    notes.push('This route crosses conditional branches. Validate checks which sources complete.');
+  for (const node of chainNodes) {
+    if (!payloadAtPath(node.state, path))
+      issues.push(`Add ${pathLabel(path)} to ${node.name} state before connecting.`);
+    if (node.promotedStatePaths !== undefined && !Array.isArray(node.promotedStatePaths))
+      issues.push(`${node.name} has an unsupported promotion format.`);
+  }
+}
+
 function sourceRoute(
   document: Document,
   group: GraphNode,
@@ -221,18 +262,7 @@ function sourceRoute(
   if (!valueType) issues.push('The selected child output field is unavailable.');
   if (selector?.node !== writer.name)
     notes.push('This write reads another node; Validate checks that its output is available.');
-  if (
-    chainNodes.some(
-      (node) => node.kind === 'choice' || (node.kind === 'par' && node.join?.kind !== 'all')
-    )
-  )
-    notes.push('This route crosses conditional branches. Validate checks which sources complete.');
-  for (const node of chainNodes) {
-    if (!payloadAtPath(node.state, path))
-      issues.push(`Add ${pathLabel(path)} to ${node.name} state before connecting.`);
-    if (node.promotedStatePaths !== undefined && !Array.isArray(node.promotedStatePaths))
-      issues.push(`${node.name} has an unsupported promotion format.`);
-  }
+  addChainRouteChecks(chainNodes, path, notes, issues);
   const target = enclosingType(document, writer, path, planned);
   addFitIssue(
     issues,
@@ -259,17 +289,7 @@ function sourceRoute(
     if (list(writer.writeBindings).some((binding) => overlaps(binding?.target, path)))
       issues.push(`${writer.name} already writes this state path. Edit that mapping instead.`);
   }
-  for (const other of allNodes(document.graph.root).filter(executable)) {
-    if (
-      other.name !== writer.name &&
-      isParallelConflict(document.graph.root, writer, other, path, planned) &&
-      list(other.writeBindings).some((binding) => overlaps(binding?.target, path))
-    ) {
-      issues.push(
-        `${other.name} also writes this field in a parallel branch. Resolve the conflict first.`
-      );
-    }
-  }
+  issues.push(...parallelWriteIssues(document, writer, path, planned));
   return {
     id: JSON.stringify([writer.name, bindingIndex ?? 'new', selector]),
     writer: writer.name,

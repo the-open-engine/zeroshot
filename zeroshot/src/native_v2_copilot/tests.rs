@@ -25,7 +25,13 @@ mod hosted;
 
 const INSTRUCTIONS: &str = "Return answer 42 using the required schema.";
 
-const SCRIPT: &str = include_str!("tests/runtime.py");
+fn script() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/native_v2_copilot/tests/runtime.py"
+    ))
+    .unwrap()
+}
 
 fn binding(names: impl Iterator<Item = String>) -> NodeRuntimeBinding {
     binding_for_model(names, "auto")
@@ -115,7 +121,7 @@ impl Fixture {
 
     async fn with_values(mode: &str, extra: BTreeMap<String, String>) -> Self {
         let directory = TestDirectory::new("copilot");
-        let executable = directory.write_executable("copilot", SCRIPT);
+        let executable = directory.write_executable("copilot", &script());
         let mut values = fixture_values(&directory, mode);
         values.insert(auth::TOKEN.to_owned(), "gho_fake-secret".to_owned());
         values.extend(extra);
@@ -186,7 +192,7 @@ impl Fixture {
         base_environment: BTreeMap<String, String>,
     ) -> Self {
         let directory = TestDirectory::new("copilot-provider");
-        let executable = directory.write_executable("copilot", SCRIPT);
+        let executable = directory.write_executable("copilot", &script());
         let mut values = fixture_values(&directory, mode);
         values.extend(extra_values);
         let local_user = local_user(&directory);
@@ -262,7 +268,7 @@ impl Fixture {
 
     async fn registry(explicit: bool, command: bool) -> Self {
         let directory = TestDirectory::new("copilot-registry");
-        let executable = directory.write_executable("copilot", SCRIPT);
+        let executable = directory.write_executable("copilot", &script());
         let copilot_home = directory.child("copilot-home");
         std::fs::create_dir_all(&copilot_home).assert_value();
         let registry = if command {
@@ -326,7 +332,7 @@ impl Fixture {
 
     async fn invalid_registry(contents: &[u8]) -> Self {
         let directory = TestDirectory::new("copilot-invalid-registry");
-        let executable = directory.write_executable("copilot", SCRIPT);
+        let executable = directory.write_executable("copilot", &script());
         let registry_path = directory.child("providers.json");
         std::fs::write(&registry_path, contents).assert_value();
         let values = fixture_values(&directory, "native");
