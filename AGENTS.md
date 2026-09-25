@@ -583,6 +583,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   hooks, CI gates, other skills, or checked-in state for personal analysis tooling.
 - New Rust APIs must respect the four-parameter Clippy ceiling; use request structs rather than
   raising or bypassing the limit.
+- `.opcore.json` owns the full-source Opcore policy. `.github/workflows/opcore.yml` runs the Fast
+  and native Rust providers on every PR and main commit. Its two exact PowerShell exclusions reflect
+  unsupported parsing; the Windows native CI lane still runs those scripts.
 - Preserve bounded values, explicit overflow, cancellation safety, and exact source provenance at
   every public boundary.
 - Add focused tests beside the owning crate/module.

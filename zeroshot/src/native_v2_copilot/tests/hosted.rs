@@ -9,7 +9,7 @@ async fn root_copilot_uses_the_hosted_process_boundary() {
         return;
     }
     let directory = TestDirectory::new("copilot-hosted");
-    let executable = directory.write_executable("copilot", SCRIPT);
+    let executable = directory.write_executable("copilot", &script());
     let workspace = directory.child("workspace");
     let runtime_home = directory.child("runtime");
     let process_pool = HostedProcessPool::new(31_602, 31_602, 32_600, 32_600).assert_value();

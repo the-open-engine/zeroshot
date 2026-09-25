@@ -60,48 +60,79 @@ pub(in crate::workspace) fn ensure_required_output(
         .iter()
         .any(|node| watched.iter().any(|name| references_guard(node, name)));
     let mut candidate = graph.clone();
-    let mut reason = None;
-    if references {
-        let mut expected = BTreeSet::new();
-        // Route-masked Choice errors and Map aggregates retain their existing explicit policy;
-        // factoring is intentionally limited to direct full worker-error sets.
-        let expected_guards = plain_error_terms(&guard).ok_or_else(custom_handling)?;
-        for error in expected_guards {
-            collect_guard_names(error, &mut expected);
-        }
-        let mut seen = false;
-        let (handler, _) = find_late_handler(suffix, consumer, &expected, &mut seen)
-            .ok()
-            .flatten()
-            .ok_or_else(custom_handling)?;
-        let mut edited_suffix = suffix.to_vec();
-        for node in &mut edited_suffix {
-            edit(node, &mut |node| {
-                if node.name() == &handler {
-                    reason = Some(split_failure(node, &expected)?);
-                }
-                Ok(())
-            })?;
-        }
-        // Other ordered, partial, signal, or recovery handlers may still own these outcomes.
-        // Reject instead of changing their priority or borrowing one arbitrary failure reason.
-        if edited_suffix
-            .iter()
-            .any(|node| watched.iter().any(|name| references_guard(node, name)))
-        {
-            return Err(custom_handling());
-        }
-        edit(&mut candidate.root, &mut |node| {
-            if node.name() == &handler {
-                split_failure(node, &expected)?;
-            }
-            Ok(())
-        })?;
-    }
+    let reason = if references {
+        factor_late_handler(
+            &mut candidate,
+            LateHandler {
+                suffix,
+                consumer,
+                guard: &guard,
+                watched: &watched,
+            },
+        )?
+    } else {
+        None
+    };
     let mut names = reserved_names(graph, runtime)?;
     protect_with_reason(&mut candidate.root, &target, &mut names, reason)?;
     *graph = candidate;
     Ok(())
+}
+
+struct LateHandler<'a> {
+    suffix: &'a [GraphNode],
+    consumer: &'a NodeName,
+    guard: &'a Guard,
+    watched: &'a BTreeSet<NodeName>,
+}
+
+fn factor_late_handler(
+    candidate: &mut GraphSpec,
+    handler: LateHandler<'_>,
+) -> Result<Option<FailReason>, ApiError> {
+    let LateHandler {
+        suffix,
+        consumer,
+        guard,
+        watched,
+    } = handler;
+    let mut expected = BTreeSet::new();
+    // Route-masked Choice errors and Map aggregates retain their existing explicit policy;
+    // factoring is intentionally limited to direct full worker-error sets.
+    let expected_guards = plain_error_terms(guard).ok_or_else(custom_handling)?;
+    for error in expected_guards {
+        collect_guard_names(error, &mut expected);
+    }
+    let mut seen = false;
+    let (handler, _) = find_late_handler(suffix, consumer, &expected, &mut seen)
+        .ok()
+        .flatten()
+        .ok_or_else(custom_handling)?;
+    let mut reason = None;
+    let mut edited_suffix = suffix.to_vec();
+    for node in &mut edited_suffix {
+        edit(node, &mut |node| {
+            if node.name() == &handler {
+                reason = Some(split_failure(node, &expected)?);
+            }
+            Ok(())
+        })?;
+    }
+    // Other ordered, partial, signal, or recovery handlers may still own these outcomes.
+    // Reject instead of changing their priority or borrowing one arbitrary failure reason.
+    if edited_suffix
+        .iter()
+        .any(|node| watched.iter().any(|name| references_guard(node, name)))
+    {
+        return Err(custom_handling());
+    }
+    edit(&mut candidate.root, &mut |node| {
+        if node.name() == &handler {
+            split_failure(node, &expected)?;
+        }
+        Ok(())
+    })?;
+    Ok(reason)
 }
 
 fn path_to<'a>(node: &'a GraphNode, target: &NodeName) -> Option<Vec<&'a GraphNode>> {
@@ -199,43 +230,7 @@ fn find_late_handler(
                 }
             }
             GraphNode::Choice(choice) => {
-                if *seen && split_terms(choice, expected).is_some() {
-                    let GraphNode::Fail(failure) = &choice.branches.as_slice()[0].node else {
-                        return Err(());
-                    };
-                    return Ok(Some((choice.name.clone(), failure.reason.clone())));
-                }
-                let [branch] = choice.branches.as_slice() else {
-                    return Err(());
-                };
-                if !matches!(branch.node, GraphNode::Fail(_))
-                    || plain_error_terms(&branch.when).is_none()
-                {
-                    return Err(());
-                }
-                if let Some(otherwise) = choice.otherwise.as_deref() {
-                    let consumer_reached = *seen;
-                    if let Some(found) = find_late_handler(
-                        std::slice::from_ref(otherwise),
-                        consumer,
-                        expected,
-                        seen,
-                    )? {
-                        let GraphNode::Fail(failure) = &branch.node else {
-                            return Err(());
-                        };
-                        if failure.reason != found.1
-                            && !(consumer_reached && is_consumer_default(branch, consumer))
-                        {
-                            return Err(());
-                        }
-                        return Ok(Some(found));
-                    }
-                }
-                // Keep this lowering bounded to a handler inside the same continuation. A
-                // sibling after a completed choice would need its earlier terminal priorities
-                // carried through a different scope; leave that authored structure untouched.
-                return Err(());
+                return find_choice_handler(choice, consumer, expected, seen);
             }
             GraphNode::Loop(_) | GraphNode::Map(_) | GraphNode::Fail(_) | GraphNode::Succeed(_) => {
                 return Err(());
@@ -245,6 +240,46 @@ fn find_late_handler(
         *seen |= named_nodes(node, consumer) == 1;
     }
     Ok(None)
+}
+
+fn find_choice_handler(
+    choice: &ChoiceNode,
+    consumer: &NodeName,
+    expected: &BTreeSet<NodeName>,
+    seen: &mut bool,
+) -> Result<Option<(NodeName, FailReason)>, ()> {
+    if *seen && split_terms(choice, expected).is_some() {
+        let GraphNode::Fail(failure) = &choice.branches.as_slice()[0].node else {
+            return Err(());
+        };
+        return Ok(Some((choice.name.clone(), failure.reason.clone())));
+    }
+    let [branch] = choice.branches.as_slice() else {
+        return Err(());
+    };
+    if !matches!(branch.node, GraphNode::Fail(_)) || plain_error_terms(&branch.when).is_none() {
+        return Err(());
+    }
+    if let Some(otherwise) = choice.otherwise.as_deref() {
+        let consumer_reached = *seen;
+        if let Some(found) =
+            find_late_handler(std::slice::from_ref(otherwise), consumer, expected, seen)?
+        {
+            let GraphNode::Fail(failure) = &branch.node else {
+                return Err(());
+            };
+            if failure.reason != found.1
+                && !(consumer_reached && is_consumer_default(branch, consumer))
+            {
+                return Err(());
+            }
+            return Ok(Some(found));
+        }
+    }
+    // Keep this lowering bounded to a handler inside the same continuation. A
+    // sibling after a completed choice would need its earlier terminal priorities
+    // carried through a different scope; leave that authored structure untouched.
+    Err(())
 }
 
 fn is_consumer_default(branch: &ChoiceBranch, consumer: &NodeName) -> bool {

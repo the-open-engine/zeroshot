@@ -501,28 +501,7 @@ fn loop_input_route(
             "Select an existing activity input inside the same loop.",
         ));
     }
-    let value_type = selected_type(&donor["input"], source.path)?;
-    let bindings = donor["inputBindings"]
-        .as_array()
-        .ok_or_else(|| invalid("This input has no saved source."))?;
-    let overlapping = bindings
-        .iter()
-        .filter(|binding| {
-            binding["target"]
-                .as_array()
-                .and_then(|path| path.first())
-                .and_then(Value::as_str)
-                == Some(source.path[0].as_str())
-        })
-        .collect::<Vec<_>>();
-    let [binding] = overlapping.as_slice() else {
-        return Err(invalid("Select one complete existing input mapping."));
-    };
-    if binding["target"] != json!(source.path) || binding["value"]["source"] != "state" {
-        return Err(invalid("Select an existing loop feedback input."));
-    }
-    let selector = binding["value"].clone();
-    let path = field_path(&selector["path"])?;
+    let (selector, path, value_type) = saved_feedback_input(donor, source.path)?;
     let donor_path = ancestry(index, source.node)?;
     let consumer_path = ancestry(index, consumer)?;
     let owner = nearest_loop(index, &donor_path)
@@ -533,28 +512,7 @@ fn loop_input_route(
 
     // A copied selector must retain the same unambiguous writer, including nested
     // target collisions. An identically named path from another scope is not guessed.
-    let mut writes = Vec::new();
-    for (name, location) in index {
-        let node = graph
-            .pointer(&location.pointer)
-            .ok_or_else(|| invalid("Node not found."))?;
-        for binding in node["writeBindings"].as_array().into_iter().flatten() {
-            let target = field_path(&binding["target"])?;
-            if target.iter().zip(&path).all(|(left, right)| left == right) {
-                writes.push((name, binding, target));
-            }
-        }
-    }
-    let [(writer, write, target)] = writes.as_slice() else {
-        return Err(invalid(
-            "This feedback path needs one unambiguous existing writer.",
-        ));
-    };
-    if target != &path || write["value"]["node"].as_str() != Some(writer.as_str()) {
-        return Err(invalid(
-            "Select feedback written directly by its producing activity.",
-        ));
-    }
+    let (writer, write) = feedback_writer(graph, index, &path)?;
     let writer_path = ancestry(index, writer)?;
     if nearest_loop(index, &writer_path) != Some(owner)
         || !previous_round_route(index, writer, source.node)?
@@ -570,16 +528,49 @@ fn loop_input_route(
     if output.len() != 1 || output[0].value_type != value_type {
         return Err(invalid("The saved feedback output has a different type."));
     }
-    for route in [&donor_path, &consumer_path, &writer_path] {
+    validate_feedback_scopes(
+        graph,
+        index,
+        FeedbackScopeCheck {
+            routes: [&donor_path, &consumer_path, &writer_path],
+            owner,
+            path: &path,
+            value_type: &value_type,
+        },
+    )?;
+    validate_initial_feedback(graph, &path, &value_type)?;
+    Ok((selector, value_type))
+}
+
+struct FeedbackScopeCheck<'a> {
+    routes: [&'a Vec<String>; 3],
+    owner: &'a str,
+    path: &'a [String],
+    value_type: &'a Value,
+}
+
+fn validate_feedback_scopes(
+    graph: &Value,
+    index: &Index,
+    check: FeedbackScopeCheck<'_>,
+) -> Result<(), ApiError> {
+    let FeedbackScopeCheck {
+        routes,
+        owner,
+        path,
+        value_type,
+    } = check;
+    for route in &routes {
         for name in route.iter().take(route.len() - 1) {
             let scope = get(graph, index, name)?;
-            if scope["kind"] == "map" || selected_type(&scope["state"], &path)? != value_type {
+            if scope["kind"] == "map" || selected_type(&scope["state"], path)? != *value_type {
                 return Err(invalid(
                     "Feedback must keep the same required type in every enclosing scope.",
                 ));
             }
         }
     }
+    let writer_path = routes[2];
     let loop_index = writer_path
         .iter()
         .position(|name| name == owner)
@@ -597,6 +588,14 @@ fn loop_input_route(
             ));
         }
     }
+    Ok(())
+}
+
+fn validate_initial_feedback(
+    graph: &Value,
+    path: &[String],
+    value_type: &Value,
+) -> Result<(), ApiError> {
     let initial: PayloadType =
         serde_json::from_value(graph["initialInput"].clone()).map_err(value_error)?;
     let root_state: PayloadType =
@@ -604,14 +603,69 @@ fn loop_input_route(
     let effective = initial
         .materialized_subtype_of(&root_state)
         .ok_or_else(|| invalid("The feedback has no defined value on the first attempt."))?;
-    if selected_type(
-        &serde_json::to_value(effective).map_err(value_error)?,
-        &path,
-    )? != value_type
-    {
+    if selected_type(&serde_json::to_value(effective).map_err(value_error)?, path)? != *value_type {
         return Err(invalid("The feedback has no compatible initial value."));
     }
-    Ok((selector, value_type))
+    Ok(())
+}
+
+fn saved_feedback_input(
+    donor: &Value,
+    source_path: &[String],
+) -> Result<(Value, Vec<String>, Value), ApiError> {
+    let value_type = selected_type(&donor["input"], source_path)?;
+    let bindings = donor["inputBindings"]
+        .as_array()
+        .ok_or_else(|| invalid("This input has no saved source."))?;
+    let overlapping = bindings
+        .iter()
+        .filter(|binding| {
+            binding["target"]
+                .as_array()
+                .and_then(|path| path.first())
+                .and_then(Value::as_str)
+                == Some(source_path[0].as_str())
+        })
+        .collect::<Vec<_>>();
+    let [binding] = overlapping.as_slice() else {
+        return Err(invalid("Select one complete existing input mapping."));
+    };
+    if binding["target"] != json!(source_path) || binding["value"]["source"] != "state" {
+        return Err(invalid("Select an existing loop feedback input."));
+    }
+    let selector = binding["value"].clone();
+    let path = field_path(&selector["path"])?;
+    Ok((selector, path, value_type))
+}
+
+fn feedback_writer<'a>(
+    graph: &'a Value,
+    index: &'a Index,
+    path: &[String],
+) -> Result<(&'a String, &'a Value), ApiError> {
+    let mut writes = Vec::new();
+    for (name, location) in index {
+        let node = graph
+            .pointer(&location.pointer)
+            .ok_or_else(|| invalid("Node not found."))?;
+        for binding in node["writeBindings"].as_array().into_iter().flatten() {
+            let target = field_path(&binding["target"])?;
+            if target.iter().zip(path).all(|(left, right)| left == right) {
+                writes.push((name, binding, target));
+            }
+        }
+    }
+    let [(writer, write, target)] = writes.as_slice() else {
+        return Err(invalid(
+            "This feedback path needs one unambiguous existing writer.",
+        ));
+    };
+    if target != path || write["value"]["node"].as_str() != Some(writer.as_str()) {
+        return Err(invalid(
+            "Select feedback written directly by its producing activity.",
+        ));
+    }
+    Ok((writer, write))
 }
 
 fn executable(node: &Value) -> bool {
@@ -718,22 +772,15 @@ fn connect_outputs(
             return Err(invalid("Select an earlier output."));
         }
         let source_scopes = &source_path[shared..source_path.len() - 1];
-        let mut value_type = producer.value_type.clone();
-        for scope in source_scopes.iter().rev() {
-            let node = get(graph, index, scope)?;
-            if node["kind"] == "par" && node["join"]["kind"] != "all" {
-                return Err(invalid("Select an output from a completed group."));
-            }
-            if node["kind"] == "loop" && !guaranteed(&node["body"], &producer_names) {
-                return Err(invalid("This output is not produced in every round."));
-            }
-            if node["kind"] == "choice" && !guaranteed(node, &producer_names) {
-                return Err(invalid("Select a common decision output."));
-            }
-            if node["kind"] == "map" {
-                value_type = json!({"kind":"array","items":value_type});
-            }
-        }
+        let value_type = produced_output_type(
+            graph,
+            index,
+            OutputSource {
+                scopes: source_scopes,
+                producer_names: &producer_names,
+            },
+            producer.value_type.clone(),
+        )?;
         if final_type
             .as_ref()
             .is_some_and(|value| value != &value_type)
@@ -781,6 +828,35 @@ fn connect_outputs(
         json!({"source":"state","path":[field]}),
         final_type.ok_or_else(|| invalid("Select an output."))?,
     ))
+}
+
+struct OutputSource<'a> {
+    scopes: &'a [String],
+    producer_names: &'a BTreeSet<String>,
+}
+
+fn produced_output_type(
+    graph: &Value,
+    index: &Index,
+    source: OutputSource<'_>,
+    mut value_type: Value,
+) -> Result<Value, ApiError> {
+    for scope in source.scopes.iter().rev() {
+        let node = get(graph, index, scope)?;
+        if node["kind"] == "par" && node["join"]["kind"] != "all" {
+            return Err(invalid("Select an output from a completed group."));
+        }
+        if node["kind"] == "loop" && !guaranteed(&node["body"], source.producer_names) {
+            return Err(invalid("This output is not produced in every round."));
+        }
+        if node["kind"] == "choice" && !guaranteed(node, source.producer_names) {
+            return Err(invalid("Select a common decision output."));
+        }
+        if node["kind"] == "map" {
+            value_type = json!({"kind":"array","items":value_type});
+        }
+    }
+    Ok(value_type)
 }
 
 fn guaranteed(node: &Value, names: &BTreeSet<String>) -> bool {
@@ -974,87 +1050,16 @@ fn edit_run_input(
         }
     }
     if let Some(old) = before {
-        for (node, info) in index {
-            let owner = info.parent.as_ref();
-            if !owner.is_some_and(|owner| linked.contains(owner)) && !linked.contains(node) {
-                continue;
-            }
-            let value = get_mut(graph, index, node)?;
-            for key in ["inputBindings", "bindings"] {
-                let Some(bindings) = value.get_mut(key).and_then(Value::as_array_mut) else {
-                    continue;
-                };
-                let mut changes = Vec::new();
-                bindings.retain_mut(|binding| {
-                    if binding["value"]["source"] != "state" || binding["value"]["path"][0] != old {
-                        return true;
-                    }
-                    changes.push((binding["target"].clone(), binding["value"]["path"].clone()));
-                    if field.is_some() {
-                        binding["value"]["path"][0] = json!(name);
-                        true
-                    } else {
-                        false
-                    }
-                });
-                let schema = if key == "bindings" { "output" } else { "input" };
-                for (target, source_path) in changes {
-                    if let Some(input) = target
-                        .as_array()
-                        .filter(|path| path.len() == 1)
-                        .and_then(|path| path[0].as_str())
-                    {
-                        if let Some(fields) = value
-                            .get_mut(schema)
-                            .and_then(|schema| schema.get_mut("fields"))
-                            .and_then(Value::as_object_mut)
-                        {
-                            if let Some(field) = &field {
-                                let mut selected = &field["type"];
-                                for part in source_path.as_array().into_iter().flatten().skip(1) {
-                                    let part = part
-                                        .as_str()
-                                        .ok_or_else(|| invalid("Invalid connected input."))?;
-                                    selected = selected["fields"]
-                                        .get(part)
-                                        .map(|field| &field["type"])
-                                        .ok_or_else(|| {
-                                            invalid("A connected field no longer exists.")
-                                        })?;
-                                }
-                                fields
-                                    .insert(input.into(), json!({"type":selected,"required":true}));
-                            } else {
-                                fields.remove(input);
-                            }
-                        }
-                    }
-                }
-            }
-            if value["over"]["source"] == "state" && value["over"]["path"][0] == old {
-                if field.is_some() {
-                    value["over"]["path"][0] = json!(name);
-                } else {
-                    value["over"] = Value::Null;
-                }
-            }
-            if let Some(promotions) = value
-                .get_mut("promotedStatePaths")
-                .and_then(Value::as_array_mut)
-            {
-                promotions.retain_mut(|path| {
-                    if path[0] != old {
-                        return true;
-                    }
-                    if field.is_some() {
-                        path[0] = json!(name);
-                        true
-                    } else {
-                        false
-                    }
-                });
-            }
-        }
+        rewrite_input_references(
+            graph,
+            index,
+            InputRewrite {
+                old,
+                name,
+                field: field.as_ref(),
+                linked: &linked,
+            },
+        )?;
     }
     for name in affected_maps {
         let map = get_mut(graph, index, &name)?;
@@ -1069,6 +1074,115 @@ fn edit_run_input(
             Value::Null
         };
         refresh_map_inputs(graph, index, &name, &items)?;
+    }
+    Ok(())
+}
+
+struct InputRewrite<'a> {
+    old: &'a str,
+    name: &'a str,
+    field: Option<&'a Value>,
+    linked: &'a BTreeSet<String>,
+}
+
+fn rewrite_input_references(
+    graph: &mut Value,
+    index: &Index,
+    rewrite: InputRewrite<'_>,
+) -> Result<(), ApiError> {
+    let InputRewrite {
+        old,
+        name,
+        field,
+        linked,
+    } = rewrite;
+    for (node, info) in index {
+        let owner = info.parent.as_ref();
+        if !owner.is_some_and(|owner| linked.contains(owner)) && !linked.contains(node) {
+            continue;
+        }
+        let value = get_mut(graph, index, node)?;
+        for key in ["inputBindings", "bindings"] {
+            let Some(bindings) = value.get_mut(key).and_then(Value::as_array_mut) else {
+                continue;
+            };
+            let mut changes = Vec::new();
+            bindings.retain_mut(|binding| {
+                if binding["value"]["source"] != "state" || binding["value"]["path"][0] != old {
+                    return true;
+                }
+                changes.push((binding["target"].clone(), binding["value"]["path"].clone()));
+                if field.is_some() {
+                    binding["value"]["path"][0] = json!(name);
+                    true
+                } else {
+                    false
+                }
+            });
+            let schema = if key == "bindings" { "output" } else { "input" };
+            rewrite_connected_fields(value, schema, changes, field)?;
+        }
+        if value["over"]["source"] == "state" && value["over"]["path"][0] == old {
+            if field.is_some() {
+                value["over"]["path"][0] = json!(name);
+            } else {
+                value["over"] = Value::Null;
+            }
+        }
+        if let Some(promotions) = value
+            .get_mut("promotedStatePaths")
+            .and_then(Value::as_array_mut)
+        {
+            promotions.retain_mut(|path| {
+                if path[0] != old {
+                    return true;
+                }
+                if field.is_some() {
+                    path[0] = json!(name);
+                    true
+                } else {
+                    false
+                }
+            });
+        }
+    }
+    Ok(())
+}
+
+fn rewrite_connected_fields(
+    value: &mut Value,
+    schema: &str,
+    changes: Vec<(Value, Value)>,
+    field: Option<&Value>,
+) -> Result<(), ApiError> {
+    for (target, source_path) in changes {
+        if let Some(input) = target
+            .as_array()
+            .filter(|path| path.len() == 1)
+            .and_then(|path| path[0].as_str())
+        {
+            if let Some(fields) = value
+                .get_mut(schema)
+                .and_then(|schema| schema.get_mut("fields"))
+                .and_then(Value::as_object_mut)
+            {
+                if let Some(field) = field {
+                    let mut selected = &field["type"];
+                    for part in source_path.as_array().into_iter().flatten().skip(1) {
+                        let part = part
+                            .as_str()
+                            .ok_or_else(|| invalid("Invalid connected input."))?;
+                        selected = selected["fields"]
+                            .get(part)
+                            .map(|field| &field["type"])
+                            .ok_or_else(|| invalid("A connected field no longer exists."))?;
+                    }
+                    fields.insert(input.into(), json!({"type":selected,"required":true}));
+                } else {
+                    fields.remove(input);
+                }
+            }
+        }
     }
     Ok(())
 }

@@ -383,6 +383,7 @@ function makeNode(root: GraphNode, kind: string, parentState: any): GraphNode {
   } else throw new Error('Choose a supported node type.');
   return node;
 }
+
 export function replaceBody(document: Document, parent: string, kind: string): Document {
   const group = findNode(document.graph.root, parent);
   if (!group || !['loop', 'map'].includes(group.kind)) throw new Error('Select a loop or map.');
@@ -391,6 +392,7 @@ export function replaceBody(document: Document, parent: string, kind: string): D
   // and Rust identifies any references that no longer resolve.
   return replaceNode(document, parent, { ...group, body });
 }
+
 export function wrapBody(document: Document, parent: string): { document: Document; name: string } {
   const group = findNode(document.graph.root, parent);
   if (!group || !['loop', 'map'].includes(group.kind)) throw new Error('Select a loop or map.');
@@ -410,14 +412,8 @@ export function wrapBody(document: Document, parent: string): { document: Docume
   };
   return { document: replaceNode(document, parent, { ...group, body }), name };
 }
-export function assertDocument(value: any): asserts value is Document {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new Error('A profile must be a JSON object.');
-  for (const key of Object.keys(value))
-    if (!['name', 'graph', 'runtime', 'id', 'scope', 'isDefault'].includes(key))
-      throw new Error(`Unknown profile field: ${key}.`);
-  if (value.name !== undefined && typeof value.name !== 'string')
-    throw new Error('Profile name must be text.');
+
+function assertRuntime(value: any): void {
   if (
     !value.graph ||
     !value.runtime ||
@@ -443,35 +439,54 @@ export function assertDocument(value: any): asserts value is Document {
       if (binding[key] !== undefined && typeof binding[key] !== 'string')
         throw new Error(`${key} for ${name} must be text.`);
   }
+}
+
+function assertNodeFields(n: any): void {
+  if (
+    !n ||
+    typeof n !== 'object' ||
+    typeof n.kind !== 'string' ||
+    !Object.hasOwn(labels, n.kind) ||
+    typeof n.name !== 'string' ||
+    !n.name
+  )
+    throw new Error('Every graph node needs a supported kind and a name.');
+  if (n.instructions !== undefined && typeof n.instructions !== 'string')
+    throw new Error(`Instructions for ${n.name} must be text.`);
+  if (n.kind === 'fail' && typeof n.reason !== 'string')
+    throw new Error(`Failure reason for ${n.name} must be text.`);
+  for (const key of ['attempts', 'timeoutMs', 'maxIterations', 'maxItems'])
+    if (n[key] !== undefined && typeof n[key] !== 'number' && n[key] !== '')
+      throw new Error(`${key} for ${n.name} must be a number.`);
+}
+
+function assertNodeChildren(n: any): void {
+  if (n.kind === 'seq' && !Array.isArray(n.children))
+    throw new Error('A sequence needs a children array.');
+  if (['par', 'choice'].includes(n.kind) && !Array.isArray(n.branches))
+    throw new Error('A branch group needs a branches array.');
+  if (n.kind === 'choice' && n.branches.some((b: any) => !b || !b.node))
+    throw new Error('Each choice branch needs a node.');
+}
+
+export function assertDocument(value: any): asserts value is Document {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('A profile must be a JSON object.');
+  for (const key of Object.keys(value))
+    if (!['name', 'graph', 'runtime', 'id', 'scope', 'isDefault'].includes(key))
+      throw new Error(`Unknown profile field: ${key}.`);
+  if (value.name !== undefined && typeof value.name !== 'string')
+    throw new Error('Profile name must be text.');
+  assertRuntime(value);
   let count = 0;
   const names = new Set<string>();
   function inspect(n: any, depth: number): void {
     if (++count > 500 || depth > 48)
       throw new Error('The editor supports up to 500 nodes and 48 nesting levels.');
-    if (
-      !n ||
-      typeof n !== 'object' ||
-      typeof n.kind !== 'string' ||
-      !Object.hasOwn(labels, n.kind) ||
-      typeof n.name !== 'string' ||
-      !n.name
-    )
-      throw new Error('Every graph node needs a supported kind and a name.');
-    if (n.instructions !== undefined && typeof n.instructions !== 'string')
-      throw new Error(`Instructions for ${n.name} must be text.`);
-    if (n.kind === 'fail' && typeof n.reason !== 'string')
-      throw new Error(`Failure reason for ${n.name} must be text.`);
-    for (const key of ['attempts', 'timeoutMs', 'maxIterations', 'maxItems'])
-      if (n[key] !== undefined && typeof n[key] !== 'number' && n[key] !== '')
-        throw new Error(`${key} for ${n.name} must be a number.`);
+    assertNodeFields(n);
     if (names.has(n.name)) throw new Error(`Duplicate node name: ${n.name}.`);
     names.add(n.name);
-    if (n.kind === 'seq' && !Array.isArray(n.children))
-      throw new Error('A sequence needs a children array.');
-    if (['par', 'choice'].includes(n.kind) && !Array.isArray(n.branches))
-      throw new Error('A branch group needs a branches array.');
-    if (n.kind === 'choice' && n.branches.some((b: any) => !b || !b.node))
-      throw new Error('Each choice branch needs a node.');
+    assertNodeChildren(n);
     children(n).forEach((child) => inspect(child, depth + 1));
   }
   inspect(value.graph.root, 0);

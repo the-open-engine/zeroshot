@@ -37,6 +37,19 @@ export function controlVisitLabel(visit: ControlVisit): string {
   ].join(' · ');
 }
 
+function validControlRecord(record: ControlRecord): boolean {
+  return (
+    !!record &&
+    typeof record.node === 'string' &&
+    typeof record.visitId === 'string' &&
+    Array.isArray(record.mapIndices) &&
+    record.mapIndices.every((index) => Number.isSafeInteger(index) && index >= 0) &&
+    ['entered', 'completed', 'succeeded', 'failed', 'stopped'].includes(record.state) &&
+    (record.branch === undefined || typeof record.branch === 'string') &&
+    (record.detail === undefined || typeof record.detail === 'string')
+  );
+}
+
 /** Merge only reducer records anchored in this page. Retransmission must be identical. */
 export function appendControlHistory(
   previous: readonly ControlRecord[],
@@ -55,17 +68,7 @@ export function appendControlHistory(
   );
   let position = -1;
   for (const record of page.control) {
-    if (
-      !record ||
-      typeof record.node !== 'string' ||
-      typeof record.visitId !== 'string' ||
-      !Array.isArray(record.mapIndices) ||
-      !record.mapIndices.every((index) => Number.isSafeInteger(index) && index >= 0) ||
-      !['entered', 'completed', 'succeeded', 'failed', 'stopped'].includes(record.state) ||
-      (record.branch !== undefined && typeof record.branch !== 'string') ||
-      (record.detail !== undefined && typeof record.detail !== 'string')
-    )
-      return fail();
+    if (!validControlRecord(record)) return fail();
     const next = positions.get(record.cursor);
     if (next === undefined || next < position) return fail();
     const identity = JSON.stringify([record.node, record.mapIndices]);

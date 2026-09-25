@@ -25,7 +25,14 @@ impl Fixture {
             .unwrap();
         success(&node);
         let node = String::from_utf8(node.stdout).unwrap();
-        std::fs::write(bin.join("harness.cjs"), include_bytes!("harness.cjs")).unwrap();
+        std::fs::copy(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/native_v2_cli_portable/harness.cjs"
+            ),
+            bin.join("harness.cjs"),
+        )
+        .unwrap();
         install_shim(&bin, node.trim());
         let mut paths = vec![bin];
         paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));

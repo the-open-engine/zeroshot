@@ -156,15 +156,7 @@ class Client:
     async def run(
         self,
         task: str,
-        *,
-        title: str | None = None,
-        preset: Preset | None = None,
-        runtime: _Runtime | None = None,
-        repository: str | None = None,
-        branch: str | None = None,
-        revision: str | None = None,
-        submission_key: str | None = None,
-        wait_timeout: float | None = None,
+        **options: Unpack[_RunOptions],
     ) -> RunResult: ...
 
     @overload
