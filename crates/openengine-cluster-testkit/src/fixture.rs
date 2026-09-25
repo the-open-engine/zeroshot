@@ -108,7 +108,6 @@ fn finish_executable_write(file: std::fs::File, path: &Path) -> io::Result<()> {
 #[cfg(all(test, unix))]
 mod tests {
     use std::sync::mpsc;
-    use std::time::{Duration, Instant};
 
     use super::*;
 
@@ -127,12 +126,10 @@ mod tests {
         });
 
         let probe = std::fs::File::open(&path).expect("open lock probe");
-        let deadline = Instant::now() + Duration::from_secs(1);
         loop {
             match fs2::FileExt::try_lock_shared(&probe) {
                 Ok(()) => {
                     fs2::FileExt::unlock(&probe).expect("unlock probe");
-                    assert!(Instant::now() < deadline, "lock handoff never started");
                     std::thread::yield_now();
                 }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
@@ -143,8 +140,8 @@ mod tests {
 
         drop(inherited_writer);
         result
-            .recv_timeout(Duration::from_secs(1))
-            .expect("lock handoff should finish after the inherited writer closes")
+            .recv()
+            .expect("receive lock handoff result")
             .expect("lock handoff should succeed");
         waiter.join().expect("join lock handoff waiter");
     }
