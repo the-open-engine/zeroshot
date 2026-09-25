@@ -369,7 +369,8 @@ function EnvironmentNotice({
     <div className="history-error" role={failure ? 'alert' : 'status'}>
       <span>
         {failure
-          ? `${failure} Graph execution did not start. Check the run log and update the profile before retrying.`
+          ? `${failure} Graph execution did not start. ` +
+            'Check the run log and update the environment before starting a new run.'
           : 'Preparing environment. Setup and startup must finish before graph nodes can run.'}
       </span>
       <button className="text-button" onClick={openLog}>
