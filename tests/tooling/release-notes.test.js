@@ -183,6 +183,28 @@ describe('release-note validation', () => {
   });
 });
 
+describe('historical release metadata recovery', () => {
+  it('recovers the immutable Dependabot update without accepting later missing summaries', () => {
+    const historical = {
+      hash: '0d688ae5773febd2e6c81def59790b04c9e8fd58',
+      subject: 'chore(deps-dev): bump prettier from 3.9.6 to 3.9.8 (#1136)',
+      body: 'Bumps the development-dependencies group with 1 update:\n[prettier].',
+    };
+    assert.equal(
+      parseReleaseCommit(historical).summary,
+      'Update the development formatter Prettier from 3.9.6 to 3.9.8.'
+    );
+    assert.throws(
+      () => parseReleaseCommit({ ...historical, hash: 'b'.repeat(40) }),
+      /has no release summary/
+    );
+    assert.equal(
+      parseReleaseCommit({ ...historical, body: '## Summary\n\nExplicit summary.' }).summary,
+      'Explicit summary.'
+    );
+  });
+});
+
 describe('release-note Git history', () => {
   it('uses the preceding canonical tag and immutable first-parent range', () => {
     const repository = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-release-notes-'));

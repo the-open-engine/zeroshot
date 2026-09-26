@@ -12,6 +12,12 @@ const RELEASE_COMMIT = /^[0-9a-f]{40}$/;
 const RELEASE_SUBJECT =
   /^(?<type>[a-z]+)(?:\((?<scope>[^()\r\n]+)\))?(?<breaking>!)?: (?<title>.+) \(#(?<pull>[1-9][0-9]*)\)$/;
 const PLAIN_SUMMARY_COMMIT_EXCEPTIONS = new Set(['78b7baa2d88dcd6a7640d8cf06d6fbce94d91f42']);
+const RECOVERED_COMMIT_SUMMARIES = new Map([
+  [
+    '0d688ae5773febd2e6c81def59790b04c9e8fd58',
+    'Update the development formatter Prettier from 3.9.6 to 3.9.8.',
+  ],
+]);
 const CATEGORIES = Object.freeze([
   ['breaking', 'Breaking changes'],
   ['feat', 'Features'],
@@ -166,6 +172,9 @@ function parseReleaseCommit(commit) {
   if (!summary && PLAIN_SUMMARY_COMMIT_EXCEPTIONS.has(commit.hash)) {
     summary = plainSummaryFromBody(commit.body);
   }
+  // This already-merged Dependabot update contains upstream HTML instead of our
+  // Summary section. Recover only this immutable object; other commits stay strict.
+  if (!summary) summary = RECOVERED_COMMIT_SUMMARIES.get(commit.hash);
   if (!summary) throw new Error(`${commit.hash} has no release summary`);
   const breakingFooter = hasBreakingFooter(commit.body);
   const category =
