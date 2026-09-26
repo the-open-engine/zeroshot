@@ -4,13 +4,14 @@ use serde_json::{Value, json};
 use super::*;
 #[cfg(unix)]
 use super::observation::test_support::{authority, shell_literal, write_executable};
-use super::policy::MergeMethod;
+use super::merge_policy::MergeMethod;
 use crate::native_v2_delivery::GitHubChecks;
 
+#[cfg(unix)]
 #[path = "merge_tests.rs"]
 mod merge_tests;
 
-fn review() -> GitHubReviewReceipt {
+pub(super) fn review() -> GitHubReviewReceipt {
     GitHubReviewReceipt {
         review_id: "17".to_owned(),
         repository: "acme/project".to_owned(),
@@ -83,7 +84,7 @@ fn policy_page(
                     "baseRef": {
                         "name": "main",
                         "branchProtectionRule": null,
-                        "rules": {"totalCount": 0, "nodes": []},
+                        "rules": {"totalCount": 0, "nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}},
                         "refUpdateRule": {
                             "requiredApprovingReviewCount": 0,
                             "requiredStatusCheckContexts": [],
@@ -258,17 +259,17 @@ fn policy_query_is_repository_generic_and_paginates_required_contexts() {
     assert!(query.contains("isRequired(pullRequestNumber: $number)"));
     assert!(query.contains("statusCheckRollup"));
     assert!(query.contains("isMergeQueueEnabled"));
-    assert!(query.contains("mergeCommitAllowed"));
+    assert!(!query.contains("mergeCommitAllowed"));
     assert!(query.contains("requiredApprovingReviewCount"));
     assert!(query.contains("requiresConversationResolution"));
-    assert!(query.contains("branchProtectionRule { requiresLinearHistory }"));
-    assert!(query.contains("rules(first: 100)"));
+    assert!(!query.contains("branchProtectionRule"));
+    assert!(!query.contains("rules(first:"));
     assert_eq!(
         query.matches("pageInfo").count(),
         1,
         "gh paginates only check contexts"
     );
-    assert!(query.contains("allowedMergeMethods"));
+    assert!(!query.contains("allowedMergeMethods"));
 }
 
 #[test]
@@ -555,21 +556,8 @@ fn merge_queue_policy_reaches_native_submission_without_ci_special_cases() {
                 checks: GitHubChecks::NotRequired
             }
         );
-        assert_eq!(snapshot.merge_method, Some(MergeMethod::Queue));
+        assert!(snapshot.is_merge_queue_enabled);
         assert!(snapshot.head_update.is_none());
-    }
-}
-
-#[test]
-fn repository_merge_capabilities_select_an_allowed_method() {
-    let cases = [
-        ((true, true, true), MergeMethod::Merge),
-        ((false, true, true), MergeMethod::Squash),
-        ((false, false, true), MergeMethod::Rebase),
-    ];
-    for ((merge, squash, rebase), expected) in cases {
-        let page = policy_page_with_merge_capabilities(merge, squash, rebase);
-        assert_eq!(classify(page).merge_method, Some(expected));
     }
 }
 
@@ -836,15 +824,14 @@ fn oversized_failure_summary_marks_omitted_text() {
 }
 
 #[test]
-fn merge_actions_preserve_terminal_authority_and_select_only_allowed_methods() {
-    let snapshot = |state, merge_method| PolicySnapshot {
+fn merge_actions_preserve_terminal_authority_and_queue_ownership() {
+    let snapshot = |state, queued| PolicySnapshot {
         state,
         failed_job_ids: Vec::new(),
-        merge_method,
+        is_merge_queue_enabled: queued,
         head_update: None,
         pull_request_ready: false,
     };
-
     for (state, expected) in [
         (
             GitHubReviewState::Merged {
@@ -863,42 +850,37 @@ fn merge_actions_preserve_terminal_authority_and_select_only_allowed_methods() {
             GitHubMergeRequestOutcome::Pending,
         ),
     ] {
-        let MergeAction::Complete(actual) = merge_action(snapshot(state, None)).assert_value()
+        let MergeAction::Complete(actual) = merge_action(snapshot(state, false)).assert_value()
         else {
             panic!("terminal policy must complete without submitting");
         };
         assert_eq!(actual, expected);
     }
+    for queued in [false, true] {
+        for checks in [GitHubChecks::NotRequired, GitHubChecks::Passed] {
+            let MergeAction::Submit { queued: actual } =
+                merge_action(snapshot(GitHubReviewState::Open { checks }, queued)).assert_value()
+            else {
+                panic!("ready policy must permit submission");
+            };
+            assert_eq!(actual, queued);
+        }
+    }
+    assert_eq!(
+        merge_action(snapshot(GitHubReviewState::Closed, false)).assert_error(),
+        GitHubAuthorityError::Rejected
+    );
+}
 
+#[test]
+fn merge_flags_leave_method_selection_to_queues() {
     for (method, argument) in [
         (MergeMethod::Queue, None),
         (MergeMethod::Merge, Some("--merge")),
         (MergeMethod::Squash, Some("--squash")),
         (MergeMethod::Rebase, Some("--rebase")),
     ] {
-        let MergeAction::Submit(actual) = merge_action(snapshot(
-            GitHubReviewState::Open {
-                checks: GitHubChecks::NotRequired,
-            },
-            Some(method),
-        ))
-        .assert_value() else {
-            panic!("ready policy must submit an allowed merge method");
-        };
-        assert_eq!(actual, method);
-        assert_eq!(merge_method_argument(actual), argument);
-    }
-
-    for state in [
-        GitHubReviewState::Closed,
-        GitHubReviewState::Open {
-            checks: GitHubChecks::Passed,
-        },
-    ] {
-        assert_eq!(
-            merge_action(snapshot(state, None)).assert_error(),
-            GitHubAuthorityError::Rejected
-        );
+        assert_eq!(merge_method_argument(method), argument);
     }
 }
 
@@ -1034,7 +1016,7 @@ async fn failed_check_logs_are_enriched_but_transport_failures_remain_typed() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn rejected_merge_is_reclassified_from_the_latest_authoritative_policy() {
+async fn transient_merge_failure_is_reclassified_from_the_latest_authoritative_policy() {
     let mut merged = policy_page("MERGEABLE", "CLEAN", None, (false, None));
     set_review_state(&mut merged, "MERGED", true);
     merged["data"]["repository"]["pullRequest"]["mergeCommit"] =
@@ -1061,7 +1043,7 @@ async fn rejected_merge_is_reclassified_from_the_latest_authoritative_policy() {
             .classify_rejected_merge(
                 &review(),
                 GitHubCredential("test-token"),
-                &GitHubAuthorityError::api(None, "merge command failed"),
+                &GitHubAuthorityError::api(None, "merge transport failed").temporary(),
             )
             .await;
         assert_eq!(actual, expected);

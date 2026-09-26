@@ -6,9 +6,18 @@ fn base_ref(page: &mut Value) -> &mut Value {
 }
 
 fn set_rules(page: &mut Value, rules: Vec<Value>) {
+    let rules = rules
+        .into_iter()
+        .enumerate()
+        .map(|(index, mut rule)| {
+            rule["id"] = json!(format!("RULE_{index}"));
+            rule
+        })
+        .collect::<Vec<_>>();
     base_ref(page)["rules"] = json!({
         "totalCount": rules.len(),
         "nodes": rules,
+        "pageInfo": {"hasNextPage": false, "endCursor": null},
     });
 }
 
@@ -20,160 +29,6 @@ fn assert_policy_error(error: &GitHubAuthorityError) {
     assert!(matches!(error, GitHubAuthorityError::Api(_)), "{error}");
     assert!(!error.retryable_operation(), "{error}");
     assert!(!error.authentication_failed(), "{error}");
-}
-
-#[test]
-fn every_repository_method_combination_respects_each_linear_history_source() {
-    for mask in 0..8 {
-        for source in ["none", "classic", "viewer", "ruleset"] {
-            let (merge, squash, rebase) = (mask & 1 != 0, mask & 2 != 0, mask & 4 != 0);
-            let mut page = policy_page_with_merge_capabilities(merge, squash, rebase);
-            match source {
-                "classic" => {
-                    base_ref(&mut page)["branchProtectionRule"] =
-                        json!({"requiresLinearHistory": true});
-                }
-                "viewer" => {
-                    base_ref(&mut page)["refUpdateRule"]["requiresLinearHistory"] = json!(true)
-                }
-                "ruleset" => set_rules(&mut page, vec![json!({"type": "REQUIRED_LINEAR_HISTORY"})]),
-                _ => {}
-            }
-            let expected = [
-                (merge && source == "none", MergeMethod::Merge),
-                (squash, MergeMethod::Squash),
-                (rebase, MergeMethod::Rebase),
-            ]
-            .into_iter()
-            .find_map(|(enabled, method)| enabled.then_some(method));
-            let result = classify_policy(json!([page]), &review());
-            if let Some(method) = expected {
-                assert_eq!(
-                    result.assert_value().merge_method,
-                    Some(method),
-                    "{mask} {source}"
-                );
-            } else {
-                let error = result.assert_error();
-                assert_policy_error(&error);
-                assert!(error.to_string().contains("No merge method is allowed"));
-            }
-        }
-    }
-}
-
-#[test]
-fn all_applicable_method_restrictions_must_allow_the_selected_method() {
-    let cases = [
-        (
-            vec![method_rule(json!(["REBASE"]))],
-            Some(MergeMethod::Rebase),
-        ),
-        (
-            vec![method_rule(json!(["SQUASH", "REBASE"]))],
-            Some(MergeMethod::Squash),
-        ),
-        (
-            vec![
-                method_rule(json!(["MERGE", "SQUASH"])),
-                method_rule(json!(["SQUASH", "REBASE"])),
-            ],
-            Some(MergeMethod::Squash),
-        ),
-        (
-            vec![
-                method_rule(json!(["MERGE"])),
-                method_rule(json!(["REBASE"])),
-            ],
-            None,
-        ),
-        (vec![method_rule(json!([]))], None),
-        (vec![method_rule(json!(["FUTURE_METHOD"]))], None),
-        (
-            vec![method_rule(json!(["FUTURE_METHOD", "REBASE"]))],
-            Some(MergeMethod::Rebase),
-        ),
-        (
-            vec![
-                method_rule(Value::Null),
-                json!({"type": "FUTURE_UNRELATED_RULE"}),
-            ],
-            Some(MergeMethod::Merge),
-        ),
-    ];
-    for (rules, expected) in cases {
-        let mut page = policy_page_with_merge_capabilities(true, true, true);
-        set_rules(&mut page, rules);
-        let result = classify_policy(json!([page]), &review());
-        if let Some(method) = expected {
-            assert_eq!(result.assert_value().merge_method, Some(method));
-        } else {
-            assert_policy_error(&result.assert_error());
-        }
-    }
-}
-
-#[test]
-fn rules_cannot_enable_a_repository_disabled_or_non_linear_method() {
-    for mut page in [
-        policy_page_with_merge_capabilities(true, false, true),
-        policy_page_with_merge_capabilities(true, true, true),
-    ] {
-        let squash = page["data"]["repository"]["squashMergeAllowed"] == true;
-        base_ref(&mut page)["branchProtectionRule"] = json!({"requiresLinearHistory": true});
-        set_rules(
-            &mut page,
-            vec![method_rule(if squash {
-                json!(["MERGE"])
-            } else {
-                json!(["SQUASH"])
-            })],
-        );
-        page["data"]["repository"]["pullRequest"]["mergeStateStatus"] = json!("BLOCKED");
-        assert_policy_error(&classify_policy(json!([page]), &review()).assert_error());
-    }
-}
-
-#[test]
-fn incomplete_or_malformed_rules_stop_delivery_instead_of_guessing() {
-    for rules in [
-        Value::Null,
-        json!({"totalCount": 101, "nodes": []}),
-        json!({"totalCount": 1, "nodes": []}),
-        json!({"totalCount": 1, "nodes": [null]}),
-        json!({"totalCount": 1, "pageInfo": {"hasNextPage": false},
-            "nodes": [{"type": "PULL_REQUEST", "parameters": null}]}),
-        json!({"totalCount": 1, "pageInfo": {"hasNextPage": false},
-            "nodes": [{"type": "PULL_REQUEST", "parameters": {}}]}),
-    ] {
-        let mut page = policy_page_with_merge_capabilities(true, true, true);
-        base_ref(&mut page)["rules"] = rules;
-        assert_policy_error(&classify_policy(json!([page]), &review()).assert_error());
-    }
-}
-
-#[test]
-fn merge_queue_owns_method_selection_even_without_a_direct_method() {
-    let mut page = policy_page_with_merge_capabilities(false, false, false);
-    base_ref(&mut page)["branchProtectionRule"] = json!({"requiresLinearHistory": true});
-    base_ref(&mut page)["rules"] = Value::Null;
-    page["data"]["repository"]["pullRequest"]["isMergeQueueEnabled"] = json!(true);
-    assert_eq!(classify(page).merge_method, Some(MergeMethod::Queue));
-}
-
-#[test]
-fn branch_policy_changes_during_check_pagination_invalidate_the_snapshot() {
-    let first = policy_page("MERGEABLE", "CLEAN", Some(vec![]), (true, Some("first")));
-    let second = policy_page("MERGEABLE", "CLEAN", Some(vec![]), (false, Some("last")));
-    for field in ["branchProtectionRule", "rules"] {
-        let mut changed = second.clone();
-        if field == "rules" {
-            set_rules(&mut changed, vec![method_rule(json!(["REBASE"]))]);
-        } else {
-            base_ref(&mut changed)[field] = json!({"requiresLinearHistory": true});
-        }
-        assert_policy_pages_pending(vec![first.clone(), changed]);
-    }
 }
 
 #[cfg(unix)]
@@ -250,7 +105,7 @@ async fn unavailable_method_or_changed_head_never_invokes_merge() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn queued_and_merged_reviews_do_not_submit_another_merge() {
+async fn merge_submission_rechecks_terminal_approval_queue_and_freshness_state() {
     let mut queued = policy_page_with_merge_capabilities(false, false, false);
     queued["data"]["repository"]["pullRequest"]["isMergeQueueEnabled"] = json!(true);
     queued["data"]["repository"]["pullRequest"]["isInMergeQueue"] = json!(true);
@@ -259,9 +114,19 @@ async fn queued_and_merged_reviews_do_not_submit_another_merge() {
     merged["data"]["repository"]["pullRequest"]["mergeCommit"] =
         json!({"oid": "cccccccccccccccccccccccccccccccccccccccc"});
     base_ref(&mut merged)["rules"] = Value::Null;
+    let mut review_required = policy_page_with_merge_capabilities(false, false, false);
+    review_required["data"]["repository"]["pullRequest"]["mergeStateStatus"] = json!("BLOCKED");
+    review_required["data"]["repository"]["pullRequest"]["reviewDecision"] =
+        json!("REVIEW_REQUIRED");
+    base_ref(&mut review_required)["refUpdateRule"]["requiredApprovingReviewCount"] = json!(1);
+    base_ref(&mut review_required)["rules"] = Value::Null;
+    let mut behind = policy_page("MERGEABLE", "BEHIND", None, (false, None));
+    base_ref(&mut behind)["rules"] = Value::Null;
     for (page, expected) in [
         (queued, GitHubMergeRequestOutcome::Pending),
         (merged, GitHubMergeRequestOutcome::Accepted),
+        (review_required, GitHubMergeRequestOutcome::Pending),
+        (behind, GitHubMergeRequestOutcome::HeadUpdateRequired),
     ] {
         let root = tempfile::tempdir().assert_value();
         let actual = merge_authority(root.path(), &page, &page, "exit 19")
@@ -280,11 +145,13 @@ async fn permanent_merge_rejection_preserves_diagnostics_and_cannot_become_pendi
     for after in [
         ready.clone(),
         policy_page("UNKNOWN", "BLOCKED", None, (false, None)),
+        policy_page("CONFLICTING", "DIRTY", None, (false, None)),
+        policy_page("MERGEABLE", "BEHIND", None, (false, None)),
     ] {
         for rejection in [
             "GraphQL: Merge commits are not allowed on this repository. (mergePullRequest)",
-            "gh: Resource not accessible (HTTP 403)",
-            "gh: Validation Failed (HTTP 422)",
+            "HTTP 403: Resource not accessible (https://api.github.com/graphql)",
+            "HTTP 422: Validation Failed (https://api.github.com/graphql)",
         ] {
             let root = tempfile::tempdir().assert_value();
             let action = format!(
@@ -311,7 +178,9 @@ async fn merge_transport_errors_preserve_authentication_and_retry_classification
     let page = policy_page_with_merge_capabilities(true, true, true);
     for status in [401, 429, 503] {
         let root = tempfile::tempdir().assert_value();
-        let action = format!("printf '%s\\n' 'gh: request failed (HTTP {status})' >&2; exit 1");
+        let action = format!(
+            "printf '%s\\n' 'HTTP {status}: request failed (https://api.github.com/graphql)' >&2; exit 1"
+        );
         let error = merge_authority(root.path(), &page, &page, &action)
             .request_merge(&review(), GitHubCredential("test-token"))
             .await
@@ -332,8 +201,9 @@ async fn permanent_http_rejection_cannot_request_workspace_repair_or_head_update
             policy_page("MERGEABLE", "BEHIND", None, (false, None)),
         ] {
             let root = tempfile::tempdir().assert_value();
-            let action =
-                format!("printf '%s\\n' 'gh: request rejected (HTTP {status})' >&2; exit 1");
+            let action = format!(
+                "printf '%s\\n' 'HTTP {status}: request rejected (https://api.github.com/graphql)' >&2; exit 1"
+            );
             let error = merge_authority(root.path(), &ready, &after, &action)
                 .request_merge(&review(), GitHubCredential("test-token"))
                 .await
@@ -354,22 +224,65 @@ async fn merge_failure_reconciles_authoritative_success_conflict_and_freshness()
     set_review_state(&mut merged, "MERGED", true);
     merged["data"]["repository"]["pullRequest"]["mergeCommit"] =
         json!({"oid": "cccccccccccccccccccccccccccccccccccccccc"});
-    for (after, expected) in [
-        (merged, GitHubMergeRequestOutcome::Accepted),
+    let transient = "printf 'error connecting to api.github.com\\n' >&2; exit 1";
+    for (after, expected, action) in [
+        (
+            merged.clone(),
+            GitHubMergeRequestOutcome::Accepted,
+            "printf 'GraphQL: already merged (mergePullRequest)\\n' >&2; exit 1",
+        ),
+        (merged, GitHubMergeRequestOutcome::Accepted, transient),
         (
             policy_page("CONFLICTING", "DIRTY", None, (false, None)),
             GitHubMergeRequestOutcome::Conflict,
+            transient,
         ),
         (
             policy_page("MERGEABLE", "BEHIND", None, (false, None)),
             GitHubMergeRequestOutcome::HeadUpdateRequired,
+            transient,
         ),
     ] {
         let root = tempfile::tempdir().assert_value();
-        let outcome = merge_authority(root.path(), &ready, &after, "exit 1")
+        let outcome = merge_authority(root.path(), &ready, &after, action)
             .request_merge(&review(), GitHubCredential("test-token"))
             .await
             .assert_value();
         assert_eq!(outcome, expected);
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn review_observation_and_queue_submission_do_not_read_direct_merge_policy() {
+    for queued in [false, true] {
+        let root = tempfile::tempdir().assert_value();
+        let mut page = policy_page_with_merge_capabilities(false, false, false);
+        base_ref(&mut page)["rules"] = Value::Null;
+        base_ref(&mut page)
+            .as_object_mut()
+            .assert_value()
+            .remove("branchProtectionRule");
+        page["data"]["repository"]["pullRequest"]["isMergeQueueEnabled"] = json!(queued);
+        let authority = merge_authority(root.path(), &page, &page, "exit 0");
+        let observation = authority
+            .inspect_review(&review(), GitHubCredential("test-token"))
+            .await
+            .assert_value();
+        assert!(matches!(
+            observation.state,
+            GitHubReviewState::Open {
+                checks: GitHubChecks::NotRequired
+            }
+        ));
+        if queued {
+            assert_eq!(
+                authority
+                    .request_merge(&review(), GitHubCredential("test-token"))
+                    .await
+                    .assert_value(),
+                GitHubMergeRequestOutcome::Accepted
+            );
+        }
     }
 }

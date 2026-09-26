@@ -35,11 +35,6 @@ impl GhCliDeliveryAuthority {
         let context = format!("command: {:?} api {arguments:?}", self.config.gh_program);
         bounded_output(command, self.config.api_deadline, credential)
             .await
-            .and_then(|output| {
-                (!output.is_empty())
-                    .then_some(output)
-                    .ok_or(GitHubAuthorityError::Rejected)
-            })
             .map_err(|error| {
                 let retryable = error.retryable_operation();
                 let wrapped = redacted_api_error(
@@ -150,7 +145,33 @@ pub(super) fn decode_response<T: serde::de::DeserializeOwned>(
     })
 }
 
-pub(super) async fn bounded_output(
+pub(super) async fn command_status(
+    mut command: Command,
+    deadline: Duration,
+    credential: GitHubCredential<'_>,
+) -> Result<(), GitHubAuthorityError> {
+    capture(&mut command, deadline)
+        .await
+        .and_then(|output| output.require_success())
+        .map(|_| ())
+        .map_err(|failure| {
+            // Capture owns the process tree; only a completed command supplies an HTTP status.
+            let response = failure
+                .exit_status
+                .filter(|_| !failure.stderr_truncated)
+                .map(|_| github_api_error(failure.stderr.as_bytes()));
+            let status = response.as_ref().and_then(GitHubAuthorityError::api_status);
+            let retryable = failure.retryable_transport()
+                || response
+                    .as_ref()
+                    .is_some_and(GitHubAuthorityError::retryable_operation)
+                || status.is_none() && github_transport_error(&failure.stderr);
+            let error = redacted_api_error(status, failure.to_string(), credential);
+            if retryable { error.temporary() } else { error }
+        })
+}
+
+async fn bounded_output(
     mut command: Command,
     deadline: Duration,
     credential: GitHubCredential<'_>,
@@ -240,12 +261,7 @@ impl ApiOutput {
         let rate_limited = api_error
             .as_ref()
             .is_some_and(|error| error.api_status() == Some(403) && error.retryable_operation());
-        let transient = rate_limited
-            || api_status.is_none()
-                && stderr.lines().any(|line| {
-                    line.starts_with("error connecting to ")
-                        || line.contains(": TLS handshake timeout")
-                });
+        let transient = rate_limited || api_status.is_none() && github_transport_error(&stderr);
         let failure = redacted_api_error(
             api_status,
             format!(
@@ -333,8 +349,11 @@ fn github_api_error(output: &[u8]) -> GitHubAuthorityError {
             .and_then(Value::as_str)
             .is_some_and(github_rate_limit_message)
             || text.lines().any(|line| {
-                line.strip_prefix("gh: ")
-                    .and_then(|line| line.strip_suffix(" (HTTP 403)"))
+                line.strip_prefix("HTTP 403: ")
+                    .or_else(|| {
+                        line.strip_prefix("gh: ")
+                            .and_then(|line| line.strip_suffix(" (HTTP 403)"))
+                    })
                     .is_some_and(github_rate_limit_message)
             }));
     let failure = GitHubAuthorityError::api(status, text.into_owned());
@@ -343,6 +362,12 @@ fn github_api_error(output: &[u8]) -> GitHubAuthorityError {
     } else {
         failure
     }
+}
+
+fn github_transport_error(text: &str) -> bool {
+    text.lines().any(|line| {
+        line.starts_with("error connecting to ") || line.contains(": TLS handshake timeout")
+    })
 }
 
 fn github_rate_limit_message(message: &str) -> bool {
@@ -374,6 +399,15 @@ fn github_api_status(value: &Value) -> Option<u16> {
 }
 
 fn github_api_status_from_text(text: &str) -> Option<u16> {
+    if let Some(status) = text.lines().find_map(|line| {
+        let response = line.strip_prefix("HTTP ")?;
+        let (status, _) = response
+            .split_once(": ")
+            .or_else(|| response.split_once(" ("))?;
+        status.parse().ok()
+    }) {
+        return Some(status);
+    }
     let marker = "(HTTP ";
     let start = text.rfind(marker)? + marker.len();
     let digits = text.get(start..)?.split(')').next()?;
@@ -381,7 +415,7 @@ fn github_api_status_from_text(text: &str) -> Option<u16> {
 }
 
 fn validate_api_output(output: Vec<u8>) -> Result<Vec<u8>, GitHubAuthorityError> {
-    if output.len() > MAX_API_OUTPUT_BYTES {
+    if output.is_empty() || output.len() > MAX_API_OUTPUT_BYTES {
         return Err(GitHubAuthorityError::Rejected);
     }
     Ok(output)
@@ -408,3 +442,7 @@ pub(super) fn check_log_tail(output: &[u8]) -> String {
 #[cfg(test)]
 #[path = "api/tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "api/command_status_tests.rs"]
+mod command_status_tests;

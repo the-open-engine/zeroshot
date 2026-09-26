@@ -907,7 +907,7 @@ case "$endpoint:$method" in
       '"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false,' \
       '"isInMergeQueue":false,"isMergeQueueEnabled":false,"baseRefName":"main",' \
       '"baseRef":{"name":"main","branchProtectionRule":null,' \
-      '"rules":{"totalCount":0,"nodes":[]},' \
+      '"rules":{"totalCount":0,"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}},' \
       '"refUpdateRule":{"requiredApprovingReviewCount":0,' \
       '"requiredStatusCheckContexts":[],' \
       '"requiresCodeOwnerReviews":false,"requiresConversationResolution":false,' \

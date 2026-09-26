@@ -278,9 +278,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   merge queues/deferrals, and succeeds only after observing the exact merged result. Merge methods
   must satisfy repository capabilities, base-ref branch protection, and every active applicable
   ruleset returned by GitHub. Either branch-protection view can require linear history; neither
-  overrides a stricter restriction. Incomplete rule reads and empty method intersections stop
-  delivery with policy diagnostics. Merge queues choose their own method. Merge command failures
-  use the GitHub API error boundary, never Git repair; a pending gate cannot mask a rejection. Configured
+  overrides a stricter restriction. Direct merge submission reads all rule pages with an independent
+  cursor; PR observation and queues do not require direct-method discovery. Incomplete rule reads and
+  empty method intersections stop merge submission with policy diagnostics. Merge queues choose their
+  own method. Merge commands retain contained process cleanup and use the GitHub API error boundary,
+  never Git repair; changed gates cannot mask a permanent rejection. Configured
   branch-protection contexts remain pending until they appear on the exact PR head, preventing a
   newly opened PR from looking ready before its required workflow registers. Missing or stale human
   review may satisfy PR readiness when aggregate ref-update policy positively requires approval,

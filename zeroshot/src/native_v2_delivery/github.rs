@@ -247,6 +247,21 @@ impl GhCliDeliveryAuthority {
         serde_json::from_value(value).map_err(|_| GitHubAuthorityError::Rejected)
     }
 
+    async fn merge_method(
+        &self,
+        review: &GitHubReviewReceipt,
+        credential: GitHubCredential<'_>,
+        queued: bool,
+    ) -> Result<merge_policy::MergeMethod, GitHubAuthorityError> {
+        if queued {
+            return Ok(merge_policy::MergeMethod::Queue);
+        }
+        let value = self
+            .api(&merge_policy::query_arguments(review)?, credential)
+            .await?;
+        merge_policy::classify(value, review)
+    }
+
     async fn classify_rejected_merge(
         &self,
         review: &GitHubReviewReceipt,
@@ -254,8 +269,7 @@ impl GhCliDeliveryAuthority {
         failure: &GitHubAuthorityError,
     ) -> Result<GitHubMergeRequestOutcome, GitHubAuthorityError> {
         let snapshot = self.policy_snapshot(review, credential).await?;
-        let permanent_response =
-            matches!(failure.api_status(), Some(400..=499)) && !failure.retryable_operation();
+        let permanent_response = !failure.retryable_operation();
         match snapshot.state {
             GitHubReviewState::Merged { .. } => Ok(GitHubMergeRequestOutcome::Accepted),
             _ if permanent_response => Err(GitHubAuthorityError::Rejected),
@@ -354,10 +368,11 @@ impl GitHubDeliveryAuthority for GhCliDeliveryAuthority {
         credential: GitHubCredential<'_>,
     ) -> Result<GitHubMergeRequestOutcome, GitHubAuthorityError> {
         let snapshot = self.policy_snapshot(review, credential).await?;
-        let merge_method = match merge_action(snapshot)? {
+        let queued = match merge_action(snapshot)? {
             MergeAction::Complete(outcome) => return Ok(outcome),
-            MergeAction::Submit(method) => method,
+            MergeAction::Submit { queued } => queued,
         };
+        let merge_method = self.merge_method(review, credential, queued).await?;
         let mut command = clean_command(&self.config, &self.config.gh_program, credential);
         command.args([
             "pr",
@@ -368,11 +383,9 @@ impl GitHubDeliveryAuthority for GhCliDeliveryAuthority {
             "--match-head-commit",
             &review.head_revision,
         ]);
-        if let Some(argument) = merge_method_argument(merge_method) {
-            command.arg(argument);
-        }
-        match api::bounded_output(command, self.config.api_deadline, credential).await {
-            Ok(_) => Ok(GitHubMergeRequestOutcome::Accepted),
+        command.args(merge_method_argument(merge_method));
+        match api::command_status(command, self.config.api_deadline, credential).await {
+            Ok(()) => Ok(GitHubMergeRequestOutcome::Accepted),
             Err(error) => match self
                 .classify_rejected_merge(review, credential, &error)
                 .await
@@ -444,42 +457,52 @@ fn job_log_excerpt(
 
 enum MergeAction {
     Complete(GitHubMergeRequestOutcome),
-    Submit(policy::MergeMethod),
+    Submit { queued: bool },
 }
 
 fn merge_action(snapshot: PolicySnapshot) -> Result<MergeAction, GitHubAuthorityError> {
-    match snapshot.state {
-        GitHubReviewState::Merged { .. } => {
-            Ok(MergeAction::Complete(GitHubMergeRequestOutcome::Accepted))
+    let outcome = match (
+        snapshot.state,
+        snapshot.head_update,
+        snapshot.pull_request_ready,
+    ) {
+        (GitHubReviewState::Merged { .. }, _, _) => GitHubMergeRequestOutcome::Accepted,
+        (GitHubReviewState::Conflict, _, _) => GitHubMergeRequestOutcome::Conflict,
+        (
+            GitHubReviewState::Open {
+                checks: GitHubChecks::NotRequired | GitHubChecks::Passed,
+            },
+            None,
+            false,
+        ) => {
+            return Ok(MergeAction::Submit {
+                queued: snapshot.is_merge_queue_enabled,
+            });
         }
-        GitHubReviewState::Conflict => {
-            Ok(MergeAction::Complete(GitHubMergeRequestOutcome::Conflict))
-        }
-        GitHubReviewState::Open {
-            checks:
-                crate::native_v2_delivery::GitHubChecks::NotRequired
-                | crate::native_v2_delivery::GitHubChecks::Passed,
-        } => snapshot
-            .merge_method
-            .map(MergeAction::Submit)
-            .ok_or(GitHubAuthorityError::Rejected),
-        GitHubReviewState::Open { .. } => {
-            Ok(MergeAction::Complete(GitHubMergeRequestOutcome::Pending))
-        }
-        GitHubReviewState::Closed => Err(GitHubAuthorityError::Rejected),
-    }
+        (
+            GitHubReviewState::Open {
+                checks: GitHubChecks::NotRequired | GitHubChecks::Passed,
+            },
+            Some(_),
+            false,
+        ) => GitHubMergeRequestOutcome::HeadUpdateRequired,
+        (GitHubReviewState::Open { .. }, _, _) => GitHubMergeRequestOutcome::Pending,
+        (GitHubReviewState::Closed, _, _) => return Err(GitHubAuthorityError::Rejected),
+    };
+    Ok(MergeAction::Complete(outcome))
 }
 
-const fn merge_method_argument(method: policy::MergeMethod) -> Option<&'static str> {
+const fn merge_method_argument(method: merge_policy::MergeMethod) -> Option<&'static str> {
     match method {
-        policy::MergeMethod::Queue => None,
-        policy::MergeMethod::Merge => Some("--merge"),
-        policy::MergeMethod::Squash => Some("--squash"),
-        policy::MergeMethod::Rebase => Some("--rebase"),
+        merge_policy::MergeMethod::Queue => None,
+        merge_policy::MergeMethod::Merge => Some("--merge"),
+        merge_policy::MergeMethod::Squash => Some("--squash"),
+        merge_policy::MergeMethod::Rebase => Some("--rebase"),
     }
 }
 
 mod head;
+mod merge_policy;
 mod policy;
 mod source_issue;
 mod wire;
@@ -504,6 +527,36 @@ pub(super) fn test_review_request() -> GitHubReviewRequest {
         description: "Repair the checkout flow.".to_owned(),
         source_issue: None,
     }
+}
+
+fn review_query_arguments(
+    review: &GitHubReviewReceipt,
+    query: &str,
+) -> Result<Vec<String>, GitHubAuthorityError> {
+    let (owner, name) = review
+        .repository
+        .split_once('/')
+        .filter(|(owner, name)| !owner.is_empty() && !name.is_empty() && !name.contains('/'))
+        .ok_or(GitHubAuthorityError::Rejected)?;
+    let number = review
+        .review_id
+        .parse::<u64>()
+        .ok()
+        .filter(|number| *number > 0)
+        .ok_or(GitHubAuthorityError::Rejected)?;
+    Ok(vec![
+        "graphql".to_owned(),
+        "--paginate".to_owned(),
+        "--slurp".to_owned(),
+        "-f".to_owned(),
+        format!("query={query}"),
+        "-F".to_owned(),
+        format!("owner={owner}"),
+        "-F".to_owned(),
+        format!("name={name}"),
+        "-F".to_owned(),
+        format!("number={number}"),
+    ])
 }
 
 fn review_list_arguments(
