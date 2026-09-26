@@ -287,6 +287,31 @@ jobs:
           target/release/zeroshot --version
           node tests/tooling/smoke-ui.js --binary target/release/zeroshot${{ runner.os == 'Windows' && '.exe' || '' }}
 
+  macos-check:
+    name: macOS compilation
+    needs: classify
+    if: needs.classify.outputs.native == 'true'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: 1.97.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Build embedded UI
+        run: |
+          npm --prefix ui ci --ignore-scripts
+          npm --prefix ui run build
+      - name: Check macOS product and test compilation
+        run: cargo check --locked --workspace --all-targets --features ui
+
   python-check:
     name: Python SDK
     needs: classify
@@ -496,7 +521,16 @@ jobs:
     name: required
     if: always()
     needs:
-      [classify, tooling-check, npm-check, native-check, python-check, docs-check, target-image]
+      [
+        classify,
+        tooling-check,
+        npm-check,
+        native-check,
+        macos-check,
+        python-check,
+        docs-check,
+        target-image,
+      ]
     runs-on: ubuntu-latest
     steps:
       - name: Require every selected lane
@@ -512,6 +546,7 @@ jobs:
           NPM_RESULT: ${{ needs.npm-check.result }}
           DOCS_RESULT: ${{ needs.docs-check.result }}
           NATIVE_RESULT: ${{ needs.native-check.result }}
+          MACOS_RESULT: ${{ needs.macos-check.result }}
           PYTHON_RESULT: ${{ needs.python-check.result }}
           IMAGE_RESULT: ${{ needs.target-image.result }}
         run: |
@@ -541,5 +576,6 @@ jobs:
           require_result "$NPM_SELECTED" "$NPM_RESULT" npm-check
           require_result "$DOCS_SELECTED" "$DOCS_RESULT" docs-check
           require_result "$NATIVE_SELECTED" "$NATIVE_RESULT" native-check
+          require_result "$NATIVE_SELECTED" "$MACOS_RESULT" macos-check
           require_result "$NATIVE_SELECTED" "$IMAGE_RESULT" target-image
           require_result "$PYTHON_SELECTED" "$PYTHON_RESULT" python-check

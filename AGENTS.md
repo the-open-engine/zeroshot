@@ -636,7 +636,8 @@ python -m mkdocs build --strict
 ## Release convention
 
 - CI has native, Python, repository-tooling, npm-package, and strict-documentation lanes plus stable
-  aggregate `required`. `.github/ci-path-classifier.js` owns fail-closed path routing and cross-lane
+  aggregate `required`. Native changes also require macOS product and test compilation with the UI
+  feature. `.github/ci-path-classifier.js` owns fail-closed path routing and cross-lane
   producer/consumer dependencies. The native lane runs on Linux and Windows, including real local
   CLI subprocess tests. Windows uses
   `scripts/test-windows.ps1` to run test executables outside Cargo's restrictive Job; the CI-only
