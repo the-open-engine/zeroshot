@@ -275,7 +275,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   when their tree has no staged difference. Other unfinished Git operations return raw status for
   repair before staging or reconciliation. Delivery does not inspect or filter user-installed tooling.
 - GitHub delivery treats aggregate merge policy and required contexts as authority, waits through
-  merge queues/deferrals, and succeeds only after observing the exact merged result. Configured
+  merge queues/deferrals, and succeeds only after observing the exact merged result. Merge methods
+  must satisfy repository capabilities, base-ref branch protection, and every active applicable
+  ruleset returned by GitHub. Either branch-protection view can require linear history; neither
+  overrides a stricter restriction. Incomplete rule reads and empty method intersections stop
+  delivery with policy diagnostics. Merge queues choose their own method. Merge command failures
+  use the GitHub API error boundary, never Git repair; a pending gate cannot mask a rejection. Configured
   branch-protection contexts remain pending until they appear on the exact PR head, preventing a
   newly opened PR from looking ready before its required workflow registers. Missing or stale human
   review may satisfy PR readiness when aggregate ref-update policy positively requires approval,

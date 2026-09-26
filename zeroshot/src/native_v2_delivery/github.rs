@@ -251,19 +251,23 @@ impl GhCliDeliveryAuthority {
         &self,
         review: &GitHubReviewReceipt,
         credential: GitHubCredential<'_>,
+        failure: &GitHubAuthorityError,
     ) -> Result<GitHubMergeRequestOutcome, GitHubAuthorityError> {
         let snapshot = self.policy_snapshot(review, credential).await?;
+        let permanent_response =
+            matches!(failure.api_status(), Some(400..=499)) && !failure.retryable_operation();
         match snapshot.state {
             GitHubReviewState::Merged { .. } => Ok(GitHubMergeRequestOutcome::Accepted),
+            _ if permanent_response => Err(GitHubAuthorityError::Rejected),
             GitHubReviewState::Conflict => Ok(GitHubMergeRequestOutcome::Conflict),
             GitHubReviewState::Open { .. } if snapshot.head_update.is_some() => {
                 Ok(GitHubMergeRequestOutcome::HeadUpdateRequired)
             }
-            GitHubReviewState::Open {
-                checks: GitHubChecks::Passed | GitHubChecks::NotRequired,
-            } => Err(GitHubAuthorityError::Rejected),
-            GitHubReviewState::Open { .. } => Ok(GitHubMergeRequestOutcome::Pending),
-            GitHubReviewState::Closed => Err(GitHubAuthorityError::Rejected),
+            // A changed or pending gate cannot explain away a permanent merge rejection.
+            // Preserve the command failure unless GitHub confirms a specific reconciliation.
+            GitHubReviewState::Open { .. } | GitHubReviewState::Closed => {
+                Err(GitHubAuthorityError::Rejected)
+            }
         }
     }
 }
@@ -367,11 +371,18 @@ impl GitHubDeliveryAuthority for GhCliDeliveryAuthority {
         if let Some(argument) = merge_method_argument(merge_method) {
             command.arg(argument);
         }
-        match bounded_status(command, self.config.api_deadline).await {
-            Ok(()) => Ok(GitHubMergeRequestOutcome::Accepted),
-            Err(error) => match self.classify_rejected_merge(review, credential).await {
+        match api::bounded_output(command, self.config.api_deadline, credential).await {
+            Ok(_) => Ok(GitHubMergeRequestOutcome::Accepted),
+            Err(error) => match self
+                .classify_rejected_merge(review, credential, &error)
+                .await
+            {
                 Ok(outcome) => Ok(outcome),
-                Err(_) => Err(error),
+                Err(_) => Err(error.with_context(format!(
+                    "Merge request for {}#{} into {} using {merge_method:?} failed. \
+                     Check GitHub's rejection and base-branch policy before retrying delivery.",
+                    review.repository, review.review_id, review.target_branch,
+                ))),
             },
         }
     }

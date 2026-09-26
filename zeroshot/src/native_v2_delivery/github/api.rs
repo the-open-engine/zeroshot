@@ -35,6 +35,11 @@ impl GhCliDeliveryAuthority {
         let context = format!("command: {:?} api {arguments:?}", self.config.gh_program);
         bounded_output(command, self.config.api_deadline, credential)
             .await
+            .and_then(|output| {
+                (!output.is_empty())
+                    .then_some(output)
+                    .ok_or(GitHubAuthorityError::Rejected)
+            })
             .map_err(|error| {
                 let retryable = error.retryable_operation();
                 let wrapped = redacted_api_error(
@@ -145,7 +150,7 @@ pub(super) fn decode_response<T: serde::de::DeserializeOwned>(
     })
 }
 
-async fn bounded_output(
+pub(super) async fn bounded_output(
     mut command: Command,
     deadline: Duration,
     credential: GitHubCredential<'_>,
@@ -376,7 +381,7 @@ fn github_api_status_from_text(text: &str) -> Option<u16> {
 }
 
 fn validate_api_output(output: Vec<u8>) -> Result<Vec<u8>, GitHubAuthorityError> {
-    if output.is_empty() || output.len() > MAX_API_OUTPUT_BYTES {
+    if output.len() > MAX_API_OUTPUT_BYTES {
         return Err(GitHubAuthorityError::Rejected);
     }
     Ok(output)

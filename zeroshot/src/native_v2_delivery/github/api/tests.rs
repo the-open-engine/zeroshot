@@ -119,6 +119,20 @@ fn script(root: &std::path::Path, source: &str) -> PathBuf {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn empty_api_output_remains_an_error() {
+    let root = TemporaryDirectory::for_test("github-empty-api");
+    let program = script(root.as_path(), "exit 0\n");
+    let error = authority(program, Duration::from_secs(1))
+        .api_output(&["graphql".to_owned()], GitHubCredential("test-token"))
+        .await
+        .err()
+        .assert_value();
+    assert!(matches!(error, GitHubAuthorityError::Api(_)));
+    assert!(!error.retryable_operation());
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn nonexecutable_api_program_preserves_permission_error() {
     use std::os::unix::fs::PermissionsExt;
 

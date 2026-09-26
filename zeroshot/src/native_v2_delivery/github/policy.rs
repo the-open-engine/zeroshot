@@ -30,6 +30,14 @@ query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
       baseRefName
       baseRef {
         name
+        branchProtectionRule { requiresLinearHistory }
+        rules(first: 100) {
+          totalCount
+          nodes {
+            type
+            parameters { ... on PullRequestParameters { allowedMergeMethods } }
+          }
+        }
         refUpdateRule {
           requiredApprovingReviewCount
           requiredStatusCheckContexts
@@ -122,7 +130,41 @@ struct PullRequestPolicyWire {
 #[serde(rename_all = "camelCase")]
 struct RefWire {
     name: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    branch_protection_rule: Option<BranchProtectionRuleWire>,
+    rules: Option<RepositoryRuleConnectionWire>,
     ref_update_rule: Option<RefUpdateRuleWire>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct BranchProtectionRuleWire {
+    requires_linear_history: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct RepositoryRuleConnectionWire {
+    total_count: usize,
+    nodes: Vec<RepositoryRuleWire>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
+enum RepositoryRuleWire {
+    RequiredLinearHistory,
+    PullRequest {
+        parameters: PullRequestParametersWire,
+    },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct PullRequestParametersWire {
+    #[serde(deserialize_with = "Option::deserialize")]
+    allowed_merge_methods: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -254,8 +296,12 @@ pub(super) fn classify_policy(
     value: Value,
     review: &GitHubReviewReceipt,
 ) -> Result<PolicySnapshot, GitHubAuthorityError> {
-    let pages: Vec<QueryPageWire> =
-        serde_json::from_value(value).map_err(|_| GitHubAuthorityError::Rejected)?;
+    let pages: Vec<QueryPageWire> = serde_json::from_value(value).map_err(|error| {
+        GitHubAuthorityError::api(
+            None,
+            format!("GitHub returned invalid delivery policy: {error}"),
+        )
+    })?;
     let first = pages.first().ok_or(GitHubAuthorityError::Rejected)?;
     let first_repository = first
         .data
@@ -267,7 +313,11 @@ pub(super) fn classify_policy(
     if !complete {
         return Ok(waiting_snapshot());
     }
-    classify_snapshot(first_repository, &first_pull_request, &contexts)
+    if let Some(snapshot) = terminal_snapshot(&first_pull_request)? {
+        return Ok(snapshot);
+    }
+    let method = merge_method(first_repository, &first_pull_request)?;
+    Ok(classify_snapshot(&first_pull_request, &contexts, method))
 }
 
 fn collect_contexts(
@@ -412,29 +462,27 @@ fn check_contexts(
 }
 
 fn classify_snapshot(
-    repository: &RepositoryPolicyWire,
     pull_request: &PullRequestPolicyWire,
     contexts: &[CheckContextWire],
-) -> Result<PolicySnapshot, GitHubAuthorityError> {
-    if let Some(snapshot) = terminal_snapshot(pull_request)? {
-        return Ok(snapshot);
-    }
+    method: MergeMethod,
+) -> PolicySnapshot {
+    let merge_method = Some(method);
     let mut evidence = classify_required_checks(contexts);
     if required_context_is_missing(pull_request, contexts) {
         evidence.checks = RequiredChecks::Pending;
     }
     if !evidence.failures.is_empty() {
-        return Ok(PolicySnapshot {
+        return PolicySnapshot {
             state: GitHubReviewState::Open {
                 checks: GitHubChecks::Failed {
                     diagnostic: failure_diagnostic(evidence.failures),
                 },
             },
             failed_job_ids: evidence.failed_job_ids,
-            merge_method: merge_method(repository, pull_request),
+            merge_method,
             head_update: head_update(pull_request),
             pull_request_ready: false,
-        });
+        };
     }
     let policy_ready = merge_gate_ready(pull_request) || pull_request_ready(pull_request);
     let checks = match (policy_ready, evidence.checks) {
@@ -444,13 +492,13 @@ fn classify_snapshot(
     };
     let pull_request_ready =
         !matches!(evidence.checks, RequiredChecks::Pending) && pull_request_ready(pull_request);
-    Ok(PolicySnapshot {
+    PolicySnapshot {
         state: GitHubReviewState::Open { checks },
         failed_job_ids: Vec::new(),
-        merge_method: merge_method(repository, pull_request),
+        merge_method,
         head_update: head_update(pull_request),
         pull_request_ready,
-    })
+    }
 }
 
 fn required_context_is_missing(
@@ -488,18 +536,43 @@ fn head_update(pull_request: &PullRequestPolicyWire) -> Option<HeadUpdate> {
 fn merge_method(
     repository: &RepositoryPolicyWire,
     pull_request: &PullRequestPolicyWire,
-) -> Option<MergeMethod> {
+) -> Result<MergeMethod, GitHubAuthorityError> {
     if pull_request.is_merge_queue_enabled {
-        Some(MergeMethod::Queue)
-    } else if repository.merge_commit_allowed {
-        Some(MergeMethod::Merge)
-    } else if repository.squash_merge_allowed {
-        Some(MergeMethod::Squash)
-    } else if repository.rebase_merge_allowed {
-        Some(MergeMethod::Rebase)
-    } else {
-        None
+        return Ok(MergeMethod::Queue);
     }
+    let base = &pull_request.base_ref;
+    let rules = base.rules.as_ref().filter(|rules| {
+        rules.total_count == rules.nodes.len()
+    }).ok_or_else(|| GitHubAuthorityError::api(None,
+        "Cannot determine a permitted merge method: GitHub did not return the complete base-branch rules \
+         within the 100-rule policy limit. Check the branch rules or use a merge queue."))?;
+    let linear = base
+        .branch_protection_rule
+        .as_ref()
+        .is_some_and(|rule| rule.requires_linear_history)
+        || base
+            .ref_update_rule
+            .as_ref()
+            .is_some_and(|rule| rule.requires_linear_history)
+        || rules
+            .nodes
+            .contains(&RepositoryRuleWire::RequiredLinearHistory);
+    // Ref.rules supplies active rules already matched by GitHub, including organization rulesets.
+    // Every applicable restriction must allow the method; bypass privileges do not relax it.
+    [
+        (MergeMethod::Merge, "MERGE", repository.merge_commit_allowed && !linear),
+        (MergeMethod::Squash, "SQUASH", repository.squash_merge_allowed),
+        (MergeMethod::Rebase, "REBASE", repository.rebase_merge_allowed),
+    ].into_iter().find_map(|(method, name, enabled)| {
+        let allowed = rules.nodes.iter().all(|rule| match rule {
+            RepositoryRuleWire::PullRequest { parameters } => parameters.allowed_merge_methods
+                .as_ref().is_none_or(|methods| methods.iter().any(|allowed| allowed == name)),
+            _ => true,
+        });
+        (enabled && allowed).then_some(method)
+    }).ok_or_else(|| GitHubAuthorityError::api(None,
+        "No merge method is allowed by both repository settings and base-branch protection/rulesets. \
+         Enable a compatible merge method or use a merge queue before retrying delivery."))
 }
 
 fn merge_gate_ready(pull_request: &PullRequestPolicyWire) -> bool {

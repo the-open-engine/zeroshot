@@ -7,6 +7,9 @@ use super::observation::test_support::{authority, shell_literal, write_executabl
 use super::policy::MergeMethod;
 use crate::native_v2_delivery::GitHubChecks;
 
+#[path = "merge_tests.rs"]
+mod merge_tests;
+
 fn review() -> GitHubReviewReceipt {
     GitHubReviewReceipt {
         review_id: "17".to_owned(),
@@ -79,6 +82,8 @@ fn policy_page(
                     "baseRefName": "main",
                     "baseRef": {
                         "name": "main",
+                        "branchProtectionRule": null,
+                        "rules": {"totalCount": 0, "nodes": []},
                         "refUpdateRule": {
                             "requiredApprovingReviewCount": 0,
                             "requiredStatusCheckContexts": [],
@@ -256,7 +261,14 @@ fn policy_query_is_repository_generic_and_paginates_required_contexts() {
     assert!(query.contains("mergeCommitAllowed"));
     assert!(query.contains("requiredApprovingReviewCount"));
     assert!(query.contains("requiresConversationResolution"));
-    assert!(!query.contains("branchProtectionRule"));
+    assert!(query.contains("branchProtectionRule { requiresLinearHistory }"));
+    assert!(query.contains("rules(first: 100)"));
+    assert_eq!(
+        query.matches("pageInfo").count(),
+        1,
+        "gh paginates only check contexts"
+    );
+    assert!(query.contains("allowedMergeMethods"));
 }
 
 #[test]
@@ -1038,7 +1050,7 @@ async fn rejected_merge_is_reclassified_from_the_latest_authoritative_policy() {
         (merged, Ok(GitHubMergeRequestOutcome::Accepted)),
         (conflict, Ok(GitHubMergeRequestOutcome::Conflict)),
         (behind, Ok(GitHubMergeRequestOutcome::HeadUpdateRequired)),
-        (pending, Ok(GitHubMergeRequestOutcome::Pending)),
+        (pending, Err(GitHubAuthorityError::Rejected)),
         (ready, Err(GitHubAuthorityError::Rejected)),
         (closed, Err(GitHubAuthorityError::Rejected)),
     ];
@@ -1046,7 +1058,11 @@ async fn rejected_merge_is_reclassified_from_the_latest_authoritative_policy() {
         let root = tempfile::tempdir().assert_value();
         let program = write_policy_fixture(root.path(), &page, "exit 19");
         let actual = authority(program, root.path())
-            .classify_rejected_merge(&review(), GitHubCredential("test-token"))
+            .classify_rejected_merge(
+                &review(),
+                GitHubCredential("test-token"),
+                &GitHubAuthorityError::api(None, "merge command failed"),
+            )
             .await;
         assert_eq!(actual, expected);
     }
