@@ -1,56 +1,56 @@
 [
   {
-    "version": "current",
-    "title": "Current",
     "aliases": [
       "dev"
-    ]
+    ],
+    "title": "Current",
+    "version": "current"
   },
   {
-    "version": "v10.9",
-    "title": "v10.9",
     "aliases": [
       "stable"
-    ]
+    ],
+    "title": "v10.9",
+    "version": "v10.9"
   },
   {
-    "version": "v10.7",
+    "aliases": [],
     "title": "v10.7",
-    "aliases": []
+    "version": "v10.7"
   },
   {
-    "version": "v10.6",
+    "aliases": [],
     "title": "v10.6",
-    "aliases": []
+    "version": "v10.6"
   },
   {
-    "version": "v10.5",
+    "aliases": [],
     "title": "v10.5",
-    "aliases": []
+    "version": "v10.5"
   },
   {
-    "version": "v10.4",
+    "aliases": [],
     "title": "v10.4",
-    "aliases": []
+    "version": "v10.4"
   },
   {
-    "version": "v10.3",
+    "aliases": [],
     "title": "v10.3",
-    "aliases": []
+    "version": "v10.3"
   },
   {
-    "version": "v10.2",
+    "aliases": [],
     "title": "v10.2",
-    "aliases": []
+    "version": "v10.2"
   },
   {
-    "version": "v10.1",
+    "aliases": [],
     "title": "v10.1",
-    "aliases": []
+    "version": "v10.1"
   },
   {
-    "version": "v10.0",
+    "aliases": [],
     "title": "v10.0",
-    "aliases": []
+    "version": "v10.0"
   }
 ]
