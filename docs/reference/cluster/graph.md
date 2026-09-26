@@ -31,7 +31,7 @@ Every graph node is tagged by `kind`. Node payloads reject unknown fields.
 | `seq`      | Declared state, non-empty ordered children, promoted state paths                                                                              |
 | `choice`   | Declared state, non-empty authored-order guarded branches, optional `otherwise`, promoted paths                                               |
 | `par`      | Declared state, non-empty branches, promoted paths, and a tagged join                                                                         |
-| `loop`     | Declared state, body, optional structured `until`, positive `maxIterations`, promoted paths; syntactically do-while                           |
+| `loop`     | Declared state, body, optional structured `until`, positive default `maxIterations`, optional `maxIterationsInput`, promoted paths; syntactically do-while |
 | `map`      | Declared state, body, structured array selector `over`, positive `maxItems`, promoted paths                                                   |
 | `succeed`  | Declared output type and structured state-to-output bindings                                                                                  |
 | `fail`     | Finite-enum reason; `unhandled` is reserved for a future compiler's implicit sink                                                             |
@@ -134,6 +134,11 @@ when earlier branches cover that space and does not participate in flow analysis
 do-while. When present, their exit guard must use a verifier guaranteed to execute on every
 iteration. When `until` is absent, the body repeats to `maxIterations` unless a terminal node ends
 the graph first.
+`maxIterationsInput`, when present, names an integer path in `initialInput`. Native-v2 run
+admission replaces the default bound with that run's positive safe integer, then verifies the
+resulting graph again. An absent input value retains the authored default. Reusable profiles are
+verified against that default; the general execution and loop-entry budgets still constrain each
+admitted run.
 Signal and error controls from one executable are mutually exclusive outcomes. Map aggregates
 count joint per-item outcomes, so one mapped execution cannot contribute both a success signal and
 an error. They also preserve per-item execution flow: guaranteed sequential successors,
@@ -169,7 +174,6 @@ The full-graph profile has fixed ceilings:
 | Graph depth                   |      64 |
 | Guard nodes                   |   4,096 |
 | Assignments per finite check  |  65,536 |
-| Loop iterations               |     100 |
 | Map items                     |   1,024 |
 | Attempts per executable node  |     100 |
 | One-run executable node count |  65,536 |

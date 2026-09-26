@@ -57,6 +57,16 @@ fn catalog_and_template_inputs_are_closed() {
         .initial_input
         .validate_value(&authored)
         .assert_value();
+    research
+        .initial_input
+        .validate_value(&json!({"task":"repair checkout","options":{"iterations":200}}))
+        .assert_value();
+    assert!(
+        research
+            .initial_input
+            .validate_value(&json!({"task":"repair checkout","options":{"iterations":"200"}}))
+            .is_err()
+    );
     assert!(
         research
             .initial_input
@@ -171,18 +181,25 @@ async fn every_supported_materialization_is_admissible() {
 
 fn auto_research_leaves(delivery: TemplateDelivery) -> Vec<&'static str> {
     let mut leaves = vec![
-        "abort_execution",
-        "abort_scouting",
+        "abort_plan",
+        "abort_plan_rejected",
+        "abort_staging_review",
+        "abort_staging_rejected",
         "abort_review",
         "audit_disposition",
         "bootstrap",
         "experiment",
+        "stage_parent",
+        "record_stop",
+        "research_scout",
+        "plan_review",
+        "staging_review",
+        "iteration_exit",
         "finalize_aborted",
         "finalize_adopted",
         "finalize_record_only",
         "research_judge",
-        "research_scout",
-        "select_hypothesis",
+        "plan_experiment",
         "topology_validation",
     ];
     if delivery == TemplateDelivery::Push {
@@ -217,6 +234,91 @@ fn auto_research_has_ten_gated_iterations_and_optional_checkpoint() {
     }
 }
 
+#[tokio::test]
+async fn auto_research_binds_run_input_to_the_exact_loop_count() {
+    for (delivery, initial_input, expected_count, expected_options) in [
+        (
+            TemplateDelivery::None,
+            json!({"task":"measure volume"}),
+            10,
+            json!({}),
+        ),
+        (
+            TemplateDelivery::None,
+            json!({"task":"measure volume","options":{"iterations":200}}),
+            200,
+            json!({"iterations":200}),
+        ),
+        (
+            TemplateDelivery::Push,
+            json!({"task":"measure volume","options":{"iterations":200}}),
+            200,
+            json!({"iterations":200}),
+        ),
+    ] {
+        let admitted = admit_research_input(initial_input.clone(), delivery)
+            .await
+            .unwrap_or_else(|error| panic!("research admission failed: {error:?}"));
+        let loop_node = all_nodes(&admitted.graph.root)
+            .into_iter()
+            .find_map(|node| match node {
+                GraphNode::Loop(group) if group.name.as_str() == "research_loop" => Some(group),
+                _ => None,
+            })
+            .assert_value();
+        assert_eq!(loop_node.max_iterations.get(), expected_count);
+        let verified = VerifiedGraph {
+            compiled_ir: admitted.graph,
+            diagnostics: Vec::new(),
+        };
+        assert_dispatch(
+            &reduce(&verified, &initial_input, &[]),
+            "bootstrap",
+            &json!({"task":"measure volume","options":expected_options}),
+        );
+    }
+
+    let error = admit_research_input(
+        json!({"task":"measure volume","options":{"iterations":0}}),
+        TemplateDelivery::None,
+    )
+    .await
+    .assert_error();
+    assert!(matches!(
+        error,
+        crate::native_v2_admission::NativeV2AdmissionError::InvalidLoopLimit { .. }
+    ));
+}
+
+async fn admit_research_input(
+    initial_input: Value,
+    delivery: TemplateDelivery,
+) -> Result<
+    crate::native_v2_contract::AdmittedRun,
+    crate::native_v2_admission::NativeV2AdmissionError,
+> {
+    let template = BuiltinGraphTemplate::AutoResearch;
+    let graph = template.materialize(delivery).assert_value();
+    let runtime = runtime_for(template, delivery, &executable_leaves(&graph.root));
+    NativeV2Admission
+        .admit_with_policy(
+            RunSubmission {
+                title: RunTitle::new("Research iteration count").assert_value(),
+                graph,
+                initial_input,
+                runtime,
+                source: resolved_source(),
+                submission_key: IdempotencyKey::new("research-iteration-count").assert_value(),
+            },
+            if delivery == TemplateDelivery::Push {
+                DeliveryPolicy::Required
+            } else {
+                DeliveryPolicy::Optional
+            },
+        )
+        .await
+}
+
 fn assert_auto_research_materialization(delivery: TemplateDelivery, expected_deliveries: usize) {
     let graph = BuiltinGraphTemplate::AutoResearch
         .materialize(delivery)
@@ -232,14 +334,51 @@ fn assert_auto_research_materialization(delivery: TemplateDelivery, expected_del
         })
         .assert_value_with("research loop");
     assert_eq!(research_loop.max_iterations.get(), 10);
+    assert_eq!(
+        research_loop.max_iterations_input,
+        Some(
+            openengine_cluster_protocol::FieldPath::new(vec![
+                field_name("options").assert_value(),
+                field_name("iterations").assert_value(),
+            ])
+            .assert_value()
+        )
+    );
     assert!(research_loop.until.is_none());
+    let GraphNode::Seq(iteration) = research_loop.body.as_ref() else {
+        panic!("research iteration must be a sequence");
+    };
+    let sequence_names = iteration
+        .children
+        .as_slice()
+        .iter()
+        .map(|node| node.name().as_str())
+        .collect::<Vec<_>>();
+    let expected = if delivery == TemplateDelivery::Push {
+        vec![
+            "hypothesis_scouts",
+            "research_phase",
+            "disposition_audit_phase",
+            "checkpoint",
+            "iteration_exit",
+            "exit_route",
+        ]
+    } else {
+        vec![
+            "hypothesis_scouts",
+            "research_phase",
+            "disposition_audit_phase",
+            "iteration_exit",
+            "exit_route",
+        ]
+    };
+    assert_eq!(sequence_names, expected);
 
     let iteration_nodes = all_nodes(&research_loop.body);
-    assert_research_selector(&iteration_nodes);
-    assert_scout_topology(&iteration_nodes);
+    assert_research_scouts(&iteration_nodes);
+    assert_research_planner(&iteration_nodes);
     assert_research_phase_topology(&iteration_nodes);
     assert_judge_topology(&iteration_nodes);
-    assert_guarded_finalizers(&iteration_nodes);
     assert_research_checkpoint(&iteration_nodes, delivery, expected_deliveries);
     assert_research_decision(&iteration_nodes);
 }
@@ -255,7 +394,7 @@ fn assert_research_bootstrap(root: &GraphNode) {
     let PayloadType::Record { fields } = &bootstrap.output else {
         panic!("research bootstrap must return a record");
     };
-    assert_eq!(fields.len(), 7);
+    assert_eq!(fields.len(), 8);
     assert_topology_fields(fields);
     assert_eq!(
         fields
@@ -269,12 +408,12 @@ fn assert_research_bootstrap(root: &GraphNode) {
         ))
     );
     assert!(!fields.contains_key(&field_name("activationItems").assert_value()));
-    assert_eq!(bootstrap.write_bindings.len(), 7);
+    assert_eq!(bootstrap.write_bindings.len(), 8);
     assert!(bootstrap.instructions.as_ref().is_some_and(|value| {
         value
             .as_str()
             .contains("best supported historical findings")
-            && value.as_str().contains("exactly three ordered scout roles")
+            && value.as_str().contains("archive/<artifact-id>/files/")
             && value.as_str().contains("exactly one experiment work item")
             && value.as_str().contains("rejects missing")
     }));
@@ -320,21 +459,43 @@ fn assert_required_role_field(fields: &BTreeMap<FieldName, RecordField>, labels:
 }
 
 fn assert_research_phase_topology(iteration_nodes: &[&GraphNode]) {
-    let phase = iteration_nodes
+    let planning = iteration_nodes
         .iter()
         .find_map(|node| match node {
-            GraphNode::Map(node) if node.name.as_str() == "research_phase" => Some(node),
+            GraphNode::Map(node) if node.name.as_str() == "planning_phase" => Some(node),
             _ => None,
         })
-        .assert_value_with("research phase");
-    assert_eq!(phase.max_items.get(), 1);
+        .assert_value_with("planning phase");
+    assert_eq!(planning.max_items.get(), 1);
     assert_eq!(
-        phase.over,
+        planning.over,
         DataSelector::State {
             path: field_path("workItems").assert_value()
         }
     );
-    assert_eq!(phase.body.name().as_str(), "execution_stage");
+    assert_eq!(planning.body.name().as_str(), "plan_review");
+    assert_eq!(
+        planning.promoted_state_paths,
+        vec![field_path("planReviews").assert_value()]
+    );
+    let work = iteration_nodes
+        .iter()
+        .find_map(|node| match node {
+            GraphNode::Map(node) if node.name.as_str() == "work_phase" => Some(node),
+            _ => None,
+        })
+        .assert_value_with("work phase");
+    assert_eq!(work.max_items.get(), 1);
+    assert_eq!(work.body.name().as_str(), "staging_stage");
+    let route = find_choice(iteration_nodes, "research_route");
+    assert_eq!(
+        route.branches.as_slice()[2].node.name().as_str(),
+        "record_stop"
+    );
+    assert_eq!(
+        route.branches.as_slice()[3].node.name().as_str(),
+        "work_phase"
+    );
 }
 
 fn assert_topology_preflight(nodes: &[&GraphNode]) {
@@ -346,7 +507,7 @@ fn assert_topology_preflight(nodes: &[&GraphNode]) {
     let PayloadType::Record { fields } = &validator.input else {
         panic!("topology validator must have record input");
     };
-    assert_eq!(fields.len(), 3);
+    assert_eq!(fields.len(), 4);
     assert_topology_fields(fields);
     assert_eq!(
         validator
@@ -373,50 +534,7 @@ fn assert_topology_preflight(nodes: &[&GraphNode]) {
     assert!(result.otherwise.is_none());
 }
 
-fn assert_research_selector(iteration_nodes: &[&GraphNode]) {
-    let selector = iteration_nodes
-        .iter()
-        .find_map(|node| match node {
-            GraphNode::Step(node) if node.name.as_str() == "select_hypothesis" => Some(node),
-            _ => None,
-        })
-        .assert_value_with("research selector");
-    assert!(selector.instructions.as_ref().is_some_and(|value| {
-        value
-            .as_str()
-            .contains("retained workspace violates a charter invariant")
-            && value
-                .as_str()
-                .contains("Predeclare evidence collection and evaluation order")
-    }));
-    assert_recovery_route(iteration_nodes, "execution_result", "abort_execution_stage");
-}
-
-fn assert_scout_topology(iteration_nodes: &[&GraphNode]) {
-    let scouts = iteration_nodes
-        .iter()
-        .find_map(|node| match node {
-            GraphNode::Map(node) if node.name.as_str() == "hypothesis_scouts" => Some(node),
-            _ => None,
-        })
-        .assert_value_with("hypothesis scouts");
-    assert_eq!(scouts.max_items.get(), 3);
-    assert_eq!(
-        scouts.over,
-        DataSelector::State {
-            path: field_path("scoutRoles").assert_value()
-        }
-    );
-    assert_eq!(scouts.body.name().as_str(), "research_scout");
-    let scout = assert_role_verifier(
-        iteration_nodes,
-        "research_scout",
-        "builtin.agent.research-scout@1",
-        &["explorer", "synthesizer", "challenger"],
-    );
-    assert!(scout.instructions.is_some());
-    assert_recovery_route(iteration_nodes, "scout_result", "abort_scouting_stage");
-}
+include!("auto_research_tests.rs");
 
 fn assert_judge_topology(iteration_nodes: &[&GraphNode]) {
     let judge_phase = iteration_nodes
@@ -499,40 +617,6 @@ fn find_verifier<'a>(nodes: &'a [&GraphNode], name: &str) -> &'a VerifierNode {
             _ => None,
         })
         .assert_value_with(name)
-}
-
-fn assert_recovery_route(iteration_nodes: &[&GraphNode], choice_name: &str, stage_name: &str) {
-    let route = find_choice(iteration_nodes, choice_name);
-    assert_eq!(
-        route.branches.as_slice()[0].node.name().as_str(),
-        stage_name
-    );
-}
-
-fn assert_guarded_finalizers(iteration_nodes: &[&GraphNode]) {
-    for name in ["abort_execution", "abort_scouting"] {
-        let result_name = format!("{name}_result");
-        let route = find_choice(iteration_nodes, &result_name);
-        let Guard::In { value, labels } = &route.branches.as_slice()[0].when else {
-            panic!("finalizer result must guard its worker error");
-        };
-        assert_eq!(value.name.as_str(), name);
-        assert_eq!(value.source, ControlSource::Error);
-        assert!(value.field.is_none());
-        assert_eq!(labels, &worker_error_labels().assert_value());
-        assert_eq!(
-            route.branches.as_slice()[0].node.name().as_str(),
-            format!("{name}_failed")
-        );
-        assert_eq!(
-            route.otherwise.as_ref().assert_value().name().as_str(),
-            format!("{name}_complete")
-        );
-        assert!(matches!(
-            route.otherwise.as_ref().assert_value().as_ref(),
-            GraphNode::Map(_)
-        ));
-    }
 }
 
 fn assert_research_checkpoint(
@@ -722,6 +806,10 @@ fn assert_disposition_stages(iteration_nodes: &[&GraphNode]) {
     assert!(auditor.instructions.as_ref().is_some_and(|value| {
         value.as_str().contains("required disposition")
             && value.as_str().contains("current filesystem")
+            && value
+                .as_str()
+                .contains("reviewed stop selection requires stop")
+            && value.as_str().contains("recovery before an experiment")
     }));
 
     let audit_result = find_choice(iteration_nodes, "audit_disposition_result");

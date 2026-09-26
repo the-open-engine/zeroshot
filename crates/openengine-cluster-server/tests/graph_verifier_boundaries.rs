@@ -6,8 +6,8 @@ use openengine_cluster_server::admission::{GraphVerifier, VerificationError};
 use openengine_cluster_server::graph_verifier::{
     ProductionGraphVerifier, FULL_V1_MAX_ATTEMPTS_PER_NODE, FULL_V1_MAX_GRAPH_DEPTH,
     FULL_V1_MAX_GRAPH_NODES, FULL_V1_MAX_GUARD_ASSIGNMENTS, FULL_V1_MAX_GUARD_NODES,
-    FULL_V1_MAX_LOOP_ENTRIES, FULL_V1_MAX_LOOP_ITERATIONS, FULL_V1_MAX_MAP_ITEMS,
-    FULL_V1_MAX_NODE_EXECUTIONS, FULL_V1_MAX_PEAK_CONCURRENCY,
+    FULL_V1_MAX_LOOP_ENTRIES, FULL_V1_MAX_MAP_ITEMS, FULL_V1_MAX_NODE_EXECUTIONS,
+    FULL_V1_MAX_PEAK_CONCURRENCY,
 };
 use openengine_cluster_server::worker_registry::{WorkerRegistry, WorkerRegistryError};
 use serde_json::{json, Value};
@@ -161,14 +161,14 @@ async fn loop_and_map_authored_bounds_accept_exact_limits_and_reject_plus_one() 
         })
     };
     verify(&graph(vec![
-        loop_node(FULL_V1_MAX_LOOP_ITERATIONS),
+        loop_node(FULL_V1_MAX_LOOP_ENTRIES),
         succeed("done"),
     ]))
     .await
     .assert_value();
     assert!(has_ceiling(
         verify(&graph(vec![
-            loop_node(FULL_V1_MAX_LOOP_ITERATIONS + 1),
+            loop_node(FULL_V1_MAX_LOOP_ENTRIES + 1),
             succeed("done"),
         ]))
         .await

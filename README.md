@@ -76,14 +76,25 @@ zeroshot template show software-change
 zeroshot template show auto-research
 ```
 
-`auto-research` runs ten bounded iterations. Explorer, synthesizer, and challenger scouts propose
-different ways to advance the charter. Evidence, method, and progress judges review the selected
-experiment. Unanimous `adopt` keeps its workspace changes; `record_only` preserves a supported
-negative or inconclusive result while restoring them, and `abort` rejects invalid or incomplete
-evidence. The graph keeps its charter, summary, backlog, state, iteration records, and reversible
-backups under `.zeroshot/research`. Its state and summary distinguish the retained workspace and
-known invariant status from the best historical findings. Run it without delivery to keep results
-local, or add `--push` to publish each finalized iteration.
+`auto-research` runs ten iterations by default. Supply a positive `options.iterations` integer in
+the run input to choose the count, for example
+`{"task":"research question","options":{"iterations":200}}`. The chosen count becomes the
+loop bound at admission, subject to the engine's general per-run resource budgets. Three
+independent scouts propose directions. A planner compares those proposals with the durable archive,
+chooses one experiment and its starting artifact, and may propose stopping when no affordable
+direction remains. A reviewer challenges the plan and any stop proposal; its written rationale
+is kept with the iteration. A staging agent restores
+an archived parent when selected, and a reviewer checks its manifest and hashes before the
+experiment. The archive stores complete candidate files and manifests so credible branches can be
+resumed; incomplete or oversized candidates are marked nonrestorable. Evidence, method, and progress
+judges review the experiment. Unanimous `adopt` keeps its workspace changes; `record_only` records a
+supported result, archives a viable candidate when warranted, and restores the prior incumbent.
+`abort` restores the incumbent and records invalid or incomplete evidence. An independent auditor
+checks the final decision, archive, and workspace before the next iteration. The graph keeps its
+charter, summary, backlog, state, iteration records, candidate archive, and reversible backups under
+`.zeroshot/research`. Its state and summary distinguish the retained workspace and known invariant
+status from the best historical findings. Run it without delivery to keep results local, or add
+`--push` to publish each finalized iteration.
 A one-time read-only graph preflight enforces the exact scout, judge, and experiment sets before the loop.
 Finalization and checkpoint audits fail closed, and a delivery repair request stops instead of
 bypassing review.

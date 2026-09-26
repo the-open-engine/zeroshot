@@ -379,7 +379,7 @@ Options:
           Possible values:
           - single-worker:   A single general-purpose worker
           - software-change: A review, validation, and optional delivery workflow for code changes
-          - auto-research:   Ten bounded research iterations with independent evidence gates
+          - auto-research:   Research with ten iterations by default and independent evidence gates
 
       --runtime-config <FILE>
 
@@ -554,7 +554,7 @@ Arguments:
           Possible values:
           - single-worker:   A single general-purpose worker
           - software-change: A review, validation, and optional delivery workflow for code changes
-          - auto-research:   Ten bounded research iterations with independent evidence gates
+          - auto-research:   Research with ten iterations by default and independent evidence gates
 
 Options:
       --delivery <MODE>
@@ -771,7 +771,7 @@ Options:
           Possible values:
           - single-worker:   A single general-purpose worker
           - software-change: A review, validation, and optional delivery workflow for code changes
-          - auto-research:   Ten bounded research iterations with independent evidence gates
+          - auto-research:   Research with ten iterations by default and independent evidence gates
 
       --input <FILE>
           Load the graph's initial input from this JSON file

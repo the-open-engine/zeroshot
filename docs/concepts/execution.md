@@ -86,20 +86,23 @@ stops without merging. `--ship` uses the same feedback loop before it follows th
 policy and confirms the merged revision. Missing approval doesn't block `--pr`; it still blocks
 `--ship` when GitHub requires it.
 
-`auto-research` runs exactly ten iterations. Mapped explorer, synthesizer, and challenger scouts
-propose distinct ways to advance the caller's charter. A one-time read-only preflight requires the exact
-scout, judge, and experiment sets before the loop; mapped evidence, method, and progress judges
+`auto-research` runs ten iterations by default. Optional run input `options.iterations` selects a
+positive count that becomes the loop bound at admission, subject to the engine's general per-run
+resource budgets. A single planner compares directions using the durable backlog archive and
+chooses one bounded experiment. The archive retains credible alternatives and their evidence so
+later plans can revisit them. A one-time read-only preflight requires the exact
+judge and experiment sets before the loop; mapped evidence, method, and progress judges
 then review it independently. Ignored scratch files carry their handoffs. Unanimous `adopt` keeps
 working changes. A supported negative or inconclusive result becomes
 `record_only` and restores those changes; invalid, incomplete, or unsafe evidence becomes `abort` and
 also restores them. Finalized records live under
 `.zeroshot/research/iterations/`; the charter, state, summary, and backlog live at the research root.
-Scratch handoffs and backups use per-iteration directories. A scout, selector, experimenter, or judge
+Scratch handoffs and backups use per-iteration directories. A planner, experimenter, or judge
 execution failure becomes a finalized aborted iteration; restoration runs when an experiment may have
 changed the workspace, and the bounded loop continues. A recorder or recovery failure stops before
 the next iteration. The charter distinguishes required invariants from
 optional progress measures. If evidence proves that the retained workspace violates an invariant,
-the selector prioritizes repair and judges treat a verified repair as adopt even when it does not
+the planner prioritizes repair and judges treat a verified repair as adopt even when it does not
 clear an optional optimization threshold. Mutable state and summaries report the retained workspace
 and its invariant status separately from the best supported historical findings, so a result from a
 restored artifact is never presented as current.

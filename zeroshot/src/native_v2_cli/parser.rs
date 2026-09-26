@@ -357,7 +357,7 @@ enum TemplateName {
     /// A review, validation, and optional delivery workflow for code changes.
     SoftwareChange,
 
-    /// Ten bounded research iterations with independent evidence gates.
+    /// Research with ten iterations by default and independent evidence gates.
     AutoResearch,
 }
 

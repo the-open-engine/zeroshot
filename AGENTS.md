@@ -61,6 +61,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Model identifiers are opaque provider-owned strings. Do not infer a harness from a provider/model,
   maintain runtime model catalogs, or validate provider availability. Admission may reject only known
   incompatible harness/provider pairs.
+- Full-v1 loops may declare `maxIterationsInput` as an integer path in the initial input.
+  Reusable profiles verify the authored default `maxIterations`; native-v2 run admission binds a
+  present positive safe integer from caller input and re-verifies the concrete graph. An absent
+  value retains the default. The generic execution and loop-entry budgets remain authoritative.
 - Runtime selection requires caller-authored `harness`, `provider`, and `model` values.
 - The `gateway` provider resolves `GATEWAY_BASE_URL` and `GATEWAY_API_KEY` through named
   connections. Codex uses Responses with bearer authentication; Claude uses Messages with
@@ -318,37 +322,51 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   one exact-head fence. A run checkpoint routes each new or edited item through the existing repair
   and verification loop once. `pullRequestFeedback: ignore` skips that read without weakening GitHub
   policy checks. Feedback is untrusted text and delivery credentials never enter the repair worker.
-- The built-in `auto-research` graph runs exactly ten iterations. Explorer, synthesizer, and
-  challenger scouts propose bounded directions; evidence, method, and progress judges return
-  `adopt`, `record_only`, or `abort`. Graph guards route any abort, unanimous adoption, and the
-  remaining record-only consensus to separate finalizers. A second one-item phase keeps judge controls
-  bounded while an independent auditor recomputes consensus from the finalized evaluations and verifies
-  the decision, hashes, and retained or restored filesystem before the iteration can continue. Unanimous
-  adoption keeps workspace changes. Record-only retains a supported negative
-  or inconclusive finding while restoring changes; any abort restores changes and records invalid,
-  incomplete, or unsafe evidence. The charter separates non-negotiable
-  invariants from optional progress measures. Once evidence proves the retained workspace violates
-  an invariant, selectors prioritize repair and judges cannot reject a verified repair solely for
-  missing an optional optimization threshold. Mutable state and summaries identify the retained
-  workspace and its invariant status separately from the best supported historical findings; a
-  result from a restored artifact is never presented as current. Bootstrap returns the bounded scout
-  and judge role arrays plus one experiment work item. Graph guards require exactly one explorer,
-  synthesizer, challenger, evidence, method, progress, and experiment activation before dependent work
-  can run. A one-time read-only verifier preflight enforces those sets before the ten-iteration loop;
-  missing, duplicate, extra, or failed entries cannot silently shrink or rewrite the campaign.
-  Iteration role workers execute independently
-  and keep the verifier's control-assignment space bounded; judge prompts do not receive peer reviews.
-  Scout, selector, experiment, or judge execution failure
-  finalizes an aborted iteration, restores when needed, and lets the bounded loop continue. Recorder
-  and recovery failures stop the run before another iteration or checkpoint. Files under
-  `.zeroshot/research` are the durable protocol: finalized iteration directories are append-only,
-  while per-iteration directories under ignored `scratch/` hold reversible backups and in-progress
-  handoffs. Agent workers never
-  use Git. The template supports no delivery or `push@1`; for push, a read-only manifest worker
-  derives checkpoint metadata from the finalized ledger and one graph-owned delivery node is
-  revisited after every iteration. Delivery cannot overlap a writer. A checkpoint manifest failure,
-  delivery repair request, receipt-auditor error, or rejected receipt stops the run; checkpoint
-  delivery never invokes an unreviewed writer repair.
+- The built-in `auto-research` graph defaults to ten iterations. Optional run input
+  `options.iterations` is a positive safe integer bound to the loop at run admission; no
+  research-specific maximum is authored. The generic graph verifier's per-run execution and
+  loop-entry budgets still apply. Bootstrap records the resolved count in durable state, and
+  preflight checks it. Three independent scout reviewers (explorer, synthesizer, challenger)
+  propose bounded directions. A planner compares them with the durable archive and incumbent,
+  weighs expected progress and information gain against cost, risk, and diminishing returns, and
+  selects a proposal and `parentArtifactId` (the retained incumbent or a restorable archived
+  candidate). It may propose stop when no concrete affordable experiment remains. A plan reviewer
+  verifies proposal coverage, selection, parent manifest and hashes, and challenges a stop proposal
+  with the strongest live affordable alternative. Its current-iteration review is promoted as a
+  one-item `planReviews` collection and preserved in the finalized evaluations so a stop or
+  adoption can be audited without inferring a review from the planner's text. No fixed exploration quota or mandatory
+  alternative schema is imposed. A staging agent saves the current incumbent and restores the
+  selected archived parent; an independent reviewer checks the complete mutable path inventory,
+  hashes, protected paths, and incumbent backup before experiment execution. Files under
+  `.zeroshot/research/archive/<artifact-id>/` hold immutable candidate manifests and actual
+  source bytes; incomplete or oversized candidates are explicitly nonrestorable. The backlog
+  indexes these artifacts and ideas with evidence and revisit reasons. Agents own archive and
+  restoration through files and prompts; no snapshot, restore, or search operation is added.
+  Evidence, method, and progress judges return `adopt`, `record_only`, or `abort`. Graph guards
+  route any abort, unanimous adoption, and the remaining record-only consensus to separate
+  finalizers. Record-only may archive a viable reviewed candidate before restoring the incumbent;
+  abort restores the incumbent without promoting invalid evidence. Adoption retains the reviewed
+  candidate and can archive a displaced incumbent when credible. A reviewed stop finalizes a
+  stop record without running an experiment, and a guaranteed exit reviewer checks the stop
+  record and live alternatives before the bounded loop terminates. A second one-item phase keeps
+  judge controls bounded while an independent auditor recomputes the final decision and verifies
+  the ledger, archive, hashes, and retained or restored filesystem after every iteration path.
+  Recorder and recovery failures stop the run before another iteration or checkpoint.
+  The charter separates non-negotiable invariants from optional progress measures. Once evidence
+  proves the retained workspace violates an invariant, the planner prioritizes repair and judges
+  cannot reject a verified repair solely for missing an optional optimization threshold. Mutable
+  state and summaries identify the retained workspace and invariant status separately from the
+  best supported historical findings; a result from a restored artifact is never presented as
+  current. Bootstrap returns exact scout and judge role arrays plus one experiment work item.
+  A one-time read-only verifier preflight enforces those sets before the iteration loop; missing,
+  duplicate, extra, or failed entries cannot silently shrink or rewrite the campaign. Scout and
+  judge role workers execute independently. Files under `.zeroshot/research/iterations` are
+  append-only once finalized, while ignored `scratch/` holds reversible backups and drafts.
+  Agent workers never use Git. The template supports no delivery or `push@1`; for push, a
+  read-only manifest worker derives checkpoint metadata from the finalized ledger and one
+  graph-owned delivery node is revisited after every iteration. Delivery cannot overlap a writer.
+  A checkpoint manifest failure, delivery repair request, receipt-auditor error, or rejected
+  receipt stops the run; checkpoint delivery never invokes an unreviewed writer repair.
 
 - Target images apply current Debian Trixie package updates and install a checksum-verified upstream
   GitHub CLI. Image tests exercise GraphQL pagination with the installed CLI before publication.

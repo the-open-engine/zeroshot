@@ -94,6 +94,7 @@ zeroshot template show single-worker
 `zeroshot template show software-change` prints the exact graph behind the first example as the same
 `GraphSpec` accepted by `--graph` and the Python SDK.
 
-`zeroshot template show auto-research` prints the fixed ten-iteration research graph. It keeps
+`zeroshot template show auto-research` prints the research graph with its default of ten iterations.
+Supply a positive `options.iterations` integer in the run input to set the admitted loop bound. It keeps
 adopted, record-only, and aborted results under `.zeroshot/research`; add `--push` to a run when every
 finalized iteration should be published.

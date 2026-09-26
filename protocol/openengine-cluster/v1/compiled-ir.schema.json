@@ -438,6 +438,21 @@
               "minimum": 1,
               "type": "integer"
             },
+            "maxIterationsInput": {
+              "description": "Optional initial-input path that replaces `max_iterations` for an admitted run.",
+              "items": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+                "type": "string"
+              },
+              "maxItems": 64,
+              "minItems": 1,
+              "type": [
+                "array",
+                "null"
+              ]
+            },
             "name": {
               "maxLength": 128,
               "minLength": 1,
