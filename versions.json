@@ -1,51 +1,56 @@
 [
   {
+    "version": "current",
+    "title": "Current",
     "aliases": [
       "dev"
-    ],
-    "title": "Current",
-    "version": "current"
+    ]
   },
   {
+    "version": "v10.9",
+    "title": "v10.9",
     "aliases": [
       "stable"
-    ],
+    ]
+  },
+  {
+    "version": "v10.7",
     "title": "v10.7",
-    "version": "v10.7"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.6",
     "title": "v10.6",
-    "version": "v10.6"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.5",
     "title": "v10.5",
-    "version": "v10.5"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.4",
     "title": "v10.4",
-    "version": "v10.4"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.3",
     "title": "v10.3",
-    "version": "v10.3"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.2",
     "title": "v10.2",
-    "version": "v10.2"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.1",
     "title": "v10.1",
-    "version": "v10.1"
+    "aliases": []
   },
   {
-    "aliases": [],
+    "version": "v10.0",
     "title": "v10.0",
-    "version": "v10.0"
+    "aliases": []
   }
 ]

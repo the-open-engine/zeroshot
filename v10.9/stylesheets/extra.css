@@ -1,0 +1,119 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,550;9..144,650&family=Spline+Sans:wght@400;500;600&display=swap');
+
+:root {
+  --oe-cream: #faf7f1;
+  --oe-ink: #171411;
+  --oe-rust: #c2240c;
+  --oe-rule: rgb(23 20 17 / 20%);
+  --md-primary-fg-color: var(--oe-ink);
+  --md-accent-fg-color: var(--oe-rust);
+  --md-typeset-a-color: #9f1f0d;
+}
+
+[data-md-color-scheme='default'] {
+  --md-default-bg-color: var(--oe-cream);
+  --md-default-fg-color: var(--oe-ink);
+  --md-code-bg-color: rgb(23 20 17 / 6%);
+  --md-code-fg-color: var(--oe-ink);
+}
+
+[data-md-color-scheme='slate'] {
+  --md-default-bg-color: #14110e;
+  --md-default-fg-color: #faf7f1;
+  --md-default-fg-color--light: rgb(250 247 241 / 72%);
+  --md-default-fg-color--lighter: rgb(250 247 241 / 38%);
+  --md-code-bg-color: rgb(250 247 241 / 7%);
+  --md-code-fg-color: #faf7f1;
+  --md-typeset-a-color: #ed6b55;
+  --oe-rule: rgb(250 247 241 / 20%);
+}
+
+body,
+input {
+  font-family: 'Spline Sans', system-ui, sans-serif;
+}
+
+.md-header,
+.md-tabs {
+  background: var(--oe-ink);
+}
+
+.md-header__button.md-logo img {
+  filter: invert(1);
+  height: 1.7rem;
+  width: auto;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  color: inherit;
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 550;
+  letter-spacing: -0.018em;
+}
+
+.md-typeset h1 {
+  border-top: 1px solid var(--oe-rule);
+  font-size: clamp(2.15rem, 5vw, 3.8rem);
+  line-height: 1.04;
+  margin-bottom: 0.65em;
+  padding-top: 1.1rem;
+}
+
+.md-typeset h2 {
+  border-top: 1px solid var(--oe-rule);
+  margin-top: 2.6em;
+  padding-top: 0.7em;
+}
+
+.md-typeset .docs-kicker {
+  color: var(--oe-rust);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  margin-bottom: 0.7rem;
+  text-transform: uppercase;
+}
+
+.md-typeset .docs-lede {
+  font-size: 1.08rem;
+  line-height: 1.65;
+  max-width: 48rem;
+}
+
+.md-typeset .grid.cards > ul > li {
+  border: 1px solid var(--oe-rule);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--oe-rust);
+  box-shadow: none;
+}
+
+.md-typeset .md-button {
+  border-radius: 0;
+}
+
+.md-typeset .md-button--primary {
+  background: var(--oe-ink);
+  border-color: var(--oe-ink);
+  color: var(--oe-cream);
+}
+
+[data-md-color-scheme='slate'] .md-typeset .md-button--primary {
+  background: var(--oe-cream);
+  border-color: var(--oe-cream);
+  color: var(--oe-ink);
+}
+
+.md-typeset table:not([class]) {
+  border-radius: 0;
+}
+
+.md-footer {
+  background: var(--oe-ink);
+}
