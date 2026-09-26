@@ -16,7 +16,7 @@
         <link rel="prev" href="../runtimes-and-connections/">
       
       
-        <link rel="next" href="../../guides/observe-and-control/">
+        <link rel="next" href="../../guides/runtime-environments/">
       
       
         
@@ -668,6 +668,8 @@
       
         
       
+        
+      
     
     
     
@@ -712,6 +714,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/runtime-environments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prepare a runtime environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1653,9 +1683,10 @@ configuration, or other material under review or implementing repairs. Verifiers
 create temporary files and generated artifacts, and must report failed or unavailable checks accurately.
 The built-in acceptance verifier also tries to run the repository's pre-commit checks and reports
 the results.</p>
-<p>Local verifiers operate directly on the candidate: the restriction on edits is instruction guidance,
-not a filesystem boundary. Hosted verifiers retain disposable writable copies; their process and
-filesystem isolation remains in force.</p>
+<p>Local and hosted verifiers operate directly on the candidate: the restriction on edits is instruction
+guidance, not a filesystem boundary. Hosted nodes share the prepared workspace and its owner identity.
+They retain separate session homes and process cleanup markers, so ending one node does not terminate
+another node or the run's startup services.</p>
 <p>Zeroshot controls the response format and session continuation. Web search follows Codex's
 configuration: by default it uses live search with full access and cached search otherwise. For local
 runs, an explicit <code>web_search="cached"</code> prevents Zeroshot from adding bypass because Codex can
@@ -1768,13 +1799,13 @@ local and are never committed or pushed automatically.</p>
         
         
           
-          <a href="../../guides/observe-and-control/" class="md-footer__link md-footer__link--next" aria-label="Next: Observe and control runs">
+          <a href="../../guides/runtime-environments/" class="md-footer__link md-footer__link--next" aria-label="Next: Prepare a runtime environment">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Observe and control runs
+                Prepare a runtime environment
               </div>
             </div>
             <div class="md-footer__button md-icon">

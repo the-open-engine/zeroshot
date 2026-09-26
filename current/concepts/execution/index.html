@@ -690,6 +690,8 @@
       
         
       
+        
+      
     
     
     
@@ -734,6 +736,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/runtime-environments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prepare a runtime environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1709,13 +1739,13 @@ shell code, or prompt text. Full field rules live in the
 <a href="../../reference/cluster/graph/">graph contract</a>.</p>
 <h2 id="concurrent-workspace-changes">Concurrent workspace changes<a class="headerlink" href="#concurrent-workspace-changes" title="Permanent link">&para;</a></h2>
 <p><code>par</code> branches and <code>map</code> items can run multiple writing agents at once. Writers share the run's
-workspace, so the graph and agent instructions must coordinate edits to the same files. Hosted
-verifiers work in disposable copies; copying while a writer is active does not provide an atomic
-snapshot. Place verification after the writers when it needs their completed changes.</p>
+workspace, including reviewers, so the graph and agent instructions must coordinate edits to the
+same files. Reviewers see the same installed dependencies, generated output, and services as workers.
+Place verification after the writers when it needs their completed changes.</p>
 <p>Sequence Git delivery after the writing branches or map have joined. Graph validation rejects
-parallel delivery and writing, including delivery in a map that can have multiple items. Delivery
-can run alongside verifiers, which are instructed not to edit the candidate. A delivery receipt can
-certify run success only when every other writer settled before that delivery execution started.</p>
+delivery alongside any other executable node, including reviewers, and delivery in a map that can
+have multiple items. A delivery receipt can certify run success only when every other executable
+settled before that delivery execution started.</p>
 <h2 id="state-reduction-chooses-the-next-step">State reduction chooses the next step<a class="headerlink" href="#state-reduction-chooses-the-next-step" title="Permanent link">&para;</a></h2>
 <p>An agent returns a value through a declared output channel. Zeroshot checks that value, applies
 authored bindings, and records the new state before it evaluates another node. Model output cannot

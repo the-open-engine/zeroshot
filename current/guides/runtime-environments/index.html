@@ -10,31 +10,31 @@
       
       
       
-        <link rel="canonical" href="https://the-open-engine.github.io/zeroshot/current/reference/cluster/graph/">
+        <link rel="canonical" href="https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/">
       
       
-        <link rel="prev" href="../api/">
+        <link rel="prev" href="../../concepts/targets/">
       
       
-        <link rel="next" href="../admission/">
+        <link rel="next" href="../observe-and-control/">
       
       
         
       
       
-      <link rel="icon" href="../../../brand/oec-favicon.svg">
+      <link rel="icon" href="../../brand/oec-favicon.svg">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
-        <title>Graph contract - Zeroshot</title>
+        <title>Prepare a runtime environment - Zeroshot</title>
       
     
     
-      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
-        <link rel="stylesheet" href="../../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
       
       
 
@@ -53,11 +53,11 @@
       
     
     
-      <link rel="stylesheet" href="../../../assets/_mkdocstrings.css">
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
     
-      <link rel="stylesheet" href="../../../stylesheets/extra.css">
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
     
-    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -82,7 +82,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#graph-contract" class="md-skip">
+        <a href="#prepare-a-runtime-environment" class="md-skip">
           Skip to content
         </a>
       
@@ -102,9 +102,9 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../../.." title="Zeroshot" class="md-header__button md-logo" aria-label="Zeroshot" data-md-component="logo">
+    <a href="../.." title="Zeroshot" class="md-header__button md-logo" aria-label="Zeroshot" data-md-component="logo">
       
-  <img src="../../../brand/oec-crow.png" alt="logo">
+  <img src="../../brand/oec-crow.png" alt="logo">
 
     </a>
     <label class="md-header__button md-icon" for="__drawer">
@@ -121,7 +121,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Graph contract
+              Prepare a runtime environment
             
           </span>
         </div>
@@ -239,9 +239,9 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../../.." title="Zeroshot" class="md-nav__button md-logo" aria-label="Zeroshot" data-md-component="logo">
+    <a href="../.." title="Zeroshot" class="md-nav__button md-logo" aria-label="Zeroshot" data-md-component="logo">
       
-  <img src="../../../brand/oec-crow.png" alt="logo">
+  <img src="../../brand/oec-crow.png" alt="logo">
 
     </a>
     Zeroshot
@@ -268,7 +268,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../.." class="md-nav__link">
+      <a href="../.." class="md-nav__link">
         
   
   
@@ -353,7 +353,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../getting-started/install/" class="md-nav__link">
+      <a href="../../getting-started/install/" class="md-nav__link">
         
   
   
@@ -381,7 +381,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../getting-started/first-run/" class="md-nav__link">
+      <a href="../../getting-started/first-run/" class="md-nav__link">
         
   
   
@@ -476,7 +476,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../concepts/execution/" class="md-nav__link">
+      <a href="../../concepts/execution/" class="md-nav__link">
         
   
   
@@ -504,7 +504,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../concepts/runtimes-and-connections/" class="md-nav__link">
+      <a href="../../concepts/runtimes-and-connections/" class="md-nav__link">
         
   
   
@@ -532,7 +532,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../concepts/targets/" class="md-nav__link">
+      <a href="../../concepts/targets/" class="md-nav__link">
         
   
   
@@ -564,8 +564,10 @@
       
   
   
+    
   
   
+  
     
     
       
@@ -586,11 +588,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
         
           
           <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
@@ -611,7 +613,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -626,10 +628,19 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../../guides/runtime-environments/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -645,6 +656,7 @@
   
 
       </a>
+      
     </li>
   
 
@@ -657,7 +669,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guides/observe-and-control/" class="md-nav__link">
+      <a href="../observe-and-control/" class="md-nav__link">
         
   
   
@@ -685,7 +697,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guides/acp/" class="md-nav__link">
+      <a href="../acp/" class="md-nav__link">
         
   
   
@@ -713,7 +725,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../guides/python-sdk/" class="md-nav__link">
+      <a href="../python-sdk/" class="md-nav__link">
         
   
   
@@ -745,10 +757,8 @@
       
   
   
-    
   
   
-  
     
     
       
@@ -767,11 +777,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
         
           
           <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
@@ -792,7 +802,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -810,7 +820,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../zeroshot-cli/" class="md-nav__link">
+      <a href="../../zeroshot-cli/" class="md-nav__link">
         
   
   
@@ -899,7 +909,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../python/" class="md-nav__link">
+      <a href="../../reference/python/" class="md-nav__link">
         
   
   
@@ -927,7 +937,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../python/client/" class="md-nav__link">
+      <a href="../../reference/python/client/" class="md-nav__link">
         
   
   
@@ -955,7 +965,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../python/configuration/" class="md-nav__link">
+      <a href="../../reference/python/configuration/" class="md-nav__link">
         
   
   
@@ -983,7 +993,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../python/results/" class="md-nav__link">
+      <a href="../../reference/python/results/" class="md-nav__link">
         
   
   
@@ -1011,7 +1021,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../python/errors/" class="md-nav__link">
+      <a href="../../reference/python/errors/" class="md-nav__link">
         
   
   
@@ -1044,10 +1054,8 @@
                 
   
   
-    
   
   
-  
     
     
       
@@ -1071,11 +1079,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3" >
         
           
           <label class="md-nav__link" for="__nav_5_3" id="__nav_5_3_label" tabindex="0">
@@ -1096,7 +1104,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_3_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1114,7 +1122,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../api/" class="md-nav__link">
+      <a href="../../reference/cluster/api/" class="md-nav__link">
         
   
   
@@ -1139,37 +1147,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Graph contract
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../reference/cluster/graph/" class="md-nav__link">
         
   
   
@@ -1185,114 +1166,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#graph-wire-format" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Graph wire format
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#data-and-control-separation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Data and control separation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#stable-references-and-policies" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Stable references and policies
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#closed-payload-algebra-and-subtyping" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Closed payload algebra and subtyping
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#production-full-graph-verification" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Production full-graph verification
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#diagnostics-bounds-and-artifact-receipts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Diagnostics, bounds, and artifact receipts
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#canonical-compiled-ir-and-identity" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Canonical compiled IR and identity
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#generated-conformance-vectors" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Generated conformance vectors
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1305,7 +1178,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../admission/" class="md-nav__link">
+      <a href="../../reference/cluster/admission/" class="md-nav__link">
         
   
   
@@ -1333,7 +1206,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../lifecycle/" class="md-nav__link">
+      <a href="../../reference/cluster/lifecycle/" class="md-nav__link">
         
   
   
@@ -1361,7 +1234,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../watch/" class="md-nav__link">
+      <a href="../../reference/cluster/watch/" class="md-nav__link">
         
   
   
@@ -1389,7 +1262,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../data-plane/" class="md-nav__link">
+      <a href="../../reference/cluster/data-plane/" class="md-nav__link">
         
   
   
@@ -1417,7 +1290,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../portable-bindings/" class="md-nav__link">
+      <a href="../../reference/cluster/portable-bindings/" class="md-nav__link">
         
   
   
@@ -1518,7 +1391,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../project/versioning/" class="md-nav__link">
+      <a href="../../project/versioning/" class="md-nav__link">
         
   
   
@@ -1546,7 +1419,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../zeroshot-distribution/" class="md-nav__link">
+      <a href="../../zeroshot-distribution/" class="md-nav__link">
         
   
   
@@ -1594,102 +1467,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#graph-wire-format" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Graph wire format
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#data-and-control-separation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Data and control separation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#stable-references-and-policies" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Stable references and policies
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#closed-payload-algebra-and-subtyping" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Closed payload algebra and subtyping
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#production-full-graph-verification" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Production full-graph verification
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#diagnostics-bounds-and-artifact-receipts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Diagnostics, bounds, and artifact receipts
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#canonical-compiled-ir-and-identity" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Canonical compiled IR and identity
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#generated-conformance-vectors" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Generated conformance vectors
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -1708,352 +1485,68 @@
   
 
 
-<h1 id="graph-contract">Graph contract<a class="headerlink" href="#graph-contract" title="Permanent link">&para;</a></h1>
-<p>This document is normative together with the public Rust types in
-<code>openengine-cluster-protocol</code>. The Rust types are authoritative when generated projections and
-prose disagree.</p>
-<p>The graph contract defines two profiles:</p>
-<table>
-<thead>
-<tr>
-<th>Profile</th>
-<th>Wire identifier</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Full graph</td>
-<td><code>openengine.graph.full/v1</code></td>
-</tr>
-<tr>
-<td>Single worker</td>
-<td><code>openengine.graph.single-worker/v1</code></td>
-</tr>
-</tbody>
-</table>
-<p><code>openengine-cluster-server::graph_verifier::ProductionGraphVerifier</code> verifies the full-graph
-profile. It reads <code>GraphSpec</code>, resolves workers through <code>WorkerRegistry</code>, and returns
-<code>CompiledGraphIr</code> with proven <code>StructuralBounds</code>. Parsing or schema validation alone does not admit
-a graph; neither does round-tripping a fixture, constructing <code>CompiledGraphIr</code> directly, or hashing
-its canonical form. The verifier does not store, schedule, or execute graphs. <code>ScriptedVerifier</code> is
-only an admission fixture for tests. Protocol methods and advertised backend capabilities remain
-separate from verification.</p>
-<h2 id="graph-wire-format">Graph wire format<a class="headerlink" href="#graph-wire-format" title="Permanent link">&para;</a></h2>
-<p><code>GraphSpec</code> has the required camel-case fields <code>profile</code>, <code>initialInput</code>, <code>policy</code>, and <code>root</code>.
-Every graph node is tagged by <code>kind</code>. Node payloads reject unknown fields.</p>
-<table>
-<thead>
-<tr>
-<th><code>kind</code></th>
-<th>Contract</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>step</code></td>
-<td>Stable name and versioned worker reference; optional bounded authored instructions; declared input/output types and bindings; positive bounds</td>
-</tr>
-<tr>
-<td><code>verifier</code></td>
-<td>The bounded worker surface plus optional bounded authored instructions, named finite-enum signals, and a declared diagnostic type</td>
-</tr>
-<tr>
-<td><code>seq</code></td>
-<td>Declared state, non-empty ordered children, promoted state paths</td>
-</tr>
-<tr>
-<td><code>choice</code></td>
-<td>Declared state, non-empty authored-order guarded branches, optional <code>otherwise</code>, promoted paths</td>
-</tr>
-<tr>
-<td><code>par</code></td>
-<td>Declared state, non-empty branches, promoted paths, and a tagged join</td>
-</tr>
-<tr>
-<td><code>loop</code></td>
-<td>Declared state, body, optional structured <code>until</code>, positive <code>maxIterations</code>, promoted paths; syntactically do-while</td>
-</tr>
-<tr>
-<td><code>map</code></td>
-<td>Declared state, body, structured array selector <code>over</code>, positive <code>maxItems</code>, promoted paths</td>
-</tr>
-<tr>
-<td><code>succeed</code></td>
-<td>Declared output type and structured state-to-output bindings</td>
-</tr>
-<tr>
-<td><code>fail</code></td>
-<td>Finite-enum reason; <code>unhandled</code> is reserved for a future compiler's implicit sink</td>
-</tr>
-</tbody>
-</table>
-<p>Parallel joins are <code>all</code>, <code>any</code>, <code>quorum { count }</code>, or <code>first { when }</code>. The closed worker error
-channel is <code>timeout</code>, <code>crash</code>, <code>malformed</code>, and <code>refusal</code>. Choice reachability/exhaustiveness, loop
-exit satisfiability, selector typing, dominance, promotion safety, and structural folds are
-production-verifier responsibilities, not parser claims. Omitting <code>timeoutMs</code> lets a node run until
-completion or cancellation. An explicit <code>timeoutMs</code> accepts the <code>PositiveInteger</code> wire range.
-Built-in graphs omit deadlines for every node; provider processes have no separate execution
-deadline. Custom graphs may still declare a node deadline.
-Normal-success continuation requires every branch for <code>all</code>, one branch for <code>any</code>/<code>first</code>, and
-<code>count</code> branches for <code>quorum</code>. Quorum flow and promotion guarantees range over every valid
-size-<code>count</code> completing branch set. A set is valid only when its branch-completion predicates are
-jointly satisfiable under one legal control assignment; branches guarded by mutually exclusive
-outcomes never fabricate a completion set. Quorum one behaves as alternatives, while quorum over
-every branch carries the same completion guarantees as <code>all</code>. For <code>all</code>, <code>any</code>, and <code>quorum</code>,
-<code>joined=reached|quorum_unreachable</code> is correlated with that required-completion predicate;
-assignments combining <code>reached</code> with an unsatisfied predicate or <code>quorum_unreachable</code> with a
-satisfied predicate are not legal control assignments. Inside a map, this correlation is applied
-to each item's joint join/branch-control outcome before <code>k_of_map</code> aggregates label counts.
-For <code>first</code>, a winning branch must complete, guarantee the controls read by <code>when</code>, and make
-<code>when</code> true. The <code>raced=satisfied|no_satisfier</code> control is correlated with those legal winner
-assignments; a non-satisfying completion cannot contribute promotion guarantees.</p>
-<h2 id="data-and-control-separation">Data and control separation<a class="headerlink" href="#data-and-control-separation" title="Permanent link">&para;</a></h2>
-<p>No selector or guard is source text. <code>DataSelector</code> is tagged by <code>source</code> and reads only a bounded,
-non-empty <code>FieldPath</code> from <code>state</code> or the current map <code>item</code>. An input binding has an explicit target
-path and data selector. A write binding has an explicit target and a <code>NodeOutputSelector</code> naming a
-node, the closed channel <code>out</code>, <code>signal</code>, or <code>diagnostic</code>, and a field path.</p>
-<p>The graph format has no whole-payload binding: executable inputs and <code>succeed</code> outputs must be <code>null</code> or records
-that bindings can construct through non-empty field paths. Scalar, enum, and array payloads remain
-valid elsewhere in the closed algebra and as nested record fields; they are not implicitly copied
-or defaulted at a payload root.</p>
-<p>Control guards use a separate AST and cannot contain <code>DataSelector</code>:</p>
-<table>
-<thead>
-<tr>
-<th><code>kind</code></th>
-<th>Fields</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>in</code></td>
-<td>One <code>ControlSelector</code> and a non-empty enum-label set</td>
-</tr>
-<tr>
-<td><code>all</code>, <code>any</code></td>
-<td>Non-empty guard lists</td>
-</tr>
-<tr>
-<td><code>not</code></td>
-<td>One guard</td>
-</tr>
-<tr>
-<td><code>k_of_n</code></td>
-<td>Positive count, non-empty finite selector list, enum-label set</td>
-</tr>
-<tr>
-<td><code>k_of_map</code></td>
-<td>Positive count, one bounded group selector, enum-label set</td>
-</tr>
-</tbody>
-</table>
-<p>A <code>ControlSelector</code> names a node/group, a closed source (<code>signal</code>, <code>error</code>, or <code>group</code>), and an
-optional field. JavaScript, JSONPath, regular expressions, commands, endpoints, environment
-variables, credentials, provider secrets, and free-form expressions are not fields in this AST.
-Unknown-field rejection prevents them from being smuggled into otherwise valid nodes.</p>
-<h2 id="stable-references-and-policies">Stable references and policies<a class="headerlink" href="#stable-references-and-policies" title="Permanent link">&para;</a></h2>
-<p>Workers and policies are references of the form <code>name@positiveVersion</code>. Graphs cannot represent a
-typed command, executable path, endpoint, credential, bearer token, environment value, inline
-permission, or provider secret. Executable <code>instructions</code> are opaque prompt guidance and grant no
-runtime authority. A policy binding contains one versioned policy reference and permits only
-<code>deny</code> as its default. Registry descriptors and policy implementations are outside this contract.</p>
-<h2 id="closed-payload-algebra-and-subtyping">Closed payload algebra and subtyping<a class="headerlink" href="#closed-payload-algebra-and-subtyping" title="Permanent link">&para;</a></h2>
-<p><code>PayloadType</code> is tagged by <code>kind</code> and is closed over <code>null</code>, <code>boolean</code>, <code>integer</code>, <code>number</code>,
-<code>string</code>, structural <code>record</code>, homogeneous <code>array</code>, and finite <code>enum</code>. A record maps field names to
-<code>{ type, required }</code>. Enum labels are non-empty, unique, sorted, and finite. The algebra contains no
-unions, references, definitions, tuples, custom schema keywords, regex constraints, or arbitrary
-JSON Schema.</p>
-<p>For source type <code>S</code> and target type <code>T</code>, <code>S &lt;: T</code> is exactly:</p>
-<table>
-<thead>
-<tr>
-<th>Source and target</th>
-<th>Rule</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Equal primitive kinds</td>
-<td>Yes</td>
-</tr>
-<tr>
-<td><code>integer</code> to <code>number</code></td>
-<td>Yes</td>
-</tr>
-<tr>
-<td>Any other primitive widening</td>
-<td>No</td>
-</tr>
-<tr>
-<td><code>array&lt;S&gt;</code> to <code>array&lt;T&gt;</code></td>
-<td>Exactly when <code>S &lt;: T</code></td>
-</tr>
-<tr>
-<td>Enum <code>S</code> to enum <code>T</code></td>
-<td>Every label in <code>S</code> occurs in <code>T</code></td>
-</tr>
-<tr>
-<td>Record <code>S</code> to record <code>T</code></td>
-<td>Width and depth rules below</td>
-</tr>
-</tbody>
-</table>
-<p>For records, every required field of <code>T</code> must exist as required in <code>S</code>, and its value type must be a
-subtype. An optional field of <code>T</code> may be absent from <code>S</code>; if present, its value must subtype the
-target value. A required source field may satisfy an optional target field. An optional source field
-never satisfies a required target field. Extra source fields are allowed. The relation is recursive,
-deterministic, side-effect free, and never delegates to general JSON Schema evaluation.</p>
-<h2 id="production-full-graph-verification">Production full-graph verification<a class="headerlink" href="#production-full-graph-verification" title="Permanent link">&para;</a></h2>
-<p>The verifier runs deterministic synchronous structural and semantic passes before accessing the
-worker registry. Any structural diagnostic prevents registry lookup. Worker absence, unavailable
-versions, descriptor mismatch, profile mismatch, verifier-contract mismatch, and schema
-incompatibility are graph rejections. Internal errors are reserved for impossible invariant or
-compiled-IR construction failures after successful validation.</p>
-<p>Selectors use closed finite domains: verifier signals use their declared labels; worker errors are
-<code>timeout|crash|malformed|refusal</code>; loop <code>terminated</code> is <code>converged|exhausted</code>; map <code>overflow</code> is
-<code>ok|overflow</code>; <code>all|any|quorum</code> parallel <code>joined</code> is <code>reached|quorum_unreachable</code>; and <code>first</code>
-parallel <code>raced</code> is <code>satisfied|no_satisfier</code>. Choices are first-true in authored order and are
-checked over the bounded legal control space. An <code>otherwise</code> alternative is rejected as unreachable
-when earlier branches cover that space and does not participate in flow analysis. Loops are
-do-while. When present, their exit guard must use a verifier guaranteed to execute on every
-iteration. When <code>until</code> is absent, the body repeats to <code>maxIterations</code> unless a terminal node ends
-the graph first.
-Signal and error controls from one executable are mutually exclusive outcomes. Map aggregates
-count joint per-item outcomes, so one mapped execution cannot contribute both a success signal and
-an error. They also preserve per-item execution flow: guaranteed sequential successors,
-descendants of a full-completion parallel, and do-while body descendants must emit one success or
-error outcome. A conditional successor emits an outcome exactly when its first-true choice residual
-selects that route. For a promoted map path <code>p: array&lt;T&gt;</code>, a body write to <code>p</code> writes one <code>T</code> at the
-current input index; indexed values are collected in input order. The promotion is total, so an
-empty selected input defines <code>p</code> as <code>[]</code>, but the promoted array retains each mapped executable's
-success/error provenance until control excludes every mapped runtime error. Choice residual
-assignments determine channel availability:
-<code>out</code>, <code>signal</code>, and <code>diagnostic</code> are unavailable on every reaching error path, while terminal
-alternatives do not contaminate later fall-through flow. Every <code>k_of_n</code>/<code>k_of_map</code> label must belong
-to the applicable closed selector domains. Executable write bindings are success-outcome effects:
-an output-backed optional state path remains undefined while that executable's runtime-error
-outcomes can reach the reader. A residual branch that excludes every runtime error makes the write
-definite. State promotion preserves this outcome provenance and cannot turn a conditional write
-into a definite one. Definition flow retains exact path/type guarantees from required initial input
-through nested group-state widening. A descendant write invalidates stale ancestor refinements.
-Parallel promotions remain conditional until a <code>reached</code> or <code>satisfied</code> residual excludes the
-group failure outcome; unguarded continuation cannot consume success-only branch writes.
-Conditional ownership is target-granular across nested parallel groups, choice merges, and later
-sequential writers. Parallel failure labels <code>quorum_unreachable</code> and
-<code>no_satisfier</code> restore the incoming pre-par definitions and expose no winner or branch-promotion
-data. After successful routing, a binding defines its target only when the selected output or
-diagnostic path is required; writing a required record defines only its required descendants, never
-optional descendants.</p>
-<p>The full-graph profile has fixed ceilings:</p>
-<table>
-<thead>
-<tr>
-<th>Bound</th>
-<th style="text-align: right;">Maximum</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Graph nodes</td>
-<td style="text-align: right;">4,096</td>
-</tr>
-<tr>
-<td>Graph depth</td>
-<td style="text-align: right;">64</td>
-</tr>
-<tr>
-<td>Guard nodes</td>
-<td style="text-align: right;">4,096</td>
-</tr>
-<tr>
-<td>Assignments per finite check</td>
-<td style="text-align: right;">65,536</td>
-</tr>
-<tr>
-<td>Loop iterations</td>
-<td style="text-align: right;">100</td>
-</tr>
-<tr>
-<td>Map items</td>
-<td style="text-align: right;">1,024</td>
-</tr>
-<tr>
-<td>Attempts per executable node</td>
-<td style="text-align: right;">100</td>
-</tr>
-<tr>
-<td>One-run executable node count</td>
-<td style="text-align: right;">65,536</td>
-</tr>
-<tr>
-<td>Total loop-body entries</td>
-<td style="text-align: right;">65,536</td>
-</tr>
-<tr>
-<td>Peak concurrency</td>
-<td style="text-align: right;">1,024</td>
-</tr>
-</tbody>
-</table>
-<p>All structural arithmetic is checked. Authored values, computed folds, and arithmetic overflow
-above a ceiling produce <code>ceiling_exceeded</code> at the narrowest combining node or field. These bounds
-are public constants beside <code>ProductionGraphVerifier</code>; they are not backend configuration or
-product policy. <code>missing_bound</code> is reserved; the current <code>GraphSpec</code> always requires these proof
-bounds.</p>
-<p>Only <code>step</code> and <code>verifier</code> count as executions. Sequence sums executions, choice takes the maximum,
-parallel sums, map multiplies by <code>maxItems</code>, and loop multiplies by <code>maxIterations</code>. Parallel and
-map multiplication determine peak concurrency; loop body concurrency is unchanged. Loop-entry
-folds use sum for sequence/parallel, maximum for choice, map multiplication, and
-<code>maxIterations * (1 + bodyLoopEntries)</code> for loops. Attempts are recorded per executable and do not
-multiply the one-run execution bound. Loop-free graphs receive a stable reference-topological
-acyclic witness; graphs with loops receive deterministic outer-to-inner ranking identifiers.</p>
-<h2 id="diagnostics-bounds-and-artifact-receipts">Diagnostics, bounds, and artifact receipts<a class="headerlink" href="#diagnostics-bounds-and-artifact-receipts" title="Permanent link">&para;</a></h2>
-<p>Verifier output uses structured <code>GraphDiagnostic</code> values. Severity and diagnostic code are
-closed enums. Paths are arrays of field, index, or node segments, never JSONPath strings. The codes
-cover schema safety, reachability, choice exhaustiveness, loop exit satisfiability, missing bounds,
-write conflicts, ceiling excess, cyclic references, undefined reads, and invalid graph shape.</p>
-<p><code>StructuralBounds</code> carries a termination witness, positive maximum node executions, positive peak
-concurrency, and positive per-node attempt ceilings. A termination witness is either an acyclic node
-order or a bounded structural ranking with positive maximum iterations.</p>
-<p><code>ArtifactRef</code> is a durable receipt containing only:</p>
-<ul>
-<li>opaque <code>artifactId</code>;</li>
-<li>lowercase 64-hex <code>sha256</code>;</li>
-<li>JavaScript-safe <code>byteLength</code>;</li>
-<li><code>mediaType</code> and stable <code>typeId</code>;</li>
-<li>producer node and worker reference;</li>
-<li>generation, run ID, and positive attempt lineage;</li>
-<li><code>public</code>, <code>internal</code>, <code>confidential</code>, or <code>restricted</code> redaction class.</li>
-</ul>
-<p>Artifact bytes, inline payloads, filesystem paths, signed URLs, bearer tokens, and credential
-material are deliberately unrepresentable.</p>
-<h2 id="canonical-compiled-ir-and-identity">Canonical compiled IR and identity<a class="headerlink" href="#canonical-compiled-ir-and-identity" title="Permanent link">&para;</a></h2>
-<p><code>CompiledGraphIr</code> contains the profile, initial input type, policy binding, root, and proven
-structural bounds. Canonical bytes are compact UTF-8 JSON after these transformations:</p>
-<ul>
-<li>object/map keys, record fields, bindings, signal names, enum labels, policy/set-like collections,
-  promoted paths, and other semantically unordered collections are sorted; binding and <code>k_of_n</code>
-  selector multiplicity is preserved;</li>
-<li>commutative <code>all</code>/<code>any</code> operands are recursively flattened, sorted, and deduplicated;</li>
-<li>parallel branches are sorted by stable node name;</li>
-<li>sequence child order, choice branch order, loop/map body structure, and every semantic order are
-  preserved;</li>
-<li>optional/default fields are serialized explicitly;</li>
-<li>floats and non-finite values are absent from and rejected by the closed IR algebra.</li>
-</ul>
-<p><code>GraphIdentity</code> is lowercase hexadecimal SHA-256 over exactly those canonical bytes. Equivalent IR
-built with different map, set, guard, binding-order, or parallel insertion order has the same
-identity. Changing semantic sequence order, authored instructions, a payload type, bound, worker
-reference, policy reference, binding content or multiplicity, or <code>k_of_n</code> selector multiplicity
-changes the identity.</p>
-<h2 id="generated-conformance-vectors">Generated conformance vectors<a class="headerlink" href="#generated-conformance-vectors" title="Permanent link">&para;</a></h2>
-<p><code>graph.schema.json</code> is rooted at <code>GraphSpec</code>; <code>compiled-ir.schema.json</code> is rooted at
-<code>CompiledGraphIr</code>. OpenRPC exposes these and the graph diagnostic, bounds, and artifact component
-schemas, but defines no additional protocol method. Files under
-<code>protocol/openengine-cluster/v1/fixtures/graph/</code> are deterministic syntax/canonicalization vectors.
-Their Rust parser and JSON Schema checks are fixture validation only. Exact production-verifier
-success and rejection envelopes live under <code>protocol/openengine-cluster/v1/fixtures/verifier/</code> and
-are generated through the reusable server verifier.</p>
+<h1 id="prepare-a-runtime-environment">Prepare a runtime environment<a class="headerlink" href="#prepare-a-runtime-environment" title="Permanent link">&para;</a></h1>
+<p>Docker targets accept an optional top-level <code>environment</code> in a run submission:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">"environment"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">    </span><span class="nt">"setup"</span><span class="p">:</span><span class="w"> </span><span class="s2">"apt-get update &amp;&amp; apt-get install -y jq"</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">    </span><span class="nt">"startup"</span><span class="p">:</span><span class="w"> </span><span class="s2">"npm ci"</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="nt">"variables"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"CI"</span><span class="p">:</span><span class="w"> </span><span class="s2">"true"</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nt">"connections"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"package-registry"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"NPM_TOKEN"</span><span class="p">]</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="p">}</span>
+</code></pre></div>
+<p>Profiles contain graph and agent settings and have no environment reference. Supply the concrete
+definition when submitting a run. With the CLI, put the contents of <code>environment</code> above into a JSON
+file and pass <code>--environment FILE</code> alongside your profile. <code>--no-environment</code> sends an explicit empty
+definition (<code>{}</code>), which bypasses defaults on hosts that provide them. Omitting both flags leaves
+selection to the host. Direct Docker uses the base environment when none is supplied.
+Merge-plan manifests also accept a top-level <code>environment</code>; the definition applies to each run
+in that plan, while omission allows the host to resolve each repository's default.</p>
+<p>Hosts may provide saved environments and choose repository defaults before accepting a run.
+Zeroshot executes the resolved definition and preserves it for queued and resumed attempts; it
+does not store environment resources or interpret repository defaults. The local UI has no
+environment catalog or selector. Connection values come from the existing target connection
+mechanism and never belong in scripts or public variables. Only explicitly declared hook
+connections reach preparation; node connections remain independently declared.
+The CLI can collect hook credentials for a definition you supply. When a host selects a default,
+its connection store must supply those credentials; the CLI does not inspect saved environments
+to discover additional secrets in your shell.</p>
+<p>Submission returns after admission and durable acceptance. While the run is <code>admitted</code>, setup runs
+as root before source checkout or workspace restoration. Startup then runs as the workspace user,
+with the checkout as its current directory. The graph starts only after both succeed. Watch run
+logs for phase progress and command output. Nonzero exits become <code>environment_setup_failed</code> or
+<code>environment_startup_failed</code>; a preparation deadline becomes <code>environment_preparation_timeout</code>.
+These stop the run without using any graph repair attempts. Force-stop works during preparation
+and waits for process cleanup before recording its terminal result.</p>
+<p>Each hook uses Bash with <code>errexit</code> and <code>pipefail</code> and has fifteen minutes, inside one thirty-minute
+preparation budget. Install OS packages in setup. Install shared executable tools under
+<code>$ZEROSHOT_TOOLS/bin</code>, which is on the PATH of every hook and agent, and project dependencies in
+the workspace. Shell exports affect only that hook; use <code>variables</code> for later commands. The
+platform's harness Node interpreter remains separate from a project-installed Node version. Setup,
+startup, and agent sessions have separate home directories; use <code>$ZEROSHOT_TOOLS</code> for tools shared
+across them.</p>
+<p>Workers and reviewers share files, ignored dependencies, generated output, and services. Startup
+can start a background service; its process belongs to the run and survives individual agent
+executions. Wait for required services to be ready before startup exits; the runtime does not infer
+their health. Setup is for installation: start services from startup. Do not daemonize processes or
+start root services in setup. Setup cancellation cleans up its shell process group; a root script
+can escape that group, so this is not containment for untrusted root code. The target images
+suppress Debian package service autostart. Parallel graph branches share mutable state, so scripts
+and graphs must coordinate concurrent writes.</p>
+<p>Both hooks run again on resume: setup, restore workspace files, startup, then restart or continue
+the graph. Startup must be idempotent with respect to existing workspace files. Checkpoints do not
+restore running services, Docker images or volumes, database transactions, or agent conversations.
+A background process may change files while a checkpoint is captured; use application-managed
+exports for consistent database recovery.</p>
+<p>A direct Docker target is an operator-trusted container. Root setup changes that container's OS,
+including for other runs it hosts. Use separate disposable target containers for independent OS
+requirements. The target must have a writable root for package installation. Docker commands need
+an operator-provided daemon endpoint. Detached Docker containers belong to that daemon and are not
+terminated by the target's process cleanup. Direct target operators or scripts must manage their
+names, reuse, and removal. When the daemon runs inside a disposable run machine, destroying that
+machine removes its Docker resources. Local execution uses the invoking machine and rejects setup
+and startup hooks.</p>
 
 
 
@@ -2089,7 +1582,7 @@ are generated through the reusable server verifier.</p>
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../api/" class="md-footer__link md-footer__link--prev" aria-label="Previous: API">
+          <a href="../../concepts/targets/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Targets">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2099,20 +1592,20 @@ are generated through the reusable server verifier.</p>
                 Previous
               </span>
               <div class="md-ellipsis">
-                API
+                Targets
               </div>
             </div>
           </a>
         
         
           
-          <a href="../admission/" class="md-footer__link md-footer__link--next" aria-label="Next: Admission">
+          <a href="../observe-and-control/" class="md-footer__link md-footer__link--next" aria-label="Next: Observe and control runs">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Admission
+                Observe and control runs
               </div>
             </div>
             <div class="md-footer__button md-icon">
@@ -2202,10 +1695,10 @@ are generated through the reusable server verifier.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["content.code.copy", "navigation.footer", "navigation.indexes", "navigation.sections", "navigation.top", "search.highlight", "search.suggest"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": false, "default": "current", "provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["content.code.copy", "navigation.footer", "navigation.indexes", "navigation.sections", "navigation.top", "search.highlight", "search.suggest"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": false, "default": "current", "provider": "mike"}}</script>
     
     
-      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

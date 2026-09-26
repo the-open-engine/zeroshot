@@ -1462,7 +1462,7 @@
             "reason": {
               "maxLength": 128,
               "minLength": 1,
-              "pattern": "^(?!(?:unhandled|runtime_failed|runtime_lost)$)[A-Za-z_][A-Za-z0-9_.-]*$",
+              "pattern": "^(?!(?:unhandled|runtime_failed|runtime_lost|environment_setup_failed|environment_startup_failed|environment_preparation_timeout)$)[A-Za-z_][A-Za-z0-9_.-]*$",
               "type": "string"
             }
           },
@@ -4579,6 +4579,16 @@
       "additionalProperties": false,
       "description": "Immutable, secret-free native-v2 submission admitted by the selected target.",
       "properties": {
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeEnvironment"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "graph": {
           "$ref": "#/$defs/GraphSpec"
         },
@@ -4719,6 +4729,38 @@
         "runId",
         "atCursor"
       ],
+      "type": "object"
+    },
+    "RuntimeEnvironment": {
+      "additionalProperties": false,
+      "description": "Setup runs as root before checkout; startup runs as the workspace user after checkout or restore.\nBoth hooks run again on a new attempt. Values here are public run configuration, never secrets.",
+      "properties": {
+        "connections": {
+          "$ref": "#/$defs/DeclaredConnections",
+          "description": "Exact connection fields available to setup and startup, separate from node credentials."
+        },
+        "setup": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startup": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "variables": {
+          "additionalProperties": false,
+          "patternProperties": {
+            "^[A-Za-z_][A-Za-z0-9_]*$": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      },
       "type": "object"
     },
     "RuntimePlan": {
