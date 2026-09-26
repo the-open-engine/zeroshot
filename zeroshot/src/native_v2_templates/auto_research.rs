@@ -13,7 +13,6 @@ const OPTIONS_FIELD: &str = "options";
 const ITERATIONS_FIELD: &str = "iterations";
 const SCOUT_ROLES_FIELD: &str = "scoutRoles";
 const PROPOSALS_FIELD: &str = "proposals";
-const PLAN_REVIEWS_FIELD: &str = "planReviews";
 const JUDGE_ROLES_FIELD: &str = "judgeRoles";
 const WORK_ITEMS_FIELD: &str = "workItems";
 const CONTINUATION_ITEMS_FIELD: &str = "continuationItems";
@@ -69,7 +68,6 @@ fn bootstrap() -> Result<GraphNode, BuiltinTemplateError> {
         WORK_ITEMS_FIELD,
         CONTINUATION_ITEMS_FIELD,
         PROPOSALS_FIELD,
-        PLAN_REVIEWS_FIELD,
         REVIEWS_FIELD,
         VERDICTS_FIELD,
     ]
@@ -94,7 +92,8 @@ fn bootstrap() -> Result<GraphNode, BuiltinTemplateError> {
          never invent missing candidate bytes. Capture a restorable baseline and incumbent before switching \
          parents; immutable archive entries are append-only. Put finalized, append-only iteration records \
          under 'iterations/NNNNNN/'; each record contains 'proposal.json', 'experiment.json', \
-         'evaluations.json', 'decision.json', and 'artifacts.json'. Keep reversible backups under \
+         'evaluations.json', 'decision.json', and 'artifacts.json'. A successful auditor \
+         appends 'audit.json' with continue or stop and any stop counterproposal. Keep reversible backups under \
          'scratch/' and add that directory to the research '.gitignore'. Initialize 'state.json' \
          with schema version 1, the next iteration number, the retained workspace identity, its \
          artifact hashes, invariant status, and open invariant violations, any task-specific adopted \
@@ -106,7 +105,8 @@ fn bootstrap() -> Result<GraphNode, BuiltinTemplateError> {
          optional improvement. Keep 'summary.md' explicit about the retained workspace identity and \
          invariant status separately from the best supported historical findings; never attribute a \
          finding from a restored artifact to the retained workspace. Check that prior finalized \
-         records agree with mutable state and summary. If an earlier process left a draft, restore \
+         records and their audit outcomes agree with mutable state and summary. Never treat an \
+         unaudited stop proposal as an approved stop. If an earlier process left a draft, restore \
          its backup and record an aborted iteration before proceeding. Treat provider sessions as \
          disposable; files are authoritative. Do not use Git, do not rewrite a finalized iteration, \
          and keep large logs or binaries out of the committed research directory. Read \
@@ -115,7 +115,7 @@ fn bootstrap() -> Result<GraphNode, BuiltinTemplateError> {
          Record the resolved value as 'iterationLimit' in 'state.json' and reject a resumed state \
          with a different value. Return exactly three ordered scout roles (explorer, synthesizer, \
          challenger), exactly three ordered judge roles (evidence, method, progress), exactly one \
-         experiment work item, and empty continuationItems, proposals, planReviews, reviews, and \
+         experiment work item, and empty continuationItems, proposals, reviews, and \
          verdicts arrays. \
              The graph validates role and work-item coverage before \
          dependent work and rejects missing, duplicate, extra, or failed entries.",
@@ -260,7 +260,6 @@ fn research_iteration(
     if auto_research_delivery_mode(delivery)?.is_some() {
         children.push(checkpoint(state.clone())?);
     }
-    children.push(iteration_exit()?);
     children.push(exit_route(state.clone(), delivery)?);
     sequence(
         "research_iteration",
@@ -329,19 +328,6 @@ fn task_reviewer(
     }))
 }
 
-fn iteration_exit() -> Result<GraphNode, BuiltinTemplateError> {
-    task_reviewer(
-        "iteration_exit",
-        "builtin.agent.research-exit-auditor@1",
-        verdict_signals(&["continue", "stop"])?,
-        "Read only. Check the newest finalized iteration, disposition audit, archive, state, and \
-            charter. Return stop only for a reviewed and audited stop proposal when no concrete \
-            affordable alternative remains, including archived parents. Return continue for every other \
-            finalized iteration. Reject inconsistent ledger, workspace identity, or archive hashes with \
-            an actionable diagnostic. Do not edit files or use Git.",
-    )
-}
-
 fn exit_route(
     state: PayloadType,
     delivery: TemplateDelivery,
@@ -355,11 +341,11 @@ fn exit_route(
         state: state.clone(),
         branches: non_empty(vec![
             ChoiceBranch {
-                when: signal_guard("iteration_exit", VERDICT_FIELD, &["stop"])?,
+                when: mapped_signal_guard("audit_disposition", 1, &["stop"])?,
                 node: terminal,
             },
             ChoiceBranch {
-                when: signal_guard("iteration_exit", VERDICT_FIELD, &["continue"])?,
+                when: mapped_signal_guard("audit_disposition", 1, &["continue"])?,
                 node: empty_continuation("iteration_continues", state)?,
             },
         ])?,
@@ -375,26 +361,9 @@ fn research_phase(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError>
     sequence(
         "research_phase",
         state.clone(),
-        vec![
-            planner()?,
-            planning_phase(state.clone())?,
-            research_route(state)?,
-        ],
+        vec![planner()?, research_route(state)?],
         Vec::new(),
     )
-}
-
-fn planning_phase(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
-    Ok(GraphNode::Map(MapNode {
-        name: node_name("planning_phase")?,
-        state: state.clone(),
-        body: Box::new(plan_reviewer()?),
-        over: DataSelector::State {
-            path: field_path(WORK_ITEMS_FIELD)?,
-        },
-        max_items: positive(1)?,
-        promoted_state_paths: paths(&[PLAN_REVIEWS_FIELD])?,
-    }))
 }
 
 fn research_route(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
@@ -403,36 +372,34 @@ fn research_route(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError>
         state: state.clone(),
         branches: non_empty(vec![
             ChoiceBranch {
-                when: mapped_error_guard("plan_review")?,
+                when: executable_error_guard("plan_experiment")?,
                 node: recovery_stage(
                     state.clone(),
                     "abort_plan",
-                    "Plan review failed. Leave the incumbent intact, finalize an aborted iteration with \
-                        the review error, and advance once. Do not use Git.",
+                    "Planner execution failed. Leave the incumbent intact, finalize an aborted \
+                        iteration with the error, and advance once. Do not use Git.",
                 )?,
             },
             ChoiceBranch {
-                when: mapped_signal_guard("plan_review", 1, &["rejected"])?,
+                when: signal_guard("plan_experiment", VERDICT_FIELD, &["abort"])?,
                 node: recovery_stage(
                     state.clone(),
-                    "abort_plan_rejected",
-                    "Plan review rejected the selection. Leave the incumbent intact, finalize an \
-                        aborted iteration with the diagnostic, and advance once. Do not use Git.",
+                    "abort_plan_invalid",
+                    "Planner could not make a valid selection. Leave the incumbent intact, \
+                        finalize an aborted iteration with its diagnostic, and advance once. \
+                        Do not use Git.",
                 )?,
             },
             ChoiceBranch {
-                when: mapped_signal_guard("plan_review", 1, &["stop"])?,
+                when: signal_guard("plan_experiment", VERDICT_FIELD, &["stop"])?,
                 node: stop_stage(state.clone())?,
             },
             ChoiceBranch {
-                when: mapped_signal_guard("plan_review", 1, &["work"])?,
+                when: signal_guard("plan_experiment", VERDICT_FIELD, &["work"])?,
                 node: work_phase(state.clone())?,
             },
         ])?,
-        otherwise: Some(Box::new(fail(
-            "plan_decision_missing",
-            "plan_decision_missing",
-        )?)),
+        otherwise: None,
         promoted_state_paths: Vec::new(),
     }))
 }
@@ -450,44 +417,16 @@ fn work_phase(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
     }))
 }
 
-fn plan_reviewer() -> Result<GraphNode, BuiltinTemplateError> {
-    Ok(GraphNode::Verifier(VerifierNode {
-        name: node_name("plan_review")?,
-        worker: worker_ref("builtin.agent.research-plan-review@1")?,
-        input: selection_input_type()?,
-        output: review_output_type()?,
-        input_bindings: selection_input_bindings()?,
-        write_bindings: vec![output_write("plan_review", "review", PLAN_REVIEWS_FIELD)?],
-        timeout_ms: None,
-        attempts: positive(MAX_AGENT_VERIFIER_ATTEMPTS)?,
-        signals: verdict_signals(&["work", "stop", "rejected"])?,
-        diagnostic: diagnostic_type()?,
-        instructions: Some(instructions(
-            "Read only. Require exactly three nonempty, current-iteration scout proposals and a complete \
-             selection.json. Reject a failed or incomplete planner handoff. \
-             Check that the selected proposal or independent alternative is falsifiable, bounded, and \
-             compared against the live archive and current incumbent. For work, require a named \
-             parentArtifactId: incumbent or a restorable immutable archive ID; verify the archive \
-             manifest exists, its scope is complete, and file hashes match before returning work. \
-             Reject missing or nonrestorable parents. For stop, challenge the planner with the strongest \
-             concrete affordable alternative from the scouts or archive; return stop only if none \
-             survives the charter's cost and risk limits. Otherwise reject with that alternative. \
-             Return a concise review string tagged with the current iteration number, naming the \
-             strongest counterproposal, the selected parent check, and the reason for work, stop, \
-             or rejection. Do not edit files or use Git.",
-        )?),
-    }))
-}
-
 fn stop_stage(_state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
     research_recorder(
         "record_stop",
-        "The plan reviewer approved stop. Do not change candidate files. Finalize this iteration with \
-         the five standard records. decision.json records disposition stop and the challenged \
-         alternatives; evaluations.json records the current planReviews[0] reviewer output, not stale \
-         judge inputs \
-         from a prior iteration; artifacts.json proves the unchanged retained incumbent hashes. \
-         Update state, summary, and backlog once. Remove scratch only after finalization. Do not use Git.",
+        "The planner proposed stop. Do not change candidate files. Finalize this iteration \
+         with the five standard records. decision.json records disposition stop as a proposal, \
+         not an approved campaign termination. Copy the selection and its challenged alternatives \
+         into proposal.json before removing scratch; evaluations.json contains no judge claims. \
+         artifacts.json proves the unchanged retained incumbent hashes. Update state, summary, \
+         and backlog once. The independent disposition auditor decides whether to stop or continue \
+         and writes its own audit.json. Remove scratch only after finalization. Do not use Git.",
     )
 }
 
@@ -504,7 +443,8 @@ fn stage_parent() -> Result<GraphNode, BuiltinTemplateError> {
     task_step(
         "stage_parent",
         "builtin.agent.research-stage@1",
-        "Read the reviewed selection.json. Before changing candidate files, save the complete retained \
+        "Read selection.json and refuse an incomplete or invalid parent before changing candidate \
+            files. Before changing candidate files, save the complete retained \
             incumbent mutable scope byte-for-byte under scratch/NNNNNN/incumbent and record its \
             inventory and hashes. If parentArtifactId is incumbent, leave it in place. Otherwise \
             restore the exact archived parent files from archive/<id>/files using its complete scope \
@@ -580,37 +520,39 @@ fn experiment_stage(state: PayloadType) -> Result<GraphNode, BuiltinTemplateErro
 }
 
 fn planner() -> Result<GraphNode, BuiltinTemplateError> {
-    Ok(GraphNode::Step(StepNode {
+    Ok(GraphNode::Verifier(VerifierNode {
         name: node_name("plan_experiment")?,
         worker: worker_ref("builtin.agent.research-planner@1")?,
         instructions: Some(instructions(
-            "Require three fresh scout proposals tagged with the current iteration; if any are missing, \
-                stale, or failed, write no valid selection. Read the task, charter, state, summary, \
-             backlog, immutable candidate archive, finalized records, and current incumbent. Consider \
-             refinement of the incumbent, the strongest live archived branch, and fresh directions \
-             when warranted; do not force a fixed schema of alternatives. \
-             Compare their expected progress and information gain against cost, uncertainty, risk, and \
-             diminishing returns. Choose one falsifiable experiment that fits this iteration; sustained \
-             work on the best direction is valid when its expected value remains highest. Do not force a \
-             quota of novel ideas or repeat a failed direction without new evidence. Choose both a \
-             proposal and its starting artifact. Set parentArtifactId to incumbent or an immutable \
-             restorable archive ID; never select a nonrestorable idea as a parent. Do not change workspace \
-             artifacts, the backlog, or finalized records. Read the next iteration number from 'state.json' \
-             and write only '.zeroshot/research/scratch/NNNNNN/selection.json'. Record action \
-             experiment or stop; for experiment include parentArtifactId, selected proposal and \
-             reason to use that parent. Record the three scouts, other considered alternatives, their \
-             evidence references, expected value, costs, and why the selected direction wins now. \
-             Stop only when no concrete affordable experiment remains and explain why the strongest \
-             scout or archived alternative fails. Include the \
-             chosen question, expected learning or artifact change, falsification condition, protected \
-             paths or data, procedure, observations or sources to collect, comparison or reference checks \
-             when useful, evaluation rules, resource limits, and disposition conditions. Predeclare \
+            "Require three fresh scout proposals tagged with the current iteration; if any are \
+             missing, stale, or failed, write no valid selection and signal abort. Read the task, \
+             charter, state, summary, backlog, immutable candidate archive, finalized records, \
+             including the latest audit.json, and current incumbent. Consider refinement of the \
+             incumbent, the strongest live archived branch, and fresh directions when warranted; \
+             do not force a fixed schema of alternatives. Compare expected progress and information \
+             gain against cost, uncertainty, risk, and diminishing returns. Choose one falsifiable \
+             experiment that fits this iteration; sustained work on the best direction is valid when \
+             its expected value remains highest. Do not force a quota of novel ideas or repeat a \
+             failed direction without new evidence. Choose both a proposal and its starting artifact. \
+             Set parentArtifactId to incumbent or an immutable restorable archive ID; never select \
+             a nonrestorable idea as a parent. Do not change workspace artifacts, the backlog, or \
+             finalized records. Read the next iteration number from state.json and write only \
+             .zeroshot/research/scratch/NNNNNN/selection.json. For work, name parentArtifactId, \
+             selected proposal, and reason to use that parent; signal work only after writing a \
+             complete selection. For stop, explain why the strongest concrete affordable scout or \
+             archived alternative fails charter cost and risk limits; signal stop only after writing \
+             the stop selection. For an incomplete or invalid handoff, signal abort with a diagnostic. \
+             Record the three scouts, other considered alternatives, evidence references, expected \
+             value, costs, and why the selected direction wins now. Include the chosen question, \
+             expected learning or artifact change, falsification condition, protected paths or data, \
+             procedure, observations or sources to collect, comparison or reference checks when \
+             useful, evaluation rules, resource limits, and disposition conditions. Predeclare \
              evidence collection and evaluation order when observations may be noisy or order-dependent; \
              use charter-defined controls, repetitions, and thresholds rather than choosing them after \
-             seeing results. Do not let an optional progress threshold reject a verified repair when the \
-             ledger already shows that the retained workspace violates a charter invariant. In that case, \
-             prioritize a bounded repair or discriminating test, and judge repaired validity before \
-             optional improvement. Do not use Git.",
+             seeing results. Do not let an optional progress threshold reject a verified repair when \
+             the ledger already shows that the retained workspace violates a charter invariant. In \
+             that case prioritize a bounded repair or discriminating test, and judge repaired validity \
+             before optional improvement. Do not use Git.",
         )?),
         input: selection_input_type()?,
         output: PayloadType::Null,
@@ -618,6 +560,8 @@ fn planner() -> Result<GraphNode, BuiltinTemplateError> {
         write_bindings: Vec::new(),
         timeout_ms: None,
         attempts: positive(1)?,
+        signals: verdict_signals(&["work", "stop", "abort"])?,
+        diagnostic: diagnostic_type()?,
     }))
 }
 
@@ -625,7 +569,7 @@ fn experiment() -> Result<GraphNode, BuiltinTemplateError> {
     task_step(
         "experiment",
         "builtin.agent.research-experimenter@1",
-        "Read the reviewed selection and verified staging.json. If either is absent or incomplete, \
+        "Read the planner selection and verified staging.json. If either is absent or incomplete, \
          do not edit candidate files; leave a draft explaining why. Otherwise execute exactly that \
          experiment on the staged parent. Preserve the incumbent backup and record a manifest \
          covering modified, deleted, and new paths relative to the staged parent. Never use Git. Gather \
@@ -870,7 +814,8 @@ fn decision_worker(disposition: ResearchDisposition) -> Result<GraphNode, Builti
     let name = disposition.finalizer_name();
     let authored_instructions = format!(
         "{} Store the three reviews and verdicts in 'evaluations.json' and write the exact '{}' \
-         disposition plus its reason to 'decision.json'. Before removing scratch, preserve the \
+         disposition plus its reason to 'decision.json'. Before removing scratch, copy the \
+         planner selection and considered alternatives into proposal.json. Preserve the \
          changed-path manifest, selected parent ID and hashes, pre-iteration incumbent, \
          reviewed-candidate, and final-current hashes in 'artifacts.json' so restoration or \
          retention remains independently auditable. For adopt, archive the displaced incumbent \
@@ -929,14 +874,14 @@ fn decision_audit_stage(state: PayloadType) -> Result<GraphNode, BuiltinTemplate
                 )?,
             },
             ChoiceBranch {
-                when: signal_guard(name, VERDICT_FIELD, &[REJECTED_LABEL])?,
+                when: signal_guard(name, VERDICT_FIELD, &["rejected"])?,
                 node: fail(
                     "audit_disposition_rejected",
                     "iteration_finalization_rejected",
                 )?,
             },
             ChoiceBranch {
-                when: signal_guard(name, VERDICT_FIELD, &[ACCEPTED_LABEL])?,
+                when: signal_guard(name, VERDICT_FIELD, &["continue", "stop"])?,
                 node: empty_continuation("audit_disposition_accepted", state.clone())?,
             },
         ])?,
@@ -955,31 +900,36 @@ fn decision_auditor() -> Result<GraphNode, BuiltinTemplateError> {
     task_reviewer(
         "audit_disposition",
         "builtin.agent.research-disposition-auditor@1",
-        review_signals()?,
-        "Read only. Recompute the required disposition from the finalized records according to \
-             the path that actually ran. A reviewed stop selection requires stop, a current plan \
-             review in evaluations.json, no experiment or judge claims, an unchanged incumbent, and \
-             a concrete challenge of live affordable alternatives. A failed plan, staging, experiment, \
-             or judge stage requires abort, its failed stage and available evidence, and no fabricated \
-             evaluations. For a complete three-judge evaluation, any abort requires abort, three \
-             adopts require adopt, and every other complete valid combination requires record_only. \
-             Require evaluations.json to preserve the current planReviews[0] rationale on stop and \
-             experiment paths. Reject duplicate, extra, unknown, stale, or inconsistent evaluations. Confirm \
-             decision.json records that exact disposition; all five standard iteration records are \
-             finalized; prior finalized iterations are unchanged; mutable state and summary advance \
-             exactly once; and backlog retains the scouts, selected and credible alternatives with \
-             accurate evidence references, parent identity, disposition, and archive IDs. Require no \
-             draft or scratch backup to remain. Independently hash every restorable archive file \
-             against its immutable manifest and verify complete mutable scope and provenance. For an \
-             experiment, artifacts.json must contain the changed-path manifest, selected parent, \
-             pre-iteration incumbent, reviewed candidate, and final-current hashes. For stop or \
-             recovery before an experiment, require explicit absent candidate fields and hashes of the \
-             unchanged or restored incumbent. For abort or record_only, require byte-for-byte \
-             equality with the pre-iteration incumbent, restored deleted paths, and no candidate-created \
-             paths. For adopt, require current hashes to equal the reviewed candidate and the retained \
-             workspace identity to advance consistently. Return accepted only when the verdict rule, \
-             ledger, archive, and current filesystem all agree; otherwise reject with an actionable \
-             diagnostic. Do not edit files and do not use Git commands.",
+        verdict_signals(&["continue", "stop", "rejected"])?,
+        "Inspect the newest finalized iteration read-only before writing one audit artifact. \
+             Recompute the required disposition from the finalized records according to the path \
+             that actually ran. A planner stop selection requires disposition stop, no experiment \
+             or judge claims, an unchanged incumbent, and a concrete challenge of live affordable \
+             alternatives. A failed plan, staging, experiment, or judge stage requires abort, its \
+             failed stage and available evidence, and no fabricated evaluations. For a complete \
+             three-judge evaluation, any abort requires abort, three adopts require adopt, and \
+             every other complete valid combination requires record_only. Reject duplicate, extra, \
+             unknown, stale, or inconsistent evaluations. Confirm decision.json records that exact \
+             disposition; all five standard iteration records are finalized; prior finalized \
+             iterations are unchanged; mutable state and summary advance exactly once; and backlog \
+             retains the scouts, selected and credible alternatives with accurate evidence \
+             references, parent identity, disposition, and archive IDs. Require no draft or scratch \
+             backup to remain. Independently hash every restorable archive file against its immutable \
+             manifest and verify complete mutable scope and provenance. For an experiment, artifacts.json \
+             must contain the changed-path manifest, selected parent, pre-iteration incumbent, \
+             reviewed candidate, and final-current hashes. For stop or recovery before experiment, \
+             require explicit absent candidate fields and hashes of the unchanged or restored incumbent. \
+             For abort or record_only, require byte-for-byte equality with the pre-iteration incumbent, \
+             restored deleted paths, and no candidate-created paths. For adopt, require current hashes \
+             to equal the reviewed candidate and the retained workspace identity to advance consistently. \
+             Return rejected with an actionable diagnostic if the verdict rule, ledger, archive, or \
+             current filesystem disagree. If valid and the planner proposed stop, independently \
+             challenge it with the strongest concrete affordable scout or archived alternative. \
+             Return stop only if none survives charter limits; otherwise return continue and name \
+             the alternative. For every other valid disposition return continue. Before returning \
+             continue or stop, append only iterations/NNNNNN/audit.json with that verdict, concise \
+             rationale, and any stop counterproposal so the next planner sees the result. Never alter \
+             the five finalized records, candidate files, or earlier audit files. Do not use Git.",
     )
 }
 
@@ -1072,7 +1022,7 @@ fn checkpoint_delivery_stage(state: PayloadType) -> Result<GraphNode, BuiltinTem
             },
             ChoiceBranch {
                 when: named_delivery_signal_guard("checkpoint_delivery", &[DELIVERY_PUSHED_LABEL])?,
-                node: checkpoint_audit_stage(state.clone())?,
+                node: empty_continuation("checkpoint_accepted", state.clone())?,
             },
         ])?,
         otherwise: None,
@@ -1087,65 +1037,6 @@ fn checkpoint_delivery_stage(state: PayloadType) -> Result<GraphNode, BuiltinTem
         ],
         checkpoint_paths()?,
     )
-}
-
-fn checkpoint_audit_stage(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
-    let result = GraphNode::Choice(ChoiceNode {
-        name: node_name("checkpoint_audit_result")?,
-        state: state.clone(),
-        branches: non_empty(vec![
-            ChoiceBranch {
-                when: executable_error_guard("checkpoint_audit")?,
-                node: fail("checkpoint_audit_failed", "checkpoint_audit_failed")?,
-            },
-            ChoiceBranch {
-                when: signal_guard("checkpoint_audit", VERDICT_FIELD, &[REJECTED_LABEL])?,
-                node: fail("checkpoint_audit_rejected", "checkpoint_audit_rejected")?,
-            },
-            ChoiceBranch {
-                when: signal_guard("checkpoint_audit", VERDICT_FIELD, &[ACCEPTED_LABEL])?,
-                node: empty_continuation("checkpoint_accepted", state.clone())?,
-            },
-        ])?,
-        otherwise: None,
-        promoted_state_paths: Vec::new(),
-    });
-    sequence(
-        "checkpoint_audit_stage",
-        state,
-        vec![checkpoint_auditor()?, result],
-        Vec::new(),
-    )
-}
-
-fn checkpoint_auditor() -> Result<GraphNode, BuiltinTemplateError> {
-    let input = static_value(delivery_result_schema(DeliveryMode::Push))?;
-    let input_bindings = output_fields(&input)?
-        .into_iter()
-        .map(|field| state_input(&field, &field))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(GraphNode::Verifier(VerifierNode {
-        name: node_name("checkpoint_audit")?,
-        worker: worker_ref("builtin.agent.research-checkpoint@1")?,
-        input,
-        output: PayloadType::Null,
-        input_bindings,
-        write_bindings: vec![diagnostic_write(
-            "checkpoint_audit",
-            DELIVERY_FEEDBACK_FIELD,
-        )?],
-        timeout_ms: None,
-        attempts: positive(MAX_AGENT_VERIFIER_ATTEMPTS)?,
-        signals: review_signals()?,
-        diagnostic: diagnostic_type()?,
-        instructions: Some(instructions(
-            "Read only. Confirm that the push receipt names the exact finalized research checkpoint \
-             currently present in the workspace and that no experiment draft or scratch backup was \
-             published. Return accepted only when the receipt and workspace prove those conditions; \
-             otherwise return rejected with an actionable diagnostic. Do not edit files and do not use \
-             Git commands.",
-        )?),
-    }))
 }
 
 fn empty_continuation(name: &str, state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
@@ -1190,7 +1081,6 @@ fn research_collection_fields(
         (WORK_ITEMS_FIELD, role_array_type(&WORK_ITEM_LABELS)?),
         (CONTINUATION_ITEMS_FIELD, array_type(PayloadType::Null)),
         (PROPOSALS_FIELD, array_type(PayloadType::String)),
-        (PLAN_REVIEWS_FIELD, array_type(PayloadType::String)),
         (REVIEWS_FIELD, array_type(PayloadType::String)),
         (VERDICTS_FIELD, array_type(verdict_type()?)),
     ]
@@ -1287,7 +1177,6 @@ fn bootstrap_output_type() -> Result<PayloadType, BuiltinTemplateError> {
             true,
         ),
         (PROPOSALS_FIELD, array_type(PayloadType::String), true),
-        (PLAN_REVIEWS_FIELD, array_type(PayloadType::String), true),
         (REVIEWS_FIELD, array_type(PayloadType::String), true),
         (VERDICTS_FIELD, array_type(verdict_type()?), true),
     ]);
@@ -1405,20 +1294,14 @@ fn decision_input_type() -> Result<PayloadType, BuiltinTemplateError> {
         (TASK_FIELD, PayloadType::String, true),
         (REVIEWS_FIELD, array_type(PayloadType::String), true),
         (VERDICTS_FIELD, array_type(verdict_type()?), true),
-        (PLAN_REVIEWS_FIELD, array_type(PayloadType::String), true),
     ])
 }
 
 fn decision_input_bindings() -> Result<Vec<InputBinding>, BuiltinTemplateError> {
-    [
-        TASK_FIELD,
-        REVIEWS_FIELD,
-        VERDICTS_FIELD,
-        PLAN_REVIEWS_FIELD,
-    ]
-    .into_iter()
-    .map(|field| state_input(field, field))
-    .collect()
+    [TASK_FIELD, REVIEWS_FIELD, VERDICTS_FIELD]
+        .into_iter()
+        .map(|field| state_input(field, field))
+        .collect()
 }
 
 fn terminal_paths(delivery: TemplateDelivery) -> Result<Vec<FieldPath>, BuiltinTemplateError> {
@@ -1428,9 +1311,7 @@ fn terminal_paths(delivery: TemplateDelivery) -> Result<Vec<FieldPath>, BuiltinT
 }
 
 fn checkpoint_paths() -> Result<Vec<FieldPath>, BuiltinTemplateError> {
-    let mut result = delivery_output_paths(DeliveryMode::Push)?;
-    result.push(field_path(DELIVERY_FEEDBACK_FIELD)?);
-    Ok(result)
+    delivery_output_paths(DeliveryMode::Push)
 }
 
 fn delivery_output_paths(mode: DeliveryMode) -> Result<Vec<FieldPath>, BuiltinTemplateError> {

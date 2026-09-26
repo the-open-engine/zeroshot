@@ -182,7 +182,7 @@ async fn every_supported_materialization_is_admissible() {
 fn auto_research_leaves(delivery: TemplateDelivery) -> Vec<&'static str> {
     let mut leaves = vec![
         "abort_plan",
-        "abort_plan_rejected",
+        "abort_plan_invalid",
         "abort_staging_review",
         "abort_staging_rejected",
         "abort_review",
@@ -192,9 +192,7 @@ fn auto_research_leaves(delivery: TemplateDelivery) -> Vec<&'static str> {
         "stage_parent",
         "record_stop",
         "research_scout",
-        "plan_review",
         "staging_review",
-        "iteration_exit",
         "finalize_aborted",
         "finalize_adopted",
         "finalize_record_only",
@@ -203,11 +201,7 @@ fn auto_research_leaves(delivery: TemplateDelivery) -> Vec<&'static str> {
         "topology_validation",
     ];
     if delivery == TemplateDelivery::Push {
-        leaves.extend([
-            "checkpoint_audit",
-            "checkpoint_delivery",
-            "checkpoint_manifest",
-        ]);
+        leaves.extend(["checkpoint_delivery", "checkpoint_manifest"]);
     }
     leaves
 }
@@ -360,7 +354,6 @@ fn assert_auto_research_materialization(delivery: TemplateDelivery, expected_del
             "research_phase",
             "disposition_audit_phase",
             "checkpoint",
-            "iteration_exit",
             "exit_route",
         ]
     } else {
@@ -368,7 +361,6 @@ fn assert_auto_research_materialization(delivery: TemplateDelivery, expected_del
             "hypothesis_scouts",
             "research_phase",
             "disposition_audit_phase",
-            "iteration_exit",
             "exit_route",
         ]
     };
@@ -394,7 +386,7 @@ fn assert_research_bootstrap(root: &GraphNode) {
     let PayloadType::Record { fields } = &bootstrap.output else {
         panic!("research bootstrap must return a record");
     };
-    assert_eq!(fields.len(), 8);
+    assert_eq!(fields.len(), 7);
     assert_topology_fields(fields);
     assert_eq!(
         fields
@@ -408,7 +400,7 @@ fn assert_research_bootstrap(root: &GraphNode) {
         ))
     );
     assert!(!fields.contains_key(&field_name("activationItems").assert_value()));
-    assert_eq!(bootstrap.write_bindings.len(), 8);
+    assert_eq!(bootstrap.write_bindings.len(), 7);
     assert!(bootstrap.instructions.as_ref().is_some_and(|value| {
         value
             .as_str()
@@ -459,24 +451,10 @@ fn assert_required_role_field(fields: &BTreeMap<FieldName, RecordField>, labels:
 }
 
 fn assert_research_phase_topology(iteration_nodes: &[&GraphNode]) {
-    let planning = iteration_nodes
-        .iter()
-        .find_map(|node| match node {
-            GraphNode::Map(node) if node.name.as_str() == "planning_phase" => Some(node),
-            _ => None,
-        })
-        .assert_value_with("planning phase");
-    assert_eq!(planning.max_items.get(), 1);
-    assert_eq!(
-        planning.over,
-        DataSelector::State {
-            path: field_path("workItems").assert_value()
-        }
-    );
-    assert_eq!(planning.body.name().as_str(), "plan_review");
-    assert_eq!(
-        planning.promoted_state_paths,
-        vec![field_path("planReviews").assert_value()]
+    assert!(
+        iteration_nodes
+            .iter()
+            .all(|node| node.name().as_str() != "planning_phase")
     );
     let work = iteration_nodes
         .iter()
@@ -635,6 +613,11 @@ fn assert_research_checkpoint(
             .count(),
         expected_deliveries
     );
+    assert!(
+        iteration_nodes
+            .iter()
+            .all(|node| node.name().as_str() != "checkpoint_audit")
+    );
     if delivery != TemplateDelivery::Push {
         assert!(
             iteration_nodes
@@ -672,28 +655,8 @@ fn assert_research_checkpoint(
         &delivery_result.branches.as_slice()[1].node,
         GraphNode::Fail(_)
     ));
-
-    let auditor = find_verifier(iteration_nodes, "checkpoint_audit");
     assert_eq!(
-        auditor
-            .signals
-            .get(&field_name(VERDICT_FIELD).assert_value()),
-        Some(&enum_labels(&[ACCEPTED_LABEL, REJECTED_LABEL]).assert_value())
-    );
-    assert_eq!(auditor.diagnostic, diagnostic_type().assert_value());
-    assert_eq!(auditor.write_bindings.len(), 1);
-
-    let audit_result = find_choice(iteration_nodes, "checkpoint_audit_result");
-    assert_eq!(
-        audit_result.branches.as_slice()[1].node.name().as_str(),
-        "checkpoint_audit_rejected"
-    );
-    assert!(matches!(
-        &audit_result.branches.as_slice()[1].node,
-        GraphNode::Fail(_)
-    ));
-    assert_eq!(
-        audit_result.branches.as_slice()[2].node.name().as_str(),
+        delivery_result.branches.as_slice()[2].node.name().as_str(),
         "checkpoint_accepted"
     );
 }
@@ -801,15 +764,15 @@ fn assert_disposition_stages(iteration_nodes: &[&GraphNode]) {
         auditor
             .signals
             .get(&field_name(VERDICT_FIELD).assert_value()),
-        Some(&enum_labels(&[ACCEPTED_LABEL, REJECTED_LABEL]).assert_value())
+        Some(&enum_labels(&["continue", "stop", "rejected"]).assert_value())
     );
     assert!(auditor.instructions.as_ref().is_some_and(|value| {
         value.as_str().contains("required disposition")
             && value.as_str().contains("current filesystem")
             && value
                 .as_str()
-                .contains("reviewed stop selection requires stop")
-            && value.as_str().contains("recovery before an experiment")
+                .contains("planner stop selection requires disposition stop")
+            && value.as_str().contains("stop or recovery before experiment")
     }));
 
     let audit_result = find_choice(iteration_nodes, "audit_disposition_result");
