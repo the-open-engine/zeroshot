@@ -183,16 +183,16 @@ fn auto_research_leaves(delivery: TemplateDelivery) -> Vec<&'static str> {
     let mut leaves = vec![
         "abort_plan",
         "abort_plan_invalid",
-        "abort_staging_review",
-        "abort_staging_rejected",
+        "abort_staging",
         "abort_review",
         "audit_disposition",
+        "audit_disposition_recheck",
+        "audit_repair",
         "bootstrap",
         "experiment",
         "stage_parent",
         "record_stop",
         "research_scout",
-        "staging_review",
         "finalize_aborted",
         "finalize_adopted",
         "finalize_record_only",
@@ -767,13 +767,35 @@ fn assert_disposition_stages(iteration_nodes: &[&GraphNode]) {
         Some(&enum_labels(&["continue", "stop", "rejected"]).assert_value())
     );
     assert!(auditor.instructions.as_ref().is_some_and(|value| {
-        value.as_str().contains("required disposition")
-            && value.as_str().contains("current filesystem")
+        value
+            .as_str()
+            .contains("Recompute the required disposition")
+            && value.as_str().contains("retained workspace hashes")
             && value
                 .as_str()
-                .contains("planner stop selection requires disposition stop")
-            && value.as_str().contains("stop or recovery before experiment")
+                .contains("provisional until audit acceptance")
+            && value.as_str().contains("audit-feedback.json")
     }));
+    let recheck = find_verifier(iteration_nodes, "audit_disposition_recheck");
+    assert_eq!(
+        recheck
+            .signals
+            .get(&field_name(VERDICT_FIELD).assert_value()),
+        Some(&enum_labels(&["continue", "stop", "rejected"]).assert_value())
+    );
+    let repair = iteration_nodes
+        .iter()
+        .find_map(|node| match node {
+            GraphNode::Step(node) if node.name.as_str() == "audit_repair" => Some(node),
+            _ => None,
+        })
+        .assert_value_with("conditional audit repair");
+    assert!(
+        repair
+            .instructions
+            .as_ref()
+            .is_some_and(|value| value.as_str().contains("current unaudited iteration"))
+    );
 
     let audit_result = find_choice(iteration_nodes, "audit_disposition_result");
     assert_eq!(audit_result.branches.as_slice().len(), 3);
@@ -781,13 +803,23 @@ fn assert_disposition_stages(iteration_nodes: &[&GraphNode]) {
         audit_result.branches.as_slice()[0].node,
         GraphNode::Fail(_)
     ));
-    assert!(matches!(
-        audit_result.branches.as_slice()[1].node,
-        GraphNode::Fail(_)
-    ));
+    assert_eq!(
+        audit_result.branches.as_slice()[1].node.name().as_str(),
+        "audit_repair_stage"
+    );
     assert_eq!(
         audit_result.branches.as_slice()[2].node.name().as_str(),
         "audit_disposition_accepted"
+    );
+    let recheck_result = find_choice(iteration_nodes, "audit_disposition_recheck_result");
+    assert_eq!(recheck_result.branches.as_slice().len(), 4);
+    assert!(matches!(
+        recheck_result.branches.as_slice()[2].node,
+        GraphNode::Fail(_)
+    ));
+    assert_eq!(
+        recheck_result.branches.as_slice()[3].node.name().as_str(),
+        "audit_disposition_recheck_accepted"
     );
 }
 
