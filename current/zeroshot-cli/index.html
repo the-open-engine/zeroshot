@@ -3258,10 +3258,10 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-31-29" name="__codelineno-31-29" href="#__codelineno-31-29"></a>          Expand one secret-free agent runtime across every executable graph node
 <a id="__codelineno-31-30" name="__codelineno-31-30" href="#__codelineno-31-30"></a>
 <a id="__codelineno-31-31" name="__codelineno-31-31" href="#__codelineno-31-31"></a>      --environment &lt;FILE&gt;
-<a id="__codelineno-31-32" name="__codelineno-31-32" href="#__codelineno-31-32"></a>          Load setup, startup, public variables, and hook connections for this run
+<a id="__codelineno-31-32" name="__codelineno-31-32" href="#__codelineno-31-32"></a>          Load a JSON environment definition: setup, startup, public variables, and hook connections
 <a id="__codelineno-31-33" name="__codelineno-31-33" href="#__codelineno-31-33"></a>
 <a id="__codelineno-31-34" name="__codelineno-31-34" href="#__codelineno-31-34"></a>      --no-environment
-<a id="__codelineno-31-35" name="__codelineno-31-35" href="#__codelineno-31-35"></a>          Use the target's base environment instead of a configured default
+<a id="__codelineno-31-35" name="__codelineno-31-35" href="#__codelineno-31-35"></a>          Send an empty environment ({}) to bypass the target's configured default
 <a id="__codelineno-31-36" name="__codelineno-31-36" href="#__codelineno-31-36"></a>
 <a id="__codelineno-31-37" name="__codelineno-31-37" href="#__codelineno-31-37"></a>      --profile &lt;[SCOPE:]NAME&gt;
 <a id="__codelineno-31-38" name="__codelineno-31-38" href="#__codelineno-31-38"></a>          Use a profile: NAME, local:NAME, user:NAME, or org:NAME.
@@ -3289,69 +3289,100 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-31-60" name="__codelineno-31-60" href="#__codelineno-31-60"></a>          Return after submission instead of following NDJSON run events
 <a id="__codelineno-31-61" name="__codelineno-31-61" href="#__codelineno-31-61"></a>
 <a id="__codelineno-31-62" name="__codelineno-31-62" href="#__codelineno-31-62"></a>      --validate-only
-<a id="__codelineno-31-63" name="__codelineno-31-63" href="#__codelineno-31-63"></a>          Validate and materialize the run without submitting it or contacting a target
+<a id="__codelineno-31-63" name="__codelineno-31-63" href="#__codelineno-31-63"></a>          Validate and materialize the run without submitting it or running preparation scripts.
 <a id="__codelineno-31-64" name="__codelineno-31-64" href="#__codelineno-31-64"></a>
-<a id="__codelineno-31-65" name="__codelineno-31-65" href="#__codelineno-31-65"></a>      --delivery &lt;MODE&gt;
-<a id="__codelineno-31-66" name="__codelineno-31-66" href="#__codelineno-31-66"></a>          Materialize this template-owned delivery mode
-<a id="__codelineno-31-67" name="__codelineno-31-67" href="#__codelineno-31-67"></a>
-<a id="__codelineno-31-68" name="__codelineno-31-68" href="#__codelineno-31-68"></a>      --push
-<a id="__codelineno-31-69" name="__codelineno-31-69" href="#__codelineno-31-69"></a>          Commit and push the managed run branch without opening a pull request
-<a id="__codelineno-31-70" name="__codelineno-31-70" href="#__codelineno-31-70"></a>
-<a id="__codelineno-31-71" name="__codelineno-31-71" href="#__codelineno-31-71"></a>      --pr
-<a id="__codelineno-31-72" name="__codelineno-31-72" href="#__codelineno-31-72"></a>          Materialize pull-request delivery for the software-change template
-<a id="__codelineno-31-73" name="__codelineno-31-73" href="#__codelineno-31-73"></a>
-<a id="__codelineno-31-74" name="__codelineno-31-74" href="#__codelineno-31-74"></a>      --ship
-<a id="__codelineno-31-75" name="__codelineno-31-75" href="#__codelineno-31-75"></a>          Materialize merge delivery for the software-change template.
-<a id="__codelineno-31-76" name="__codelineno-31-76" href="#__codelineno-31-76"></a>
-<a id="__codelineno-31-77" name="__codelineno-31-77" href="#__codelineno-31-77"></a>          Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
+<a id="__codelineno-31-65" name="__codelineno-31-65" href="#__codelineno-31-65"></a>          Remote profiles still require target access. This does not check dependency installation or connection availability.
+<a id="__codelineno-31-66" name="__codelineno-31-66" href="#__codelineno-31-66"></a>
+<a id="__codelineno-31-67" name="__codelineno-31-67" href="#__codelineno-31-67"></a>      --delivery &lt;MODE&gt;
+<a id="__codelineno-31-68" name="__codelineno-31-68" href="#__codelineno-31-68"></a>          Materialize this template-owned delivery mode
+<a id="__codelineno-31-69" name="__codelineno-31-69" href="#__codelineno-31-69"></a>
+<a id="__codelineno-31-70" name="__codelineno-31-70" href="#__codelineno-31-70"></a>      --push
+<a id="__codelineno-31-71" name="__codelineno-31-71" href="#__codelineno-31-71"></a>          Commit and push the managed run branch without opening a pull request
+<a id="__codelineno-31-72" name="__codelineno-31-72" href="#__codelineno-31-72"></a>
+<a id="__codelineno-31-73" name="__codelineno-31-73" href="#__codelineno-31-73"></a>      --pr
+<a id="__codelineno-31-74" name="__codelineno-31-74" href="#__codelineno-31-74"></a>          Materialize pull-request delivery for the software-change template
+<a id="__codelineno-31-75" name="__codelineno-31-75" href="#__codelineno-31-75"></a>
+<a id="__codelineno-31-76" name="__codelineno-31-76" href="#__codelineno-31-76"></a>      --ship
+<a id="__codelineno-31-77" name="__codelineno-31-77" href="#__codelineno-31-77"></a>          Materialize merge delivery for the software-change template.
 <a id="__codelineno-31-78" name="__codelineno-31-78" href="#__codelineno-31-78"></a>
-<a id="__codelineno-31-79" name="__codelineno-31-79" href="#__codelineno-31-79"></a>      --no-pr-feedback
-<a id="__codelineno-31-80" name="__codelineno-31-80" href="#__codelineno-31-80"></a>          Do not route visible pull-request feedback through the autonomous repair loop
-<a id="__codelineno-31-81" name="__codelineno-31-81" href="#__codelineno-31-81"></a>
-<a id="__codelineno-31-82" name="__codelineno-31-82" href="#__codelineno-31-82"></a>  -h, --help
-<a id="__codelineno-31-83" name="__codelineno-31-83" href="#__codelineno-31-83"></a>          Print help (see a summary with '-h')
-<a id="__codelineno-31-84" name="__codelineno-31-84" href="#__codelineno-31-84"></a>
-<a id="__codelineno-31-85" name="__codelineno-31-85" href="#__codelineno-31-85"></a>RUNTIME CONFIGURATION
-<a id="__codelineno-31-86" name="__codelineno-31-86" href="#__codelineno-31-86"></a>    The file is secret-free JSON. For example:
-<a id="__codelineno-31-87" name="__codelineno-31-87" href="#__codelineno-31-87"></a>
-<a id="__codelineno-31-88" name="__codelineno-31-88" href="#__codelineno-31-88"></a>      {
-<a id="__codelineno-31-89" name="__codelineno-31-89" href="#__codelineno-31-89"></a>        "harness": "codex",
-<a id="__codelineno-31-90" name="__codelineno-31-90" href="#__codelineno-31-90"></a>        "provider": "openrouter",
-<a id="__codelineno-31-91" name="__codelineno-31-91" href="#__codelineno-31-91"></a>        "size": "medium",
-<a id="__codelineno-31-92" name="__codelineno-31-92" href="#__codelineno-31-92"></a>        "nodes": {
-<a id="__codelineno-31-93" name="__codelineno-31-93" href="#__codelineno-31-93"></a>          "worker": {
-<a id="__codelineno-31-94" name="__codelineno-31-94" href="#__codelineno-31-94"></a>            "kind": "agent",
-<a id="__codelineno-31-95" name="__codelineno-31-95" href="#__codelineno-31-95"></a>            "model": "provider-model-id",
-<a id="__codelineno-31-96" name="__codelineno-31-96" href="#__codelineno-31-96"></a>            "connections": {"openrouter": ["OPENROUTER_API_KEY"]}
-<a id="__codelineno-31-97" name="__codelineno-31-97" href="#__codelineno-31-97"></a>          }
-<a id="__codelineno-31-98" name="__codelineno-31-98" href="#__codelineno-31-98"></a>        }
-<a id="__codelineno-31-99" name="__codelineno-31-99" href="#__codelineno-31-99"></a>      }
-<a id="__codelineno-31-100" name="__codelineno-31-100" href="#__codelineno-31-100"></a>
-<a id="__codelineno-31-101" name="__codelineno-31-101" href="#__codelineno-31-101"></a>    Provider choices are codex/openai, codex/openrouter, codex/bedrock, claude/anthropic,
-<a id="__codelineno-31-102" name="__codelineno-31-102" href="#__codelineno-31-102"></a>    claude/openrouter, claude/bedrock, codex/gateway, claude/gateway, and copilot/github. Gateway connections
-<a id="__codelineno-31-103" name="__codelineno-31-103" href="#__codelineno-31-103"></a>    require GATEWAY_BASE_URL and GATEWAY_API_KEY; Codex uses Responses and Claude uses Messages.
-<a id="__codelineno-31-104" name="__codelineno-31-104" href="#__codelineno-31-104"></a>    Known-incompatible harness/provider pairs include
-<a id="__codelineno-31-105" name="__codelineno-31-105" href="#__codelineno-31-105"></a>    codex/anthropic and claude/openai. Local Copilot reuses its native user login; contained
-<a id="__codelineno-31-106" name="__codelineno-31-106" href="#__codelineno-31-106"></a>    Copilot uses a user-backed GitHub connection with COPILOT_GITHUB_TOKEN. Model IDs are passed
-<a id="__codelineno-31-107" name="__codelineno-31-107" href="#__codelineno-31-107"></a>    unchanged to the selected harness and
-<a id="__codelineno-31-108" name="__codelineno-31-108" href="#__codelineno-31-108"></a>    provider; Zeroshot does not maintain or validate provider model catalogs.
-<a id="__codelineno-31-109" name="__codelineno-31-109" href="#__codelineno-31-109"></a>
-<a id="__codelineno-31-110" name="__codelineno-31-110" href="#__codelineno-31-110"></a>    Sizes are small, medium, and large.
+<a id="__codelineno-31-79" name="__codelineno-31-79" href="#__codelineno-31-79"></a>          Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
+<a id="__codelineno-31-80" name="__codelineno-31-80" href="#__codelineno-31-80"></a>
+<a id="__codelineno-31-81" name="__codelineno-31-81" href="#__codelineno-31-81"></a>      --no-pr-feedback
+<a id="__codelineno-31-82" name="__codelineno-31-82" href="#__codelineno-31-82"></a>          Do not route visible pull-request feedback through the autonomous repair loop
+<a id="__codelineno-31-83" name="__codelineno-31-83" href="#__codelineno-31-83"></a>
+<a id="__codelineno-31-84" name="__codelineno-31-84" href="#__codelineno-31-84"></a>  -h, --help
+<a id="__codelineno-31-85" name="__codelineno-31-85" href="#__codelineno-31-85"></a>          Print help (see a summary with '-h')
+<a id="__codelineno-31-86" name="__codelineno-31-86" href="#__codelineno-31-86"></a>
+<a id="__codelineno-31-87" name="__codelineno-31-87" href="#__codelineno-31-87"></a>RUNTIME CONFIGURATION
+<a id="__codelineno-31-88" name="__codelineno-31-88" href="#__codelineno-31-88"></a>    The file is secret-free JSON. For example:
+<a id="__codelineno-31-89" name="__codelineno-31-89" href="#__codelineno-31-89"></a>
+<a id="__codelineno-31-90" name="__codelineno-31-90" href="#__codelineno-31-90"></a>      {
+<a id="__codelineno-31-91" name="__codelineno-31-91" href="#__codelineno-31-91"></a>        "harness": "codex",
+<a id="__codelineno-31-92" name="__codelineno-31-92" href="#__codelineno-31-92"></a>        "provider": "openrouter",
+<a id="__codelineno-31-93" name="__codelineno-31-93" href="#__codelineno-31-93"></a>        "size": "medium",
+<a id="__codelineno-31-94" name="__codelineno-31-94" href="#__codelineno-31-94"></a>        "nodes": {
+<a id="__codelineno-31-95" name="__codelineno-31-95" href="#__codelineno-31-95"></a>          "worker": {
+<a id="__codelineno-31-96" name="__codelineno-31-96" href="#__codelineno-31-96"></a>            "kind": "agent",
+<a id="__codelineno-31-97" name="__codelineno-31-97" href="#__codelineno-31-97"></a>            "model": "provider-model-id",
+<a id="__codelineno-31-98" name="__codelineno-31-98" href="#__codelineno-31-98"></a>            "connections": {"openrouter": ["OPENROUTER_API_KEY"]}
+<a id="__codelineno-31-99" name="__codelineno-31-99" href="#__codelineno-31-99"></a>          }
+<a id="__codelineno-31-100" name="__codelineno-31-100" href="#__codelineno-31-100"></a>        }
+<a id="__codelineno-31-101" name="__codelineno-31-101" href="#__codelineno-31-101"></a>      }
+<a id="__codelineno-31-102" name="__codelineno-31-102" href="#__codelineno-31-102"></a>
+<a id="__codelineno-31-103" name="__codelineno-31-103" href="#__codelineno-31-103"></a>    Provider choices are codex/openai, codex/openrouter, codex/bedrock, claude/anthropic,
+<a id="__codelineno-31-104" name="__codelineno-31-104" href="#__codelineno-31-104"></a>    claude/openrouter, claude/bedrock, codex/gateway, claude/gateway, and copilot/github. Gateway connections
+<a id="__codelineno-31-105" name="__codelineno-31-105" href="#__codelineno-31-105"></a>    require GATEWAY_BASE_URL and GATEWAY_API_KEY; Codex uses Responses and Claude uses Messages.
+<a id="__codelineno-31-106" name="__codelineno-31-106" href="#__codelineno-31-106"></a>    Known-incompatible harness/provider pairs include
+<a id="__codelineno-31-107" name="__codelineno-31-107" href="#__codelineno-31-107"></a>    codex/anthropic and claude/openai. Local Copilot reuses its native user login; contained
+<a id="__codelineno-31-108" name="__codelineno-31-108" href="#__codelineno-31-108"></a>    Copilot uses a user-backed GitHub connection with COPILOT_GITHUB_TOKEN. Model IDs are passed
+<a id="__codelineno-31-109" name="__codelineno-31-109" href="#__codelineno-31-109"></a>    unchanged to the selected harness and
+<a id="__codelineno-31-110" name="__codelineno-31-110" href="#__codelineno-31-110"></a>    provider; Zeroshot does not maintain or validate provider model catalogs.
 <a id="__codelineno-31-111" name="__codelineno-31-111" href="#__codelineno-31-111"></a>
-<a id="__codelineno-31-112" name="__codelineno-31-112" href="#__codelineno-31-112"></a>    Every executable graph node needs a same-named binding. Agent bindings require kind and model.
-<a id="__codelineno-31-113" name="__codelineno-31-113" href="#__codelineno-31-113"></a>    Optional fields are effort (low, medium, high, xhigh, or max when supported), sessionScope
-<a id="__codelineno-31-114" name="__codelineno-31-114" href="#__codelineno-31-114"></a>    (execution or node_instance), and connections. Each connection key maps to the exact
-<a id="__codelineno-31-115" name="__codelineno-31-115" href="#__codelineno-31-115"></a>    environment variable names required by that node; never put values in this file.
-<a id="__codelineno-31-116" name="__codelineno-31-116" href="#__codelineno-31-116"></a>
-<a id="__codelineno-31-117" name="__codelineno-31-117" href="#__codelineno-31-117"></a>    Use `zeroshot template show TEMPLATE` to inspect node names. With --push, --pr, or --ship, omit the
-<a id="__codelineno-31-118" name="__codelineno-31-118" href="#__codelineno-31-118"></a>    template-owned delivery binding.
-<a id="__codelineno-31-119" name="__codelineno-31-119" href="#__codelineno-31-119"></a>
-<a id="__codelineno-31-120" name="__codelineno-31-120" href="#__codelineno-31-120"></a>    --uniform-runtime-config requires harness, provider, and model. It accepts optional size,
-<a id="__codelineno-31-121" name="__codelineno-31-121" href="#__codelineno-31-121"></a>    effort, sessionScope, and connections fields without nodes. Zeroshot expands that agent binding
-<a id="__codelineno-31-122" name="__codelineno-31-122" href="#__codelineno-31-122"></a>    across every executable graph node and supplies graph-visible Git delivery bindings itself.
-<a id="__codelineno-31-123" name="__codelineno-31-123" href="#__codelineno-31-123"></a>    Omitted connections reuse native local login for codex/openai, claude/anthropic, and
-<a id="__codelineno-31-124" name="__codelineno-31-124" href="#__codelineno-31-124"></a>    copilot/github; other local lanes and contained targets derive their canonical connection
-<a id="__codelineno-31-125" name="__codelineno-31-125" href="#__codelineno-31-125"></a>    requirements.
+<a id="__codelineno-31-112" name="__codelineno-31-112" href="#__codelineno-31-112"></a>    Sizes are small, medium, and large.
+<a id="__codelineno-31-113" name="__codelineno-31-113" href="#__codelineno-31-113"></a>
+<a id="__codelineno-31-114" name="__codelineno-31-114" href="#__codelineno-31-114"></a>    Every executable graph node needs a same-named binding. Agent bindings require kind and model.
+<a id="__codelineno-31-115" name="__codelineno-31-115" href="#__codelineno-31-115"></a>    Optional fields are effort (low, medium, high, xhigh, or max when supported), sessionScope
+<a id="__codelineno-31-116" name="__codelineno-31-116" href="#__codelineno-31-116"></a>    (execution or node_instance), and connections. Each connection key maps to the exact
+<a id="__codelineno-31-117" name="__codelineno-31-117" href="#__codelineno-31-117"></a>    environment variable names required by that node; never put values in this file.
+<a id="__codelineno-31-118" name="__codelineno-31-118" href="#__codelineno-31-118"></a>
+<a id="__codelineno-31-119" name="__codelineno-31-119" href="#__codelineno-31-119"></a>    Use `zeroshot template show TEMPLATE` to inspect node names. With --push, --pr, or --ship, omit the
+<a id="__codelineno-31-120" name="__codelineno-31-120" href="#__codelineno-31-120"></a>    template-owned delivery binding.
+<a id="__codelineno-31-121" name="__codelineno-31-121" href="#__codelineno-31-121"></a>
+<a id="__codelineno-31-122" name="__codelineno-31-122" href="#__codelineno-31-122"></a>    --uniform-runtime-config requires harness, provider, and model. It accepts optional size,
+<a id="__codelineno-31-123" name="__codelineno-31-123" href="#__codelineno-31-123"></a>    effort, sessionScope, and connections fields without nodes. Zeroshot expands that agent binding
+<a id="__codelineno-31-124" name="__codelineno-31-124" href="#__codelineno-31-124"></a>    across every executable graph node and supplies graph-visible Git delivery bindings itself.
+<a id="__codelineno-31-125" name="__codelineno-31-125" href="#__codelineno-31-125"></a>    Omitted connections reuse native local login for codex/openai, claude/anthropic, and
+<a id="__codelineno-31-126" name="__codelineno-31-126" href="#__codelineno-31-126"></a>    copilot/github; other local lanes and contained targets derive their canonical connection
+<a id="__codelineno-31-127" name="__codelineno-31-127" href="#__codelineno-31-127"></a>    requirements.
+<a id="__codelineno-31-128" name="__codelineno-31-128" href="#__codelineno-31-128"></a>
+<a id="__codelineno-31-129" name="__codelineno-31-129" href="#__codelineno-31-129"></a>ENVIRONMENT PREPARATION
+<a id="__codelineno-31-130" name="__codelineno-31-130" href="#__codelineno-31-130"></a>    For Docker or Cloud targets, pass --environment environment.json with a separate, flat JSON
+<a id="__codelineno-31-131" name="__codelineno-31-131" href="#__codelineno-31-131"></a>    definition (not a profile field or an "environment" wrapper):
+<a id="__codelineno-31-132" name="__codelineno-31-132" href="#__codelineno-31-132"></a>
+<a id="__codelineno-31-133" name="__codelineno-31-133" href="#__codelineno-31-133"></a>      {
+<a id="__codelineno-31-134" name="__codelineno-31-134" href="#__codelineno-31-134"></a>        "setup": "apt-get update &amp;&amp; apt-get install -y jq",
+<a id="__codelineno-31-135" name="__codelineno-31-135" href="#__codelineno-31-135"></a>        "startup": "npm ci",
+<a id="__codelineno-31-136" name="__codelineno-31-136" href="#__codelineno-31-136"></a>        "variables": {"CI": "true"}
+<a id="__codelineno-31-137" name="__codelineno-31-137" href="#__codelineno-31-137"></a>      }
+<a id="__codelineno-31-138" name="__codelineno-31-138" href="#__codelineno-31-138"></a>
+<a id="__codelineno-31-139" name="__codelineno-31-139" href="#__codelineno-31-139"></a>    Setup runs as root before checkout or workspace restore. Startup runs as the non-root
+<a id="__codelineno-31-140" name="__codelineno-31-140" href="#__codelineno-31-140"></a>    workspace owner in the checkout before any agent starts. Workers and reviewers share the
+<a id="__codelineno-31-141" name="__codelineno-31-141" href="#__codelineno-31-141"></a>    prepared workspace. Both hooks rerun on resume; startup must tolerate existing files.
+<a id="__codelineno-31-142" name="__codelineno-31-142" href="#__codelineno-31-142"></a>
+<a id="__codelineno-31-143" name="__codelineno-31-143" href="#__codelineno-31-143"></a>    Install OS packages in setup, project dependencies in startup, and shared executable tools
+<a id="__codelineno-31-144" name="__codelineno-31-144" href="#__codelineno-31-144"></a>    under $ZEROSHOT_TOOLS/bin (already on every hook and agent's PATH). Shell exports last only
+<a id="__codelineno-31-145" name="__codelineno-31-145" href="#__codelineno-31-145"></a>    for that hook; use variables for public values shared with agents. Scripts and variables
+<a id="__codelineno-31-146" name="__codelineno-31-146" href="#__codelineno-31-146"></a>    are public. If hooks need secrets, add e.g. "connections": {"package-registry": ["NPM_TOKEN"]}.
+<a id="__codelineno-31-147" name="__codelineno-31-147" href="#__codelineno-31-147"></a>    Hook connections are separate from node connections.
+<a id="__codelineno-31-148" name="__codelineno-31-148" href="#__codelineno-31-148"></a>
+<a id="__codelineno-31-149" name="__codelineno-31-149" href="#__codelineno-31-149"></a>    Hook failures stop the run before agents start and use no graph retry attempts.
+<a id="__codelineno-31-150" name="__codelineno-31-150" href="#__codelineno-31-150"></a>    Inspect `zeroshot logs RUN_ID --target NAME` for preparation output.
+<a id="__codelineno-31-151" name="__codelineno-31-151" href="#__codelineno-31-151"></a>    Omit both flags to allow host defaults; direct Docker defaults to the base environment.
+<a id="__codelineno-31-152" name="__codelineno-31-152" href="#__codelineno-31-152"></a>    --no-environment sends {} to bypass host defaults. Local runs use the invoking machine and
+<a id="__codelineno-31-153" name="__codelineno-31-153" href="#__codelineno-31-153"></a>    reject hooks and hook connections.
+<a id="__codelineno-31-154" name="__codelineno-31-154" href="#__codelineno-31-154"></a>
+<a id="__codelineno-31-155" name="__codelineno-31-155" href="#__codelineno-31-155"></a>    Installation, services, limits, and recovery:
+<a id="__codelineno-31-156" name="__codelineno-31-156" href="#__codelineno-31-156"></a>    https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/
 </code></pre></div>
 <h3 id="zeroshot-update"><code>zeroshot update</code><a class="headerlink" href="#zeroshot-update" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>Update this executable and managed agent skill to the newest canonical release.
@@ -3473,21 +3504,23 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a>
 <a id="__codelineno-39-3" name="__codelineno-39-3" href="#__codelineno-39-3"></a>By default, restart the original graph using its latest retained workspace. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. The successor resolves credentials again. Export GH_TOKEN before resuming a named-target run that needs it for private source checkout or Git delivery.
 <a id="__codelineno-39-4" name="__codelineno-39-4" href="#__codelineno-39-4"></a>
-<a id="__codelineno-39-5" name="__codelineno-39-5" href="#__codelineno-39-5"></a>Usage: zeroshot resume [OPTIONS] &lt;RUN_ID&gt;
+<a id="__codelineno-39-5" name="__codelineno-39-5" href="#__codelineno-39-5"></a>Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Services, Docker state, and agent conversations are not restored.
 <a id="__codelineno-39-6" name="__codelineno-39-6" href="#__codelineno-39-6"></a>
-<a id="__codelineno-39-7" name="__codelineno-39-7" href="#__codelineno-39-7"></a>Arguments:
-<a id="__codelineno-39-8" name="__codelineno-39-8" href="#__codelineno-39-8"></a>  &lt;RUN_ID&gt;
-<a id="__codelineno-39-9" name="__codelineno-39-9" href="#__codelineno-39-9"></a>          Public run ID
-<a id="__codelineno-39-10" name="__codelineno-39-10" href="#__codelineno-39-10"></a>
-<a id="__codelineno-39-11" name="__codelineno-39-11" href="#__codelineno-39-11"></a>Options:
-<a id="__codelineno-39-12" name="__codelineno-39-12" href="#__codelineno-39-12"></a>      --target &lt;NAME&gt;
-<a id="__codelineno-39-13" name="__codelineno-39-13" href="#__codelineno-39-13"></a>          Use this named target. If omitted, use the local controller
-<a id="__codelineno-39-14" name="__codelineno-39-14" href="#__codelineno-39-14"></a>
-<a id="__codelineno-39-15" name="__codelineno-39-15" href="#__codelineno-39-15"></a>      --from-checkpoint &lt;ID&gt;
-<a id="__codelineno-39-16" name="__codelineno-39-16" href="#__codelineno-39-16"></a>          Restore this checkpoint and continue from its saved graph boundary
-<a id="__codelineno-39-17" name="__codelineno-39-17" href="#__codelineno-39-17"></a>
-<a id="__codelineno-39-18" name="__codelineno-39-18" href="#__codelineno-39-18"></a>  -h, --help
-<a id="__codelineno-39-19" name="__codelineno-39-19" href="#__codelineno-39-19"></a>          Print help (see a summary with '-h')
+<a id="__codelineno-39-7" name="__codelineno-39-7" href="#__codelineno-39-7"></a>Usage: zeroshot resume [OPTIONS] &lt;RUN_ID&gt;
+<a id="__codelineno-39-8" name="__codelineno-39-8" href="#__codelineno-39-8"></a>
+<a id="__codelineno-39-9" name="__codelineno-39-9" href="#__codelineno-39-9"></a>Arguments:
+<a id="__codelineno-39-10" name="__codelineno-39-10" href="#__codelineno-39-10"></a>  &lt;RUN_ID&gt;
+<a id="__codelineno-39-11" name="__codelineno-39-11" href="#__codelineno-39-11"></a>          Public run ID
+<a id="__codelineno-39-12" name="__codelineno-39-12" href="#__codelineno-39-12"></a>
+<a id="__codelineno-39-13" name="__codelineno-39-13" href="#__codelineno-39-13"></a>Options:
+<a id="__codelineno-39-14" name="__codelineno-39-14" href="#__codelineno-39-14"></a>      --target &lt;NAME&gt;
+<a id="__codelineno-39-15" name="__codelineno-39-15" href="#__codelineno-39-15"></a>          Use this named target. If omitted, use the local controller
+<a id="__codelineno-39-16" name="__codelineno-39-16" href="#__codelineno-39-16"></a>
+<a id="__codelineno-39-17" name="__codelineno-39-17" href="#__codelineno-39-17"></a>      --from-checkpoint &lt;ID&gt;
+<a id="__codelineno-39-18" name="__codelineno-39-18" href="#__codelineno-39-18"></a>          Restore this checkpoint and continue from its saved graph boundary
+<a id="__codelineno-39-19" name="__codelineno-39-19" href="#__codelineno-39-19"></a>
+<a id="__codelineno-39-20" name="__codelineno-39-20" href="#__codelineno-39-20"></a>  -h, --help
+<a id="__codelineno-39-21" name="__codelineno-39-21" href="#__codelineno-39-21"></a>          Print help (see a summary with '-h')
 </code></pre></div>
 <h3 id="zeroshot-checkpoints"><code>zeroshot checkpoints</code><a class="headerlink" href="#zeroshot-checkpoints" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>List one page of a run's saved workspace checkpoints as JSON.
