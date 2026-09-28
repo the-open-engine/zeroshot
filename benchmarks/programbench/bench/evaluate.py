@@ -24,20 +24,42 @@ from .util import download, log, read_json, sha256_file, without_secrets, write_
 # Eval error codes that are outcomes of the submission itself: its tree could not be committed,
 # its compile.sh failed or timed out, or it produced no usable ./executable. The leaderboard scores
 # them 0 on every test, and so do we.
-# Any other error code, and any test-branch error, is an evaluation infrastructure failure.
+# A test branch whose test run hit ProgramBench's time limit is also the submission's outcome: its
+# tests kept running (chroma's did whenever pytest diffed a large mismatched output), no results
+# file was written, and the branch's tests count as not passed, as on the leaderboard.
+# Any other error code, and any other test-branch error, is an evaluation infrastructure failure.
 SUBMISSION_OUTCOMES = frozenset({"compile_failed", "copy_executable_failed", "hash_executable_failed", "no_executable_hash", "seed_git_failed"})
 
 
 def infrastructure_error(score: dict[str, Any]) -> str | None:
     """Why an archive's evaluation cannot be trusted, or None."""
-    if score.get("test_branch_errors"):
-        return f"test branch errors {sorted(score['test_branch_errors'])}"
+    branch_errors = score.get("test_branch_errors") or {}
+    timed_out = score.get("test_runs_timed_out") and all({_error_code(e) for e in errors} == {"results_read_failed"} for errors in branch_errors.values())
+    if branch_errors and not timed_out:
+        return f"test branch errors {sorted(branch_errors)}"
     code = score.get("error_code")
     if code:
         return None if code in SUBMISSION_OUTCOMES else code
-    if score.get("score") is not None and score.get("rerun_plugin_pinned") is not True:
+    if score.get("score") is not None and score.get("rerun_plugin_pinned") is False:
         return "pinned pytest-rerunfailures was not active"
     return None
+
+
+def _error_code(error: Any) -> str | None:
+    return error.get("error_code") if isinstance(error, dict) else str(error)
+
+
+def _timed_out(entry: dict[str, Any]) -> bool:
+    """A step that ProgramBench stopped at its time limit (``Command timed out after <n>s``)."""
+    return entry.get("returncode") == -1 and "timed out after" in str(entry.get("exception_info") or "")
+
+
+def test_runs_timed_out(raw: dict[str, Any]) -> bool:
+    """Every failed read of a branch's results file directly follows that branch's test run hitting
+    ProgramBench's time limit (each attempt logs its steps together, in order)."""
+    entries = [e for e in raw.get("log") or [] if isinstance(e, dict)]
+    failed_reads = [i for i, e in enumerate(entries) if e.get("step") == "results_read" and e.get("returncode") != 0]
+    return bool(failed_reads) and all(i > 0 and entries[i - 1].get("step") == "run_tests" and _timed_out(entries[i - 1]) for i in failed_reads)
 
 
 def archive_id(path: Path) -> str:
@@ -47,10 +69,11 @@ def archive_id(path: Path) -> str:
 
 
 def rerun_plugin_active(raw: dict[str, Any]) -> bool | None:
-    """Whether the pinned plugin was installed (exit 0) and loaded by pytest; None if no tests ran."""
+    """Whether the pinned plugin was installed (exit 0) and loaded by pytest; None if no test run
+    finished (a run stopped at ProgramBench's time limit keeps no output and no results)."""
     log_entries = [e for e in raw.get("log") or [] if isinstance(e, dict)]
     installs = [e for e in log_entries if e.get("step") == "install_rerunfailures"]
-    runs = [e for e in log_entries if e.get("step") == "run_tests"]
+    runs = [e for e in log_entries if e.get("step") == "run_tests" and not _timed_out(e)]
     if not runs:
         return None
     installed = any(e.get("returncode") == 0 and "pytest-rerunfailures==16.4" in str(e.get("command")) for e in installs)
@@ -96,6 +119,7 @@ def score_eval(eval_json: Path, instance_id: str, ignores: dict[str, list[str]])
         "error_code": raw.get("error_code"),
         "error_details": str(raw.get("error_details") or "")[:2000] or None,
         "test_branch_errors": raw.get("test_branch_errors") or {},
+        "test_runs_timed_out": test_runs_timed_out(raw),
         "executable_hash": raw.get("executable_hash"),
         "tests": kept,
     }

@@ -514,6 +514,13 @@ class DecisionTests(unittest.TestCase):
         docker["rounds"]["build-1"]["error_code"] = "wipe_workspace_failed"
         self.assertTrue(any(r.startswith("build-1 evaluation failed") for r in report._eligibility(docker, 472)))
 
+    def test_a_final_whose_tests_hung_scores_them_as_failed(self):
+        # The submission kept its test run going past ProgramBench's time limit: its tests count as
+        # not passed, as on the leaderboard, and the run stays eligible.
+        hung = self._loop("05", 200, 0)
+        hung["rounds"]["final"].update(test_branch_errors={"main": [{"error_code": "results_read_failed"}]}, test_runs_timed_out=True, rerun_plugin_pinned=None)
+        self.assertEqual(report._eligibility(hung, 472), [])
+
     def test_a_missing_codex_home_probe_counts_as_not_checked(self):
         meta = {"codex_home_surfaces": ["./config.toml 00"], "snapshots": {"build-1": {"codex_home_surfaces": ["./config.toml 00"]}, "check-1": {"probe_errors": {"codex_home_surfaces": "x"}}}, "codex_home_surfaces_end": ["./config.toml 00"]}
         self.assertEqual(report.codex_home_changes(meta), ["not checked after check-1"])
@@ -549,6 +556,33 @@ class DecisionTests(unittest.TestCase):
 
 
 class EvalTests(unittest.TestCase):
+    def test_a_test_run_stopped_at_the_time_limit_counts_as_failed_tests(self):
+        from bench import evaluate
+
+        install = {"step": "install_rerunfailures", "returncode": 0, "command": "pip install -q pytest-rerunfailures==16.4"}
+        timeout = {"step": "run_tests", "returncode": -1, "exception_info": "Command timed out after 3600s", "output": ""}
+        missing = {"step": "results_read", "returncode": 1, "exception_info": ""}
+        finished = {"step": "run_tests", "returncode": 0, "output": "plugins: rerunfailures-16.4, timeout-2.4.0"}
+        read = {"step": "results_read", "returncode": 0, "branch": "b"}
+        errors = {"a": [{"error_code": "results_read_failed", "error_details": ""}]}
+        # chroma's smoke: the only branch timed out twice (attempt and retry), so no test run finished.
+        hung = {"log": [install, timeout, missing, timeout, missing]}
+        self.assertTrue(evaluate.test_runs_timed_out(hung))
+        self.assertIsNone(evaluate.rerun_plugin_active(hung))
+        self.assertIsNone(evaluate.infrastructure_error({"score": 0.0, "test_branch_errors": errors, "test_runs_timed_out": True, "rerun_plugin_pinned": None}))
+        # One branch finished with the pinned plugin, the other hung.
+        mixed = {"log": [install, finished, read, timeout, missing, timeout, missing]}
+        self.assertTrue(evaluate.test_runs_timed_out(mixed))
+        self.assertTrue(evaluate.rerun_plugin_active(mixed))
+        # No results after a test run that ended on its own (a crash, a failed install) stays an
+        # infrastructure error, and so does any other branch error.
+        crashed = {"log": [install, {**finished, "returncode": 2}, missing]}
+        self.assertFalse(evaluate.test_runs_timed_out(crashed))
+        self.assertEqual(evaluate.infrastructure_error({"score": 0.0, "test_branch_errors": errors, "test_runs_timed_out": False}), "test branch errors ['a']")
+        other = {"a": [{"error_code": "run_tests_failed"}]}
+        self.assertEqual(evaluate.infrastructure_error({"score": 0.0, "test_branch_errors": other, "test_runs_timed_out": True}), "test branch errors ['a']")
+        self.assertEqual(evaluate.infrastructure_error({"score": 0.5, "rerun_plugin_pinned": False}), "pinned pytest-rerunfailures was not active")
+
     def test_targets_skip_discarded_attempts(self):
         from bench import evaluate
 

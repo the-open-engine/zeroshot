@@ -394,8 +394,9 @@ def pipeline_checks(smoke: Smoke, summary: dict[str, Any]) -> None:
         """Every evaluation that ran tests installed the pinned plugin (a workspace that did not
         compile never reaches the tests)."""
         scored = [v or {} for a in attempts.values() for v in a["rounds"].values()]
-        ran = [v for v in scored if v.get("error_code") not in SUBMISSION_OUTCOMES]
-        return bool(ran) and all(v.get("rerun_plugin_pinned") for v in ran), f"{len(ran)} evaluation(s) ran tests, all with the pinned pytest-rerunfailures; {len(scored) - len(ran)} never compiled"
+        ran = [v for v in scored if v.get("error_code") not in SUBMISSION_OUTCOMES and v.get("rerun_plugin_pinned") is not None]
+        pinned = sum(1 for v in ran if v.get("rerun_plugin_pinned"))
+        return bool(ran) and pinned == len(ran), f"{pinned} of {len(ran)} evaluation(s) that finished a test run had the pinned pytest-rerunfailures; {len(scored) - len(ran)} never compiled or finished no test run"
 
     smoke.check("pipeline_rerun_plugin_pinned", rerun_plugin_pinned)
     smoke.check("pipeline_costed_from_transcripts", lambda: (
