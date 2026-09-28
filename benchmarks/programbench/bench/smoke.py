@@ -134,13 +134,17 @@ class Smoke:
             self.check("runs_as_agent", lambda: (self._sh(c, "id -un")[1] == "agent", self._sh(c, "id")[1]))
             ref = shlex.quote(self.exp.reference_path)
             self.check("reference_binary_unreadable", lambda: (self._sh(c, f"test -r {ref}")[0] != 0, "execute-only for the agent"))
-            self.check("reference_binary_runs", lambda: (self._sh(c, f"{ref} --version")[0] == 0, self._sh(c, f"{ref} --version")[1]))
+            # Any status the program chooses shows it ran: not every reference has --version (ditaa
+            # prints its usage and fails); 126 and 127 mean it could not be executed or found.
+            probe = f"{ref} --version"
+            self.check("reference_binary_runs", lambda: (self._sh(c, probe)[0] < 126, self._sh(c, probe)[1]))
             if self.exp.reference_path != UPSTREAM_REFERENCE:
                 def reference_protected() -> tuple[bool, str]:
                     """Moved out of the workspace, the reference survives whatever the agent does."""
+                    before = self._sh(c, probe)
                     self._sh(c, f"rm -f {ref}; mv {ref} /tmp/zsbench-moved; printf x > {ref}; cp /bin/true {ref}; true")
-                    still = self._sh(c, f"{ref} --version")
-                    return still[0] == 0 and self._sh(c, "test -e /tmp/zsbench-moved")[0] != 0, f"after rm/mv/overwrite attempts: {still[1][:80]}"
+                    still = self._sh(c, probe)
+                    return still[0] < 126 and still == before and self._sh(c, "test -e /tmp/zsbench-moved")[0] != 0, f"after rm/mv/overwrite attempts: {still[1][:80]}"
 
                 self.check("reference_protected", reference_protected)
                 self.check("workspace_starts_clean", lambda: (not self._sh(c, "git -C /workspace status --porcelain")[1], self._sh(c, "git -C /workspace status --porcelain; git -C /workspace log --oneline")[1]))
