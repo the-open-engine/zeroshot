@@ -68,8 +68,10 @@ not expose the port to the public internet.
 
 ## Environment scripts and Docker
 
-A runtime may declare `environment.setup`, `environment.startup`, and ordinary
-`environment.variables`. Setup runs as root before checkout or checkpoint restoration.
+A run submission may supply `environment` beside `runtime`, with `setup`, `startup`, and ordinary
+`variables`. Profiles have no environment field. With the CLI, pass the definition
+as `--environment FILE`; see the [worked example](../../docs/guides/runtime-environments.md#example-pinned-node-and-npm-dependencies).
+Setup runs as root before checkout or checkpoint restoration.
 Startup runs as the workspace user after checkout or restoration and before any agent.
 Both run again on resume, so startup must be idempotent with respect to workspace files.
 Workers and reviewers share this prepared workspace and its dependencies. Setup must not

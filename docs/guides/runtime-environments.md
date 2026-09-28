@@ -1,14 +1,13 @@
 # Prepare a runtime environment
 
-Docker targets accept an optional top-level `environment` in a run submission:
+Run submissions to Docker targets accept an `environment` field alongside `runtime`:
 
 ```json
 {
   "environment": {
     "setup": "apt-get update && apt-get install -y jq",
     "startup": "npm ci",
-    "variables": { "CI": "true" },
-    "connections": { "package-registry": ["NPM_TOKEN"] }
+    "variables": { "CI": "true" }
   }
 }
 ```
@@ -27,9 +26,68 @@ does not store environment resources or interpret repository defaults. The local
 environment catalog or selector. Connection values come from the existing target connection
 mechanism and never belong in scripts or public variables. Only explicitly declared hook
 connections reach preparation; node connections remain independently declared.
+If installation needs private registry access, add
+`"connections": { "package-registry": ["NPM_TOKEN"] }` to the definition.
 The CLI can collect hook credentials for a definition you supply. When a host selects a default,
 its connection store must supply those credentials; the CLI does not inspect saved environments
 to discover additional secrets in your shell.
+
+## Example: pinned Node and npm dependencies
+
+For a repository with a committed `package-lock.json`, save this as `setup.sh`. It installs OS
+packages and Node 22.22.3, verifies the archive against the release's SHA-256 checksums, and exposes
+Node to every agent through `$ZEROSHOT_TOOLS/bin`:
+
+```bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y --no-install-recommends jq sqlite3 xz-utils
+
+case "$(uname -m)" in
+  x86_64) arch=x64 ;;
+  aarch64) arch=arm64 ;;
+  *) echo 'Unsupported Node architecture' >&2; exit 1 ;;
+esac
+version=22.22.3
+release="node-v$version-linux-$arch"
+download=$(mktemp -d)
+trap 'rm -rf "$download"' EXIT
+curl -fsSL "https://nodejs.org/dist/v$version/$release.tar.xz" -o "$download/$release.tar.xz"
+curl -fsSL "https://nodejs.org/dist/v$version/SHASUMS256.txt" -o "$download/SHASUMS256.txt"
+(cd "$download" && sha256sum --check --ignore-missing SHASUMS256.txt)
+tar -xJf "$download/$release.tar.xz" -C "$ZEROSHOT_TOOLS"
+for tool in node npm npx; do
+  ln -sfn "../$release/bin/$tool" "$ZEROSHOT_TOOLS/bin/$tool"
+done
+node --version
+```
+
+Save the workspace preparation as `startup.sh`. `npm ci` rebuilds `node_modules` from the lockfile,
+so this also works after restoring a workspace:
+
+```bash
+set -euo pipefail
+test "$(node --version)" = v22.22.3
+npm ci --no-audit --no-fund
+```
+
+On your machine, use `jq` to embed both scripts in a flat environment file, then submit it with
+your existing profile, task input file, and target:
+
+```bash
+jq -n --rawfile setup setup.sh --rawfile startup startup.sh \
+  '{setup: $setup, startup: $startup, variables: {CI: "true"}}' > environment.json
+zeroshot run --profile my-profile --target my-target \
+  --environment environment.json --title "Fix the failing test" --input input.json
+```
+
+The file contains `setup` and `startup` directly; an inline run API request puts the same object
+in `submission.environment`, beside `submission.runtime`. Setup cannot read repository files because
+checkout has not happened yet. Startup can invoke a checked-in script, for example
+`bash .zeroshot/startup.sh`.
+
+## Lifecycle and installation conventions
 
 Submission returns after admission and durable acceptance. While the run is `admitted`, setup runs
 as root before source checkout or workspace restoration. Startup then runs as the workspace user,
@@ -69,4 +127,4 @@ an operator-provided daemon endpoint. Detached Docker containers belong to that 
 terminated by the target's process cleanup. Direct target operators or scripts must manage their
 names, reuse, and removal. When the daemon runs inside a disposable run machine, destroying that
 machine removes its Docker resources. Local execution uses the invoking machine and rejects setup
-and startup hooks.
+and startup hooks and their connection references.
