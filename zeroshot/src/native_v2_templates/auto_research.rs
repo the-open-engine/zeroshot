@@ -131,7 +131,9 @@ fn bootstrap() -> Result<GraphNode, BuiltinTemplateError> {
          optional improvement. Keep 'summary.md' explicit about the retained workspace identity and \
          invariant status separately from the best supported historical findings; never attribute a \
          finding from a restored artifact to the retained workspace. Check that prior finalized \
-         records and their audit outcomes agree with mutable state and summary. Never treat an \
+         records and their audit outcomes agree with mutable state and summary. Use each \
+         iteration's audit.json as the sole authority for its audit status; do not infer \
+         acceptance from provisional records or summary prose. Never treat an \
          unaudited stop proposal as an approved stop. If an earlier process left a draft, restore \
          its backup and record an aborted iteration before proceeding. Treat provider sessions as \
          disposable; files are authoritative. Do not use Git or rewrite an audited iteration; \
@@ -539,10 +541,16 @@ fn planner() -> Result<GraphNode, BuiltinTemplateError> {
              including the latest audit.json, and current incumbent. Consider refinement of the \
              incumbent, the strongest live archived branch, and fresh directions when warranted; \
              do not force a fixed schema of alternatives. Compare expected progress and information \
-             gain against cost, uncertainty, risk, and diminishing returns. Choose one falsifiable \
-             experiment that fits this iteration; sustained work on the best direction is valid when \
-             its expected value remains highest. Do not force a quota of novel ideas or repeat a \
-             failed direction without new evidence. Choose both a proposal and its starting artifact. \
+             gain against cost, uncertainty, risk, and diminishing returns. When the two most \
+             recent audited iterations did not adopt a candidate, explicitly compare a new \
+             mechanism, a restorable archived branch, and a bounded measurement or discriminating \
+             test. Weigh expected gain and information against cost, risk, and observed noise; \
+             explain when a category has no affordable concrete option. Record this comparison in \
+             the selection. This trigger does not require a parent switch or impose an exploration \
+             quota. Choose one falsifiable experiment that fits this iteration; sustained work on \
+             the best direction is valid when its expected value remains highest. Do not impose a \
+             novelty quota or repeat a failed direction without new evidence. Choose both a proposal \
+             and its starting artifact. \
              Set parentArtifactId to incumbent or an immutable restorable archive ID; never select \
              a nonrestorable idea as a parent. Do not change workspace artifacts, the backlog, or \
              finalized records. Read the next iteration number from state.json and write only \
@@ -837,14 +845,20 @@ fn decision_worker(disposition: ResearchDisposition) -> Result<GraphNode, Builti
          generated files outside it and remove incidental files left by inspection. Reconcile \
          'state.json', 'summary.md', and 'backlog.json' so they separately identify the retained \
          workspace, its known invariant status and open violations, and the best supported historical \
-         findings, including findings from restored artifacts. Keep all scouts and considered \
-         alternatives in proposal.json; index actionable unresolved directions in the backlog \
-         with evidence and useful next tests. Preserve \
+         findings, including findings from restored artifacts. Describe the finalized disposition \
+         in summary.md without asserting the current audit outcome or leaving a pending-audit \
+         claim that will become stale. An iteration's audit.json alone determines its audit status. \
+         Keep all scouts and considered alternatives in proposal.json; index actionable unresolved \
+         directions in the backlog with evidence and useful next tests. Preserve \
          promising branches even when another experiment was chosen. Never attribute a historical finding or \
          measure to the retained workspace unless hashes or provenance match. Update the retained \
          workspace identity, hashes, invariant status, open violations, and accepted measures only for \
          an adopted result. Advance the next iteration number and remove scratch only after any required \
-         restoration is proven. Earlier audited iteration directories are append-only. Current \
+         restoration is proven. Before returning, resolve every evidence reference newly written \
+         in the five current records and mutable state, backlog, and summary, including file paths \
+         and JSON fragment anchors, against the post-cleanup ledger. Replace links to removed drafts \
+         with finalized evidence; preserve immutable archive provenance. Earlier audited iteration \
+         directories are append-only. Current \
          records are provisional until audit acceptance; correct only bookkeeping and \
          provenance supported by existing evidence after rejection. Keep large artifacts out \
          of Git and do not use Git commands. Return a Conventional Commit title and a short description \
@@ -989,7 +1003,9 @@ fn decision_auditor(name: &str) -> Result<GraphNode, BuiltinTemplateError> {
          any abort requires abort, three adopts require adopt, and every other combination requires \
          record_only. Reject duplicate, extra, stale, or inconsistent evaluations. Confirm the \
          five current iteration records agree with decision.json, state, and summary; confirm \
-         state advances exactly once and earlier audited records are unchanged. The current \
+         state advances exactly once and earlier audited records are unchanged. Treat existing \
+         audit.json files as the sole authority for audit status, and reject summary wording that \
+         conflicts with them or would falsely remain pending after this audit is appended. The current \
          records are provisional until audit acceptance; any repair must preserve original \
          observations, selection, and judge verdicts. Proposal.json preserves the full scout \
          handoff; backlog indexes actionable unresolved \

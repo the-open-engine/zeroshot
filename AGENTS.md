@@ -332,7 +332,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   direction remains. The planner emits `work`, `stop`, or `abort` directly and writes
   its selection under ignored scratch. It weighs expected progress and information gain against
   cost, risk, and diminishing returns without a fixed exploration quota or mandatory alternative
-  schema. No separate plan reviewer runs.
+  schema. After two consecutive audited non-adoptions, it explicitly compares a new mechanism,
+  a restorable archived branch, and a bounded measurement or discriminating test, explaining
+  unavailable options without forcing a parent switch. No separate plan reviewer runs.
   The staging agent backs up the incumbent, checks the declared archived source files and mutable
   scope, cleans only clearly incidental generated files outside that scope, and restores the
   chosen parent. The experiment independently checks the staged source, backup, and protected
@@ -347,7 +349,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   the incumbent; abort restores it without promoting invalid evidence; adopt retains the reviewed
   candidate and may archive the displaced incumbent. Finalizers preserve the full scout handoff
   and considered alternatives in the current proposal record; backlog indexes actionable
-  unresolved leads without duplicating every scout. A stop proposal creates an experiment-free
+  unresolved leads without duplicating every scout. Before returning, finalizers resolve newly
+  written evidence paths and JSON fragments against the ledger after scratch cleanup. Summaries
+  describe finalized work without asserting a provisional audit outcome; each iteration's
+  `audit.json` alone determines audit status. A stop proposal creates an experiment-free
   record but does not itself terminate the campaign.
   After every iteration path, one disposition auditor recomputes the verdict and checks the
   ledger, archive, hashes, and retained or restored filesystem. It emits `continue`, `stop`,
