@@ -39,7 +39,7 @@
   "eval": {
     "workers": 8,
     "docker_cpus": 3,
-    "timeout_seconds": 14400,
+    "timeout_seconds": 43200,
     "rounds": [1, 2, 3, 5, 10, 20, 30, 40, 50]
   },
   "pricing": {

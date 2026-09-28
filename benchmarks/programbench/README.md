@@ -146,7 +146,9 @@ the shortlist svgbob came from (small by measured code size, rarely solved by pu
 Only the general adjustment carries over: the reference moves to `/reference/executable`. The
 documentation stays as shipped, with no task-specific corrections. The smoke test's scoring check
 re-scores a published run of each task (`task.fidelity_reference`: GPT-5.5 xhigh on ditaa, Opus 5
-xhigh on chroma). The two experiments run one after the other.
+xhigh on chroma). Scoring uses v3's settings except for its overall time limit, 12 hours instead of
+4: ditaa's tests run one at a time, and its smoke test took 37 minutes a workspace. The two
+experiments run one after the other.
 
 ## The graph and prompts
 

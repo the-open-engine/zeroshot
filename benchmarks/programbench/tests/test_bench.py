@@ -162,8 +162,12 @@ class ConfigTests(unittest.TestCase):
             exp = config.load(f"experiments/luna-xhigh-{name}-v1.json")
             self.assertEqual((exp.instance_id, exp.model, exp.effort, exp.max_iterations), (iid, "gpt-5.6-luna", "xhigh", 50))
             self.assertEqual((exp.raw["order"], set(exp.raw["arms"])), (["loop"] * 5, {"loop"}))
-            for key in ("limits", "eval", "pricing"):
+            for key in ("limits", "pricing"):
                 self.assertEqual(exp.raw[key], v3.raw[key], key)
+            # Scoring runs as in v3 except for the overall time limit: ditaa's tests run one at a time
+            # (about 37 minutes a workspace), so 45 or so workspaces would not fit v3's 4 hours.
+            self.assertEqual({**exp.raw["eval"], "timeout_seconds": None}, {**v3.raw["eval"], "timeout_seconds": None})
+            self.assertEqual(exp.raw["eval"]["timeout_seconds"], 12 * 3600)
             rule = {k: v for k, v in exp.raw["decision_rule"].items() if k != "comparison"}
             self.assertEqual(rule, {k: v for k, v in v3.raw["decision_rule"].items() if k != "comparison"})
             # The general adjustment only: the reference moves, the documentation stays as shipped.
