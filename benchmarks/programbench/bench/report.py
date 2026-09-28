@@ -384,7 +384,7 @@ def markdown(summary: dict[str, Any]) -> str:
         for name in ("build-1", "final"):
             score = (a["rounds"].get(name) or {})
             if score.get("error_code") or score.get("test_branch_errors"):
-                flags.append(f"{name}: {infrastructure_error(score) or score.get('error_code')}")
+                flags.append(f"{name}: {infrastructure_error(score) or score.get('error_code') or 'test run timed out (its tests count as failed)'}")
         if a.get("ineligible_reasons"):
             flags.append("H1-ineligible")
         cost = a["cost_usd"].get("total")
