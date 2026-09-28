@@ -156,6 +156,31 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(v4.raw["eval"]["rounds"], list(range(1, 11)))
         self.assertEqual(v4.raw["task"], config.load("experiments/luna-xhigh-svgbob-v3.json").raw["task"])
 
+    def test_panel_tasks_rerun_luna_v3_on_new_tasks(self):
+        v3 = config.load("experiments/luna-xhigh-svgbob-v3.json")
+        for name, iid in (("ditaa", "stathissideris__ditaa.f2286c4"), ("chroma", "alecthomas__chroma.8d04def")):
+            exp = config.load(f"experiments/luna-xhigh-{name}-v1.json")
+            self.assertEqual((exp.instance_id, exp.model, exp.effort, exp.max_iterations), (iid, "gpt-5.6-luna", "xhigh", 50))
+            self.assertEqual((exp.raw["order"], set(exp.raw["arms"])), (["loop"] * 5, {"loop"}))
+            for key in ("limits", "eval", "pricing"):
+                self.assertEqual(exp.raw[key], v3.raw[key], key)
+            rule = {k: v for k, v in exp.raw["decision_rule"].items() if k != "comparison"}
+            self.assertEqual(rule, {k: v for k, v in v3.raw["decision_rule"].items() if k != "comparison"})
+            # The general adjustment only: the reference moves, the documentation stays as shipped.
+            self.assertEqual((exp.reference_path, exp.doc_fixes), ("/reference/executable", []))
+            self.assertEqual(config.task_statement(exp), config.task_statement(v3))
+            smoke = config.load(f"experiments/smoke-{name}.json")
+            self.assertEqual(smoke.raw["task"], exp.raw["task"])
+            self.assertEqual(exp.fidelity_reference["archive_url"].split("/")[-2], iid)
+
+    def test_fidelity_reference_defaults_to_the_pinned_svgbob_submission(self):
+        self.assertEqual(config.load("experiments/sol-xhigh-svgbob-v4.json").fidelity_reference, config.pins()["fidelity_reference"])
+        ditaa = config.load("experiments/luna-xhigh-ditaa-v1.json")
+        wrong_task = {**ditaa.raw["task"]["fidelity_reference"], "archive_url": config.pins()["fidelity_reference"]["archive_url"]}
+        for bad in (wrong_task, {**wrong_task, "archive_sha256": "abc"}, {"archive_url": ditaa.fidelity_reference["archive_url"]}):
+            with self.assertRaises(ValueError):
+                self._load({**ditaa.raw, "task": {**ditaa.raw["task"], "fidelity_reference": bad}})
+
     def test_digest_covers_code_but_not_tests_or_results(self):
         names = {str(p.relative_to(config.ROOT)) for p in config.code_files()}
         self.assertTrue({"bench/attempt.py", "bench/evaluate.py", "requirements.lock", "agent/Dockerfile"} <= names)

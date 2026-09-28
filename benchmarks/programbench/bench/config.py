@@ -72,6 +72,11 @@ class Experiment:
         return self.raw["task"].get("doc_fixes", [])
 
     @property
+    def fidelity_reference(self) -> dict[str, str]:
+        """The published submission the smoke test re-scores on this task (pins.json pins svgbob's)."""
+        return self.raw["task"].get("fidelity_reference") or pins()["fidelity_reference"]
+
+    @property
     def model(self) -> str:
         return self.raw["model"]["id"]
 
@@ -158,6 +163,13 @@ def _validate(raw: dict[str, Any]) -> None:
     for fix in raw["task"].get("doc_fixes", []):
         if set(fix) != {"file", "old", "new"} or fix["file"].startswith("/") or ".." in Path(fix["file"]).parts or not fix["old"] or fix["old"] == fix["new"]:
             raise ValueError(f"invalid doc fix: {fix}")
+    fidelity = raw["task"].get("fidelity_reference")
+    if fidelity is not None and (
+        set(fidelity) != {"submission", "commit", "archive_url", "archive_sha256", "registry_commit"}
+        or not fidelity["archive_url"].endswith(f"/{raw['task']['instance_id']}/submission.tar.gz")
+        or not re.fullmatch(r"[0-9a-f]{64}", fidelity["archive_sha256"])
+    ):
+        raise ValueError("task.fidelity_reference must pin a published submission archive of this task by sha256")
     if raw["model"]["effort"] not in EFFORTS:
         raise ValueError(f"effort must be one of {EFFORTS}")
     harness = raw["model"].get("harness", "codex")

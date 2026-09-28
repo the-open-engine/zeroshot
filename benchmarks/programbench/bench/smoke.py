@@ -339,7 +339,7 @@ class Smoke:
     def scoring_fidelity(self) -> None:
         """Evaluate a pinned, published leaderboard submission on this task and compare scores."""
         iid = self.exp.instance_id
-        ref = pins()["fidelity_reference"]
+        ref = self.exp.fidelity_reference
         run_dir = self.results / "smoke-fidelity" / ref["submission"]
         target = run_dir / iid / "submission.tar.gz"
         target.parent.mkdir(parents=True, exist_ok=True)

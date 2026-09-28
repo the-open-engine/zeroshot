@@ -131,6 +131,23 @@ So v5 keeps all 10 rounds and drops the time cap (the attempt limit is a week; b
 attempt's API cost reaches $1,000, a safety net a run is not expected to reach; the smoke spent about
 $13.50 per hour.
 
+`luna-xhigh-ditaa-v1` and `luna-xhigh-chroma-v1` ask whether v3's result holds beyond svgbob. Each
+reruns v3's model, prompts, graphs, limits, evaluation schedule and H1 rule on another task from
+the shortlist svgbob came from (small by measured code size, rarely solved by published runs), with
+5 loop runs and no single-worker arm, as in v4 and v5. Each task gets its own H1 verdict.
+- ditaa (`stathissideris__ditaa.f2286c4`, 609 scored tests; best published 38.4%, median of the 21
+  published runs 17%) turns ASCII diagrams into PNG images; most tests compare PNG bytes with the
+  Java original's output.
+- chroma (`alecthomas__chroma.8d04def`, 503 scored tests; best published 46.5%, median 9%) is a
+  syntax highlighter; most tests check the exact highlighting of one of about 250 languages. Its
+  default style fails to load in the task image (`open swapoff: no such file or directory`), as it
+  did in the published runs, so the reference highlights only with an explicit `--style`.
+
+Only the general adjustment carries over: the reference moves to `/reference/executable`. The
+documentation stays as shipped, with no task-specific corrections. The smoke test's scoring check
+re-scores a published run of each task (`task.fidelity_reference`: GPT-5.5 xhigh on ditaa, Opus 5
+xhigh on chroma). The two experiments run one after the other.
+
 ## The graph and prompts
 
 Both arms share one byte-identical `build` node; round 1 of the loop is exactly the single arm.
@@ -259,7 +276,8 @@ scripts/zsbench run experiments/luna-xhigh-svgbob.json
 ```
 
 For v2, use `scripts/zsbench smoke experiments/smoke-v2.json` and `scripts/zsbench run
-experiments/luna-xhigh-svgbob-v2.json`.
+experiments/luna-xhigh-svgbob-v2.json`. For the other tasks, use `experiments/smoke-ditaa.json` and
+`experiments/luna-xhigh-ditaa-v1.json` (chroma likewise).
 
 To reproduce a published result exactly, check out the commit recorded in its `manifest.json`
 (`provenance.vcs_ref`) rather than the branch tip.
