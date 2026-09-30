@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicBool;
 use openengine_cluster_protocol::Cursor;
 use openengine_cluster_testkit::assertions::AssertAt;
 use crate::v2_run_ledger::{AppendResult, SnapshotAndTail};
+use crate::native_v2_target_authority::{OperatorDiagnosticOutput, OperatorDiagnosticStore};
 
 const RETAINED_OUTPUT: &str = "retained before storage failure";
 const UNPERSISTED_OUTPUT: &str = "output rejected by storage";
@@ -256,6 +257,9 @@ impl NodeDriver for FaultDriver {
 }
 
 struct FailureHarness {
+    diagnostic_receiver: std::sync::Mutex<
+        tokio::sync::broadcast::Receiver<openengine_cluster_protocol::TargetOperatorDiagnostic>,
+    >,
     controller: NativeV2CloudController,
     ledger: Arc<FaultLedger>,
     driver: Arc<FaultDriver>,
@@ -275,9 +279,11 @@ impl FailureHarness {
         let driver = Arc::new(FaultDriver::new(point));
         let cleanup = Arc::new(FakeCleanup::new(inner));
         let allocator = Arc::new(FakeAllocator::new(driver.clone(), cleanup.clone()));
+        let (output, diagnostic_receiver) = OperatorDiagnosticOutput::channel();
         let controller = NativeV2CloudController::new(ledger.clone(), allocator)
             .await
-            .assert_value_with("fault-injection controller startup");
+            .assert_value_with("fault-injection controller startup")
+            .with_operator_diagnostics(Arc::new(OperatorDiagnosticStore::new(Some(output))));
         let receipt = submit_test_request(&controller, request(Value::Null))
             .await
             .assert_value_with("run admitted before fault");
@@ -309,6 +315,7 @@ impl FailureHarness {
             .assert_value_with("active status before fault");
         assert!(matches!(before.status, RunStatus::Running { .. }));
         Self {
+            diagnostic_receiver: std::sync::Mutex::new(diagnostic_receiver),
             controller,
             ledger,
             driver,
@@ -373,6 +380,20 @@ impl FailureHarness {
             .assert_value_with("operator diagnostic");
         assert_eq!(diagnostic.code, "runtime_failed");
         assert!(diagnostic.stderr.contains(&sqlite_failure().to_string()));
+        self.assert_exported_diagnostic(diagnostic);
+    }
+
+    fn assert_exported_diagnostic(
+        &self,
+        diagnostic: &openengine_cluster_protocol::TargetOperatorDiagnostic,
+    ) {
+        let exported = self
+            .diagnostic_receiver
+            .lock()
+            .assert_value()
+            .try_recv()
+            .assert_value();
+        assert_eq!(exported, *diagnostic);
     }
 
     async fn assert_history_unavailable(&self) {
@@ -560,6 +581,7 @@ async fn supervisor_panic_reports_failure_without_rendering_the_panic_payload() 
         .assert_value_with("panic diagnostic");
     assert_eq!(diagnostic.code, "runtime_failed");
     assert!(diagnostic.stderr.contains("supervisor task panicked"));
+    harness.assert_exported_diagnostic(diagnostic);
     assert!(
         !diagnostic
             .stderr

@@ -18,7 +18,7 @@ use crate::native_v2_candidate::test_support::TestGitRepository;
 #[cfg(unix)]
 use crate::native_v2_delivery::GhCliAuthorityConfig;
 #[cfg(unix)]
-use crate::native_v2_target_authority::OperatorDiagnosticStore;
+use crate::native_v2_target_authority::{OperatorDiagnosticOutput, OperatorDiagnosticStore};
 
 #[cfg(unix)]
 #[tokio::test]
@@ -40,7 +40,8 @@ for argument in "$@"; do /usr/bin/printf 'arg=%s\n' "$argument"; done
 exit 17
 "#,
     );
-    let store = Arc::new(OperatorDiagnosticStore::default());
+    let (output, mut receiver) = OperatorDiagnosticOutput::channel();
+    let store = Arc::new(OperatorDiagnosticStore::new(Some(output)));
     let run_id = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c991");
     let authority = diagnostic_authority(&repository, git_program, run_id.clone(), store.clone());
     let request = push_request(&repository);
@@ -55,6 +56,7 @@ exit 17
     let snapshot = store.snapshot(&run_id);
     assert_eq!(snapshot.diagnostics.len(), 1);
     let diagnostic = &snapshot.diagnostics[0];
+    assert_eq!(receiver.try_recv().assert_value(), *diagnostic);
     assert_eq!(diagnostic.code, "git_push_failed");
     assert_eq!(diagnostic.operation, "delivery.git_push");
     assert_eq!(diagnostic.exit_status, Some(17));

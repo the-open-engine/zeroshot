@@ -29,6 +29,8 @@ struct CheckoutFixture {
     allocator: ProductionCapsuleAllocator,
     admitted: native_v2_contract::AdmittedRun,
     diagnostics: Arc<OperatorDiagnosticStore>,
+    diagnostic_receiver:
+        tokio::sync::broadcast::Receiver<openengine_cluster_protocol::TargetOperatorDiagnostic>,
     run_id: RunId,
 }
 
@@ -69,6 +71,8 @@ exec /usr/bin/git "$@"
         let mut config = capsule_config(root.path().to_owned());
         config.git_program = program;
         config.workspace_storage = storage;
+        let (output, diagnostic_receiver) = OperatorDiagnosticOutput::channel();
+        config.operator_diagnostics = Arc::new(OperatorDiagnosticStore::new(Some(output)));
         let diagnostics = config.operator_diagnostics.clone();
         let allocator = ProductionCapsuleAllocator::new(config)
             .assert_value()
@@ -85,6 +89,7 @@ exec /usr/bin/git "$@"
             allocator,
             admitted,
             diagnostics,
+            diagnostic_receiver,
             run_id: RunId::new("checkout-recovery"),
         }
     }
@@ -217,7 +222,7 @@ esac"#,
 
 #[tokio::test]
 async fn exhausted_checkout_preserves_redacted_operator_diagnostics() {
-    let fixture = CheckoutFixture::new(
+    let mut fixture = CheckoutFixture::new(
         r#"case " $* " in
   *" fetch "*)
     /usr/bin/printf 'upstream status body\n'
@@ -235,6 +240,10 @@ esac"#,
     let snapshot = fixture.diagnostics.snapshot(&fixture.run_id);
     assert_eq!(snapshot.diagnostics.len(), 1);
     let diagnostic = &snapshot.diagnostics[0];
+    assert_eq!(
+        fixture.diagnostic_receiver.try_recv().assert_value(),
+        *diagnostic
+    );
     assert_eq!(diagnostic.operation, "source.checkout");
     assert_eq!(diagnostic.exit_status, Some(42));
     assert!(diagnostic.stdout.starts_with("upstream status body\n"));

@@ -449,7 +449,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Target HTTP failures use the shared bounded `{code,message,details?}` protocol problem; message-only
   bodies are invalid, and details contain only user-safe structured metadata.
 - Operator diagnostics are private-capability-only, run-scoped, bounded, sanitized, and excluded
-  from public run status and logs.
+  from public run status and logs. `ProductionHostingConfig::operator_diagnostic_output` accepts an
+  optional `OperatorDiagnosticOutput` created before target construction. Its nonblocking channel
+  exports the same normalized records from checkout, Git push, and fatal runtime producers; the
+  two-record private snapshot remains independent. The channel retains at most 128 records and
+  reports overwritten records through Tokio's `Lagged` error. Hosts own continuous collection,
+  durable storage/export, deployment identity, timestamps, retention, and shutdown draining; this
+  in-memory handoff cannot guarantee preservation across abrupt process termination. Treat lag as
+  incomplete diagnostics. Namespace IDs by target process/attempt and keep collected data private.
 - Hosted merge plans are atomic, immutable, merge-only DAGs over one explicit repository, branch,
   and profile. The target resolves each node's exact revision only after its dependencies succeed;
   plans have static inputs, no cross-node dataflow, and no retry-in-place. Agent runtime bindings

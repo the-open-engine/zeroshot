@@ -71,6 +71,7 @@ impl RepositoryFixture {
 
 pub(super) fn hosting_config(storage_root: PathBuf) -> ProductionHostingConfig {
     ProductionHostingConfig {
+        operator_diagnostic_output: None,
         workspace_storage: None,
         storage_root,
         copilot_executable: PathBuf::from("/usr/bin/false"),

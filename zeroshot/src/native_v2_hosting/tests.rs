@@ -184,6 +184,21 @@ fn capsule_configuration_requires_every_executable_boundary() {
 }
 
 #[test]
+fn production_factory_installs_the_host_owned_diagnostic_output() {
+    let root = TestDirectory::new("hosting-diagnostic-output");
+    let (output, mut receiver) = OperatorDiagnosticOutput::channel();
+    let mut config = hosting_config(root.path().to_owned());
+    config.operator_diagnostic_output = Some(output);
+    let factory = ProductionTargetControllerFactory::new(config);
+    let run_id = RunId::new("factory-diagnostic");
+    repository::RepositoryInstallError::Deadline
+        .record_diagnostic(&run_id, &factory.operator_diagnostics);
+    let snapshot = factory.operator_diagnostics.snapshot(&run_id);
+    assert_eq!(receiver.try_recv().assert_value(), snapshot.diagnostics[0]);
+    assert_eq!(snapshot.diagnostics[0].code, "git_checkout_failed");
+}
+
+#[test]
 fn production_config_debug_exposes_capabilities_without_environment_or_pool_details() {
     let root = TestDirectory::new("hosting-config-debug");
     let config = hosting_config(root.path().to_owned());
