@@ -27,7 +27,7 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 
 use crate::native_v2_cloud::NativeV2CloudController;
-pub use operator_diagnostics::OperatorDiagnosticOutput;
+pub use operator_diagnostics::{OperatorDiagnosticJsonLines, OperatorDiagnosticOutput};
 pub(crate) use operator_diagnostics::{
     MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES, NewOperatorDiagnostic, OperatorDiagnosticStore,
 };

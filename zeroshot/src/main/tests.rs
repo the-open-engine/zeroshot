@@ -481,6 +481,7 @@ async fn service_dispatch_preserves_public_listener_and_origin_refusals() {
             listen: "127.0.0.1:0".parse().assert_value(),
             public_origin: "https://target.example/private".to_owned(),
             storage: root.path("storage"),
+            operator_diagnostics_json: false,
             bootstrap_key_file: None,
         },
     ))

@@ -95,6 +95,7 @@ pub struct TargetServe {
     pub listen: SocketAddr,
     pub public_origin: String,
     pub storage: PathBuf,
+    pub operator_diagnostics_json: bool,
     pub bootstrap_key_file: Option<PathBuf>,
 }
 

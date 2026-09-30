@@ -351,6 +351,10 @@ struct TargetServeArgs {
     #[arg(long, value_name = "DIRECTORY")]
     storage: PathBuf,
 
+    /// Write private operator diagnostics as JSON lines to stdout.
+    #[arg(long)]
+    operator_diagnostics_json: bool,
+
     #[arg(long, value_name = "PATH", hide = true)]
     bootstrap_key_file: Option<PathBuf>,
 }

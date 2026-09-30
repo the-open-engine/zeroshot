@@ -459,6 +459,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   durable storage/export, deployment identity, timestamps, retention, and shutdown draining; this
   in-memory handoff cannot guarantee preservation across abrupt process termination. Treat lag as
   incomplete diagnostics. Namespace IDs by target process/attempt and keep collected data private.
+  `OperatorDiagnosticJsonLines` optionally drains those records on a dedicated writer thread,
+  flushing each line and reporting overflow. `target serve --operator-diagnostics-json` enables
+  stdout output. Writer shutdown is bounded; it cannot guarantee delivery after abrupt termination.
+  Output has no deployment metadata or cloud-specific envelope.
 - Hosted merge plans are atomic, immutable, merge-only DAGs over one explicit repository, branch,
   and profile. The target resolves each node's exact revision only after its dependencies succeed;
   plans have static inputs, no cross-node dataflow, and no retry-in-place. Agent runtime bindings

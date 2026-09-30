@@ -30,6 +30,7 @@ async fn relative_storage_has_an_initialized_ledger_before_accepting_connections
         listen: "127.0.0.1:0".parse().assert_value(),
         public_origin: "http://127.0.0.1:8080".to_owned(),
         storage: storage.0.clone(),
+        operator_diagnostics_json: false,
         bootstrap_key_file: None,
     };
     let (server, listener) = prepare_server(&config, &config.public_origin)
@@ -96,6 +97,7 @@ async fn direct_serve_rejects_an_invalid_public_origin_before_preparing_storage(
             listen: "127.0.0.1:0".parse().assert_value(),
             public_origin: origin.to_owned(),
             storage: path.clone(),
+            operator_diagnostics_json: false,
             bootstrap_key_file: None,
         })
         .await
@@ -116,6 +118,7 @@ async fn direct_serve_shuts_down_cleanly_on_process_signal() {
                 .assert_value(),
             public_origin: "http://127.0.0.1:8080".to_owned(),
             storage: storage.into(),
+            operator_diagnostics_json: false,
             bootstrap_key_file: None,
         })
         .await
@@ -218,6 +221,7 @@ async fn direct_serve_surfaces_hosting_preparation_failures() {
         listen: "127.0.0.1:0".parse().assert_value(),
         public_origin: "http://127.0.0.1:8080".to_owned(),
         storage,
+        operator_diagnostics_json: false,
         bootstrap_key_file: None,
     })
     .await
@@ -237,6 +241,7 @@ async fn preparation_fails_closed_before_hosting_for_invalid_private_inputs() {
                 listen: "127.0.0.1:0".parse().assert_value(),
                 public_origin: "http://127.0.0.1:8080".to_owned(),
                 storage: root.path("missing-key-storage"),
+                operator_diagnostics_json: false,
                 bootstrap_key_file: Some(root.path("missing-bootstrap-key")),
             },
             "authority",
@@ -246,6 +251,7 @@ async fn preparation_fails_closed_before_hosting_for_invalid_private_inputs() {
                 listen: occupied.local_addr().assert_value(),
                 public_origin: "http://127.0.0.1:8080".to_owned(),
                 storage: root.path("occupied-listener-storage"),
+                operator_diagnostics_json: false,
                 bootstrap_key_file: None,
             },
             "io",
@@ -255,6 +261,7 @@ async fn preparation_fails_closed_before_hosting_for_invalid_private_inputs() {
                 listen: "127.0.0.1:0".parse().assert_value(),
                 public_origin: "ftp://127.0.0.1:8080".to_owned(),
                 storage: root.path("invalid-endpoint-storage"),
+                operator_diagnostics_json: false,
                 bootstrap_key_file: None,
             },
             "authority",
@@ -288,6 +295,7 @@ async fn private_preparation_consumes_the_bootstrap_key_before_serving() {
         listen: "127.0.0.1:0".parse().assert_value(),
         public_origin: "http://127.0.0.1:8080".to_owned(),
         storage: root.path("storage"),
+        operator_diagnostics_json: false,
         bootstrap_key_file: Some(bootstrap_key.clone()),
     };
 
@@ -309,6 +317,7 @@ async fn prepared_target_reaches_a_live_listener_and_remains_active_until_cancel
         listen: "127.0.0.1:0".parse().assert_value(),
         public_origin: "http://127.0.0.1:8080".to_owned(),
         storage: storage.clone(),
+        operator_diagnostics_json: false,
         bootstrap_key_file: None,
     };
     let (server, listener) = prepare_server(&config, &config.public_origin)

@@ -1,6 +1,8 @@
+mod json_lines;
 mod output;
 
 pub use output::OperatorDiagnosticOutput;
+pub use json_lines::OperatorDiagnosticJsonLines;
 
 use std::collections::VecDeque;
 use std::fmt;

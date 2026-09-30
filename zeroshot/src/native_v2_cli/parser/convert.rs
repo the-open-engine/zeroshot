@@ -242,6 +242,7 @@ impl TargetCommand {
                 listen: args.listen,
                 public_origin: args.public_origin,
                 storage: args.storage,
+                operator_diagnostics_json: args.operator_diagnostics_json,
                 bootstrap_key_file: args.bootstrap_key_file,
             })),
         }
