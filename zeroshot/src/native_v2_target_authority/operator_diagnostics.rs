@@ -75,12 +75,12 @@ impl OperatorDiagnosticStore {
             stdout_truncated: diagnostic.stdout_truncated,
             stderr_truncated: diagnostic.stderr_truncated,
         };
-        state.diagnostics.push_back(record.clone());
         if let Some(output) = &self.output {
             // The bounded channel has no callbacks or I/O. Publish under the store lock so
             // concurrent producers preserve the same ordering as the private snapshot IDs.
-            output.publish(record);
+            output.publish(record.clone());
         }
+        state.diagnostics.push_back(record);
     }
 
     pub(crate) fn snapshot(&self, run_id: &RunId) -> TargetOperatorDiagnostics {

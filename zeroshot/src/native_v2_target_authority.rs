@@ -12,8 +12,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 pub use openengine_cluster_protocol::{
     TargetAuthentication, TargetDiscoveryDocument, TargetHttpProblem, TargetOecpSession,
-    TargetOecpSessionRequest, TargetOperatorDiagnostics, TargetRunReceipt, TargetRunRequest,
-    TARGET_RUN_REJECTED_CODE,
+    TargetOecpSessionRequest, TargetOperatorDiagnostic, TargetOperatorDiagnostics,
+    TargetRunReceipt, TargetRunRequest, TARGET_RUN_REJECTED_CODE,
 };
 pub use openengine_cluster_protocol::{
     TARGET_CONTROLLER_AUDIENCE as CONTROLLER_AUDIENCE, TARGET_DISCOVERY_KIND as DISCOVERY_KIND,

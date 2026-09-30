@@ -226,8 +226,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Built-in graphs have no node deadlines, and provider adapters impose no separate turn timeout.
   The supervisor records node error codes and elapsed time in durable logs before settlement.
 - A failed durable-output bridge cancels and drains its provider immediately. Fatal supervisor
-  errors and task panics close owned work and attempt runtime cleanup before durable failure.
-  If persistence is unavailable, the controller retains a minimal `runtime_failed` status at the
+  errors and task panics publish their private primary diagnostic before recovery waits or stderr
+  writes, then close owned work and attempt runtime cleanup before durable failure. Recovery failures
+  publish a separate private diagnostic without replacing the primary cause. If persistence is
+  unavailable, the controller retains a minimal `runtime_failed` status at the
   last observed durable cursor and records private operator diagnostics, including SQLite error codes.
   This fallback creates no history events. Readable retained history drains normally; unavailable
   history closes with `SOURCE_UNAVAILABLE`, never `done`. Compiler/runtime failure reasons

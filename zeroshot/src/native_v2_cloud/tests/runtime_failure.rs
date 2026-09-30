@@ -379,7 +379,21 @@ impl FailureHarness {
             .first()
             .assert_value_with("operator diagnostic");
         assert_eq!(diagnostic.code, "runtime_failed");
+        assert_eq!(diagnostic.operation, "supervisor.drive");
         assert!(diagnostic.stderr.contains(&sqlite_failure().to_string()));
+        self.assert_exported_diagnostic(diagnostic);
+    }
+
+    fn assert_recovery_diagnostic(&self, expected_error: &str) {
+        let diagnostics = self
+            .controller
+            .operator_diagnostics
+            .snapshot(&self.before.run_id);
+        assert_eq!(diagnostics.diagnostics.len(), 2);
+        let diagnostic = diagnostics.diagnostics.assert_at(1);
+        assert_eq!(diagnostic.code, "runtime_failed");
+        assert_eq!(diagnostic.operation, "supervisor.fail_runtime");
+        assert!(diagnostic.stderr.contains(expected_error));
         self.assert_exported_diagnostic(diagnostic);
     }
 
@@ -558,6 +572,7 @@ async fn permanent_storage_failure_preserves_status_and_reports_stream_completen
         assert_eq!(logs.assert_at(1).cursor, harness.before.at_cursor);
         assert_eq!(logs.assert_at(1).record.message.as_str(), RETAINED_OUTPUT);
         harness.assert_storage_diagnostic();
+        harness.assert_recovery_diagnostic(&sqlite_failure().to_string());
         if lose_reads {
             harness.assert_history_unavailable().await;
         }
@@ -600,6 +615,9 @@ async fn failed_cleanup_keeps_failure_visible_without_claiming_a_durable_termina
     let stored = harness.retained().await;
     assert!(stored.snapshot.terminal.is_none());
     harness.assert_storage_diagnostic();
+    harness.assert_recovery_diagnostic(
+        &crate::native_v2_supervisor::RuntimeCleanupUnavailable.to_string(),
+    );
 }
 
 const HELD_PEER_OUTPUT: &str = "peer output held during supervisor panic";
@@ -805,6 +823,7 @@ async fn confirmed_failure_is_observable_while_terminal_persistence_is_blocked()
         } if reason.as_str() == "runtime_failed"
     ));
     assert_eq!(status.at_cursor, harness.before.at_cursor);
+    harness.assert_storage_diagnostic();
 
     harness.ledger.reads.hold(false);
     harness.ledger.terminal_write.hold(false);

@@ -24,6 +24,10 @@ pub(super) const DIAGNOSTIC_OUTPUT_CAPACITY: usize = 128;
 /// outside public run observation. Hosts must restrict access and namespace each record's `id` by
 /// its target process/attempt; IDs restart with a new store. The host supplies deployment identity
 /// and collection timestamps in its own storage envelope.
+///
+/// A fatal runtime error emits a `supervisor.drive` record before recovery waits. A recovery error
+/// adds a `supervisor.fail_runtime` record with the same `runtime_failed` code and run ID. Group
+/// failure summaries by run ID and use `operation` to distinguish these stages.
 #[derive(Clone)]
 pub struct OperatorDiagnosticOutput {
     sender: broadcast::Sender<TargetOperatorDiagnostic>,
@@ -50,8 +54,7 @@ impl OperatorDiagnosticOutput {
     }
 
     pub(super) fn publish(&self, diagnostic: TargetOperatorDiagnostic) {
-        // No receiver means the host intentionally stopped collecting. Run execution and the
-        // private snapshot remain independent of collector availability.
+        // Run execution and the private snapshot remain independent of collector availability.
         let _ = self.sender.send(diagnostic);
     }
 }

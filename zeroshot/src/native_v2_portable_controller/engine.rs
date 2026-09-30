@@ -89,6 +89,14 @@ impl PortableRunEngine {
             match task_result(result) {
                 Ok(_) => observability.runtime_finished(&run_id),
                 Err(cause) => {
+                    // Preserve the known cause before cleanup, persistence, or stderr can block.
+                    let mut details = format!("supervisor.drive: {cause}");
+                    record_runtime_failure(
+                        &operator_diagnostics,
+                        &run_id,
+                        "supervisor.drive",
+                        details.clone(),
+                    );
                     let failed_observability = observability.clone();
                     let failed_run_id = run_id.clone();
                     let recovery = task_result(
@@ -101,27 +109,22 @@ impl PortableRunEngine {
                         })
                         .await,
                     );
-                    let mut details = format!("supervisor.drive: {cause}");
                     if let Err(error) = recovery {
-                        details.push_str(&format!("\nFailure cleanup/persistence: {error}"));
+                        let recovery_details = format!("Failure cleanup/persistence: {error}");
+                        record_runtime_failure(
+                            &operator_diagnostics,
+                            &run_id,
+                            "supervisor.fail_runtime",
+                            recovery_details.clone(),
+                        );
+                        details.push('\n');
+                        details.push_str(&recovery_details);
                     }
-                    // These are typed platform errors. Never render a panic payload, provider
-                    // response, environment value, or arbitrary SQLite query/trigger text here.
                     let _ = writeln!(
                         std::io::stderr(),
                         "run {} runtime_failed: {details}",
                         run_id.as_str()
                     );
-                    operator_diagnostics.record(NewOperatorDiagnostic {
-                        run_id: run_id.clone(),
-                        code: "runtime_failed",
-                        operation: "supervisor.drive",
-                        exit_status: None,
-                        stdout: String::new(),
-                        stderr: details,
-                        stdout_truncated: false,
-                        stderr_truncated: false,
-                    });
                     observability.runtime_failed(&run_id);
                     observability.refresh_runtime(&run_id).await;
                 }
@@ -142,6 +145,26 @@ impl PortableRunEngine {
     pub async fn wait_removable(&self) -> bool {
         wait_for_removability(self.removable.clone()).await
     }
+}
+
+fn record_runtime_failure(
+    diagnostics: &OperatorDiagnosticStore,
+    run_id: &RunId,
+    operation: &'static str,
+    details: String,
+) {
+    // These are typed platform errors. Never render a panic payload, provider response,
+    // environment value, or arbitrary SQLite query/trigger text here.
+    diagnostics.record(NewOperatorDiagnostic {
+        run_id: run_id.clone(),
+        code: "runtime_failed",
+        operation,
+        exit_status: None,
+        stdout: String::new(),
+        stderr: details,
+        stdout_truncated: false,
+        stderr_truncated: false,
+    });
 }
 
 async fn wait_for_removability(mut removable: watch::Receiver<bool>) -> bool {
