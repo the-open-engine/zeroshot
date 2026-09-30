@@ -334,7 +334,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   cost, risk, and diminishing returns without a fixed exploration quota or mandatory alternative
   schema. After two consecutive audited non-adoptions, it explicitly compares a new mechanism,
   a restorable archived branch, and a bounded measurement or discriminating test, explaining
-  unavailable options without forcing a parent switch. No separate plan reviewer runs.
+  unavailable options without forcing a parent switch. Before work, the planner states what
+  charter-grounded evidence would make the candidate a better default than the incumbent, and
+  what would instead warrant recording only. No separate plan reviewer runs.
   The staging agent backs up the incumbent, checks the declared archived source files and mutable
   scope, cleans only clearly incidental generated files outside that scope, and restores the
   chosen parent. The experiment independently checks the staged source, backup, and protected
@@ -344,7 +346,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   unprovable candidates are nonrestorable. Agents own archive and restoration through files and
   prompts; there is no snapshot, restore, or search operation.
   Evidence, method, and progress judges independently return `adopt`, `record_only`, or
-  `abort`. Graph guards route any abort, unanimous adoption, and the remaining record-only
+  `abort`. The progress judge compares candidate and incumbent as the next default under
+  the task charter, weighing relevant benefit, coverage, costs, regressions, and confidence;
+  valid findings can be archived without replacing the incumbent. Graph guards route any
+  abort, unanimous adoption, and the remaining record-only
   consensus to separate finalizers. Record-only may archive a viable candidate before restoring
   the incumbent; abort restores it without promoting invalid evidence; adopt retains the reviewed
   candidate and may archive the displaced incumbent. Finalizers preserve the full scout handoff

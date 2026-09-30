@@ -566,7 +566,13 @@ fn planner() -> Result<GraphNode, BuiltinTemplateError> {
              useful, evaluation rules, resource limits, and disposition conditions. Predeclare \
              evidence collection and evaluation order when observations may be noisy or order-dependent; \
              use charter-defined controls, repetitions, and thresholds rather than choosing them after \
-             seeing results. Do not let an optional progress threshold reject a verified repair when \
+             seeing results. Before work, state what evidence would make the candidate a better \
+             retained default than the incumbent under the charter, and what would instead warrant \
+             record_only. Ground those conditions in the task's intended use and priorities, considering \
+             benefit magnitude and coverage, costs, regressions, complexity, and uncertainty where \
+             relevant. A valid finding can merit archiving without displacing the incumbent. Do not \
+             invent a universal score or fixed adoption threshold. Do not let an optional progress \
+             threshold reject a verified repair when \
              the ledger already shows that the retained workspace violates a charter invariant. In \
              that case prioritize a bounded repair or discriminating test, and judge repaired validity \
              before optional improvement. Do not use Git.",
@@ -676,12 +682,18 @@ fn judge() -> Result<GraphNode, BuiltinTemplateError> {
              ledger, and workspace. Review independently and do not edit files. Evidence checks whether \
              observations support the main claims and repeats the decisive computation, source check, or \
              comparison when possible. Method audits design, controls, provenance, reproducibility, scope, \
-             protected material, backups, and restoration. Progress compares the result with the charter \
-             and ledger; a valid negative or inconclusive result can merit record_only when it removes a \
-             live direction or reduces uncertainty. Adopt means the evidence permits retaining the working \
-             changes. Record_only means the finding belongs in the ledger but workspace changes must be \
-             restored. Abort means the evidence or method is invalid, incomplete, unsafe, or cannot support \
-             a defensible finding. When prior evidence already proves that the retained workspace violates \
+             protected material, backups, and restoration. Progress decides whether the candidate should \
+             replace the retained incumbent as the default for the next iteration under the charter. \
+             Compare benefit magnitude and coverage of intended use with costs, regressions, complexity, \
+             and confidence from relevant controls and counterexamples, as applicable to the task. Check \
+             the planner's predeclared disposition conditions against the results, allowing a different \
+             conclusion when new evidence supports it; do not invent a universal score or fixed adoption \
+             threshold. Evidence and method return adopt when their own checks support retaining the \
+             candidate. Progress returns adopt only when the candidate is a defensibly better default. \
+             Record_only preserves a valid negative, inconclusive, or promising finding while restoring \
+             the incumbent; a narrow gain alone does not require replacing it. Abort means the evidence \
+             or method is invalid, incomplete, unsafe, or cannot support a defensible finding. When prior \
+             evidence already proves that the retained workspace violates \
              a non-negotiable charter invariant, a verified repair merits adopt even if it does not improve \
              an optional measure. Do not choose record_only merely because that repair misses an optimization \
              threshold: restoring the known-invalid predecessor would violate the charter. Avoid \
