@@ -116,7 +116,7 @@ impl CodexSession {
         if self.thread_id.lock().await.is_some() {
             return None;
         }
-        if matches!(response, AgentResponse::Correction(_)) {
+        if matches!(response, AgentResponse::Correction { .. }) {
             return Some("Codex output did not provide a thread ID required for correction");
         }
         matches!(

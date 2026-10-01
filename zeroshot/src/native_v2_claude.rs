@@ -22,7 +22,7 @@ use crate::execution::process::{HostedProcessPool, ProcessSessionCommand, Proces
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderExecution, ProviderExecutionFiles, ProviderProcessRunners,
     CLAUDE_LOCAL_ENVIRONMENT, LocalHarnessEnvironment, agent_workspace_access, provider_redactions,
-    with_driver_detail,
+    report_provider_error, with_driver_detail,
 };
 use crate::native_v2_contract::{ClaudeProvider, NodeRuntimeBinding};
 use crate::native_v2_runner::{
@@ -313,7 +313,12 @@ impl ClaudeAdapter {
                 .entry(name.clone())
                 .or_insert_with(|| value.clone());
         }
-        configure_provider(&mut environment, self.provider)?;
+        configure_provider(&mut environment, self.provider).map_err(|error| {
+            with_driver_detail(
+                error,
+                "Claude provider credentials are missing or conflict with other credentials",
+            )
+        })?;
         Ok(environment)
     }
 }
@@ -337,7 +342,13 @@ impl ClaudeAdapter {
                 diagnostic: diagnostic.to_owned(),
             });
         }
-        resolve_claude_attempt(turn, resume_id, attempt).await
+        resolve_claude_attempt(
+            turn,
+            resume_id,
+            attempt,
+            &provider_redactions(&turn.invocation.environment, &self.local_environment),
+        )
+        .await
     }
 
     async fn execute_turn(
@@ -384,6 +395,7 @@ async fn resolve_claude_attempt(
     turn: &ClaudeTurn<'_>,
     resume_id: &Option<String>,
     attempt: ClaudeAttempt,
+    redactions: &[String],
 ) -> Result<ClaudeTurnAdvance, NodeRunnerError> {
     let result = match attempt {
         ClaudeAttempt::Complete(result) => result,
@@ -395,7 +407,10 @@ async fn resolve_claude_attempt(
         }
     };
     let response = resolve_agent_response(&turn.invocation.response, &result.message)?;
-    if matches!(response, AgentResponse::Correction(_)) {
+    if let Some(error) = response.correction_error() {
+        report_provider_error("Claude", &error, redactions, turn.control).await?;
+    }
+    if matches!(response, AgentResponse::Correction { .. }) {
         if resume_id.is_none() {
             return Ok(ClaudeTurnAdvance::ProviderFailure {
                 retryable: false,

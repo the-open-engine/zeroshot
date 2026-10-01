@@ -217,12 +217,12 @@ async fn report_failure(
                 _ => None,
             };
             let diagnostic = provider_failure_diagnostic("Copilot", detail, None, redactions);
-            control
+            let _ = control
                 .emit(LiveOutput::new(
                     LiveOutputStream::Error,
                     diagnostic.clone(),
                 )?)
-                .await?;
+                .await;
             Err(match error {
                 NodeRunnerError::DriverDetail(_) => rpc::failure(diagnostic),
                 error => error,
@@ -245,8 +245,8 @@ async fn finish_rpc(
     if control.is_cancelled() {
         return Err(NodeRunnerError::Cancelled);
     }
-    drained
-        .and(outcome)
+    outcome
+        .and_then(|outcome| drained.map(|()| outcome))
         .map_err(|error| connection.failure_diagnostic(error, completion))
 }
 

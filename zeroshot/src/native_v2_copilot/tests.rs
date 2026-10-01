@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 use openengine_cluster_protocol::{IdempotencyKey, NodeName, RunSize, RunTitle};
-use openengine_cluster_testkit::assertions::AssertValue;
+use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{Value, json};
 use super::*;
 use crate::execution::SessionScope;
@@ -731,7 +731,17 @@ fn hosted_adapter_discards_user_only_credentials_and_provider_controls() {
 async fn malformed_output_receives_only_two_corrections_in_the_same_session() {
     for mode in ["correction", "malformed"] {
         let fixture = Fixture::new(mode).await;
-        let (_, outcome) = complete(fixture.start(1).await).await;
+        let (events, outcome) = complete(fixture.start(1).await).await;
+        let errors = error_output(&events);
+        let expected = if mode == "correction" { 1 } else { 3 };
+        assert_eq!(
+            errors
+                .iter()
+                .filter(|line| line
+                    .contains("final output rejected: output $.answer must be a integer"))
+                .count(),
+            expected
+        );
         if mode == "correction" {
             verified(outcome);
         } else {
@@ -777,6 +787,36 @@ async fn fails_closed_on_protocol_identity_and_provider_errors() {
         }
         assert!(!format!("{events:?} {outcome:?}").contains("gho_fake-secret"));
     }
+}
+
+#[tokio::test]
+async fn validation_errors_keep_the_explanation_and_redact_credentials() {
+    for mode in ["validation_secret", "validation_secret_long"] {
+        let fixture = Fixture::new(mode).await;
+        let (events, outcome) = complete(fixture.start(1).await).await;
+        assert_eq!(outcome.assert_value(), WorkerOutcome::malformed());
+        let errors = error_output(&events);
+        assert_eq!(errors.len(), 3);
+        for error in errors {
+            assert!(error.contains("final output rejected:"));
+            assert!(error.contains("unknown field"));
+            assert!(error.contains("[REDACTED]"));
+            assert!(!error.contains("gho_fak"));
+            assert!(!error.contains("Response contract:"));
+            assert!(error.len() <= 8 * 1024);
+        }
+    }
+}
+
+#[tokio::test]
+async fn failed_diagnostic_publication_preserves_the_provider_error() {
+    let fixture = Fixture::new("version").await;
+    let mut handle = fixture.start(1).await;
+    drop(handle.take_initial_output().assert_value());
+    let error = handle.completion().await.assert_error();
+    assert!(matches!(error, NodeRunnerError::DriverDetail(ref detail)
+        if detail.contains("is incompatible; install CLI 1.0.86")));
+    assert!(!error.to_string().contains("gho_fake-secret"));
 }
 
 fn error_output(events: &[DurableNodeEvent]) -> Vec<&str> {

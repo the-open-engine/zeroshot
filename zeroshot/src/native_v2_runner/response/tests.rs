@@ -306,12 +306,12 @@ fn provider_envelope_is_unwrapped_before_authoritative_validation() {
     ));
     assert!(matches!(
         resolve_agent_response(&contract, r#"{"answer":42}"#).assert_value(),
-        AgentResponse::Correction(_)
+        AgentResponse::Correction { .. }
     ));
     assert!(matches!(
         resolve_agent_response(&contract, r#"{"response":{"answer":42},"extra":true}"#)
             .assert_value(),
-        AgentResponse::Correction(_)
+        AgentResponse::Correction { .. }
     ));
 }
 

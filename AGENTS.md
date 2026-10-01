@@ -232,7 +232,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   An actual node error remains logged if a parallel winner voids that execution; intentional
   cancellation is not presented as a new crash. Unconfirmed cleanup preserves a bounded best-effort
   error log without completing the still-active execution or masking the primary failure.
-  These public summaries stay separate from private operator diagnostics.
+  Detailed provider, validation, and delivery errors retain their useful explanation in ordinary
+  run logs. Credential owners redact their known secret values before publishing; correction
+  prompts are not copied into diagnostics. Failed terminal diagnostic publication preserves the
+  primary failure. These public summaries stay separate from private operator diagnostics.
 - A failed durable-output bridge cancels and drains its provider immediately. Fatal supervisor
   errors and task panics publish their private primary diagnostic before recovery waits or stderr
   writes, then close owned work and attempt runtime cleanup before durable failure. Recovery failures

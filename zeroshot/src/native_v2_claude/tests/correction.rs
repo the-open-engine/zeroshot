@@ -25,7 +25,7 @@ async fn invalid_output_is_corrected_in_the_same_claude_session() {
         &[ANTHROPIC_KEY, "CORRECT_OUTPUT"],
     )
     .await;
-    let completion = runner
+    let handle = runner
         .start(request(
             binding,
             1,
@@ -35,10 +35,18 @@ async fn invalid_output_is_corrected_in_the_same_claude_session() {
             ],
         ))
         .await
-        .assert_value()
-        .completion()
-        .await
         .assert_value();
+    let (captured, completion) = super::failure::complete_with_durable(handle).await;
+    let completion = completion.assert_value();
+    let logs = captured.logs.join("\n");
+    assert_eq!(
+        logs.matches(
+            "final output rejected: provider response must be exactly an object containing response"
+        )
+        .count(),
+        1
+    );
+    assert!(!logs.contains("Your previous final response was rejected mechanically"));
 
     assert!(matches!(
         completion.outcome,
@@ -68,13 +76,23 @@ printf '%s%s\n' \
         &[ANTHROPIC_KEY],
     )
     .await;
-    let mut handle = runner
+    let handle = runner
         .start(request(binding, 1, &[(ANTHROPIC_KEY, "anthropic-fake")]))
         .await
         .assert_value();
-    let completion = handle.completion().await.assert_value();
-
-    assert_eq!(completion.outcome, WorkerOutcome::malformed());
+    let (captured, completion) = super::failure::complete_with_durable(handle).await;
+    assert_eq!(
+        completion.assert_value().outcome,
+        WorkerOutcome::malformed()
+    );
+    let logs = captured.logs.join("\n");
+    assert_eq!(
+        logs.matches(
+            "final output rejected: provider response must be exactly an object containing response"
+        )
+        .count(),
+        3
+    );
     assert_eq!(workspace.read("attempts.args").matches("---").count(), 3);
 }
 

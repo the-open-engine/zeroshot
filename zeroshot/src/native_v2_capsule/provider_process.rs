@@ -421,12 +421,13 @@ impl ProviderFailureRetry {
     ) -> Result<String, NodeRunnerError> {
         let diagnostic =
             provider_failure_diagnostic(self.provider, failure.detail, None, &self.redactions);
-        control
+        let published = control
             .emit(LiveOutput::new(LiveOutputStream::Error, diagnostic)?)
-            .await?;
+            .await;
         if !failure.retryable || self.used {
             return Err(NodeRunnerError::Driver);
         }
+        published?;
         self.used = true;
         control
             .emit(LiveOutput::new(
@@ -446,17 +447,26 @@ impl ProviderFailureRetry {
         control: &DriverControl,
         error: &NodeRunnerError,
     ) -> Result<(), NodeRunnerError> {
-        let detail = match error {
-            NodeRunnerError::Driver => None,
-            NodeRunnerError::DriverDetail(detail) => Some(detail.as_str()),
-            _ => return Ok(()),
-        };
-        let diagnostic = provider_failure_diagnostic(self.provider, detail, None, &self.redactions);
-        control
-            .emit(LiveOutput::new(LiveOutputStream::Error, diagnostic)?)
-            .await?;
-        Ok(())
+        report_provider_error(self.provider, error, &self.redactions, control).await
     }
+}
+
+/// Publish useful provider-owned detail after redacting credentials known at this boundary.
+pub(crate) async fn report_provider_error(
+    provider: &str,
+    error: &NodeRunnerError,
+    redactions: &[String],
+    control: &DriverControl,
+) -> Result<(), NodeRunnerError> {
+    let detail = match error {
+        NodeRunnerError::Driver => None,
+        NodeRunnerError::DriverDetail(detail) => Some(detail.as_str()),
+        _ => return Ok(()),
+    };
+    let diagnostic = provider_failure_diagnostic(provider, detail, None, redactions);
+    control
+        .emit(LiveOutput::new(LiveOutputStream::Error, diagnostic)?)
+        .await
 }
 
 pub(crate) fn redaction_values<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {

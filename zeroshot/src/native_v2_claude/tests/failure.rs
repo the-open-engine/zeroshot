@@ -49,8 +49,8 @@ async fn collect_logs(durable: &mut DurableOutput) -> Vec<String> {
     collect_durable(durable).await.logs
 }
 
-struct CapturedDurable {
-    logs: Vec<String>,
+pub(super) struct CapturedDurable {
+    pub(super) logs: Vec<String>,
     usages: Vec<Option<TokenUsageDelta>>,
 }
 
@@ -66,7 +66,9 @@ async fn collect_durable(durable: &mut DurableOutput) -> CapturedDurable {
     CapturedDurable { logs, usages }
 }
 
-async fn complete_with_durable(mut handle: ClaudeHandle) -> (CapturedDurable, CompletionResult) {
+pub(super) async fn complete_with_durable(
+    mut handle: ClaudeHandle,
+) -> (CapturedDurable, CompletionResult) {
     let mut durable = handle.take_initial_output().assert_value();
     tokio::join!(collect_durable(&mut durable), handle.completion())
 }

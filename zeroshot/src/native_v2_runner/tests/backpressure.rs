@@ -33,6 +33,27 @@ fn control_with_capacity(capacity: usize) -> (watch::Sender<bool>, DriverControl
     )
 }
 
+#[tokio::test]
+async fn failed_terminal_diagnostic_does_not_replace_the_provider_failure() {
+    use crate::native_v2_capsule::provider_process::{ProviderFailure, ProviderFailureRetry};
+    let (_cancel, control, output) = control_with_capacity(1);
+    drop(output);
+    let mut retry = ProviderFailureRetry::new("Codex", String::new(), Vec::new());
+    assert_eq!(
+        retry
+            .after_failure(
+                &control,
+                ProviderFailure {
+                    detail: Some("provider rejected the configured model"),
+                    retryable: false,
+                    has_session: false,
+                }
+            )
+            .await,
+        Err(NodeRunnerError::Driver)
+    );
+}
+
 async fn saturated_cancelled_control() -> (DriverControl, DurableOutput) {
     let (cancel, control, durable) = control_with_capacity(1);
     control

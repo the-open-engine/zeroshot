@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use crate::execution::SessionScope;
 use crate::native_v2_capsule::provider_process::{
     ProviderExecution, ProviderFilesystemConfig, ProviderFailure, ProviderFailureRetry,
-    ProviderSessionCore, impl_provider_node_session, provider_redactions,
+    ProviderSessionCore, impl_provider_node_session, provider_redactions, report_provider_error,
 };
 use crate::native_v2_contract::{NodeInvocation, NodeRuntimeBinding};
 use crate::native_v2_runner::{
@@ -82,11 +82,17 @@ impl NodeDriver for ClaudeAdapter {
             &invocation,
             session,
             provider_redactions(&invocation.environment, &self.local_environment),
+            &control,
         )
         .await?;
         loop {
             if let Some(outcome) = self.advance_run(&turn, &mut state, &control).await? {
-                retain_session(&invocation.node, session, state.resume_id.as_deref()).await?;
+                if let Err(error) =
+                    retain_session(&invocation.node, session, state.resume_id.as_deref()).await
+                {
+                    let _ = state.emit_terminal_error(&control, &error).await;
+                    return Err(error);
+                }
                 return Ok(outcome);
             }
         }
@@ -126,7 +132,7 @@ impl ClaudeAdapter {
                 Ok(None)
             }
             Err(error) => {
-                state.emit_terminal_error(control, &error).await?;
+                let _ = state.emit_terminal_error(control, &error).await;
                 Err(error)
             }
         }
@@ -144,8 +150,15 @@ impl ClaudeRunState {
         invocation: &DriverInvocation,
         session: &ClaudeSession,
         redactions: Vec<String>,
+        control: &DriverControl,
     ) -> Result<Self, NodeRunnerError> {
-        let prompt = prompt(invocation)?;
+        let prompt = match prompt(invocation) {
+            Ok(prompt) => prompt,
+            Err(error) => {
+                let _ = report_provider_error("Claude", &error, &redactions, control).await;
+                return Err(error);
+            }
+        };
         Ok(Self {
             resume_id: session.resume_id.lock().await.clone(),
             retry: ProviderFailureRetry::new("Claude", prompt.clone(), redactions),
@@ -199,9 +212,11 @@ async fn retain_session(
     if !requires_session(invocation) {
         return Ok(());
     }
-    let observed = observed.ok_or(NodeRunnerError::Driver)?;
+    let observed = observed
+        .ok_or_else(|| NodeRunnerError::DriverDetail(MISSING_REUSABLE_SESSION.to_owned()))?;
     let mut retained = session.resume_id.lock().await;
-    observe_session(&mut retained, Some(observed)).map_err(|_| NodeRunnerError::Driver)
+    observe_session(&mut retained, Some(observed))
+        .map_err(|detail| NodeRunnerError::DriverDetail(detail.to_owned()))
 }
 
 fn requires_session(invocation: &NodeInvocation) -> bool {

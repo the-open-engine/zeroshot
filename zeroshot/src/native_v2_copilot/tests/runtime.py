@@ -210,7 +210,14 @@ while (message := read()) is not None:
             for _ in range(80):
                 event("future.event", {"padding": "x" * 1048576})
         answer = "invalid" if mode == "malformed" or (mode == "correction" and turn == 1) else 42
-        event("assistant.message", {"content": json.dumps({"response": {"answer": answer}})})
+        response = {"response": {"answer": answer}}
+        if mode in ("validation_secret", "validation_secret_long"):
+            padding = ""
+            if mode == "validation_secret_long":
+                prefix = "provider response must be exactly an object containing response: unknown field `"
+                padding = "x" * (8192 - 3 - len(prefix) - 7)
+            response[padding + "gho_fake-secret"] = True
+        event("assistant.message", {"content": json.dumps(response)})
         result = {"messageId": "message"}
     elif method == "session.detach":
         result = {"success": True}

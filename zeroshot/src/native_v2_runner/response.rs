@@ -185,22 +185,31 @@ impl NodeResponseContract {
 pub(crate) struct NodeResponseError(Box<str>);
 
 impl NodeResponseError {
-    fn new(mut message: String) -> Self {
-        if message.len() > MAX_RESPONSE_ERROR_BYTES {
-            let mut end = MAX_RESPONSE_ERROR_BYTES.saturating_sub(3);
-            while !message.is_char_boundary(end) {
-                end -= 1;
-            }
-            message.truncate(end);
-            message.push_str("...");
-        }
+    fn new(message: String) -> Self {
+        // Keep original text transiently until the provider can redact credentials. Display
+        // bounds correction prompts; public diagnostics are bounded only after redaction.
         Self(message.into_boxed_str())
     }
 }
 
 pub(crate) enum AgentResponse {
     Complete(WorkerOutcome),
-    Correction(String),
+    Correction {
+        prompt: String,
+        diagnostic: NodeResponseError,
+    },
+}
+
+impl AgentResponse {
+    pub(crate) fn correction_error(&self) -> Option<NodeRunnerError> {
+        match self {
+            Self::Correction { diagnostic, .. } => Some(NodeRunnerError::DriverDetail(format!(
+                "final output rejected: {}",
+                diagnostic.0
+            ))),
+            Self::Complete(_) => None,
+        }
+    }
 }
 
 pub(crate) struct AgentResponseState {
@@ -232,7 +241,7 @@ impl AgentResponseState {
     ) -> Result<Option<WorkerOutcome>, NodeRunnerError> {
         match response {
             AgentResponse::Complete(outcome) => Ok(Some(outcome)),
-            AgentResponse::Correction(_) if self.corrections == MAX_OUTPUT_CORRECTIONS => {
+            AgentResponse::Correction { .. } if self.corrections == MAX_OUTPUT_CORRECTIONS => {
                 control
                     .emit(LiveOutput::new(
                         LiveOutputStream::System,
@@ -241,9 +250,9 @@ impl AgentResponseState {
                     .await?;
                 Ok(Some(WorkerOutcome::malformed()))
             }
-            AgentResponse::Correction(correction) => {
+            AgentResponse::Correction { prompt, .. } => {
                 self.corrections += 1;
-                self.prompt = correction;
+                self.prompt = prompt;
                 Ok(None)
             }
         }
@@ -274,7 +283,10 @@ pub(crate) fn resolve_agent_response_with_dialect(
     };
     Ok(match parsed {
         Ok(outcome) => AgentResponse::Complete(outcome),
-        Err(error) => AgentResponse::Correction(render_agent_correction(contract, &error)?),
+        Err(error) => AgentResponse::Correction {
+            prompt: render_agent_correction(contract, &error)?,
+            diagnostic: error,
+        },
     })
 }
 
@@ -295,7 +307,15 @@ struct ProviderResponseEnvelope {
 
 impl fmt::Display for NodeResponseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
+        if self.0.len() <= MAX_RESPONSE_ERROR_BYTES {
+            return formatter.write_str(&self.0);
+        }
+        let mut end = MAX_RESPONSE_ERROR_BYTES.saturating_sub(3);
+        while !self.0.is_char_boundary(end) {
+            end -= 1;
+        }
+        formatter.write_str(&self.0[..end])?;
+        formatter.write_str("...")
     }
 }
 

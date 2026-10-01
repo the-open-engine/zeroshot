@@ -148,3 +148,33 @@ pub(super) fn assert_retried_head_adoption(authority: &FakeGitHub, outcome: &Wor
     assert_eq!(authority.head_updates.load(Ordering::SeqCst), 1);
     assert_eq!(authority.head_sync_attempts.load(Ordering::SeqCst), 2);
 }
+
+#[tokio::test]
+async fn a_permanent_head_update_failure_keeps_redacted_details_in_run_logs() {
+    let (repo, authority) = delivery_harness(Script::HeadUpdatePermanentFailure);
+    let execution = run_delivery_execution(
+        DeliveryRunRequest {
+            repo: &repo,
+            attempts: 2,
+            mode: DeliveryMode::Merge,
+            run_id: "delivery-run",
+            refresh: None,
+        },
+        authority,
+    )
+    .await;
+    assert_eq!(
+        execution.outcome,
+        WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
+    );
+    let errors = execution
+        .output
+        .iter()
+        .filter(|output| output.stream == LiveOutputStream::Error)
+        .map(|output| output.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].contains("branch update rejected [REDACTED] [REDACTED]"));
+    assert!(!errors[0].contains("test-token"));
+    assert!(!errors[0].contains(&git_auth::encode_basic_credential("test-token")));
+}

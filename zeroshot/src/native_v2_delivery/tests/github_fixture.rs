@@ -46,6 +46,7 @@ pub(super) enum Script {
     HeadUpdatePending,
     HeadUpdateResponseLost,
     HeadUpdateUnavailable,
+    HeadUpdatePermanentFailure,
     RepeatedBehind,
     ProtectedBranch,
     ReviewSyncRace,
@@ -234,6 +235,7 @@ impl FakeGitHub {
                 | Script::HeadUpdatePending
                 | Script::HeadUpdateResponseLost
                 | Script::HeadUpdateUnavailable
+                | Script::HeadUpdatePermanentFailure
         )
     }
 
@@ -242,6 +244,13 @@ impl FakeGitHub {
     ) -> Option<Result<GitHubHeadUpdateOutcome, GitHubAuthorityError>> {
         match self.script {
             Script::HeadUpdatePending => Some(Ok(GitHubHeadUpdateOutcome::Pending)),
+            Script::HeadUpdatePermanentFailure => Some(Err(GitHubAuthorityError::api(
+                Some(422),
+                format!(
+                    "branch update rejected test-token {}",
+                    git_auth::encode_basic_credential("test-token")
+                ),
+            ))),
             Script::HeadUpdateConflict => Some(Ok(GitHubHeadUpdateOutcome::Conflict)),
             Script::HeadUpdateUnavailable
             | Script::HeadRecoveryReviewMissing

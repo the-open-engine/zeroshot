@@ -6,7 +6,8 @@ use crate::execution::process::{
     ProcessFrame, ProcessRunnerError, ProcessStdout, MAX_PROCESS_MESSAGE_BYTES,
 };
 use crate::native_v2_capsule::provider_process::{
-    ProviderProcess, ProviderExecutionFiles, redaction_values, safe_provider_text,
+    ProviderProcess, ProviderExecutionFiles, redaction_values, report_provider_error,
+    safe_provider_text,
 };
 use crate::native_v2_runner::{
     AgentResponseState, DriverControl, DriverInvocation, NodeRunnerError, ProviderSchemaDialect,
@@ -187,15 +188,26 @@ impl<'a> CopilotRpc<'a> {
                 .response
                 .take()
                 .ok_or_else(|| failure("Copilot completed without an assistant response"))?;
-            let value = resolve_agent_response_with_dialect(
-                &self.invocation.response,
-                &text,
-                ProviderSchemaDialect::OpenAiStrict,
-            )?;
-            if let Some(outcome) = response.accept("Copilot", self.control, value).await? {
+            if let Some(outcome) = self.accept_response(&mut response, &text).await? {
                 return Ok(outcome);
             }
         }
+    }
+
+    async fn accept_response(
+        &self,
+        state: &mut AgentResponseState,
+        text: &str,
+    ) -> Result<Option<WorkerOutcome>, NodeRunnerError> {
+        let response = resolve_agent_response_with_dialect(
+            &self.invocation.response,
+            text,
+            ProviderSchemaDialect::OpenAiStrict,
+        )?;
+        if let Some(error) = response.correction_error() {
+            report_provider_error("Copilot", &error, &self.redactions, self.control).await?;
+        }
+        state.accept("Copilot", self.control, response).await
     }
 
     pub(super) fn queue(&self, value: Value) -> Result<(), NodeRunnerError> {

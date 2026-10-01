@@ -298,7 +298,21 @@ impl NativeV2DeliveryAdapter {
                 wait_for_poll(drive.control, self.config.poll.interval).await?;
                 Ok(ReviewStep::Continue)
             }
-            _ => Err(recovery::finish_uncertain_authority(failure)),
+            _ => {
+                let diagnostic = failure.diagnostic.clone();
+                let stop = recovery::finish_uncertain_authority(failure);
+                if !matches!(stop, DeliveryStop::Repair(_)) {
+                    let redactions = vec![
+                        drive.credentials.token.clone(),
+                        git_auth::encode_basic_credential(&drive.credentials.token),
+                    ];
+                    let error = NodeRunnerError::DriverDetail(diagnostic);
+                    let _ =
+                        report_provider_error("Git delivery", &error, &redactions, drive.control)
+                            .await;
+                }
+                Err(stop)
+            }
         }
     }
 }

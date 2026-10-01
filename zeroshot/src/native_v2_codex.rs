@@ -23,7 +23,8 @@ use crate::execution::process::{HostedProcessPool, ProcessSessionCommand};
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderFailure, ProviderFailureRetry, ProviderProcessRunners,
     ProviderExecution, ProviderFilesystemConfig, CODEX_LOCAL_ENVIRONMENT, LocalHarnessEnvironment,
-    agent_workspace_access, provider_redactions, redaction_values, with_driver_detail,
+    agent_workspace_access, provider_redactions, redaction_values, report_provider_error,
+    with_driver_detail,
 };
 use crate::native_v2_contract::CodexProvider;
 use crate::native_v2_runner::{
@@ -243,16 +244,19 @@ impl NativeV2CodexAdapter {
             control: &control,
             execution: &execution,
         };
-        let prompt = render_agent_prompt(
-            invocation.agent_instructions()?,
-            &invocation.node.input,
-            &invocation.response,
-        )
-        .map_err(|error| with_driver_detail(error, "Codex prompt could not be serialized"))?;
-        let mut state = CodexRunState::new(
-            prompt,
-            provider_redactions(&invocation.environment, &self.local_environment),
-        );
+        let redactions = provider_redactions(&invocation.environment, &self.local_environment);
+        let prompt = invocation.agent_instructions().and_then(|instructions| {
+            render_agent_prompt(instructions, &invocation.node.input, &invocation.response)
+                .map_err(|error| with_driver_detail(error, "Codex prompt could not be serialized"))
+        });
+        let prompt = match prompt {
+            Ok(prompt) => prompt,
+            Err(error) => {
+                let _ = report_provider_error("Codex", &error, &redactions, &control).await;
+                return Err(error);
+            }
+        };
+        let mut state = CodexRunState::new(prompt, redactions);
         loop {
             if let Some(outcome) = self.advance_run(&turn, &mut state).await? {
                 return Ok(outcome);
@@ -314,7 +318,7 @@ impl NativeV2CodexAdapter {
         {
             return Ok(CodexTurnAdvance::ProviderFailure(detail.to_owned()));
         }
-        resolve_codex_output(turn, output).await
+        resolve_codex_output(turn, output, retry).await
     }
 
     async fn execute_turn(
@@ -480,6 +484,7 @@ enum CodexTurnAdvance {
 async fn resolve_codex_output(
     turn: &CodexTurn<'_>,
     output: CodexOutput,
+    retry: &ProviderFailureRetry,
 ) -> Result<CodexTurnAdvance, NodeRunnerError> {
     if let Some(failure) = output.failure_message() {
         return Ok(CodexTurnAdvance::ProviderFailure(failure.to_owned()));
@@ -489,6 +494,9 @@ async fn resolve_codex_output(
         output.final_message()?,
         ProviderSchemaDialect::OpenAiStrict,
     )?;
+    if let Some(error) = response.correction_error() {
+        retry.report_terminal(turn.control, &error).await?;
+    }
     if let Some(diagnostic) = turn
         .session
         .missing_required_thread(turn.invocation, &response)
@@ -496,7 +504,7 @@ async fn resolve_codex_output(
     {
         return Ok(CodexTurnAdvance::ProviderFailure(diagnostic.to_owned()));
     }
-    if matches!(response, AgentResponse::Correction(_)) {
+    if matches!(response, AgentResponse::Correction { .. }) {
         turn.control
             .emit(LiveOutput::new(
                 LiveOutputStream::System,

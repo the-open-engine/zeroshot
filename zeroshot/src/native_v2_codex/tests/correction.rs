@@ -63,6 +63,12 @@ async fn invalid_output_is_corrected_in_the_same_codex_session() {
     );
     assert!(capture.contains("output $.answer must be a integer"));
     assert!(logs.contains("Codex final output rejected; requesting correction"));
+    assert_eq!(
+        logs.matches("final output rejected: output $.answer must be a integer")
+            .count(),
+        1
+    );
+    assert!(!logs.contains("Your previous final response was rejected mechanically"));
 }
 
 #[tokio::test]
@@ -108,7 +114,7 @@ async fn malformed_output_stops_after_two_correction_turns() {
         &["ALWAYS_MALFORMED", "CAPTURE_PATH", "OPENAI_API_KEY"],
     )
     .await;
-    let mut handle = start(
+    let handle = start(
         &runtime,
         &admitted,
         1,
@@ -120,9 +126,12 @@ async fn malformed_output_stops_after_two_correction_turns() {
     )
     .await;
 
+    let (logs, outcome) = complete_with_logs(handle).await;
+    assert_eq!(outcome.assert_value(), WorkerOutcome::malformed());
     assert_eq!(
-        handle.completion().await.assert_value().outcome,
-        WorkerOutcome::malformed()
+        logs.matches("final output rejected: output $.answer must be a integer")
+            .count(),
+        3
     );
     let capture = fs::read_to_string(capture).assert_value();
     assert_eq!(capture.matches("prompt=").count(), 3);
