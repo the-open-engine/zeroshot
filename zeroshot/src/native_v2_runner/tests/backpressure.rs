@@ -34,7 +34,7 @@ fn control_with_capacity(capacity: usize) -> (watch::Sender<bool>, DriverControl
 }
 
 #[tokio::test]
-async fn failed_terminal_diagnostic_does_not_replace_the_provider_failure() {
+async fn terminal_provider_failure_returns_detail_without_publishing() {
     use crate::native_v2_capsule::provider_process::{ProviderFailure, ProviderFailureRetry};
     let (_cancel, control, output) = control_with_capacity(1);
     drop(output);
@@ -50,7 +50,9 @@ async fn failed_terminal_diagnostic_does_not_replace_the_provider_failure() {
                 }
             )
             .await,
-        Err(NodeRunnerError::Driver)
+        Err(NodeRunnerError::DriverDetail(
+            "Codex provider failure: provider rejected the configured model".to_owned()
+        ))
     );
 }
 

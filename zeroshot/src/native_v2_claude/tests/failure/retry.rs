@@ -134,7 +134,10 @@ async fn retryable_claude_failure_is_retried_only_once() {
         .await
         .assert_value();
 
-    assert_eq!(handle.completion().await, Err(NodeRunnerError::Driver));
+    assert!(
+        matches!(handle.completion().await, Err(NodeRunnerError::DriverDetail(ref detail))
+        if detail.contains("provider still unavailable"))
+    );
     assert!(workspace.child("attempt-2.prompt").exists());
     assert!(!workspace.child("attempt-3.prompt").exists());
 }

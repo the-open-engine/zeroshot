@@ -43,17 +43,39 @@ struct LocalOutputContext<'a> {
 }
 
 #[derive(Default)]
-struct TerminalMetadata {
+pub(super) struct TerminalMetadata {
     known_usage: Option<TokenUsageDelta>,
+    errors: Vec<CapsuleNodeEvent>,
     incomplete: bool,
     overflowed: bool,
 }
 
 impl TerminalMetadata {
     fn retain(&mut self, event: CapsuleNodeEvent) {
-        let CapsuleNodeEvent::TokenUsage { usage } = event else {
-            return;
+        let usage = match event {
+            CapsuleNodeEvent::TokenUsage { usage } => usage,
+            event @ CapsuleNodeEvent::Output {
+                output:
+                    CapsuleOutput {
+                        stream: CapsuleOutputStream::Error,
+                        ..
+                    },
+                ..
+            } => {
+                if self.errors.len() < crate::native_v2_runner::DURABLE_OUTPUT_CAPACITY {
+                    self.errors.push(event);
+                } else {
+                    self.incomplete = true;
+                    self.overflowed = true;
+                }
+                return;
+            }
+            _ => return,
         };
+        self.retain_usage(usage);
+    }
+
+    fn retain_usage(&mut self, usage: Option<TokenUsageDelta>) {
         let Some(usage) = usage else {
             self.incomplete = true;
             return;
@@ -74,16 +96,29 @@ impl TerminalMetadata {
         };
     }
 
-    fn into_events(
+    pub(super) fn into_events(
         self,
         completion: Result<NodeCompletion, NodeRunnerError>,
     ) -> Vec<CapsuleNodeEvent> {
-        let mut events = Vec::with_capacity(3);
+        let mut events = self.errors;
+        events.reserve(4);
         if let Some(usage) = self.known_usage {
             events.push(CapsuleNodeEvent::TokenUsage { usage: Some(usage) });
         }
         if self.incomplete {
             events.push(CapsuleNodeEvent::TokenUsage { usage: None });
+        }
+        if let Err(error @ NodeRunnerError::DriverDetail(_)) = &completion {
+            events.push(CapsuleNodeEvent::Output {
+                output: CapsuleOutput {
+                    stream: CapsuleOutputStream::Error,
+                    text: crate::native_v2_runner::bounded_log_text(
+                        error.to_string(),
+                        crate::v2_run_ledger::MAX_SAFE_LOG_BYTES / 2,
+                    ),
+                },
+                timestamp: crate::native_v2_runner::current_timestamp(),
+            });
         }
         let terminal = if matches!(completion, Err(NodeRunnerError::CleanupUnconfirmed)) {
             CapsuleNodeEvent::Failed {

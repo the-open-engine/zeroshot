@@ -212,10 +212,9 @@ async fn root_delivery_panic_reaps_helpers_and_settles_runner_activity() {
     };
     assert_eq!(message, "Git delivery panicked");
     assert!(
-        events
+        !events
             .iter()
-            .any(|output| output.stream == LiveOutputStream::Error
-                && output.text.as_str() == "Git delivery panicked")
+            .any(|output| output.stream == LiveOutputStream::Error)
     );
     let encoded = format!("{events:?}");
     assert!(!encoded.contains("injected"));

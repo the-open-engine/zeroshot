@@ -90,7 +90,9 @@ async fn failed_with_openai_key(adapter: Arc<NativeV2CodexAdapter>) -> (NodeRunn
 }
 
 fn assert_actionable_retry(error: &NodeRunnerError, logs: &str) {
-    assert_eq!(*error, NodeRunnerError::Driver);
+    assert!(
+        matches!(error, NodeRunnerError::DriverDetail(detail) if detail.contains("Codex provider failure:"))
+    );
     assert_eq!(
         logs.matches("Codex provider failed; continuing once")
             .count(),

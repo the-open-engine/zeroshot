@@ -537,16 +537,11 @@ pub(super) fn settled_outcome(
         DispatchResult::StartFailure(error) => Err(error),
     }
 }
-// Provider adapters publish redacted details through durable output. Arbitrary driver detail
-// strings must never cross the public log boundary here.
 pub(super) fn settled_failure_cause(result: &DispatchResult, force: bool) -> Option<String> {
     if force {
         return None;
     }
     match result {
-        DispatchResult::Completed(Err(NodeRunnerError::DriverDetail(_))) => {
-            Some(NodeRunnerError::Driver.to_string())
-        }
         DispatchResult::Completed(Err(error)) => Some(error.to_string()),
         _ => None,
     }

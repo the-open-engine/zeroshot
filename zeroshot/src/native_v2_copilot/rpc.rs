@@ -58,7 +58,6 @@ pub(super) struct CopilotRpc<'a> {
     pending: BTreeSet<u64>,
     pub(super) session_id: String,
     pub(super) response: Option<String>,
-    pub(super) provider_error: Option<String>,
     pub(super) redactions: Vec<String>,
     authentication: auth::CopilotAuthentication<'a>,
     provider: Option<&'a provider::LocalProvider>,
@@ -95,7 +94,6 @@ impl<'a> CopilotRpc<'a> {
             pending: BTreeSet::new(),
             session_id: String::new(),
             response: None,
-            provider_error: None,
             redactions,
             authentication: native.authentication,
             provider: native.provider,
@@ -173,7 +171,6 @@ impl<'a> CopilotRpc<'a> {
         let mut response = AgentResponseState::new(prompt);
         loop {
             self.response = None;
-            self.provider_error = None;
             self.request("session.send", json!({
                 "sessionId":self.session_id, "prompt":response.prompt(), "wait":true,
                 "responseFormat":{"type":"json_schema", "jsonSchema":{
@@ -181,9 +178,6 @@ impl<'a> CopilotRpc<'a> {
                     "schema":self.invocation.response.provider_schema(ProviderSchemaDialect::OpenAiStrict),
                 }},
             })).await?;
-            if let Some(error) = self.provider_error.take() {
-                return Err(failure(error));
-            }
             let text = self
                 .response
                 .take()

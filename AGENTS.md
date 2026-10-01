@@ -226,16 +226,20 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Built-in graphs have no node deadlines, and provider adapters impose no separate turn timeout.
   The supervisor records every node error in durable logs before settlement, including handled
   failures and retries. Summaries preserve error code, typed refusal/malformed reason, elapsed time,
-  and safe runner context; provider adapters own redaction of detailed output. Runtime failure,
+  and returned error context; provider adapters redact credentials before returning details. Runtime failure,
   runtime loss/restart reconciliation, and force-stop use the same completion/log transaction for
   every active node. Failed runs also retain a run-wide error log, including before graph dispatch.
   An actual node error remains logged if a parallel winner voids that execution; intentional
   cancellation is not presented as a new crash. Unconfirmed cleanup preserves a bounded best-effort
   error log without completing the still-active execution or masking the primary failure.
   Detailed provider, validation, and delivery errors retain their useful explanation in ordinary
-  run logs. Credential owners redact their known secret values before publishing; correction
-  prompts are not copied into diagnostics. Failed terminal diagnostic publication preserves the
-  primary failure. These public summaries stay separate from private operator diagnostics.
+  run logs. Adapters redact their known credentials before returning error details; the supervisor
+  preserves these through ordinary completion logs. Capsule transport retains details as an existing
+  output event before reducing the failure to its wire code; the existing bounded cancellation queue
+  retains errors during draining; capsule terminal metadata preserves bounded error records too. Retries, corrections, and typed delivery
+  outcomes log detail separately only when completion would lose it. Correction prompts stay out of
+  diagnostics. Public error formatting is bounded and control-safe without suppressing causes.
+  These public summaries stay separate from private operator diagnostics.
 - A failed durable-output bridge cancels and drains its provider immediately. Fatal supervisor
   errors and task panics publish their private primary diagnostic before recovery waits or stderr
   writes, then close owned work and attempt runtime cleanup before durable failure. Recovery failures

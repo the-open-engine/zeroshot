@@ -263,7 +263,10 @@ async fn terminal_error_is_retried_only_once() {
     let (admitted, runtime, state) = codex_retry_runtime(&directory, SessionScope::Execution).await;
     let mut handle = start(&runtime, &admitted, 1, &retry_values(&state, true, false)).await;
 
-    assert_eq!(handle.completion().await, Err(NodeRunnerError::Driver));
+    assert!(
+        matches!(handle.completion().await, Err(NodeRunnerError::DriverDetail(ref detail))
+        if detail.contains("provider still unavailable"))
+    );
     assert!(state.with_extension("prompt.2").exists());
     assert!(!state.with_extension("prompt.3").exists());
 }
@@ -301,7 +304,10 @@ async fn exhausted_provider_failure_reopens_a_node_instance_session_for_retry() 
     let (admitted, runtime, state) =
         codex_retry_runtime(&directory, SessionScope::NodeInstance).await;
     let mut failed = start(&runtime, &admitted, 1, &retry_values(&state, true, false)).await;
-    assert_eq!(failed.completion().await, Err(NodeRunnerError::Driver));
+    assert!(
+        matches!(failed.completion().await, Err(NodeRunnerError::DriverDetail(ref detail))
+        if detail.contains("provider still unavailable"))
+    );
     assert!(
         fs::read_to_string(state.with_extension("args.2"))
             .assert_value()

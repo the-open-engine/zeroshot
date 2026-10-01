@@ -35,43 +35,53 @@ async fn rejected_before_process(fixture: Fixture) {
 
 #[tokio::test]
 async fn credential_callback_refreshes_through_the_existing_resolver() {
-    let fixture = Fixture::with_values(
-        "refresh",
-        BTreeMap::from([(auth::EXPIRES_AT.to_owned(), expiry())]),
-    )
-    .await;
-    let mut request = fixture.request(1);
-    let mut rotated = fixture.values.clone();
-    rotated.insert(auth::TOKEN.to_owned(), "rotated-sensitive-value".to_owned());
-    let environment = ResolvedEnvironment::exact(
-        &fixture.binding,
-        rotated
-            .into_iter()
-            .map(|(key, value)| (environment_name(&key), value))
-            .collect(),
-    )
-    .assert_value();
-    let refresh = Arc::new(Refresh {
-        environment,
-        calls: AtomicUsize::new(0),
-    });
-    request.environment = with_environment_refresh(request.environment, refresh.clone());
-    verified(
-        complete(fixture.runtime.start(request).await.assert_value())
-            .await
-            .1,
-    );
-    assert_eq!(refresh.calls.load(Ordering::Relaxed), 1);
-    let capture = fixture.capture();
-    let created = capture
-        .iter()
-        .find(|message| message["method"] == "session.create")
+    for mode in ["refresh", "refresh_error"] {
+        let fixture = Fixture::with_values(
+            mode,
+            BTreeMap::from([(auth::EXPIRES_AT.to_owned(), expiry())]),
+        )
+        .await;
+        let mut request = fixture.request(1);
+        let mut rotated = fixture.values.clone();
+        rotated.insert(auth::TOKEN.to_owned(), "rotated-sensitive-value".to_owned());
+        let environment = ResolvedEnvironment::exact(
+            &fixture.binding,
+            rotated
+                .into_iter()
+                .map(|(key, value)| (environment_name(&key), value))
+                .collect(),
+        )
         .assert_value();
-    assert!(created["params"].get("gitHubToken").is_none());
-    assert_eq!(
-        created["params"]["gitHubTokenProviderRegistrationId"],
-        auth::REGISTRATION
-    );
+        let refresh = Arc::new(Refresh {
+            environment,
+            calls: AtomicUsize::new(0),
+        });
+        request.environment = with_environment_refresh(request.environment, refresh.clone());
+        let (events, outcome) = complete(fixture.runtime.start(request).await.assert_value()).await;
+        if mode == "refresh" {
+            verified(outcome);
+        } else {
+            let Err(NodeRunnerError::DriverDetail(detail)) = outcome else {
+                panic!("expected refreshed-token error: {outcome:?}");
+            };
+            assert!(detail.contains("rejected [REDACTED]"));
+            assert!(detail.contains("refresh failure: [REDACTED]"));
+            assert!(!detail.contains("rotated-sensitive-value"));
+            assert!(!detail.contains("gho_fake-secret"));
+            assert!(error_output(&events).is_empty());
+        }
+        assert_eq!(refresh.calls.load(Ordering::Relaxed), 1);
+        let capture = fixture.capture();
+        let created = capture
+            .iter()
+            .find(|message| message["method"] == "session.create")
+            .assert_value();
+        assert!(created["params"].get("gitHubToken").is_none());
+        assert_eq!(
+            created["params"]["gitHubTokenProviderRegistrationId"],
+            auth::REGISTRATION
+        );
+    }
 }
 
 #[tokio::test]

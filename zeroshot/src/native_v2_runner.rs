@@ -34,6 +34,7 @@ mod response;
 
 pub use handle::NodeHandle;
 pub use output::{AttachReceiveError, DurableOutput, LiveOutputSource, ReadOnlyAttach};
+pub(crate) use output::bounded_log_text;
 use output::{DurableEventSender, durable_event_channel, durable_output_event};
 pub use response::{render_agent_prompt, NodeResponseContract};
 pub(crate) use response::ProviderSchemaDialect;
@@ -110,6 +111,7 @@ pub enum NodeRunnerError {
     SessionLost,
     #[error("node execution failed")]
     Driver,
+    /// User-visible error context. Producers must redact credentials before returning it.
     #[error("node execution failed: {0}")]
     DriverDetail(String),
     #[error("the remote node runtime connection was lost")]
@@ -137,6 +139,7 @@ pub trait NodeSession: Any + Send + Sync {
     async fn close(&self);
 }
 
+/// Returned error details enter user logs; implementations must redact owned credentials.
 #[async_trait]
 pub trait SessionFactory: Send + Sync {
     async fn open(
@@ -221,6 +224,7 @@ impl DriverControl {
     }
 }
 
+/// Returned error details enter user logs; implementations must redact owned credentials.
 #[async_trait]
 pub trait NodeDriver: Send + Sync {
     /// Runs until the provider has completed or consumed cancellation and finished process cleanup.

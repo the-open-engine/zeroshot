@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -9,6 +9,7 @@ use tokio::sync::Notify;
 use super::super::request;
 use crate::native_v2_capsule::{
     CapsuleNodeChannel, CapsuleNodeEvent, CapsuleNodeFailure, NativeCapsuleNodeEndpoint,
+    CapsuleConnectionError, CapsuleExecutionStream, CapsuleOutput, CapsuleOutputStream,
     RemoteCapsuleNodeRunner,
 };
 use crate::native_v2_contract::TokenUsageDelta;
@@ -159,4 +160,113 @@ async fn proxy_terminal_lane_overflow_is_sticky_and_marks_usage_incomplete() {
     assert_eq!(output_tokens, (known_events * 2) as u64);
     assert_eq!(incomplete_events, 1);
     assert_eq!(unexpected_outputs, 0);
+}
+
+struct ErrorBurstChannel {
+    cancelled: tokio::sync::watch::Sender<bool>,
+    loss: tokio::sync::watch::Sender<bool>,
+    cancel_calls: AtomicUsize,
+    started: Notify,
+    overflow_seen: Arc<Notify>,
+    release_cleanup: Arc<Notify>,
+}
+
+#[async_trait]
+impl CapsuleNodeChannel for ErrorBurstChannel {
+    async fn start(
+        &self,
+        _request: NodeRunRequest,
+    ) -> Result<CapsuleExecutionStream, CapsuleConnectionError> {
+        let (events, receiver) = tokio::sync::mpsc::channel(DURABLE_OUTPUT_CAPACITY);
+        let mut cancelled = self.cancelled.subscribe();
+        let release = self.release_cleanup.clone();
+        tokio::spawn(async move {
+            while !*cancelled.borrow_and_update() {
+                cancelled.changed().await.assert_value();
+            }
+            for index in 0..=DURABLE_OUTPUT_CAPACITY * 2 {
+                events
+                    .send(CapsuleNodeEvent::Output {
+                        output: CapsuleOutput {
+                            stream: CapsuleOutputStream::Error,
+                            text: format!("error {index}"),
+                        },
+                        timestamp: openengine_cluster_protocol::UnixTimestampMillis::new(1)
+                            .assert_value(),
+                    })
+                    .await
+                    .assert_value();
+            }
+            release.notified().await;
+            events
+                .send(CapsuleNodeEvent::Failed {
+                    failure: CapsuleNodeFailure::CleanupUnconfirmed,
+                })
+                .await
+                .assert_value();
+        });
+        self.started.notify_one();
+        Ok(CapsuleExecutionStream::from_receiver(receiver))
+    }
+
+    async fn cancel(
+        &self,
+        _reference: &crate::native_v2_contract::ExecutionRef,
+    ) -> Result<(), CapsuleConnectionError> {
+        self.cancelled.send_replace(true);
+        if self.cancel_calls.fetch_add(1, Ordering::SeqCst) == 1 {
+            self.overflow_seen.notify_one();
+        }
+        Ok(())
+    }
+
+    async fn close_run(&self, _run_id: &RunId) -> Result<(), CapsuleConnectionError> {
+        self.cancelled.send_replace(true);
+        self.release_cleanup.notify_one();
+        Ok(())
+    }
+
+    fn connection_loss(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.loss.subscribe()
+    }
+}
+
+#[tokio::test]
+async fn remote_error_overflow_waits_for_cleanup_and_preserves_cleanup_failure() {
+    let (cancelled, _) = tokio::sync::watch::channel(false);
+    let (loss, _) = tokio::sync::watch::channel(false);
+    let channel = Arc::new(ErrorBurstChannel {
+        cancelled,
+        loss,
+        cancel_calls: AtomicUsize::new(0),
+        started: Notify::new(),
+        overflow_seen: Arc::new(Notify::new()),
+        release_cleanup: Arc::new(Notify::new()),
+    });
+    let proxy = RemoteCapsuleNodeRunner::new(channel.clone());
+    let mut handle = proxy
+        .start(request("error-overflow", 1))
+        .await
+        .assert_value();
+    let _durable = handle.take_initial_output().assert_value();
+    tokio::time::timeout(Duration::from_secs(5), channel.started.notified())
+        .await
+        .assert_value();
+    handle.cancel();
+    tokio::time::timeout(Duration::from_secs(5), channel.overflow_seen.notified())
+        .await
+        .assert_value();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), handle.completion())
+            .await
+            .is_err(),
+        "overflow must not settle an execution whose capsule cleanup is still blocked"
+    );
+    channel.release_cleanup.notify_one();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(5), handle.completion())
+            .await
+            .assert_value(),
+        Err(NodeRunnerError::CleanupUnconfirmed)
+    );
 }

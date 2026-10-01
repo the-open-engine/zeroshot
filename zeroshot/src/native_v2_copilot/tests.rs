@@ -7,6 +7,7 @@ use openengine_cluster_protocol::{IdempotencyKey, NodeName, RunSize, RunTitle};
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{Value, json};
 use super::*;
+use crate::native_v2_runner::LiveOutputStream;
 use crate::execution::SessionScope;
 use crate::native_v2_candidate::test_support::{
     NodeRequestFixture, TestDirectory, admit, environment_name, full_graph, success_node,
@@ -774,18 +775,18 @@ async fn fails_closed_on_protocol_identity_and_provider_errors() {
     ] {
         let fixture = Fixture::new(mode).await;
         let (events, outcome) = complete(fixture.start(1).await).await;
-        assert!(outcome.is_err());
-        let errors = error_output(&events);
-        assert!(errors.iter().any(|line| line.starts_with("Copilot provider failure: ")
-            && line.contains(detail)), "missing useful error: {errors:?}");
+        let Err(NodeRunnerError::DriverDetail(error)) = outcome else {
+            panic!("expected provider detail: {outcome:?}");
+        };
+        assert!(error.contains(detail), "missing useful error: {error}");
+        assert!(
+            error_output(&events).is_empty(),
+            "terminal detail must not be emitted twice"
+        );
         if mode == "version" {
-            assert!(
-                errors
-                    .iter()
-                    .any(|line| line.contains("stderr: launch note: [REDACTED]"))
-            );
+            assert!(error.contains("stderr: launch note: [REDACTED]"));
         }
-        assert!(!format!("{events:?} {outcome:?}").contains("gho_fake-secret"));
+        assert!(!format!("{events:?} {error}").contains("gho_fake-secret"));
     }
 }
 
@@ -809,7 +810,7 @@ async fn validation_errors_keep_the_explanation_and_redact_credentials() {
 }
 
 #[tokio::test]
-async fn failed_diagnostic_publication_preserves_the_provider_error() {
+async fn terminal_failure_returns_detail_with_no_durable_consumer() {
     let fixture = Fixture::new("version").await;
     let mut handle = fixture.start(1).await;
     drop(handle.take_initial_output().assert_value());
@@ -832,7 +833,7 @@ fn error_output(events: &[DurableNodeEvent]) -> Vec<&str> {
 }
 
 #[tokio::test]
-async fn startup_failures_emit_actionable_durable_diagnostics() {
+async fn startup_failures_return_actionable_details() {
     let directory = TestDirectory::new("copilot-missing-executable");
     let missing = directory.child("missing-copilot");
     let fixture = Fixture::with_executable(
@@ -860,13 +861,12 @@ async fn startup_failures_emit_actionable_durable_diagnostics() {
 
 async fn assert_startup_error(fixture: &Fixture, detail: &str, secret: &str) {
     let (events, outcome) = complete(fixture.start(1).await).await;
-    assert!(outcome.is_err());
-    assert!(
-        error_output(&events)
-            .iter()
-            .any(|line| line.contains(detail))
-    );
-    assert!(!format!("{events:?} {outcome:?}").contains(secret));
+    let Err(NodeRunnerError::DriverDetail(error)) = outcome else {
+        panic!("expected startup detail: {outcome:?}");
+    };
+    assert!(error.contains(detail));
+    assert!(error_output(&events).is_empty());
+    assert!(!format!("{events:?} {error}").contains(secret));
     assert!(!fixture.directory.child("capture").exists());
 }
 
@@ -947,4 +947,45 @@ fn assert_no_persisted_token(directory: &std::path::Path, token: &[u8]) {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn cancellation_during_cleanup_preserves_an_already_received_provider_error() {
+    let fixture = Fixture::new("error_cleanup").await;
+    let mut handle = fixture.start(1).await;
+    let mut output = handle.take_initial_output().assert_value();
+    tokio::time::timeout(Duration::from_secs(5), output.wait_until_saturated())
+        .await
+        .assert_value();
+    handle.cancel();
+    let (events, completion) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(
+            async {
+                let mut events = Vec::new();
+                while let Ok(event) = output.recv().await {
+                    events.push(event);
+                }
+                events
+            },
+            handle.completion()
+        )
+    })
+    .await
+    .assert_value();
+    let error = completion.assert_error();
+    assert!(
+        matches!(&error, NodeRunnerError::DriverDetail(detail)
+        if detail.contains("rejected [REDACTED]")),
+        "{error:?}"
+    );
+    assert!(!format!("{events:?} {error}").contains("gho_fake-secret"));
+    assert_eq!(
+        events.len(),
+        1027,
+        "all trailing usage must survive cleanup"
+    );
+    assert!(
+        error_output(&events).is_empty(),
+        "terminal detail must not be duplicated"
+    );
 }

@@ -85,7 +85,7 @@ async fn missing_thread_failure(
     )
     .await;
     let (logs, completion) = complete_with_logs(handle).await;
-    assert_eq!(completion, Err(NodeRunnerError::Driver));
+    assert!(matches!(completion, Err(NodeRunnerError::DriverDetail(_))));
     logs
 }
 
@@ -140,8 +140,10 @@ async fn changed_thread_id_reports_actionable_failure_after_retry() {
     .await;
     let (logs, completion) = complete_with_logs(handle).await;
 
-    assert_eq!(completion, Err(NodeRunnerError::Driver));
-    assert!(logs.contains("Codex output thread ID did not match the resumed session"));
+    assert!(
+        matches!(completion, Err(NodeRunnerError::DriverDetail(ref detail))
+        if detail.contains("Codex output thread ID did not match the resumed session"))
+    );
     assert!(!logs.contains("execution failed without provider detail"));
 }
 

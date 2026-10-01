@@ -1,10 +1,9 @@
 use crate::execution::process::ProcessSessionOutput;
-use crate::native_v2_runner::NodeRunnerError;
+use crate::native_v2_runner::{NodeRunnerError, bounded_log_text};
 
 use super::process_failure_detail;
 
 pub(super) const MAX_PROVIDER_DIAGNOSTIC_BYTES: usize = 8 * 1024;
-const DIAGNOSTIC_TRUNCATION_MARKER: &str = " ... [middle truncated] ... ";
 const TRUNCATED_STDERR_DETAIL_PREFIX: &str = "stderr (truncated tail): ";
 
 pub(crate) fn safe_provider_text(text: &str, redactions: &[String]) -> String {
@@ -94,65 +93,22 @@ pub(crate) fn provider_failure_diagnostic(
     } else {
         details.join("; ")
     };
-    let detail = sanitize_control_characters(&safe_provider_text(&detail, redactions));
-    bounded_provider_diagnostic(format!("{provider} provider failure: {}", detail.trim()))
+    let detail = safe_provider_text(&detail, redactions);
+    bounded_log_text(
+        format!("{provider} provider failure: {}", detail.trim()),
+        MAX_PROVIDER_DIAGNOSTIC_BYTES,
+    )
 }
 
-fn sanitize_control_characters(detail: &str) -> String {
-    detail
-        .chars()
-        .map(|character| {
-            if character.is_control() && !matches!(character, '\n' | '\t') {
-                ' '
-            } else {
-                character
-            }
-        })
-        .collect()
-}
-
-fn bounded_provider_diagnostic(diagnostic: String) -> String {
-    if diagnostic.len() <= MAX_PROVIDER_DIAGNOSTIC_BYTES {
-        return diagnostic;
+pub(crate) fn redact_provider_error(
+    error: NodeRunnerError,
+    redactions: &[String],
+) -> NodeRunnerError {
+    match error {
+        NodeRunnerError::DriverDetail(detail) => NodeRunnerError::DriverDetail(bounded_log_text(
+            safe_provider_text(&detail, redactions),
+            MAX_PROVIDER_DIAGNOSTIC_BYTES,
+        )),
+        error => error,
     }
-    let content_bytes =
-        MAX_PROVIDER_DIAGNOSTIC_BYTES.saturating_sub(DIAGNOSTIC_TRUNCATION_MARKER.len());
-    let prefix = utf8_prefix(&diagnostic, content_bytes / 2);
-    let suffix = utf8_suffix(&diagnostic, content_bytes.saturating_sub(prefix.len()));
-    format!("{prefix}{DIAGNOSTIC_TRUNCATION_MARKER}{suffix}")
-}
-
-fn utf8_prefix(value: &str, maximum_bytes: usize) -> String {
-    let mut bytes = 0;
-    value
-        .chars()
-        .take_while(|character| {
-            let next = bytes + character.len_utf8();
-            if next > maximum_bytes {
-                false
-            } else {
-                bytes = next;
-                true
-            }
-        })
-        .collect()
-}
-
-fn utf8_suffix(value: &str, maximum_bytes: usize) -> String {
-    let mut bytes = 0;
-    let mut characters = value
-        .chars()
-        .rev()
-        .take_while(|character| {
-            let next = bytes + character.len_utf8();
-            if next > maximum_bytes {
-                false
-            } else {
-                bytes = next;
-                true
-            }
-        })
-        .collect::<Vec<_>>();
-    characters.reverse();
-    characters.into_iter().collect()
 }

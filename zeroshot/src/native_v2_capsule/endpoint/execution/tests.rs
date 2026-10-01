@@ -177,3 +177,44 @@ fn reference() -> ExecutionRef {
         execution: crate::native_v2_contract::ExecutionId::new(1).assert_value(),
     }
 }
+
+#[test]
+fn cancellation_error_buffer_is_bounded_and_cleanup_failure_keeps_priority() {
+    for (completion, expected) in [
+        (
+            NodeRunnerError::Cancelled,
+            CapsuleNodeFailure::ExecutionFailed,
+        ),
+        (
+            NodeRunnerError::CleanupUnconfirmed,
+            CapsuleNodeFailure::CleanupUnconfirmed,
+        ),
+    ] {
+        let mut metadata = TerminalMetadata::default();
+        let capacity = crate::native_v2_runner::DURABLE_OUTPUT_CAPACITY;
+        for index in 0..=capacity {
+            metadata.retain(CapsuleNodeEvent::Output {
+                output: CapsuleOutput {
+                    stream: CapsuleOutputStream::Error,
+                    text: format!("error {index}"),
+                },
+                timestamp: UnixTimestampMillis::new(index as u64 + 1).assert_value(),
+            });
+        }
+        let events = metadata.into_events(Err(completion));
+        assert_eq!(events.len(), capacity + 2);
+        for (index, event) in events[..capacity].iter().enumerate() {
+            assert!(
+                matches!(event, CapsuleNodeEvent::Output { output, timestamp }
+                if output.text == format!("error {index}") && timestamp.get() == index as u64 + 1)
+            );
+        }
+        assert!(matches!(
+            events[capacity],
+            CapsuleNodeEvent::TokenUsage { usage: None }
+        ));
+        assert!(
+            matches!(&events[capacity + 1], CapsuleNodeEvent::Failed { failure } if *failure == expected)
+        );
+    }
+}

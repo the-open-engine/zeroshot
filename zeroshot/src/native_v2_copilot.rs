@@ -21,12 +21,9 @@ use crate::execution::process::HostedProcessPool;
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderExecution, ProviderFilesystemConfig, ProviderProcessRunners,
     ProviderExecutionFiles, ProviderProcess, open_provider_process, require_process_cleanup,
-    provider_failure_diagnostic,
+    redact_provider_error, report_provider_error,
 };
-use crate::native_v2_runner::{
-    DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeRunnerError,
-    ResolvedEnvironment,
-};
+use crate::native_v2_runner::{DriverControl, DriverInvocation, NodeRunnerError, ResolvedEnvironment};
 use session::CopilotSession;
 
 /// Host-owned launch capabilities; credentials belong to each invocation's resolved connection.
@@ -170,7 +167,7 @@ impl CopilotAdapter {
             finish_rpc(&mut connection, &mut process, control, outcome).await
         }
         .await;
-        report_failure(result, control, &redactions).await
+        result.map_err(|error| redact_provider_error(error, &redactions))
     }
 
     fn provider_configuration(
@@ -205,33 +202,6 @@ impl CopilotAdapter {
     }
 }
 
-async fn report_failure(
-    result: Result<WorkerOutcome, NodeRunnerError>,
-    control: &DriverControl,
-    redactions: &[String],
-) -> Result<WorkerOutcome, NodeRunnerError> {
-    match result {
-        Err(error @ (NodeRunnerError::Driver | NodeRunnerError::DriverDetail(_))) => {
-            let detail = match &error {
-                NodeRunnerError::DriverDetail(detail) => Some(detail.as_str()),
-                _ => None,
-            };
-            let diagnostic = provider_failure_diagnostic("Copilot", detail, None, redactions);
-            let _ = control
-                .emit(LiveOutput::new(
-                    LiveOutputStream::Error,
-                    diagnostic.clone(),
-                )?)
-                .await;
-            Err(match error {
-                NodeRunnerError::DriverDetail(_) => rpc::failure(diagnostic),
-                error => error,
-            })
-        }
-        result => result,
-    }
-}
-
 async fn finish_rpc(
     connection: &mut rpc::CopilotRpc<'_>,
     process: &mut ProviderProcess,
@@ -241,13 +211,26 @@ async fn finish_rpc(
     // Stop the owned tree while draining its remaining events, including token usage.
     // Releasing an intentionally completed headless server is not a provider cancellation.
     let (completion, drained) = tokio::join!(process.release(), connection.drain());
-    let completion = require_process_cleanup(&completion)?;
-    if control.is_cancelled() {
+    let outcome = outcome.and_then(|outcome| drained.map(|()| outcome));
+    let completion = match require_process_cleanup(&completion) {
+        Ok(completion) => completion,
+        Err(cleanup_error) => {
+            // Cleanup owns settlement, but its classification cannot carry the original cause.
+            // Preserve that cause without letting a stopped log consumer delay cleanup failure.
+            if let Err(error @ NodeRunnerError::DriverDetail(_)) = &outcome {
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_millis(100),
+                    report_provider_error("Copilot", error, &connection.redactions, control),
+                )
+                .await;
+            }
+            return Err(cleanup_error);
+        }
+    };
+    if control.is_cancelled() && outcome.is_ok() {
         return Err(NodeRunnerError::Cancelled);
     }
-    outcome
-        .and_then(|outcome| drained.map(|()| outcome))
-        .map_err(|error| connection.failure_diagnostic(error, completion))
+    outcome.map_err(|error| connection.failure_diagnostic(error, completion))
 }
 
 async fn exchange_rpc(

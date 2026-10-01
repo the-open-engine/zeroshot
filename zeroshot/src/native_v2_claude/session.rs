@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use crate::execution::SessionScope;
 use crate::native_v2_capsule::provider_process::{
     ProviderExecution, ProviderFilesystemConfig, ProviderFailure, ProviderFailureRetry,
-    ProviderSessionCore, impl_provider_node_session, provider_redactions, report_provider_error,
+    ProviderSessionCore, impl_provider_node_session, provider_redactions,
 };
 use crate::native_v2_contract::{NodeInvocation, NodeRuntimeBinding};
 use crate::native_v2_runner::{
@@ -82,17 +82,15 @@ impl NodeDriver for ClaudeAdapter {
             &invocation,
             session,
             provider_redactions(&invocation.environment, &self.local_environment),
-            &control,
         )
         .await?;
         loop {
-            if let Some(outcome) = self.advance_run(&turn, &mut state, &control).await? {
-                if let Err(error) =
-                    retain_session(&invocation.node, session, state.resume_id.as_deref()).await
-                {
-                    let _ = state.emit_terminal_error(&control, &error).await;
-                    return Err(error);
-                }
+            if let Some(outcome) = self
+                .advance_run(&turn, &mut state, &control)
+                .await
+                .map_err(|error| state.retry.redact_error(error))?
+            {
+                retain_session(&invocation.node, session, state.resume_id.as_deref()).await?;
                 return Ok(outcome);
             }
         }
@@ -131,10 +129,7 @@ impl ClaudeAdapter {
                     .await?;
                 Ok(None)
             }
-            Err(error) => {
-                let _ = state.emit_terminal_error(control, &error).await;
-                Err(error)
-            }
+            Err(error) => Err(error),
         }
     }
 }
@@ -150,15 +145,8 @@ impl ClaudeRunState {
         invocation: &DriverInvocation,
         session: &ClaudeSession,
         redactions: Vec<String>,
-        control: &DriverControl,
     ) -> Result<Self, NodeRunnerError> {
-        let prompt = match prompt(invocation) {
-            Ok(prompt) => prompt,
-            Err(error) => {
-                let _ = report_provider_error("Claude", &error, &redactions, control).await;
-                return Err(error);
-            }
-        };
+        let prompt = prompt(invocation)?;
         Ok(Self {
             resume_id: session.resume_id.lock().await.clone(),
             retry: ProviderFailureRetry::new("Claude", prompt.clone(), redactions),
@@ -193,14 +181,6 @@ impl ClaudeRunState {
             .await?;
         self.response.replace_prompt(prompt);
         Ok(())
-    }
-
-    async fn emit_terminal_error(
-        &self,
-        control: &DriverControl,
-        error: &NodeRunnerError,
-    ) -> Result<(), NodeRunnerError> {
-        self.retry.report_terminal(control, error).await
     }
 }
 

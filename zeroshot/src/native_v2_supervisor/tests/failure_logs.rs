@@ -149,24 +149,53 @@ async fn successful_retry_preserves_the_failed_attempt_and_runner_cause() {
 }
 
 #[tokio::test]
-async fn arbitrary_driver_details_do_not_bypass_provider_redaction() {
-    let harness = harness(
-        super::resolution::worker_graph(None),
-        Value::Null,
-        FakeDriver::scripted([(
-            "worker",
-            vec![Behavior::Fail(NodeRunnerError::DriverDetail(
-                "private-token https://user:password@example.invalid".to_owned(),
-            ))],
-        )]),
-    )
-    .await;
-    harness.supervisor.drive().await.assert_value();
-    let records = public_logs(&harness).await;
-    let encoded = serde_json::to_string(&records).assert_value();
-    assert!(!encoded.contains("private-token"));
-    assert!(!encoded.contains("password"));
-    assert!(encoded.contains("node execution failed"));
+async fn returned_driver_details_survive_public_logs_without_breaking_settlement() {
+    for detail in [
+        "repository not found; upstream response: 404".to_owned(),
+        format!("invalid\0record {} root cause at tail", "界".repeat(10_000)),
+        format!("newline-rich {} root cause at tail", "\n".repeat(10_000)),
+    ] {
+        let node = concat!(
+            "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+            "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+            "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+            "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+        );
+        let harness = harness(
+            graph(
+                sequence(vec![step(node, 1_000), succeed("done")], null_type()),
+                null_type(),
+            ),
+            Value::Null,
+            FakeDriver::scripted([(
+                node,
+                vec![Behavior::Fail(NodeRunnerError::DriverDetail(
+                    detail.clone(),
+                ))],
+            )]),
+        )
+        .await;
+        harness.supervisor.drive().await.assert_value();
+        let records = public_errors(&harness).await;
+        let node_errors: Vec<_> = records
+            .iter()
+            .filter(|record| record.execution.is_some())
+            .collect();
+        assert_eq!(node_errors.len(), 1);
+        let message = node_errors[0].record.message.as_str();
+        assert!(!message.contains('\0'));
+        assert!(message.len() <= crate::v2_run_ledger::MAX_SAFE_LOG_BYTES);
+        if detail.len() < 8 * 1024 {
+            assert!(message.contains(&detail));
+        } else {
+            if detail.contains('\0') {
+                assert!(message.contains("invalid\u{fffd}record"));
+            } else {
+                assert!(message.contains("newline-rich"));
+            }
+            assert!(message.ends_with("root cause at tail"));
+        }
+    }
 }
 
 #[tokio::test]

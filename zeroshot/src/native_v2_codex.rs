@@ -23,8 +23,7 @@ use crate::execution::process::{HostedProcessPool, ProcessSessionCommand};
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderFailure, ProviderFailureRetry, ProviderProcessRunners,
     ProviderExecution, ProviderFilesystemConfig, CODEX_LOCAL_ENVIRONMENT, LocalHarnessEnvironment,
-    agent_workspace_access, provider_redactions, redaction_values, report_provider_error,
-    with_driver_detail,
+    agent_workspace_access, provider_redactions, redaction_values, with_driver_detail,
 };
 use crate::native_v2_contract::CodexProvider;
 use crate::native_v2_runner::{
@@ -248,17 +247,14 @@ impl NativeV2CodexAdapter {
         let prompt = invocation.agent_instructions().and_then(|instructions| {
             render_agent_prompt(instructions, &invocation.node.input, &invocation.response)
                 .map_err(|error| with_driver_detail(error, "Codex prompt could not be serialized"))
-        });
-        let prompt = match prompt {
-            Ok(prompt) => prompt,
-            Err(error) => {
-                let _ = report_provider_error("Codex", &error, &redactions, &control).await;
-                return Err(error);
-            }
-        };
+        })?;
         let mut state = CodexRunState::new(prompt, redactions);
         loop {
-            if let Some(outcome) = self.advance_run(&turn, &mut state).await? {
+            if let Some(outcome) = self
+                .advance_run(&turn, &mut state)
+                .await
+                .map_err(|error| state.retry.redact_error(error))?
+            {
                 return Ok(outcome);
             }
         }
@@ -495,7 +491,7 @@ async fn resolve_codex_output(
         ProviderSchemaDialect::OpenAiStrict,
     )?;
     if let Some(error) = response.correction_error() {
-        retry.report_terminal(turn.control, &error).await?;
+        retry.report_correction(turn.control, &error).await?;
     }
     if let Some(diagnostic) = turn
         .session

@@ -116,17 +116,9 @@ impl NodeDriver for NativeV2DeliveryAdapter {
         }
         match result {
             Ok(result) => result,
-            Err(_) => {
-                control
-                    .emit(LiveOutput::new(
-                        LiveOutputStream::Error,
-                        "Git delivery panicked",
-                    )?)
-                    .await?;
-                Err(NodeRunnerError::DriverDetail(
-                    "Git delivery panicked".to_owned(),
-                ))
-            }
+            Err(_) => Err(NodeRunnerError::DriverDetail(
+                "Git delivery panicked".to_owned(),
+            )),
         }
     }
 }

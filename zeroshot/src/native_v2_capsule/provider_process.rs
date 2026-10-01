@@ -48,7 +48,7 @@ pub(crate) fn agent_workspace_access(
 
 #[path = "provider_process/diagnostic.rs"]
 mod diagnostic;
-pub(crate) use diagnostic::{provider_failure_diagnostic, safe_provider_text};
+pub(crate) use diagnostic::{provider_failure_diagnostic, redact_provider_error, safe_provider_text};
 #[cfg(test)]
 use diagnostic::MAX_PROVIDER_DIAGNOSTIC_BYTES;
 
@@ -421,13 +421,12 @@ impl ProviderFailureRetry {
     ) -> Result<String, NodeRunnerError> {
         let diagnostic =
             provider_failure_diagnostic(self.provider, failure.detail, None, &self.redactions);
-        let published = control
-            .emit(LiveOutput::new(LiveOutputStream::Error, diagnostic)?)
-            .await;
         if !failure.retryable || self.used {
-            return Err(NodeRunnerError::Driver);
+            return Err(NodeRunnerError::DriverDetail(diagnostic));
         }
-        published?;
+        control
+            .emit(LiveOutput::new(LiveOutputStream::Error, diagnostic)?)
+            .await?;
         self.used = true;
         control
             .emit(LiveOutput::new(
@@ -442,7 +441,11 @@ impl ProviderFailureRetry {
         })
     }
 
-    pub(crate) async fn report_terminal(
+    pub(crate) fn redact_error(&self, error: NodeRunnerError) -> NodeRunnerError {
+        redact_provider_error(error, &self.redactions)
+    }
+
+    pub(crate) async fn report_correction(
         &self,
         control: &DriverControl,
         error: &NodeRunnerError,

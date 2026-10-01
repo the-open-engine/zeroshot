@@ -19,7 +19,7 @@ pub(super) async fn receive(
     match kind {
         "assistant.usage" => usage(rpc, data).await,
         "assistant.message" => assistant_message(rpc, data).await,
-        "session.error" => session_error(rpc, data).await,
+        "session.error" => session_error(data),
         "tool.execution_start" => tool_started(rpc, data).await,
         "permission.requested" => permission(rpc, data),
         "tool.execution_complete" => tool_completed(rpc, data).await,
@@ -27,12 +27,11 @@ pub(super) async fn receive(
     }
 }
 
-async fn session_error(rpc: &mut CopilotRpc<'_>, data: &Value) -> Result<(), NodeRunnerError> {
+fn session_error(data: &Value) -> Result<(), NodeRunnerError> {
     let message = data["message"]
         .as_str()
         .ok_or_else(|| failure("Copilot session error is invalid"))?;
-    rpc.provider_error = Some(safe_provider_text(message, &rpc.redactions));
-    emit(rpc, LiveOutputStream::Error, message).await
+    Err(failure(message))
 }
 
 async fn tool_started(rpc: &CopilotRpc<'_>, data: &Value) -> Result<(), NodeRunnerError> {

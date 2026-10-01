@@ -144,7 +144,9 @@ async fn coverage_contract_command_path_failures_preserve_driver_detail_across_o
         let runtime = runner(&admitted, adapter);
         let (logs, completion) = complete_with_logs(start(&runtime, &admitted, 1, &[]).await).await;
 
-        assert_eq!(completion, Err(NodeRunnerError::Driver));
+        assert!(
+            matches!(completion, Err(NodeRunnerError::DriverDetail(ref detail)) if detail.contains(expected))
+        );
         assert!(logs.contains(expected), "missing {expected:?} in {logs:?}");
         assert!(logs.contains("Codex provider failed; continuing once"));
     }

@@ -95,6 +95,9 @@ fn error_log(
         execution,
         timestamp: crate::native_v2_runner::current_timestamp(),
         stream: SafeLogStream::Error,
-        line: SafeLogLine::new(message)?,
+        line: SafeLogLine::new(crate::native_v2_runner::bounded_log_text(
+            message,
+            crate::v2_run_ledger::MAX_SAFE_LOG_BYTES / 2,
+        ))?,
     })
 }

@@ -130,9 +130,9 @@ impl NativeCapsuleNodeEndpoint {
 
     async fn finish_failed_start(&self, reserved: ReservedLocalStart, error: NodeRunnerError) {
         drop(reserved.events);
-        let _ = reserved.terminal.send(vec![CapsuleNodeEvent::Failed {
-            failure: CapsuleNodeFailure::from_runner(&error),
-        }]);
+        let _ = reserved
+            .terminal
+            .send(execution::TerminalMetadata::default().into_events(Err(error)));
         self.finish_reservation(&reserved.reference, &reserved.done)
             .await;
     }
