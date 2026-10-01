@@ -80,7 +80,7 @@ def main(data_path: Path) -> Path:
     x_lo, x_hi = (0.5, rounds[-1] + 0.5) if short else (0, rounds[-1] * 1.03)
     span = x_hi - x_lo
     single = rate[:, 0].mean()  # a single worker is the loop's first build
-    lines = [(single, f"Single worker, {single:.1f}%", INK_2, "right", False)]
+    lines = [(single, f"Single worker, {single:.1f}%", INK_2, "right", data.get("single_label_below", False))]
     for ref in data["references"]:
         pct = 100 * ref["passed"] / total
         prefix = "Best published" if ref.get("best") else "Published"
