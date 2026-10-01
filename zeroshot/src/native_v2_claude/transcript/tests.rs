@@ -526,3 +526,45 @@ fn process_failures_are_merged_into_terminal_attempts() {
         "provider rejected request; provider process exited with status 17; stderr: useful detail"
     );
 }
+
+#[test]
+fn rate_limit_events_are_normalized_for_display() {
+    let mut bytes = Vec::new();
+    append_event(
+        &mut bytes,
+        json!({
+            "type":"rate_limit_event",
+            "session_id":"session-1",
+            "rate_limit_info":{
+                "status":"allowed_warning",
+                "resetsAt":1780000000,
+                "rateLimitType":"five_hour",
+                "utilization":0.825
+            }
+        }),
+    );
+    append_event(&mut bytes, success(json!("done"), "session-1"));
+
+    let decoded = decode(&bytes, 11, None);
+    assert_eq!(decoded.emissions.len(), 1);
+    let emission = decoded.emissions.first().assert_value();
+    assert_eq!(emission.stream, LiveOutputStream::System);
+    assert_eq!(
+        emission.text,
+        "Claude rate limit: status=allowed_warning, utilization=82.5%, type=five_hour, resetsAt=2026-05-28T20:26:40Z"
+    );
+    assert_eq!(
+        decoded.usage.map(|usage| usage.input_tokens.get()),
+        Some(11)
+    );
+}
+
+#[test]
+fn transcripts_without_rate_limit_events_keep_their_existing_output_behavior() {
+    let mut bytes = Vec::new();
+    append_event(&mut bytes, success(json!("done"), "session-1"));
+
+    let decoded = decode(&bytes, 17, None);
+    assert!(decoded.emissions.is_empty());
+    assert_eq!(completed_response(decoded.attempt), json!("done"));
+}
