@@ -235,8 +235,10 @@ class Smoke:
         key), and requests for server-side tools are refused before they reach the API."""
         base = "$ANTHROPIC_BASE_URL"
         headers = "-H \"x-api-key: $ANTHROPIC_API_KEY\" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json'"
-        models = self._sh(c, f"curl -sS -m 30 -o /dev/null -w '%{{http_code}}' {headers} {base}/v1/models")[1]
-        self.check("gateway_authenticates_placeholder", lambda: (models == "200", f"GET /v1/models with the placeholder key -> {models}"))
+        # A request only the real key can answer: Anthropic's model list, or OpenRouter's key record.
+        path = "/v1/key" if self.exp.provider == "openrouter" else "/v1/models"
+        models = self._sh(c, f"curl -sS -m 30 -o /dev/null -w '%{{http_code}}' {headers} {base}{path}")[1]
+        self.check("gateway_authenticates_placeholder", lambda: (models == "200", f"GET {path} with the placeholder key -> {models}"))
         body = json.dumps({"model": self.exp.model, "max_tokens": 8, "tools": [{"type": "web_search_20250305", "name": "web_search"}], "messages": [{"role": "user", "content": "hi"}]})
         refused = self._sh(c, f"curl -sS -m 30 -o /dev/null -w '%{{http_code}}' {headers} -d {shlex.quote(body)} {base}/v1/messages")[1]
         self.check("gateway_refuses_server_tools", lambda: (refused == "403", f"POST /v1/messages with web_search -> {refused}"))
@@ -252,7 +254,7 @@ class Smoke:
         status: dict[str, Any] = {}
         try:
             write_json(staging / "input.json", {"task": CLAUDE_DIAGNOSTIC_TASK if claude else DIAGNOSTIC_TASK})
-            write_json(staging / "runtime.json", {"harness": self.exp.harness, "provider": self.exp.provider, "model": self.exp.model, "effort": "low"})
+            write_json(staging / "runtime.json", {"harness": self.exp.harness, "provider": self.exp.runtime_provider, "model": self.exp.model, "effort": "low"})
             docker("cp", f"{staging}/.", f"{c}:{RUN_DIR}")
             docker("exec", "-u", "root", *HARNESS_PATH, c, "chmod", "-R", "a+rX", RUN_DIR)
             if claude:

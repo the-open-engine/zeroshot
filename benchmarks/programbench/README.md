@@ -152,14 +152,18 @@ experiments run one after the other.
 
 `glm52-xhigh-svgbob-v6` and `glm52-xhigh-ditaa-v1` repeat Luna's runs on both tasks
 (`luna-xhigh-svgbob-v3` and `luna-xhigh-ditaa-v1`) with GLM-5.2, an open-weights model from Z.ai,
-at xhigh, served through OpenRouter: the same environment, prompts, graphs, limits, evaluation
-schedule and H1 rule, with 5 loop runs each and no single-worker arm. Codex reaches OpenRouter
-through Zeroshot's built-in `openrouter` provider (the Responses API, with the key in
-`OPENROUTER_API_KEY`), and the egress proxy allows `openrouter.ai` instead of `api.openai.com`. The
-key gets the OpenAI key's protection: tool commands never see it. Codex has no model metadata for
-GLM-5.2 and falls back to defaults, including the 258,400-token context window it uses for Luna.
-Costs use OpenRouter's list prices for `z-ai/glm-5.2` ($0.14 input, $0.112 cached input and $3.99
-output per million tokens on 2026-10-01).
+at xhigh: the same environment, prompts, graphs, limits, evaluation schedule and H1 rule, with 5
+loop runs each and no single-worker arm. GLM runs in Claude Code, not Codex. Zeroshot's Codex
+harness always sends an output schema, and GLM on OpenRouter then answers with the schema's JSON
+at once and never calls a tool: in `smoke-glm52`, a Codex smoke test, builders returned in seconds
+and a checker accepted an empty workspace. Claude Code asks for its structured result through a
+tool call at the end instead. Claude Code reaches OpenRouter through the model gateway, which holds
+the OpenRouter key, pins Z.ai's own endpoint (`provider.order: ["z-ai"]` without fallbacks;
+OpenRouter otherwise routes among about 30 providers serving fp4 to fp8 deployments), refuses any
+model but `z-ai/glm-5.2`, records OpenRouter's billed cost for every request and stops an attempt
+at $60. Z.ai's prices on 2026-10-01 were $1.40 input, $0.26 cached input and $4.40 output per
+million tokens. The GLM runs therefore differ from Luna's in model, provider and harness, and the
+comparison is descriptive.
 
 ## The graph and prompts
 

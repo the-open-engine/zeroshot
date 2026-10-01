@@ -185,24 +185,34 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self._load({**ditaa.raw, "task": {**ditaa.raw["task"], "fidelity_reference": bad}})
 
-    def test_glm_runs_repeat_the_luna_protocol_through_openrouter(self):
+    def test_glm_runs_repeat_the_luna_protocol_in_claude_code_through_openrouter(self):
         for glm_name, luna_name in (("glm52-xhigh-svgbob-v6", "luna-xhigh-svgbob-v3"), ("glm52-xhigh-ditaa-v1", "luna-xhigh-ditaa-v1")):
             glm, luna = config.load(f"experiments/{glm_name}.json"), config.load(f"experiments/{luna_name}.json")
-            self.assertEqual((glm.model, glm.effort, glm.harness, glm.provider), ("z-ai/glm-5.2", "xhigh", "codex", "openrouter"))
-            self.assertEqual((glm.secret_env, glm.api_host), ("OPENROUTER_API_KEY", "openrouter.ai"))
+            self.assertEqual((glm.model, glm.effort, glm.harness, glm.provider, glm.runtime_provider), ("z-ai/glm-5.2", "xhigh", "claude", "openrouter", "anthropic"))
+            self.assertEqual((glm.secret_env, glm.api_host, glm.provider_routing), ("OPENROUTER_API_KEY", "openrouter.ai", {"order": ["z-ai"], "allow_fallbacks": False}))
             self.assertEqual((glm.raw["order"], glm.max_iterations), (["loop"] * 5, 50))
-            for key in ("task", "limits", "eval"):
+            for key in ("task", "eval"):
                 self.assertEqual(glm.raw[key], luna.raw[key], key)
+            self.assertEqual({**glm.limits, "usd_cap_per_attempt": None}, {**luna.limits, "usd_cap_per_attempt": None})
             same = {k: v for k, v in glm.raw["decision_rule"].items() if k != "comparison"}
             self.assertEqual(same, {k: v for k, v in luna.raw["decision_rule"].items() if k != "comparison"})
             self.assertEqual(run_files(glm, "loop")["graph.json"], run_files(luna, "loop")["graph.json"])
-            self.assertEqual(run_files(glm, "loop")["runtime.json"]["provider"], "openrouter")
+            self.assertEqual(run_files(glm, "loop")["input.json"], run_files(luna, "loop")["input.json"])
+            plan = run_files(glm, "loop")["runtime.json"]
+            self.assertEqual((plan["harness"], plan["provider"]), ("claude", "anthropic"))
+            settings = images.gateway_settings(glm, "gateway-image")
+            self.assertEqual((settings["upstream"], settings["secret_env"], json.loads(settings["models"])), ("openrouter", "OPENROUTER_API_KEY", ["z-ai/glm-5.2"]))
+            self.assertEqual(json.loads(settings["routing"]), {"order": ["z-ai"], "allow_fallbacks": False})
 
     def test_providers_belong_to_their_harness(self):
         glm = config.load("experiments/glm52-xhigh-svgbob-v6.json")
-        for model in ({**glm.raw["model"], "harness": "claude"}, {**glm.raw["model"], "provider": "anthropic"}, {**glm.raw["model"], "provider": "bedrock"}):
+        unpinned = {k: v for k, v in glm.raw["model"].items() if k != "provider_routing"}
+        for model in ({**unpinned, "provider": "openai"}, {**unpinned, "harness": "codex", "provider": "anthropic"}, {**unpinned, "provider": "bedrock"},
+                      {**glm.raw["model"], "provider": "anthropic"}, {**glm.raw["model"], "provider_routing": {"order": []}}):
             with self.assertRaises(ValueError, msg=model):
                 self._load({**glm.raw, "model": model})
+        codex = {**unpinned, "harness": "codex"}
+        self.assertEqual(self._load({**glm.raw, "model": codex, "limits": {k: v for k, v in glm.limits.items() if k != "usd_cap_per_attempt"}}).runtime_provider, "openrouter")
         self.assertEqual(EXPERIMENT.provider, "openai")
         self.assertEqual(EXPERIMENT.api_host, "api.openai.com")
 
@@ -773,6 +783,30 @@ class GatewayTests(unittest.TestCase):
         self.assertAlmostEqual(gateway.cost_usd(parser.usage, prices), expected)
         usage, model = gateway.usage_from_body(json.dumps({"model": "claude-opus-5", "usage": {"input_tokens": 3, "output_tokens": 4}}).encode())
         self.assertEqual((usage, model), ({"input_tokens": 3, "output_tokens": 4}, "claude-opus-5"))
+
+
+class OpenRouterGatewayTests(unittest.TestCase):
+    def test_openrouter_upstream_gets_a_bearer_key_and_the_pinned_provider(self):
+        gateway = _load_gateway()
+        headers = gateway.forward_headers([("X-Api-Key", "placeholder"), ("anthropic-version", "2023-06-01")], "sk-or-real", "openrouter")
+        self.assertEqual((headers["authorization"], headers["host"]), ("Bearer sk-or-real", "openrouter.ai"))
+        self.assertNotIn("x-api-key", {k.lower() for k in headers})
+        routing = {"order": ["z-ai"], "allow_fallbacks": False}
+        body = json.loads(gateway.routed_body({"model": "z-ai/glm-5.2", "messages": []}, routing))
+        self.assertEqual(body["provider"], routing)
+        self.assertIsNone(gateway.routed_body({"model": "m"}, None))
+
+    def test_the_billed_cost_is_charged_when_reported(self):
+        gateway = _load_gateway()
+        parser = gateway.SSEUsage()
+        delta = {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"input_tokens": 55, "cache_read_input_tokens": 16192, "cache_creation_input_tokens": None, "output_tokens": 3, "cost": 0.00430452}}
+        parser.feed(f"data: {json.dumps(delta)}\n\n".encode())
+        self.assertEqual(parser.usage, {"input_tokens": 55, "cache_read_input_tokens": 16192, "output_tokens": 3, "cost": 0.00430452})
+        with tempfile.TemporaryDirectory() as tmp:
+            billed = gateway.Gateway("k" * 20, {"input": 1.4, "cached_input": 0.26, "output": 4.4}, 1.0, f"{tmp}/g.jsonl", "openrouter")
+            self.assertAlmostEqual(billed.charge(parser.usage), 0.00430452)
+            listed = gateway.Gateway("k" * 20, {"input": 1.4, "cached_input": 0.26, "output": 4.4}, 1.0, f"{tmp}/h.jsonl")
+            self.assertAlmostEqual(listed.charge({"input_tokens": 55, "cache_read_input_tokens": 16192, "output_tokens": 3}), (55 * 1.4 + 16192 * 0.26 + 3 * 4.4) / 1e6)
 
 
 class ClaudeHarnessTests(unittest.TestCase):

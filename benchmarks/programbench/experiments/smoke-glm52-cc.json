@@ -1,0 +1,78 @@
+{
+  "id": "smoke-glm52-cc",
+  "description": "Pipeline smoke test for glm52-xhigh-svgbob-v6 and glm52-xhigh-ditaa-v1: GLM-5.2 in Claude Code through the model gateway to OpenRouter's Z.ai endpoint, on svgbob with v3's task adjustments, one short loop run of 3 rounds.",
+  "task": {
+    "instance_id": "ivanceras__svgbob.6d00ad9",
+    "image": "programbench/ivanceras_1776_svgbob.6d00ad9:task_cleanroom_v6@sha256:8656583769698b008c6ca1b02ca7da4207a4a3c7dc2d8105d82dc6ae0a2a6f67",
+    "reference_path": "/reference/executable",
+    "doc_fixes": [
+      {
+        "file": "README.md",
+        "old": "- `--font-family <font>` - Set font family for text (default: arial)",
+        "new": "- `--font-family <font>` - Set font family for text (default: Iosevka Fixed, monospace)"
+      },
+      {
+        "file": "README.md",
+        "old": "- `-s, --inline` - Parse an inline string",
+        "new": "- `-s` - Parse an inline string"
+      },
+      {
+        "file": "README.md",
+        "old": "- Server mode available for REST API usage",
+        "new": "- A separate server program (`svgbob_server`) for REST API usage"
+      },
+      {
+        "file": "README.md",
+        "old": "Svgbob can also run as a REST API server. Send ASCII art as a POST request and receive SVG output.",
+        "new": "The separate Svgbob Server (see `crates/svgbob_server/README.md`) runs svgbob as a REST API server. Send ASCII art as a POST request and receive SVG output."
+      }
+    ],
+    "adjustments_rationale": "Pilot v1 (luna-xhigh-svgbob-v1) showed builders overwriting or deleting the reference at ./executable (the build target) and later checkers enforcing README statements that contradict the reference. The reference moves to a root-owned directory outside the workspace (the task statement points there); README statements that contradict the reference's behavior are corrected: default font (renders Iosevka Fixed, monospace), --inline (only -s exists), server mode (a separate svgbob_server program). The reference's own --help text is unchanged. The --scale line is ambiguous rather than false and is left as is."
+  },
+  "model": {
+    "id": "z-ai/glm-5.2",
+    "effort": "xhigh",
+    "harness": "claude",
+    "provider": "openrouter",
+    "provider_routing": {
+      "order": ["z-ai"],
+      "allow_fallbacks": false
+    }
+  },
+  "arms": {
+    "loop": {
+      "repeats": 1,
+      "max_iterations": 3
+    }
+  },
+  "order": ["loop"],
+  "limits": {
+    "attempt_seconds": 7200,
+    "build_timeout_ms": 2400000,
+    "check_timeout_ms": 900000,
+    "usd_cap_per_attempt": 15
+  },
+  "resources": {
+    "concurrency": 1,
+    "cpus": 4,
+    "memory": "7g",
+    "pids_limit": 8192
+  },
+  "eval": {
+    "workers": 8,
+    "docker_cpus": 3,
+    "timeout_seconds": 14400,
+    "rounds": [1, 2, 3]
+  },
+  "pricing": {
+    "model": "z-ai/glm-5.2 on OpenRouter's Z.ai endpoint (z-ai/fp8)",
+    "usd_per_million_tokens": {
+      "input": 1.4,
+      "cached_input": 0.26,
+      "cache_write": 1.4,
+      "output": 4.4
+    },
+    "source": "https://openrouter.ai/api/v1/models/z-ai/glm-5.2/endpoints (Z.AI: prompt, input_cache_read, completion; no separate cache-write price). The gateway records OpenRouter's billed cost per request; these prices are the cross-check.",
+    "retrieved": "2026-10-01"
+  }
+}

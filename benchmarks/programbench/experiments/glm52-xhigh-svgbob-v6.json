@@ -1,6 +1,6 @@
 {
   "id": "glm52-xhigh-svgbob-v6",
-  "description": "Does the check-and-repair loop help an open-weights model from another family? luna-xhigh-svgbob-v3's environment, prompts, graphs, limits, evaluation schedule and decision rule with GLM-5.2 at xhigh in Codex, served through OpenRouter, instead of GPT-5.6 Luna; 5 loop runs of up to 50 rounds, no single-worker arm, all at once.",
+  "description": "Does the check-and-repair loop help an open-weights model from another family? luna-xhigh-svgbob-v3's environment, prompts, graphs, limits, evaluation schedule and decision rule with GLM-5.2 at xhigh, served by Z.ai through OpenRouter, in Claude Code instead of GPT-5.6 Luna in Codex; 5 loop runs of up to 50 rounds, no single-worker arm, all at once. GLM-5.2 runs in Claude Code because Zeroshot's Codex harness always sends an output schema, and GLM on OpenRouter then answers with the schema's JSON at once and never calls a tool. Claude Code asks for its structured result through a tool call at the end instead.",
   "task": {
     "instance_id": "ivanceras__svgbob.6d00ad9",
     "image": "programbench/ivanceras_1776_svgbob.6d00ad9:task_cleanroom_v6@sha256:8656583769698b008c6ca1b02ca7da4207a4a3c7dc2d8105d82dc6ae0a2a6f67",
@@ -32,8 +32,12 @@
   "model": {
     "id": "z-ai/glm-5.2",
     "effort": "xhigh",
-    "harness": "codex",
-    "provider": "openrouter"
+    "harness": "claude",
+    "provider": "openrouter",
+    "provider_routing": {
+      "order": ["z-ai"],
+      "allow_fallbacks": false
+    }
   },
   "arms": {
     "loop": {
@@ -45,7 +49,8 @@
   "limits": {
     "attempt_seconds": 21600,
     "build_timeout_ms": 10800000,
-    "check_timeout_ms": 3600000
+    "check_timeout_ms": 3600000,
+    "usd_cap_per_attempt": 60
   },
   "resources": {
     "concurrency": 5,
@@ -60,14 +65,14 @@
     "rounds": [1, 2, 3, 5, 10, 20, 30, 40, 50]
   },
   "pricing": {
-    "model": "z-ai/glm-5.2",
+    "model": "z-ai/glm-5.2 on OpenRouter's Z.ai endpoint (z-ai/fp8)",
     "usd_per_million_tokens": {
-      "input": 0.14,
-      "cached_input": 0.112,
-      "cache_write": 0.14,
-      "output": 3.99
+      "input": 1.4,
+      "cached_input": 0.26,
+      "cache_write": 1.4,
+      "output": 4.4
     },
-    "source": "https://openrouter.ai/api/v1/models (z-ai/glm-5.2: prompt, input_cache_read, completion; OpenRouter lists no cache-write price, so cache writes cost the prompt price)",
+    "source": "https://openrouter.ai/api/v1/models/z-ai/glm-5.2/endpoints (Z.AI: prompt, input_cache_read, completion; no separate cache-write price). The gateway records OpenRouter's billed cost per request; these prices are the cross-check.",
     "retrieved": "2026-10-01"
   },
   "decision_rule": {
@@ -79,6 +84,6 @@
     "reruns": "attempts that end in an infrastructure error are re-run once from scratch (the runner refuses a second re-run); the discarded attempt is kept and reported",
     "covariates": "reported per run, not used for eligibility: whether the reference executable still existed after build 1 (builders may overwrite it), round count and verdicts, build-1 and total cost",
     "learning_curve": "pre-registered and descriptive: hidden tests passed after builds 1, 2, 3, 5, 10, 20, 30, 40 and 50 (those reached) and in the final workspace, per loop run and as the median across runs; every other snapshot is archived but not scored",
-    "comparison": "descriptive, not a test: per-run gains, pass rates after builds 1, 2, 3, 5, 10, 20, 30, 40 and 50, and cost next to luna-xhigh-svgbob-v3's loop runs (same task, environment, prompts, graphs and limits; different model and provider)"
+    "comparison": "descriptive, not a test: per-run gains, pass rates after builds 1, 2, 3, 5, 10, 20, 30, 40 and 50, and cost next to luna-xhigh-svgbob-v3's loop runs (same task, environment, prompts, graphs and limits; different model, provider and harness)"
   }
 }

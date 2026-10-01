@@ -147,7 +147,7 @@ def run_files(exp: Experiment, arm: str) -> dict[str, Any]:
         graph = graphs.single_graph(builder, limits["build_timeout_ms"])
     return {
         "graph.json": graph,
-        "runtime.json": graphs.runtime_plan(arm, exp.model, exp.effort, exp.harness, exp.provider),
+        "runtime.json": graphs.runtime_plan(arm, exp.model, exp.effort, exp.harness, exp.runtime_provider),
         "input.json": {"task": task_statement(exp)},
     }
 

@@ -1,11 +1,13 @@
 """Model gateway: the only way out of a Claude attempt's network.
 
 Claude Code in the attempt container sends plain HTTP to this gateway with a placeholder key. The
-gateway holds the real key (it never enters the attempt container), forwards to api.anthropic.com
-over TLS, refuses server-side tools (web search, web fetch, code execution, remote MCP), refuses
-requests once the attempt's spending cap is reached, and appends one JSON line per request to its
-log: path, model, tool names, request id and token usage. Keys, headers and bodies are never
-logged. Python standard library only.
+gateway holds the real key (it never enters the attempt container), forwards over TLS to its
+upstream (Anthropic's API, or OpenRouter's Anthropic-compatible API with a pinned provider),
+refuses server-side tools (web search, web fetch, code execution, remote MCP) and models other than
+the experiment's, refuses requests once the attempt's spending cap is reached, and appends one JSON
+line per request to its log: path, model, tool names, request id, token usage and cost (OpenRouter's
+billed cost when it reports one). Keys, headers and bodies are never logged. Python standard
+library only.
 """
 
 from __future__ import annotations
@@ -20,7 +22,12 @@ import threading
 import time
 from typing import Any
 
-UPSTREAM = "api.anthropic.com"
+# name -> (host, path prefix, key variable, how the key is sent)
+UPSTREAMS = {
+    "anthropic": ("api.anthropic.com", "", "ANTHROPIC_API_KEY", "x-api-key"),
+    "openrouter": ("openrouter.ai", "/api", "OPENROUTER_API_KEY", "bearer"),
+}
+UPSTREAM = UPSTREAMS["anthropic"][0]
 PORT = 8889
 LOG_PATH = "/var/log/zsbench/gateway.jsonl"
 # Hop-by-hop and connection-specific headers are not forwarded in either direction.
@@ -48,14 +55,25 @@ def tool_names(payload: Any) -> list[str]:
     return sorted(str(t.get("name")) for t in payload.get("tools") or [] if isinstance(t, dict) and t.get("name"))
 
 
-def forward_headers(incoming: list[tuple[str, str]], key: str) -> dict[str, str]:
+def forward_headers(incoming: list[tuple[str, str]], key: str, upstream: str = "anthropic") -> dict[str, str]:
     """The client's headers minus hop-by-hop headers and its placeholder credentials, plus the key.
     Responses are requested uncompressed so the gateway can read their usage."""
+    host, _prefix, _env, auth = UPSTREAMS[upstream]
     headers = {name: value for name, value in incoming if name.lower() not in HOP_BY_HOP | CLIENT_CREDENTIALS | {"accept-encoding"}}
-    headers["x-api-key"] = key
-    headers["host"] = UPSTREAM
+    if auth == "bearer":
+        headers["authorization"] = f"Bearer {key}"
+    else:
+        headers["x-api-key"] = key
+    headers["host"] = host
     headers["accept-encoding"] = "identity"
     return headers
+
+
+def routed_body(payload: Any, routing: dict[str, Any] | None) -> bytes | None:
+    """An inference request with OpenRouter's provider preferences added, or None to send as is."""
+    if not routing or not isinstance(payload, dict):
+        return None
+    return json.dumps({**payload, "provider": routing}).encode()
 
 
 def merge_usage(total: dict[str, Any], update: dict[str, Any] | None) -> None:
@@ -67,6 +85,8 @@ def merge_usage(total: dict[str, Any], update: dict[str, Any] | None) -> None:
             total["server_tool_use"] = {k: v for k, v in value.items() if isinstance(v, int)}
         elif name in USAGE_FIELDS and isinstance(value, int):
             total[name] = value
+        elif name == "cost" and isinstance(value, (int, float)) and not isinstance(value, bool):
+            total["cost"] = value  # OpenRouter's billed cost for this response
 
 
 class SSEUsage:
@@ -128,8 +148,10 @@ def cost_usd(usage: dict[str, Any], prices: dict[str, float]) -> float:
 
 
 class Gateway:
-    def __init__(self, key: str, prices: dict[str, float], cap_usd: float | None, log_path: str) -> None:
+    def __init__(self, key: str, prices: dict[str, float], cap_usd: float | None, log_path: str, upstream: str = "anthropic",
+                 routing: dict[str, Any] | None = None, models: list[str] | None = None) -> None:
         self.key, self.prices, self.cap_usd = key, prices, cap_usd
+        self.upstream, self.routing, self.models = upstream, routing, models
         self.spent = 0.0
         self.lock = threading.Lock()
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -143,7 +165,9 @@ class Gateway:
         print(line, flush=True)
 
     def charge(self, usage: dict[str, Any]) -> float:
-        cost = cost_usd(usage, self.prices)
+        """The billed cost when the upstream reports it (OpenRouter), else the list-price cost."""
+        billed = usage.get("cost")
+        cost = float(billed) if billed is not None else cost_usd(usage, self.prices)
         with self.lock:
             self.spent += cost
         return cost
@@ -201,12 +225,18 @@ def make_handler(gateway: Gateway) -> type[http.server.BaseHTTPRequestHandler]:
             if blocked:
                 self._refuse(403, f"server-side tools are not allowed: {blocked}", {**record, "blocked": blocked})
                 return
+            if gateway.models and isinstance(payload, dict) and payload.get("model") is not None and payload.get("model") not in gateway.models:
+                self._refuse(403, f"model {payload.get('model')!r} is not this experiment's model", {**record, "blocked": ["model"]})
+                return
             if gateway.over_cap():
                 self._refuse(403, "the attempt's spending cap is reached", {**record, "cap_reached": True})
                 return
-            upstream = http.client.HTTPSConnection(UPSTREAM, 443, timeout=1800, context=gateway.context)
+            host, prefix, _env, _auth = UPSTREAMS[gateway.upstream]
+            if self.command == "POST" and record["path"] == "/v1/messages":
+                body = routed_body(payload, gateway.routing) or body
+            upstream = http.client.HTTPSConnection(host, 443, timeout=1800, context=gateway.context)
             try:
-                upstream.request(self.command, self.path, body=body, headers=forward_headers(self.headers.items(), gateway.key))
+                upstream.request(self.command, prefix + self.path, body=body, headers=forward_headers(self.headers.items(), gateway.key, gateway.upstream))
                 response = upstream.getresponse()
             except OSError as error:
                 upstream.close()
@@ -246,6 +276,8 @@ def make_handler(gateway: Gateway) -> type[http.server.BaseHTTPRequestHandler]:
                 upstream.close()
             if usage:
                 record.update(usage=usage, response_model=model, cost_usd=round(gateway.charge(usage), 6))
+                if usage.get("cost") is not None:
+                    record["list_cost_usd"] = round(cost_usd(usage, gateway.prices), 6)
             record["seconds"] = round(time.time() - started, 3)
             gateway.log(record)
 
@@ -253,15 +285,21 @@ def make_handler(gateway: Gateway) -> type[http.server.BaseHTTPRequestHandler]:
 
 
 def main() -> None:
-    key = os.environ.pop("ANTHROPIC_API_KEY", "")
+    upstream = os.environ.get("ZSBENCH_UPSTREAM") or "anthropic"
+    if upstream not in UPSTREAMS:
+        sys.exit(f"unknown upstream {upstream!r}")
+    key_env = UPSTREAMS[upstream][2]
+    key = os.environ.pop(key_env, "")
     if len(key) < 16:
-        sys.exit("ANTHROPIC_API_KEY is not set")
+        sys.exit(f"{key_env} is not set")
     prices = json.loads(os.environ.get("ZSBENCH_PRICES") or "{}")
     cap = float(os.environ.get("ZSBENCH_USD_CAP") or 0) or None
-    gateway = Gateway(key, prices, cap, os.environ.get("ZSBENCH_GATEWAY_LOG", LOG_PATH))
+    routing = json.loads(os.environ.get("ZSBENCH_PROVIDER_ROUTING") or "null")
+    models = json.loads(os.environ.get("ZSBENCH_MODELS") or "null")
+    gateway = Gateway(key, prices, cap, os.environ.get("ZSBENCH_GATEWAY_LOG", LOG_PATH), upstream, routing, models)
     server = http.server.ThreadingHTTPServer(("0.0.0.0", PORT), make_handler(gateway))
     server.daemon_threads = True
-    gateway.log({"t": round(time.time(), 3), "event": "listening", "port": PORT, "cap_usd": cap})
+    gateway.log({"t": round(time.time(), 3), "event": "listening", "port": PORT, "cap_usd": cap, "upstream": upstream, "routing": routing, "models": models})
     server.serve_forever()
 
 

@@ -195,7 +195,10 @@ def gateway_settings(exp: Experiment, image: str) -> dict[str, str] | None:
     if exp.harness != "claude":
         return None
     cap = exp.limits.get("usd_cap_per_attempt")
-    return {"image": image, "secret_env": exp.secret_env, "prices": json.dumps(exp.pricing["usd_per_million_tokens"], sort_keys=True), "cap": str(cap) if cap else ""}
+    return {
+        "image": image, "secret_env": exp.secret_env, "prices": json.dumps(exp.pricing["usd_per_million_tokens"], sort_keys=True), "cap": str(cap) if cap else "",
+        "upstream": exp.provider, "routing": json.dumps(exp.provider_routing, sort_keys=True) if exp.provider_routing else "", "models": json.dumps([exp.model]),
+    }
 
 
 def container_env(exp: Experiment, network: "Network") -> list[str]:
@@ -249,6 +252,9 @@ class Network:
         docker("run", "-d", "--name", self.proxy, *self.labels, "--network", self.name, gateway["image"])
         docker("network", "connect", "bridge", self.proxy)
         settings = ["-e", f"ZSBENCH_PRICES={gateway['prices']}", *(["-e", f"ZSBENCH_USD_CAP={gateway['cap']}"] if gateway.get("cap") else [])]
+        settings += ["-e", f"ZSBENCH_UPSTREAM={gateway.get('upstream') or 'anthropic'}", "-e", f"ZSBENCH_MODELS={gateway.get('models') or ''}"]
+        if gateway.get("routing"):
+            settings += ["-e", f"ZSBENCH_PROVIDER_ROUTING={gateway['routing']}"]
         docker("exec", "-d", "-e", gateway["secret_env"], *settings, self.proxy, "python3", "/opt/zsbench/gateway.py")
         for _ in range(60):
             if '"event": "listening"' in docker("exec", self.proxy, "cat", GATEWAY_LOG, check=False):

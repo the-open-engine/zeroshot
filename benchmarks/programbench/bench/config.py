@@ -15,7 +15,9 @@ ARMS = ("loop", "single")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 # Agent harness -> model provider it runs against, and the API key variable that provider needs.
 HARNESSES = {"codex": "openai", "claude": "anthropic"}  # each harness's default provider
-PROVIDERS = {"codex": ("openai", "openrouter"), "claude": ("anthropic",)}  # Zeroshot's names
+# Codex talks to its provider through the allowlist proxy; Claude Code always talks Anthropic's API to
+# the model gateway, which forwards to the provider named here.
+PROVIDERS = {"codex": ("openai", "openrouter"), "claude": ("anthropic", "openrouter")}
 SECRET_ENVS = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
 # The one host each provider's agents may reach (the egress proxy's allowlist, or the gateway's upstream).
 API_HOSTS = {"openai": "api.openai.com", "anthropic": "api.anthropic.com", "openrouter": "openrouter.ai"}
@@ -94,6 +96,17 @@ class Experiment:
     @property
     def provider(self) -> str:
         return self.raw["model"].get("provider", HARNESSES[self.harness])
+
+    @property
+    def runtime_provider(self) -> str:
+        """The provider Zeroshot is told about: Claude Code always sees an Anthropic-compatible API
+        (the gateway), whatever the gateway's upstream is."""
+        return "anthropic" if self.harness == "claude" else self.provider
+
+    @property
+    def provider_routing(self) -> dict[str, Any] | None:
+        """OpenRouter provider preferences the gateway adds to every inference request."""
+        return self.raw["model"].get("provider_routing")
 
     @property
     def api_host(self) -> str:
@@ -182,6 +195,9 @@ def _validate(raw: dict[str, Any]) -> None:
     harness = raw["model"].get("harness", "codex")
     if harness not in HARNESSES or raw["model"].get("provider", HARNESSES.get(harness)) not in PROVIDERS[harness]:
         raise ValueError(f"model.harness/provider must be one of {PROVIDERS}")
+    routing = raw["model"].get("provider_routing")
+    if routing is not None and (harness != "claude" or raw["model"].get("provider") != "openrouter" or not isinstance(routing, dict) or not routing.get("order")):
+        raise ValueError("model.provider_routing pins OpenRouter providers through the Claude gateway and needs an order")
     if "usd_cap_per_attempt" in raw["limits"] and (harness != "claude" or float(raw["limits"]["usd_cap_per_attempt"]) <= 0):
         raise ValueError("limits.usd_cap_per_attempt must be positive and needs the Claude gateway")
     arms = raw["arms"]
