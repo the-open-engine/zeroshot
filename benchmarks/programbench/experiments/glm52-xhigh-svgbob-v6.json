@@ -49,8 +49,7 @@
   "limits": {
     "attempt_seconds": 21600,
     "build_timeout_ms": 10800000,
-    "check_timeout_ms": 3600000,
-    "usd_cap_per_attempt": 60
+    "check_timeout_ms": 3600000
   },
   "resources": {
     "concurrency": 5,

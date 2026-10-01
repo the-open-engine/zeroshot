@@ -160,8 +160,8 @@ and a checker accepted an empty workspace. Claude Code asks for its structured r
 tool call at the end instead. Claude Code reaches OpenRouter through the model gateway, which holds
 the OpenRouter key, pins Z.ai's own endpoint (`provider.order: ["z-ai"]` without fallbacks;
 OpenRouter otherwise routes among about 30 providers serving fp4 to fp8 deployments), refuses any
-model but `z-ai/glm-5.2`, records OpenRouter's billed cost for every request and stops an attempt
-at $60. Z.ai's prices on 2026-10-01 were $1.40 input, $0.26 cached input and $4.40 output per
+model but `z-ai/glm-5.2` and records OpenRouter's billed cost for every request. Like Luna's runs,
+they have no spending cap: only the protocol's time limits apply. Z.ai's prices on 2026-10-01 were $1.40 input, $0.26 cached input and $4.40 output per
 million tokens. The GLM runs therefore differ from Luna's in model, provider and harness, and the
 comparison is descriptive.
 

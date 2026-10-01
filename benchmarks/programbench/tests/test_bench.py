@@ -191,9 +191,8 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual((glm.model, glm.effort, glm.harness, glm.provider, glm.runtime_provider), ("z-ai/glm-5.2", "xhigh", "claude", "openrouter", "anthropic"))
             self.assertEqual((glm.secret_env, glm.api_host, glm.provider_routing), ("OPENROUTER_API_KEY", "openrouter.ai", {"order": ["z-ai"], "allow_fallbacks": False}))
             self.assertEqual((glm.raw["order"], glm.max_iterations), (["loop"] * 5, 50))
-            for key in ("task", "eval"):
+            for key in ("task", "limits", "eval"):  # Luna's limits exactly: no spending cap that could cut a run short
                 self.assertEqual(glm.raw[key], luna.raw[key], key)
-            self.assertEqual({**glm.limits, "usd_cap_per_attempt": None}, {**luna.limits, "usd_cap_per_attempt": None})
             same = {k: v for k, v in glm.raw["decision_rule"].items() if k != "comparison"}
             self.assertEqual(same, {k: v for k, v in luna.raw["decision_rule"].items() if k != "comparison"})
             self.assertEqual(run_files(glm, "loop")["graph.json"], run_files(luna, "loop")["graph.json"])
