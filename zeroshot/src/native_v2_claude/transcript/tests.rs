@@ -560,6 +560,31 @@ fn rate_limit_events_are_normalized_for_display() {
 }
 
 #[test]
+fn rate_limit_reset_milliseconds_are_normalized_for_display() {
+    let mut bytes = Vec::new();
+    append_event(
+        &mut bytes,
+        json!({
+            "type":"rate_limit_event",
+            "session_id":"session-2",
+            "rate_limit_info":{
+                "resetsAt":1780000000000_i64
+            }
+        }),
+    );
+    append_event(&mut bytes, success(json!("done"), "session-2"));
+
+    let decoded = decode(&bytes, 7, None);
+    assert_eq!(decoded.emissions.len(), 1);
+    let emission = decoded.emissions.first().assert_value();
+    assert_eq!(emission.stream, LiveOutputStream::System);
+    assert_eq!(
+        emission.text,
+        "Claude rate limit: resetsAt=2026-05-28T20:26:40Z"
+    );
+}
+
+#[test]
 fn transcripts_without_rate_limit_events_keep_their_existing_output_behavior() {
     let mut bytes = Vec::new();
     append_event(&mut bytes, success(json!("done"), "session-1"));
