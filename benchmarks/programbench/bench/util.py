@@ -20,7 +20,7 @@ from typing import Any
 
 # API keys the runner may hold (one per provider). They reach the runner as mounted files, never as
 # arguments, and are scanned for in every artifact.
-SECRET_ENVS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")
+SECRET_ENVS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY")
 _log_lock = threading.Lock()
 _log_file: Path | None = None
 

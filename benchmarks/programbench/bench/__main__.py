@@ -41,7 +41,7 @@ from .util import (
 RESULTS = Path(os.environ.get("ZSBENCH_RESULTS", "/results"))
 CACHE = Path(os.environ.get("ZSBENCH_CACHE", "/cache"))
 # One key file per provider, mounted read-only by scripts/zsbench (whichever exist).
-SECRET_FILES = (os.environ.get("ZSBENCH_SECRET_FILE", "/run/secrets/openai.env"), "/run/secrets/anthropic.env")
+SECRET_FILES = (os.environ.get("ZSBENCH_SECRET_FILE", "/run/secrets/openai.env"), "/run/secrets/anthropic.env", "/run/secrets/openrouter.env")
 GIB = 1 << 30
 
 
@@ -78,6 +78,8 @@ def cmd_check_key(exp: config.Experiment) -> None:
     key = os.environ[exp.secret_env]
     if exp.provider == "anthropic":
         request = urllib.request.Request(f"https://api.anthropic.com/v1/models/{exp.model}", headers={"x-api-key": key, "anthropic-version": "2023-06-01"})
+    elif exp.provider == "openrouter":  # the key's own record; the model is checked by the smoke test's run
+        request = urllib.request.Request("https://openrouter.ai/api/v1/key", headers={"Authorization": f"Bearer {key}"})
     else:
         request = urllib.request.Request(f"https://api.openai.com/v1/models/{exp.model}", headers={"Authorization": f"Bearer {key}"})
     try:
@@ -119,7 +121,7 @@ def _prepare(exp: config.Experiment, results: Path, allow_mixed: bool) -> tuple[
         if previous.get("experiment_digest") != provenance["experiment_digest"] and not allow_mixed:
             sys.exit("results already hold attempts from a different experiment digest (code, prompts or config changed). Use a new results directory, or --allow-mixed.")
     _preflight(exp, results)
-    proxy_image = images.build_gateway(CACHE) if exp.harness == "claude" else images.build_proxy(CACHE)
+    proxy_image = images.build_gateway(CACHE) if exp.harness == "claude" else images.build_proxy(CACHE, exp.api_host)
     agent_image, info = images.build_agent(exp, CACHE)
     history = read_json(manifest_path).get("invocations", []) if manifest_path.exists() else []
     write_json(manifest_path, {

@@ -14,8 +14,11 @@ from . import ROOT
 ARMS = ("loop", "single")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 # Agent harness -> model provider it runs against, and the API key variable that provider needs.
-HARNESSES = {"codex": "openai", "claude": "anthropic"}
-SECRET_ENVS = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+HARNESSES = {"codex": "openai", "claude": "anthropic"}  # each harness's default provider
+PROVIDERS = {"codex": ("openai", "openrouter"), "claude": ("anthropic",)}  # Zeroshot's names
+SECRET_ENVS = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
+# The one host each provider's agents may reach (the egress proxy's allowlist, or the gateway's upstream).
+API_HOSTS = {"openai": "api.openai.com", "anthropic": "api.anthropic.com", "openrouter": "openrouter.ai"}
 # Where ProgramBench task images put the reference executable. An experiment may move it out of the
 # workspace (task.reference_path), where the agent can run it but not overwrite, move or delete it.
 UPSTREAM_REFERENCE = "/workspace/executable"
@@ -90,7 +93,11 @@ class Experiment:
 
     @property
     def provider(self) -> str:
-        return HARNESSES[self.harness]
+        return self.raw["model"].get("provider", HARNESSES[self.harness])
+
+    @property
+    def api_host(self) -> str:
+        return API_HOSTS[self.provider]
 
     @property
     def secret_env(self) -> str:
@@ -173,8 +180,8 @@ def _validate(raw: dict[str, Any]) -> None:
     if raw["model"]["effort"] not in EFFORTS:
         raise ValueError(f"effort must be one of {EFFORTS}")
     harness = raw["model"].get("harness", "codex")
-    if harness not in HARNESSES or raw["model"].get("provider", HARNESSES.get(harness)) != HARNESSES.get(harness):
-        raise ValueError(f"model.harness/provider must be one of {HARNESSES}")
+    if harness not in HARNESSES or raw["model"].get("provider", HARNESSES.get(harness)) not in PROVIDERS[harness]:
+        raise ValueError(f"model.harness/provider must be one of {PROVIDERS}")
     if "usd_cap_per_attempt" in raw["limits"] and (harness != "claude" or float(raw["limits"]["usd_cap_per_attempt"]) <= 0):
         raise ValueError("limits.usd_cap_per_attempt must be positive and needs the Claude gateway")
     arms = raw["arms"]

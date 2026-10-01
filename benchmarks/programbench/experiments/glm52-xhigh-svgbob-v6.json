@@ -1,0 +1,84 @@
+{
+  "id": "glm52-xhigh-svgbob-v6",
+  "description": "Does the check-and-repair loop help an open-weights model from another family? luna-xhigh-svgbob-v3's environment, prompts, graphs, limits, evaluation schedule and decision rule with GLM-5.2 at xhigh in Codex, served through OpenRouter, instead of GPT-5.6 Luna; 5 loop runs of up to 50 rounds, no single-worker arm, all at once.",
+  "task": {
+    "instance_id": "ivanceras__svgbob.6d00ad9",
+    "image": "programbench/ivanceras_1776_svgbob.6d00ad9:task_cleanroom_v6@sha256:8656583769698b008c6ca1b02ca7da4207a4a3c7dc2d8105d82dc6ae0a2a6f67",
+    "reference_path": "/reference/executable",
+    "doc_fixes": [
+      {
+        "file": "README.md",
+        "old": "- `--font-family <font>` - Set font family for text (default: arial)",
+        "new": "- `--font-family <font>` - Set font family for text (default: Iosevka Fixed, monospace)"
+      },
+      {
+        "file": "README.md",
+        "old": "- `-s, --inline` - Parse an inline string",
+        "new": "- `-s` - Parse an inline string"
+      },
+      {
+        "file": "README.md",
+        "old": "- Server mode available for REST API usage",
+        "new": "- A separate server program (`svgbob_server`) for REST API usage"
+      },
+      {
+        "file": "README.md",
+        "old": "Svgbob can also run as a REST API server. Send ASCII art as a POST request and receive SVG output.",
+        "new": "The separate Svgbob Server (see `crates/svgbob_server/README.md`) runs svgbob as a REST API server. Send ASCII art as a POST request and receive SVG output."
+      }
+    ],
+    "adjustments_rationale": "Pilot v1 (luna-xhigh-svgbob-v1) showed builders overwriting or deleting the reference at ./executable (the build target) and later checkers enforcing README statements that contradict the reference. The reference moves to a root-owned directory outside the workspace (the task statement points there); README statements that contradict the reference's behavior are corrected: default font (renders Iosevka Fixed, monospace), --inline (only -s exists), server mode (a separate svgbob_server program). The reference's own --help text is unchanged. The --scale line is ambiguous rather than false and is left as is."
+  },
+  "model": {
+    "id": "z-ai/glm-5.2",
+    "effort": "xhigh",
+    "harness": "codex",
+    "provider": "openrouter"
+  },
+  "arms": {
+    "loop": {
+      "repeats": 5,
+      "max_iterations": 50
+    }
+  },
+  "order": ["loop", "loop", "loop", "loop", "loop"],
+  "limits": {
+    "attempt_seconds": 21600,
+    "build_timeout_ms": 10800000,
+    "check_timeout_ms": 3600000
+  },
+  "resources": {
+    "concurrency": 5,
+    "cpus": 4,
+    "memory": "7g",
+    "pids_limit": 8192
+  },
+  "eval": {
+    "workers": 8,
+    "docker_cpus": 3,
+    "timeout_seconds": 14400,
+    "rounds": [1, 2, 3, 5, 10, 20, 30, 40, 50]
+  },
+  "pricing": {
+    "model": "z-ai/glm-5.2",
+    "usd_per_million_tokens": {
+      "input": 0.14,
+      "cached_input": 0.112,
+      "cache_write": 0.14,
+      "output": 3.99
+    },
+    "source": "https://openrouter.ai/api/v1/models (z-ai/glm-5.2: prompt, input_cache_read, completion; OpenRouter lists no cache-write price, so cache writes cost the prompt price)",
+    "retrieved": "2026-10-01"
+  },
+  "decision_rule": {
+    "eligibility": "A loop run enters the analysis only if: it completed; its first-build snapshot was archived and both it and the final workspace were scored on all tests (a workspace that fails to compile or to produce a usable executable scores 0, as on the leaderboard; an evaluation infrastructure error is re-evaluated once and disqualifies the run if it persists); build 1 ended normally or at its node time limit (a crash or malformed response cuts the baseline short); it has no disqualifying audit finding (binary instrumentation such as LD_PRELOAD, LD_AUDIT, LD_DEBUG or ptrace; direct model-API calls; proxy use by tools; process-environment reads; web search); its builder did not touch harness internals in round 1; neither scored workspace contains or builds the reference executable; the Codex config, the harness files and the Codex home's instruction files were unchanged and checked after every node, and no transcript shows loaded AGENTS.md instructions. All 5 loop runs must be eligible; otherwise the verdict is inconclusive.",
+    "metric": "paired within-run gain in hidden tests passed: final workspace minus the workspace when build 1 completed; the final workspace counts even if the 6-hour cap force-stopped the run",
+    "supported": "every loop run gains at least 1 percentage point and the median gain is at least 5 percentage points",
+    "not_supported": "the median gain is below 2 percentage points",
+    "otherwise": "inconclusive",
+    "reruns": "attempts that end in an infrastructure error are re-run once from scratch (the runner refuses a second re-run); the discarded attempt is kept and reported",
+    "covariates": "reported per run, not used for eligibility: whether the reference executable still existed after build 1 (builders may overwrite it), round count and verdicts, build-1 and total cost",
+    "learning_curve": "pre-registered and descriptive: hidden tests passed after builds 1, 2, 3, 5, 10, 20, 30, 40 and 50 (those reached) and in the final workspace, per loop run and as the median across runs; every other snapshot is archived but not scored",
+    "comparison": "descriptive, not a test: per-run gains, pass rates after builds 1, 2, 3, 5, 10, 20, 30, 40 and 50, and cost next to luna-xhigh-svgbob-v3's loop runs (same task, environment, prompts, graphs and limits; different model and provider)"
+  }
+}

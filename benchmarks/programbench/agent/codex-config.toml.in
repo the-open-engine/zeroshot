@@ -1,5 +1,5 @@
 # Codex configuration used by every agent node (rendered per task image by bench/images.py).
-# Isolation is enforced outside Codex: the container can only reach api.openai.com through the
+# Isolation is enforced outside Codex: the container can only reach the model API host through the
 # allowlist proxy, so Codex runs with full access inside the disposable container.
 approval_policy = "never"
 sandbox_mode = "danger-full-access"

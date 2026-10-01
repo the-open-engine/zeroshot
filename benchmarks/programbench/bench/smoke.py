@@ -39,8 +39,8 @@ DIAGNOSTIC_TASK = """This is an environment diagnostic, not a coding task. Run e
   echo "USER=$(id -un)"
   echo "HOME=$HOME"
   echo "ENV_NAMES=$(env | cut -d= -f1 | sort | tr '\\n' ' ')"
-  echo "KEY_VARS_VISIBLE=$(env | grep -c -E '^(OPENAI_API_KEY|CODEX_API_KEY)=')"
-  echo "PROC_KEY_VISIBLE=$(grep -l -a -E '(OPENAI_API_KEY|CODEX_API_KEY)=' /proc/[0-9]*/environ 2>/dev/null | wc -l)"
+  echo "KEY_VARS_VISIBLE=$(env | grep -c -E '^(OPENAI_API_KEY|CODEX_API_KEY|OPENROUTER_API_KEY)=')"
+  echo "PROC_KEY_VISIBLE=$(grep -l -a -E '(OPENAI_API_KEY|CODEX_API_KEY|OPENROUTER_API_KEY)=' /proc/[0-9]*/environ 2>/dev/null | wc -l)"
   echo "PROXY_VARS_VISIBLE=$(env | grep -c -i -E '^(https?|all)_proxy=')"
   echo "TMPDIR=${TMPDIR:-unset}"
   echo "CARGO=$(cargo --version 2>&1 | head -1)"
@@ -55,8 +55,8 @@ DIAGNOSTIC_TASK = """This is an environment diagnostic, not a coding task. Run e
 
 
 CLAUDE_DIAGNOSTIC_TASK = DIAGNOSTIC_TASK.replace(
-    """  echo "KEY_VARS_VISIBLE=$(env | grep -c -E '^(OPENAI_API_KEY|CODEX_API_KEY)=')"
-  echo "PROC_KEY_VISIBLE=$(grep -l -a -E '(OPENAI_API_KEY|CODEX_API_KEY)=' /proc/[0-9]*/environ 2>/dev/null | wc -l)"
+    """  echo "KEY_VARS_VISIBLE=$(env | grep -c -E '^(OPENAI_API_KEY|CODEX_API_KEY|OPENROUTER_API_KEY)=')"
+  echo "PROC_KEY_VISIBLE=$(grep -l -a -E '(OPENAI_API_KEY|CODEX_API_KEY|OPENROUTER_API_KEY)=' /proc/[0-9]*/environ 2>/dev/null | wc -l)"
 """,
     f"""  echo "KEY_IS_PLACEHOLDER=$([ "$ANTHROPIC_API_KEY" = "{CLAUDE_PLACEHOLDER_KEY}" ] && echo yes || echo no)"
   echo "PROC_KEY_VISIBLE=$(grep -l -a -E 'sk-ant-(api|admin|oat)[0-9]' /proc/[0-9]*/environ 2>/dev/null | wc -l)"
@@ -176,7 +176,7 @@ class Smoke:
             self.check("key_holder_environ_unreadable", key_holder_nondumpable)
             self.check("direct_egress_blocked", lambda: (
                 self._sh(c, "curl -sS -m 8 --noproxy '*' -o /dev/null https://example.com")[0] != 0
-                and self._sh(c, f"curl -sS -m 8 --noproxy '*' -o /dev/null https://{'api.anthropic.com' if claude else 'api.openai.com'}")[0] != 0,
+                and self._sh(c, f"curl -sS -m 8 --noproxy '*' -o /dev/null https://{self.exp.api_host}")[0] != 0,
                 "no route out without the proxy"))
             self.check("dns_blocked", lambda: (self._sh(c, "getent hosts example.com")[0] != 0, self._sh(c, "getent hosts example.com")[1] or "no answer"))
             self.check("ipv6_blocked", lambda: (self._sh(c, "curl -6 -sS -m 8 --noproxy '*' -o /dev/null https://example.com")[0] != 0, "no IPv6 route"))
@@ -190,8 +190,9 @@ class Smoke:
                     "example.com, github.com, pypi.org refused"))
 
                 def model_api() -> tuple[bool, str]:
-                    code = self._sh(c, "curl -sS -m 20 -o /dev/null -w '%{http_code}' https://api.openai.com/v1/models")[1]
-                    return code == "401", f"unauthenticated GET /v1/models -> {code}"
+                    url = {"openai": "https://api.openai.com/v1/models", "openrouter": "https://openrouter.ai/api/v1/key"}[self.exp.provider]
+                    code = self._sh(c, f"curl -sS -m 20 -o /dev/null -w '%{{http_code}}' {url}")[1]
+                    return code == "401", f"unauthenticated GET {url} -> {code}"
 
                 self.check("proxy_allows_model_api", model_api)
             agent_cli = "/opt/claude-code/claude" if claude else "/usr/local/bin/codex"
@@ -442,7 +443,7 @@ def pipeline_checks(smoke: Smoke, summary: dict[str, Any]) -> None:
             all(a.get("gateway") and not a["gateway"]["transcript_requests_not_seen"] for a in attempts.values()),
             {k: a.get("gateway") and {f: a["gateway"][f] for f in ("transcript_requests_not_seen", "requests_not_in_transcripts", "cost_usd")} for k, a in attempts.items()}))
     else:
-        smoke.check("pipeline_egress_only_model_api", lambda: (set(egress.get("established") or {}) == {"api.openai.com"}, {k: egress.get(k) for k in ("established", "refused")}))
+        smoke.check("pipeline_egress_only_model_api", lambda: (set(egress.get("established") or {}) == {smoke.exp.api_host}, {k: egress.get(k) for k in ("established", "refused")}))
     smoke.check("pipeline_no_web_search", lambda: (all(not a["commands"].get("web_search_calls") for a in attempts.values()), {k: a["commands"].get("web_search_calls") for k, a in attempts.items()}))
     smoke.check("pipeline_no_disqualifying_audit", lambda: (
         all(not (a["commands"].get("rule_counts") or {}).get(rule) for a in attempts.values() for rule in audit.DISQUALIFYING),

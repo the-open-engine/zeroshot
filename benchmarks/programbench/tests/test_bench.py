@@ -185,6 +185,31 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self._load({**ditaa.raw, "task": {**ditaa.raw["task"], "fidelity_reference": bad}})
 
+    def test_glm_runs_repeat_the_luna_protocol_through_openrouter(self):
+        for glm_name, luna_name in (("glm52-xhigh-svgbob-v6", "luna-xhigh-svgbob-v3"), ("glm52-xhigh-ditaa-v1", "luna-xhigh-ditaa-v1")):
+            glm, luna = config.load(f"experiments/{glm_name}.json"), config.load(f"experiments/{luna_name}.json")
+            self.assertEqual((glm.model, glm.effort, glm.harness, glm.provider), ("z-ai/glm-5.2", "xhigh", "codex", "openrouter"))
+            self.assertEqual((glm.secret_env, glm.api_host), ("OPENROUTER_API_KEY", "openrouter.ai"))
+            self.assertEqual((glm.raw["order"], glm.max_iterations), (["loop"] * 5, 50))
+            for key in ("task", "limits", "eval"):
+                self.assertEqual(glm.raw[key], luna.raw[key], key)
+            same = {k: v for k, v in glm.raw["decision_rule"].items() if k != "comparison"}
+            self.assertEqual(same, {k: v for k, v in luna.raw["decision_rule"].items() if k != "comparison"})
+            self.assertEqual(run_files(glm, "loop")["graph.json"], run_files(luna, "loop")["graph.json"])
+            self.assertEqual(run_files(glm, "loop")["runtime.json"]["provider"], "openrouter")
+
+    def test_providers_belong_to_their_harness(self):
+        glm = config.load("experiments/glm52-xhigh-svgbob-v6.json")
+        for model in ({**glm.raw["model"], "harness": "claude"}, {**glm.raw["model"], "provider": "anthropic"}, {**glm.raw["model"], "provider": "bedrock"}):
+            with self.assertRaises(ValueError, msg=model):
+                self._load({**glm.raw, "model": model})
+        self.assertEqual(EXPERIMENT.provider, "openai")
+        self.assertEqual(EXPERIMENT.api_host, "api.openai.com")
+
+    def test_the_openai_proxy_allowlist_is_unchanged(self):
+        self.assertEqual(images.proxy_filter("api.openai.com"), (config.ROOT / "proxy" / "filter").read_bytes())
+        self.assertEqual(images.proxy_filter("openrouter.ai"), b"^openrouter\\.ai$\n")
+
     def test_digest_covers_code_but_not_tests_or_results(self):
         names = {str(p.relative_to(config.ROOT)) for p in config.code_files()}
         self.assertTrue({"bench/attempt.py", "bench/evaluate.py", "requirements.lock", "agent/Dockerfile"} <= names)
@@ -331,6 +356,8 @@ class AuditTests(unittest.TestCase):
         self.assertFalse(rules["reference_binary_moved_or_copied"].search("./executable -s 'x' > out.svg"))
         self.assertTrue(rules["network_fetch"].search("cargo install svgbob_cli"))
         self.assertTrue(rules["model_api_calls"].search("curl https://api.openai.com/v1/responses"))
+        self.assertTrue(rules["model_api_calls"].search("curl -s https://openrouter.ai/api/v1/chat/completions"))
+        self.assertTrue(rules["credential_probe"].search("echo ${OPENROUTER_API_KEY:0:8}"))
         self.assertTrue(rules["proxy_usage"].search("HTTPS_PROXY=http://zsbench-x-proxy:8888 curl x"))
         self.assertTrue(rules["proxy_usage"].search("curl -x 172.18.0.2:8888 https://example.com"))
         self.assertFalse(rules["proxy_usage"].search("curl -s http://localhost:8888/render"))

@@ -51,7 +51,7 @@ COMMAND_RULES = {
     "network_fetch": re.compile(
         r"(?<!command -v )(?<!which )(?<!type )\b(curl|wget|nc|ncat|socat|ssh|scp|rsync|git\s+(clone|fetch|pull|ls-remote|submodule)|pip3?\s+(install|download)|cargo\s+(install|fetch|add|update|search)|go\s+(get|install|mod\s+download)|npm\s+(i|install|view)|apt(-get)?\s+(install|source|download|update))\b"
     ),
-    "model_api_calls": re.compile(r"api\.openai\.com|api\.anthropic\.com|/v1/(responses|chat/completions|models|embeddings|messages)", re.IGNORECASE),
+    "model_api_calls": re.compile(r"api\.openai\.com|api\.anthropic\.com|openrouter\.ai|/v1/(responses|chat/completions|models|embeddings|messages)", re.IGNORECASE),
     "proxy_usage": re.compile(r"zsbench-\S*-proxy|\b(https?|all)_proxy\s*=|--proxy\b|\bproxies\s*=|\bcurl\b[^\n;&|]*\s-x\s", re.IGNORECASE),
     "sudo": re.compile(r"(^|[\s;&|(])sudo\b"),
     # /proc/<pid>/environ or mem, or BSD-style `ps e` (print environments); not `ps -e` (all
@@ -66,7 +66,7 @@ COMMAND_RULES = {
     "harness_internals": re.compile(r"\bzeroshot\b|workspace-recovery|runs\.sqlite3|\.local/state/zeroshot|/opt/zeroshot-bench|/opt/codex\b|\.codex/(sessions|config\.toml|state_|logs_|memories)|/opt/claude-code\b|\.claude/projects|\.claude\.json"),
     # Claude attempts: the placeholder key and the gateway address are in every tool's environment
     # (the real key is not); touching them is reported. Calling the gateway matches proxy_usage.
-    "credential_probe": re.compile(r"\$\{?ANTHROPIC_(?:API_KEY|BASE_URL|AUTH_TOKEN)\b|\$\{?(?:OPENAI|CODEX)_API_KEY\b"),
+    "credential_probe": re.compile(r"\$\{?ANTHROPIC_(?:API_KEY|BASE_URL|AUTH_TOKEN)\b|\$\{?(?:OPENAI|CODEX|OPENROUTER)_API_KEY\b"),
 }
 # Findings that disqualify a run from the H1 analysis (pre-registered): each is a channel that
 # could carry information the task withholds (the reference's internals, the web, the key).

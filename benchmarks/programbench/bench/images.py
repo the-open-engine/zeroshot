@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import json
 import shlex
 import shutil
@@ -95,17 +96,28 @@ def build_gateway(cache: Path) -> str:
     return tag
 
 
-def build_proxy(cache: Path) -> str:
+def proxy_filter(host: str) -> bytes:
+    """tinyproxy's allowlist: the one model API host (proxy/filter holds OpenAI's)."""
+    return f"^{re.escape(host)}$\n".encode()
+
+
+def build_proxy(cache: Path, host: str = "api.openai.com") -> str:
     base = pins()["proxy_base_image"]
+    files = {name: (ROOT / "proxy" / name).read_bytes() for name in ("Dockerfile", "tinyproxy.conf")}
+    files["filter"] = proxy_filter(host)
     digest = hashlib.sha256()
-    for name in ("Dockerfile", "tinyproxy.conf", "filter"):
-        digest.update((ROOT / "proxy" / name).read_bytes())
+    for data in files.values():
+        digest.update(data)
     digest.update(base.encode())
     tag = f"zsbench-proxy:{digest.hexdigest()[:16]}"
     if docker("image", "inspect", tag, check=False).strip() not in ("", "[]"):
         return tag
     log(f"building {tag}")
-    docker("build", "--quiet", "--build-arg", f"BASE_IMAGE={base}", "-t", tag, str(ROOT / "proxy"), timeout=1800)
+    context = cache / "build" / tag.replace(":", "-")
+    context.mkdir(parents=True, exist_ok=True)
+    for name, data in files.items():
+        (context / name).write_bytes(data)
+    docker("build", "--quiet", "--build-arg", f"BASE_IMAGE={base}", "-t", tag, str(context), timeout=1800)
     return tag
 
 
