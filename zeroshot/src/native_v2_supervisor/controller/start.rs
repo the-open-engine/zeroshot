@@ -120,7 +120,7 @@ impl NativeV2Supervisor {
             DispatchResult::DurableEventFailure(error) => {
                 DispatchResult::DurableEventFailure(error)
             }
-            _ => stopped,
+            result => super::super::failure::preserve_interrupted_failure(Some(stopped), result),
         }
     }
 }

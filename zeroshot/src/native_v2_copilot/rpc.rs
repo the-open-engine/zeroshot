@@ -7,7 +7,6 @@ use crate::execution::process::{
 };
 use crate::native_v2_capsule::provider_process::{
     ProviderProcess, ProviderExecutionFiles, redaction_values, safe_provider_text,
-    provider_failure_diagnostic,
 };
 use crate::native_v2_runner::{
     AgentResponseState, DriverControl, DriverInvocation, NodeRunnerError, ProviderSchemaDialect,
@@ -291,12 +290,7 @@ impl<'a> CopilotRpc<'a> {
             Err(error) => return error,
         };
         append_stderr_detail(&mut detail, completion);
-        failure(provider_failure_diagnostic(
-            "Copilot",
-            Some(&detail),
-            None,
-            &self.redactions,
-        ))
+        failure(safe_provider_text(&detail, &self.redactions))
     }
 
     pub(super) async fn drain(&mut self) -> Result<(), NodeRunnerError> {

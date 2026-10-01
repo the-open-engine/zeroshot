@@ -757,12 +757,77 @@ async fn malformed_output_receives_only_two_corrections_in_the_same_session() {
 
 #[tokio::test]
 async fn fails_closed_on_protocol_identity_and_provider_errors() {
-    for mode in ["version", "identity", "error"] {
+    for (mode, detail) in [
+        ("version", "is incompatible; install CLI 1.0.86"),
+        ("identity", "Copilot returned a different session"),
+        ("error", "rejected [REDACTED]"),
+    ] {
         let fixture = Fixture::new(mode).await;
         let (events, outcome) = complete(fixture.start(1).await).await;
         assert!(outcome.is_err());
+        let errors = error_output(&events);
+        assert!(errors.iter().any(|line| line.starts_with("Copilot provider failure: ")
+            && line.contains(detail)), "missing useful error: {errors:?}");
+        if mode == "version" {
+            assert!(
+                errors
+                    .iter()
+                    .any(|line| line.contains("stderr: launch note: [REDACTED]"))
+            );
+        }
         assert!(!format!("{events:?} {outcome:?}").contains("gho_fake-secret"));
     }
+}
+
+fn error_output(events: &[DurableNodeEvent]) -> Vec<&str> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            DurableNodeEvent::Output { output, .. } if output.stream == LiveOutputStream::Error => {
+                Some(output.text.as_str())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn startup_failures_emit_actionable_durable_diagnostics() {
+    let directory = TestDirectory::new("copilot-missing-executable");
+    let missing = directory.child("missing-copilot");
+    let fixture = Fixture::with_executable(
+        directory,
+        missing,
+        BTreeMap::from([(auth::TOKEN.to_owned(), "gho_fake-secret".to_owned())]),
+        INSTRUCTIONS,
+    )
+    .await;
+    assert_startup_error(
+        &fixture,
+        "process launch failed before start",
+        "gho_fake-secret",
+    )
+    .await;
+
+    let fixture = Fixture::invalid_registry(b"{invalid-secret-registry").await;
+    assert_startup_error(
+        &fixture,
+        "Copilot provider registry is invalid",
+        "invalid-secret-registry",
+    )
+    .await;
+}
+
+async fn assert_startup_error(fixture: &Fixture, detail: &str, secret: &str) {
+    let (events, outcome) = complete(fixture.start(1).await).await;
+    assert!(outcome.is_err());
+    assert!(
+        error_output(&events)
+            .iter()
+            .any(|line| line.contains(detail))
+    );
+    assert!(!format!("{events:?} {outcome:?}").contains(secret));
+    assert!(!fixture.directory.child("capture").exists());
 }
 
 #[tokio::test]

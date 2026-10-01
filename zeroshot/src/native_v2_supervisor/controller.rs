@@ -96,36 +96,6 @@ impl NativeV2Supervisor {
         registrar.register(reference, source).await.map(Some)
     }
 
-    async fn append_completion(
-        &self,
-        reference: ExecutionRef,
-        outcome: WorkerOutcome,
-        elapsed: Option<Duration>,
-    ) -> Result<(), NativeV2SupervisorError> {
-        let mut events = Vec::new();
-        if let Some(code) = outcome.error_code() {
-            let timing = elapsed.map_or_else(String::new, |duration| {
-                format!(" after {:.1}s", duration.as_secs_f64())
-            });
-            events.push(RunEvent::SafeLog {
-                execution: Some(reference.execution),
-                timestamp: crate::native_v2_runner::current_timestamp(),
-                stream: SafeLogStream::Error,
-                line: SafeLogLine::new(format!(
-                    "Node {} failed: {}{}",
-                    reference.node.as_str(),
-                    code.as_str(),
-                    timing,
-                ))?,
-            });
-        }
-        events.push(RunEvent::NodeCompleted {
-            completion: NodeCompletion { reference, outcome },
-        });
-        self.ledger.append(&self.run_id, events).await?;
-        Ok(())
-    }
-
     pub(super) async fn cancel_voids(
         &self,
         voids: Vec<(ExecutionId, ExecutionVoidReason)>,
@@ -158,26 +128,21 @@ impl NativeV2Supervisor {
         finished: FinishedDispatch,
         pending_voids: &mut BTreeMap<ExecutionId, ExecutionVoidReason>,
     ) -> Result<(), NativeV2SupervisorError> {
-        if finished.result.cleanup_unconfirmed() {
-            return Err(NativeV2SupervisorError::CleanupUnconfirmed);
-        }
+        self.require_finished_cleanup(&finished).await?;
         if let Some(reason) = pending_voids.remove(&finished.execution) {
-            self.ledger
-                .append(
-                    &self.run_id,
-                    vec![RunEvent::ExecutionVoided {
-                        reference: finished.reference,
-                        reason,
-                    }],
-                )
-                .await?;
+            let mut events = finished.failure_log()?.into_iter().collect::<Vec<_>>();
+            events.push(RunEvent::ExecutionVoided {
+                reference: finished.reference,
+                reason,
+            });
+            self.ledger.append(&self.run_id, events).await?;
             return Ok(());
         }
         let snapshot = self.snapshot().await?;
         let force = self.force_requested.load(Ordering::Acquire) || snapshot.force_stop_requested;
-        let outcome = settled_outcome(&finished.reference, finished.result, force)?;
-        self.append_completion(finished.reference, outcome, Some(finished.elapsed))
-            .await
+        let events = finished.completion_events(force)?;
+        self.ledger.append(&self.run_id, events).await?;
+        Ok(())
     }
 
     pub(super) async fn append_terminal(
@@ -187,9 +152,7 @@ impl NativeV2Supervisor {
         self.ledger
             .append(
                 &self.run_id,
-                vec![RunEvent::Terminal {
-                    result: terminal.clone(),
-                }],
+                super::logging::terminal_events(terminal.clone())?,
             )
             .await?;
         Ok(terminal)
@@ -198,46 +161,58 @@ impl NativeV2Supervisor {
     async fn stop_runtime_tasks(
         &self,
         tasks: &mut JoinSet<FinishedDispatch>,
-    ) -> Result<(), NativeV2SupervisorError> {
+    ) -> Result<Vec<RunEvent>, NativeV2SupervisorError> {
         self.resolution_stop.send_replace(true);
         self.runner.close_run(&self.run_id).await;
-        drain_terminalizing_tasks(tasks).await
+        self.drain_terminalizing_tasks(tasks).await
     }
 
     pub(super) async fn terminalize_force(
         &self,
         tasks: &mut JoinSet<FinishedDispatch>,
     ) -> Result<TerminalResult, NativeV2SupervisorError> {
-        self.stop_runtime_tasks(tasks).await?;
-        let snapshot = self.snapshot().await?;
-        if let Some(terminal) = snapshot.terminal {
-            return Ok(terminal);
+        let logs = self.stop_runtime_tasks(tasks).await?;
+        let result = async {
+            let snapshot = self.snapshot().await?;
+            if let Some(terminal) = snapshot.terminal {
+                return Ok(terminal);
+            }
+            let terminal = TerminalResult::Failed {
+                reason: EnumLabel::new("force_stopped")
+                    .map_err(|_| NativeV2SupervisorError::InvalidState)?,
+            };
+            self.cleanup_runtime(RunRuntimeExit::ForceStopped).await?;
+            let mut events = logs.clone();
+            events.extend(super::logging::terminal_failure_events(
+                &snapshot,
+                "force_stopped",
+                WorkerErrorCode::Refusal,
+            )?);
+            self.ledger.append(&self.run_id, events).await?;
+            Ok(terminal)
         }
-        let terminal = TerminalResult::Failed {
-            reason: EnumLabel::new("force_stopped")
-                .map_err(|_| NativeV2SupervisorError::InvalidState)?,
-        };
-        self.cleanup_runtime(RunRuntimeExit::ForceStopped).await?;
-        let mut events = refusal_completions(&snapshot);
-        events.push(RunEvent::Terminal {
-            result: terminal.clone(),
-        });
-        self.ledger.append(&self.run_id, events).await?;
-        Ok(terminal)
+        .await;
+        self.preserve_terminalization_logs(logs, result).await
     }
 
     pub(super) async fn terminalize_lost(
         &self,
         tasks: &mut JoinSet<FinishedDispatch>,
     ) -> Result<TerminalResult, NativeV2SupervisorError> {
-        self.stop_runtime_tasks(tasks).await?;
-        self.cleanup_runtime(RunRuntimeExit::RuntimeLost).await?;
-        self.append_runtime_failure("runtime_lost").await
+        let logs = self.stop_runtime_tasks(tasks).await?;
+        let result = async {
+            self.cleanup_runtime(RunRuntimeExit::RuntimeLost).await?;
+            self.append_runtime_failure("runtime_lost", logs.clone())
+                .await
+        }
+        .await;
+        self.preserve_terminalization_logs(logs, result).await
     }
 
     pub(super) async fn append_runtime_failure(
         &self,
         reason: &str,
+        mut events: Vec<RunEvent>,
     ) -> Result<TerminalResult, NativeV2SupervisorError> {
         let snapshot = self.snapshot().await?;
         if let Some(terminal) = snapshot.terminal {
@@ -246,18 +221,11 @@ impl NativeV2Supervisor {
         let terminal = TerminalResult::Failed {
             reason: EnumLabel::new(reason).map_err(|_| NativeV2SupervisorError::InvalidState)?,
         };
-        let mut events = snapshot
-            .active_executions()
-            .map(|node| RunEvent::NodeCompleted {
-                completion: NodeCompletion {
-                    reference: node.reference.clone(),
-                    outcome: WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
-                },
-            })
-            .collect::<Vec<_>>();
-        events.push(RunEvent::Terminal {
-            result: terminal.clone(),
-        });
+        events.extend(super::logging::terminal_failure_events(
+            &snapshot,
+            reason,
+            WorkerErrorCode::Crash,
+        )?);
         self.ledger.append(&self.run_id, events).await?;
         Ok(terminal)
     }

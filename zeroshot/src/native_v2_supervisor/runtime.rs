@@ -1,22 +1,88 @@
 use super::*;
 
-pub(super) async fn drain_terminalizing_tasks(
-    tasks: &mut JoinSet<FinishedDispatch>,
-) -> Result<(), NativeV2SupervisorError> {
-    while let Some(finished) = tasks.join_next().await {
-        let finished = finished.map_err(supervisor_task_error)?;
-        if finished.result.cleanup_unconfirmed() {
-            return Err(NativeV2SupervisorError::CleanupUnconfirmed);
+impl NativeV2Supervisor {
+    pub(super) async fn require_finished_cleanup(
+        &self,
+        finished: &FinishedDispatch,
+    ) -> Result<(), NativeV2SupervisorError> {
+        if !finished.result.cleanup_unconfirmed() {
+            return Ok(());
         }
-        match finished.result {
-            DispatchResult::DurableEventFailure(error) => return Err(error.into()),
-            DispatchResult::StartFailure(error) => return Err(error),
-            DispatchResult::Completed(_)
-            | DispatchResult::TimedOut
-            | DispatchResult::Interrupted => {}
+        // Logging cannot replace the cleanup failure or wait indefinitely for broken storage.
+        // Leave the execution active: an error log is not proof that its processes stopped.
+        if let Ok(Some(log)) = finished.failure_log() {
+            self.record_failure_logs(vec![log]).await;
+        }
+        Err(NativeV2SupervisorError::CleanupUnconfirmed)
+    }
+
+    pub(super) async fn preserve_terminalization_logs(
+        &self,
+        logs: Vec<RunEvent>,
+        result: Result<TerminalResult, NativeV2SupervisorError>,
+    ) -> Result<TerminalResult, NativeV2SupervisorError> {
+        if result.is_err() {
+            self.record_failure_logs(logs).await;
+        }
+        result
+    }
+
+    async fn record_failure_logs(&self, logs: Vec<RunEvent>) {
+        if !logs.is_empty() {
+            let _ = tokio::time::timeout(
+                Duration::from_secs(1),
+                self.ledger.append(&self.run_id, logs),
+            )
+            .await;
         }
     }
-    Ok(())
+
+    pub(super) async fn drain_failed_tasks(&self, tasks: &mut JoinSet<FinishedDispatch>) {
+        let mut logs = Vec::new();
+        // Every peer still drains, including after task panics and failed output persistence.
+        while let Some(finished) = tasks.join_next().await {
+            if let Ok(finished) = finished {
+                if let Ok(Some(log)) = finished.failure_log() {
+                    logs.push(log);
+                }
+            }
+        }
+        self.record_failure_logs(logs).await;
+    }
+
+    pub(super) async fn drain_terminalizing_tasks(
+        &self,
+        tasks: &mut JoinSet<FinishedDispatch>,
+    ) -> Result<Vec<RunEvent>, NativeV2SupervisorError> {
+        let mut logs = Vec::new();
+        while let Some(finished) = tasks.join_next().await {
+            let result = match finished {
+                Ok(finished) => {
+                    if let Some(log) = finished.failure_log()? {
+                        logs.push(log);
+                    }
+                    terminal_drain_result(finished.result)
+                }
+                Err(error) => Err(supervisor_task_error(error)),
+            };
+            if let Err(error) = result {
+                self.record_failure_logs(logs).await;
+                return Err(error);
+            }
+        }
+        Ok(logs)
+    }
+}
+
+fn terminal_drain_result(result: DispatchResult) -> Result<(), NativeV2SupervisorError> {
+    if result.cleanup_unconfirmed() {
+        return Err(NativeV2SupervisorError::CleanupUnconfirmed);
+    }
+    match result {
+        DispatchResult::DurableEventFailure(error) => Err(error.into()),
+        DispatchResult::StartFailure(error) => Err(error),
+        _ => Ok(()),
+    }
 }
 
 pub(super) enum Initialization {
@@ -201,7 +267,7 @@ async fn observe_dispatch(
         return result;
     }
     match output_result {
-        Ok(()) => interrupted.unwrap_or(result),
+        Ok(()) => super::failure::preserve_interrupted_failure(interrupted, result),
         Err(error) => DispatchResult::DurableEventFailure(error),
     }
 }
@@ -433,7 +499,7 @@ fn record_execution_metadata(
         .insert(name.clone(), instructions.clone());
 }
 
-pub(super) fn runner_failure(error: NodeRunnerError) -> WorkerOutcome {
+pub(super) fn runner_failure(error: &NodeRunnerError) -> WorkerOutcome {
     let code = match error {
         NodeRunnerError::Cancelled | NodeRunnerError::RunClosed => WorkerErrorCode::Refusal,
         NodeRunnerError::InvalidRole
@@ -464,22 +530,24 @@ pub(super) fn settled_outcome(
             Ok(completion.outcome)
         }
         DispatchResult::Completed(Ok(_)) => Err(NativeV2SupervisorError::InvalidState),
-        DispatchResult::Completed(Err(error)) => Ok(runner_failure(error)),
+        DispatchResult::Completed(Err(error)) => Ok(runner_failure(&error)),
         DispatchResult::TimedOut => Ok(WorkerOutcome::declared_failure(WorkerErrorCode::Timeout)),
         DispatchResult::Interrupted => Ok(WorkerOutcome::declared_failure(WorkerErrorCode::Crash)),
         DispatchResult::DurableEventFailure(error) => Err(error.into()),
         DispatchResult::StartFailure(error) => Err(error),
     }
 }
-
-pub(super) fn refusal_completions(snapshot: &RunSnapshot) -> Vec<RunEvent> {
-    snapshot
-        .active_executions()
-        .map(|node| RunEvent::NodeCompleted {
-            completion: NodeCompletion {
-                reference: node.reference.clone(),
-                outcome: WorkerOutcome::declared_failure(WorkerErrorCode::Refusal),
-            },
-        })
-        .collect()
+// Provider adapters publish redacted details through durable output. Arbitrary driver detail
+// strings must never cross the public log boundary here.
+pub(super) fn settled_failure_cause(result: &DispatchResult, force: bool) -> Option<String> {
+    if force {
+        return None;
+    }
+    match result {
+        DispatchResult::Completed(Err(NodeRunnerError::DriverDetail(_))) => {
+            Some(NodeRunnerError::Driver.to_string())
+        }
+        DispatchResult::Completed(Err(error)) => Some(error.to_string()),
+        _ => None,
+    }
 }

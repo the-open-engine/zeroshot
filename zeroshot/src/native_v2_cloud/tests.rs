@@ -6,10 +6,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    ConnectionKey, DeclaredConnections, DeclaredEnvironment, GraphSpec, IdempotencyKey, NodeName,
-    NodeRuntimeBinding, ResolvedSource, RunForceParams, RunId, RunSize, RunStatus, RunStatusParams,
-    RunSubmitParams, RunTitle, RuntimePlan, SourceBranchId, SourceRepositoryId, SourceRevisionId,
-    StaticConnectionValues, TerminalResult, WorkerOutcome,
+    ConnectionKey, EnumLabel, DeclaredConnections, DeclaredEnvironment, GraphSpec, IdempotencyKey,
+    NodeName, NodeRuntimeBinding, ResolvedSource, RunForceParams, RunId, RunSize, RunStatus,
+    RunStatusParams, RunSubmitParams, RunTitle, RuntimePlan, SourceBranchId, SourceRepositoryId,
+    SourceRevisionId, StaticConnectionValues, TerminalResult, WorkerOutcome,
 };
 use serde_json::{json, Value};
 use tokio::sync::watch;
@@ -408,6 +408,9 @@ mod runtime_failure;
 
 #[path = "tests/initialization.rs"]
 mod initialization;
+
+#[path = "tests/restart_logs.rs"]
+mod restart_logs;
 
 fn test_preparation() -> CapsulePreparation {
     struct Quiet;

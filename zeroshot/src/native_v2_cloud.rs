@@ -9,14 +9,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    ClusterStatus, EnumLabel, GetParams, GetResult, GraphProfile, GraphProfileSet,
-    InitializeParams, InitializeResult, RunAttachEventNotification, RunAttachParams,
-    RunAttachResult, RunForceParams, RunForceResult, RunId, RunListParams, RunListResult,
-    RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunLogEventNotification, RunLogsParams,
-    RunLogsResult, RunResumeParams, RunResumeResult, RunStatus, RunStatusParams, RunStatusResult,
-    RunSubmitParams, RunSubmitResult, RunWatchEventNotification, RunWatchParams, RunWatchResult,
-    ServerCapabilities, Sha256Digest, SubscriptionCloseReason, TerminalResult, WorkerErrorCode,
-    WorkerOutcome, GONE, GRAPH_INVALID, IDEMPOTENCY_REUSE, INTERNAL_ERROR_CODE, NOT_FOUND,
+    ClusterStatus, GetParams, GetResult, GraphProfile, GraphProfileSet, InitializeParams,
+    InitializeResult, RunAttachEventNotification, RunAttachParams, RunAttachResult, RunForceParams,
+    RunForceResult, RunId, RunListParams, RunListResult, RunDiscardWorkspaceParams,
+    RunDiscardWorkspaceResult, RunLogEventNotification, RunLogsParams, RunLogsResult,
+    RunResumeParams, RunResumeResult, RunStatus, RunStatusParams, RunStatusResult, RunSubmitParams,
+    RunSubmitResult, RunWatchEventNotification, RunWatchParams, RunWatchResult, ServerCapabilities,
+    Sha256Digest, SubscriptionCloseReason, TerminalResult, WorkerErrorCode, GONE, GRAPH_INVALID,
+    IDEMPOTENCY_REUSE, INTERNAL_ERROR_CODE, NOT_FOUND,
 };
 use openengine_cluster_server::native_v2::{
     RunAttachEventStream, RunLogEventStream, RunSubscriptionItem, RunSubscriptionSource,
@@ -28,7 +28,7 @@ use thiserror::Error;
 use tokio::sync::{watch, Mutex};
 
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission, NativeV2AdmissionError};
-use crate::native_v2_contract::{AdmittedRun, NodeCompletion, RunSubmission};
+use crate::native_v2_contract::{AdmittedRun, RunSubmission};
 #[cfg(test)]
 use crate::native_v2_contract::EnvironmentVariableName;
 use crate::native_v2_observability::{

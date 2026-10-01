@@ -427,6 +427,9 @@ mod startup;
 #[path = "tests/terminalization.rs"]
 mod terminalization;
 
+#[path = "tests/failure_logs.rs"]
+mod failure_logs;
+
 #[path = "tests/checkpoint_seed.rs"]
 mod checkpoint_seed;
 #[path = "tests/checkpoints.rs"]

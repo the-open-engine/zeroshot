@@ -58,6 +58,8 @@ while (message := read()) is not None:
         with open(os.environ["CAPTURE_PATH"], "a", encoding="utf-8") as capture:
             capture.write(json.dumps(message) + "\n")
     if method == "connect":
+        if mode == "version":
+            print("launch note: gho_fake-secret", file=sys.stderr, flush=True)
         result = {"protocolVersion": 99 if mode == "version" else 3}
     elif method in ("session.create", "session.resume"):
         assert "COPILOT_GITHUB_TOKEN" not in os.environ

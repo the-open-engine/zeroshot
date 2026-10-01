@@ -224,7 +224,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and tombstones execution activity atomically; no late work may surface after close returns.
 - Node deadlines are optional: omitted `timeoutMs` means completion or explicit cancellation.
   Built-in graphs have no node deadlines, and provider adapters impose no separate turn timeout.
-  The supervisor records node error codes and elapsed time in durable logs before settlement.
+  The supervisor records every node error in durable logs before settlement, including handled
+  failures and retries. Summaries preserve error code, typed refusal/malformed reason, elapsed time,
+  and safe runner context; provider adapters own redaction of detailed output. Runtime failure,
+  runtime loss/restart reconciliation, and force-stop use the same completion/log transaction for
+  every active node. Failed runs also retain a run-wide error log, including before graph dispatch.
+  An actual node error remains logged if a parallel winner voids that execution; intentional
+  cancellation is not presented as a new crash. Unconfirmed cleanup preserves a bounded best-effort
+  error log without completing the still-active execution or masking the primary failure.
+  These public summaries stay separate from private operator diagnostics.
 - A failed durable-output bridge cancels and drains its provider immediately. Fatal supervisor
   errors and task panics publish their private primary diagnostic before recovery waits or stderr
   writes, then close owned work and attempt runtime cleanup before durable failure. Recovery failures

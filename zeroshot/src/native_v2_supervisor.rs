@@ -244,7 +244,7 @@ impl NativeV2Supervisor {
             self.resolution_stop.send_replace(true);
             self.runner.close_run(&self.run_id).await;
             // Keep ownership until every task has stopped, even when another output append failed.
-            while active.tasks.join_next().await.is_some() {}
+            self.drain_failed_tasks(&mut active.tasks).await;
         }
         result
     }
@@ -409,7 +409,7 @@ impl NativeV2Supervisor {
         self.runner.close_run(&self.run_id).await;
         self.cleanup_runtime(RunRuntimeExit::RuntimeLost).await?;
         on_stopped();
-        self.append_runtime_failure("runtime_failed")
+        self.append_runtime_failure("runtime_failed", Vec::new())
             .await
             .map(|_| ())
     }
@@ -545,6 +545,8 @@ fn contains_exact_value(container: &Value, expected: &Value) -> bool {
 
 mod controller;
 mod environment;
+mod failure;
+pub(crate) mod logging;
 mod runtime;
 // Read-only observation shares the supervisor's exact ledger-to-reducer normalization.
 pub(crate) use runtime::{durable_history, next_execution, next_node_instance};
