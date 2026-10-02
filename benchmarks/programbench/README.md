@@ -166,7 +166,14 @@ a response to 32,000 output tokens for a model its catalog does not know (64,000
 that limit and had the cut-off file rejected as invalid JSON. The GLM runs therefore set
 `model.max_output_tokens` to 128,000, the most Claude Code sends; Z.ai serves up to 131,072. Against
 a stub API, Claude Code still compacts its context after 167,000 tokens at 32,000, 64,000 and
-128,000, as Opus did in v5. Like Luna's runs, they have no spending cap: only the protocol's time
+128,000, as Opus did in v5. GLM-5.2 reads text only (OpenRouter lists its input as text), but Claude
+Code's Read tool returns an image file as an image, and OpenRouter then rejects the whole request:
+on ditaa, whose program draws PNG files, two of five builders crashed this way within a minute. The
+ditaa run therefore declares `model.image_input: false`, and the gateway replaces every image in a
+request with a one-line note that the model cannot view it; svgbob's output is SVG text, and its GLM
+run sent no image. The reported ditaa run is the third start: the first stopped when the OpenRouter
+account ran out of credit (every first build cut off after 2 h 15 min), the second was stopped after
+3 minutes for the image failure. Like Luna's runs, they have no spending cap: only the protocol's time
 limits apply. Z.ai's prices on 2026-10-01 were $1.40 input, $0.26 cached input and $4.40 output per
 million tokens. The GLM runs therefore differ from Luna's in model, provider and harness, and the
 comparison is descriptive.

@@ -76,6 +76,38 @@ def routed_body(payload: Any, routing: dict[str, Any] | None) -> bytes | None:
     return json.dumps({**payload, "provider": routing}).encode()
 
 
+MEDIA_NOTE = "[{kind} removed by the benchmark gateway: the model reads text only and cannot view this {media_type} {kind} ({size} base64 characters)]"
+
+
+def text_only_body(payload: Any) -> tuple[Any, int]:
+    """The request with every image or document block replaced by a short text note, for a model that
+    reads text only, and how many were replaced. Such blocks sit in a message's content or inside a
+    tool result (Claude Code's Read tool returns a PNG as an image)."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("messages"), list):
+        return payload, 0
+    removed = 0
+
+    def strip(blocks: Any) -> Any:
+        nonlocal removed
+        if not isinstance(blocks, list):
+            return blocks
+        out = []
+        for block in blocks:
+            if isinstance(block, dict) and block.get("type") in ("image", "document"):
+                removed += 1
+                source = block.get("source") if isinstance(block.get("source"), dict) else {}
+                note = MEDIA_NOTE.format(kind=block["type"], media_type=source.get("media_type") or "unknown", size=len(str(source.get("data") or "")))
+                out.append({"type": "text", "text": note})
+            elif isinstance(block, dict) and block.get("type") == "tool_result":
+                out.append({**block, "content": strip(block.get("content"))})
+            else:
+                out.append(block)
+        return out
+
+    messages = [{**m, "content": strip(m.get("content"))} if isinstance(m, dict) else m for m in payload["messages"]]
+    return ({**payload, "messages": messages} if removed else payload), removed
+
+
 def merge_usage(total: dict[str, Any], update: dict[str, Any] | None) -> None:
     """Fold a usage object (from message_start or a cumulative message_delta) into ``total``."""
     for name, value in (update or {}).items():
@@ -149,9 +181,9 @@ def cost_usd(usage: dict[str, Any], prices: dict[str, float]) -> float:
 
 class Gateway:
     def __init__(self, key: str, prices: dict[str, float], cap_usd: float | None, log_path: str, upstream: str = "anthropic",
-                 routing: dict[str, Any] | None = None, models: list[str] | None = None) -> None:
+                 routing: dict[str, Any] | None = None, models: list[str] | None = None, text_only: bool = False) -> None:
         self.key, self.prices, self.cap_usd = key, prices, cap_usd
-        self.upstream, self.routing, self.models = upstream, routing, models
+        self.upstream, self.routing, self.models, self.text_only = upstream, routing, models, text_only
         self.spent = 0.0
         self.lock = threading.Lock()
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -235,6 +267,11 @@ def make_handler(gateway: Gateway) -> type[http.server.BaseHTTPRequestHandler]:
                 return
             host, prefix, _env, _auth = UPSTREAMS[gateway.upstream]
             if self.command == "POST" and record["path"] == "/v1/messages":
+                if gateway.text_only:
+                    payload, removed = text_only_body(payload)
+                    if removed:
+                        record["media_removed"] = removed
+                        body = json.dumps(payload).encode()
                 body = routed_body(payload, gateway.routing) or body
             upstream = http.client.HTTPSConnection(host, 443, timeout=1800, context=gateway.context)
             try:
@@ -298,10 +335,11 @@ def main() -> None:
     cap = float(os.environ.get("ZSBENCH_USD_CAP") or 0) or None
     routing = json.loads(os.environ.get("ZSBENCH_PROVIDER_ROUTING") or "null")
     models = json.loads(os.environ.get("ZSBENCH_MODELS") or "null")
-    gateway = Gateway(key, prices, cap, os.environ.get("ZSBENCH_GATEWAY_LOG", LOG_PATH), upstream, routing, models)
+    text_only = os.environ.get("ZSBENCH_TEXT_ONLY") == "1"
+    gateway = Gateway(key, prices, cap, os.environ.get("ZSBENCH_GATEWAY_LOG", LOG_PATH), upstream, routing, models, text_only)
     server = http.server.ThreadingHTTPServer(("0.0.0.0", PORT), make_handler(gateway))
     server.daemon_threads = True
-    gateway.log({"t": round(time.time(), 3), "event": "listening", "port": PORT, "cap_usd": cap, "upstream": upstream, "routing": routing, "models": models})
+    gateway.log({"t": round(time.time(), 3), "event": "listening", "port": PORT, "cap_usd": cap, "upstream": upstream, "routing": routing, "models": models, "text_only": text_only})
     server.serve_forever()
 
 

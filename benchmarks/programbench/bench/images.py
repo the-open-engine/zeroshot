@@ -200,6 +200,7 @@ def gateway_settings(exp: Experiment, image: str) -> dict[str, str] | None:
     return {
         "image": image, "secret_env": exp.secret_env, "prices": json.dumps(exp.pricing["usd_per_million_tokens"], sort_keys=True), "cap": str(cap) if cap else "",
         "upstream": exp.provider, "routing": json.dumps(exp.provider_routing, sort_keys=True) if exp.provider_routing else "", "models": json.dumps([exp.model]),
+        "text_only": "" if exp.image_input else "1",
     }
 
 
@@ -257,6 +258,8 @@ class Network:
         settings += ["-e", f"ZSBENCH_UPSTREAM={gateway.get('upstream') or 'anthropic'}", "-e", f"ZSBENCH_MODELS={gateway.get('models') or ''}"]
         if gateway.get("routing"):
             settings += ["-e", f"ZSBENCH_PROVIDER_ROUTING={gateway['routing']}"]
+        if gateway.get("text_only"):
+            settings += ["-e", "ZSBENCH_TEXT_ONLY=1"]
         docker("exec", "-d", "-e", gateway["secret_env"], *settings, self.proxy, "python3", "/opt/zsbench/gateway.py")
         for _ in range(60):
             if '"event": "listening"' in docker("exec", self.proxy, "cat", GATEWAY_LOG, check=False):

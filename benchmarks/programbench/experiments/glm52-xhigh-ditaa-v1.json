@@ -20,6 +20,7 @@
     "harness": "claude",
     "provider": "openrouter",
     "max_output_tokens": 128000,
+    "image_input": false,
     "provider_routing": {
       "order": ["z-ai"],
       "allow_fallbacks": false

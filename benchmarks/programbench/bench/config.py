@@ -117,6 +117,12 @@ class Experiment:
         return self.raw["model"].get("max_output_tokens")
 
     @property
+    def image_input(self) -> bool:
+        """Whether the model accepts images; for a text-only model the gateway replaces images in
+        requests with a note (Claude Code's Read tool returns image files as images)."""
+        return self.raw["model"].get("image_input", True)
+
+    @property
     def api_host(self) -> str:
         return API_HOSTS[self.provider]
 
@@ -209,6 +215,9 @@ def _validate(raw: dict[str, Any]) -> None:
     max_output = raw["model"].get("max_output_tokens")
     if max_output is not None and (harness != "claude" or isinstance(max_output, bool) or not isinstance(max_output, int) or not 1 <= max_output <= CLAUDE_MAX_OUTPUT_TOKENS):
         raise ValueError(f"model.max_output_tokens sets Claude Code's output limit per response: an integer from 1 to {CLAUDE_MAX_OUTPUT_TOKENS}")
+    image_input = raw["model"].get("image_input", True)
+    if not isinstance(image_input, bool) or (not image_input and harness != "claude"):
+        raise ValueError("model.image_input is true or false, and only the Claude gateway can take images out of requests")
     if "usd_cap_per_attempt" in raw["limits"] and (harness != "claude" or float(raw["limits"]["usd_cap_per_attempt"]) <= 0):
         raise ValueError("limits.usd_cap_per_attempt must be positive and needs the Claude gateway")
     arms = raw["arms"]

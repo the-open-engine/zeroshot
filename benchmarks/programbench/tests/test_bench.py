@@ -217,9 +217,21 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(self._load({**glm.raw, "model": {**glm.raw["model"], "max_output_tokens": 64000}}).max_output_tokens, 64000)
         self.assertIsNone(config.load("experiments/opus5-xhigh-svgbob-v5.json").max_output_tokens)  # v5 keeps its launcher
 
+    def test_glm_on_ditaa_is_declared_text_only(self):
+        ditaa, svgbob = config.load("experiments/glm52-xhigh-ditaa-v1.json"), config.load("experiments/glm52-xhigh-svgbob-v6.json")
+        self.assertEqual((ditaa.image_input, svgbob.image_input, EXPERIMENT.image_input), (False, True, True))
+        self.assertEqual(images.gateway_settings(ditaa, "g")["text_only"], "1")
+        self.assertEqual(images.gateway_settings(svgbob, "g")["text_only"], "")
+        for bad in ("false", 0, None):
+            with self.assertRaises(ValueError, msg=bad):
+                self._load({**ditaa.raw, "model": {**ditaa.raw["model"], "image_input": bad}})
+        codex = {k: v for k, v in ditaa.raw["model"].items() if k not in ("provider_routing", "max_output_tokens")}
+        with self.assertRaises(ValueError):
+            self._load({**ditaa.raw, "model": {**codex, "harness": "codex"}})
+
     def test_providers_belong_to_their_harness(self):
         glm = config.load("experiments/glm52-xhigh-svgbob-v6.json")
-        unpinned = {k: v for k, v in glm.raw["model"].items() if k not in ("provider_routing", "max_output_tokens")}
+        unpinned = {k: v for k, v in glm.raw["model"].items() if k not in ("provider_routing", "max_output_tokens", "image_input")}
         for model in ({**unpinned, "provider": "openai"}, {**unpinned, "harness": "codex", "provider": "anthropic"}, {**unpinned, "provider": "bedrock"},
                       {**glm.raw["model"], "provider": "anthropic"}, {**glm.raw["model"], "provider_routing": {"order": []}}):
             with self.assertRaises(ValueError, msg=model):
@@ -821,15 +833,38 @@ class OpenRouterGatewayTests(unittest.TestCase):
             listed = gateway.Gateway("k" * 20, {"input": 1.4, "cached_input": 0.26, "output": 4.4}, 1.0, f"{tmp}/h.jsonl")
             self.assertAlmostEqual(listed.charge({"input_tokens": 55, "cache_read_input_tokens": 16192, "output_tokens": 3}), (55 * 1.4 + 16192 * 0.26 + 3 * 4.4) / 1e6)
 
+    def test_a_text_only_model_gets_notes_instead_of_images(self):
+        gateway = _load_gateway()
+        png = {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="}}
+        payload = {"model": "z-ai/glm-5.2", "messages": [
+            {"role": "user", "content": [{"type": "text", "text": "compare these"}, png]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "/tmp/a.png"}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": [png]}]},
+            {"role": "user", "content": "plain text"},
+        ]}
+        stripped, removed = gateway.text_only_body(payload)
+        self.assertEqual(removed, 2)
+        self.assertNotIn('"image"', json.dumps(stripped))
+        self.assertEqual(stripped["messages"][0]["content"][0], {"type": "text", "text": "compare these"})
+        note = stripped["messages"][2]["content"][0]["content"][0]
+        self.assertEqual(note["type"], "text")
+        self.assertIn("image/png image (12 base64 characters)", note["text"])
+        self.assertEqual(stripped["messages"][3], payload["messages"][3])
+        self.assertIn('"image"', json.dumps(payload))  # the caller's payload is not changed
+        text = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+        self.assertIs(gateway.text_only_body(text)[0], text)
+        self.assertEqual(gateway.text_only_body(None), (None, 0))
+
     def test_the_audit_reports_the_output_limits_requested(self):
         log = "\n".join(json.dumps(r) for r in (
             {"t": 1, "event": "listening"},
             {"t": 2, "method": "POST", "path": "/v1/messages", "status": 200, "model": "z-ai/glm-5.2", "max_tokens": 128000, "cost_usd": 0.5},
-            {"t": 3, "method": "POST", "path": "/v1/messages", "status": 200, "model": "z-ai/glm-5.2", "max_tokens": 128000, "cost_usd": 0.25},
+            {"t": 3, "method": "POST", "path": "/v1/messages", "status": 200, "model": "z-ai/glm-5.2", "max_tokens": 128000, "cost_usd": 0.25, "media_removed": 2},
             {"t": 4, "method": "POST", "path": "/v1/messages/count_tokens", "status": 404, "model": "z-ai/glm-5.2"},
         ))
         summary = audit.gateway_audit(log)
         self.assertEqual(summary["max_tokens"], {"128000": 2})
+        self.assertEqual(summary["media_removed"], 2)
         self.assertEqual((summary["cost_usd"], summary["statuses"]), (0.75, {"200": 2, "404": 1}))
 
 

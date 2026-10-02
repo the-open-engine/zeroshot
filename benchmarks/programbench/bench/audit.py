@@ -424,6 +424,7 @@ def gateway_audit(log_text: str) -> dict[str, Any]:
     tools Claude Code offered the model, the output limits it asked for, and the cost of the usage
     the API reported."""
     requests, models, statuses, refused, max_tokens = Counter(), Counter(), Counter(), Counter(), Counter()
+    media_removed = 0
     tools: set[str] = set()
     ids: list[str] = []
     cost = 0.0
@@ -443,10 +444,11 @@ def gateway_audit(log_text: str) -> dict[str, Any]:
         tools.update(str(t) for t in record.get("tools") or [])
         if record.get("max_tokens") is not None:
             max_tokens[str(record["max_tokens"])] += 1
+        media_removed += int(record.get("media_removed") or 0)
         cost += float(record.get("cost_usd") or 0)
         if record.get("request_id"):
             ids.append(str(record["request_id"]))
-    return {"requests": dict(requests), "models": dict(models), "statuses": dict(statuses), "refused": dict(refused), "tools_offered": sorted(tools), "max_tokens": dict(max_tokens), "cost_usd": round(cost, 4), "request_ids": ids}
+    return {"requests": dict(requests), "models": dict(models), "statuses": dict(statuses), "refused": dict(refused), "tools_offered": sorted(tools), "max_tokens": dict(max_tokens), "media_removed": media_removed, "cost_usd": round(cost, 4), "request_ids": ids}
 
 
 def _file_hashes(path: Path) -> dict[str, str]:
