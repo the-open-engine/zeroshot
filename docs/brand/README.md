@@ -95,7 +95,7 @@ Review both themes after changes, including the mobile layouts where supplied.
 Body text uses [Spline Sans](https://github.com/google/fonts/tree/main/ofl/splinesans),
 with its SIL Open Font License bundled in `assets/`.
 
-The animated version is authored in the [motion repository](https://github.com/the-open-engine/motion/tree/main/compositions/zeroshot-readme). Its timeline illustrates a review rejection and
+The animated version is authored in the [shared assets repository](https://github.com/the-open-engine/assets/tree/main/compositions/zeroshot-readme). Its timeline illustrates a review rejection and
 a delivery failure; both repairs return to both reviewers.
 
 The 22-second GIF exports are `docs/assets/zeroshot-demo.gif` (light) and
