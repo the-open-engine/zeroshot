@@ -26,6 +26,8 @@
 
 **The agent that writes the code should not be the one that decides it works.**
 
+[Opcore](https://github.com/the-open-engine/opcore) adds local checks while agents edit source.
+
 Zeroshot turns a software goal into an explicit multi-agent graph. One agent implements. Independent
 agents review. Failures route back into bounded repair. Delivery happens only after the graph's checks
 pass.
@@ -122,9 +124,14 @@ its configured checks accepted the work; coverage depends on the requirements, r
 and environment you provide.
 
 <div align="center">
-  <img src="docs/assets/zeroshot-demo.gif" alt="Animated Zeroshot software-change graph: a goal moves through implementation, parallel acceptance and code review, bounded repair loops, Git delivery, and a merged result" width="960">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/zeroshot-workflow.svg">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/zeroshot-demo-dark.gif">
+    <img src="docs/assets/zeroshot-demo.gif" alt="Animated Zeroshot workflow: implementation, parallel acceptance and code review, repair, and optional Git delivery" width="960">
+  </picture>
   <br>
-  <em>One authored graph: implement, review, repair when evidence fails, and deliver when it passes.</em>
+  <em>Both reviews run again after a repair. Git delivery is optional.</em><br>
+  <a href="docs/assets/zeroshot-workflow.svg">Static diagram</a>
 </div>
 
 ## Bring your own graph topology

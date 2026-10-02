@@ -76,3 +76,28 @@ Review both exports at full resolution and README display width before committin
 engraved-seal design. They are separate from the README banners. `social/` contains
 the existing README social links, and `oec-crow.png` / `oec-favicon.svg` are used by
 the documentation theme.
+
+## Workflow diagrams
+
+The workflow diagram shows both reviewers, both repair paths, and optional Git delivery.
+Editable SVG labels and shapes live in `diagram-sources/`. Run the exporter after
+editing them:
+
+```sh
+python3 -m venv /tmp/open-engine-diagram-tools
+/tmp/open-engine-diagram-tools/bin/pip install fonttools==4.63.0
+/tmp/open-engine-diagram-tools/bin/python docs/brand/outline-diagrams.py
+```
+
+Exports land in `docs/assets/`. Text becomes vector paths, retaining accessible
+labels, so GitHub needs no external fonts. Each SVG supports light and dark mode.
+Review both themes after changes, including the mobile layouts where supplied.
+Body text uses [Spline Sans](https://github.com/google/fonts/tree/main/ofl/splinesans),
+with its SIL Open Font License bundled in `assets/`.
+
+The animated version is authored in the [motion repository](https://github.com/the-open-engine/motion/tree/main/compositions/zeroshot-readme). Its timeline illustrates a review rejection and
+a delivery failure; both repairs return to both reviewers.
+
+The 22-second GIF exports are `docs/assets/zeroshot-demo.gif` (light) and
+`docs/assets/zeroshot-demo-dark.gif` (dark), rendered at 1600 × 940 and 15 fps.
+The README uses the static SVG when reduced motion is preferred.
