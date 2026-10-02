@@ -26,17 +26,12 @@
 
 **The agent that writes the code should not be the one that decides it works.**
 
-Zeroshot runs agent workflows you can inspect, customize, and reuse. Define the steps, choose the
-models, and decide how results are checked before work moves on.
+Build better software with agent workflows you can customize and reuse. Zeroshot brings
+implementation, independent review, and repair into one workflow.
 
-Start with a built-in graph or author your own:
-
-- **Software changes:** implement a task, review it independently, and repair rejected work.
-- **Autoresearch:** propose experiments, judge the evidence, and retain or reject results over a
-  bounded series of iterations.
-
-Both use the same graph engine. Customize the agents, parallel steps, loops, and exit conditions,
-then save the setup as a profile.
+Start with the built-in software-change graph or author your own. Choose the models, add the checks
+your codebase needs, and control the parallel steps, loops, and exit conditions. Save the setup as a
+profile for your next task.
 
 - **Independent review:** acceptance and code reviewers check the worker's result in separate agent sessions.
 - **Automatic repair:** rejected work returns to a repair worker, then goes through review again.
