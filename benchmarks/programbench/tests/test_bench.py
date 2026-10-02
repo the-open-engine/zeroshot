@@ -202,10 +202,24 @@ class ConfigTests(unittest.TestCase):
             settings = images.gateway_settings(glm, "gateway-image")
             self.assertEqual((settings["upstream"], settings["secret_env"], json.loads(settings["models"])), ("openrouter", "OPENROUTER_API_KEY", ["z-ai/glm-5.2"]))
             self.assertEqual(json.loads(settings["routing"]), {"order": ["z-ai"], "allow_fallbacks": False})
+            # Claude Code's default for a model its catalog does not know is 32,000 output tokens a response.
+            self.assertEqual(glm.max_output_tokens, config.CLAUDE_MAX_OUTPUT_TOKENS)
+            self.assertIn("export CLAUDE_CODE_MAX_OUTPUT_TOKENS=128000\n", images.claude_launcher({"PATH": "/usr/bin"}, glm.max_output_tokens))
+
+    def test_only_claude_experiments_set_an_output_limit(self):
+        glm = config.load("experiments/glm52-xhigh-svgbob-v6.json")
+        for bad in (0, 128_001, "128000", True, 64000.0):
+            with self.assertRaises(ValueError, msg=bad):
+                self._load({**glm.raw, "model": {**glm.raw["model"], "max_output_tokens": bad}})
+        codex = {k: v for k, v in glm.raw["model"].items() if k != "provider_routing"}
+        with self.assertRaises(ValueError):
+            self._load({**glm.raw, "model": {**codex, "harness": "codex"}})
+        self.assertEqual(self._load({**glm.raw, "model": {**glm.raw["model"], "max_output_tokens": 64000}}).max_output_tokens, 64000)
+        self.assertIsNone(config.load("experiments/opus5-xhigh-svgbob-v5.json").max_output_tokens)  # v5 keeps its launcher
 
     def test_providers_belong_to_their_harness(self):
         glm = config.load("experiments/glm52-xhigh-svgbob-v6.json")
-        unpinned = {k: v for k, v in glm.raw["model"].items() if k != "provider_routing"}
+        unpinned = {k: v for k, v in glm.raw["model"].items() if k not in ("provider_routing", "max_output_tokens")}
         for model in ({**unpinned, "provider": "openai"}, {**unpinned, "harness": "codex", "provider": "anthropic"}, {**unpinned, "provider": "bedrock"},
                       {**glm.raw["model"], "provider": "anthropic"}, {**glm.raw["model"], "provider_routing": {"order": []}}):
             with self.assertRaises(ValueError, msg=model):
@@ -807,6 +821,17 @@ class OpenRouterGatewayTests(unittest.TestCase):
             listed = gateway.Gateway("k" * 20, {"input": 1.4, "cached_input": 0.26, "output": 4.4}, 1.0, f"{tmp}/h.jsonl")
             self.assertAlmostEqual(listed.charge({"input_tokens": 55, "cache_read_input_tokens": 16192, "output_tokens": 3}), (55 * 1.4 + 16192 * 0.26 + 3 * 4.4) / 1e6)
 
+    def test_the_audit_reports_the_output_limits_requested(self):
+        log = "\n".join(json.dumps(r) for r in (
+            {"t": 1, "event": "listening"},
+            {"t": 2, "method": "POST", "path": "/v1/messages", "status": 200, "model": "z-ai/glm-5.2", "max_tokens": 128000, "cost_usd": 0.5},
+            {"t": 3, "method": "POST", "path": "/v1/messages", "status": 200, "model": "z-ai/glm-5.2", "max_tokens": 128000, "cost_usd": 0.25},
+            {"t": 4, "method": "POST", "path": "/v1/messages/count_tokens", "status": 404, "model": "z-ai/glm-5.2"},
+        ))
+        summary = audit.gateway_audit(log)
+        self.assertEqual(summary["max_tokens"], {"128000": 2})
+        self.assertEqual((summary["cost_usd"], summary["statuses"]), (0.75, {"200": 2, "404": 1}))
+
 
 class ClaudeHarnessTests(unittest.TestCase):
     def test_v5_runs_claude_code_behind_the_gateway(self):
@@ -833,6 +858,7 @@ class ClaudeHarnessTests(unittest.TestCase):
         self.assertIn("export TMPDIR=/tmp\n", launcher)
         self.assertIn("export ODD='a b'\"'\"'c'\n", launcher)
         self.assertNotIn("export HOME=", launcher)  # Zeroshot sets HOME itself
+        self.assertNotIn("CLAUDE_CODE_MAX_OUTPUT_TOKENS", launcher)  # Claude Code's own default unless an experiment sets one
         for switch in ("CLAUDE_CODE_DISABLE_CLAUDE_MDS=1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1", "DISABLE_TELEMETRY=1"):
             self.assertIn(f"export {switch}\n", launcher)
         exec_line = launcher.strip().splitlines()[-1]

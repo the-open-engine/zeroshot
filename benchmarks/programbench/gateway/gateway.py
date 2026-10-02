@@ -221,6 +221,8 @@ def make_handler(gateway: Gateway) -> type[http.server.BaseHTTPRequestHandler]:
                     payload = None
             if isinstance(payload, dict):
                 record.update(model=payload.get("model"), stream=bool(payload.get("stream")), tools=tool_names(payload))
+                if payload.get("max_tokens") is not None:
+                    record["max_tokens"] = payload["max_tokens"]
             blocked = blocked_request_features(payload)
             if blocked:
                 self._refuse(403, f"server-side tools are not allowed: {blocked}", {**record, "blocked": blocked})

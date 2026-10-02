@@ -72,11 +72,13 @@ def tool_environment(task_env: dict[str, str]) -> dict[str, str]:
     return mirrored
 
 
-def claude_launcher(task_env: dict[str, str]) -> str:
+def claude_launcher(task_env: dict[str, str], max_output_tokens: int | None = None) -> str:
     env = tool_environment(task_env)
     rest = [d for d in env.get("PATH", "").split(":") if d and d not in ROOT_OWNED_PATH]
     env["PATH"] = ":".join([*ROOT_OWNED_PATH, *dict.fromkeys(rest)])
     env.update(CLAUDE_SWITCHES)
+    if max_output_tokens is not None:
+        env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = str(max_output_tokens)
     exports = "\n".join(f"export {key}={shlex.quote(value)}" for key, value in sorted(env.items()))
     template = (ROOT / "agent" / "claude-launcher.sh.in").read_text()
     return template.replace("@EXPORTS@", exports).replace("@DISALLOWED@", ",".join(CLAUDE_DISALLOWED_TOOLS))
@@ -161,7 +163,7 @@ def build_agent(exp: Experiment, cache: Path) -> tuple[str, dict[str, str]]:
 def _build_claude_agent(exp: Experiment, cache: Path) -> tuple[str, dict[str, str]]:
     pin = pins()
     ensure_image(exp.task_image)
-    launcher = claude_launcher(image_env(exp.task_image))
+    launcher = claude_launcher(image_env(exp.task_image), exp.max_output_tokens)
     adjustments = json.dumps({"reference_path": exp.reference_path, "doc_fixes": exp.doc_fixes}, sort_keys=True, indent=2)
     digest = hashlib.sha256()
     for part in (exp.task_image, launcher, adjustments):

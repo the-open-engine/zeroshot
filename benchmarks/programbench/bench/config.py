@@ -21,6 +21,8 @@ PROVIDERS = {"codex": ("openai", "openrouter"), "claude": ("anthropic", "openrou
 SECRET_ENVS = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
 # The one host each provider's agents may reach (the egress proxy's allowlist, or the gateway's upstream).
 API_HOSTS = {"openai": "api.openai.com", "anthropic": "api.anthropic.com", "openrouter": "openrouter.ai"}
+# The largest output limit per response Claude Code sends, whatever CLAUDE_CODE_MAX_OUTPUT_TOKENS asks for.
+CLAUDE_MAX_OUTPUT_TOKENS = 128_000
 # Where ProgramBench task images put the reference executable. An experiment may move it out of the
 # workspace (task.reference_path), where the agent can run it but not overwrite, move or delete it.
 UPSTREAM_REFERENCE = "/workspace/executable"
@@ -107,6 +109,12 @@ class Experiment:
     def provider_routing(self) -> dict[str, Any] | None:
         """OpenRouter provider preferences the gateway adds to every inference request."""
         return self.raw["model"].get("provider_routing")
+
+    @property
+    def max_output_tokens(self) -> int | None:
+        """Claude Code's output limit per response (CLAUDE_CODE_MAX_OUTPUT_TOKENS); None keeps its
+        default, which depends on whether its model catalog knows the model."""
+        return self.raw["model"].get("max_output_tokens")
 
     @property
     def api_host(self) -> str:
@@ -198,6 +206,9 @@ def _validate(raw: dict[str, Any]) -> None:
     routing = raw["model"].get("provider_routing")
     if routing is not None and (harness != "claude" or raw["model"].get("provider") != "openrouter" or not isinstance(routing, dict) or not routing.get("order")):
         raise ValueError("model.provider_routing pins OpenRouter providers through the Claude gateway and needs an order")
+    max_output = raw["model"].get("max_output_tokens")
+    if max_output is not None and (harness != "claude" or isinstance(max_output, bool) or not isinstance(max_output, int) or not 1 <= max_output <= CLAUDE_MAX_OUTPUT_TOKENS):
+        raise ValueError(f"model.max_output_tokens sets Claude Code's output limit per response: an integer from 1 to {CLAUDE_MAX_OUTPUT_TOKENS}")
     if "usd_cap_per_attempt" in raw["limits"] and (harness != "claude" or float(raw["limits"]["usd_cap_per_attempt"]) <= 0):
         raise ValueError("limits.usd_cap_per_attempt must be positive and needs the Claude gateway")
     arms = raw["arms"]

@@ -207,6 +207,8 @@ class Smoke:
                 launcher = self._sh(c, "cat /usr/local/bin/claude")[1]
                 owner = self._sh(c, "stat -c '%U %a' /usr/local/bin/claude")[1]
                 required = ["--safe-mode", '--setting-sources ""', "export TMPDIR=/tmp", *(f"export {k}={v}" for k, v in CLAUDE_SWITCHES.items()), *CLAUDE_DISALLOWED_TOOLS]
+                if self.exp.max_output_tokens is not None:
+                    required.append(f"export CLAUDE_CODE_MAX_OUTPUT_TOKENS={self.exp.max_output_tokens}")
                 missing = [r for r in required if r not in launcher]
                 return owner == "root 755" and not missing, f"root-owned launcher ({owner}); missing: {missing or 'none'}"
 
