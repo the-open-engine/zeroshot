@@ -26,18 +26,12 @@
 
 **The agent that writes the code should not be the one that decides it works.**
 
-Build better software with agent workflows you can customize and reuse. Zeroshot brings
-implementation, independent review, and repair into one workflow.
+Zeroshot turns a software goal into an explicit multi-agent graph. One agent implements. Independent
+agents review. Failures route back into bounded repair. Delivery happens only after the graph's checks
+pass.
 
-Start with the built-in software-change graph or author your own. Choose the models, add the checks
-your codebase needs, and control the parallel steps, loops, and exit conditions. Save the setup as a
-profile for your next task.
-
-- **Independent review:** acceptance and code reviewers check the worker's result in separate agent sessions.
-- **Automatic repair:** rejected work returns to a repair worker, then goes through review again.
-- **Reusable profiles:** save a graph and its runtime settings for future tasks.
-- **Visible execution:** inspect live and completed runs, node transcripts, and review findings in the browser UI.
-- **Explicit delivery:** keep work local, push a branch, prepare a pull request, or ship through CI and merge.
+Use the built-in graph or bring your own topology. Add reviewers, tests, and repair loops, then save
+the setup as a profile for the next task.
 
 > **Zeroshot v8 is a hard interface cutover.** The former Node.js runtime is retired; the native
 > `zeroshot` executable is the product.
@@ -133,28 +127,25 @@ and environment you provide.
   <em>One authored graph: implement, review, repair when evidence fails, and deliver when it passes.</em>
 </div>
 
-## Adapt the workflow to your codebase
+## Bring your own graph topology
 
-For example, a service with an expensive integration environment could use a custom graph:
+Choose each agent's model and instructions, which steps run in parallel, and when to retry.
+For example, add a bugfinder and E2E tests after the code and acceptance review loop:
 
 ```text
 Implementation
       ↓
 Code review + acceptance review
       ↓
-Adversarial tests
+Bugfinder: adversarial tests
       ↓
 E2E tests
       ↓
 Delivery
 ```
 
-Configure repair paths for failed checks and provide the environment each stage needs. Adversarial
-and E2E stages are custom additions to this example, not part of the built-in software-change graph.
-E2E testing requires your application's dependencies, services, credentials, and test tools.
-
-You can also assign different models to workers and reviewers, adjust their instructions, and
-choose which checks run in parallel.
+The bugfinder and E2E stages are custom additions. Provide their test tools, services, and credentials,
+and configure where failures route back for repair.
 
 Inspect the built-in graph as a starting point:
 
@@ -184,14 +175,14 @@ The CLI and UI share the same local profiles. Pass `--target NAME` to `zeroshot 
 configured direct or hosted target's run history while keeping profiles local. See
 [UI setup](docs/getting-started/install.md#open-the-workspace-ui).
 
-Experimental: expose a saved local profile as an ACP agent. Each prompt runs the graph as a
-durable local run while the ACP session keeps the workspace and node sessions alive:
+Experimental: expose a local graph as an ACP agent. First create the separate `acp-worker` profile
+from the [ACP guide](docs/guides/acp.md). ACP requires a `response` output and node-scoped sessions;
+the software-change profile above is not compatible. Each prompt runs the graph while the ACP session
+keeps the workspace and node sessions alive:
 
 ```bash
-zeroshot acp --profile local:my-profile
+zeroshot acp --profile local:acp-worker
 ```
-
-See [Use a local graph as an ACP agent](docs/guides/acp.md) for the narrow preview contract.
 
 ## Choose delivery and execution
 
@@ -255,7 +246,7 @@ Add `--target NAME` for Docker or Cloud. See
 [Restart or resume a failed run](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run)
 for restore rules and retention.
 
-## Autoresearch
+## Not just for coding
 
 Zeroshot also includes an `auto-research` graph for ten bounded iterations of experiments with
 independent review of evidence, method, and progress. It keeps adopted, record-only, and aborted
