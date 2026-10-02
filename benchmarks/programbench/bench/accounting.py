@@ -79,9 +79,10 @@ def node_of_session(first_prompt: str) -> str:
 
 
 def is_node_prompt(record: dict[str, Any]) -> bool:
-    """The user message that starts one graph execution of a node (Codex or Claude Code record)."""
+    """The user message that starts one graph execution of a node (Codex or Claude Code record).
+    Claude Code's compaction summaries can quote the instructions, but they start no execution."""
     if record.get("type") == "user" and "message" in record:
-        return not record.get("isMeta") and "Authored instructions" in claude_text(record.get("message"))
+        return not record.get("isMeta") and not record.get("isCompactSummary") and "Authored instructions" in claude_text(record.get("message"))
     payload = record.get("payload") or {}
     if payload.get("type") != "message" or payload.get("role") != "user":
         return False

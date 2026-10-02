@@ -867,9 +867,14 @@ class ClaudeHarnessTests(unittest.TestCase):
 
     def test_claude_usage_counts_each_response_once_by_round(self):
         usage = {"input_tokens": 2, "cache_creation_input_tokens": 100, "cache_read_input_tokens": 1000, "output_tokens": 50, "cache_creation": {"ephemeral_1h_input_tokens": 40}}
+        # A compaction summary quotes the instructions but continues the same round.
+        summary = {**_claude_prompt(config.prompt("builder"), "2026-09-25T10:00:30Z"), "isCompactSummary": True, "isVisibleInTranscriptOnly": True}
         build = [
             _claude_prompt(config.prompt("builder"), "2026-09-25T10:00:00Z"),
             *_claude_response("m1", "2026-09-25T10:00:05Z", [{"type": "text", "text": "x"}, {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}], usage),
+            {"type": "system", "subtype": "compact_boundary", "timestamp": "2026-09-25T10:00:30Z"},
+            summary,
+            *_claude_response("m0", "2026-09-25T10:00:40Z", [{"type": "text", "text": "w"}], usage),
             _claude_prompt(config.prompt("builder"), "2026-09-25T10:10:00Z"),
             *_claude_response("m2", "2026-09-25T10:10:05Z", [{"type": "text", "text": "y"}], usage),
         ]
@@ -885,7 +890,8 @@ class ClaudeHarnessTests(unittest.TestCase):
         self.assertEqual([s["node"] for s in sessions], ["build", "check"])  # by first timestamp
         one = {"inputTokens": 1102, "outputTokens": 50, "cacheReadInputTokens": 1000, "cacheCreationInputTokens": 100, accounting.ONE_HOUR: 40}
         rounds = sessions[0]["rounds"]
-        self.assertEqual(rounds[0], one)  # m1 once, although it spans two records
+        self.assertEqual(len(rounds), 2)
+        self.assertEqual(rounds[0], {k: 2 * v for k, v in one.items()})  # m1 once, although it spans two records, and m0 after the compaction
         self.assertEqual(rounds[1]["inputTokens"], 2 * 1102)  # m2 plus the subagent that ran during round 2
         pricing = {"usd_per_million_tokens": {"input": 5, "cached_input": 0.5, "cache_write": 6.25, "cache_write_1h": 10, "output": 25}}
         self.assertAlmostEqual(accounting.cost(one, pricing), (2 * 5 + 1000 * 0.5 + 60 * 6.25 + 40 * 10 + 50 * 25) / 1e6)
