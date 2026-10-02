@@ -1,7 +1,7 @@
 {
   "docsVersion": "current",
   "productVersion": null,
-  "publisherCommit": "8d00072db8d90926240233e2793926066854bba4",
+  "publisherCommit": "0448da3fda8dc94f3dc2d50deff807ec9985de1b",
   "pythonSdkVersion": null,
   "routes": {
     "cli": "zeroshot-cli/",
@@ -21,5 +21,5 @@
     "targets": "concepts/targets/"
   },
   "schemaVersion": 2,
-  "sourceCommit": "8d00072db8d90926240233e2793926066854bba4"
+  "sourceCommit": "0448da3fda8dc94f3dc2d50deff807ec9985de1b"
 }
