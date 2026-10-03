@@ -221,7 +221,7 @@ impl ClaudeTranscript {
         };
         if !matches!(
             event_type,
-            "system" | "stream_event" | "assistant" | "result"
+            "system" | "stream_event" | "assistant" | "rate_limit_event" | "result"
         ) {
             return;
         }
@@ -243,6 +243,7 @@ impl ClaudeTranscript {
             "system" => self.parse_system(object, emissions),
             "stream_event" => self.parse_stream_event(object, emissions),
             "assistant" => self.parse_assistant(object, emissions),
+            "rate_limit_event" => self.parse_rate_limit_event(object, emissions),
             "result" => self.parse_result(object),
             _ => {}
         }
@@ -271,6 +272,50 @@ impl ClaudeTranscript {
             LiveOutputStream::System,
             &format!("Claude API retry {attempt}/{maximum}: {error}"),
         );
+    }
+
+    fn parse_rate_limit_event(
+        &self,
+        event: &serde_json::Map<String, Value>,
+        emissions: &mut Vec<ClaudeEmission>,
+    ) {
+        let Some(info) = event.get("rate_limit_info").and_then(Value::as_object) else {
+            return;
+        };
+        let mut fields = Vec::new();
+        if let Some(status) = info.get("status").and_then(Value::as_str) {
+            if safe_rate_limit_label(status) {
+                fields.push(format!("status={status}"));
+            }
+        }
+        if let Some(utilization) = info.get("utilization").and_then(Value::as_f64) {
+            if utilization.is_finite() {
+                // The SDK reports this as a 0..1 fraction; keep the fallback for normalized percentages.
+                let percentage = if (0.0..=1.0).contains(&utilization) {
+                    utilization * 100.0
+                } else {
+                    utilization
+                };
+                fields.push(format!("utilization={}%", format_decimal(percentage)));
+            }
+        }
+        if let Some(rate_limit_type) = info.get("rateLimitType").and_then(Value::as_str) {
+            if safe_rate_limit_label(rate_limit_type) {
+                fields.push(format!("type={rate_limit_type}"));
+            }
+        }
+        if let Some(resets_at) = info.get("resetsAt").and_then(Value::as_f64) {
+            if resets_at.is_finite() {
+                fields.push(format!("resetsAt={}", format_resets_at(resets_at)));
+            }
+        }
+        if !fields.is_empty() {
+            self.emit(
+                emissions,
+                LiveOutputStream::System,
+                &format!("Claude rate limit: {}", fields.join(", ")),
+            );
+        }
     }
 
     fn parse_stream_event(
@@ -467,6 +512,47 @@ impl ClaudeTranscript {
         }
         diagnostic
     }
+}
+
+fn safe_rate_limit_label(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.')
+        })
+}
+
+fn format_decimal(value: f64) -> String {
+    let mut formatted = format!("{value:.2}");
+    while formatted.ends_with('0') {
+        formatted.pop();
+    }
+    if formatted.ends_with('.') {
+        formatted.pop();
+    }
+    formatted
+}
+
+fn format_resets_at(value: f64) -> String {
+    // The SDK currently reports Unix seconds, but accept milliseconds as its account shape evolves.
+    let seconds = if value.abs() >= 1_000_000_000_000.0 {
+        value / 1000.0
+    } else {
+        value
+    };
+    time::OffsetDateTime::from_unix_timestamp(seconds.round() as i64)
+        .map(|timestamp| {
+            format!(
+                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+                timestamp.year(),
+                u8::from(timestamp.month()),
+                timestamp.day(),
+                timestamp.hour(),
+                timestamp.minute(),
+                timestamp.second()
+            )
+        })
+        .unwrap_or_else(|_| format_decimal(value))
 }
 
 fn utf8_chunks(value: &str, max: usize) -> Vec<String> {
