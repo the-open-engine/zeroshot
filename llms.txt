@@ -1,0 +1,57 @@
+# Zeroshot
+
+> Zeroshot runs a software task as an explicit multi-agent graph: one agent implements, independent agents review the result against the task's acceptance criteria and for code quality, rejected work goes to a bounded repair loop, and nothing is delivered until the graph's checks pass. The implementing agent never approves its own work. It is a native CLI (`zeroshot`) for Linux, macOS, and Windows, driving Codex, Claude Code, or GitHub Copilot as the agent harness. MIT licensed.
+
+## What it does
+
+- Built-in `software-change` graph: implementation, then acceptance review and code review in parallel, then repair and re-review until both accept or the run's bounds are reached.
+- Custom graphs: choose each agent's model and instructions, which steps run in parallel, and where failures route for repair (for example, add adversarial bug-finding or E2E test stages).
+- Delivery modes: keep the change local (default), `--push` a branch, `--pr` open a pull request and address visible review feedback and required CI without merging, or `--ship` follow the repository's merge policy through to a merged revision.
+- Profiles save a graph plus its runtime settings for reuse. The browser UI (`zeroshot ui`) edits profiles and shows runs.
+- Execution targets: local, a self-hosted Docker target, or Zeroshot Cloud (shared team queue, durable run history). Failed runs with a recoverable workspace can resume from a checkpoint.
+- Every run records its events in a durable SQLite ledger.
+- An `auto-research` graph runs ten bounded experiment iterations with independent review of evidence, method, and progress.
+- Experimental: expose a graph as an ACP agent with `zeroshot acp`.
+
+## When to use it
+
+- A change should be checked by agents other than the one that wrote it.
+- You want the result delivered as a branch, a reviewed pull request, or a merge after CI.
+- You want the same review and repair setup reused across tasks, locally, self-hosted, or in the cloud.
+
+## When not to use it
+
+- A small edit you will review yourself in the editor; a single agent session is quicker.
+- As a replacement for tests. A passing run means the configured checks accepted the work; coverage depends on the requirements, reviewers, and tests you provide.
+- Per-edit checking inside an agent session: that is Opcore (https://github.com/the-open-engine/opcore), which pairs with Zeroshot.
+
+## Install and first run
+
+```bash
+npm install -g @the-open-engine-company/zeroshot
+echo '{"task": "Add JSON output to the status command and cover it with focused tests."}' > input.json
+echo '{"harness": "codex", "provider": "openai", "model": "YOUR_MODEL_ID", "effort": "high"}' > runtime.json
+zeroshot run --title "Add JSON status output" --template software-change \
+  --input input.json --uniform-runtime-config runtime.json --validate-only
+```
+
+Replace `YOUR_MODEL_ID` with a model your installed Codex CLI supports, and drop `--validate-only` to start the run. The worker edits the current Git worktree, so start in a clean one. The [first-run guide](https://the-open-engine.github.io/zeroshot/current/getting-started/first-run/) covers other harnesses.
+
+The installer needs Node.js 18+ and installs a verified native binary plus a Zeroshot skill for Codex, Claude Code, and GitHub Copilot. Local runs reuse the harness's existing login.
+
+## Docs
+
+- [Install](https://the-open-engine.github.io/zeroshot/current/getting-started/install/): prerequisites and harness setup
+- [First run](https://the-open-engine.github.io/zeroshot/current/getting-started/first-run/): input, runtime config, and inspecting a run
+- [Execution](https://the-open-engine.github.io/zeroshot/current/concepts/execution/): built-in graphs and delivery behavior
+- [Runtimes and connections](https://the-open-engine.github.io/zeroshot/current/concepts/runtimes-and-connections/): supported harness and provider pairs
+- [Graph contract](https://the-open-engine.github.io/zeroshot/current/reference/cluster/graph/): authoring custom graphs
+- [Observe and control runs](https://the-open-engine.github.io/zeroshot/current/guides/observe-and-control/): status, logs, resume
+- [CLI reference](https://the-open-engine.github.io/zeroshot/current/zeroshot-cli/)
+
+## Optional
+
+- [Prepare a runtime environment](https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/)
+- [ACP agent preview](https://the-open-engine.github.io/zeroshot/current/guides/acp/)
+- [Python SDK](https://the-open-engine.github.io/zeroshot/current/guides/python-sdk/)
+- [Source](https://github.com/the-open-engine/zeroshot)
