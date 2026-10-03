@@ -304,6 +304,10 @@ jobs:
           test -f "$pages_dir/current/manifest.json"
           test -f "$pages_dir/$DOCS_VERSION/manifest.json"
           git push origin refs/heads/gh-pages:refs/heads/gh-pages
+          # Agents look for llms.txt at the site root; serve Current's copy there.
+          if [[ -f "$pages_dir/current/llms.txt" ]]; then
+            cp "$pages_dir/current/llms.txt" "$pages_dir/llms.txt"
+          fi
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0

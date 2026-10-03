@@ -26,17 +26,35 @@
 
 **The agent that writes the code should not be the one that decides it works.**
 
-[Opcore](https://github.com/the-open-engine/opcore) adds local checks while agents edit source.
-
-Zeroshot turns a software goal into an explicit multi-agent graph. One agent implements. Independent
-agents review. Failures route back into bounded repair. Delivery happens only after the graph's checks
-pass.
+Zeroshot turns a software goal into an explicit multi-agent graph: one agent implements, independent
+agents review, failures go back to a bounded repair loop, and nothing is delivered until the graph's
+checks pass. The implementing agent never approves its own work.
 
 Use the built-in graph or bring your own topology. Add reviewers, tests, and repair loops, then save
 the setup as a profile for the next task.
 
-> **Zeroshot v8 is a hard interface cutover.** The former Node.js runtime is retired; the native
-> `zeroshot` executable is the product.
+[Opcore](https://github.com/the-open-engine/opcore) works alongside it: Opcore checks each edit while
+an agent writes code, and Zeroshot has independent agents review the whole change before it lands.
+
+## When to use it
+
+Zeroshot fits when:
+
+- a change should be checked by agents other than the one that wrote it, against the task's
+  acceptance criteria and for code quality;
+- you want the result delivered as a branch, a pull request with review feedback handled, or a merge
+  after CI;
+- you want the same review and repair setup reused across tasks, locally, on your own Docker target,
+  or in Zeroshot Cloud.
+
+It is not the right tool when:
+
+- you'll review a small edit yourself in the editor; a single agent session is quicker;
+- you need it to replace your tests. A passing run means the configured checks accepted the work, so
+  coverage depends on the requirements, reviewers, and tests you provide.
+
+> **Zeroshot v8 is a hard interface cutover.** v8 replaces the Node.js runtime with a native
+> `zeroshot` binary.
 
 ## Install
 
@@ -202,12 +220,12 @@ Keep the first result local, then enable the delivery mode that fits your proces
 | `--pr`           | Prepare a mergeable pull request without merging |
 | `--ship`         | Proceed through PR, CI, and merge                |
 
-PR and ship runs process visible GitHub feedback unless their delivery runtime binding opts out.
+PR and ship runs address visible pull request review feedback by default; pass `--no-pr-feedback` to
+ignore it.
 
 Graphs can execute locally, on a self-hosted target, or in Zeroshot Cloud. Each environment needs
-its own tools and authentication setup. Local graph execution and Cloud planning across dependent
-jobs are separate capabilities; changing an execution target does not make Cloud planning available
-locally.
+its own tools and authentication setup. Hosted merge plans, which coordinate several dependent jobs,
+are a Zeroshot Cloud feature.
 
 ### Self-hosted: run the Docker target
 
@@ -253,7 +271,7 @@ Add `--target NAME` for Docker or Cloud. See
 [Restart or resume a failed run](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run)
 for restore rules and retention.
 
-## Not just for coding
+## Research graph
 
 Zeroshot also includes an `auto-research` graph for ten bounded iterations of experiments with
 independent review of evidence, method, and progress. It keeps adopted, record-only, and aborted
@@ -277,7 +295,7 @@ See [Execution](docs/concepts/execution.md) for the research workflow's decision
 - [Target image guide](docker/zeroshot-target/README.md)
 - [Python SDK](sdks/python/README.md)
 - [Cluster API reference](https://the-open-engine.github.io/zeroshot/current/reference/cluster/api/)
-- [OpenEngine graph contract](docs/reference/cluster/graph.md)
+- [Graph contract](docs/reference/cluster/graph.md)
 
 ## Development
 
