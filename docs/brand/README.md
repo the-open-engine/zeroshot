@@ -101,3 +101,39 @@ a delivery failure; both repairs return to both reviewers.
 The 22-second GIF exports are `docs/assets/zeroshot-demo.gif` (light) and
 `docs/assets/zeroshot-demo-dark.gif` (dark), rendered at 1600 × 940 and 15 fps.
 The README uses the static SVG when reduced motion is preferred.
+
+## Social buttons
+
+`social/buttons.html` is the source for the README call-to-action and X buttons. The
+Discord button is the row's only filled rust button, so it reads as the primary
+action; the other buttons stay ink pills with rust icons. Exports are 70 px tall
+(35 px at 2×) and are displayed at `height="30"`.
+
+Re-render both themes with the Playwright install above:
+
+```sh
+NODE_PATH=/tmp/open-engine-banner-tools/node_modules node <<'JS'
+const { chromium } = require('playwright');
+const { resolve } = require('node:path');
+const { pathToFileURL } = require('node:url');
+(async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({ viewport: { width: 480, height: 160 }, deviceScaleFactor: 2 });
+    for (const theme of ['light', 'dark']) {
+      await page.goto(pathToFileURL(resolve('docs/brand/social/buttons.html')).href);
+      await page.evaluate(t => { document.documentElement.dataset.theme = t; }, theme);
+      await page.evaluate(() => document.fonts.ready);
+      for (const id of ['discord-cta', 'x']) {
+        await page.locator(`#${id}`).screenshot({
+          path: resolve(`docs/brand/social/${id}-${theme}.png`),
+          omitBackground: true,
+        });
+      }
+    }
+  } finally {
+    await browser.close();
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });
+JS
+```
