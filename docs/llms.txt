@@ -29,9 +29,13 @@
 
 ```bash
 npm install -g @the-open-engine-company/zeroshot
+echo '{"task": "Add JSON output to the status command and cover it with focused tests."}' > input.json
+echo '{"harness": "codex", "provider": "openai", "model": "YOUR_MODEL_ID", "effort": "high"}' > runtime.json
 zeroshot run --title "Add JSON status output" --template software-change \
   --input input.json --uniform-runtime-config runtime.json --validate-only
 ```
+
+Replace `YOUR_MODEL_ID` with a model your installed Codex CLI supports, and drop `--validate-only` to start the run. The worker edits the current Git worktree, so start in a clean one. The [first-run guide](https://the-open-engine.github.io/zeroshot/current/getting-started/first-run/) covers other harnesses.
 
 The installer needs Node.js 18+ and installs a verified native binary plus a Zeroshot skill for Codex, Claude Code, and GitHub Copilot. Local runs reuse the harness's existing login.
 
