@@ -187,7 +187,7 @@ Builds with UI support also serve the profile editor and run history at /ui/. Th
 
 Direct mode is unauthenticated. Bind or publish it only on trusted networks.
 
-Usage: zeroshot target serve --listen &lt;ADDRESS&gt; --public-origin &lt;ORIGIN&gt; --storage &lt;DIRECTORY&gt;
+Usage: zeroshot target serve [OPTIONS] --listen &lt;ADDRESS&gt; --public-origin &lt;ORIGIN&gt; --storage &lt;DIRECTORY&gt;
 
 Options:
       --listen &lt;ADDRESS&gt;
@@ -200,6 +200,9 @@ Options:
 
       --storage &lt;DIRECTORY&gt;
           Directory that stores target state, UI profiles, and run data
+
+      --operator-diagnostics-json
+          Write private operator diagnostics as JSON lines to stdout
 
   -h, --help
           Print help (see a summary with &#39;-h&#39;)</code></pre></section>
