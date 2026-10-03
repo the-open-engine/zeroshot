@@ -3,7 +3,9 @@
     python3 scripts/plot_pass_rate.py figures/luna-xhigh-svgbob-v3.json
 
 Draws the mean of the loop runs with a 95% percentile bootstrap interval (runs resampled as units),
-the single-worker level (the loop runs' mean first build) and published reference results. Writes
+the single-worker level (the loop runs' mean first build) and reference results (published runs, or
+any level with its own "label" and "color"). Optional: "round_labels" renames round ticks (such as the
+final workspace at the time limit), "headroom" adds room above the highest line for the legend. Writes
 <data>-pass-rate.png next to the data file. Needs matplotlib and numpy; Fraunces and Spline Sans are
 fetched once from Google Fonts into ~/.cache/zsbench/fonts (the default fonts are used offline).
 """
@@ -84,18 +86,21 @@ def main(data_path: Path) -> Path:
     for ref in data["references"]:
         pct = 100 * ref["passed"] / total
         prefix = "Best published" if ref.get("best") else "Published"
-        text = f"{prefix}: {ref['model']}\n({ref['effort']}, {ref['harness']}), {pct:.1f}%"
-        lines.append((pct, text, RUST if ref.get("best") else MUTED, ref.get("label_side", "right"), ref.get("label_below", False)))
+        text = ref["label"].format(pct=pct) if "label" in ref else f"{prefix}: {ref['model']}\n({ref['effort']}, {ref['harness']}), {pct:.1f}%"
+        color = {"ink_2": INK_2, "muted": MUTED, "rust": RUST}[ref["color"]] if "color" in ref else RUST if ref.get("best") else MUTED
+        lines.append((pct, text, color, ref.get("label_side", "right"), ref.get("label_below", False)))
     for y, text, color, side, below in lines:
         ax.axhline(y, color=color, lw=1.5, ls=(0, (1.2, 2.4)), dash_capstyle="round", zorder=1)
         x, ha = (x_hi - span * 0.3 / 51.5, "right") if side == "right" else (x_lo + span * 0.9 / 51.5, "left")
         ax.text(x, y - 0.55 if below else y + 0.55, text, ha=ha, va="top" if below else "bottom", ma=ha, linespacing=1.25, fontsize=9.5, fontweight="medium", color=color)
 
     low = min(lo.min(), *(y for y, *_ in lines)) - 4
-    high = max(hi.max(), *(y for y, *_ in lines)) + 7  # room for the legend above the highest line
+    high = max(hi.max(), *(y for y, *_ in lines)) + data.get("headroom", 7)  # room for the legend above the highest line
     ax.set_ylim(5 * np.floor(low / 5), 5 * np.ceil(high / 5) - 3)
     ax.set_xlim(x_lo, x_hi)
     ax.set_xticks(rounds if short else sorted({1, *(r for r in rounds if r % 5 == 0)}))
+    if data.get("round_labels"):  # e.g. {"4": "final"}: the workspace when the time limit stopped the run
+        ax.set_xticklabels([data["round_labels"].get(str(int(x)), str(int(x))) for x in ax.get_xticks()])
     ax.yaxis.set_major_locator(matplotlib.ticker.MultipleLocator(5))
     ax.yaxis.set_major_formatter(matplotlib.ticker.FormatStrFormatter("%d%%"))
     ax.set_xlabel("Build round (one build followed by one independent check)", labelpad=8)

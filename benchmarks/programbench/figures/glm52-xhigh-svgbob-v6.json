@@ -1,0 +1,73 @@
+{
+ "experiment": "glm52-xhigh-svgbob-v6",
+ "title": "GLM-5.2 (xhigh, Claude Code) on ProgramBench svgbob",
+ "scored_tests": 472,
+ "rounds": [
+  1,
+  2,
+  3,
+  4
+ ],
+ "round_labels": {
+  "4": "final"
+ },
+ "loop_runs": {
+  "01-loop": [
+   233,
+   240,
+   263,
+   263
+  ],
+  "02-loop": [
+   225,
+   227,
+   246,
+   247
+  ],
+  "03-loop": [
+   217,
+   280,
+   309,
+   309
+  ],
+  "04-loop": [
+   221,
+   268,
+   253,
+   253
+  ],
+  "05-loop": [
+   222,
+   276,
+   297,
+   311
+  ]
+ },
+ "notes": "Rounds are builds (each followed by a check). 'final' is the workspace when the 6-hour cap stopped the run: build 3 for 01, 03 and 04 (so equal to their round 3), build 4 for 02 and 05; every run's last build was cut off by the cap.",
+ "references_source": "ProgramBench/submissions@794fa30bbfd65059d5c67e192ceb6da659c9ef51, submissions/<entry>/_stats/score.json with ignored_tests.json applied",
+ "references": [
+  {
+   "model": "Claude Opus 5",
+   "effort": "xhigh",
+   "harness": "mini-SWE-agent",
+   "entry": "20260731_mini-v2.4.2_opus-5-xhigh",
+   "passed": 305,
+   "best": true
+  },
+  {
+   "model": "GLM-5.2",
+   "effort": "default effort",
+   "harness": "mini-SWE-agent",
+   "entry": "20260717_mini-v2.4.5_glm-5.2",
+   "passed": 207,
+   "label_below": true
+  },
+  {
+   "label": "GPT-5.6 Luna loop, 50 rounds (ours), {pct:.1f}%",
+   "source": "luna-xhigh-svgbob-v3 final workspaces 261, 266, 264, 242, 283",
+   "passed": 263.2,
+   "color": "ink_2",
+   "label_side": "left"
+  }
+ ]
+}
