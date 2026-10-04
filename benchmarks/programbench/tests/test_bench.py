@@ -206,6 +206,46 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(glm.max_output_tokens, config.CLAUDE_MAX_OUTPUT_TOKENS)
             self.assertIn("export CLAUDE_CODE_MAX_OUTPUT_TOKENS=128000\n", images.claude_launcher({"PATH": "/usr/bin"}, glm.max_output_tokens))
 
+    def test_cost_parity_study_pairs_luna_loops_with_sol_single_workers(self):
+        ditaa_luna = config.load("experiments/luna-xhigh-ditaa-v1.json")
+        for task in ("ditaa", "calcurse", "revive", "fasttext"):
+            luna = config.load(f"experiments/luna-xhigh-{task}-v1.json")
+            sol = config.load(f"experiments/sol-xhigh-{task}-single.json")
+            self.assertEqual((luna.model, luna.effort, sol.model, sol.effort), ("gpt-5.6-luna", "xhigh", "gpt-5.6-sol", "xhigh"))
+            self.assertEqual(sol.raw["task"], luna.raw["task"])
+            self.assertEqual((sol.raw["arms"], sol.raw["order"]), ({"single": {"repeats": 5}}, ["single"] * 5))
+            self.assertEqual((sol.limits, sol.resources), (luna.limits, luna.resources))
+            self.assertEqual({k: v for k, v in sol.raw["eval"].items() if k != "rounds"}, {k: v for k, v in luna.raw["eval"].items() if k != "rounds"})
+            self.assertEqual(sol.pricing["usd_per_million_tokens"], config.load("experiments/sol-xhigh-svgbob-v4.json").pricing["usd_per_million_tokens"])
+            self.assertEqual(run_files(sol, "single")["input.json"], run_files(luna, "loop")["input.json"])  # a single worker is round 1's build
+            self.assertIn("parity workspace", sol.raw["decision_rule"]["cost_parity"])
+            if task == "ditaa":
+                continue
+            self.assertEqual(luna.raw["decision_rule"]["cost_parity"], sol.raw["decision_rule"]["cost_parity"])
+            for key in ("arms", "order", "limits", "resources", "eval", "pricing", "model"):  # ditaa's protocol on a new task
+                self.assertEqual(luna.raw[key], ditaa_luna.raw[key], key)
+            smoke = config.load(f"experiments/smoke-{task}.json")
+            self.assertEqual(smoke.raw["task"], luna.raw["task"])
+            fidelity = luna.fidelity_reference
+            self.assertTrue(fidelity["archive_url"].endswith(f"/{luna.instance_id}/submission.tar.gz"))
+            self.assertEqual(luna.reference_path, "/reference/executable")
+
+    def test_parallel_runners_only_on_request(self):
+        from unittest import mock
+
+        from bench import __main__ as cli
+
+        with mock.patch.object(cli, "docker", return_value="aaaaaaaaaaaa\nbbbbbbbbbbbb\n"), mock.patch.object(cli.socket, "gethostname", return_value="aaaaaaaaaaaa"):
+            with mock.patch.dict(os.environ, {"ZSBENCH_ALLOW_PARALLEL": ""}):
+                for command in ("run", "eval", "cleanup"):
+                    with self.assertRaises(SystemExit):
+                        cli._refuse_while_another_runner_runs(command)
+            with mock.patch.dict(os.environ, {"ZSBENCH_ALLOW_PARALLEL": "1"}), mock.patch.object(cli, "log"):
+                cli._refuse_while_another_runner_runs("run")
+                cli._refuse_while_another_runner_runs("eval")
+                with self.assertRaises(SystemExit):
+                    cli._refuse_while_another_runner_runs("cleanup")  # would remove a live runner's attempts
+
     def test_only_claude_experiments_set_an_output_limit(self):
         glm = config.load("experiments/glm52-xhigh-svgbob-v6.json")
         for bad in (0, 128_001, "128000", True, 64000.0):

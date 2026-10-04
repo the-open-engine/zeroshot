@@ -178,6 +178,40 @@ limits apply. Z.ai's prices on 2026-10-01 were $1.40 input, $0.26 cached input a
 million tokens. The GLM runs therefore differ from Luna's in model, provider and harness, and the
 comparison is descriptive.
 
+### Cost-parity study (pre-registered 2026-10-04)
+
+Can a cheaper model's check-and-repair loop beat a more expensive model's single worker at the same
+model cost? GPT-5.6 Luna at xhigh ($0.20 input, $1.20 output per million tokens) runs the loop;
+GPT-5.6 Sol at xhigh ($4 and $20 at the promotional prices v4 used) runs once, as a single worker:
+the build node alone, byte-identical to round 1 of the loop. Five tasks, 5 runs per arm each:
+
+- svgbob (Rust, ASCII diagrams to SVG): existing runs only. Sol's single workers are
+  `sol-xhigh-svgbob-v4`'s first builds and Luna's loops are `luna-xhigh-svgbob-v3`'s. From the rounds
+  scored so far, this task already leans towards Sol at parity (Luna about 53.5% at Sol's mean cost
+  of $3.75 per run against Sol's 55.9%); it stays in the study.
+- ditaa (Java, ASCII diagrams to PNG): Luna's loops are `luna-xhigh-ditaa-v1`'s; Sol's single
+  workers are new (`sol-xhigh-ditaa-single`).
+- calcurse (C, a terminal calendar), revive (Go, a linter for Go) and fasttext (C++, text
+  classification and word vectors): new `luna-xhigh-<task>-v1` loops with ditaa's protocol and new
+  `sol-xhigh-<task>-single` workers, after a `smoke-<task>` test each. These three were chosen before
+  any run: tasks with at most 800 hidden tests split over more than one test branch, published GPT-5.6
+  Sol xhigh between 15% and 80% and the best published result at least 5 points above it, one task
+  per language not yet covered, and within a language the domain least like the two diagram renderers.
+
+The comparison (each experiment's `decision_rule.cost_parity`): C is the mean model cost of a task's 5
+Sol single workers. Each Luna loop run is compared through its parity workspace, the workspace after
+the last build whose cumulative cost (builds 1 to k and checks 1 to k-1, from the transcripts at
+Luna's prices) does not exceed C; build 1 if build 1 alone costs more; the final workspace if the run
+stops first. On each task, Luna outperforms Sol at cost parity if the mean pass rate of its 5 parity
+workspaces is higher than the mean of Sol's 5 single workers, and robustly if the two 95% bootstrap
+intervals do not overlap. The study reports every task in one of these categories (no task is
+dropped afterwards), plus, descriptively, C at Sol's launch prices ($5, $0.50 cached, $30).
+
+All attempts of the study run side by side on a 64-CPU host (`ZSBENCH_ALLOW_PARALLEL=1`, recorded in
+each manifest) without evaluation: the agents mostly wait on the model API. Evaluations follow in
+batches sized to the host, and the parity workspaces are scored once both arms have finished (every
+round's snapshot is archived).
+
 ## The graph and prompts
 
 Both arms share one byte-identical `build` node; round 1 of the loop is exactly the single arm.

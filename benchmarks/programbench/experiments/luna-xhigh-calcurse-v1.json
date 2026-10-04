@@ -1,0 +1,84 @@
+{
+  "id": "luna-xhigh-calcurse-v1",
+  "description": "Cost-parity study: GPT-5.6 Luna's check-and-repair loop on calcurse (a terminal calendar and scheduling application, written in C), with luna-xhigh-ditaa-v1's model, prompts, graphs, limits, evaluation schedule and decision rule; 5 loop runs of up to 50 rounds. Compared at cost parity with sol-xhigh-calcurse-single's single GPT-5.6 Sol workers (decision_rule.cost_parity).",
+  "task": {
+    "instance_id": "lfos__calcurse.49180d5",
+    "image": "programbench/lfos_1776_calcurse.49180d5:task_cleanroom_v6@sha256:26d810389a6d5b155bb6d6799beaee6a836ee8a52d29c9a5089793ac1d22c79d",
+    "reference_path": "/reference/executable",
+    "adjustments_rationale": "As in the svgbob experiments v2 to v5, the reference moves to a root-owned directory outside the workspace (the task statement points there), so builders cannot overwrite or delete it at the build target's path. This adjustment is general, not specific to the task. The bundled documentation is left as shipped: no task-specific corrections.",
+    "fidelity_reference": {
+      "submission": "20260508_mini-v2.2.6_gpt-5-5-xhigh",
+      "commit": "530a7b8f969840d17efac1e1e5aaca1078cc2b3a",
+      "archive_url": "https://huggingface.co/datasets/programbench/20260508_mini-v2.2.6_gpt-5-5-xhigh/resolve/main/lfos__calcurse.49180d5/submission.tar.gz",
+      "archive_sha256": "2dd8372508b82ee610d71fc86d3f293369836320d72661a14ea2c9f756d969db",
+      "registry_commit": "794fa30bbfd65059d5c67e192ceb6da659c9ef51"
+    }
+  },
+  "model": {
+    "id": "gpt-5.6-luna",
+    "effort": "xhigh"
+  },
+  "arms": {
+    "loop": {
+      "repeats": 5,
+      "max_iterations": 50
+    }
+  },
+  "order": [
+    "loop",
+    "loop",
+    "loop",
+    "loop",
+    "loop"
+  ],
+  "limits": {
+    "attempt_seconds": 21600,
+    "build_timeout_ms": 10800000,
+    "check_timeout_ms": 3600000
+  },
+  "resources": {
+    "concurrency": 5,
+    "cpus": 4,
+    "memory": "7g",
+    "pids_limit": 8192
+  },
+  "eval": {
+    "workers": 8,
+    "docker_cpus": 3,
+    "timeout_seconds": 43200,
+    "rounds": [
+      1,
+      2,
+      3,
+      5,
+      10,
+      20,
+      30,
+      40,
+      50
+    ]
+  },
+  "pricing": {
+    "model": "gpt-5.6-luna",
+    "usd_per_million_tokens": {
+      "input": 0.2,
+      "cached_input": 0.02,
+      "cache_write": 0.25,
+      "output": 1.2
+    },
+    "source": "https://developers.openai.com/api/docs/pricing",
+    "retrieved": "2026-09-23"
+  },
+  "decision_rule": {
+    "eligibility": "A loop run enters the analysis only if: it completed; its first-build snapshot was archived and both it and the final workspace were scored on all tests (a workspace that fails to compile or to produce a usable executable scores 0, as on the leaderboard; an evaluation infrastructure error is re-evaluated once and disqualifies the run if it persists); build 1 ended normally or at its node time limit (a crash or malformed response cuts the baseline short); it has no disqualifying audit finding (binary instrumentation such as LD_PRELOAD, LD_AUDIT, LD_DEBUG or ptrace; direct model-API calls; proxy use by tools; process-environment reads; web search); its builder did not touch harness internals in round 1; neither scored workspace contains or builds the reference executable; the Codex config, the harness files and the Codex home's instruction files were unchanged and checked after every node, and no transcript shows loaded AGENTS.md instructions. All 5 loop runs must be eligible; otherwise the verdict is inconclusive.",
+    "metric": "paired within-run gain in hidden tests passed: final workspace minus the workspace when build 1 completed; the final workspace counts even if the 6-hour cap force-stopped the run",
+    "supported": "every loop run gains at least 1 percentage point and the median gain is at least 5 percentage points",
+    "not_supported": "the median gain is below 2 percentage points",
+    "otherwise": "inconclusive",
+    "reruns": "attempts that end in an infrastructure error are re-run once from scratch (the runner refuses a second re-run); the discarded attempt is kept and reported",
+    "covariates": "reported per run, not used for eligibility: whether the reference executable still existed after build 1 (builders may overwrite it), round count and verdicts, build-1 and total cost",
+    "learning_curve": "pre-registered and descriptive: hidden tests passed after builds 1, 2, 3, 5, 10, 20, 30, 40 and 50 (those reached) and in the final workspace, per loop run and as the median across runs; every other snapshot is archived but not scored",
+    "comparison": "cost parity with sol-xhigh-calcurse-single: see cost_parity",
+    "cost_parity": "Pre-registered 2026-10-04 (README, cost-parity study), before any run of this study. C = the mean model cost of the 5 runs of sol-xhigh-calcurse-single (single worker: GPT-5.6 Sol at xhigh, priced at that experiment's Sol prices). For each loop run of luna-xhigh-calcurse-v1, the parity workspace is the workspace after build k*, the last build whose cumulative cost (builds 1..k and checks 1..k-1, from the Codex transcripts at Luna's prices) does not exceed C; build 1 if build 1 alone exceeds C; the final workspace if the run ends before its cumulative cost reaches C. Outcome on this task: the mean hidden-test pass rate of the 5 Luna parity workspaces against the mean of the 5 Sol single-worker workspaces, each with a 95% percentile bootstrap interval (runs resampled, 10,000 resamples, seed 20260924). Luna outperforms Sol at cost parity if its mean is higher, robustly if the two intervals do not overlap. A run enters only if it completed, its compared workspace was scored on all tests (a workspace that fails to compile or to produce an executable scores 0, as on the leaderboard), neither that workspace contains nor builds the reference executable, and it has no disqualifying audit finding (binary instrumentation, direct model-API calls, proxy use by tools, process-environment reads, web search, changed harness or Codex files). Sensitivity, descriptive: C at Sol's launch prices ($5 input, $0.50 cached input, $30 output per million tokens)."
+  }
+}

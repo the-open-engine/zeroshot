@@ -10,13 +10,20 @@
 # OpenRouter) from ~/.config/zeroshot-bench/openrouter.env. Either way a key reaches the runner as
 # a read-only file mount, never as container config. Results land in ./results unless
 # ZSBENCH_RESULTS_DIR is set. ZSBENCH_DETACH=1 runs the runner as a detached container named
-# zsbench-runner (follow it with `docker logs -f zsbench-runner`; stop it with
+# zsbench-runner, or ZSBENCH_RUNNER_NAME (follow it with `docker logs -f zsbench-runner`; stop it with
 # `docker stop -t 1800 zsbench-runner` so running attempts are wound down and recorded).
+# ZSBENCH_ALLOW_PARALLEL=1 lets `run` and `eval` start while other runners are up (give each its own
+# ZSBENCH_RUNNER_NAME); evaluations then compete for CPUs, so schedule them with the host in mind.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")/.." && pwd)
 image=${ZSBENCH_IMAGE:-zeroshot-programbench:local}
 results=${ZSBENCH_RESULTS_DIR:-$PWD/results}
+runner=${ZSBENCH_RUNNER_NAME:-zsbench-runner}
+if [[ ! $runner =~ ^zsbench-runner[a-z0-9.-]*$ ]]; then
+  echo "ZSBENCH_RUNNER_NAME must start with zsbench-runner and use lowercase letters, digits, dots and dashes" >&2
+  exit 1
+fi
 secret=${ZSBENCH_SECRET_FILE:-$HOME/.config/zeroshot-bench/openai.env}
 socket=${ZSBENCH_DOCKER_SOCK:-/var/run/docker.sock}
 mkdir -p "$results"
@@ -45,6 +52,9 @@ args=(
   -e "ZSBENCH_VCS_REF=$ref" -e "ZSBENCH_VCS_DIRTY=$dirty"
   -e "ZSBENCH_HOST_UID=$(id -u)" -e "ZSBENCH_HOST_GID=$(id -g)"
 )
+if [[ ${ZSBENCH_ALLOW_PARALLEL:-0} == 1 ]]; then
+  args+=(-e "ZSBENCH_ALLOW_PARALLEL=1")
+fi
 
 temp_secret=""
 cleanup() { if [[ -n $temp_secret ]]; then rm -f "$temp_secret"; fi; }
@@ -71,12 +81,12 @@ if [[ -f $openrouter_secret ]]; then
 fi
 
 if [[ ${ZSBENCH_DETACH:-0} == 1 ]]; then
-  if [[ $(docker inspect -f '{{.State.Running}}' zsbench-runner 2>/dev/null || true) == true ]]; then
-    echo "A zsbench-runner container is already running; stop it first (docker stop -t 1800 zsbench-runner)." >&2
+  if [[ $(docker inspect -f '{{.State.Running}}' "$runner" 2>/dev/null || true) == true ]]; then
+    echo "A $runner container is already running; stop it first (docker stop -t 1800 $runner)." >&2
     exit 1
   fi
-  docker rm zsbench-runner >/dev/null 2>&1 || true
-  docker run -d --init --name zsbench-runner --label zsbench=1 --label zsbench.runner=1 --stop-timeout 1800 "${args[@]}" "$image" "$@"
+  docker rm "$runner" >/dev/null 2>&1 || true
+  docker run -d --init --name "$runner" --label zsbench=1 --label zsbench.runner=1 --stop-timeout 1800 "${args[@]}" "$image" "$@"
   if [[ -n $temp_secret ]]; then
     sleep 20  # the runner reads the key at startup; the temporary file is then removed
   fi

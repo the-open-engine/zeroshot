@@ -59,6 +59,7 @@ def _provenance(exp: config.Experiment) -> dict:
         "vcs_dirty": os.environ.get("ZSBENCH_VCS_DIRTY", "unknown"),
         "runner_image": runner_image,
         "experiment_digest": exp.digest(),
+        "parallel_runners_allowed": _parallel_allowed(),
     }
 
 
@@ -250,10 +251,19 @@ def cmd_smoke(exp: config.Experiment) -> None:
         sys.exit(1)
 
 
+def _parallel_allowed() -> bool:
+    """Experiments run side by side only on request (ZSBENCH_ALLOW_PARALLEL=1): attempts mostly wait on
+    the model API, but evaluations compete for CPUs, so the operator sizes the host and schedules them."""
+    return os.environ.get("ZSBENCH_ALLOW_PARALLEL") == "1"
+
+
 def _refuse_while_another_runner_runs(command: str) -> None:
     """`cleanup` would destroy a live runner's attempts, and `eval` would compete with them for CPUs."""
     own = socket.gethostname()
     others = [c for c in docker("ps", "-q", "--filter", "label=zsbench.runner=1").split() if not own.startswith(c) and not c.startswith(own)]
+    if others and command in ("run", "eval") and _parallel_allowed():
+        log(f"{len(others)} other zsbench runner(s) running; `{command}` continues because ZSBENCH_ALLOW_PARALLEL=1")
+        return
     if others:
         sys.exit(f"another zsbench runner is running ({', '.join(others)}); stop it before `{command}`")
 
