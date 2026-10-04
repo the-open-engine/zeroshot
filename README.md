@@ -72,8 +72,7 @@ npm install -g @the-open-engine-company/zeroshot
 
 The installer requires Node.js 18 or newer and installs a verified native binary for Linux
 x64/arm64, macOS x64/arm64, or Windows x64. It also installs one Zeroshot skill for Codex, GitHub
-Copilot, and Claude Code at user scope. Native archives and checksums are attached to each
-canonical `vX.Y.Z` GitHub Release.
+Copilot, and Claude Code at user scope.
 
 For local execution, install and sign in to Codex, Claude Code, or GitHub Copilot. Local runs can
 reuse the harness's existing login, including subscription-backed sessions. See the
@@ -104,18 +103,7 @@ Codex CLI:
 }
 ```
 
-Check the graph, runtime configuration, and input without starting a run:
-
-```bash
-zeroshot run \
-  --title "Add JSON status output" \
-  --template software-change \
-  --input input.json \
-  --uniform-runtime-config runtime.json \
-  --validate-only
-```
-
-Then start it:
+Start the run. Add `--validate-only` to check the graph, runtime configuration, and input first:
 
 ```bash
 zeroshot run \
@@ -204,18 +192,8 @@ zeroshot run \
   --input input.json
 ```
 
-The CLI and UI share the same local profiles. Pass `--target NAME` to `zeroshot ui` to inspect a
-configured direct or hosted target's run history while keeping profiles local. See
+The CLI and UI share the same local profiles. See
 [UI setup](docs/getting-started/install.md#open-the-workspace-ui).
-
-Experimental: expose a local graph as an ACP agent. First create the separate `acp-worker` profile
-from the [ACP guide](docs/guides/acp.md). ACP requires a `response` output and node-scoped sessions;
-the software-change profile above is not compatible. Each prompt runs the graph while the ACP session
-keeps the workspace and node sessions alive:
-
-```bash
-zeroshot acp --profile local:acp-worker
-```
 
 ## Choose delivery and execution
 
@@ -266,18 +244,8 @@ zeroshot target login cloud
 Open the printed link to sign in with the device code already filled in. Use `--target cloud` when
 submitting runs.
 
-When a failed run has a recoverable workspace, restart its graph on the latest saved files or choose
-an earlier node boundary:
-
-```bash
-zeroshot resume RUN_ID
-zeroshot checkpoints RUN_ID
-zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID
-```
-
-Add `--target NAME` for Docker or Cloud. See
-[Restart or resume a failed run](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run)
-for restore rules and retention.
+A failed run with a recoverable workspace can be
+[restarted or resumed](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run).
 
 ## Research graph
 
@@ -302,10 +270,7 @@ See [Execution](docs/concepts/execution.md) for the research workflow's decision
 
 - [Versioned documentation](https://the-open-engine.github.io/zeroshot/)
 - [Get started](docs/getting-started/first-run.md)
-- [ACP agent preview](docs/guides/acp.md)
 - [CLI reference](docs/zeroshot-cli.md)
-- [Standalone HTML CLI reference](docs/zeroshot-cli.html)
-- [Distribution contract](docs/zeroshot-distribution.md)
 - [Target image guide](docker/zeroshot-target/README.md)
 - [Python SDK](sdks/python/README.md)
 - [Cluster API reference](https://the-open-engine.github.io/zeroshot/current/reference/cluster/api/)
