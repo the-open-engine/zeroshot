@@ -61,9 +61,6 @@ It is not the right tool when:
 - you need it to replace your tests. A passing run means the configured checks accepted the work, so
   coverage depends on the requirements, reviewers, and tests you provide.
 
-> **Zeroshot v8 is a hard interface cutover.** v8 replaces the Node.js runtime with a native
-> `zeroshot` binary.
-
 ## Install
 
 ```bash
