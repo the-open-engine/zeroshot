@@ -19,7 +19,6 @@
 [![Coverage](https://coveralls.io/repos/github/the-open-engine/zeroshot/badge.svg?branch=main)](https://coveralls.io/github/the-open-engine/zeroshot?branch=main)
 [![Docs](https://img.shields.io/github/actions/workflow/status/the-open-engine/zeroshot/docs.yml?branch=main&style=flat&label=docs&labelColor=171411)](https://the-open-engine.github.io/zeroshot/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-171411?style=flat)](LICENSE)
-[![Discord](https://img.shields.io/discord/1435269500634140884?style=flat&label=discord&logo=discord&logoColor=white&labelColor=171411&color=C2240C)](https://discord.gg/fZyzf2Cut9)
 
 </div>
 
