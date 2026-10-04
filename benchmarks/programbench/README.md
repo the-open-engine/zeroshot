@@ -210,7 +210,10 @@ dropped afterwards), plus, descriptively, C at Sol's launch prices ($5, $0.50 ca
 All attempts of the study run side by side on a 64-CPU host (`ZSBENCH_ALLOW_PARALLEL=1`, recorded in
 each manifest) without evaluation: the agents mostly wait on the model API. Evaluations follow in
 batches sized to the host, and the parity workspaces are scored once both arms have finished (every
-round's snapshot is archived).
+round's snapshot is archived): `scripts/zsbench parity experiments/luna-xhigh-<task>-v1.json --against
+experiments/sol-xhigh-<task>-single.json` (for svgbob, `--against` v4, whose first builds are the
+single workers) writes `results/<luna experiment>/parity/<sol experiment>.json` and `.md`, scoring the
+parity snapshots outside the pre-registered schedule.
 
 ## The graph and prompts
 

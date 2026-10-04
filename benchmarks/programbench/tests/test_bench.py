@@ -230,6 +230,42 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(fidelity["archive_url"].endswith(f"/{luna.instance_id}/submission.tar.gz"))
             self.assertEqual(luna.reference_path, "/reference/executable")
 
+    def test_parity_workspace_is_the_last_build_within_budget(self):
+        from bench import parity
+
+        spend = [0.3, 0.8, 1.5, 2.2]
+        self.assertEqual(parity.parity_workspace(spend, 1.6), "build-3")
+        self.assertEqual(parity.parity_workspace(spend, 0.8), "build-2")  # at the budget counts as within it
+        self.assertEqual(parity.parity_workspace(spend, 0.1), "build-1")  # build 1 alone costs more
+        self.assertEqual(parity.parity_workspace(spend, 3.0), "final")  # the run stopped before reaching the budget
+        self.assertEqual(parity.parity_workspace([], 1.0), "final")
+
+    def test_parity_costs_add_each_build_and_the_checks_before_it(self):
+        from bench import accounting, parity
+
+        pricing = {"usd_per_million_tokens": {"input": 1.0, "cached_input": 0.1, "cache_write": 1.0, "output": 10.0}}
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = _tar(Path(tmp, "trajectories.tar.gz"), {
+                ".codex/sessions/2026/10/04/rollout-2026-10-04T10-00-00-a.jsonl": _rollout(config.prompt("builder"), [(1000, 100), (2000, 200), (3000, 300)]),
+                ".codex/sessions/2026/10/04/rollout-2026-10-04T10-05-00-b.jsonl": _rollout(config.prompt("checker"), [(500, 50), (700, 70)]),
+            })
+            spend = parity.cumulative_costs(archive, pricing)
+            sessions = {s["node"]: s["rounds"] for s in accounting.sessions(archive)}
+        price = lambda tokens: accounting.cost(tokens, pricing)
+        builds, checks = sessions["build"], sessions["check"]
+        self.assertEqual(len(spend), 3)
+        self.assertAlmostEqual(spend[0], price(builds[0]))
+        self.assertAlmostEqual(spend[1] - spend[0], price(builds[1]) + price(checks[0]))
+        self.assertAlmostEqual(spend[2] - spend[1], price(builds[2]) + price(checks[1]))
+
+    def test_parity_verdict_compares_means_and_intervals(self):
+        from bench import parity
+
+        self.assertIn("robustly", parity.verdict([50, 52, 51, 53, 52], [40, 41, 42, 40, 41])["verdict"])
+        overlapping = parity.verdict([50, 30, 60, 45, 52], [44, 46, 45, 43, 47])
+        self.assertEqual(overlapping["verdict"], "Luna outperforms (higher mean; intervals overlap)")
+        self.assertTrue(parity.verdict([40, 41, 39, 40, 42], [50, 51, 52, 50, 49])["verdict"].startswith("Sol is ahead robustly"))
+
     def test_parallel_runners_only_on_request(self):
         from unittest import mock
 

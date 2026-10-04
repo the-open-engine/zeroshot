@@ -8,6 +8,7 @@ Commands:
   run         run every attempt, then evaluate and report
   eval        (re)evaluate and score existing attempts
   report      rebuild summary.json and summary.md
+  parity      score this loop experiment at the cost of another's single workers (--against)
   cleanup     remove this experiment's containers and networks
 """
 
@@ -26,7 +27,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from . import ROOT, config, evaluate, images, report, smoke
+from . import ROOT, config, evaluate, images, parity, report, smoke
 from .attempt import Attempt, run_files
 from .util import (
     docker,
@@ -268,6 +269,19 @@ def _refuse_while_another_runner_runs(command: str) -> None:
         sys.exit(f"another zsbench runner is running ({', '.join(others)}); stop it before `{command}`")
 
 
+def cmd_parity(exp: config.Experiment, against: str | None) -> None:
+    """Cost parity (decision_rule.cost_parity): this experiment's loop runs at the mean cost of the
+    single workers in ``against`` (or of a loop experiment's first builds)."""
+    if not against:
+        sys.exit("parity needs --against SOL_EXPERIMENT")
+    _refuse_while_another_runner_runs("eval")
+    sol = config.load(against)
+    results = _results(exp)
+    _record_invocation(results, exp, f"parity --against {sol.id}")
+    parity.compare(exp, sol, results, RESULTS / sol.id, CACHE)
+    print((results / "parity" / f"{sol.id}.md").read_text())
+
+
 def cmd_cleanup(exp: config.Experiment) -> None:
     _refuse_while_another_runner_runs("cleanup")
     for container in docker("ps", "-aq", "--filter", f"label=zsbench.experiment={exp.id}").split():
@@ -295,12 +309,13 @@ def _exit_on_signal(signum: int, _frame: object) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="bench", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["plan", "check-key", "smoke", "run", "eval", "report", "cleanup"])
+    parser.add_argument("command", choices=["plan", "check-key", "smoke", "run", "eval", "report", "parity", "cleanup"])
     parser.add_argument("experiment", nargs="?", help="experiment JSON (default: experiments/smoke.json for smoke)")
     parser.add_argument("--keep-containers", action="store_true", help="leave attempt containers for inspection")
     parser.add_argument("--skip-eval", action="store_true", help="run attempts without evaluating")
     parser.add_argument("--force", action="store_true", help="re-evaluate archives that already have results")
     parser.add_argument("--allow-mixed", action="store_true", help="resume even if the experiment digest changed")
+    parser.add_argument("--against", help="parity: the experiment whose single workers (or first builds) set the cost")
     args = parser.parse_args()
     signal.signal(signal.SIGTERM, _exit_on_signal)
     for path in SECRET_FILES:
@@ -320,6 +335,8 @@ def main() -> None:
             cmd_eval(exp, args.force)
         elif args.command == "report":
             cmd_report(exp)
+        elif args.command == "parity":
+            cmd_parity(exp, args.against)
         elif args.command == "cleanup":
             cmd_cleanup(exp)
     finally:
