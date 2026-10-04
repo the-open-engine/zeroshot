@@ -215,6 +215,32 @@ experiments/sol-xhigh-<task>-single.json` (for svgbob, `--against` v4, whose fir
 single workers) writes `results/<luna experiment>/parity/<sol experiment>.json` and `.md`, scoring the
 parity snapshots outside the pre-registered schedule.
 
+Result (2026-10-04): at Sol's promotional prices, Luna's loop has the higher mean on 4 of 5 tasks,
+robustly on ditaa (46.6% against 17.7%) and calcurse (80.5% against 70.6%); its intervals overlap
+Sol's on revive (49.1% against 45.1%) and fasttext (78.4% against 76.9%), and on svgbob Sol is ahead
+with overlapping intervals (55.9% against 53.5%). At Sol's launch prices revive also turns robust
+(50.4% against 45.1%). The budgets were $2.88 to $4.66 per run, which Luna's loops reached after 11
+to 42 rounds; Sol's single workers took 6 to 14 minutes, Luna's 50-round loops 2.4 to 3.5 hours.
+
+| Task | Budget | Sol single worker | Luna loop at parity | Verdict |
+|---|---|---|---|---|
+| svgbob (Rust) | $3.75 | 55.9% (53.4 to 58.7) | 53.5% (51.2 to 55.0) | Sol ahead, intervals overlap |
+| ditaa (Java) | $4.66 | 17.7% (5.9 to 29.5) | 46.6% (42.5 to 50.0) | Luna ahead, robustly |
+| calcurse (C) | $4.41 | 70.6% (65.9 to 74.7) | 80.5% (76.8 to 85.4) | Luna ahead, robustly |
+| revive (Go) | $4.00 | 45.1% (42.2 to 46.9) | 49.1% (46.6 to 51.5) | Luna ahead, intervals overlap |
+| fasttext (C++) | $2.88 | 76.9% (73.5 to 82.2) | 78.4% (74.5 to 82.0) | Luna ahead, intervals overlap |
+
+![GPT-5.6 Luna's loop against GPT-5.6 Sol's single worker at the same model cost on five tasks: means of 5 runs with 95% bootstrap intervals](figures/cost-parity-promotional.png)
+
+Every run of both arms entered the comparison. One of Sol's ditaa workers scored 0 because its Java
+source contains a bullet character and `javac` in the evaluation environment reads source as
+US-ASCII, as on the leaderboard; without it Sol's ditaa mean is 22.1%, still well below Luna's. Two
+of Luna's fasttext loops left trained model files of up to 800 MB in their workspaces (about 65 GB
+of snapshots each), which only slowed archiving and the summary's scans (now parallel). The study's
+new model cost was $164.68: $79.73 for Sol's 20 single workers, $83.07 for Luna's 15 full loops
+(beyond their parity rounds as well) and $1.90 for the smoke tests. Per-task results:
+`figures/cost-parity/*.json` (from `bench parity`), figure: `scripts/plot_parity.py`.
+
 ## The graph and prompts
 
 Both arms share one byte-identical `build` node; round 1 of the loop is exactly the single arm.
