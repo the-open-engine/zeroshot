@@ -572,6 +572,19 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(parsed["established"], {"api.openai.com": 1})
         self.assertEqual(parsed["refused"], {"example.com": 1})
 
+    def test_checker_edits_compare_each_check_with_the_snapshot_before_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snaps = Path(tmp, "snapshots")
+            snaps.mkdir()
+            _tar(snaps / "build-1.tar.gz", {"./src/a.rs": b"one", "./.git/HEAD": b"ref"})
+            _tar(snaps / "check-1.tar.gz", {"./src/a.rs": b"one", "./.git/HEAD": b"ref2", "./target/x.o": b"obj"})
+            _tar(snaps / "build-2.tar.gz", {"./src/a.rs": b"two", "./.git/HEAD": b"ref2"})
+            _tar(snaps / "check-2.tar.gz", {"./src/a.rs": b"edited by the checker", "./.git/HEAD": b"ref2"})
+            rounds = audit.checker_edits(Path(tmp), ["build-1", "check-1", "build-2", "check-2"])
+        self.assertEqual([(r["check"], r["compared_with"]) for r in rounds], [("check-1", "build-1"), ("check-2", "build-2")])
+        self.assertEqual((rounds[0]["workspace_changes"], rounds[0]["artifact_changes"], rounds[0]["git_metadata_changes"]), ([], 1, 1))
+        self.assertEqual(rounds[1]["workspace_changes"], ["src/a.rs"])
+
     def test_secret_scan_finds_key_in_archives_nested_archives_and_git_objects(self):
         fake = "sk-test-" + "x" * 40
         os.environ["OPENAI_API_KEY"] = fake

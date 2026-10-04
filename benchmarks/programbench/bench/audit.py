@@ -9,12 +9,14 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import re
 import subprocess
 import tarfile
 import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Iterator
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -124,30 +126,50 @@ def _scan_blob(name: str, data: bytes, needles: list[bytes], hits: list[str], sh
             pass
 
 
+# Archives are scanned in parallel: one experiment's snapshots can hold hundreds of gigabytes.
+SCAN_WORKERS = min(16, os.cpu_count() or 1)
+
+
+def _scan_file(path: Path, rel: str, needles: list[bytes]) -> tuple[list[str], Counter, list[str]]:
+    hits: list[str] = []
+    shaped: Counter = Counter()
+    where: list[str] = []
+    if path.name.endswith(ARCHIVE_SUFFIXES):
+        try:
+            for member, data in _walk_archive(path):
+                _scan_blob(f"{rel}!{member}", data, needles, hits, shaped, where, 1)
+            if needles and any(needle in _git_objects(path) for needle in needles):
+                hits.append(f"{rel}!(git objects)")
+        except (tarfile.TarError, OSError, EOFError) as error:
+            hits.append(f"{rel}: unreadable archive ({error})")
+    else:
+        _scan_blob(rel, path.read_bytes(), needles, hits, shaped, where, 0)
+    return hits, shaped, where
+
+
 def secret_scan(root: Path) -> dict[str, Any]:
     """Look for the literal API key everywhere under ``root``: plain files, archive members,
     nested archives, and the decompressed objects of any git repository inside an archive."""
     needles = secret_values()
-    hits: list[str] = []
-    shaped: Counter = Counter()
-    where: list[str] = []
+    files: list[tuple[Path, str]] = []
     seen_inodes: set[tuple[int, int]] = set()
     for path in sorted(p for p in root.rglob("*") if p.is_file()):
         stat = path.stat()
         if (stat.st_dev, stat.st_ino) in seen_inodes:  # evals/ hard-link the attempt archives
             continue
         seen_inodes.add((stat.st_dev, stat.st_ino))
-        rel = str(path.relative_to(root))
-        if path.name.endswith(ARCHIVE_SUFFIXES):
-            try:
-                for member, data in _walk_archive(path):
-                    _scan_blob(f"{rel}!{member}", data, needles, hits, shaped, where, 1)
-                if needles and any(needle in _git_objects(path) for needle in needles):
-                    hits.append(f"{rel}!(git objects)")
-            except (tarfile.TarError, OSError, EOFError) as error:
-                hits.append(f"{rel}: unreadable archive ({error})")
-        else:
-            _scan_blob(rel, path.read_bytes(), needles, hits, shaped, where, 0)
+        files.append((path, str(path.relative_to(root))))
+    archives = [(p, r) for p, r in files if p.name.endswith(ARCHIVE_SUFFIXES)]
+    with ProcessPoolExecutor(max_workers=SCAN_WORKERS) as pool:
+        scanned = dict(zip((r for _, r in archives), pool.map(_scan_file, [p for p, _ in archives], [r for _, r in archives], [needles] * len(archives))))
+    hits: list[str] = []
+    shaped: Counter = Counter()
+    where: list[str] = []
+    for path, rel in files:  # merged in path order: the same result as one sequential pass
+        file_hits, file_shaped, file_where = scanned[rel] if rel in scanned else _scan_file(path, rel, needles)
+        hits += file_hits
+        shaped.update(file_shaped)
+        where += file_where[: max(0, 20 - len(where))]
     return {"checked_literal_key": bool(needles), "literal_key_hits": hits, "key_shaped_strings": dict(shaped), "key_shaped_locations": where}
 
 
@@ -472,11 +494,12 @@ def checker_edits(attempt_dir: Path, snapshot_labels: list[str]) -> list[dict[st
     modify reviewed files; regenerated build artifacts are reported separately."""
     rounds = []
     labels = [label for label in snapshot_labels if (attempt_dir / "snapshots" / f"{label}.tar.gz").exists()]
-    for before, after in zip(labels, labels[1:], strict=False):
-        if not after.startswith("check-"):
-            continue
-        a = _file_hashes(attempt_dir / "snapshots" / f"{before}.tar.gz")
-        b = _file_hashes(attempt_dir / "snapshots" / f"{after}.tar.gz")
+    pairs = [(before, after) for before, after in zip(labels, labels[1:], strict=False) if after.startswith("check-")]
+    needed = sorted({label for pair in pairs for label in pair})
+    with ProcessPoolExecutor(max_workers=SCAN_WORKERS) as pool:
+        hashes = dict(zip(needed, pool.map(_file_hashes, [attempt_dir / "snapshots" / f"{label}.tar.gz" for label in needed])))
+    for before, after in pairs:
+        a, b = hashes[before], hashes[after]
         changed = sorted(p for p in set(a) | set(b) if a.get(p) != b.get(p))
         workspace = [p for p in changed if not p.startswith(".git/")]
         rounds.append({
