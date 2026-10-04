@@ -20,6 +20,10 @@
 [![Docs](https://img.shields.io/github/actions/workflow/status/the-open-engine/zeroshot/docs.yml?branch=main&style=flat&label=docs&labelColor=171411)](https://the-open-engine.github.io/zeroshot/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-171411?style=flat)](LICENSE)
 
+&nbsp;
+
+<a href="https://github.com/the-open-engine/zeroshot/stargazers"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/starred-by-dark.png"><img alt="Starred by engineers at Google, Meta, Shopify, Uber, Booking.com, GitHub, Cloudflare, Atlassian and JetBrains" src="docs/brand/social/starred-by-light.png" width="100%"></picture></a>
+
 </div>
 
 # Zeroshot

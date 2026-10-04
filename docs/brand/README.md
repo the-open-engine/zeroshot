@@ -11,6 +11,12 @@ handwritten headings and diagrams, yellow notes, and the company mascot.
 - `hero.css`: shared layout and theme tokens.
 - `zeroshot-hero-light.png` and `zeroshot-hero-dark.png`: 2560 × 800 exports
   from a 1280 × 400 canvas at 2× scale.
+- `social/starred-by.html`: the "Starred by engineers at" strip under the README badges. Its
+  companies come from the self-reported GitHub company field of zeroshot stargazers, each profile
+  checked by hand, so the copy says "engineers at", never "used by". Marks are Simple Icons (CC0);
+  brands that asked Simple Icons to remove their marks stay off. `starred-by-light.png` and
+  `starred-by-dark.png` are transparent 2× exports of its `.strip` element, rendered once per
+  theme by setting `data-theme="dark"` on the root, the same way as the hero below.
 - `assets/`: local fonts, font licenses, and the website mascot. Rendering needs
   no network requests.
 
