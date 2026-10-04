@@ -30,6 +30,8 @@
 
 **The agent that writes the code should not be the one that decides it works.**
 
+We built Zeroshot because we were tired of being gaslit by agents telling us broken code was ready.
+
 Zeroshot turns a software goal into an explicit multi-agent graph: one agent implements, independent
 agents review, failures go back to a bounded repair loop, and nothing is delivered until the graph's
 checks pass. The implementing agent never approves its own work.
