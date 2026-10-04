@@ -15,8 +15,7 @@ handwritten headings and diagrams, yellow notes, and the company mascot.
   companies come from the self-reported GitHub company field of zeroshot stargazers, each profile
   checked by hand, so the copy says "engineers at", never "used by". Marks are Simple Icons (CC0);
   brands that asked Simple Icons to remove their marks stay off. `starred-by-light.png` and
-  `starred-by-dark.png` are transparent 2× exports of its `.strip` element, rendered once per
-  theme by setting `data-theme="dark"` on the root, the same way as the hero below.
+  `starred-by-dark.png` are its transparent 2× exports; re-render steps are below.
 - `assets/`: local fonts, font licenses, and the website mascot. Rendering needs
   no network requests.
 
@@ -136,6 +135,38 @@ const { pathToFileURL } = require('node:url');
           omitBackground: true,
         });
       }
+    }
+  } finally {
+    await browser.close();
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });
+JS
+```
+
+### Starred-by strip
+
+With the same tools installed, render both themes of `social/starred-by.html`:
+
+```sh
+NODE_PATH=/tmp/open-engine-banner-tools/node_modules node <<'JS'
+const { chromium } = require('playwright');
+const { resolve } = require('node:path');
+const { pathToFileURL } = require('node:url');
+(async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 300 }, deviceScaleFactor: 2 });
+    const source = resolve('docs/brand/social/starred-by.html');
+    for (const theme of ['light', 'dark']) {
+      await page.goto(pathToFileURL(source).href);
+      await page.evaluate(t => { document.documentElement.dataset.theme = t; }, theme);
+      await page.evaluate(() => document.fonts.ready);
+      const ready = await page.evaluate(() => [...document.fonts].every(font => font.status === 'loaded'));
+      if (!ready) throw new Error('Strip fonts failed to load');
+      await page.locator('.strip').screenshot({
+        path: `docs/brand/social/starred-by-${theme}.png`,
+        omitBackground: true,
+      });
     }
   } finally {
     await browser.close();

@@ -22,7 +22,7 @@
 
 &nbsp;
 
-<a href="https://github.com/the-open-engine/zeroshot/stargazers"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/starred-by-dark.png"><img alt="Starred by engineers at Google, Meta, Shopify, Uber, Booking.com, GitHub, Cloudflare, Atlassian and JetBrains" src="docs/brand/social/starred-by-light.png" width="100%"></picture></a>
+<a href="https://github.com/the-open-engine/zeroshot/stargazers"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/starred-by-dark.png"><img alt="Starred by engineers at Google, Meta, Shopify, Uber, Booking.com, GitHub, Cloudflare, Atlassian and JetBrains" src="docs/brand/social/starred-by-light.png" width="504"></picture></a>
 
 </div>
 

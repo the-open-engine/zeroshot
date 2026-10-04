@@ -12,7 +12,8 @@
 html, body { margin: 0; background: transparent; }
 .strip { display: inline-flex; flex-direction: column; align-items: center; gap: 14px; padding: 10px 12px; }
 .label { font: 500 11px/1 ui-monospace, "SFMono-Regular", menlo, monospace; letter-spacing: 0.16em; text-transform: uppercase; color: var(--label); }
-ul { list-style: none; margin: 0; padding: 0; display: flex; align-items: center; gap: 26px; }
+/* Two rows (5 + 4) so the strip stays legible when GitHub scales it to a phone. */
+ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px 24px; max-width: 480px; }
 li { display: inline-flex; align-items: center; gap: 7px; color: var(--name); font: 500 15px/1 "Spline Sans", sans-serif; letter-spacing: -0.005em; white-space: nowrap; }
 svg { width: 15px; height: 15px; fill: currentColor; flex: none; }
 /* Uber's mark is its name: it stands alone, sized to match the names' weight. */
