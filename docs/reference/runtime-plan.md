@@ -110,8 +110,8 @@ software-change --pr` prints a delivery node with the current contract.
 
 A graph can contain at most one delivery node, and no other executable node may run in parallel with
 it, either as a `par` sibling or inside a `map` that can have more than one item. A hosting service
-may require exactly one delivery node; Zeroshot Cloud requires one for saved profiles and quick
-runs. See [concurrent workspace changes](../concepts/execution.md#concurrent-workspace-changes).
+may require exactly one delivery node; Zeroshot Cloud quick runs require one. See
+[concurrent workspace changes](../concepts/execution.md#concurrent-workspace-changes).
 
 `ignore` skips pull-request discussion. CI, conflict, freshness, and merge-policy checks still apply.
 

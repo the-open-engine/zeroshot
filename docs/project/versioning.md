@@ -49,8 +49,8 @@ Manifest schema 2 distinguishes a docs channel from the exact product used to ge
 }
 ```
 
-The example abbreviates `routes`; builds retain the complete logical route map, including protocol
-schemas. Values are relative to the selected version root. Current uses `docsVersion: current`
+The example abbreviates `routes`; builds list every logical route their source documents,
+including protocol schemas. Values are relative to the selected version root. Current uses `docsVersion: current`
 and null product and Python SDK versions; its source commit identifies `main` at build time.
 
 A minor's manifest lists only routes its source documents; clients must treat a missing route key as
