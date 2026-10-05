@@ -247,7 +247,6 @@ an agent writes code, and Zeroshot has independent agents review the whole chang
 ## Community
 
 - [Discord](https://discord.gg/fZyzf2Cut9): ask questions, share runs and graphs, and talk to the team.
-- [GitHub Discussions](https://github.com/the-open-engine/zeroshot/discussions): longer-form questions and show-and-tell.
 - [GitHub Issues](https://github.com/the-open-engine/zeroshot/issues): reproducible bugs and feature requests.
 
 ## Reference
