@@ -137,7 +137,7 @@ and environment you provide.
 ## Bring your own graph topology
 
 Choose each agent's model and instructions, which steps run in parallel, and when to retry.
-For example, a custom graph could add stages after the review loop:
+Example topology, adding stages after the review loop:
 
 ```text
 Implementation
@@ -151,8 +151,8 @@ E2E tests
 Delivery
 ```
 
-This only shows what a custom graph can express; it is not a built-in graph. Any stage you add, you
-define, including its tools, services and credentials, and where its failures go for repair.
+Only the review loop is built in. You define the other stages, their tools, services and
+credentials, and where failures go for repair.
 
 Inspect the built-in graph as a starting point:
 
