@@ -151,9 +151,8 @@ E2E tests
 Delivery
 ```
 
-This only shows what a custom graph can express. Zeroshot ships just the built-in graph described
-above. Any stage you add, you define, including its tools, services and credentials, and where its
-failures go for repair.
+This only shows what a custom graph can express; it is not a built-in graph. Any stage you add, you
+define, including its tools, services and credentials, and where its failures go for repair.
 
 Inspect the built-in graph as a starting point:
 
