@@ -281,6 +281,38 @@ workspaces through `bench parity`, so these tasks get no learning curves; every 
 still archived. Every task is reported and none is dropped afterwards. No pooled test across tasks is
 pre-registered: the result is the 20 per-task verdicts.
 
+Changes during the run (2026-10-05), all decided before any of Luna's expansion loops was scored
+(only the smoke tests and some of Sol's single workers had been):
+
+- keifu, both arms rerun. Zeroshot 10.8.0's run controller adopts orphaned processes (it is a
+  child subreaper) but reaps only its nodes' process groups, so a process orphaned in another
+  group stays a zombie. keifu's agents test the terminal UI in pseudo-terminals, which orphan such
+  processes by the thousand: within 30 minutes its containers hit their 8,192-process limit and no
+  tool command could start (other tasks leaked far more slowly). The first start
+  (`luna-xhigh-keifu-v1`, `sol-xhigh-keifu-single`, `smoke-keifu`) was stopped and is not analysed.
+  keifu reran as `luna-xhigh-keifu-v2`, `sol-xhigh-keifu-single-v2` and `smoke-keifu-v2`, which run
+  `codex` under `agent/codex-reaper.c` (`resources.reap_orphans`): a subreaper between Zeroshot and
+  Codex that reaps those orphans, with Codex kept in Zeroshot's process group so its kills still
+  apply. Nothing else changed. An earlier smoke test of keifu stopped at its diagnostic because the
+  model mistyped the diagnostic script (`results/smoke-keifu.aborted-diagnostic-typo`).
+- Process limit. At 05:25 UTC every running attempt container of both arms had its limit raised
+  from 8,192 to 65,536 processes, and so did every container started later, so that the slower
+  leaks could not end a long loop.
+- Scoring under equal load. Sol's single workers finished within the loops' first hour and the
+  first of them were scored while 75 loops ran (load average about 75 on 64 CPUs); timing-sensitive
+  tests could fail more there than in Luna's later scoring. Each task's two arms are therefore
+  scored side by side once its loops have finished, Sol's workers again (`eval --force`; the earlier
+  scores are kept as `scores.under-load.json` and not used), then compared at parity.
+- Scorer fix (`6ad2b674`). The pinned-plugin check now covers only test runs in which pytest ran
+  (ascii-image-converter has branches with nothing to test), and a branch whose pytest cannot load an
+  installed plugin before any test runs counts as tests not passed, like a timed-out branch (dust's
+  evaluation image loads a libtmux plugin that pytest 9 rejects, the same for every submission).
+- Scoring fidelity. On two tasks our scoring of GPT-5.5 xhigh's published archive does not match
+  the leaderboard: crowbook (67.0% against 2.9%) and dust (74.8% against 87.3%; dust's golden outputs
+  embed the leaderboard machine's filesystem block sizes, and its libtmux branch cannot run). Both
+  arms are scored the same way, so the comparison stands, but absolute scores on these two tasks are
+  not comparable with the leaderboard.
+
 ## The graph and prompts
 
 Both arms share one byte-identical `build` node; round 1 of the loop is exactly the single arm.

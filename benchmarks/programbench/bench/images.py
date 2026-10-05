@@ -10,10 +10,11 @@ import shutil
 import tarfile
 import time
 from pathlib import Path
+from typing import Any
 
 from . import ROOT
 from .config import Experiment, pins
-from .util import docker, download, log, run
+from .util import docker, download, log, run, sha256_file
 
 # Claude Code attempts: tools that would reach the web from Anthropic's side, talk to other sessions,
 # or schedule work beyond the node. Everything else is Claude Code's default toolset.
@@ -127,6 +128,11 @@ def build_agent(exp: Experiment, cache: Path) -> tuple[str, dict[str, str]]:
     """Return the agent image tag and the rendered harness config (for the manifest)."""
     if exp.harness == "claude":
         return _build_claude_agent(exp, cache)
+    tag, info = _build_codex_agent(exp, cache)
+    return _reaper_image(tag, info, cache) if exp.reap_orphans else (tag, info)
+
+
+def _build_codex_agent(exp: Experiment, cache: Path) -> tuple[str, dict[str, str]]:
     pin = pins()
     ensure_image(exp.task_image)
     config = codex_config(image_env(exp.task_image))
@@ -157,6 +163,25 @@ def build_agent(exp: Experiment, cache: Path) -> tuple[str, dict[str, str]]:
     (context / "task-adjustments.json").write_text(adjustments)
     log(f"building {tag} from {exp.task_image}")
     docker("build", "--quiet", "--build-arg", f"TASK_IMAGE={exp.task_image}", "-t", tag, str(context), timeout=3600)
+    return tag, info
+
+
+def _reaper_image(base: str, info: dict[str, Any], cache: Path) -> tuple[str, dict[str, Any]]:
+    """The agent image with `codex` run under agent/codex-reaper.c, compiled in the image."""
+    digest = hashlib.sha256(base.encode())
+    for name in ("reaper.Dockerfile", "codex-reaper.c"):
+        digest.update((ROOT / "agent" / name).read_bytes())
+    tag = f"{base}-reaper-{digest.hexdigest()[:12]}"
+    info = {**info, "tag": tag, "base_agent_image": base, "codex_reaper_sha256": sha256_file(ROOT / "agent" / "codex-reaper.c")}
+    if docker("image", "inspect", tag, check=False).strip() not in ("", "[]"):
+        return tag, info
+    context = cache / "agent-context" / tag.split(":", 1)[1]
+    shutil.rmtree(context, ignore_errors=True)
+    context.mkdir(parents=True)
+    shutil.copy(ROOT / "agent" / "reaper.Dockerfile", context / "Dockerfile")
+    shutil.copy(ROOT / "agent" / "codex-reaper.c", context / "codex-reaper.c")
+    log(f"building {tag} from {base}")
+    docker("build", "--quiet", "--build-arg", f"AGENT_IMAGE={base}", "-t", tag, str(context), timeout=1800)
     return tag, info
 
 

@@ -10,10 +10,13 @@ import io
 import json
 import os
 import random
+import shutil
+import signal
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -272,6 +275,34 @@ class ConfigTests(unittest.TestCase):
             expected = calcurse_luna.raw["decision_rule"]["cost_parity"].split(" C = ", 1)[1]
             expected = expected.replace("luna-xhigh-calcurse-v1", luna.id).replace("sol-xhigh-calcurse-single", sol.id)
             self.assertEqual(rule.split(" C = ", 1)[1], expected)  # the study's rule, word for word
+
+    def test_keifu_rerun_differs_from_its_first_start_only_by_the_reaper(self):
+        renamed = {"luna-xhigh-keifu-v1": "luna-xhigh-keifu-v2", "sol-xhigh-keifu-single": "sol-xhigh-keifu-single-v2", "smoke-keifu": "smoke-keifu-v2"}
+
+        def comparable(raw: dict) -> dict:
+            text = json.dumps({k: v for k, v in raw.items() if k not in ("id", "description")})
+            for old, new in renamed.items():
+                text = text.replace(f'"{new}', f'"{old}').replace(f" {new}", f" {old}")
+            out = json.loads(text)
+            out["resources"].pop("reap_orphans", None)
+            return out
+
+        for old, new in renamed.items():
+            first, rerun = config.load(f"experiments/{old}.json"), config.load(f"experiments/{new}.json")
+            self.assertEqual((first.reap_orphans, rerun.reap_orphans), (False, True))
+            self.assertEqual(comparable(rerun.raw), comparable(first.raw), new)
+            self.assertTrue(rerun.raw["description"].startswith(f"Rerun of {old} (both arms)"))
+            for arm in rerun.raw["arms"]:
+                self.assertEqual(run_files(rerun, arm), run_files(first, arm))  # same prompts, graphs and limits
+        luna, sol = config.load("experiments/luna-xhigh-keifu-v2.json"), config.load("experiments/sol-xhigh-keifu-single-v2.json")
+        self.assertEqual(luna.raw["decision_rule"]["cost_parity"], sol.raw["decision_rule"]["cost_parity"])
+        self.assertIn("the 5 runs of sol-xhigh-keifu-single-v2", luna.raw["decision_rule"]["cost_parity"])
+        self.assertIn("each loop run of luna-xhigh-keifu-v2", luna.raw["decision_rule"]["cost_parity"])
+        with self.assertRaises(ValueError):
+            self._load({**luna.raw, "resources": {**luna.raw["resources"], "reap_orphans": "yes"}})
+        glm = config.load("experiments/glm52-xhigh-ditaa-v1.json")
+        with self.assertRaises(ValueError):  # the reaper wraps Codex only
+            self._load({**glm.raw, "resources": {**glm.raw["resources"], "reap_orphans": True}})
 
     def test_parity_workspace_is_the_last_build_within_budget(self):
         from bench import parity
@@ -747,6 +778,57 @@ class DecisionTests(unittest.TestCase):
     def test_disqualifying_audit_makes_a_run_ineligible(self):
         run = self._loop("01", 200, 260, commands={"rule_counts": {"process_environment_read": 1}, "rule_counts_by_round": {}})
         self.assertIn("audit: process_environment_read", run["ineligible_reasons"])
+
+
+@unittest.skipUnless(shutil.which("cc"), "needs a C compiler")
+class ReaperTests(unittest.TestCase):
+    """agent/codex-reaper.c, compiled against a stand-in for Codex."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        self.codex = self.dir / "codex"
+        self.reaper = self.dir / "codex-reaper"
+        subprocess.run(["cc", "-O2", "-Wall", "-Wextra", "-Werror", f'-DCODEX="{self.codex}"', "-o", str(self.reaper), str(Path(__file__).resolve().parent.parent / "agent" / "codex-reaper.c")], check=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _codex(self, script: str) -> None:
+        self.codex.write_text("#!/bin/sh\n" + script)
+        self.codex.chmod(0o755)
+
+    def test_orphans_in_other_sessions_are_reaped_and_the_exit_code_passes_through(self):
+        # An orphan in its own session (as a program started in a pseudo-terminal) is adopted by
+        # the reaper, not by an outer subreaper, and does not stay a zombie once it exits.
+        self._codex(
+            "sh -c 'setsid sh -c \"sleep 0.6\" & echo $! > \"$0.orphan\"; exit 0' \"$0\"\n"
+            "sleep 0.3\necho \"adopted_by=$(ps -o ppid= -p $(cat \"$0.orphan\") | tr -d ' ')\"\necho \"reaper=$PPID\"\n"
+            "sleep 0.7\necho \"zombies=$(ps -o stat= --ppid $PPID | grep -c Z)\"\nexit 7\n"
+        )
+        result = subprocess.run([str(self.reaper), "exec", "--json"], capture_output=True, text=True, timeout=20)
+        out = dict(line.split("=", 1) for line in result.stdout.split())
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(out["adopted_by"], out["reaper"])
+        self.assertEqual(out["zombies"], "0")
+
+    def test_the_reaper_dies_the_way_codex_dies(self):
+        self._codex("kill -TERM $$\nsleep 5\n")
+        self.assertEqual(subprocess.run([str(self.reaper)], timeout=20).returncode, -signal.SIGTERM)
+
+    def test_codex_dies_with_the_reaper_and_group_signals_reach_codex(self):
+        self._codex("echo $$ > \"$(dirname \"$0\")/pid\"\nexec sleep 30\n")
+        for kill in (lambda proc: proc.kill(), lambda proc: os.killpg(proc.pid, signal.SIGTERM)):
+            (self.dir / "pid").unlink(missing_ok=True)
+            proc = subprocess.Popen([str(self.reaper)], start_new_session=True)
+            deadline = time.time() + 10
+            while not (self.dir / "pid").exists() and time.time() < deadline:
+                time.sleep(0.05)
+            codex = int((self.dir / "pid").read_text())
+            kill(proc)
+            proc.wait(timeout=10)
+            time.sleep(0.3)
+            self.assertFalse(Path(f"/proc/{codex}").exists() and "Z" not in Path(f"/proc/{codex}/stat").read_text().split()[2], "Codex outlived the reaper")
 
 
 class EvalTests(unittest.TestCase):

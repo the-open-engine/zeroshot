@@ -156,6 +156,8 @@ class Smoke:
                 self.check(f"doc_fix_applied_{self.exp.doc_fixes.index(fix) + 1}", doc_fix)
             claude = self.exp.harness == "claude"
             binaries = ("/usr/local/bin/zeroshot", "/opt/claude-code/claude") if claude else ("/usr/local/bin/zeroshot", "/opt/codex/bin/codex", "/opt/codex/bin/codex-code-mode-host")
+            if self.exp.reap_orphans:
+                binaries = (*binaries, "/usr/local/bin/codex")  # agent/codex-reaper.c
             self.check("harness_binaries_unreadable", lambda: (
                 self._sh(c, " || ".join(f"test -r {b}" for b in binaries))[0] != 0,
                 f"{', '.join(binaries)} are execute-only (their /proc entries are protected)"))

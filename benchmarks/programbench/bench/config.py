@@ -139,6 +139,12 @@ class Experiment:
         return self.raw["resources"]
 
     @property
+    def reap_orphans(self) -> bool:
+        """Whether `codex` runs under agent/codex-reaper.c, which reaps the processes orphaned below
+        Codex (Zeroshot 10.8.0's controller leaves those from other process groups as zombies)."""
+        return self.raw["resources"].get("reap_orphans", False)
+
+    @property
     def max_iterations(self) -> int:
         return self.raw["arms"]["loop"]["max_iterations"]
 
@@ -218,6 +224,9 @@ def _validate(raw: dict[str, Any]) -> None:
     image_input = raw["model"].get("image_input", True)
     if not isinstance(image_input, bool) or (not image_input and harness != "claude"):
         raise ValueError("model.image_input is true or false, and only the Claude gateway can take images out of requests")
+    reap = raw["resources"].get("reap_orphans", False)
+    if not isinstance(reap, bool) or (reap and harness != "codex"):
+        raise ValueError("resources.reap_orphans is true or false, and wraps the Codex harness only")
     if "usd_cap_per_attempt" in raw["limits"] and (harness != "claude" or float(raw["limits"]["usd_cap_per_attempt"]) <= 0):
         raise ValueError("limits.usd_cap_per_attempt must be positive and needs the Claude gateway")
     arms = raw["arms"]
