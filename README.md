@@ -57,6 +57,9 @@ For local execution, install and sign in to Codex, Claude Code, or GitHub Copilo
 reuse the harness's existing login, including subscription-backed sessions. See the
 [installation guide](docs/getting-started/install.md) for harness prerequisites.
 
+> **Zeroshot v8 is a hard interface cutover.** v8 replaces the Node.js runtime with a native
+> `zeroshot` binary.
+
 ## Run your first task
 
 This example uses Codex and keeps delivery local. **The worker edits the current Git worktree**,
