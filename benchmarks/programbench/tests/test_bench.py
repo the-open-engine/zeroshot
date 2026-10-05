@@ -277,8 +277,12 @@ class ConfigTests(unittest.TestCase):
             expected = expected.replace("luna-xhigh-calcurse-v1", luna.id).replace("sol-xhigh-calcurse-single", sol.id)
             self.assertEqual(rule.split(" C = ", 1)[1], expected)  # the study's rule, word for word
 
-    def test_keifu_rerun_differs_from_its_first_start_only_by_the_reaper(self):
-        renamed = {"luna-xhigh-keifu-v1": "luna-xhigh-keifu-v2", "sol-xhigh-keifu-single": "sol-xhigh-keifu-single-v2", "smoke-keifu": "smoke-keifu-v2"}
+    def test_keifu_reruns_differ_from_its_first_start_only_by_the_reaper(self):
+        for version in ("v2", "v3"):
+            self._keifu_rerun(version)
+
+    def _keifu_rerun(self, version: str) -> None:
+        renamed = {"luna-xhigh-keifu-v1": f"luna-xhigh-keifu-{version}", "sol-xhigh-keifu-single": f"sol-xhigh-keifu-single-{version}", "smoke-keifu": f"smoke-keifu-{version}"}
 
         def comparable(raw: dict) -> dict:
             text = json.dumps({k: v for k, v in raw.items() if k not in ("id", "description")})
@@ -292,13 +296,13 @@ class ConfigTests(unittest.TestCase):
             first, rerun = config.load(f"experiments/{old}.json"), config.load(f"experiments/{new}.json")
             self.assertEqual((first.reap_orphans, rerun.reap_orphans), (False, True))
             self.assertEqual(comparable(rerun.raw), comparable(first.raw), new)
-            self.assertTrue(rerun.raw["description"].startswith(f"Rerun of {old} (both arms)"))
+            self.assertTrue(rerun.raw["description"].startswith(("Rerun" if version == "v2" else "Second rerun") + f" of {old} (both arms)"))
             for arm in rerun.raw["arms"]:
                 self.assertEqual(run_files(rerun, arm), run_files(first, arm))  # same prompts, graphs and limits
-        luna, sol = config.load("experiments/luna-xhigh-keifu-v2.json"), config.load("experiments/sol-xhigh-keifu-single-v2.json")
+        luna, sol = config.load(f"experiments/luna-xhigh-keifu-{version}.json"), config.load(f"experiments/sol-xhigh-keifu-single-{version}.json")
         self.assertEqual(luna.raw["decision_rule"]["cost_parity"], sol.raw["decision_rule"]["cost_parity"])
-        self.assertIn("the 5 runs of sol-xhigh-keifu-single-v2", luna.raw["decision_rule"]["cost_parity"])
-        self.assertIn("each loop run of luna-xhigh-keifu-v2", luna.raw["decision_rule"]["cost_parity"])
+        self.assertIn(f"the 5 runs of sol-xhigh-keifu-single-{version}", luna.raw["decision_rule"]["cost_parity"])
+        self.assertIn(f"each loop run of luna-xhigh-keifu-{version}", luna.raw["decision_rule"]["cost_parity"])
         with self.assertRaises(ValueError):
             self._load({**luna.raw, "resources": {**luna.raw["resources"], "reap_orphans": "yes"}})
         glm = config.load("experiments/glm52-xhigh-ditaa-v1.json")
@@ -812,6 +816,30 @@ class ReaperTests(unittest.TestCase):
         self.assertEqual(result.returncode, 7)
         self.assertEqual(out["adopted_by"], out["reaper"])
         self.assertEqual(out["zombies"], "0")
+
+    def test_processes_the_node_leaves_running_end_with_it(self):
+        # A detached sleeper and a session that keeps creating orphans (keifu's reference app left
+        # running in a tmux server did): both end before the reaper exits, so nothing is handed
+        # back to Zeroshot's controller.
+        self._codex(
+            "setsid sh -c 'sleep 30' & echo $! > \"$0.sleeper\"\n"
+            "setsid sh -c 'while :; do sh -c \"sleep 0.05 &\"; sleep 0.02; done' & echo $! > \"$0.spawner\"\n"
+            "sleep 0.3\nexit 3\n"
+        )
+        started = time.time()
+        result = subprocess.run([str(self.reaper)], timeout=30)
+        self.assertEqual(result.returncode, 3)
+        self.assertLess(time.time() - started, 5)
+        sessions = {int(Path(f"{self.codex}.{name}").read_text()) for name in ("sleeper", "spawner")}
+        left = []
+        for stat in Path("/proc").glob("[0-9]*/stat"):
+            try:
+                fields = stat.read_text().rsplit(")", 1)[1].split()
+            except OSError:
+                continue
+            if int(fields[3]) in sessions:  # field 6 of /proc/<pid>/stat: the session id
+                left.append(stat.parent.name)
+        self.assertEqual(left, [])
 
     def test_the_reaper_dies_the_way_codex_dies(self):
         self._codex("kill -TERM $$\nsleep 5\n")

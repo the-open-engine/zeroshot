@@ -284,17 +284,22 @@ pre-registered: the result is the 20 per-task verdicts.
 Changes during the run (2026-10-05), all decided before any of Luna's expansion loops was scored
 (only the smoke tests and some of Sol's single workers had been):
 
-- keifu, both arms rerun. Zeroshot 10.8.0's run controller adopts orphaned processes (it is a
+- keifu, both arms rerun twice. Zeroshot 10.8.0's run controller adopts orphaned processes (it is a
   child subreaper) but reaps only its nodes' process groups, so a process orphaned in another
-  group stays a zombie. keifu's agents test the terminal UI in pseudo-terminals, which orphan such
-  processes by the thousand: within 30 minutes its containers hit their 8,192-process limit and no
-  tool command could start (other tasks leaked far more slowly). The first start
-  (`luna-xhigh-keifu-v1`, `sol-xhigh-keifu-single`, `smoke-keifu`) was stopped and is not analysed.
-  keifu reran as `luna-xhigh-keifu-v2`, `sol-xhigh-keifu-single-v2` and `smoke-keifu-v2`, which run
-  `codex` under `agent/codex-reaper.c` (`resources.reap_orphans`): a subreaper between Zeroshot and
-  Codex that reaps those orphans, with Codex kept in Zeroshot's process group so its kills still
-  apply. Nothing else changed. An earlier smoke test of keifu stopped at its diagnostic because the
-  model mistyped the diagnostic script (`results/smoke-keifu.aborted-diagnostic-typo`).
+  group stays a zombie. keifu's agents test the terminal UI in pseudo-terminals and tmux, which
+  orphan such processes by the thousand: within 30 minutes its containers hit their 8,192-process
+  limit and no tool command could start (other tasks leaked far more slowly). The first start
+  (`luna-xhigh-keifu-v1`, `sol-xhigh-keifu-single`, `smoke-keifu`) was stopped. The first rerun
+  (`-v2`) ran `codex` under `agent/codex-reaper.c` (`resources.reap_orphans`), a subreaper between
+  Zeroshot and Codex that reaped those orphans while their node ran, with Codex kept in Zeroshot's
+  process group so its kills still apply. But a tmux server that a node leaves running outlives
+  the node and is then adopted by the controller: in one loop the reference app inside such a
+  server kept creating orphans, 23,000 zombies within 50 minutes. The v2 loops were stopped, and
+  keifu reran again (`luna-xhigh-keifu-v3`, `sol-xhigh-keifu-single-v3`, `smoke-keifu-v3`) with a
+  reaper that also ends what a node leaves running when its Codex exits, as Zeroshot means a
+  node's processes to end with the node (it kills the node's process group). Nothing else changed;
+  neither earlier start is analysed. An earlier smoke test of keifu stopped at its diagnostic
+  because the model mistyped the diagnostic script (`results/smoke-keifu.aborted-diagnostic-typo`).
 - Process limit. At 05:25 UTC every running attempt container of both arms had its limit raised
   from 8,192 to 65,536 processes, and so did every container started later, so that the slower
   leaks could not end a long loop.
