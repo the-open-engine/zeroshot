@@ -43,26 +43,6 @@ the setup as a profile for the next task.
 
 Questions, ideas, or a run worth showing? Join the [Zeroshot community on Discord](https://discord.gg/fZyzf2Cut9).
 
-## When to use it
-
-Zeroshot fits when:
-
-- a change should be checked by agents other than the one that wrote it, against the task's
-  acceptance criteria and for code quality;
-- you want the result delivered as a branch, a pull request with review feedback handled, or a merge
-  after CI;
-- you want the same review and repair setup reused across tasks, locally, on your own Docker target,
-  or in Zeroshot Cloud.
-
-It is not the right tool when:
-
-- you'll review a small edit yourself in the editor; a single agent session is quicker;
-- you need it to replace your tests. A passing run means the configured checks accepted the work, so
-  coverage depends on the requirements, reviewers, and tests you provide.
-
-> **Zeroshot v8 is a hard interface cutover.** v8 replaces the Node.js runtime with a native
-> `zeroshot` binary.
-
 ## Install
 
 ```bash
@@ -76,6 +56,9 @@ Copilot, and Claude Code at user scope.
 For local execution, install and sign in to Codex, Claude Code, or GitHub Copilot. Local runs can
 reuse the harness's existing login, including subscription-backed sessions. See the
 [installation guide](docs/getting-started/install.md) for harness prerequisites.
+
+> **Zeroshot v8 is a hard interface cutover.** v8 replaces the Node.js runtime with a native
+> `zeroshot` binary.
 
 ## Run your first task
 
@@ -259,10 +242,14 @@ zeroshot template show auto-research
 
 See [Execution](docs/concepts/execution.md) for the research workflow's decision and evidence rules.
 
+## Works with Opcore
+
+[Opcore](https://github.com/the-open-engine/opcore) works alongside Zeroshot: Opcore checks each edit while
+an agent writes code, and Zeroshot has independent agents review the whole change before it lands.
+
 ## Community
 
 - [Discord](https://discord.gg/fZyzf2Cut9): ask questions, share runs and graphs, and talk to the team.
-- [GitHub Discussions](https://github.com/the-open-engine/zeroshot/discussions): longer-form questions and show-and-tell.
 - [GitHub Issues](https://github.com/the-open-engine/zeroshot/issues): reproducible bugs and feature requests.
 
 ## Reference
