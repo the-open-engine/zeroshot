@@ -151,8 +151,8 @@ E2E tests
 Delivery
 ```
 
-Only the review loop is built in. You define the other stages, their tools, services and
-credentials, and where failures go for repair.
+Only the review loop and delivery are built in. You define the other stages, their tools, services
+and credentials, and where failures go for repair.
 
 Inspect the built-in graph as a starting point:
 
