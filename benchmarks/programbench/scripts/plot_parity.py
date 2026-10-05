@@ -46,6 +46,10 @@ def main(paths: list[Path], prices: str = "promotional") -> Path:
             ax.plot(ci, [y + dy] * 2, color=color, lw=2.4, solid_capstyle="round", alpha=0.85, zorder=2)
             ax.scatter([mean], [y + dy], s=58, color=color, marker=marker, edgecolor=CANVAS, linewidth=1.2, zorder=3)
             ax.annotate(f"{mean:.1f}%", (ci[1], y + dy), xytext=(7, 0), textcoords="offset points", va="center", fontsize=9, color=color, fontweight="medium")
+        # The loop rounds Luna's runs needed to reach the budget (their parity workspaces), on average.
+        rounds = [r[prices]["rounds"] for r in data[task]["luna_runs"] if not r["excluded"] and not r[prices]["excluded"]]
+        ax.annotate(f"mean {sum(rounds) / len(rounds):.0f} rounds", (c["luna_mean"], y + 0.14), xytext=(0, 8), textcoords="offset points",
+                    ha="center", va="bottom", fontsize=7.8, color=RUST, fontweight="medium")
         verdict = c["verdict"].replace(" (intervals do not overlap)", "").replace(" (higher mean; intervals overlap)", ", intervals overlap")
         ax.annotate(f"budget ${c['budget_usd']:.2f} per run · {verdict}", (0, y - 0.42), xycoords=("axes fraction", "data"), fontsize=8.6, color=MUTED, va="center")
     ax.set_yticks(range(len(tasks)))
