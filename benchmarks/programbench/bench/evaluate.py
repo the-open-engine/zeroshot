@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,7 +27,10 @@ from .util import download, log, read_json, sha256_file, without_secrets, write_
 # them 0 on every test, and so do we.
 # A test branch whose test run hit ProgramBench's time limit is also the submission's outcome: its
 # tests kept running (chroma's did whenever pytest diffed a large mismatched output), no results
-# file was written, and the branch's tests count as not passed, as on the leaderboard.
+# file was written, and the branch's tests count as not passed, as on the leaderboard. So do the
+# tests of a branch whose pytest could not load an installed plugin: the evaluation image's own
+# packages fail before any test or conftest runs (dust: libtmux's plugin under pytest 9), the same
+# for every submission.
 # Any other error code, and any other test-branch error, is an evaluation infrastructure failure.
 SUBMISSION_OUTCOMES = frozenset({"compile_failed", "copy_executable_failed", "hash_executable_failed", "no_executable_hash", "seed_git_failed"})
 
@@ -34,8 +38,9 @@ SUBMISSION_OUTCOMES = frozenset({"compile_failed", "copy_executable_failed", "ha
 def infrastructure_error(score: dict[str, Any]) -> str | None:
     """Why an archive's evaluation cannot be trusted, or None."""
     branch_errors = score.get("test_branch_errors") or {}
-    timed_out = score.get("test_runs_timed_out") and all({_error_code(e) for e in errors} == {"results_read_failed"} for errors in branch_errors.values())
-    if branch_errors and not timed_out:
+    explained = score.get("missing_results_explained", score.get("test_runs_timed_out"))
+    no_results = explained and all({_error_code(e) for e in errors} == {"results_read_failed"} for errors in branch_errors.values())
+    if branch_errors and not no_results:
         return f"test branch errors {sorted(branch_errors)}"
     code = score.get("error_code")
     if code:
@@ -54,12 +59,33 @@ def _timed_out(entry: dict[str, Any]) -> bool:
     return entry.get("returncode") == -1 and "timed out after" in str(entry.get("exception_info") or "")
 
 
+def _ran_tests(entry: dict[str, Any]) -> bool:
+    """Whether a test run's output shows a pytest session (its header or plugin line) or a summary."""
+    output = str(entry.get("output") or "")
+    return any(mark in output for mark in ("test session starts", "plugins: ")) or re.search(r"\b\d+ (passed|failed|errors?)\b", output) is not None
+
+
+def _plugin_load_failed(entry: dict[str, Any]) -> bool:
+    """A test run in which pytest failed while loading an installed plugin, before any test ran."""
+    return "load_setuptools_entrypoints" in str(entry.get("output") or "") and not _ran_tests(entry)
+
+
+def _failed_reads_follow(raw: dict[str, Any], cause: Any) -> bool:
+    entries = [e for e in raw.get("log") or [] if isinstance(e, dict)]
+    failed_reads = [i for i, e in enumerate(entries) if e.get("step") == "results_read" and e.get("returncode") != 0]
+    return bool(failed_reads) and all(i > 0 and entries[i - 1].get("step") == "run_tests" and cause(entries[i - 1]) for i in failed_reads)
+
+
 def test_runs_timed_out(raw: dict[str, Any]) -> bool:
     """Every failed read of a branch's results file directly follows that branch's test run hitting
     ProgramBench's time limit (each attempt logs its steps together, in order)."""
-    entries = [e for e in raw.get("log") or [] if isinstance(e, dict)]
-    failed_reads = [i for i, e in enumerate(entries) if e.get("step") == "results_read" and e.get("returncode") != 0]
-    return bool(failed_reads) and all(i > 0 and entries[i - 1].get("step") == "run_tests" and _timed_out(entries[i - 1]) for i in failed_reads)
+    return _failed_reads_follow(raw, _timed_out)
+
+
+def missing_results_explained(raw: dict[str, Any]) -> bool:
+    """Every failed read of a results file follows a test run that the leaderboard also scores as
+    tests not passed: one stopped at the time limit, or one whose pytest could not load a plugin."""
+    return _failed_reads_follow(raw, lambda entry: _timed_out(entry) or _plugin_load_failed(entry))
 
 
 def archive_id(path: Path) -> str:
@@ -69,11 +95,12 @@ def archive_id(path: Path) -> str:
 
 
 def rerun_plugin_active(raw: dict[str, Any]) -> bool | None:
-    """Whether the pinned plugin was installed (exit 0) and loaded by pytest; None if no test run
-    finished (a run stopped at ProgramBench's time limit keeps no output and no results)."""
+    """Whether the pinned plugin was installed (exit 0) and loaded by every pytest that ran tests;
+    None if no test run ran tests (a run stopped at ProgramBench's time limit keeps no output, and
+    a branch can have no tests to run or fail before pytest starts its session)."""
     log_entries = [e for e in raw.get("log") or [] if isinstance(e, dict)]
     installs = [e for e in log_entries if e.get("step") == "install_rerunfailures"]
-    runs = [e for e in log_entries if e.get("step") == "run_tests" and not _timed_out(e)]
+    runs = [e for e in log_entries if e.get("step") == "run_tests" and not _timed_out(e) and _ran_tests(e)]
     if not runs:
         return None
     installed = any(e.get("returncode") == 0 and "pytest-rerunfailures==16.4" in str(e.get("command")) for e in installs)
@@ -116,6 +143,7 @@ def score_eval(eval_json: Path, instance_id: str, ignores: dict[str, list[str]])
         "scored_tests": len(kept),
         "duplicate_result_entries": sum(n - 1 for n in entries.values() if n > 1),
         "rerun_plugin_pinned": rerun_plugin_active(raw),
+        "missing_results_explained": missing_results_explained(raw),
         "error_code": raw.get("error_code"),
         "error_details": str(raw.get("error_details") or "")[:2000] or None,
         "test_branch_errors": raw.get("test_branch_errors") or {},

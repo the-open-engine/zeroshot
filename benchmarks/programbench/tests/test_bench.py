@@ -777,6 +777,38 @@ class EvalTests(unittest.TestCase):
         self.assertEqual(evaluate.infrastructure_error({"score": 0.0, "test_branch_errors": other, "test_runs_timed_out": True}), "test branch errors ['a']")
         self.assertEqual(evaluate.infrastructure_error({"score": 0.5, "rerun_plugin_pinned": False}), "pinned pytest-rerunfailures was not active")
 
+    def test_branches_that_run_no_tests_leave_the_plugin_check_and_count_as_not_passed(self):
+        from bench import evaluate
+
+        install = {"step": "install_rerunfailures", "returncode": 0, "command": "pip install -q pytest-rerunfailures==16.4"}
+        header = "=== test session starts ===\nplugins: timeout-2.4.0, rerunfailures-16.4\n"
+        finished = {"step": "run_tests", "returncode": 1, "output": header + "=== 2 failed, 101 passed, 4 rerun in 3.1s ==="}
+        read = {"step": "results_read", "returncode": 0, "branch": "b"}
+        missing = {"step": "results_read", "returncode": 1, "exception_info": ""}
+        # ascii-image-converter: branches with nothing to test never start pytest.
+        nothing = {"step": "run_tests", "returncode": 0, "output": "No subcommands found. No tests to run.\n"}
+        self.assertTrue(evaluate.rerun_plugin_active({"log": [install, finished, read, nothing, read]}))
+        self.assertIsNone(evaluate.rerun_plugin_active({"log": [install, nothing, read]}))
+        # A run that ran tests without the pinned plugin still fails the check.
+        unpinned = {**finished, "output": "=== test session starts ===\nplugins: rerunfailures-16.6.1\n=== 3 passed in 1s ==="}
+        self.assertFalse(evaluate.rerun_plugin_active({"log": [install, finished, read, unpinned, read]}))
+        # dust: pytest failed to load the image's libtmux plugin, before any test ran, on the attempt
+        # and on ProgramBench's retry. Its tests count as not passed, as for a timed-out branch.
+        crash = {"step": "run_tests", "returncode": 1, "output": "Traceback (most recent call last):\n  File \"/usr/local/lib/python3.10/dist-packages/_pytest/config/__init__.py\", line 1583, in parse\n    self.pluginmanager.load_setuptools_entrypoints(\"pytest11\")\nFailed: Marks cannot be applied to fixtures.\n"}
+        dust = {"log": [install, finished, read, crash, missing, crash, missing]}
+        self.assertTrue(evaluate.rerun_plugin_active(dust))
+        self.assertFalse(evaluate.test_runs_timed_out(dust))
+        self.assertTrue(evaluate.missing_results_explained(dust))
+        errors = {"d42ad55b3a4b": [{"error_code": "results_read_failed", "error_details": "Could not find the file /workspace/eval/results.xml"}]}
+        scored = {"score": 0.66, "test_branch_errors": errors, "missing_results_explained": True, "rerun_plugin_pinned": True}
+        self.assertIsNone(evaluate.infrastructure_error(scored))
+        # A crash after tests ran is not a plugin-load failure, and missing results stay an error.
+        late = {**crash, "output": header + crash["output"]}
+        self.assertFalse(evaluate.missing_results_explained({"log": [install, late, missing]}))
+        self.assertEqual(evaluate.infrastructure_error({**scored, "missing_results_explained": False}), "test branch errors ['d42ad55b3a4b']")
+        # Scores written before this field existed keep the timed-out rule.
+        self.assertIsNone(evaluate.infrastructure_error({"score": 0.0, "test_branch_errors": errors, "test_runs_timed_out": True}))
+
     def test_targets_skip_discarded_attempts(self):
         from bench import evaluate
 

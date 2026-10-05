@@ -21,14 +21,21 @@ from matplotlib.lines import Line2D
 from plot_pass_rate import CANVAS, HAIRLINE, INK, INK_2, MUTED, RUST, load_fonts
 
 TASKS = [("svgbob", "Rust: ASCII diagrams to SVG"), ("ditaa", "Java: ASCII diagrams to PNG"), ("calcurse", "C: terminal calendar"),
-         ("revive", "Go: linter for Go"), ("fasttext", "C++: text classification")]
+         ("revive", "Go: linter for Go"), ("fasttext", "C++: text classification"),
+         # The expansion (README, cost-parity study), in the order they were drawn.
+         ("parqeye", "Rust: Parquet file viewer"), ("tree-sitter", "Rust: parser generator CLI"), ("igrep", "Rust: interactive grep"),
+         ("marmite", "Rust: static site generator"), ("datasurgeon", "Rust: extracts data from text"),
+         ("crowbook", "Rust: Markdown books to HTML, PDF, EPUB"), ("gittype", "Rust: typing game on source code"),
+         ("keifu", "Rust: Git commit graph TUI"), ("dust", "Rust: disk usage tree"), ("direnv", "Go: per-directory environments"),
+         ("gdu", "Go: disk usage analyzer"), ("dstask", "Go: Git-backed task manager"),
+         ("ascii-image-converter", "Go: images to ASCII art"), ("xz", "C: XZ compression tools"), ("samtools", "C: sequencing alignment tools")]
 
 
 def main(paths: list[Path], prices: str = "promotional") -> Path:
     data = {}
     for p in paths:
         o = json.loads(p.read_text())
-        task = next(t for t, _ in TASKS if t in o["luna"])
+        task = o["luna"].removeprefix("luna-xhigh-").rsplit("-v", 1)[0]  # luna-xhigh-<task>-v<N>
         data[task] = o
     load_fonts()
     plt.rcParams.update({
