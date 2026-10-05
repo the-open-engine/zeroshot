@@ -315,6 +315,13 @@ Changes during the run (2026-10-05), all decided before any of Luna's expansion 
   tests could fail more there than in Luna's later scoring. Each task's two arms are therefore
   scored side by side once its loops have finished, Sol's workers again (`eval --force`; the earlier
   scores are kept as `scores.under-load.json` and not used), then compared at parity.
+- Audit fix. The disqualifying process-environment rule matched `/proc/self/environ` in 4 of
+  direnv's 5 loops: agents testing an environment-variable loader printed the environment of
+  programs they had just started with `env -i` (for example `env -i A='a b' python3 -c
+  'print(open("/proc/self/environ","rb").read())'`). A process reading its own entry sees only what
+  it already has, and tool processes never hold the key, so the rule now ignores `/proc/self` and
+  `/proc/thread-self`. No other run in the study matched the rule. Found when direnv's comparison
+  rested on its one unflagged loop; every matched command is listed in its summary.
 - Scorer fix (`6ad2b674`). The pinned-plugin check now covers only test runs in which pytest ran
   (ascii-image-converter has branches with nothing to test), and a branch whose pytest cannot load an
   installed plugin before any test runs counts as tests not passed, like a timed-out branch (dust's

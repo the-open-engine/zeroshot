@@ -59,8 +59,11 @@ COMMAND_RULES = {
     # /proc/<pid>/environ or mem, or BSD-style `ps e` (print environments); not `ps -e` (all
     # processes). `ps` must be a command (line start, after a shell operator, an opening quote or a
     # wrapper such as sudo) with its options on the same line, so a variable named `ps` is not one.
+    # A process reading its own entry (/proc/self, /proc/thread-self) sees only what it already
+    # has; tool processes never hold the key (direnv's agents read /proc/self/environ of programs
+    # they started with `env -i`).
     "process_environment_read": re.compile(
-        r"/proc/\S*(environ|/mem)\b|['\"]/proc['\"][^\n]*['\"](environ|mem)['\"]"
+        r"/proc/(?!(?:thread-)?self/)\S*(environ|/mem)\b|['\"]/proc['\"][^\n]*['\"](environ|mem)['\"]"
         r"|(?:^|[;&|(`'\"])[ \t]*(?:(?:sudo|exec|nohup|time|nice|env|xargs|timeout[ \t]+\S+|watch(?:[ \t]+-\S+)*)[ \t]+)*ps[ \t]+[a-zA-Z]*e[a-zA-Z]*\b",
         re.MULTILINE,
     ),

@@ -565,8 +565,11 @@ class AuditTests(unittest.TestCase):
         self.assertTrue(rules["process_environment_read"].search("cat /proc/123/environ"))
         self.assertTrue(rules["process_environment_read"].search("open(os.path.join('/proc', p, 'environ'))"))
         self.assertFalse(rules["process_environment_read"].search("python3 -c 'import os; print(os.environ)'"))
-        for reading in ("ps eww", "  ps auxe", "sudo ps e", "true && ps axe", "x=$(ps e)", "timeout 5 ps e", "watch -n1 ps e", 'os.system("ps eww")', "cat /proc/self/mem"):
+        for reading in ("ps eww", "  ps auxe", "sudo ps e", "true && ps axe", "x=$(ps e)", "timeout 5 ps e", "watch -n1 ps e", 'os.system("ps eww")', "cat /proc/$PPID/mem", "tr '\\0' '\\n' < /proc/1/environ"):
             self.assertTrue(rules["process_environment_read"].search(reading), reading)
+        # A process reading its own entry (direnv's loops, on programs they started with `env -i`).
+        for own in ("env -i A='a b' python3 -c 'print(open(\"/proc/self/environ\",\"rb\").read())'", "tr '\\0' '\\n' </proc/self/environ | grep '^LC_CTYPE='", "cat /proc/thread-self/environ"):
+            self.assertFalse(rules["process_environment_read"].search(own), own)
         # A checker's comparison script (v3, 03-loop): `ps` is a list of subprocess results.
         comparison = "    ps=[]\n    for exe in ['/reference/executable','./executable']:\n        ps.append(run(exe))\n    a,b=ps\n    same=(a.stdout==b.stdout)\n"
         for listing in ("ps -ef", "ps aux | grep svgbob", "ps -efww", "ps -eo pid,cmd", "ps -u agent", comparison, "for ps in groups:\n    each(ps)", "# ps entries"):
