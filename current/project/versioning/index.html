@@ -577,6 +577,8 @@
       
         
       
+        
+      
     
     
     
@@ -637,6 +639,34 @@
     
   
     Prepare a runtime environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/review-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build a review loop
   
 
     
@@ -1061,6 +1091,8 @@
       
         
       
+        
+      
     
     
     
@@ -1146,6 +1178,34 @@
     
   
     Graph contract
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/runtime-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RuntimePlan
   
 
     
@@ -1741,9 +1801,11 @@ and fragment, but now show the minor version's newest patch. New releases do not
 <a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">  </span><span class="p">}</span>
 <a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="p">}</span>
 </code></pre></div>
-<p>The example abbreviates <code>routes</code>; builds retain the complete logical route map, including protocol
-schemas. Values are relative to the selected version root. Current uses <code>docsVersion: current</code>
+<p>The example abbreviates <code>routes</code>; builds list every logical route their source documents,
+including protocol schemas. Values are relative to the selected version root. Current uses <code>docsVersion: current</code>
 and null product and Python SDK versions; its source commit identifies <code>main</code> at build time.</p>
+<p>A minor's manifest lists only routes its source documents; clients must treat a missing route key as
+not documented in that version.</p>
 <p>Publication tools and this version-policy page can come from a newer workflow commit than the
 product source. <code>publisherCommit</code> records that distinction. Minor pages migrated from the old site
 retain their original source identity and omit <code>publisherCommit</code> until rebuilt; their existing

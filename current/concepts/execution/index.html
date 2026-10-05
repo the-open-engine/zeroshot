@@ -692,6 +692,8 @@
       
         
       
+        
+      
     
     
     
@@ -752,6 +754,34 @@
     
   
     Prepare a runtime environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/review-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build a review loop
   
 
     
@@ -1176,6 +1206,8 @@
       
         
       
+        
+      
     
     
     
@@ -1261,6 +1293,34 @@
     
   
     Graph contract
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/runtime-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RuntimePlan
   
 
     
@@ -1790,7 +1850,8 @@ runtime bindings, and the initial input; <code>--validate-only</code> runs them 
 </table>
 <p>Selectors, guards, and bindings are structured data. They are not snippets of JavaScript, JSONPath,
 shell code, or prompt text. Full field rules live in the
-<a href="../../reference/cluster/graph/">graph contract</a>.</p>
+<a href="../../reference/cluster/graph/">graph contract</a>, and <a href="../../guides/review-loop/">Build a review loop</a>
+builds a custom graph step by step.</p>
 <h2 id="concurrent-workspace-changes">Concurrent workspace changes<a class="headerlink" href="#concurrent-workspace-changes" title="Permanent link">&para;</a></h2>
 <p><code>par</code> branches and <code>map</code> items can run multiple writing agents at once. Writers share the run's
 workspace, including reviewers, so the graph and agent instructions must coordinate edits to the
@@ -1847,9 +1908,9 @@ The template supports local results and <code>--push</code>. With <code>--push</
 metadata from the finalized ledger, then the graph revisits its single Git delivery node after each
 iteration rather than only at graph completion. Manifest failures, delivery repair requests, and
 failed or rejected receipt audits stop the run instead of publishing an unreviewed repair.</p>
-<p>PR and merge delivery consider feedback by default. Use <code>--no-pr-feedback</code>, or set
-<code>pullRequestFeedback</code> to <code>ignore</code> on the delivery runtime binding, when the run should ignore PR
-discussion. CI, conflict, freshness, and merge-policy checks remain active.</p>
+<p>PR and merge delivery consider feedback by default. Use <code>--no-pr-feedback</code> to ignore PR discussion;
+the <a href="../../reference/runtime-plan/#git_delivery"><code>git_delivery</code> binding</a> describes the runtime
+setting.</p>
 
 
 

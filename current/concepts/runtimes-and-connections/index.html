@@ -670,6 +670,8 @@
       
         
       
+        
+      
     
     
     
@@ -730,6 +732,34 @@
     
   
     Prepare a runtime environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/review-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build a review loop
   
 
     
@@ -1154,6 +1184,8 @@
       
         
       
+        
+      
     
     
     
@@ -1239,6 +1271,34 @@
     
   
     Graph contract
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/runtime-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RuntimePlan
   
 
     
@@ -1676,6 +1736,8 @@
 <p>A graph defines the work and its control flow; the runtime plan supplies execution details for each
 executable node. Since the two documents are separate, local, self-hosted, and managed targets can
 run the same graph.</p>
+<p>The <a href="../../reference/runtime-plan/">RuntimePlan reference</a> lists every field, limit, and admission
+rule.</p>
 <h2 id="four-explicit-choices">Four explicit choices<a class="headerlink" href="#four-explicit-choices" title="Permanent link">&para;</a></h2>
 <p>Each agent binding names:</p>
 <ol>
@@ -1684,30 +1746,8 @@ run the same graph.</p>
 <li>an opaque provider-owned <strong>model</strong> identifier;</li>
 <li>zero or more named <strong>connections</strong>, each declaring exact environment field names.</li>
 </ol>
-<p>Zeroshot accepts these harness/provider pairs:</p>
-<table>
-<thead>
-<tr>
-<th>Harness</th>
-<th>Providers</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>codex</code></td>
-<td><code>openai</code>, <code>openrouter</code>, <code>bedrock</code>, <code>gateway</code></td>
-</tr>
-<tr>
-<td><code>claude</code></td>
-<td><code>anthropic</code>, <code>openrouter</code>, <code>bedrock</code>, <code>gateway</code></td>
-</tr>
-<tr>
-<td><code>copilot</code></td>
-<td><code>github</code></td>
-</tr>
-</tbody>
-</table>
-<p>Admission rejects known-incompatible pairs, such as <code>codex</code> with <code>anthropic</code> and <code>claude</code> with
+<p>The <a href="../../reference/runtime-plan/#harness-and-provider">RuntimePlan reference</a> lists the accepted
+harness/provider pairs. Admission rejects known-incompatible pairs, such as <code>codex</code> with <code>anthropic</code> and <code>claude</code> with
 <code>openai</code>. Zeroshot does not check current provider availability, and model names remain
 provider-owned.</p>
 <h2 id="uniform-and-exact-plans">Uniform and exact plans<a class="headerlink" href="#uniform-and-exact-plans" title="Permanent link">&para;</a></h2>
@@ -1725,9 +1765,8 @@ built-in template configuration short:</p>
 <p><code>--runtime-config</code> accepts a full plan with one same-named binding per executable graph node. Use it
 when reviewers and workers need different models, effort, sessions, or connections. Inspect node
 names first with <code>zeroshot template show TEMPLATE</code>.</p>
-<p>Session scope is either <code>execution</code> or <code>node_instance</code>. An <code>execution</code> scope opens a fresh provider
-session for each execution; <code>node_instance</code> reuses a live session when the same graph node instance
-runs again, such as across loop iterations.</p>
+<p>Session scope decides whether a node that runs again, such as in a loop, continues its provider
+session; see <a href="../../reference/runtime-plan/#agent">session scope</a>.</p>
 <h2 id="runtime-configuration-contains-names-not-secret-values">Runtime configuration contains names, not secret values<a class="headerlink" href="#runtime-configuration-contains-names-not-secret-values" title="Permanent link">&para;</a></h2>
 <p>A connection maps a stable key to required environment field names:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>

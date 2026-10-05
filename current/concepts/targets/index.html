@@ -613,6 +613,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Direct target">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#image-tags-and-remote-hosts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Image tags and remote hosts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -661,6 +678,8 @@
   
     
     
+      
+        
       
         
       
@@ -730,6 +749,34 @@
     
   
     Prepare a runtime environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/review-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build a review loop
   
 
     
@@ -1154,6 +1201,8 @@
       
         
       
+        
+      
     
     
     
@@ -1239,6 +1288,34 @@
     
   
     Graph contract
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/runtime-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RuntimePlan
   
 
     
@@ -1628,6 +1705,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Direct target">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#image-tags-and-remote-hosts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Image tags and remote hosts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1785,10 +1879,24 @@ its repository and branch from the invoking worktree's attached upstream. Withou
 worktree must have exactly one GitHub remote. <code>--repository</code> and <code>--branch</code> override that selection,
 and <code>--revision</code> selects an exact commit instead of resolving the current remote branch tip.
 Detached worktrees require explicit repository and branch values.</p>
+<h3 id="image-tags-and-remote-hosts">Image tags and remote hosts<a class="headerlink" href="#image-tags-and-remote-hosts" title="Permanent link">&para;</a></h3>
+<p>The image is published for <code>linux/amd64</code> only. Each release publishes a version tag such as
+<code>ghcr.io/the-open-engine/zeroshot-target:X.Y.Z</code> and a <code>sha-COMMIT</code> tag. <code>latest</code> moves to each newer
+release, so pin a version tag or an image digest when a host must keep the same image.</p>
+<p>To use a target on another machine, keep the published port on that host's loopback interface, as in
+the command above, and open an SSH tunnel from your workstation:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="go">ssh -N -L 8080:127.0.0.1:8080 USER@HOST</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">zeroshot target add remote-target --url http://127.0.0.1:8080 --direct</span>
+</code></pre></div>
+<p>Keep the tunnel open while you use the target. If a local target already uses port 8080, forward
+another local port and start the remote target with <code>--public-origin</code> set to that local origin,
+such as <code>http://127.0.0.1:18080</code>; the target advertises its endpoint from that origin. The
+<a href="https://github.com/the-open-engine/zeroshot/blob/main/docker/zeroshot-target/README.md">target image README</a>
+covers reverse proxies, Docker access for runs, and building the image.</p>
 <h2 id="hosted-target">Hosted target<a class="headerlink" href="#hosted-target" title="Permanent link">&para;</a></h2>
 <p>A hosted target adds discovery and user authentication around the same native contracts:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="go">zeroshot target add production --url https://TARGET_ORIGIN</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">zeroshot target login production</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="go">zeroshot target add production --url https://TARGET_ORIGIN</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">zeroshot target login production</span>
 </code></pre></div>
 <p>The hosting service owns login, source authorization, organization-scoped connections, queue policy,
 and capacity. Zeroshot's CLI and protocol do not prescribe those product policies.</p>

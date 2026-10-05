@@ -1,0 +1,22 @@
+{
+  "harness": "codex",
+  "provider": "openai",
+  "size": "medium",
+  "nodes": {
+    "worker": {
+      "kind": "agent",
+      "model": "YOUR_MODEL_ID",
+      "sessionScope": "node_instance"
+    },
+    "acceptance": {
+      "kind": "agent",
+      "model": "YOUR_MODEL_ID",
+      "sessionScope": "execution"
+    },
+    "code": {
+      "kind": "agent",
+      "model": "YOUR_MODEL_ID",
+      "sessionScope": "execution"
+    }
+  }
+}
