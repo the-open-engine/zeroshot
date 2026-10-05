@@ -26,6 +26,7 @@ from bench import accounting, audit, config, graphs, images, report  # noqa: E40
 from bench.attempt import run_files, snapshot_label  # noqa: E402
 
 EXPERIMENT = config.load("experiments/luna-xhigh-svgbob.json")
+EXPANSION_SELECTION = Path(__file__).resolve().parent.parent / "experiments" / "selection" / "cost-parity-expansion.json"
 
 
 def _tar(path: Path, files: dict[str, bytes]) -> Path:
@@ -235,7 +236,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(luna.reference_path, "/reference/executable")
 
     def test_cost_parity_expansion_draws_its_tasks_by_the_registered_rule(self):
-        selection = json.loads(Path("experiments/selection/cost-parity-expansion.json").read_text())
+        selection = json.loads(EXPANSION_SELECTION.read_text())
         rule = selection["criteria"]
         for task in selection["pool"]:
             self.assertTrue(rule["solx_min"] <= task["solx"] <= rule["solx_max"], task["iid"])
@@ -251,7 +252,7 @@ class ConfigTests(unittest.TestCase):
     def test_cost_parity_expansion_repeats_the_study_protocol(self):
         calcurse_luna = config.load("experiments/luna-xhigh-calcurse-v1.json")
         calcurse_sol = config.load("experiments/sol-xhigh-calcurse-single.json")
-        selection = json.loads(Path("experiments/selection/cost-parity-expansion.json").read_text())
+        selection = json.loads(EXPANSION_SELECTION.read_text())
         for instance_id in selection["chosen"]:
             task = instance_id.split("__", 1)[1].rsplit(".", 1)[0].lower()
             luna = config.load(f"experiments/luna-xhigh-{task}-v1.json")
