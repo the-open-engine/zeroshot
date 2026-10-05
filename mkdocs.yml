@@ -77,6 +77,7 @@ nav:
   - Project:
       - Documentation versions: project/versioning.md
       - Distribution contract: zeroshot-distribution.md
+  - zeroshot.sh: https://zeroshot.sh/?utm_source=github&utm_medium=docs&utm_campaign=zeroshot
 
 plugins:
   - search
@@ -128,6 +129,9 @@ extra:
     default: current
     alias: false
   social:
+    - icon: fontawesome/solid/globe
+      link: https://zeroshot.sh/?utm_source=github&utm_medium=docs&utm_campaign=zeroshot
+      name: zeroshot.sh
     - icon: fontawesome/brands/github
       link: https://github.com/the-open-engine/zeroshot
     - icon: fontawesome/brands/discord
