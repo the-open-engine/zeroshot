@@ -67,7 +67,7 @@ charter, use `auto-research`; custom graphs follow the same protocol contracts.
   Cloud accepts the same graph and runtime plan through a managed target. Its documentation covers
   accounts, organization policy, and queue behavior.
 
-  [Open the Cloud docs](https://dev.theopenengine.com/docs)
+  [Open the Cloud docs](https://cloud.zeroshot.sh/docs)
 
 </div>
 

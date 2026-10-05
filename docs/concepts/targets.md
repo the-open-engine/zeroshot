@@ -145,7 +145,7 @@ zeroshot target login production
 The hosting service owns login, source authorization, organization-scoped connections, queue policy,
 and capacity. Zeroshot's CLI and protocol do not prescribe those product policies.
 
-Follow the [Cloud documentation](https://dev.theopenengine.com/docs) for Zeroshot Cloud. Its pages
+Follow the [Cloud documentation](https://cloud.zeroshot.sh/docs) for Zeroshot Cloud. Its pages
 should link to the version of these core docs that matches the deployed target, as described in
 [Documentation versions](../project/versioning.md).
 

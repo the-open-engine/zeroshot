@@ -227,7 +227,8 @@ zeroshot target login cloud
 ```
 
 Open the printed link to sign in with the device code already filled in. Use `--target cloud` when
-submitting runs.
+submitting runs. The [Zeroshot Cloud docs](https://cloud.zeroshot.sh/docs) cover organizations, the
+GitHub App, saved connections and profiles, and starting runs from issues.
 
 A failed run with a recoverable workspace can be
 [restarted or resumed](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run).
@@ -253,6 +254,7 @@ See [Execution](docs/concepts/execution.md) for the research workflow's decision
 ## Reference
 
 - [Versioned documentation](https://the-open-engine.github.io/zeroshot/)
+- [Zeroshot Cloud documentation](https://cloud.zeroshot.sh/docs)
 - [Get started](docs/getting-started/first-run.md)
 - [CLI reference](docs/zeroshot-cli.md)
 - [Target image guide](docker/zeroshot-target/README.md)
