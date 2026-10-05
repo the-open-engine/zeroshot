@@ -205,7 +205,7 @@ Luna's prices) does not exceed C; build 1 if build 1 alone costs more; the final
 stops first. On each task, Luna outperforms Sol at cost parity if the mean pass rate of its 5 parity
 workspaces is higher than the mean of Sol's 5 single workers, and robustly if the two 95% bootstrap
 intervals do not overlap. The study reports every task in one of these categories (no task is
-dropped afterwards), plus, descriptively, C at Sol's launch prices ($5, $0.50 cached, $30).
+dropped afterwards).
 
 All attempts of the study run side by side on a 64-CPU host (`ZSBENCH_ALLOW_PARALLEL=1`, recorded in
 each manifest) without evaluation: the agents mostly wait on the model API. Evaluations follow in
@@ -215,31 +215,19 @@ experiments/sol-xhigh-<task>-single.json` (for svgbob, `--against` v4, whose fir
 single workers) writes `results/<luna experiment>/parity/<sol experiment>.json` and `.md`, scoring the
 parity snapshots outside the pre-registered schedule.
 
-Result (2026-10-04): at Sol's promotional prices, Luna's loop has the higher mean on 4 of 5 tasks,
+Result on the first five tasks (2026-10-04): Luna's loop has the higher mean on 4 of 5 tasks,
 robustly on ditaa (46.6% against 17.7%) and calcurse (80.5% against 70.6%); its intervals overlap
 Sol's on revive (49.1% against 45.1%) and fasttext (78.4% against 76.9%), and on svgbob Sol is ahead
-with overlapping intervals (55.9% against 53.5%). At Sol's launch prices revive also turns robust
-(50.4% against 45.1%). The budgets were $2.88 to $4.66 per run, which Luna's loops reached after 11
-to 42 rounds; Sol's single workers took 6 to 14 minutes, Luna's 50-round loops 2.4 to 3.5 hours.
-
-| Task | Budget | Sol single worker | Luna loop at parity | Verdict |
-|---|---|---|---|---|
-| svgbob (Rust) | $3.75 | 55.9% (53.4 to 58.7) | 53.5% (51.2 to 55.0) | Sol ahead, intervals overlap |
-| ditaa (Java) | $4.66 | 17.7% (5.9 to 29.5) | 46.6% (42.5 to 50.0) | Luna ahead, robustly |
-| calcurse (C) | $4.41 | 70.6% (65.9 to 74.7) | 80.5% (76.8 to 85.4) | Luna ahead, robustly |
-| revive (Go) | $4.00 | 45.1% (42.2 to 46.9) | 49.1% (46.6 to 51.5) | Luna ahead, intervals overlap |
-| fasttext (C++) | $2.88 | 76.9% (73.5 to 82.2) | 78.4% (74.5 to 82.0) | Luna ahead, intervals overlap |
-
-![GPT-5.6 Luna's loop against GPT-5.6 Sol's single worker at the same model cost on five tasks: means of 5 runs with 95% bootstrap intervals](figures/cost-parity-promotional.png)
-
-Every run of both arms entered the comparison. One of Sol's ditaa workers scored 0 because its Java
-source contains a bullet character and `javac` in the evaluation environment reads source as
-US-ASCII, as on the leaderboard; without it Sol's ditaa mean is 22.1%, still well below Luna's. Two
-of Luna's fasttext loops left trained model files of up to 800 MB in their workspaces (about 65 GB
-of snapshots each), which only slowed archiving and the summary's scans (now parallel). The study's
-new model cost was $164.68: $79.73 for Sol's 20 single workers, $83.07 for Luna's 15 full loops
-(beyond their parity rounds as well) and $1.90 for the smoke tests. Per-task results:
-`figures/cost-parity/*.json` (from `bench parity`), figure: `scripts/plot_parity.py`.
+with overlapping intervals (55.9% against 53.5%). The budgets were $2.88 to $4.66 per run, which
+Luna's loops reached after 11 to 42 rounds; Sol's single workers took 6 to 14 minutes, Luna's 50-round
+loops 2.4 to 3.5 hours. Every run of both arms entered the comparison. One of Sol's ditaa workers
+scored 0 because its Java source contains a bullet character and `javac` in the evaluation environment
+reads source as US-ASCII, as on the leaderboard; without it Sol's ditaa mean is 22.1%, still well below
+Luna's. Two of Luna's fasttext loops left trained model files of up to 800 MB in their workspaces
+(about 65 GB of snapshots each), which only slowed archiving and the summary's scans (now parallel).
+The first five tasks' model cost was $164.68: $79.73 for Sol's 20 single workers, $83.07 for Luna's
+15 full loops (beyond their parity rounds as well) and $1.90 for the smoke tests. Their table and
+figure are part of the 20-task result below.
 
 #### Expansion to 20 tasks (pre-registered 2026-10-05)
 
@@ -326,11 +314,64 @@ Changes during the run (2026-10-05), all decided before any of Luna's expansion 
   (ascii-image-converter has branches with nothing to test), and a branch whose pytest cannot load an
   installed plugin before any test runs counts as tests not passed, like a timed-out branch (dust's
   evaluation image loads a libtmux plugin that pytest 9 rejects, the same for every submission).
-- Scoring fidelity. On two tasks our scoring of GPT-5.5 xhigh's published archive does not match
-  the leaderboard: crowbook (67.0% against 2.9%) and dust (74.8% against 87.3%; dust's golden outputs
-  embed the leaderboard machine's filesystem block sizes, and its libtmux branch cannot run). Both
-  arms are scored the same way, so the comparison stands, but absolute scores on these two tasks are
-  not comparable with the leaderboard.
+- Scoring fidelity. On four tasks our scoring of GPT-5.5 xhigh's published archive does not match
+  the leaderboard: crowbook (67.0% against 2.9%; the leaderboard's run failed even `--help` tests that
+  pass here), dust (74.8% against 87.3%; its golden outputs embed the leaderboard machine's
+  filesystem block sizes, and its libtmux branch cannot run), tree-sitter (48.8% against 46.1%; 33
+  tests pass only here) and samtools (7.7% against 22.6%; see the result below). Every difference is
+  deterministic, and both arms are scored the same way, so the comparisons stand, but absolute scores
+  on these tasks are not comparable with the leaderboard.
+
+#### Result on 20 tasks (2026-10-05)
+
+Luna's loop has the higher mean on 15 of the 20 tasks (75%), robustly on 7: ditaa, parqeye, dstask,
+direnv, calcurse, gittype and gdu. Sol's single worker has the higher mean on 5 (marmite,
+ascii-image-converter, svgbob, xz and datasurgeon), never robustly. As pre-registered, there is no
+pooled test; the counts only describe the 20 verdicts.
+
+| Task | Budget | Sol single worker | Luna loop at parity | Rounds within budget | Verdict |
+|---|---|---|---|---|---|
+| ditaa (Java) | $4.66 | 17.7% (5.9 to 29.5) | 46.6% (42.5 to 50.0) | 26 | Luna, robustly |
+| parqeye (Rust) | $6.96 | 76.1% (70.8 to 81.5) | 89.2% (87.9 to 90.1) | 40 | Luna, robustly |
+| dstask (Go) | $4.90 | 78.6% (71.2 to 84.8) | 89.2% (88.4 to 90.1) | 38 | Luna, robustly |
+| direnv (Go) | $6.05 | 76.8% (73.9 to 79.8) | 87.4% (86.4 to 88.6) | 33 | Luna, robustly |
+| calcurse (C) | $4.41 | 70.6% (65.9 to 74.7) | 80.5% (76.8 to 85.4) | 37 | Luna, robustly |
+| tree-sitter (Rust) | $4.03 | 40.7% (39.2 to 42.5) | 45.5% (41.8 to 48.6) | 25 | Luna, intervals overlap |
+| gittype (Rust) | $4.76 | 71.5% (67.2 to 74.6) | 76.0% (74.7 to 78.0) | 41 | Luna, robustly |
+| revive (Go) | $4.00 | 45.1% (42.2 to 46.9) | 49.1% (46.6 to 51.5) | 37 | Luna, intervals overlap |
+| samtools (C) | $3.47 | 31.5% (21.8 to 37.7) | 35.3% (33.7 to 36.9) | 15 | Luna, intervals overlap |
+| gdu (Go) | $3.79 | 80.2% (78.6 to 81.7) | 83.7% (82.8 to 84.3) | 31 | Luna, robustly |
+| dust (Rust) | $3.96 | 73.4% (71.6 to 75.2) | 76.6% (75.2 to 77.6) | 30 | Luna, intervals overlap |
+| crowbook (Rust) | $4.03 | 65.3% (63.4 to 66.9) | 67.3% (63.4 to 70.4) | 18 | Luna, intervals overlap |
+| keifu (Rust) | $6.61 | 89.2% (87.9 to 90.6) | 91.1% (89.8 to 92.6) | 43 | Luna, intervals overlap |
+| fasttext (C++) | $2.88 | 76.9% (73.5 to 82.2) | 78.4% (74.5 to 82.0) | 18 | Luna, intervals overlap |
+| igrep (Rust) | $3.74 | 83.0% (80.3 to 86.4) | 84.1% (81.8 to 85.8) | 34 | Luna, intervals overlap |
+| marmite (Rust) | $4.60 | 65.9% (64.8 to 66.7) | 64.4% (62.8 to 66.1) | 26 | Sol, intervals overlap |
+| ascii-image-converter (Go) | $5.04 | 86.6% (82.7 to 89.4) | 84.4% (80.1 to 87.7) | 30 | Sol, intervals overlap |
+| svgbob (Rust) | $3.75 | 55.9% (53.4 to 58.7) | 53.5% (51.2 to 55.0) | 25 | Sol, intervals overlap |
+| xz (C) | $4.15 | 49.6% (40.2 to 66.3) | 44.9% (43.4 to 46.4) | 25 | Sol, intervals overlap |
+| datasurgeon (Rust) | $2.18 | 76.9% (74.7 to 79.2) | 63.3% (52.8 to 75.1) | 30 | Sol, intervals overlap |
+
+![A small model with a review loop outperforms a single-shot large model at cost parity in 75% of 20 sampled ProgramBench tasks: GPT-5.6 Luna's loop against GPT-5.6 Sol's single worker, means of 5 runs with 95% bootstrap intervals](figures/cost-parity.png)
+
+- Every run of both arms entered the comparisons (direnv's after the audit fix above).
+- samtools: Sol's single worker 05 lost its largest test branch to ProgramBench's 1-hour limit (two
+  pytest workers stayed busy for the whole hour), so its tests count as not passed, as on the
+  leaderboard. Without that run Sol's mean would be 36.3%, narrowly above Luna's 35.3%, so this
+  verdict rests on it. samtools was scored on a quiet host after its smoke test lost the same branch
+  under load; a re-check on the idle host gave the published GPT-5.5 archive the same 7.7%, so the
+  stall is not load. No compared Luna workspace hit the limit anywhere; Sol's ditaa worker 02 did.
+- xz: Sol's mean rests on one strong run (04 passed 1,166 of 1,410 tests; the other four 552 to 625).
+- datasurgeon: Luna's loops split, three plateauing near 53% and two reaching 75 to 82%.
+- Time: Sol's single workers took 7 to 21 minutes; Luna's loops reached the budget after 1.5 to 4.9
+  hours, about 13 times as long (median over tasks).
+- The expansion's model cost was $940.95: $386.24 for Sol's single workers, $544.07 for Luna's loops
+  (all 50 rounds, beyond their parity rounds as well) and $10.63 for smoke tests, including keifu's
+  two discarded starts.
+
+Per-task results: `figures/cost-parity/*.json` (from `bench parity`); figure:
+`scripts/plot_parity.py figures/cost-parity/*.json` (rows by Luna's lead; `--order luna` sorts them by
+Luna's score).
 
 ## The graph and prompts
 
