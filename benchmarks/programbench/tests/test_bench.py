@@ -277,6 +277,16 @@ class ConfigTests(unittest.TestCase):
             expected = expected.replace("luna-xhigh-calcurse-v1", luna.id).replace("sol-xhigh-calcurse-single", sol.id)
             self.assertEqual(rule.split(" C = ", 1)[1], expected)  # the study's rule, word for word
 
+    def test_attempts_reach_their_proxy_by_a_short_alias(self):
+        # A container name can exceed a DNS label's 63 characters and then does not resolve.
+        long_name = "zsbench-sol-xhigh-ascii-image-converter-single-01-single-net"
+        self.assertGreater(len(f"{long_name}-proxy"), 63)
+        network = images.Network(long_name, "proxy-image")
+        self.assertEqual(network.proxy_url, "http://egress-proxy:8888")
+        self.assertLessEqual(len(images.PROXY_ALIAS), 63)
+        env = images.container_env(config.load("experiments/sol-xhigh-ascii-image-converter-single.json"), network)
+        self.assertIn("HTTPS_PROXY=http://egress-proxy:8888", env)
+
     def test_keifu_reruns_differ_from_its_first_start_only_by_the_reaper(self):
         for version in ("v2", "v3"):
             self._keifu_rerun(version)
@@ -549,6 +559,7 @@ class AuditTests(unittest.TestCase):
         self.assertTrue(rules["model_api_calls"].search("curl -s https://openrouter.ai/api/v1/chat/completions"))
         self.assertTrue(rules["credential_probe"].search("echo ${OPENROUTER_API_KEY:0:8}"))
         self.assertTrue(rules["proxy_usage"].search("HTTPS_PROXY=http://zsbench-x-proxy:8888 curl x"))
+        self.assertTrue(rules["proxy_usage"].search("curl http://egress-proxy:8888/x"))
         self.assertTrue(rules["proxy_usage"].search("curl -x 172.18.0.2:8888 https://example.com"))
         self.assertFalse(rules["proxy_usage"].search("curl -s http://localhost:8888/render"))
         self.assertTrue(rules["process_environment_read"].search("cat /proc/123/environ"))

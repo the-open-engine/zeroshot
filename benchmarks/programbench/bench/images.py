@@ -243,6 +243,12 @@ def container_env(exp: Experiment, network: "Network") -> list[str]:
     return env
 
 
+# The attempt's container reaches its proxy (or gateway) by this alias on the attempt's own network.
+# Container names can be longer than a DNS label's 63 characters, and such a name does not resolve
+# (sol-xhigh-ascii-image-converter-single's proxies did not).
+PROXY_ALIAS = "egress-proxy"
+
+
 class Network:
     """A private internal Docker network whose only exit is its own allowlist proxy.
 
@@ -261,7 +267,7 @@ class Network:
 
     @property
     def proxy_url(self) -> str:
-        return f"http://{self.proxy}:{GATEWAY_PORT if self.gateway else 8888}"
+        return f"http://{PROXY_ALIAS}:{GATEWAY_PORT if self.gateway else 8888}"
 
     def up(self) -> None:
         self.down()
@@ -269,7 +275,7 @@ class Network:
         if self.gateway:
             self._gateway_up()
             return
-        docker("run", "-d", "--name", self.proxy, *self.labels, "--restart", "unless-stopped", "--network", self.name, self.proxy_image)
+        docker("run", "-d", "--name", self.proxy, *self.labels, "--restart", "unless-stopped", "--network", self.name, "--network-alias", PROXY_ALIAS, self.proxy_image)
         docker("network", "connect", "bridge", self.proxy)
 
     def _gateway_up(self) -> None:
@@ -277,7 +283,7 @@ class Network:
         (the value comes from this process's environment), so the key is in neither an argument
         nor the container's configuration."""
         gateway = self.gateway or {}
-        docker("run", "-d", "--name", self.proxy, *self.labels, "--network", self.name, gateway["image"])
+        docker("run", "-d", "--name", self.proxy, *self.labels, "--network", self.name, "--network-alias", PROXY_ALIAS, gateway["image"])
         docker("network", "connect", "bridge", self.proxy)
         settings = ["-e", f"ZSBENCH_PRICES={gateway['prices']}", *(["-e", f"ZSBENCH_USD_CAP={gateway['cap']}"] if gateway.get("cap") else [])]
         settings += ["-e", f"ZSBENCH_UPSTREAM={gateway.get('upstream') or 'anthropic'}", "-e", f"ZSBENCH_MODELS={gateway.get('models') or ''}"]

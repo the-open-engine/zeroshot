@@ -300,6 +300,13 @@ Changes during the run (2026-10-05), all decided before any of Luna's expansion 
   node's processes to end with the node (it kills the node's process group). Nothing else changed;
   neither earlier start is analysed. An earlier smoke test of keifu stopped at its diagnostic
   because the model mistyped the diagnostic script (`results/smoke-keifu.aborted-diagnostic-typo`).
+- ascii-image-converter, Sol's single workers re-run. Their proxies' container names
+  (`zsbench-sol-xhigh-ascii-image-converter-single-01-single-net-proxy`) are longer than a DNS
+  label's 63 characters and did not resolve, so Codex never reached the model API: all five
+  attempts retried for 90 minutes without a model response, used no tokens and changed nothing.
+  They were stopped and re-run from scratch (the pre-registered re-run for infrastructure errors),
+  with every attempt now reaching its proxy by a short alias on its own network. No other
+  experiment's names were that long.
 - Process limit. At 05:25 UTC every running attempt container of both arms had its limit raised
   from 8,192 to 65,536 processes, and so did every container started later, so that the slower
   leaks could not end a long loop.

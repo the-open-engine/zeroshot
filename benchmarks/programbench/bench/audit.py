@@ -54,7 +54,7 @@ COMMAND_RULES = {
         r"(?<!command -v )(?<!which )(?<!type )\b(curl|wget|nc|ncat|socat|ssh|scp|rsync|git\s+(clone|fetch|pull|ls-remote|submodule)|pip3?\s+(install|download)|cargo\s+(install|fetch|add|update|search)|go\s+(get|install|mod\s+download)|npm\s+(i|install|view)|apt(-get)?\s+(install|source|download|update))\b"
     ),
     "model_api_calls": re.compile(r"api\.openai\.com|api\.anthropic\.com|openrouter\.ai|/v1/(responses|chat/completions|models|embeddings|messages)", re.IGNORECASE),
-    "proxy_usage": re.compile(r"zsbench-\S*-proxy|\b(https?|all)_proxy\s*=|--proxy\b|\bproxies\s*=|\bcurl\b[^\n;&|]*\s-x\s", re.IGNORECASE),
+    "proxy_usage": re.compile(r"zsbench-\S*-proxy|\begress-proxy\b|\b(https?|all)_proxy\s*=|--proxy\b|\bproxies\s*=|\bcurl\b[^\n;&|]*\s-x\s", re.IGNORECASE),
     "sudo": re.compile(r"(^|[\s;&|(])sudo\b"),
     # /proc/<pid>/environ or mem, or BSD-style `ps e` (print environments); not `ps -e` (all
     # processes). `ps` must be a command (line start, after a shell operator, an opening quote or a
