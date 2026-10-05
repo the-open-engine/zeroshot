@@ -1,10 +1,11 @@
 """Cost-parity study: per task, GPT-5.6 Sol's single workers against GPT-5.6 Luna's loop at the same
-model cost (means with 95% bootstrap intervals), from the JSONs that `bench parity` writes.
+model cost (means with 95% bootstrap intervals), from the JSONs that `bench parity` writes. The title
+gives the share of tasks where the loop's mean is higher.
 
-    python3 scripts/plot_parity.py figures/cost-parity/*.json
+    python3 scripts/plot_parity.py figures/cost-parity/*.json [--out-dir DIR] [--order lead|luna]
 
-Writes figures/cost-parity-promotional.png and figures/cost-parity-launch.png (Sol's prices that
-set the budget). Needs matplotlib; fonts as in plot_pass_rate.py.
+Writes figures/cost-parity.png, or the same name in DIR. With more than six tasks, rows are sorted
+by Luna's lead, or with --order luna by Luna's score. Needs matplotlib; fonts as in plot_pass_rate.py.
 """
 import json
 import sys
@@ -31,7 +32,8 @@ TASKS = [("svgbob", "Rust: ASCII diagrams to SVG"), ("ditaa", "Java: ASCII diagr
          ("ascii-image-converter", "Go: images to ASCII art"), ("xz", "C: XZ compression tools"), ("samtools", "C: sequencing alignment tools")]
 
 
-def main(paths: list[Path], prices: str = "promotional") -> Path:
+def main(paths: list[Path], out_dir: Path | None = None, order: str = "lead") -> Path:
+    prices = "promotional"  # Sol's prices, which set each task's budget
     data = {}
     for p in paths:
         o = json.loads(p.read_text())
@@ -45,7 +47,11 @@ def main(paths: list[Path], prices: str = "promotional") -> Path:
         "xtick.color": MUTED, "ytick.color": MUTED, "xtick.labelcolor": INK_2, "ytick.labelcolor": INK_2,
     })
     tasks = [(t, d) for t, d in TASKS if t in data]
-    fig, ax = plt.subplots(figsize=(9.6, 1.0 * len(tasks) + 2.0), dpi=200)
+    many = len(tasks) > 6
+    if many:  # a forest plot: Luna's largest lead on top, or (order="luna") Luna's highest score
+        key = {t: data[t]["comparisons"][prices]["luna_mean"] - (0 if order == "luna" else data[t]["comparisons"][prices]["sol_mean"]) for t, _ in tasks}
+        tasks.sort(key=lambda item: -key[item[0]])
+    fig, ax = plt.subplots(figsize=(9.6, (0.62 if many else 1.0) * len(tasks) + 2.0), dpi=200)
     for i, (task, desc) in enumerate(tasks):
         c = data[task]["comparisons"][prices]
         y = len(tasks) - 1 - i
@@ -53,10 +59,6 @@ def main(paths: list[Path], prices: str = "promotional") -> Path:
             ax.plot(ci, [y + dy] * 2, color=color, lw=2.4, solid_capstyle="round", alpha=0.85, zorder=2)
             ax.scatter([mean], [y + dy], s=58, color=color, marker=marker, edgecolor=CANVAS, linewidth=1.2, zorder=3)
             ax.annotate(f"{mean:.1f}%", (ci[1], y + dy), xytext=(7, 0), textcoords="offset points", va="center", fontsize=9, color=color, fontweight="medium")
-        # The loop rounds Luna's runs needed to reach the budget (their parity workspaces), on average.
-        rounds = [r[prices]["rounds"] for r in data[task]["luna_runs"] if not r["excluded"] and not r[prices]["excluded"]]
-        ax.annotate(f"{sum(rounds) / len(rounds):.0f}", (c["luna_mean"], y + 0.14), xytext=(0, 7), textcoords="offset points",
-                    ha="center", va="bottom", fontsize=8.4, color=RUST, fontweight="medium")
     ax.set_yticks(range(len(tasks)))
     ax.set_yticklabels([f"{t}\n{d}" for t, d in reversed(tasks)], fontsize=9.5, linespacing=1.3)
     ax.set_ylim(-0.5, len(tasks) - 0.45)
@@ -73,16 +75,18 @@ def main(paths: list[Path], prices: str = "promotional") -> Path:
     handles = [Line2D([], [], color=INK, marker="o", lw=2.4, ms=7, mec=CANVAS, label="GPT-5.6 Sol (xhigh), single worker"),
                Line2D([], [], color=RUST, marker="D", lw=2.4, ms=6.5, mec=CANVAS, label="GPT-5.6 Luna (xhigh), loop at the same model cost")]
     ax.legend(handles=handles, loc="lower left", frameon=False, fontsize=9.3, bbox_to_anchor=(0.0, 1.0), ncol=2, handlelength=2.2, columnspacing=1.6)
-    ax.set_title("A small model with a review loop can outperform\na single-shot large model at cost parity", loc="left", fontfamily=["Fraunces", "DejaVu Serif"],
+    share = round(100 * sum(data[t]["comparisons"][prices]["luna_mean"] > data[t]["comparisons"][prices]["sol_mean"] for t, _ in tasks) / len(tasks))
+    ax.set_title(f"A small model with a review loop outperforms\na single-shot large model at cost parity\nin {share}% of {len(tasks)} sampled ProgramBench tasks", loc="left", fontfamily=["Fraunces", "DejaVu Serif"],
                  fontweight="semibold", fontsize=16, color=INK, pad=30, linespacing=1.15)
-    fig.text(0.5, 0.012, f"Number above Luna's marker: mean loop rounds Luna needed to reach the cost of Sol's single worker on that task (Sol's {prices} prices).",
-             ha="center", va="bottom", fontsize=8.6, color=MUTED)
-    fig.tight_layout(rect=(0, 0.03, 1, 1))
-    out = Path(__file__).resolve().parent.parent / "figures" / f"cost-parity-{prices}.png"
+    fig.tight_layout()
+    out = (out_dir or Path(__file__).resolve().parent.parent / "figures") / "cost-parity.png"
     fig.savefig(out)
     return out
 
 
 if __name__ == "__main__":
-    for prices in ("promotional", "launch"):
-        print(main([Path(p) for p in sys.argv[1:]], prices))
+    args = sys.argv[1:]
+    out_dir = Path(args.pop(args.index("--out-dir") + 1)) if "--out-dir" in args else None
+    order = args.pop(args.index("--order") + 1) if "--order" in args else "lead"
+    args = [a for a in args if a not in ("--out-dir", "--order")]
+    print(main([Path(p) for p in args], out_dir, order))

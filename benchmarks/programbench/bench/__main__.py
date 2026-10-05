@@ -27,7 +27,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from . import ROOT, config, evaluate, images, parity, report, smoke
+from . import ROOT, config, evaluate, images, match, parity, report, smoke
 from .attempt import Attempt, run_files
 from .util import (
     docker,
@@ -269,6 +269,20 @@ def _refuse_while_another_runner_runs(command: str) -> None:
         sys.exit(f"another zsbench runner is running ({', '.join(others)}); stop it before `{command}`")
 
 
+def cmd_match(exp: config.Experiment, against: str | None) -> None:
+    """Pinned performance (bench/match.py): the cost at which this experiment's loop runs first reach,
+    on average, the mean score of the single workers in ``against``; needs their parity comparison."""
+    if not against:
+        sys.exit("match needs --against SOL_EXPERIMENT")
+    _refuse_while_another_runner_runs("eval")
+    sol = config.load(against)
+    results = _results(exp)
+    _record_invocation(results, exp, f"match --against {sol.id}")
+    o = match.match(exp, sol, results, CACHE)
+    cost = f"${o['luna_cost_to_match_usd']:.2f} ({o['cost_ratio']:.0%} of Sol's ${o['sol_mean_cost_usd']:.2f})" if o["outcome"] == "reached" else f"not reached (${o['luna_spent_without_match_usd']:.2f} spent)"
+    print(f"{exp.id}: Sol's mean {o['sol_mean_pct']:.1f}% at ${o['sol_mean_cost_usd']:.2f}; Luna's loop reaches it at {cost}")
+
+
 def cmd_parity(exp: config.Experiment, against: str | None) -> None:
     """Cost parity (decision_rule.cost_parity): this experiment's loop runs at the mean cost of the
     single workers in ``against`` (or of a loop experiment's first builds)."""
@@ -309,7 +323,7 @@ def _exit_on_signal(signum: int, _frame: object) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="bench", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["plan", "check-key", "smoke", "run", "eval", "report", "parity", "cleanup"])
+    parser.add_argument("command", choices=["plan", "check-key", "smoke", "run", "eval", "report", "parity", "match", "cleanup"])
     parser.add_argument("experiment", nargs="?", help="experiment JSON (default: experiments/smoke.json for smoke)")
     parser.add_argument("--keep-containers", action="store_true", help="leave attempt containers for inspection")
     parser.add_argument("--skip-eval", action="store_true", help="run attempts without evaluating")
@@ -337,6 +351,8 @@ def main() -> None:
             cmd_report(exp)
         elif args.command == "parity":
             cmd_parity(exp, args.against)
+        elif args.command == "match":
+            cmd_match(exp, args.against)
         elif args.command == "cleanup":
             cmd_cleanup(exp)
     finally:

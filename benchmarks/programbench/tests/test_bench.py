@@ -347,6 +347,22 @@ class ConfigTests(unittest.TestCase):
         self.assertAlmostEqual(spend[1] - spend[0], price(builds[1]) + price(checks[0]))
         self.assertAlmostEqual(spend[2] - spend[1], price(builds[2]) + price(checks[1]))
 
+    def test_match_finds_the_first_budget_whose_deliverables_reach_sol(self):
+        from bench import match
+
+        runs = {"a": [1.0, 2.0, 3.0], "b": [1.5, 2.5, 3.5]}
+        scores = {("a", 1): 40.0, ("b", 1): 50.0, ("a", 2): 60.0, ("b", 2): 70.0, ("a", 3): 80.0, ("b", 3): 80.0}
+        # At $1.00 run b has no build yet (scores 0); at $1.50: (40 + 50) / 2 = 45; at $2.00: (60 + 50) / 2 = 55.
+        self.assertEqual(match.first_match(runs, scores, 45.0), ("reached", 1.5, {"a": 1, "b": 1}))
+        self.assertEqual(match.first_match(runs, scores, 55.0), ("reached", 2.0, {"a": 2, "b": 1}))
+        self.assertEqual(match.first_match(runs, scores, 90.0)[0], "never")
+        # A deliverable that has not been scored stops the search there.
+        partial = {k: v for k, v in scores.items() if k != ("b", 2)}
+        self.assertEqual(match.first_match(runs, partial, 75.0), ("unknown", 2.5, [("b", 2)]))
+        # A later dip does not matter: the first budget that reaches the target counts.
+        dip = {**scores, ("a", 3): 10.0}
+        self.assertEqual(match.first_match(runs, dip, 65.0), ("reached", 2.5, {"a": 2, "b": 2}))
+
     def test_parity_verdict_compares_means_and_intervals(self):
         from bench import parity
 
