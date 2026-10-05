@@ -48,7 +48,9 @@ The Cloud target is built in. Sign in once; organization selection happens in th
 zeroshot target login cloud
 ```
 
-Cloud runs use `--target cloud`. Omit `--target` for local execution.
+Cloud runs use `--target cloud`. Omit `--target` for local execution. The
+[Zeroshot Cloud docs](https://cloud.zeroshot.sh/docs) cover organizations, the GitHub App, and saved
+connections.
 
 ## Open the workspace UI
 
