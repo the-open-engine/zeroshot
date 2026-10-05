@@ -39,6 +39,13 @@ checks pass. The implementing agent never approves its own work.
 Use the built-in graph or bring your own topology. Add reviewers, tests, and repair loops, then save
 the setup as a profile for the next task.
 
+The same task, given to one agent that checks its own work and to Zeroshot. The scenario is scripted
+to show the flow; it is not a benchmark.
+
+<a href="https://x.com/eivindmeyer_cv/status/2106898797771288828"><img src="docs/assets/zeroshot-vs-single-agent.png" alt="Split terminal: a single agent claims the invoice CSV export is done and needs four corrections while it still exports all 249 rows; Zeroshot's acceptance and code reviewers reject the first attempt, repair runs, and the run succeeds with zero corrections" width="100%"></a>
+
+[Watch the run on X](https://x.com/eivindmeyer_cv/status/2106898797771288828)
+
 [Opcore](https://github.com/the-open-engine/opcore) works alongside it: Opcore checks each edit while
 an agent writes code, and Zeroshot has independent agents review the whole change before it lands.
 
