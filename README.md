@@ -41,9 +41,6 @@ the setup as a profile for the next task.
 
 **[▶ Video: a single agent vs. Zeroshot](https://x.com/eivindmeyer_cv/status/2106898797771288828)** (scripted)
 
-[Opcore](https://github.com/the-open-engine/opcore) works alongside it: Opcore checks each edit while
-an agent writes code, and Zeroshot has independent agents review the whole change before it lands.
-
 Questions, ideas, or a run worth showing? Join the [Zeroshot community on Discord](https://discord.gg/fZyzf2Cut9).
 
 ## When to use it
@@ -277,6 +274,8 @@ See [Execution](docs/concepts/execution.md) for the research workflow's decision
 - [Python SDK](sdks/python/README.md)
 - [Cluster API reference](https://the-open-engine.github.io/zeroshot/current/reference/cluster/api/)
 - [Graph contract](docs/reference/cluster/graph.md)
+
+Also check out: [Opcore](https://github.com/the-open-engine/opcore).
 
 ## Development
 
