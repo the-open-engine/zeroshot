@@ -113,7 +113,8 @@ For other harnesses and providers, see [Runtimes and connections](docs/concepts/
 
 1. A worker implements the task.
 2. Acceptance and code reviewers check the result independently, in parallel.
-3. Rejected work goes to a repair worker, then through both reviews again.
+3. Rejected work goes to one repair worker with both reviews' feedback, then through both reviews
+   again.
 4. With delivery enabled, accepted work proceeds through the configured Git and CI steps.
 5. Delivery conflicts return through repair and review.
 
@@ -136,7 +137,7 @@ and environment you provide.
 ## Bring your own graph topology
 
 Choose each agent's model and instructions, which steps run in parallel, and when to retry.
-For example, add a bugfinder and E2E tests after the code and acceptance review loop:
+For example, a custom graph could add stages after the review loop:
 
 ```text
 Implementation
@@ -150,8 +151,9 @@ E2E tests
 Delivery
 ```
 
-The bugfinder and E2E stages are custom additions. Provide their test tools, services, and credentials,
-and configure where failures route back for repair.
+This only shows what a custom graph can express. Zeroshot ships just the built-in graph described
+above. Any stage you add, you define, including its tools, services and credentials, and where its
+failures go for repair.
 
 Inspect the built-in graph as a starting point:
 
@@ -163,6 +165,27 @@ See the [graph contract](docs/reference/cluster/graph.md) for custom graph autho
 [Prepare a runtime environment](docs/guides/runtime-environments.md) for dependency and service setup.
 
 ## Save and reuse a profile
+
+Each step can use its own model. Pass `--runtime-config` with one binding per node in place of
+`--uniform-runtime-config`:
+
+```json
+{
+  "harness": "claude",
+  "provider": "anthropic",
+  "size": "medium",
+  "nodes": {
+    "worker": { "kind": "agent", "model": "WORKER_MODEL_ID", "effort": "high" },
+    "acceptance": { "kind": "agent", "model": "REVIEW_MODEL_ID", "effort": "high" },
+    "code": { "kind": "agent", "model": "REVIEW_MODEL_ID", "effort": "max" },
+    "review_repair": { "kind": "agent", "model": "WORKER_MODEL_ID", "effort": "high" }
+  }
+}
+```
+
+Runs with delivery enabled also need a `delivery_repair` binding. Run
+`zeroshot template show software-change` to list the node names. See the
+[RuntimePlan reference](docs/reference/runtime-plan.md) for every field.
 
 A profile stores a graph and its runtime settings. Use **Profiles** in the browser UI to edit and
 save your configuration. Keep different profiles for different kinds of work, or reuse one for the
