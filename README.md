@@ -42,7 +42,7 @@ the setup as a profile for the next task.
 The same task, given to one agent that checks its own work and to Zeroshot. The scenario is scripted
 to show the flow; it is not a benchmark.
 
-<a href="https://x.com/eivindmeyer_cv/status/2106898797771288828"><img src="docs/assets/zeroshot-vs-single-agent.png" alt="Split terminal: a single agent claims the invoice CSV export is done and needs four corrections while it still exports all 249 rows; Zeroshot's acceptance and code reviewers reject the first attempt, repair runs, and the run succeeds with zero corrections" width="100%"></a>
+<a href="https://x.com/eivindmeyer_cv/status/2106898797771288828"><img src="docs/assets/zeroshot-vs-single-agent.png" alt="Two terminals on the same invoice CSV task: a single agent says the export is done, then still returns all 249 rows and lets a viewer download it after four corrections; Zeroshot's code-quality, completion, and correctness reviewers reject the first attempt, repair runs, and all three approve" width="100%"></a>
 
 [Watch the run on X](https://x.com/eivindmeyer_cv/status/2106898797771288828)
 
