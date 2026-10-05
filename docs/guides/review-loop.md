@@ -1,15 +1,28 @@
 # Build a review loop
 
-This guide writes a custom graph that sends one coding task through a worker and two independent
+This guide builds a custom graph that sends one coding task through a worker and two independent
 reviewers. When either reviewer rejects the change, the loop runs the same worker again with both
 reviewers' feedback. The run succeeds when both accept, and fails after four passes.
 
 The built-in `software-change` template already does this with more recovery paths. Build the loop
 yourself when you want to change the reviewers, their instructions, or the bounds.
 
+## Before you start
+
+This guide assumes you have completed [Run a first task](../getting-started/first-run.md): Zeroshot
+is installed, the Codex CLI is signed in, and you have a Git repository with an HTTP service to
+change.
+
+!!! warning "The worker edits the current worktree"
+
+    Commit or stash work you want to protect, and run the commands from the repository you intend to
+    change.
+
 ## Files
 
-The example has three files. Download them or copy them from the sections below.
+The example has three files. Download them or copy them from the sections below, and keep them
+outside the repository you are changing, for example in `~/review-loop/`, so they stay out of the
+change.
 
 | File                                                                         | Purpose                                       |
 | ---------------------------------------------------------------------------- | --------------------------------------------- |
@@ -62,9 +75,10 @@ The worker is a `step`. It reads the task and both feedback fields:
 The full node also declares an `input` record and three `inputBindings`, one per field. Its output
 is `null` because the worker changes files in the shared workspace rather than returning data.
 
-Agent worker references are labels local to the graph. Admission builds each worker's contract from
-the node declaration, and a reference used on several nodes must keep the same contract. This
-example reuses the names from the built-in template. Agent nodes need authored `instructions`.
+The `worker` value is a label local to this graph. The `builtin.` names only mirror the built-in
+template; they add no behavior. Admission derives each worker's contract from the node's declared
+input, output, signals, and diagnostic, so a label used on several nodes must keep the same
+declaration and binding kind. Every agent node needs authored `instructions`.
 
 ## 3. Run two reviewers in parallel
 
@@ -167,49 +181,48 @@ The graph state still carries the feedback explicitly either way.
 
 Replace `YOUR_MODEL_ID` with a model the provider accepts. Nodes can use different models or effort
 values; harness, provider, and size apply to the whole run. The bindings omit `connections`, so a
-local Codex run reuses the Codex CLI's login and a contained target derives `OPENAI_API_KEY`. See
+local Codex run reuses the Codex CLI's login, and a Docker or cloud target derives the canonical
+`OPENAI_API_KEY` requirement. See
 the [RuntimePlan reference](../reference/runtime-plan.md) for every field.
 
 ## 7. Validate, then run
 
-Save the task as `input.json`:
+The input supplies only the task:
 
 ```json title="input.json"
 --8<-- "assets/review-loop/input.json"
 ```
 
-Check all three files without starting a run. Validation covers JSON shape, graph data flow, loop
+From the repository you want to change, check all three files without starting a run. Validation covers JSON shape, graph data flow, loop
 termination, runtime coverage, and the initial input:
 
 ```console
 zeroshot run \
   --title "Review loop validation" \
-  --graph review-loop.graph.json \
-  --runtime-config review-loop.runtime.json \
-  --input input.json \
+  --graph ~/review-loop/review-loop.graph.json \
+  --runtime-config ~/review-loop/review-loop.runtime.json \
+  --input ~/review-loop/input.json \
   --validate-only
 ```
 
 Successful validation writes `{"valid":true}`.
-
-!!! warning "The worker edits the current worktree"
-
-    Commit or stash work you want to protect, and run the command from the repository you intend to
-    change.
 
 Remove `--validate-only` to start the run:
 
 ```console
 zeroshot run \
   --title "Health-check endpoint" \
-  --graph review-loop.graph.json \
-  --runtime-config review-loop.runtime.json \
-  --input input.json
+  --graph ~/review-loop/review-loop.graph.json \
+  --runtime-config ~/review-loop/review-loop.runtime.json \
+  --input ~/review-loop/input.json
 ```
 
 [Observe and control runs](observe-and-control.md) covers status, logs, and stopping.
 
-Add `--target cloud` or a [direct target](../concepts/targets.md#direct-target) name to run the same
-files on a target. The graph has no delivery node, so a target run does not push the accepted
-change. Add a Git delivery verifier after the loop, or use the `software-change` template with
+The same files run on a target with `--target cloud` (see
+[Connect Zeroshot Cloud](../getting-started/install.md#connect-zeroshot-cloud)) or the name of a
+[direct target](../concepts/targets.md#direct-target). A target checks out the worktree's pushed
+upstream branch, not local uncommitted changes, and resolves `OPENAI_API_KEY` from the submission
+environment or its connection store. The graph has no delivery node, so a target run does not push
+the accepted change. Add a Git delivery verifier after the loop, or use the `software-change` template with
 `--push`, `--pr`, or `--ship`, when the result must leave the target.

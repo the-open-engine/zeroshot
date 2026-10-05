@@ -147,8 +147,9 @@ ssh -N -L 8080:127.0.0.1:8080 USER@HOST
 zeroshot target add remote-target --url http://127.0.0.1:8080 --direct
 ```
 
-Keep the tunnel open while you use the target. A direct target does not authenticate callers, so
-anyone who can reach its port can use it; never expose the port to the public internet. The
+Keep the tunnel open while you use the target. If a local target already uses port 8080, forward
+another local port and start the remote target with `--public-origin` set to that local origin,
+such as `http://127.0.0.1:18080`; the target advertises its endpoint from that origin. The
 [target image README](https://github.com/the-open-engine/zeroshot/blob/main/docker/zeroshot-target/README.md)
 covers reverse proxies, Docker access for runs, and building the image.
 

@@ -16,15 +16,8 @@ Each agent binding names:
 3. an opaque provider-owned **model** identifier;
 4. zero or more named **connections**, each declaring exact environment field names.
 
-Zeroshot accepts these harness/provider pairs:
-
-| Harness   | Providers                                       |
-| --------- | ----------------------------------------------- |
-| `codex`   | `openai`, `openrouter`, `bedrock`, `gateway`    |
-| `claude`  | `anthropic`, `openrouter`, `bedrock`, `gateway` |
-| `copilot` | `github`                                        |
-
-Admission rejects known-incompatible pairs, such as `codex` with `anthropic` and `claude` with
+The [RuntimePlan reference](../reference/runtime-plan.md#harness-and-provider) lists the accepted
+harness/provider pairs. Admission rejects known-incompatible pairs, such as `codex` with `anthropic` and `claude` with
 `openai`. Zeroshot does not check current provider availability, and model names remain
 provider-owned.
 
@@ -48,9 +41,8 @@ built-in template configuration short:
 when reviewers and workers need different models, effort, sessions, or connections. Inspect node
 names first with `zeroshot template show TEMPLATE`.
 
-Session scope is either `execution` or `node_instance`. An `execution` scope opens a fresh provider
-session for each execution; `node_instance` reuses a live session when the same graph node instance
-runs again, such as across loop iterations.
+Session scope decides whether a node that runs again, such as in a loop, continues its provider
+session; see [session scope](../reference/runtime-plan.md#agent).
 
 ## Runtime configuration contains names, not secret values
 

@@ -59,14 +59,27 @@ def _identity() -> tuple[str, str, str | None]:
     return docs_version, source_commit, product_version
 
 
-def _manifest() -> dict[str, Any]:
+def _route_target(route: str) -> str:
+    return route + "index.html" if not route or route.endswith("/") else route
+
+
+def _documented_routes(routes: dict[str, str], site_dir: Path) -> dict[str, str]:
+    """Keep only routes whose page exists in this build, so older sources omit newer pages."""
+    return {
+        name: route
+        for name, route in routes.items()
+        if (site_dir / _route_target(route)).is_file()
+    }
+
+
+def _manifest(site_dir: Path | None = None) -> dict[str, Any]:
     docs_version, source_commit, product_version = _identity()
     publisher_commit = os.environ.get("ZEROSHOT_DOCS_PUBLISHER_COMMIT") or _git_commit()
     if _SOURCE_COMMIT.fullmatch(publisher_commit) is None:
         raise ValueError(
             "ZEROSHOT_DOCS_PUBLISHER_COMMIT must be a full lowercase Git commit"
         )
-    return {
+    manifest = {
         "schemaVersion": 2,
         "docsVersion": docs_version,
         "productVersion": product_version,
@@ -93,6 +106,9 @@ def _manifest() -> dict[str, Any]:
             "schema": "reference/cluster/schema.json",
         },
     }
+    if site_dir is not None:
+        manifest["routes"] = _documented_routes(manifest["routes"], site_dir)
+    return manifest
 
 
 def on_config(config: Any, **_: Any) -> Any:
@@ -109,5 +125,5 @@ def on_post_build(*, config: Any, **_: Any) -> None:
     for source_name, public_name in _PROTOCOL_FILES:
         shutil.copyfile(_PROTOCOL_SOURCE / source_name, destination / public_name)
 
-    manifest = json.dumps(_manifest(), indent=2, sort_keys=True)
+    manifest = json.dumps(_manifest(site_dir), indent=2, sort_keys=True)
     (site_dir / "manifest.json").write_text(f"{manifest}\n", encoding="utf-8")

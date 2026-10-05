@@ -4,9 +4,9 @@ A `RuntimePlan` says how each executable node in a graph runs. It selects the ha
 run size, and gives every `step` and `verifier` one binding. It contains model identifiers and
 connection field names, never secret values.
 
-This page lists every field and admission rule.
 [Runtimes and connections](../concepts/runtimes-and-connections.md) explains the concepts, and
-[Build a review loop](../guides/review-loop.md) writes a complete plan for a custom graph. The Rust types in `openengine-cluster-protocol` are authoritative; the
+[Build a review loop](../guides/review-loop.md) builds a complete plan for a custom graph. The Rust
+types in `openengine-cluster-protocol` are authoritative; the
 <a href="../cluster/schema.json#/$defs/RuntimePlan">generated protocol schema</a> is the
 machine-readable contract.
 
@@ -28,6 +28,8 @@ connections are chosen per node.
 status; the hosting target decides what resources each class receives.
 
 `nodes` keys are graph node names: 1 to 128 bytes matching `[A-Za-z_][A-Za-z0-9_.-]*`.
+
+This plan binds the four agent nodes of the built-in `software-change` template:
 
 ```json
 {
@@ -104,9 +106,12 @@ A `git_delivery` binding has no model, effort, or session scope. Admission accep
 
 The delivery verifier cannot have authored `instructions`, must use `attempts: 1`, and must declare
 the output, signals, and diagnostic of its worker's fixed contract. `zeroshot template show
-software-change --pr` prints a delivery node with the current contract. A graph can contain at most
-one delivery node, and it must run after every node that can change the delivered workspace; see
-[concurrent workspace changes](../concepts/execution.md#concurrent-workspace-changes).
+software-change --pr` prints a delivery node with the current contract.
+
+A graph can contain at most one delivery node, and no other executable node may run in parallel with
+it, either as a `par` sibling or inside a `map` that can have more than one item. A hosting service
+may require exactly one delivery node; Zeroshot Cloud requires one for saved profiles and quick
+runs. See [concurrent workspace changes](../concepts/execution.md#concurrent-workspace-changes).
 
 `ignore` skips pull-request discussion. CI, conflict, freshness, and merge-policy checks still apply.
 
@@ -146,8 +151,8 @@ Values come from the submission environment or a target connection store at run 
 | Unique field names per run | At most 64 across all nodes                                            |
 
 The per-run limit also counts the connection fields and variable names of an attached runtime
-environment. Each connection value must be 1 byte to 64 KiB with no NUL. The connection values
-resolved for one run, counting each key and field name with its value, must fit in 256 KiB.
+environment. Each connection value must be 1 byte to 64 KiB with no NUL. The static connection
+values supplied for one run, counting each key and field name with its value, must fit in 256 KiB.
 
 When a node omits `connections`, Zeroshot derives provider access for the execution placement.
 Local native logins need no declaration; contained targets and non-native providers receive the
@@ -179,7 +184,8 @@ adds `checkpoint_delivery` plus the agent nodes `checkpoint_manifest` and `check
 `single-worker` has no delivery modes.
 
 The CLI inserts the template-owned `git_delivery` binding for the delivery node, declaring
-`{"github": ["GH_TOKEN"]}`. `--no-pr-feedback` sets its `pullRequestFeedback` to `ignore`.
+`{"github": ["GH_TOKEN"]}`. `--no-pr-feedback` (requires `--pr` or `--ship`) sets its
+`pullRequestFeedback` to `ignore`.
 
 A uniform configuration binds the added agent nodes too. An exact `--runtime-config` must bind them
 as `agent` nodes itself, such as `delivery_repair` for `software-change --pr`. It may omit the

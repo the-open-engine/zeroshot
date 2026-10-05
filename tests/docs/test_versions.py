@@ -181,6 +181,25 @@ class PublicationTests(unittest.TestCase):
                     f"route {name} has no documentation page",
                 )
 
+    def test_routes_to_pages_missing_from_the_build_are_dropped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            site = Path(directory)
+            (site / "guides/observe-and-control").mkdir(parents=True)
+            (site / "guides/observe-and-control/index.html").write_text("page")
+            (site / "index.html").write_text("page")
+            (site / "reference/cluster").mkdir(parents=True)
+            (site / "reference/cluster/schema.json").write_text("{}")
+            with patch.dict(os.environ, {"ZEROSHOT_DOCS_COMMIT": COMMIT}, clear=True):
+                routes = hook._manifest(site)["routes"]
+        self.assertEqual(
+            routes,
+            {
+                "overview": "",
+                "runControl": "guides/observe-and-control/",
+                "schema": "reference/cluster/schema.json",
+            },
+        )
+
     def test_rejects_mismatched_minor_and_product_identity(self):
         for docs, product in (
             ("v10.2", "10.3.0"),

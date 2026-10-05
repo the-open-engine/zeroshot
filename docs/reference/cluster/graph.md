@@ -2,7 +2,7 @@
 
 This document is normative together with the public Rust types in
 `openengine-cluster-protocol`. The Rust types are authoritative when generated projections and
-prose disagree.
+prose disagree. [Build a review loop](../../guides/review-loop.md) is a complete worked example.
 
 The graph contract defines two profiles:
 
@@ -23,7 +23,6 @@ separate from verification.
 
 `GraphSpec` has the required camel-case fields `profile`, `initialInput`, `policy`, and `root`.
 Every graph node is tagged by `kind`. Node payloads reject unknown fields.
-[Build a review loop](../../guides/review-loop.md) is a complete worked example.
 
 | `kind`     | Contract                                                                                                                                      |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -53,6 +53,9 @@ The example abbreviates `routes`; builds retain the complete logical route map, 
 schemas. Values are relative to the selected version root. Current uses `docsVersion: current`
 and null product and Python SDK versions; its source commit identifies `main` at build time.
 
+A minor's manifest lists only routes its source documents; clients must treat a missing route key as
+not documented in that version.
+
 Publication tools and this version-policy page can come from a newer workflow commit than the
 product source. `publisherCommit` records that distinction. Minor pages migrated from the old site
 retain their original source identity and omit `publisherCommit` until rebuilt; their existing

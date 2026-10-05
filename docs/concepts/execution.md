@@ -36,7 +36,7 @@ Executable nodes are `step` and `verifier`. Groups compose them:
 Selectors, guards, and bindings are structured data. They are not snippets of JavaScript, JSONPath,
 shell code, or prompt text. Full field rules live in the
 [graph contract](../reference/cluster/graph.md), and [Build a review loop](../guides/review-loop.md)
-writes a custom graph step by step.
+builds a custom graph step by step.
 
 ## Concurrent workspace changes
 
@@ -109,6 +109,6 @@ metadata from the finalized ledger, then the graph revisits its single Git deliv
 iteration rather than only at graph completion. Manifest failures, delivery repair requests, and
 failed or rejected receipt audits stop the run instead of publishing an unreviewed repair.
 
-PR and merge delivery consider feedback by default. Use `--no-pr-feedback`, or set
-`pullRequestFeedback` to `ignore` on the delivery runtime binding, when the run should ignore PR
-discussion. CI, conflict, freshness, and merge-policy checks remain active.
+PR and merge delivery consider feedback by default. Use `--no-pr-feedback` to ignore PR discussion;
+the [`git_delivery` binding](../reference/runtime-plan.md#git_delivery) describes the runtime
+setting.

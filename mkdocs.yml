@@ -61,7 +61,6 @@ nav:
       - Python SDK: guides/python-sdk.md
   - Reference:
       - CLI: zeroshot-cli.md
-      - RuntimePlan: reference/runtime-plan.md
       - Python API:
           - API overview: reference/python.md
           - Client and run handle: reference/python/client.md
@@ -71,6 +70,7 @@ nav:
       - Cluster protocol:
           - API: reference/cluster/api.md
           - Graph contract: reference/cluster/graph.md
+          - RuntimePlan: reference/runtime-plan.md
           - Admission: reference/cluster/admission.md
           - Lifecycle: reference/cluster/lifecycle.md
           - Watch and replay: reference/cluster/watch.md
@@ -116,6 +116,7 @@ markdown_extensions:
   - pymdownx.snippets:
       base_path: [docs]
       check_paths: true
+      restrict_base_path: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
