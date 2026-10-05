@@ -4,6 +4,9 @@ A graph defines the work and its control flow; the runtime plan supplies executi
 executable node. Since the two documents are separate, local, self-hosted, and managed targets can
 run the same graph.
 
+The [RuntimePlan reference](../reference/runtime-plan.md) lists every field, limit, and admission
+rule.
+
 ## Four explicit choices
 
 Each agent binding names:

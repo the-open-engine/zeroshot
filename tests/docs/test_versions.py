@@ -165,6 +165,22 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(manifest["sourceCommit"], COMMIT)
         self.assertEqual(manifest["publisherCommit"], "b" * 40)
 
+    def test_page_routes_resolve_to_documentation_pages(self):
+        with patch.dict(os.environ, {"ZEROSHOT_DOCS_COMMIT": COMMIT}, clear=True):
+            routes = hook._manifest()["routes"]
+        self.assertEqual(routes["runtimePlanReference"], "reference/runtime-plan/")
+        self.assertEqual(routes["reviewLoop"], "guides/review-loop/")
+        for name, route in routes.items():
+            if route.endswith(".json"):
+                continue
+            with self.subTest(route=name):
+                page = route.rstrip("/") or "index"
+                self.assertTrue(
+                    (ROOT / "docs" / f"{page}.md").is_file()
+                    or (ROOT / "docs" / page / "index.md").is_file(),
+                    f"route {name} has no documentation page",
+                )
+
     def test_rejects_mismatched_minor_and_product_identity(self):
         for docs, product in (
             ("v10.2", "10.3.0"),

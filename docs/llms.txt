@@ -46,6 +46,8 @@ The installer needs Node.js 18+ and installs a verified native binary plus a Zer
 - [Execution](https://the-open-engine.github.io/zeroshot/current/concepts/execution/): built-in graphs and delivery behavior
 - [Runtimes and connections](https://the-open-engine.github.io/zeroshot/current/concepts/runtimes-and-connections/): supported harness and provider pairs
 - [Graph contract](https://the-open-engine.github.io/zeroshot/current/reference/cluster/graph/): authoring custom graphs
+- [Build a review loop](https://the-open-engine.github.io/zeroshot/current/guides/review-loop/): a worked custom graph and runtime plan
+- [RuntimePlan reference](https://the-open-engine.github.io/zeroshot/current/reference/runtime-plan/): every runtime binding field and admission limit
 - [Observe and control runs](https://the-open-engine.github.io/zeroshot/current/guides/observe-and-control/): status, logs, resume
 - [CLI reference](https://the-open-engine.github.io/zeroshot/current/zeroshot-cli/)
 

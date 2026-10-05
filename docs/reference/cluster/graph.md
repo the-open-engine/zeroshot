@@ -23,6 +23,7 @@ separate from verification.
 
 `GraphSpec` has the required camel-case fields `profile`, `initialInput`, `policy`, and `root`.
 Every graph node is tagged by `kind`. Node payloads reject unknown fields.
+[Build a review loop](../../guides/review-loop.md) is a complete worked example.
 
 | `kind`     | Contract                                                                                                                                      |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- |

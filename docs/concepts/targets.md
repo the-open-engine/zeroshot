@@ -133,6 +133,25 @@ worktree must have exactly one GitHub remote. `--repository` and `--branch` over
 and `--revision` selects an exact commit instead of resolving the current remote branch tip.
 Detached worktrees require explicit repository and branch values.
 
+### Image tags and remote hosts
+
+The image is published for `linux/amd64` only. Each release publishes a version tag such as
+`ghcr.io/the-open-engine/zeroshot-target:X.Y.Z` and a `sha-COMMIT` tag. `latest` moves to each newer
+release, so pin a version tag or an image digest when a host must keep the same image.
+
+To use a target on another machine, keep the published port on that host's loopback interface, as in
+the command above, and open an SSH tunnel from your workstation:
+
+```console
+ssh -N -L 8080:127.0.0.1:8080 USER@HOST
+zeroshot target add remote-target --url http://127.0.0.1:8080 --direct
+```
+
+Keep the tunnel open while you use the target. A direct target does not authenticate callers, so
+anyone who can reach its port can use it; never expose the port to the public internet. The
+[target image README](https://github.com/the-open-engine/zeroshot/blob/main/docker/zeroshot-target/README.md)
+covers reverse proxies, Docker access for runs, and building the image.
+
 ## Hosted target
 
 A hosted target adds discovery and user authentication around the same native contracts:

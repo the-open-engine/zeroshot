@@ -35,7 +35,8 @@ Executable nodes are `step` and `verifier`. Groups compose them:
 
 Selectors, guards, and bindings are structured data. They are not snippets of JavaScript, JSONPath,
 shell code, or prompt text. Full field rules live in the
-[graph contract](../reference/cluster/graph.md).
+[graph contract](../reference/cluster/graph.md), and [Build a review loop](../guides/review-loop.md)
+writes a custom graph step by step.
 
 ## Concurrent workspace changes
 

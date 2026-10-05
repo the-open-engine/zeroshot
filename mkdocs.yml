@@ -55,11 +55,13 @@ nav:
       - Targets: concepts/targets.md
   - Guides:
       - Prepare a runtime environment: guides/runtime-environments.md
+      - Build a review loop: guides/review-loop.md
       - Observe and control runs: guides/observe-and-control.md
       - Use a local graph as an ACP agent: guides/acp.md
       - Python SDK: guides/python-sdk.md
   - Reference:
       - CLI: zeroshot-cli.md
+      - RuntimePlan: reference/runtime-plan.md
       - Python API:
           - API overview: reference/python.md
           - Client and run handle: reference/python/client.md
@@ -111,6 +113,9 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path: [docs]
+      check_paths: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
