@@ -241,6 +241,46 @@ new model cost was $164.68: $79.73 for Sol's 20 single workers, $83.07 for Luna'
 (beyond their parity rounds as well) and $1.90 for the smoke tests. Per-task results:
 `figures/cost-parity/*.json` (from `bench parity`), figure: `scripts/plot_parity.py`.
 
+#### Expansion to 20 tasks (pre-registered 2026-10-05)
+
+With five tasks the result could depend on which tasks were picked, so the same comparison runs on 15
+more, drawn by a fixed rule before any of their runs. A task qualifies if GPT-5.6 Sol at xhigh passed
+between 10% and 90% of its scored tests in its published run, the best published result is at least
+5 points higher, it has at most 1,500 scored tests split over at least two test branches (chroma's
+single branch hung in evaluation) and it is not already in the study. Of the 72 qualifying tasks, 15
+were drawn at random (seed 20261005): 9 Rust, 4 Go and 2 C, so that with the first five the 20 tasks
+follow ProgramBench's language mix. Published scores come from ProgramBench/submissions at
+`794fa30b` (leaderboard ignore list applied), languages and test branches from ProgramBench at
+`b08d862`. `experiments/selection/cost-parity-expansion.json` holds the pool and the draw, and a test
+repeats the draw.
+
+| Task | Language | Scored tests | Published Sol xhigh | Best published | What it is |
+|---|---|---|---|---|---|
+| parqeye | Rust | 479 | 71.8% | 99.0% | Parquet file viewer |
+| tree-sitter | Rust | 1,232 | 44.0% | 58.7% | parser generator and parsing CLI |
+| igrep | Rust | 385 | 51.9% | 92.9% | interactive grep |
+| marmite | Rust | 668 | 65.0% | 76.8% | static site generator |
+| datasurgeon | Rust | 502 | 80.9% | 86.5% | extracts emails, IPs, hashes and more from text |
+| crowbook | Rust | 807 | 30.1% | 85.9% | Markdown books to HTML, LaTeX, PDF and EPUB |
+| gittype | Rust | 103 | 81.1% | 91.3% | typing game on source code |
+| keifu | Rust | 262 | 85.1% | 94.7% | Git commit graph in the terminal |
+| dust | Rust | 584 | 70.0% | 91.8% | disk usage tree |
+| direnv | Go | 850 | 79.6% | 93.1% | per-directory environment loader |
+| gdu | Go | 1,161 | 80.0% | 89.8% | interactive disk usage analyzer |
+| dstask | Go | 1,278 | 82.1% | 96.1% | Git-backed task manager |
+| ascii-image-converter | Go | 465 | 80.4% | 96.1% | images to ASCII and Braille art |
+| xz | C | 1,410 | 16.7% | 84.7% | XZ Utils compression tools |
+| samtools | C | 1,425 | 39.0% | 49.8% | sequencing alignment tools (bioinformatics) |
+
+Each task follows the protocol of calcurse, revive and fasttext: `smoke-<task>` (its scoring check
+must match GPT-5.5 xhigh's published score on the task within 2 points), then 5 loop runs of
+`luna-xhigh-<task>-v1` and 5 single workers of `sol-xhigh-<task>-single`, compared by the same rule
+and verdict categories (`decision_rule.cost_parity`). One change, to scoring effort only: Luna's
+loops are scored at build 1 and in the final workspace (`eval.rounds` `[1]`), and their parity
+workspaces through `bench parity`, so these tasks get no learning curves; every round's snapshot is
+still archived. Every task is reported and none is dropped afterwards. No pooled test across tasks is
+pre-registered: the result is the 20 per-task verdicts.
+
 ## The graph and prompts
 
 Both arms share one byte-identical `build` node; round 1 of the loop is exactly the single arm.

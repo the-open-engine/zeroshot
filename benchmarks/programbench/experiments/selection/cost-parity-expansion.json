@@ -1,0 +1,701 @@
+{
+ "registered": "2026-10-05",
+ "purpose": "the 15 tasks added to the cost-parity study (README, cost-parity study, expansion), drawn before any of their runs",
+ "sources": {
+  "published_scores": "https://github.com/ProgramBench/submissions at 794fa30bbfd65059d5c67e192ceb6da659c9ef51: each submission's _stats/score.json with the leaderboard's ignored_tests.json applied; tests = scored tests, solx = the share GPT-5.6 Sol at xhigh passed (20260802_mini-v2.4.2_gpt-5-6-sol-xhigh), best = the highest share among the 21 submissions",
+  "task_metadata": "https://github.com/facebookresearch/ProgramBench at b08d8621031f5f5abc4d3ffc2950256c83fbfe42: language from each task's task.yaml, branches = the test branches in its tests.json"
+ },
+ "criteria": {
+  "solx_min": 0.1,
+  "solx_max": 0.9,
+  "best_minus_solx_min": 0.05,
+  "tests_max": 1500,
+  "branches_min": 2,
+  "excluded": [
+   "ivanceras__svgbob.6d00ad9",
+   "stathissideris__ditaa.f2286c4",
+   "lfos__calcurse.49180d5",
+   "mgechev__revive.201451e",
+   "facebookresearch__fasttext.1142dc4",
+   "alecthomas__chroma.8d04def"
+  ],
+  "excluded_why": "already in the study, or deferred (chroma's single test branch hangs in evaluation)"
+ },
+ "draw": {
+  "seed": 20261005,
+  "quota": {
+   "rs": 9,
+   "go": 4,
+   "c": 2
+  },
+  "method": "rng = random.Random(seed); for each language in quota order: rng.sample(the pool's tasks of that language sorted by iid, quota)",
+  "why_quota": "with the first five tasks (Rust, Java, C, Go, C++), the 20 tasks follow ProgramBench's language mix"
+ },
+ "pool": [
+  {
+   "iid": "astaxie__bat.17d1080",
+   "lang": "go",
+   "tests": 1091,
+   "branches": 15,
+   "solx": 0.8267644362969753,
+   "best": 0.8927589367552704,
+   "desc": "Go-based HTTP client for the command line, similar to cURL"
+  },
+  {
+   "iid": "blacknon__hwatch.edfcb62",
+   "lang": "rs",
+   "tests": 1016,
+   "branches": 14,
+   "solx": 0.8759842519685039,
+   "best": 0.9586614173228346,
+   "desc": "File-watching alternative to the watch command that records and diffs output history"
+  },
+  {
+   "iid": "bootandy__dust.62bf1e1",
+   "lang": "rs",
+   "tests": 584,
+   "branches": 13,
+   "solx": 0.7003424657534246,
+   "best": 0.9178082191780822,
+   "desc": "Disk usage analyzer that displays directory sizes as a visual tree"
+  },
+  {
+   "iid": "burntsushi__xsv.f430466",
+   "lang": "rs",
+   "tests": 1183,
+   "branches": 12,
+   "solx": 0.8798646362098139,
+   "best": 0.9847715736040609,
+   "desc": "High-performance command-line toolkit for working with CSV files"
+  },
+  {
+   "iid": "canop__broot.d6c798e",
+   "lang": "rs",
+   "tests": 539,
+   "branches": 9,
+   "solx": 0.6672862453531598,
+   "best": 0.7434944237918215,
+   "desc": "Terminal-based directory tree navigator and file manager"
+  },
+  {
+   "iid": "codesnap-rs__codesnap.f81e4f3",
+   "lang": "rs",
+   "tests": 571,
+   "branches": 14,
+   "solx": 0.6217162872154116,
+   "best": 0.9194395796847635,
+   "desc": "Generates stylized code snippet images from source files"
+  },
+  {
+   "iid": "cordx56__rustowl.655bc5c",
+   "lang": "rs",
+   "tests": 589,
+   "branches": 9,
+   "solx": 0.769100169779287,
+   "best": 0.9541595925297114,
+   "desc": "Visualizes ownership and lifetime annotations in Rust source code"
+  },
+  {
+   "iid": "crowdagger__crowbook.ea214d7",
+   "lang": "rs",
+   "tests": 807,
+   "branches": 10,
+   "solx": 0.30111524163568776,
+   "best": 0.8587360594795539,
+   "desc": "Converts Markdown books to HTML, LaTeX, PDF, and EPUB formats"
+  },
+  {
+   "iid": "cslarsen__jp2a.61d205f",
+   "lang": "c",
+   "tests": 631,
+   "branches": 11,
+   "solx": 0.8811410459587956,
+   "best": 0.9318541996830428,
+   "desc": "Converts JPEG images to ASCII art for terminal display"
+  },
+  {
+   "iid": "cweill__gotests.2a672c5",
+   "lang": "go",
+   "tests": 603,
+   "branches": 10,
+   "solx": 0.6185737976782753,
+   "best": 0.9469320066334992,
+   "desc": "Generates Go test function boilerplate from source code signatures"
+  },
+  {
+   "iid": "dalance__amber.69a0f52",
+   "lang": "rs",
+   "tests": 565,
+   "branches": 12,
+   "solx": 0.8690265486725663,
+   "best": 0.9486725663716814,
+   "desc": "Command-line code search and replacement tool with regex support"
+  },
+  {
+   "iid": "dandavison__delta.acd758f",
+   "lang": "rs",
+   "tests": 950,
+   "branches": 11,
+   "solx": 0.4773445732349842,
+   "best": 0.6649104320337197,
+   "desc": "Syntax-highlighting pager for git diff, grep, and blame output"
+  },
+  {
+   "iid": "direnv__direnv.02040c7",
+   "lang": "go",
+   "tests": 850,
+   "branches": 11,
+   "solx": 0.7962308598351001,
+   "best": 0.9305064782096584,
+   "desc": "Automatically loads and unloads environment variables per directory"
+  },
+  {
+   "iid": "drew-alleman__datasurgeon.d257cee",
+   "lang": "rs",
+   "tests": 502,
+   "branches": 8,
+   "solx": 0.8087649402390438,
+   "best": 0.8645418326693227,
+   "desc": "Extracts structured data such as IPs, emails, and hashes from text"
+  },
+  {
+   "iid": "ducaale__xh.4a6e44f",
+   "lang": "rs",
+   "tests": 1171,
+   "branches": 9,
+   "solx": 0.6148590947907772,
+   "best": 0.8479931682322801,
+   "desc": "Command-line HTTP client with a user-friendly interface"
+  },
+  {
+   "iid": "dundee__gdu.ede21d2",
+   "lang": "go",
+   "tests": 1161,
+   "branches": 12,
+   "solx": 0.8001722652885443,
+   "best": 0.8983634797588286,
+   "desc": "Fast interactive disk usage analyzer with a terminal interface"
+  },
+  {
+   "iid": "elkowar__pipr.fae0b17",
+   "lang": "rs",
+   "tests": 525,
+   "branches": 11,
+   "solx": 0.7442748091603053,
+   "best": 0.9484732824427481,
+   "desc": "Interactive tool for incrementally building Unix shell pipelines"
+  },
+  {
+   "iid": "esubaalew__run.0fb9dec",
+   "lang": "rs",
+   "tests": 1212,
+   "branches": 10,
+   "solx": 0.6765676567656765,
+   "best": 0.9282178217821783,
+   "desc": "Universal multi-language script runner and REPL"
+  },
+  {
+   "iid": "eudoxia0__hashcards.48aa136",
+   "lang": "rs",
+   "tests": 1019,
+   "branches": 11,
+   "solx": 0.8007850834151129,
+   "best": 0.9901864573110893,
+   "desc": "Plain-text spaced repetition flashcard system for the command line"
+  },
+  {
+   "iid": "filosottile__age.706dfc1",
+   "lang": "go",
+   "tests": 676,
+   "branches": 2,
+   "solx": 0.7026627218934911,
+   "best": 0.9201183431952663,
+   "desc": "A simple, modern and secure encryption tool (and Go library) with small explicit keys, no config options, and UNIX-style composability."
+  },
+  {
+   "iid": "foriequal0__git-trim.07c2f50",
+   "lang": "rs",
+   "tests": 509,
+   "branches": 12,
+   "solx": 0.7858546168958742,
+   "best": 0.8683693516699411,
+   "desc": "Automatically deletes local Git branches whose remote refs are merged or deleted"
+  },
+  {
+   "iid": "gabotechs__dep-tree.60a95a2",
+   "lang": "go",
+   "tests": 865,
+   "branches": 12,
+   "solx": 0.6046242774566474,
+   "best": 0.815028901734104,
+   "desc": "Visualizes source code file dependencies as a 3D force-directed graph"
+  },
+  {
+   "iid": "ggreer__the_silver_searcher.a61f178",
+   "lang": "c",
+   "tests": 1004,
+   "branches": 12,
+   "solx": 0.8884462151394422,
+   "best": 0.9701195219123506,
+   "desc": "Fast code search tool similar to ack, optimized for large codebases"
+  },
+  {
+   "iid": "guumaster__hostctl.d6d9699",
+   "lang": "go",
+   "tests": 1051,
+   "branches": 12,
+   "solx": 0.7269267364414843,
+   "best": 0.966698382492864,
+   "desc": "Command-line tool for managing /etc/hosts file entries by profile"
+  },
+  {
+   "iid": "hatoo__oha.8dc6349",
+   "lang": "rs",
+   "tests": 899,
+   "branches": 12,
+   "solx": 0.8464125560538116,
+   "best": 0.9147982062780269,
+   "desc": "HTTP load testing tool with real-time terminal animation"
+  },
+  {
+   "iid": "ip7z__7zip.839151e",
+   "lang": "cpp",
+   "tests": 1043,
+   "branches": 2,
+   "solx": 0.5656759348034516,
+   "best": 0.6883988494726749,
+   "desc": "7-Zip"
+  },
+  {
+   "iid": "isona__dirble.e2dea9f",
+   "lang": "rs",
+   "tests": 718,
+   "branches": 13,
+   "solx": 0.7552447552447552,
+   "best": 0.9482517482517483,
+   "desc": "Fast web directory and file enumeration scanner"
+  },
+  {
+   "iid": "jesseduffield__lazygit.1d0db51",
+   "lang": "go",
+   "tests": 855,
+   "branches": 12,
+   "solx": 0.5941520467836258,
+   "best": 0.6619883040935672,
+   "desc": "Terminal user interface for common Git operations"
+  },
+  {
+   "iid": "kaushiksrini__parqeye.8072121",
+   "lang": "rs",
+   "tests": 479,
+   "branches": 12,
+   "solx": 0.7181628392484343,
+   "best": 0.9895615866388309,
+   "desc": "Terminal tool for inspecting and previewing Parquet file contents"
+  },
+  {
+   "iid": "konradsz__igrep.aa75630",
+   "lang": "rs",
+   "tests": 385,
+   "branches": 13,
+   "solx": 0.5194805194805194,
+   "best": 0.9285714285714286,
+   "desc": "Interactive grep tool with a terminal user interface"
+  },
+  {
+   "iid": "kyoheiu__felix.95df390",
+   "lang": "rs",
+   "tests": 502,
+   "branches": 10,
+   "solx": 0.7065868263473054,
+   "best": 0.9740518962075848,
+   "desc": "Terminal file manager with Vim-style key bindings"
+  },
+  {
+   "iid": "lh3__seqtk.94e7070",
+   "lang": "c",
+   "tests": 429,
+   "branches": 2,
+   "solx": 0.8135198135198135,
+   "best": 0.8834498834498834,
+   "desc": "Toolkit for processing sequences in FASTA/Q formats"
+  },
+  {
+   "iid": "lua__lua.c6b4848",
+   "lang": "c",
+   "tests": 1338,
+   "branches": 11,
+   "solx": 0.851270553064275,
+   "best": 0.9469357249626308,
+   "desc": "Reference implementation of the Lua programming language interpreter"
+  },
+  {
+   "iid": "lz4__lz4.1519f46",
+   "lang": "c",
+   "tests": 1496,
+   "branches": 12,
+   "solx": 0.7994652406417112,
+   "best": 0.9258021390374331,
+   "desc": "Extremely fast lossless compression algorithm and library"
+  },
+  {
+   "iid": "miserlou__loop.209927c",
+   "lang": "rs",
+   "tests": 710,
+   "branches": 11,
+   "solx": 0.8394366197183099,
+   "best": 0.9929577464788732,
+   "desc": "Command-line utility for repeating commands with intervals and counters"
+  },
+  {
+   "iid": "mkj__dropbear.75f699b",
+   "lang": "c",
+   "tests": 678,
+   "branches": 10,
+   "solx": 0.6266866566716641,
+   "best": 0.7526236881559221,
+   "desc": "Lightweight SSH server and client implementation"
+  },
+  {
+   "iid": "multiprocessio__dsq.c3ae0ba",
+   "lang": "go",
+   "tests": 542,
+   "branches": 10,
+   "solx": 0.7915129151291513,
+   "best": 0.9077490774907749,
+   "desc": "Runs SQL queries against JSON, CSV, Excel, and Parquet files from the command line"
+  },
+  {
+   "iid": "naggie__dstask.ff57396",
+   "lang": "go",
+   "tests": 1278,
+   "branches": 12,
+   "solx": 0.8208137715179968,
+   "best": 0.9608763693270735,
+   "desc": "Git-backed terminal task and note manager with Markdown support"
+  },
+  {
+   "iid": "ninja-build__ninja.cc60300",
+   "lang": "cpp",
+   "tests": 1438,
+   "branches": 13,
+   "solx": 0.782336578581363,
+   "best": 0.9052264808362369,
+   "desc": "Small and fast build system focused on incremental compilation speed"
+  },
+  {
+   "iid": "noborus__trdsql.d8c5ff6",
+   "lang": "go",
+   "tests": 1312,
+   "branches": 11,
+   "solx": 0.8140243902439024,
+   "best": 0.9253048780487805,
+   "desc": "Executes SQL queries on CSV, JSON, YAML, and other tabular file formats"
+  },
+  {
+   "iid": "o2sh__onefetch.e5958ce",
+   "lang": "rs",
+   "tests": 1166,
+   "branches": 9,
+   "solx": 0.8430531732418525,
+   "best": 0.967409948542024,
+   "desc": "Displays Git repository summary and statistics in the terminal"
+  },
+  {
+   "iid": "oppiliappan__statix.e9df54c",
+   "lang": "rs",
+   "tests": 815,
+   "branches": 12,
+   "solx": 0.898159509202454,
+   "best": 0.9582822085889571,
+   "desc": "Linter and diagnostic tool for the Nix programming language"
+  },
+  {
+   "iid": "orf__gping.26eb5b9",
+   "lang": "rs",
+   "tests": 339,
+   "branches": 8,
+   "solx": 0.849112426035503,
+   "best": 0.9733727810650887,
+   "desc": "Ping utility that displays response times as a live terminal graph"
+  },
+  {
+   "iid": "psampaz__go-mod-outdated.bb79367",
+   "lang": "go",
+   "tests": 285,
+   "branches": 9,
+   "solx": 0.8771929824561403,
+   "best": 1.0,
+   "desc": "Reports outdated dependencies in Go module projects"
+  },
+  {
+   "iid": "rcoh__angle-grinder.9c2fc88",
+   "lang": "rs",
+   "tests": 1130,
+   "branches": 2,
+   "solx": 0.5629432624113475,
+   "best": 0.9414893617021277,
+   "desc": "Slice and dice logs on the command line"
+  },
+  {
+   "iid": "rochacbruno__marmite.7d4bc2d",
+   "lang": "rs",
+   "tests": 668,
+   "branches": 9,
+   "solx": 0.6497005988023952,
+   "best": 0.7679640718562875,
+   "desc": "Static site generator that builds blogs from Markdown files"
+  },
+  {
+   "iid": "rs__curlie.5dfcbb1",
+   "lang": "go",
+   "tests": 701,
+   "branches": 10,
+   "solx": 0.7633477633477633,
+   "best": 0.9581529581529582,
+   "desc": "Command-line HTTP client combining curl functionality with a simpler interface"
+  },
+  {
+   "iid": "rs__jplot.2a54bcc",
+   "lang": "go",
+   "tests": 583,
+   "branches": 8,
+   "solx": 0.855917667238422,
+   "best": 0.9468267581475128,
+   "desc": "Real-time JSON and expvar data plotting tool for iTerm2"
+  },
+  {
+   "iid": "rust-embedded__svd2rust.1760b5e",
+   "lang": "rs",
+   "tests": 920,
+   "branches": 10,
+   "solx": 0.15904139433551198,
+   "best": 0.9324618736383442,
+   "desc": "Generates Rust register map structs from SVD hardware description files"
+  },
+  {
+   "iid": "rust-lang__mdbook.37273ba",
+   "lang": "rs",
+   "tests": 1114,
+   "branches": 12,
+   "solx": 0.7648114901256733,
+   "best": 0.9398563734290843,
+   "desc": "Generates online books from Markdown source files"
+  },
+  {
+   "iid": "samtools__samtools.aa823b5",
+   "lang": "c",
+   "tests": 1425,
+   "branches": 2,
+   "solx": 0.39017543859649123,
+   "best": 0.4975438596491228,
+   "desc": "Tools (written in C using htslib) for manipulating next-generation sequencing data"
+  },
+  {
+   "iid": "sayanarijit__xplr.1751065",
+   "lang": "rs",
+   "tests": 419,
+   "branches": 8,
+   "solx": 0.8162291169451074,
+   "best": 0.9713603818615751,
+   "desc": "Extensible terminal file explorer with a scriptable plugin system"
+  },
+  {
+   "iid": "sclevine__yj.8016400",
+   "lang": "go",
+   "tests": 767,
+   "branches": 9,
+   "solx": 0.8709256844850065,
+   "best": 0.9856584093872229,
+   "desc": "Converts between YAML, TOML, JSON, and HCL configuration formats"
+  },
+  {
+   "iid": "sharkdp__bat.f822bd0",
+   "lang": "rs",
+   "tests": 799,
+   "branches": 2,
+   "solx": 0.7021276595744681,
+   "best": 0.867334167709637,
+   "desc": "A cat(1) clone with wings."
+  },
+  {
+   "iid": "sharkdp__fd.40d8eb3",
+   "lang": "rs",
+   "tests": 1235,
+   "branches": 10,
+   "solx": 0.8089068825910931,
+   "best": 0.9935222672064777,
+   "desc": "Fast and user-friendly alternative to the find command"
+  },
+  {
+   "iid": "sibprogrammer__xq.b89f681",
+   "lang": "go",
+   "tests": 792,
+   "branches": 11,
+   "solx": 0.8762626262626263,
+   "best": 0.9381313131313131,
+   "desc": "Command-line XML and HTML formatter and content extractor"
+  },
+  {
+   "iid": "sigoden__argc.04a08f1",
+   "lang": "rs",
+   "tests": 995,
+   "branches": 2,
+   "solx": 0.6201005025125628,
+   "best": 0.8542713567839196,
+   "desc": "A Bash CLI framework, also a Bash command runner."
+  },
+  {
+   "iid": "svenstaro__miniserve.8449e8b",
+   "lang": "rs",
+   "tests": 304,
+   "branches": 9,
+   "solx": 0.8519736842105263,
+   "best": 0.9802631578947368,
+   "desc": "Simple command-line HTTP file server for quick local file sharing"
+  },
+  {
+   "iid": "thezoraiz__ascii-image-converter.d05a757",
+   "lang": "go",
+   "tests": 465,
+   "branches": 9,
+   "solx": 0.8043010752688172,
+   "best": 0.9612903225806452,
+   "desc": "Converts images to ASCII and Braille art for terminal display"
+  },
+  {
+   "iid": "tomarrell__wrapcheck.c058da1",
+   "lang": "go",
+   "tests": 480,
+   "branches": 10,
+   "solx": 0.8708333333333333,
+   "best": 0.9977728285077951,
+   "desc": "Go linter that checks whether errors from external packages are wrapped"
+  },
+  {
+   "iid": "trasta298__keifu.3331426",
+   "lang": "rs",
+   "tests": 262,
+   "branches": 10,
+   "solx": 0.851145038167939,
+   "best": 0.9465648854961832,
+   "desc": "Terminal interface for navigating and visualizing Git commit graphs"
+  },
+  {
+   "iid": "tree-sitter__tree-sitter.5e23cca",
+   "lang": "rs",
+   "tests": 1232,
+   "branches": 11,
+   "solx": 0.43993506493506496,
+   "best": 0.5868506493506493,
+   "desc": "Incremental parsing library for building syntax-aware programming tools"
+  },
+  {
+   "iid": "tukaani-project__xz.1007bf0",
+   "lang": "c",
+   "tests": 1410,
+   "branches": 9,
+   "solx": 0.1673758865248227,
+   "best": 0.8468085106382979,
+   "desc": "XZ Utils data compression tools and liblzma library"
+  },
+  {
+   "iid": "unhappychoice__gittype.34b72d0",
+   "lang": "rs",
+   "tests": 103,
+   "branches": 9,
+   "solx": 0.8107734806629834,
+   "best": 0.912621359223301,
+   "desc": "Terminal typing game that uses source code as typing challenges"
+  },
+  {
+   "iid": "wfxr__code-minimap.0ddeea5",
+   "lang": "rs",
+   "tests": 313,
+   "branches": 8,
+   "solx": 0.865814696485623,
+   "best": 0.9968051118210862,
+   "desc": "Renders a scrollable code minimap in the terminal"
+  },
+  {
+   "iid": "xampprocky__tokei.505d648",
+   "lang": "rs",
+   "tests": 732,
+   "branches": 8,
+   "solx": 0.25546448087431695,
+   "best": 0.9549180327868853,
+   "desc": "Counts lines of code, comments, and blanks across programming languages"
+  },
+  {
+   "iid": "y2z__monolith.8702e66",
+   "lang": "rs",
+   "tests": 713,
+   "branches": 9,
+   "solx": 0.6390449438202247,
+   "best": 0.8497191011235955,
+   "desc": "Saves complete web pages as a single self-contained HTML file"
+  },
+  {
+   "iid": "yassinebridi__serpl.c48a9d7",
+   "lang": "rs",
+   "tests": 446,
+   "branches": 8,
+   "solx": 0.7290167865707434,
+   "best": 0.9496402877697842,
+   "desc": "Terminal interface for interactive search and replace across files"
+  },
+  {
+   "iid": "yoav-lavi__melody.f4af9b4",
+   "lang": "rs",
+   "tests": 1205,
+   "branches": 9,
+   "solx": 0.7825726141078838,
+   "best": 0.9319502074688797,
+   "desc": "Language that compiles to regular expressions for improved readability"
+  },
+  {
+   "iid": "ys-l__flamelens.0b4dc33",
+   "lang": "rs",
+   "tests": 224,
+   "branches": 8,
+   "solx": 0.6502242152466368,
+   "best": 0.9417040358744395,
+   "desc": "Terminal-based flamegraph viewer for performance profile analysis"
+  },
+  {
+   "iid": "zevv__duc.a58fa4e",
+   "lang": "c",
+   "tests": 874,
+   "branches": 8,
+   "solx": 0.11657142857142858,
+   "best": 0.9302059496567505,
+   "desc": "Disk usage analysis tool suite with multiple visualization options"
+  },
+  {
+   "iid": "zk-org__zk.10d93d5",
+   "lang": "go",
+   "tests": 1108,
+   "branches": 10,
+   "solx": 0.22944896115627822,
+   "best": 0.6413730803974707,
+   "desc": "Command-line tool for managing a plain text Zettelkasten note collection"
+  }
+ ],
+ "chosen": [
+  "kaushiksrini__parqeye.8072121",
+  "tree-sitter__tree-sitter.5e23cca",
+  "konradsz__igrep.aa75630",
+  "rochacbruno__marmite.7d4bc2d",
+  "drew-alleman__datasurgeon.d257cee",
+  "crowdagger__crowbook.ea214d7",
+  "unhappychoice__gittype.34b72d0",
+  "trasta298__keifu.3331426",
+  "bootandy__dust.62bf1e1",
+  "direnv__direnv.02040c7",
+  "dundee__gdu.ede21d2",
+  "naggie__dstask.ff57396",
+  "thezoraiz__ascii-image-converter.d05a757",
+  "tukaani-project__xz.1007bf0",
+  "samtools__samtools.aa823b5"
+ ]
+}

@@ -9,6 +9,7 @@ import copy
 import io
 import json
 import os
+import random
 import subprocess
 import sys
 import tarfile
@@ -229,6 +230,48 @@ class ConfigTests(unittest.TestCase):
             fidelity = luna.fidelity_reference
             self.assertTrue(fidelity["archive_url"].endswith(f"/{luna.instance_id}/submission.tar.gz"))
             self.assertEqual(luna.reference_path, "/reference/executable")
+
+    def test_cost_parity_expansion_draws_its_tasks_by_the_registered_rule(self):
+        selection = json.loads(Path("experiments/selection/cost-parity-expansion.json").read_text())
+        rule = selection["criteria"]
+        for task in selection["pool"]:
+            self.assertTrue(rule["solx_min"] <= task["solx"] <= rule["solx_max"], task["iid"])
+            self.assertGreaterEqual(task["best"] - task["solx"], rule["best_minus_solx_min"], task["iid"])
+            self.assertTrue(task["tests"] <= rule["tests_max"] and task["branches"] >= rule["branches_min"], task["iid"])
+            self.assertNotIn(task["iid"], rule["excluded"])
+        rng, drawn = random.Random(selection["draw"]["seed"]), []
+        for language, count in selection["draw"]["quota"].items():
+            drawn += rng.sample(sorted(t["iid"] for t in selection["pool"] if t["lang"] == language), count)
+        self.assertEqual(drawn, selection["chosen"])
+        self.assertEqual(len(set(drawn)), 15)
+
+    def test_cost_parity_expansion_repeats_the_study_protocol(self):
+        calcurse_luna = config.load("experiments/luna-xhigh-calcurse-v1.json")
+        calcurse_sol = config.load("experiments/sol-xhigh-calcurse-single.json")
+        selection = json.loads(Path("experiments/selection/cost-parity-expansion.json").read_text())
+        for instance_id in selection["chosen"]:
+            task = instance_id.split("__", 1)[1].rsplit(".", 1)[0].lower()
+            luna = config.load(f"experiments/luna-xhigh-{task}-v1.json")
+            sol = config.load(f"experiments/sol-xhigh-{task}-single.json")
+            smoke = config.load(f"experiments/smoke-{task}.json")
+            self.assertEqual((luna.instance_id, luna.reference_path), (instance_id, "/reference/executable"))
+            self.assertEqual(sol.raw["task"], luna.raw["task"])
+            self.assertEqual(smoke.raw["task"], luna.raw["task"])
+            self.assertTrue(luna.fidelity_reference["archive_url"].endswith(f"/{instance_id}/submission.tar.gz"))
+            self.assertEqual(luna.fidelity_reference["submission"], calcurse_luna.fidelity_reference["submission"])
+            for key in ("arms", "order", "limits", "resources", "pricing", "model"):
+                self.assertEqual(luna.raw[key], calcurse_luna.raw[key], key)
+            for key in ("arms", "order", "limits", "resources", "pricing", "model", "eval"):
+                self.assertEqual(sol.raw[key], calcurse_sol.raw[key], key)
+            # Scored at build 1 and the final workspace; parity workspaces are scored by `bench parity`.
+            self.assertEqual(luna.raw["eval"], {**calcurse_luna.raw["eval"], "rounds": [1]})
+            self.assertEqual(run_files(sol, "single")["input.json"], run_files(luna, "loop")["input.json"])
+            rule = luna.raw["decision_rule"]["cost_parity"]
+            self.assertEqual(rule, sol.raw["decision_rule"]["cost_parity"])
+            self.assertTrue(rule.startswith("Pre-registered 2026-10-05"))
+            expected = calcurse_luna.raw["decision_rule"]["cost_parity"].split(" C = ", 1)[1]
+            expected = expected.replace("luna-xhigh-calcurse-v1", luna.id).replace("sol-xhigh-calcurse-single", sol.id)
+            self.assertEqual(rule.split(" C = ", 1)[1], expected)  # the study's rule, word for word
 
     def test_parity_workspace_is_the_last_build_within_budget(self):
         from bench import parity

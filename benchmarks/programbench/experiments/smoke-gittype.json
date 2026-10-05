@@ -1,0 +1,62 @@
+{
+  "id": "smoke-gittype",
+  "description": "Pipeline smoke test for luna-xhigh-gittype-v1 and sol-xhigh-gittype-single: the same task adjustments, graphs and evaluation with one short loop run of 3 rounds.",
+  "task": {
+    "instance_id": "unhappychoice__gittype.34b72d0",
+    "image": "programbench/unhappychoice_1776_gittype.34b72d0:task_cleanroom_v6@sha256:f05d92f5095a6304b0ec4b5e3f14f13272689647208a1f9e700d90279816959e",
+    "reference_path": "/reference/executable",
+    "adjustments_rationale": "As in the svgbob experiments v2 to v5, the reference moves to a root-owned directory outside the workspace (the task statement points there), so builders cannot overwrite or delete it at the build target's path. This adjustment is general, not specific to the task. The bundled documentation is left as shipped: no task-specific corrections.",
+    "fidelity_reference": {
+      "submission": "20260508_mini-v2.2.6_gpt-5-5-xhigh",
+      "commit": "530a7b8f969840d17efac1e1e5aaca1078cc2b3a",
+      "archive_url": "https://huggingface.co/datasets/programbench/20260508_mini-v2.2.6_gpt-5-5-xhigh/resolve/main/unhappychoice__gittype.34b72d0/submission.tar.gz",
+      "archive_sha256": "f9138090af91640174c13344e8543278cd3cb0ae57b263414a639b2771a1e72a",
+      "registry_commit": "794fa30bbfd65059d5c67e192ceb6da659c9ef51"
+    }
+  },
+  "model": {
+    "id": "gpt-5.6-luna",
+    "effort": "xhigh"
+  },
+  "arms": {
+    "loop": {
+      "repeats": 1,
+      "max_iterations": 3
+    }
+  },
+  "order": [
+    "loop"
+  ],
+  "limits": {
+    "attempt_seconds": 7200,
+    "build_timeout_ms": 1200000,
+    "check_timeout_ms": 480000
+  },
+  "resources": {
+    "concurrency": 1,
+    "cpus": 4,
+    "memory": "7g",
+    "pids_limit": 8192
+  },
+  "eval": {
+    "workers": 8,
+    "docker_cpus": 3,
+    "timeout_seconds": 14400,
+    "rounds": [
+      1,
+      2,
+      3
+    ]
+  },
+  "pricing": {
+    "model": "gpt-5.6-luna",
+    "usd_per_million_tokens": {
+      "input": 0.2,
+      "cached_input": 0.02,
+      "cache_write": 0.25,
+      "output": 1.2
+    },
+    "source": "https://developers.openai.com/api/docs/pricing",
+    "retrieved": "2026-09-23"
+  }
+}
