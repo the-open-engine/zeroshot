@@ -1826,6 +1826,11 @@ any non-native provider lane, receives these canonical requirements:</p>
 access and Claude's supported auth-token variables for contained Anthropic access. Local profiles
 keep the authored runtime unchanged; applying one to a target derives the contained requirements at
 submission time. Profiles stored on a target derive those requirements when they are stored.</p>
+<p>Local Claude workers and reviewers preserve the invoking shell's <code>USER</code> for macOS Keychain login
+and reuse native CLAUDE.md, plugins, and MCP configuration. Claude's <code>--safe-mode</code> applies only to
+the permission-settings probe before a model turn. Hosted runs use private homes and do not inherit
+the caller's <code>USER</code> or user configuration. Declare additional environment fields needed by MCP
+servers through runtime connections.</p>
 <p>Store a local static connection by prompting for its fields:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="go">zeroshot connection set openrouter --field OPENROUTER_API_KEY</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">zeroshot connection list</span>
