@@ -55,6 +55,12 @@ args=(
 if [[ ${ZSBENCH_ALLOW_PARALLEL:-0} == 1 ]]; then
   args+=(-e "ZSBENCH_ALLOW_PARALLEL=1")
 fi
+# How many archives an evaluation scores at once (default: the experiment's eval.workers). Each
+# archive still runs in its own containers with eval.docker_cpus, so the scores do not change.
+if [[ -n ${ZSBENCH_EVAL_WORKERS:-} ]]; then
+  [[ $ZSBENCH_EVAL_WORKERS =~ ^[1-9][0-9]?$ ]] || { echo "ZSBENCH_EVAL_WORKERS must be 1 to 99" >&2; exit 1; }
+  args+=(-e "ZSBENCH_EVAL_WORKERS=$ZSBENCH_EVAL_WORKERS")
+fi
 
 temp_secret=""
 cleanup() { if [[ -n $temp_secret ]]; then rm -f "$temp_secret"; fi; }

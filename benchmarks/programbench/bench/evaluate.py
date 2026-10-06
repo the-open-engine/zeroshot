@@ -252,7 +252,7 @@ def _programbench_eval(exp: Experiment, results: Path, run_dirs: list[Path], for
     log(f"evaluating {len(run_dirs)} archive(s) with programbench eval")
     args = [
         sys.executable, "-m", "bench.pbeval", "eval", *map(str, run_dirs),
-        "--workers", str(cfg["workers"]), "--docker-cpus", str(cfg["docker_cpus"]),
+        "--workers", str(os.environ.get("ZSBENCH_EVAL_WORKERS") or cfg["workers"]), "--docker-cpus", str(cfg["docker_cpus"]),
         "--image-tag", eval_image_tag(exp),
     ]
     if force:
