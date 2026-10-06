@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://the-open-engine.github.io/zeroshot/v10.10/guides/observe-and-control/">
+        <link rel="canonical" href="https://the-open-engine.github.io/zeroshot/v10.10/reference/runtime-plan/">
       
       
-        <link rel="prev" href="../review-loop/">
+        <link rel="prev" href="../cluster/graph/">
       
       
-        <link rel="next" href="../acp/">
+        <link rel="next" href="../cluster/admission/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Observe and control runs - Zeroshot</title>
+        <title>RuntimePlan - Zeroshot</title>
       
     
     
@@ -82,7 +82,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#observe-and-control-runs" class="md-skip">
+        <a href="#runtimeplan" class="md-skip">
           Skip to content
         </a>
       
@@ -121,7 +121,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Observe and control runs
+              RuntimePlan
             
           </span>
         </div>
@@ -564,10 +564,8 @@
       
   
   
-    
   
   
-  
     
     
       
@@ -590,11 +588,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
         
           
           <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
@@ -615,7 +613,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -633,7 +631,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../runtime-environments/" class="md-nav__link">
+      <a href="../../guides/runtime-environments/" class="md-nav__link">
         
   
   
@@ -661,7 +659,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../review-loop/" class="md-nav__link">
+      <a href="../../guides/review-loop/" class="md-nav__link">
         
   
   
@@ -686,37 +684,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Observe and control runs
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../guides/observe-and-control/" class="md-nav__link">
         
   
   
@@ -732,103 +703,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#browser" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Browser
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#foreground-and-detached-submission" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Foreground and detached submission
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#inventory-and-current-status" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Inventory and current status
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#resume-event-and-log-streams" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Resume event and log streams
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#attach-to-an-active-execution" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Attach to an active execution
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#restart-or-resume-a-failed-run" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Restart or resume a failed run
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#stop-only-with-explicit-intent" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Stop only with explicit intent
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -841,7 +715,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../acp/" class="md-nav__link">
+      <a href="../../guides/acp/" class="md-nav__link">
         
   
   
@@ -869,7 +743,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../python-sdk/" class="md-nav__link">
+      <a href="../../guides/python-sdk/" class="md-nav__link">
         
   
   
@@ -901,8 +775,10 @@
       
   
   
+    
   
   
+  
     
     
       
@@ -921,11 +797,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
           <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
@@ -946,7 +822,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1053,7 +929,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/python/" class="md-nav__link">
+      <a href="../python/" class="md-nav__link">
         
   
   
@@ -1081,7 +957,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/python/client/" class="md-nav__link">
+      <a href="../python/client/" class="md-nav__link">
         
   
   
@@ -1109,7 +985,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/python/configuration/" class="md-nav__link">
+      <a href="../python/configuration/" class="md-nav__link">
         
   
   
@@ -1137,7 +1013,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/python/results/" class="md-nav__link">
+      <a href="../python/results/" class="md-nav__link">
         
   
   
@@ -1165,7 +1041,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/python/errors/" class="md-nav__link">
+      <a href="../python/errors/" class="md-nav__link">
         
   
   
@@ -1198,8 +1074,10 @@
                 
   
   
+    
   
   
+  
     
     
       
@@ -1225,11 +1103,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3" checked>
         
           
           <label class="md-nav__link" for="__nav_5_3" id="__nav_5_3_label" tabindex="0">
@@ -1250,7 +1128,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1268,7 +1146,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/cluster/api/" class="md-nav__link">
+      <a href="../cluster/api/" class="md-nav__link">
         
   
   
@@ -1296,7 +1174,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/cluster/graph/" class="md-nav__link">
+      <a href="../cluster/graph/" class="md-nav__link">
         
   
   
@@ -1321,10 +1199,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../reference/runtime-plan/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RuntimePlan
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1340,6 +1245,131 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#document-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Document fields
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#harness-and-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Harness and provider
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#node-bindings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Node bindings
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Node bindings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#git_delivery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        git_delivery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#connections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connections
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#uniform-runtime-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Uniform runtime configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#template-delivery-bindings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Template delivery bindings
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1352,7 +1382,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/cluster/admission/" class="md-nav__link">
+      <a href="../cluster/admission/" class="md-nav__link">
         
   
   
@@ -1380,7 +1410,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/cluster/lifecycle/" class="md-nav__link">
+      <a href="../cluster/lifecycle/" class="md-nav__link">
         
   
   
@@ -1408,7 +1438,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/cluster/watch/" class="md-nav__link">
+      <a href="../cluster/watch/" class="md-nav__link">
         
   
   
@@ -1436,7 +1466,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/cluster/data-plane/" class="md-nav__link">
+      <a href="../cluster/data-plane/" class="md-nav__link">
         
   
   
@@ -1464,7 +1494,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../reference/cluster/portable-bindings/" class="md-nav__link">
+      <a href="../cluster/portable-bindings/" class="md-nav__link">
         
   
   
@@ -1702,10 +1732,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#browser" class="md-nav__link">
+  <a href="#document-fields" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Browser
+        Document fields
       
     </span>
   </a>
@@ -1713,10 +1743,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#foreground-and-detached-submission" class="md-nav__link">
+  <a href="#harness-and-provider" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Foreground and detached submission
+        Harness and provider
       
     </span>
   </a>
@@ -1724,10 +1754,49 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#inventory-and-current-status" class="md-nav__link">
+  <a href="#node-bindings" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Inventory and current status
+        Node bindings
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Node bindings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#git_delivery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        git_delivery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage
       
     </span>
   </a>
@@ -1735,10 +1804,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#resume-event-and-log-streams" class="md-nav__link">
+  <a href="#connections" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Resume event and log streams
+        Connections
       
     </span>
   </a>
@@ -1746,10 +1815,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#attach-to-an-active-execution" class="md-nav__link">
+  <a href="#uniform-runtime-configuration" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Attach to an active execution
+        Uniform runtime configuration
       
     </span>
   </a>
@@ -1757,21 +1826,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#restart-or-resume-a-failed-run" class="md-nav__link">
+  <a href="#template-delivery-bindings" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Restart or resume a failed run
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#stop-only-with-explicit-intent" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Stop only with explicit intent
+        Template delivery bindings
       
     </span>
   </a>
@@ -1798,86 +1856,344 @@
   
 
 
-<h1 id="observe-and-control-runs">Observe and control runs<a class="headerlink" href="#observe-and-control-runs" title="Permanent link">&para;</a></h1>
-<p>Run state persists when an observation client leaves, and reconnecting does not change the run
-lifetime.</p>
-<h2 id="browser">Browser<a class="headerlink" href="#browser" title="Permanent link">&para;</a></h2>
-<p>Run <a href="../../getting-started/install/#open-the-workspace-ui"><code>zeroshot ui</code></a>, then select a run in <strong>Runs</strong>.
-The read-only graph uses that run's admitted definition. Select a node for its inputs, outputs,
-decisions, and transcript; use the timeline to replay its history. Active runs update live.
-Seeking pauses following; <strong>Go live</strong> returns to the latest event. Scrolling a transcript keeps
-the graph live and follows new output only when you reach the bottom.</p>
-<p>For a direct target, open <code>/ui/</code> on its configured public origin. Closing either browser view
-leaves the run active.</p>
-<h2 id="foreground-and-detached-submission">Foreground and detached submission<a class="headerlink" href="#foreground-and-detached-submission" title="Permanent link">&para;</a></h2>
-<p><code>zeroshot run</code> follows the durable event stream by default and writes NDJSON. Add <code>--detach</code> to
-return after submission:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="go">zeroshot run \</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="go">  --title "Update parser" \</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="go">  --template software-change \</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">  --input input.json \</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="go">  --uniform-runtime-config runtime.json \</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="go">  --detach</span>
+<h1 id="runtimeplan">RuntimePlan<a class="headerlink" href="#runtimeplan" title="Permanent link">&para;</a></h1>
+<p>A <code>RuntimePlan</code> says how each executable node in a graph runs. It selects the harness, provider, and
+run size, and gives every <code>step</code> and <code>verifier</code> one binding. It contains model identifiers and
+connection field names, never secret values.</p>
+<p><a href="../../concepts/runtimes-and-connections/">Runtimes and connections</a> explains the concepts, and
+<a href="../../guides/review-loop/">Build a review loop</a> builds a complete plan for a custom graph. The Rust
+types in <code>openengine-cluster-protocol</code> are authoritative; the
+<a href="../cluster/schema.json#/$defs/RuntimePlan">generated protocol schema</a> is the
+machine-readable contract.</p>
+<h2 id="document-fields">Document fields<a class="headerlink" href="#document-fields" title="Permanent link">&para;</a></h2>
+<p><code>RuntimePlan</code> is a closed JSON object. All four fields are required, and unknown fields are rejected.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>harness</code></td>
+<td><code>codex</code>, <code>claude</code>, or <code>copilot</code></td>
+</tr>
+<tr>
+<td><code>provider</code></td>
+<td>A provider supported by the selected harness</td>
+</tr>
+<tr>
+<td><code>size</code></td>
+<td><code>small</code>, <code>medium</code>, or <code>large</code></td>
+</tr>
+<tr>
+<td><code>nodes</code></td>
+<td>Object mapping each executable graph node name to a <a href="#node-bindings">node binding</a></td>
+</tr>
+</tbody>
+</table>
+<p>One harness, provider, and size apply to the whole run. Model, effort, session scope, and
+connections are chosen per node.</p>
+<p><code>size</code> is a run-level resource class. Zeroshot records it with the run and reports it in run
+status; the hosting target decides what resources each class receives.</p>
+<p><code>nodes</code> keys are graph node names: 1 to 128 bytes matching <code>[A-Za-z_][A-Za-z0-9_.-]*</code>.</p>
+<p>This plan binds the four agent nodes of the built-in <code>software-change</code> template:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">"harness"</span><span class="p">:</span><span class="w"> </span><span class="s2">"claude"</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">"provider"</span><span class="p">:</span><span class="w"> </span><span class="s2">"anthropic"</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">"size"</span><span class="p">:</span><span class="w"> </span><span class="s2">"medium"</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="nt">"nodes"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="nt">"worker"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"agent"</span><span class="p">,</span><span class="w"> </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"PROVIDER_MODEL_ID"</span><span class="p">,</span><span class="w"> </span><span class="nt">"sessionScope"</span><span class="p">:</span><span class="w"> </span><span class="s2">"node_instance"</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">    </span><span class="nt">"acceptance"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"agent"</span><span class="p">,</span><span class="w"> </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"PROVIDER_MODEL_ID"</span><span class="p">,</span><span class="w"> </span><span class="nt">"effort"</span><span class="p">:</span><span class="w"> </span><span class="s2">"high"</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">    </span><span class="nt">"code"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"agent"</span><span class="p">,</span><span class="w"> </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"PROVIDER_MODEL_ID"</span><span class="p">,</span><span class="w"> </span><span class="nt">"effort"</span><span class="p">:</span><span class="w"> </span><span class="s2">"high"</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">    </span><span class="nt">"review_repair"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"agent"</span><span class="p">,</span><span class="w"> </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"PROVIDER_MODEL_ID"</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="p">}</span>
 </code></pre></div>
-<p>Ctrl-C closes the terminal stream and leaves the controller running.</p>
-<h2 id="inventory-and-current-status">Inventory and current status<a class="headerlink" href="#inventory-and-current-status" title="Permanent link">&para;</a></h2>
-<p>These commands are read-only and return JSON:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="go">zeroshot list</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">zeroshot status RUN_ID</span>
+<h2 id="harness-and-provider">Harness and provider<a class="headerlink" href="#harness-and-provider" title="Permanent link">&para;</a></h2>
+<p><code>harness</code> selects which <code>provider</code> values parse:</p>
+<table>
+<thead>
+<tr>
+<th><code>harness</code></th>
+<th><code>provider</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>codex</code></td>
+<td><code>openai</code>, <code>openrouter</code>, <code>bedrock</code>, <code>gateway</code></td>
+</tr>
+<tr>
+<td><code>claude</code></td>
+<td><code>anthropic</code>, <code>openrouter</code>, <code>bedrock</code>, <code>gateway</code></td>
+</tr>
+<tr>
+<td><code>copilot</code></td>
+<td><code>github</code></td>
+</tr>
+</tbody>
+</table>
+<p>Any other pair is rejected when the plan is read.</p>
+<h2 id="node-bindings">Node bindings<a class="headerlink" href="#node-bindings" title="Permanent link">&para;</a></h2>
+<p><code>kind</code> selects one of two binding shapes. Fields that belong to the other kind are rejected.</p>
+<h3 id="agent"><code>agent</code><a class="headerlink" href="#agent" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kind</code></td>
+<td>Yes</td>
+<td><code>agent</code></td>
+</tr>
+<tr>
+<td><code>model</code></td>
+<td>Yes</td>
+<td>Provider-owned model identifier, 1 to 2,048 non-control characters</td>
+</tr>
+<tr>
+<td><code>effort</code></td>
+<td>No</td>
+<td><code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, or <code>max</code>; unset when omitted</td>
+</tr>
+<tr>
+<td><code>sessionScope</code></td>
+<td>No</td>
+<td><code>execution</code> (default) or <code>node_instance</code></td>
+</tr>
+<tr>
+<td><code>connections</code></td>
+<td>No</td>
+<td><a href="#connections">Connection declarations</a>; empty when omitted</td>
+</tr>
+</tbody>
+</table>
+<p>Zeroshot passes <code>model</code> and <code>effort</code> to the harness unchanged. It keeps no model catalog and does not
+check whether a model supports the chosen effort.</p>
+<p><code>sessionScope</code> controls provider conversation state. It does not change graph state or bindings.</p>
+<table>
+<thead>
+<tr>
+<th><code>sessionScope</code></th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>execution</code></td>
+<td>Opens a fresh provider session for each execution of the node, then closes it</td>
+</tr>
+<tr>
+<td><code>node_instance</code></td>
+<td>Reuses one session when the same node instance runs again, for example across loop iterations</td>
+</tr>
+</tbody>
+</table>
+<p>If a reused session is lost, Zeroshot fails that execution with <code>session_lost</code>. It does not open a
+replacement session silently.</p>
+<h3 id="git_delivery"><code>git_delivery</code><a class="headerlink" href="#git_delivery" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kind</code></td>
+<td>Yes</td>
+<td><code>git_delivery</code></td>
+</tr>
+<tr>
+<td><code>connections</code></td>
+<td>No</td>
+<td><a href="#connections">Connection declarations</a>; empty when omitted</td>
+</tr>
+<tr>
+<td><code>pullRequestFeedback</code></td>
+<td>No</td>
+<td><code>consider</code> (default) or <code>ignore</code></td>
+</tr>
+</tbody>
+</table>
+<p>A <code>git_delivery</code> binding has no model, effort, or session scope. Admission accepts it only on a
+<code>verifier</code> node whose worker is one of the built-in delivery workers:</p>
+<table>
+<thead>
+<tr>
+<th>Worker</th>
+<th>Accepts <code>pullRequestFeedback: ignore</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>builtin.git-delivery.push@1</code></td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>builtin.git-delivery.pr@1</code></td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>builtin.git-delivery.pr@2</code></td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>builtin.git-delivery.merge@1</code></td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>builtin.git-delivery.merge@2</code></td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>builtin.git-delivery.merge@3</code></td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<p>The delivery verifier cannot have authored <code>instructions</code>, must use <code>attempts: 1</code>, and must declare
+the output, signals, and diagnostic of its worker's fixed contract. <code>zeroshot template show
+software-change --pr</code> prints a delivery node with the current contract.</p>
+<p>A graph can contain at most one delivery node, and no other executable node may run in parallel with
+it, either as a <code>par</code> sibling or inside a <code>map</code> that can have more than one item. A hosting service
+may require exactly one delivery node; Zeroshot Cloud quick runs require one. See
+<a href="../../concepts/execution/#concurrent-workspace-changes">concurrent workspace changes</a>.</p>
+<p><code>ignore</code> skips pull-request discussion. CI, conflict, freshness, and merge-policy checks still apply.</p>
+<h2 id="coverage">Coverage<a class="headerlink" href="#coverage" title="Permanent link">&para;</a></h2>
+<p><code>nodes</code> contains exactly one binding for every <code>step</code> and <code>verifier</code> in the graph, keyed by the node
+name. Structural nodes (<code>seq</code>, <code>choice</code>, <code>par</code>, <code>loop</code>, <code>map</code>) and terminal nodes (<code>succeed</code>,
+<code>fail</code>) never get a binding. Admission rejects:</p>
+<ul>
+<li>a missing binding for an executable node;</li>
+<li>a binding for a structural, terminal, or unknown node;</li>
+<li>a <code>git_delivery</code> binding on a <code>step</code>, or on a verifier that does not use a delivery worker;</li>
+<li>an <code>agent</code> binding on a node that uses a delivery worker;</li>
+<li>an <code>agent</code> binding on a node without authored <code>instructions</code>;</li>
+<li>a worker reference reused on several nodes with a different contract or binding kind.</li>
+</ul>
+<h2 id="connections">Connections<a class="headerlink" href="#connections" title="Permanent link">&para;</a></h2>
+<p><code>connections</code> maps a connection key to the exact environment field names the node may receive.
+Values come from the submission environment or a target connection store at run time.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">"connections"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">"gateway"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"GATEWAY_BASE_URL"</span><span class="p">,</span><span class="w"> </span><span class="s2">"GATEWAY_API_KEY"</span><span class="p">]</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="p">}</span>
 </code></pre></div>
-<p>A run ID belongs to the controller or target that created it. Pass <code>--target NAME</code> when reading one
-from a named target.</p>
-<h2 id="resume-event-and-log-streams">Resume event and log streams<a class="headerlink" href="#resume-event-and-log-streams" title="Permanent link">&para;</a></h2>
-<p><code>watch</code> follows status events; <code>logs</code> follows safe provider and controller log records. Both accept
-an opaque cursor and resume strictly after it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="go">zeroshot watch RUN_ID --after STATUS_CURSOR</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">zeroshot logs RUN_ID --after LOG_CURSOR</span>
-</code></pre></div>
-<p>Cursors are opaque, so store the last fully consumed value and pass it back unchanged.
-<code>logs --execution EXECUTION_REF</code> restricts output to one execution selector from status.</p>
-<p>The producer records each log timestamp as a positive JavaScript-safe Unix epoch millisecond, and
-durable replay preserves it.</p>
-<h2 id="attach-to-an-active-execution">Attach to an active execution<a class="headerlink" href="#attach-to-an-active-execution" title="Permanent link">&para;</a></h2>
-<p>Status can expose an active execution reference. Attach to its interactive event stream with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot attach RUN_ID EXECUTION_REF</span>
-</code></pre></div>
-<p>Closing the attachment stream does not cancel the execution.</p>
-<h2 id="restart-or-resume-a-failed-run">Restart or resume a failed run<a class="headerlink" href="#restart-or-resume-a-failed-run" title="Permanent link">&para;</a></h2>
-<p>Failed local runs and direct targets retain their workspace. Restart the original graph using its
-latest files with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot resume RUN_ID</span>
-</code></pre></div>
-<p>To resume at an earlier node, list its available input checkpoints and select one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="go">zeroshot checkpoints RUN_ID</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">zeroshot resume RUN_ID --from-checkpoint CHECKPOINT_ID</span>
-</code></pre></div>
-<p>Add <code>--target NAME</code> to both commands for a named target. Checkpoint listings are paginated; use
-<code>--after CHECKPOINT_ID</code> with the returned <code>nextAfter</code> value to fetch the next page.</p>
-<p>A selected checkpoint restores the files from immediately before its node and the completed
-prerequisite outputs. The selected node runs again. Parallel and mapped groups have one checkpoint
-for the whole outer group, including nested groups and all mapped batches; individual concurrent
-writers do not have separate snapshots. Read-only boundaries can share the same workspace bytes.</p>
-<p>Both modes create a new run ID, keep the original graph, input, source, and delivery lineage, and
-resolve credentials again. The successor does not inherit provider sessions, secrets, or previous
-token usage. Selecting a checkpoint replaces later workspace edits, including untracked and ignored
-files. Restart restores the latest completed snapshot and starts the graph at its root. A sudden
-target loss can precede the next snapshot boundary, so the last writer may run again. Local workspaces
-must be idle while they are restored.</p>
-<p>Local and Docker targets deduplicate checkpoints in a private Restic repository beside their run
-storage and advertise <code>openengine.workspace-checkpoints/v1</code>. They retain that repository only for a
-failed recovery lineage and delete it after a successful run. Cloud exposes recovery through
-authenticated hosted run routes, so failed-run checkpoints remain available for 30 days after the
-original capsule is removed. Cloud resolves declared provider connections from their original
-references. It does not store a raw <code>GH_TOKEN</code>; export it again before resuming a named-target run
-that needs it for private source checkout or Git delivery.</p>
-<h2 id="stop-only-with-explicit-intent">Stop only with explicit intent<a class="headerlink" href="#stop-only-with-explicit-intent" title="Permanent link">&para;</a></h2>
-<p><code>force-stop</code> is the destructive run-lifetime command:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="go">zeroshot force-stop RUN_ID</span>
-</code></pre></div>
-<p>The command asks the controller to stop active work and writes the resulting status as JSON. Read
-status first if another operator may already have stopped the run, or if it may have completed.</p>
-<p>Python follows the same rule. A timeout or task cancellation detaches observation;
-<code>await run.force_stop()</code> changes the run lifetime.</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Connection key</td>
+<td>1 to 128 bytes, no control characters</td>
+</tr>
+<tr>
+<td>Field name</td>
+<td><code>[A-Za-z_][A-Za-z0-9_]*</code>, at most 128 bytes</td>
+</tr>
+<tr>
+<td>Field list</td>
+<td>At least one name, no duplicates</td>
+</tr>
+<tr>
+<td>Keys per node</td>
+<td>At most 64</td>
+</tr>
+<tr>
+<td>Field names per node</td>
+<td>At most 64, and one name cannot appear under two keys in the same node</td>
+</tr>
+<tr>
+<td>Unique field names per run</td>
+<td>At most 64 across all nodes</td>
+</tr>
+</tbody>
+</table>
+<p>The per-run limit also counts the connection fields and variable names of an attached runtime
+environment. Each connection value must be 1 byte to 64 KiB with no NUL. The static connection
+values supplied for one run, counting each key and field name with its value, must fit in 256 KiB.</p>
+<p>When a node omits <code>connections</code>, Zeroshot derives provider access for the execution placement.
+Local native logins need no declaration; contained targets and non-native providers receive the
+canonical requirements listed in
+<a href="../../concepts/runtimes-and-connections/#runtime-configuration-contains-names-not-secret-values">Runtimes and connections</a>.</p>
+<h2 id="uniform-runtime-configuration">Uniform runtime configuration<a class="headerlink" href="#uniform-runtime-configuration" title="Permanent link">&para;</a></h2>
+<p><code>--uniform-runtime-config</code> accepts a single agent configuration and expands it into a full plan:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>harness</code></td>
+<td>Yes</td>
+<td>As in <code>RuntimePlan</code></td>
+</tr>
+<tr>
+<td><code>provider</code></td>
+<td>Yes</td>
+<td>As in <code>RuntimePlan</code></td>
+</tr>
+<tr>
+<td><code>size</code></td>
+<td>No</td>
+<td>As in <code>RuntimePlan</code>; default <code>medium</code></td>
+</tr>
+<tr>
+<td><code>model</code></td>
+<td>Yes</td>
+<td>As in an <code>agent</code> binding</td>
+</tr>
+<tr>
+<td><code>effort</code></td>
+<td>No</td>
+<td>As in an <code>agent</code> binding</td>
+</tr>
+<tr>
+<td><code>sessionScope</code></td>
+<td>No</td>
+<td>As in an <code>agent</code> binding</td>
+</tr>
+<tr>
+<td><code>connections</code></td>
+<td>No</td>
+<td>Applied to every agent node</td>
+</tr>
+</tbody>
+</table>
+<p>Every executable node gets an <code>agent</code> binding with these values, except nodes that use a delivery
+worker. Those get a <code>git_delivery</code> binding that declares <code>{"github": ["GH_TOKEN"]}</code>.</p>
+<h2 id="template-delivery-bindings">Template delivery bindings<a class="headerlink" href="#template-delivery-bindings" title="Permanent link">&para;</a></h2>
+<p>Built-in templates own their delivery nodes. With <code>software-change</code>, <code>--push</code>, <code>--pr</code>, and <code>--ship</code>
+add a delivery verifier named <code>deliver</code> and a <code>delivery_repair</code> step. With <code>auto-research</code>, <code>--push</code>
+adds <code>checkpoint_delivery</code> plus the agent nodes <code>checkpoint_manifest</code> and <code>checkpoint_audit</code>.
+<code>single-worker</code> has no delivery modes.</p>
+<p>The CLI inserts the template-owned <code>git_delivery</code> binding for the delivery node, declaring
+<code>{"github": ["GH_TOKEN"]}</code>. <code>--no-pr-feedback</code> (requires <code>--pr</code> or <code>--ship</code>) sets its
+<code>pullRequestFeedback</code> to <code>ignore</code>.</p>
+<p>A uniform configuration binds the added agent nodes too. An exact <code>--runtime-config</code> must bind them
+as <code>agent</code> nodes itself, such as <code>delivery_repair</code> for <code>software-change --pr</code>. It may omit the
+delivery node; if it includes it, the binding must be <code>git_delivery</code>. List the executable nodes
+with <code>zeroshot template show TEMPLATE</code> plus the same delivery flag.</p>
+<p>Custom graphs author delivery in both the graph and the plan.</p>
 
 
 
@@ -1913,7 +2229,7 @@ status first if another operator may already have stopped the run, or if it may 
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../review-loop/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Build a review loop">
+          <a href="../cluster/graph/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Graph contract">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1923,20 +2239,20 @@ status first if another operator may already have stopped the run, or if it may 
                 Previous
               </span>
               <div class="md-ellipsis">
-                Build a review loop
+                Graph contract
               </div>
             </div>
           </a>
         
         
           
-          <a href="../acp/" class="md-footer__link md-footer__link--next" aria-label="Next: Use a local graph as an ACP agent">
+          <a href="../cluster/admission/" class="md-footer__link md-footer__link--next" aria-label="Next: Admission">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Use a local graph as an ACP agent
+                Admission
               </div>
             </div>
             <div class="md-footer__button md-icon">

@@ -1,8 +1,8 @@
 {
   "docsVersion": "v10.10",
-  "productVersion": "10.10.0",
-  "publisherCommit": "dab03dfea2f3da150a02b2ed3fd834b78d102554",
-  "pythonSdkVersion": "10.10.0.post1",
+  "productVersion": "10.10.1",
+  "publisherCommit": "3781f1bcf78f5ac17886d76300bf0e9370898e59",
+  "pythonSdkVersion": "10.10.1.post1",
   "routes": {
     "cli": "zeroshot-cli/",
     "clusterApi": "reference/cluster/api/",
@@ -15,11 +15,13 @@
     "pythonApi": "reference/python/",
     "pythonSdk": "guides/python-sdk/",
     "quickstart": "getting-started/first-run/",
+    "reviewLoop": "guides/review-loop/",
     "runControl": "guides/observe-and-control/",
     "runtimePlan": "concepts/runtimes-and-connections/",
+    "runtimePlanReference": "reference/runtime-plan/",
     "schema": "reference/cluster/schema.json",
     "targets": "concepts/targets/"
   },
   "schemaVersion": 2,
-  "sourceCommit": "3ee1192cec359a0b997f464e703a936e8b67d63c"
+  "sourceCommit": "3781f1bcf78f5ac17886d76300bf0e9370898e59"
 }

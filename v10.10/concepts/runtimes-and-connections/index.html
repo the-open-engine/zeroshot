@@ -670,6 +670,8 @@
       
         
       
+        
+      
     
     
     
@@ -730,6 +732,34 @@
     
   
     Prepare a runtime environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/review-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build a review loop
   
 
     
@@ -1154,6 +1184,8 @@
       
         
       
+        
+      
     
     
     
@@ -1239,6 +1271,34 @@
     
   
     Graph contract
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/runtime-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RuntimePlan
   
 
     
@@ -1528,6 +1588,60 @@
   
 
     
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://cloud.zeroshot.sh/docs" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Zeroshot Cloud
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://zeroshot.sh/?utm_source=github&utm_medium=docs&utm_campaign=zeroshot" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    zeroshot.sh
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
   </ul>
 </nav>
                   </div>
@@ -1622,6 +1736,8 @@
 <p>A graph defines the work and its control flow; the runtime plan supplies execution details for each
 executable node. Since the two documents are separate, local, self-hosted, and managed targets can
 run the same graph.</p>
+<p>The <a href="../../reference/runtime-plan/">RuntimePlan reference</a> lists every field, limit, and admission
+rule.</p>
 <h2 id="four-explicit-choices">Four explicit choices<a class="headerlink" href="#four-explicit-choices" title="Permanent link">&para;</a></h2>
 <p>Each agent binding names:</p>
 <ol>
@@ -1630,30 +1746,8 @@ run the same graph.</p>
 <li>an opaque provider-owned <strong>model</strong> identifier;</li>
 <li>zero or more named <strong>connections</strong>, each declaring exact environment field names.</li>
 </ol>
-<p>Zeroshot accepts these harness/provider pairs:</p>
-<table>
-<thead>
-<tr>
-<th>Harness</th>
-<th>Providers</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>codex</code></td>
-<td><code>openai</code>, <code>openrouter</code>, <code>bedrock</code>, <code>gateway</code></td>
-</tr>
-<tr>
-<td><code>claude</code></td>
-<td><code>anthropic</code>, <code>openrouter</code>, <code>bedrock</code>, <code>gateway</code></td>
-</tr>
-<tr>
-<td><code>copilot</code></td>
-<td><code>github</code></td>
-</tr>
-</tbody>
-</table>
-<p>Admission rejects known-incompatible pairs, such as <code>codex</code> with <code>anthropic</code> and <code>claude</code> with
+<p>The <a href="../../reference/runtime-plan/#harness-and-provider">RuntimePlan reference</a> lists the accepted
+harness/provider pairs. Admission rejects known-incompatible pairs, such as <code>codex</code> with <code>anthropic</code> and <code>claude</code> with
 <code>openai</code>. Zeroshot does not check current provider availability, and model names remain
 provider-owned.</p>
 <h2 id="uniform-and-exact-plans">Uniform and exact plans<a class="headerlink" href="#uniform-and-exact-plans" title="Permanent link">&para;</a></h2>
@@ -1671,9 +1765,8 @@ built-in template configuration short:</p>
 <p><code>--runtime-config</code> accepts a full plan with one same-named binding per executable graph node. Use it
 when reviewers and workers need different models, effort, sessions, or connections. Inspect node
 names first with <code>zeroshot template show TEMPLATE</code>.</p>
-<p>Session scope is either <code>execution</code> or <code>node_instance</code>. An <code>execution</code> scope opens a fresh provider
-session for each execution; <code>node_instance</code> reuses a live session when the same graph node instance
-runs again, such as across loop iterations.</p>
+<p>Session scope decides whether a node that runs again, such as in a loop, continues its provider
+session; see <a href="../../reference/runtime-plan/#agent">session scope</a>.</p>
 <h2 id="runtime-configuration-contains-names-not-secret-values">Runtime configuration contains names, not secret values<a class="headerlink" href="#runtime-configuration-contains-names-not-secret-values" title="Permanent link">&para;</a></h2>
 <p>A connection maps a stable key to required environment field names:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
@@ -1733,6 +1826,11 @@ any non-native provider lane, receives these canonical requirements:</p>
 access and Claude's supported auth-token variables for contained Anthropic access. Local profiles
 keep the authored runtime unchanged; applying one to a target derives the contained requirements at
 submission time. Profiles stored on a target derive those requirements when they are stored.</p>
+<p>Local Claude workers and reviewers preserve the invoking shell's <code>USER</code> for macOS Keychain login
+and reuse native CLAUDE.md, plugins, and MCP configuration. Claude's <code>--safe-mode</code> applies only to
+the permission-settings probe before a model turn. Hosted runs use private homes and do not inherit
+the caller's <code>USER</code> or user configuration. Declare additional environment fields needed by MCP
+servers through runtime connections.</p>
 <p>Store a local static connection by prompting for its fields:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="go">zeroshot connection set openrouter --field OPENROUTER_API_KEY</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">zeroshot connection list</span>
@@ -1853,6 +1951,14 @@ installation conventions, resume behavior, and direct-target ownership boundary.
     
     
     
+    <a href="https://zeroshot.sh/?utm_source=github&utm_medium=docs&utm_campaign=zeroshot" target="_blank" rel="noopener" title="zeroshot.sh" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M351.9 280H161c2.9 64.5 17.2 123.9 37.5 167.4 11.4 24.5 23.7 41.8 35.1 52.4 11.2 10.5 18.9 12.2 22.9 12.2s11.7-1.7 22.9-12.2c11.4-10.6 23.7-28 35.1-52.4 20.3-43.5 34.6-102.9 37.5-167.4zm-191-48h190.9c-2.8-64.5-17.1-123.9-37.4-167.4-11.4-24.4-23.7-41.8-35.1-52.4C268.1 1.7 260.4 0 256.4 0s-11.7 1.7-22.9 12.2c-11.4 10.6-23.7 28-35.1 52.4-20.3 43.5-34.6 102.9-37.5 167.4m-48 0c3.5-85.6 25.6-165.1 57.9-217.3C78.7 47.3 10.9 131.2 1.5 232zM1.5 280c9.4 100.8 77.2 184.7 169.3 217.3-32.3-52.2-54.4-131.7-57.9-217.3zm398.4 0c-3.5 85.6-25.6 165.1-57.9 217.3 92.1-32.7 159.9-116.5 169.3-217.3zm111.4-48C501.9 131.2 434.1 47.3 342 14.7c32.3 52.2 54.4 131.7 57.9 217.3z"/></svg>
+    </a>
+  
+    
+    
+    
+    
       
       
     
@@ -1867,7 +1973,7 @@ installation conventions, resume behavior, and direct-target ownership boundary.
       
       
     
-    <a href="https://discord.gg/9Tnxd7XWa" target="_blank" rel="noopener" title="discord.gg" class="md-social__link">
+    <a href="https://discord.gg/fZyzf2Cut9" target="_blank" rel="noopener" title="discord.gg" class="md-social__link">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M492.5 69.8c-.2-.3-.4-.6-.8-.7-38.1-17.5-78.4-30-119.7-37.1-.4-.1-.8 0-1.1.1s-.6.4-.8.8c-5.5 9.9-10.5 20.2-14.9 30.6-44.6-6.8-89.9-6.8-134.4 0-4.5-10.5-9.5-20.7-15.1-30.6-.2-.3-.5-.6-.8-.8s-.7-.2-1.1-.2C162.5 39 122.2 51.5 84.1 69c-.3.1-.6.4-.8.7C7.1 183.5-13.8 294.6-3.6 404.2c0 .3.1.5.2.8s.3.4.5.6c44.4 32.9 94 58 146.8 74.2.4.1.8.1 1.1 0s.7-.4.9-.7c11.3-15.4 21.4-31.8 30-48.8.1-.2.2-.5.2-.8s0-.5-.1-.8-.2-.5-.4-.6-.4-.3-.7-.4c-15.8-6.1-31.2-13.4-45.9-21.9-.3-.2-.5-.4-.7-.6s-.3-.6-.3-.9 0-.6.2-.9.3-.5.6-.7c3.1-2.3 6.2-4.7 9.1-7.1.3-.2.6-.4.9-.4s.7 0 1 .1c96.2 43.9 200.4 43.9 295.5 0 .3-.1.7-.2 1-.2s.7.2.9.4c2.9 2.4 6 4.9 9.1 7.2.2.2.4.4.6.7s.2.6.2.9-.1.6-.3.9-.4.5-.6.6c-14.7 8.6-30 15.9-45.9 21.8-.2.1-.5.2-.7.4s-.3.4-.4.7-.1.5-.1.8.1.5.2.8c8.8 17 18.8 33.3 30 48.8.2.3.6.6.9.7s.8.1 1.1 0c52.9-16.2 102.6-41.3 147.1-74.2.2-.2.4-.4.5-.6s.2-.5.2-.8c12.3-126.8-20.5-236.9-86.9-334.5zm-302 267.7c-29 0-52.8-26.6-52.8-59.2s23.4-59.2 52.8-59.2c29.7 0 53.3 26.8 52.8 59.2 0 32.7-23.4 59.2-52.8 59.2m195.4 0c-29 0-52.8-26.6-52.8-59.2s23.4-59.2 52.8-59.2c29.7 0 53.3 26.8 52.8 59.2 0 32.7-23.2 59.2-52.8 59.2"/></svg>
     </a>
   
