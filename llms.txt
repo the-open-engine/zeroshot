@@ -58,5 +58,5 @@ The installer needs Node.js 18+ and installs a verified native binary plus a Zer
 - [ACP agent preview](https://the-open-engine.github.io/zeroshot/current/guides/acp/)
 - [Python SDK](https://the-open-engine.github.io/zeroshot/current/guides/python-sdk/)
 - [Source](https://github.com/the-open-engine/zeroshot)
-- [Discord community](https://discord.gg/fZyzf2Cut9)
+- [Discord community](https://theopenengine.com/discord)
 - [GitHub Discussions](https://github.com/the-open-engine/zeroshot/discussions)
