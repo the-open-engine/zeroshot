@@ -78,6 +78,12 @@ access and Claude's supported auth-token variables for contained Anthropic acces
 keep the authored runtime unchanged; applying one to a target derives the contained requirements at
 submission time. Profiles stored on a target derive those requirements when they are stored.
 
+Local Claude workers and reviewers preserve the invoking shell's `USER` for macOS Keychain login
+and reuse native CLAUDE.md, plugins, and MCP configuration. Claude's `--safe-mode` applies only to
+the permission-settings probe before a model turn. Hosted runs use private homes and do not inherit
+the caller's `USER` or user configuration. Declare additional environment fields needed by MCP
+servers through runtime connections.
+
 Store a local static connection by prompting for its fields:
 
 ```console

@@ -16,6 +16,53 @@ fn local_anthropic_config(directory: &TestDirectory) -> ClaudeAdapterConfig {
 }
 
 #[test]
+fn local_claude_preserves_keychain_user_without_hosted_inheritance() {
+    let directory = TestDirectory::new("claude-keychain-user");
+    let configuration = || {
+        let mut configuration = local_anthropic_config(&directory);
+        configuration.native_environment = LocalHarnessEnvironment::new(BTreeMap::from([(
+            "USER".to_owned(),
+            "keychain-user".to_owned(),
+        )]));
+        configuration
+    };
+    let binding = agent_binding("claude-sonnet-5", None, SessionScope::Execution, &[]);
+    let resolved = ResolvedEnvironment::exact(&binding, BTreeMap::new()).assert_value();
+    let home = Path::new("/private/session");
+    let local = ClaudeAdapter::new_local(configuration()).assert_value();
+    assert_eq!(
+        local.process_environment(&resolved, home).assert_value()["USER"],
+        "keychain-user"
+    );
+
+    let hosted = ClaudeAdapter::new(configuration()).assert_value();
+    assert!(
+        !hosted
+            .process_environment(&resolved, home)
+            .assert_value()
+            .contains_key("USER")
+    );
+    let unset = ClaudeAdapter::new_local(local_anthropic_config(&directory)).assert_value();
+    assert!(
+        !unset
+            .process_environment(&resolved, home)
+            .assert_value()
+            .contains_key("USER")
+    );
+
+    let binding = agent_binding("claude-sonnet-5", None, SessionScope::Execution, &["USER"]);
+    let declared = ResolvedEnvironment::exact(
+        &binding,
+        BTreeMap::from([(environment_name("USER"), "declared-user".to_owned())]),
+    )
+    .assert_value();
+    assert_eq!(
+        local.process_environment(&declared, home).assert_value()["USER"],
+        "declared-user"
+    );
+}
+
+#[test]
 fn local_claude_user_reuses_home_without_moving_session_state() {
     let directory = TestDirectory::new("claude-local-user");
     let runtime_home = directory.child("runtime");
