@@ -7,7 +7,7 @@
 
 &nbsp;
 
-<a href="https://discord.gg/fZyzf2Cut9"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/discord-cta-dark.png"><img alt="Join the Zeroshot community on Discord" src="docs/brand/social/discord-cta-light.png" height="30"></picture></a>
+<a href="https://theopenengine.com/discord"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/discord-cta-dark.png"><img alt="Join the Zeroshot community on Discord" src="docs/brand/social/discord-cta-light.png" height="30"></picture></a>
 <a href="https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/zeroshot-site-dark.png"><img alt="Website · zeroshot.sh" src="docs/brand/social/zeroshot-site-light.png" height="30"></picture></a>
 <a href="https://theopenengine.com/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/website-dark.png"><img alt="The Open Engine · theopenengine.com" src="docs/brand/social/website-light.png" height="30"></picture></a>
 <a href="https://x.com/OpenEngineHQ"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/x-dark.png"><img alt="X · @OpenEngineHQ" src="docs/brand/social/x-light.png" height="30"></picture></a>
@@ -45,7 +45,7 @@ The product site, [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_mediu
 
 **[▶ Video: a single agent vs. Zeroshot](https://x.com/eivindmeyer_cv/status/2106898797771288828)** (scripted)
 
-Questions, ideas, or a run worth showing? Join the [Zeroshot community on Discord](https://discord.gg/fZyzf2Cut9).
+Questions, ideas, or a run worth showing? Join the [Zeroshot community on Discord](https://theopenengine.com/discord).
 
 ## Install
 
@@ -271,7 +271,7 @@ See [Execution](docs/concepts/execution.md) for the research workflow's decision
 
 ## Community
 
-- [Discord](https://discord.gg/fZyzf2Cut9): ask questions, share runs and graphs, and talk to the team.
+- [Discord](https://theopenengine.com/discord): ask questions, share runs and graphs, and talk to the team.
 - [GitHub Issues](https://github.com/the-open-engine/zeroshot/issues): reproducible bugs and feature requests.
 
 ## Reference
