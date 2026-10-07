@@ -768,6 +768,7 @@ fn assert_disposition_stages(iteration_nodes: &[&GraphNode]) {
         auditor.worker.as_str(),
         "builtin.agent.research-disposition-auditor@1"
     );
+    assert_eq!(auditor.attempts.get(), 1);
     assert_eq!(
         auditor
             .signals
@@ -785,6 +786,7 @@ fn assert_disposition_stages(iteration_nodes: &[&GraphNode]) {
             && value.as_str().contains("audit-feedback.json")
     }));
     let recheck = find_verifier(iteration_nodes, "audit_disposition_recheck");
+    assert_eq!(recheck.attempts.get(), 1);
     assert_eq!(
         recheck
             .signals

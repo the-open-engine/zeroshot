@@ -120,6 +120,14 @@ fn audit_review_outcome(verdict: &str) -> openengine_cluster_protocol::WorkerOut
     }
 }
 
+fn audit_probe_input() -> Value {
+    json!({
+        "task": "audit a research iteration",
+        "workItems": [null],
+        "continuationItems": []
+    })
+}
+
 fn assert_research_dispatch(reduction: &Reduction, expected: &str) {
     assert!(reduction.decisions.iter().any(|decision| matches!(
         decision,
@@ -184,11 +192,7 @@ fn rejected_audit_recheck(
 #[tokio::test]
 async fn rejected_research_audit_repairs_then_rechecks_before_continuing() {
     let authored = super::auto_research::audit_probe_graph().assert_value();
-    let input = json!({
-        "task": "audit a research iteration",
-        "workItems": [null],
-        "continuationItems": []
-    });
+    let input = audit_probe_input();
     let verified = verified_research_probe(authored, &input, "Audit repair routing", "audit-repair-routing").await;
 
     let first = reduce(&verified, &input, &[]);
@@ -237,11 +241,7 @@ async fn rejected_research_audit_repairs_then_rechecks_before_continuing() {
 #[tokio::test]
 async fn current_audit_stop_overrides_a_prior_iteration_recheck() {
     let authored = super::auto_research::audit_loop_probe_graph().assert_value();
-    let input = json!({
-        "task": "audit a research iteration",
-        "workItems": [null],
-        "continuationItems": []
-    });
+    let input = audit_probe_input();
     let verified = verified_research_probe(authored, &input, "Audit loop routing", "audit-loop-routing").await;
 
     let first = reduce(&verified, &input, &[]);
@@ -339,4 +339,31 @@ async fn recorder_error_reaches_independent_audit() {
     let audit = reduce(&verified, &input, &history);
     assert_research_dispatch(&audit, "audit_disposition");
     assert!(audit.terminal.is_none());
+}
+
+#[tokio::test]
+async fn auditor_crash_fails_without_retrying_a_written_audit() {
+    let authored = super::auto_research::audit_probe_graph().assert_value();
+    let input = audit_probe_input();
+    let verified = verified_research_probe(authored, &input, "Auditor crash routing", "auditor-crash-routing").await;
+    let first = reduce(&verified, &input, &[]);
+    let history = vec![settle_audit_dispatch(
+        &first,
+        1,
+        openengine_cluster_protocol::WorkerOutcome::declared_failure(
+            openengine_cluster_protocol::WorkerErrorCode::Crash,
+        ),
+    )];
+
+    let failed = reduce(&verified, &input, &history);
+    assert_eq!(
+        failed.terminal,
+        Some(TerminalProjection::Failed {
+            reason: "iteration_finalization_audit_failed".parse().assert_value()
+        })
+    );
+    assert!(failed.decisions.iter().all(|decision| !matches!(
+        decision,
+        Decision::Dispatch { occurrence, .. } if occurrence.node.as_str() == "audit_disposition"
+    )));
 }

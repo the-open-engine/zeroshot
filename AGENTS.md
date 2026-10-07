@@ -398,10 +398,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   bytes; it never accepts an older audit or partial files. A settled recorder or recovery worker
   error alone does not invalidate complete durable work. Incomplete evidence, a second rejection,
   unprovable retained state, or an auditor execution error stops the run before another iteration
-  or checkpoint. A fresh graph on retained files rejects any unaudited iteration or unfinished
-  draft before scouting; a selected checkpoint before that work or audit resumes the original graph
-  unit. A valid `continue` advances the
-  bounded loop; a valid `stop` ends it after optional delivery.
+  or checkpoint. File-writing auditors have one execution attempt so a crash after appending
+  `audit.json` cannot retry against its own output. A fresh graph on retained files rejects any
+  unaudited iteration or unfinished draft before scouting; a selected checkpoint before that work
+  or audit resumes the original graph unit. A valid `continue` advances the bounded loop; a valid
+  `stop` ends it after optional delivery.
   The charter separates non-negotiable invariants from optional progress measures. A verified
   repair of a known invariant violation takes priority over optional optimization thresholds.
   Mutable state and summaries identify the retained workspace and invariant status separately

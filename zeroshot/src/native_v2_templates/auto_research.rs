@@ -331,7 +331,7 @@ fn task_reviewer(
         input_bindings: vec![state_input(TASK_FIELD, TASK_FIELD)?],
         write_bindings: Vec::new(),
         timeout_ms: None,
-        attempts: positive(MAX_AGENT_VERIFIER_ATTEMPTS)?,
+        attempts: positive(1)?,
         signals,
         diagnostic: diagnostic_type()?,
         instructions: Some(instructions(authored_instructions)?),
@@ -1056,6 +1056,8 @@ fn decision_auditor(name: &str) -> Result<GraphNode, BuiltinTemplateError> {
          append iterations/NNNNNN/audit.json with continue or stop, rationale, and any counterproposal. \
          If invalid, return rejected with an actionable diagnostic and write \
          scratch/NNNNNN/audit-feedback.json naming the exact issues and safe repair scope. \
+         Write the audit or feedback once. If the harness asks only for a corrected structured \
+         response in this same execution, return the existing verdict without rewriting files. \
          Do not edit reviewed records, candidate files, or earlier audit files. Do not use Git.",
     )
 }
