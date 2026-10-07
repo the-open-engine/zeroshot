@@ -58,6 +58,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Map reduction collects a promoted field only when every item wrote it in that item scope. A worker
   error leaves an incomplete collection unchanged while its controls remain available to authored
   guards; never substitute inherited arrays, null placeholders, or shorter partial collections.
+- Each full-v1 loop round starts with fresh error, signal, group, and output-channel facts for its
+  body at that map scope. Caller state persists across rounds; internal visit markers persist for
+  durable replay. Final-round facts replace older facts when the loop returns to its parent.
 - Model identifiers are opaque provider-owned strings. Do not infer a harness from a provider/model,
   maintain runtime model catalogs, or validate provider availability. Admission may reject only known
   incompatible harness/provider pairs.
@@ -362,9 +365,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   The staging agent backs up the incumbent, checks the declared archived source files and mutable
   scope, cleans only clearly incidental generated files outside that scope, and restores the
   chosen parent. The experiment independently checks the staged source, backup, and protected
-  paths before editing. A manifest's declared candidate files are its restorable bytes; generated
-  files recorded outside candidate scope are evidence, not required archived source. Neither agent
-  may rewrite declared archived bytes or an immutable manifest. Incomplete, oversized, or
+  paths before editing. An experiment execution error routes directly to abort recovery without
+  judging a partial experiment. A manifest's declared candidate files are its restorable bytes;
+  generated files recorded outside candidate scope are evidence, not required archived source.
+  Neither agent may rewrite declared archived bytes or an immutable manifest. Incomplete, oversized, or
   unprovable candidates are nonrestorable. Agents own archive and restoration through files and
   prompts; there is no snapshot, restore, or search operation.
   Evidence, method, and progress judges independently return `adopt`, `record_only`, or
@@ -389,9 +393,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   unaudited iteration, mutable state, backlog, and incidental generated files, then an
   independent auditor rechecks once. Measurements, experiment observations, planner selection,
   previously audited records, declared archive bytes and manifests, judge verdicts, and
-  graph-selected dispositions cannot be rewritten. A second rejection or
-  unprovable retained state stops the run. Auditor execution errors and recorder or recovery
-  failures also stop before another iteration or checkpoint. A valid `continue` advances the
+  graph-selected dispositions cannot be rewritten. The auditor requires a fresh unaudited directory
+  at the expected iteration number, all five records, and independently proven retained or restored
+  bytes; it never accepts an older audit or partial files. A settled recorder or recovery worker
+  error alone does not invalidate complete durable work. Incomplete evidence, a second rejection,
+  unprovable retained state, or an auditor execution error stops the run before another iteration
+  or checkpoint. A valid `continue` advances the
   bounded loop; a valid `stop` ends it after optional delivery.
   The charter separates non-negotiable invariants from optional progress measures. A verified
   repair of a known invariant violation takes priority over optional optimization thresholds.

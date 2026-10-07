@@ -182,8 +182,8 @@ async fn every_supported_materialization_is_admissible() {
 fn auto_research_leaves(delivery: TemplateDelivery) -> Vec<&'static str> {
     let mut leaves = vec![
         "abort_plan",
-        "abort_plan_invalid",
         "abort_staging",
+        "abort_experiment",
         "abort_review",
         "audit_disposition",
         "audit_disposition_recheck",
@@ -468,11 +468,11 @@ fn assert_research_phase_topology(iteration_nodes: &[&GraphNode]) {
     assert_eq!(work.body.name().as_str(), "staging_stage");
     let route = find_choice(iteration_nodes, "research_route");
     assert_eq!(
-        route.branches.as_slice()[2].node.name().as_str(),
+        route.branches.as_slice()[1].node.name().as_str(),
         "record_stop"
     );
     assert_eq!(
-        route.branches.as_slice()[3].node.name().as_str(),
+        route.branches.as_slice()[2].node.name().as_str(),
         "work_phase"
     );
 }

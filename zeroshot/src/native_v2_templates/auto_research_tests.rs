@@ -39,8 +39,8 @@ fn assert_research_planner(iteration_nodes: &[&GraphNode]) {
     );
     assert!(iteration_nodes.iter().all(|node| node.name().as_str() != "plan_review"));
     let selection = find_choice(iteration_nodes, "research_route");
-    assert_eq!(selection.branches.as_slice()[2].node.name().as_str(), "record_stop");
-    assert_eq!(selection.branches.as_slice()[3].node.name().as_str(), "work_phase");
+    assert_eq!(selection.branches.as_slice()[1].node.name().as_str(), "record_stop");
+    assert_eq!(selection.branches.as_slice()[2].node.name().as_str(), "work_phase");
     let staging = find_choice(iteration_nodes, "staging_result");
     assert_eq!(staging.branches.as_slice().len(), 1);
     assert_eq!(staging.branches.as_slice()[0].node.name().as_str(), "abort_staging");
@@ -48,17 +48,22 @@ fn assert_research_planner(iteration_nodes: &[&GraphNode]) {
         staging.otherwise.as_ref().map(|node| node.name().as_str()),
         Some("experiment_stage")
     );
+    let experiment = find_choice(iteration_nodes, "experiment_result");
+    assert_eq!(experiment.branches.as_slice()[0].node.name().as_str(), "abort_experiment");
+    assert_eq!(
+        experiment.otherwise.as_ref().map(|node| node.name().as_str()),
+        Some("judge_phase")
+    );
     assert!(iteration_nodes
         .iter()
         .all(|node| node.name().as_str() != "staging_review"));
     let exit_route = find_choice(iteration_nodes, "exit_route");
-    assert_eq!(exit_route.branches.as_slice()[0].node.name().as_str(), "done_early_after_recheck");
+    assert_eq!(exit_route.branches.as_slice()[0].node.name().as_str(), "done_early");
     assert_eq!(
         exit_route.branches.as_slice()[1].node.name().as_str(),
-        "iteration_continues_after_recheck"
+        "iteration_continues"
     );
-    assert_eq!(exit_route.branches.as_slice()[2].node.name().as_str(), "done_early");
-    assert_eq!(exit_route.branches.as_slice()[3].node.name().as_str(), "iteration_continues");
+    assert_eq!(exit_route.branches.as_slice().len(), 2);
 }
 
 fn settle_audit_dispatch(
@@ -122,40 +127,71 @@ fn assert_research_dispatch(reduction: &Reduction, expected: &str) {
     )));
 }
 
-#[tokio::test]
-async fn rejected_research_audit_repairs_then_rechecks_before_continuing() {
-    use openengine_cluster_protocol::WorkerOutcome;
-
-    let authored = super::auto_research::audit_probe_graph().assert_value();
+async fn verified_research_probe(
+    authored: openengine_cluster_protocol::GraphSpec,
+    input: &Value,
+    title: &str,
+    key: &str,
+) -> VerifiedGraph {
     let runtime = runtime_for(
         BuiltinGraphTemplate::AutoResearch,
         TemplateDelivery::None,
         &executable_leaves(&authored.root),
     );
-    let input = json!({
-        "task": "audit a research iteration",
-        "workItems": [null],
-        "continuationItems": []
-    });
     let admitted = NativeV2Admission
         .admit(RunSubmission {
-            title: RunTitle::new("Audit repair routing").assert_value(),
+            title: RunTitle::new(title).assert_value(),
             graph: authored,
             initial_input: input.clone(),
             runtime,
             environment: None,
             source: resolved_source(),
-            submission_key: IdempotencyKey::new("audit-repair-routing").assert_value(),
+            submission_key: IdempotencyKey::new(key).assert_value(),
         })
         .await
-        .unwrap_or_else(|error| panic!("audit probe admission: {error:?}"));
-    let verified = VerifiedGraph {
+        .unwrap_or_else(|error| panic!("research probe admission: {error:?}"));
+    VerifiedGraph {
         compiled_ir: admitted.graph,
         diagnostics: Vec::new(),
-    };
+    }
+}
 
-    let mut history = Vec::new();
-    let first = reduce(&verified, &input, &history);
+fn rejected_audit_recheck(
+    verified: &VerifiedGraph,
+    input: &Value,
+    first: &Reduction,
+) -> (Vec<DurableExecution>, Reduction) {
+    let mut history = vec![settle_audit_dispatch(
+        first,
+        1,
+        audit_review_outcome("rejected"),
+    )];
+    let repair = reduce(verified, input, &history);
+    assert_research_dispatch(&repair, "audit_repair");
+    history.push(settle_audit_dispatch(
+        &repair,
+        2,
+        openengine_cluster_protocol::WorkerOutcome::Verified {
+            output: Value::Null,
+            artifacts: Vec::new(),
+        },
+    ));
+    let recheck = reduce(verified, input, &history);
+    assert_research_dispatch(&recheck, "audit_disposition_recheck");
+    (history, recheck)
+}
+
+#[tokio::test]
+async fn rejected_research_audit_repairs_then_rechecks_before_continuing() {
+    let authored = super::auto_research::audit_probe_graph().assert_value();
+    let input = json!({
+        "task": "audit a research iteration",
+        "workItems": [null],
+        "continuationItems": []
+    });
+    let verified = verified_research_probe(authored, &input, "Audit repair routing", "audit-repair-routing").await;
+
+    let first = reduce(&verified, &input, &[]);
     assert_research_dispatch(&first, "audit_disposition");
     let accepted_history = vec![settle_audit_dispatch(
         &first,
@@ -171,25 +207,7 @@ async fn rejected_research_audit_repairs_then_rechecks_before_continuing() {
         decision,
         Decision::Dispatch { occurrence, .. } if occurrence.node.as_str() == "audit_repair"
     )));
-    history.push(settle_audit_dispatch(
-        &first,
-        1,
-        audit_review_outcome("rejected"),
-    ));
-
-    let repair = reduce(&verified, &input, &history);
-    assert_research_dispatch(&repair, "audit_repair");
-    history.push(settle_audit_dispatch(
-        &repair,
-        2,
-        WorkerOutcome::Verified {
-            output: Value::Null,
-            artifacts: Vec::new(),
-        },
-    ));
-
-    let recheck = reduce(&verified, &input, &history);
-    assert_research_dispatch(&recheck, "audit_disposition_recheck");
+    let (mut history, recheck) = rejected_audit_recheck(&verified, &input, &first);
     history.push(settle_audit_dispatch(
         &recheck,
         3,
@@ -214,4 +232,111 @@ async fn rejected_research_audit_repairs_then_rechecks_before_continuing() {
             reason: "iteration_finalization_rejected".parse().assert_value()
         })
     );
+}
+
+#[tokio::test]
+async fn current_audit_stop_overrides_a_prior_iteration_recheck() {
+    let authored = super::auto_research::audit_loop_probe_graph().assert_value();
+    let input = json!({
+        "task": "audit a research iteration",
+        "workItems": [null],
+        "continuationItems": []
+    });
+    let verified = verified_research_probe(authored, &input, "Audit loop routing", "audit-loop-routing").await;
+
+    let first = reduce(&verified, &input, &[]);
+    assert_research_dispatch(&first, "audit_disposition");
+    let (mut history, recheck) = rejected_audit_recheck(&verified, &input, &first);
+    history.push(settle_audit_dispatch(
+        &recheck,
+        3,
+        audit_review_outcome("continue"),
+    ));
+
+    let second = reduce(&verified, &input, &history);
+    assert_research_dispatch(&second, "audit_disposition");
+    history.push(settle_audit_dispatch(
+        &second,
+        4,
+        audit_review_outcome("stop"),
+    ));
+
+    let finished = reduce(&verified, &input, &history);
+    assert!(matches!(
+        finished.terminal,
+        Some(TerminalProjection::Succeeded { output }) if output.is_null()
+    ));
+    assert!(finished.decisions.iter().all(|decision| !matches!(
+        decision,
+        Decision::Dispatch { occurrence, .. } if occurrence.node.as_str() == "audit_disposition"
+    )));
+}
+
+#[tokio::test]
+async fn experiment_crash_routes_to_recovery_without_judging() {
+    let authored = super::auto_research::experiment_failure_probe_graph().assert_value();
+    let input = json!({
+        "task": "research a bounded improvement",
+        "workItems": [{"role":"experiment"}],
+        "judgeRoles": [
+            {"role":"evidence"},
+            {"role":"method"},
+            {"role":"progress"}
+        ],
+        "reviews": [],
+        "verdicts": [],
+        "title": "",
+        "description": ""
+    });
+    let verified = verified_research_probe(
+        authored,
+        &input,
+        "Experiment failure routing",
+        "experiment-failure-routing",
+    )
+    .await;
+
+    let first = reduce(&verified, &input, &[]);
+    assert_research_dispatch(&first, "experiment");
+    let history = vec![settle_audit_dispatch(
+        &first,
+        1,
+        openengine_cluster_protocol::WorkerOutcome::declared_failure(
+            openengine_cluster_protocol::WorkerErrorCode::Crash,
+        ),
+    )];
+    let recovery = reduce(&verified, &input, &history);
+    assert_research_dispatch(&recovery, "abort_experiment");
+    assert!(recovery.decisions.iter().all(|decision| !matches!(
+        decision,
+        Decision::Dispatch { occurrence, .. } if occurrence.node.as_str() == "research_judge"
+    )));
+}
+
+#[tokio::test]
+async fn recorder_error_reaches_independent_audit() {
+    let authored = super::auto_research::recorder_audit_probe_graph().assert_value();
+    let input = json!({
+        "task": "audit durable research records",
+        "workItems": [null],
+        "continuationItems": [],
+        "reviews": [],
+        "verdicts": [],
+        "title": "",
+        "description": ""
+    });
+    let verified = verified_research_probe(authored, &input, "Recorder audit routing", "recorder-audit-routing").await;
+
+    let first = reduce(&verified, &input, &[]);
+    assert_research_dispatch(&first, "record_stop");
+    let history = vec![settle_audit_dispatch(
+        &first,
+        1,
+        openengine_cluster_protocol::WorkerOutcome::declared_failure(
+            openengine_cluster_protocol::WorkerErrorCode::Malformed,
+        ),
+    )];
+    let audit = reduce(&verified, &input, &history);
+    assert_research_dispatch(&audit, "audit_disposition");
+    assert!(audit.terminal.is_none());
 }

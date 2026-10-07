@@ -47,30 +47,7 @@ pub(super) fn auto_research_graph(
 }
 
 #[cfg(test)]
-pub(super) fn audit_probe_graph() -> Result<GraphSpec, BuiltinTemplateError> {
-    let state = record_type(vec![
-        (TASK_FIELD, PayloadType::String, true),
-        (WORK_ITEMS_FIELD, array_type(PayloadType::Null), true),
-        (
-            CONTINUATION_ITEMS_FIELD,
-            array_type(PayloadType::Null),
-            true,
-        ),
-    ])?;
-    graph(
-        state.clone(),
-        sequence(
-            "audit_probe",
-            state.clone(),
-            vec![
-                disposition_audit_phase(state.clone())?,
-                exit_route(state, TemplateDelivery::None)?,
-                succeed_null("audit_probe_done")?,
-            ],
-            Vec::new(),
-        )?,
-    )
-}
+include!("auto_research_probes.rs");
 
 fn auto_research_delivery_mode(
     delivery: TemplateDelivery,
@@ -370,26 +347,26 @@ fn exit_route(
     state: PayloadType,
     delivery: TemplateDelivery,
 ) -> Result<GraphNode, BuiltinTemplateError> {
-    let terminal = early_terminal("done_early", delivery)?;
-    let rechecked_terminal = early_terminal("done_early_after_recheck", delivery)?;
     Ok(GraphNode::Choice(ChoiceNode {
         name: node_name("exit_route")?,
         state: state.clone(),
         branches: non_empty(vec![
             ChoiceBranch {
-                when: mapped_signal_guard("audit_disposition_recheck", 1, &["stop"])?,
-                node: rechecked_terminal,
+                when: Guard::Any {
+                    guards: non_empty(vec![
+                        mapped_signal_guard("audit_disposition", 1, &["stop"])?,
+                        mapped_signal_guard("audit_disposition_recheck", 1, &["stop"])?,
+                    ])?,
+                },
+                node: early_terminal("done_early", delivery)?,
             },
             ChoiceBranch {
-                when: mapped_signal_guard("audit_disposition_recheck", 1, &["continue"])?,
-                node: empty_continuation("iteration_continues_after_recheck", state.clone())?,
-            },
-            ChoiceBranch {
-                when: mapped_signal_guard("audit_disposition", 1, &["stop"])?,
-                node: terminal,
-            },
-            ChoiceBranch {
-                when: mapped_signal_guard("audit_disposition", 1, &["continue"])?,
+                when: Guard::Any {
+                    guards: non_empty(vec![
+                        mapped_signal_guard("audit_disposition", 1, &["continue"])?,
+                        mapped_signal_guard("audit_disposition_recheck", 1, &["continue"])?,
+                    ])?,
+                },
                 node: empty_continuation("iteration_continues", state)?,
             },
         ])?,
@@ -416,22 +393,19 @@ fn research_route(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError>
         state: state.clone(),
         branches: non_empty(vec![
             ChoiceBranch {
-                when: executable_error_guard("plan_experiment")?,
+                when: Guard::Any {
+                    guards: non_empty(vec![
+                        executable_error_guard("plan_experiment")?,
+                        signal_guard("plan_experiment", VERDICT_FIELD, &["abort"])?,
+                    ])?,
+                },
                 node: recovery_stage(
                     state.clone(),
                     "abort_plan",
-                    "Planner execution failed. Leave the incumbent intact, finalize an aborted \
-                        iteration with the error, and advance once. Do not use Git.",
-                )?,
-            },
-            ChoiceBranch {
-                when: signal_guard("plan_experiment", VERDICT_FIELD, &["abort"])?,
-                node: recovery_stage(
-                    state.clone(),
-                    "abort_plan_invalid",
-                    "Planner could not make a valid selection. Leave the incumbent intact, \
-                        finalize an aborted iteration with its diagnostic, and advance once. \
-                        Do not use Git.",
+                    "The planner failed or could not make a valid selection. Leave the incumbent \
+                     intact, finalize an aborted iteration with the five standard records and the \
+                     actual error or diagnostic, and advance once. Do not invent a selection, \
+                     experiment, or judge verdict. Do not use Git.",
                 )?,
             },
             ChoiceBranch {
@@ -484,8 +458,10 @@ fn staging_stage(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> 
                 state.clone(),
                 "abort_staging",
                 "Staging failed before a usable experiment. Restore the retained incumbent from \
-                 scratch, prove its hashes, finalize an aborted iteration with the available \
-                 staging evidence, and advance once. Do not use Git.",
+                 scratch/NNNNNN/incumbent when its verified backup exists; otherwise prove the \
+                 original workspace unchanged against retained hashes and absence inventory. If \
+                 neither can be proven, report failure. Finalize an aborted iteration with the five \
+                 standard records and available staging evidence, then advance once. Do not use Git.",
             )?,
         }])?,
         otherwise: Some(Box::new(experiment_stage(state.clone())?)),
@@ -522,10 +498,34 @@ fn stage_parent() -> Result<GraphNode, BuiltinTemplateError> {
 }
 
 fn experiment_stage(state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
+    let result = GraphNode::Choice(ChoiceNode {
+        name: node_name("experiment_result")?,
+        state: state.clone(),
+        branches: non_empty(vec![ChoiceBranch {
+            when: executable_error_guard("experiment")?,
+            node: recovery_stage(
+                state.clone(),
+                "abort_experiment",
+                "The experiment execution failed, so do not judge its draft. Restore the \
+                 pre-iteration incumbent byte-for-byte from scratch/NNNNNN/incumbent whenever \
+                 that verified backup exists, including changes made when staging an archived \
+                 parent. If staging failed before backup, prove the original workspace unchanged. \
+                 Remove paths absent from the incumbent inventory and prove its hashes. Finalize \
+                 an aborted iteration with the five standard records using available planner and \
+                 experiment evidence. \
+                 Record that no judges ran; never fabricate verdicts or a reviewed candidate. \
+                 Advance state, summary, and backlog exactly once and remove scratch only after \
+                 restoration and finalization are proven. If restoration cannot be proven, \
+                 report failure. Do not use Git.",
+            )?,
+        }])?,
+        otherwise: Some(Box::new(review_stage(state.clone())?)),
+        promoted_state_paths: Vec::new(),
+    });
     sequence(
         "experiment_stage",
-        state.clone(),
-        vec![experiment()?, review_stage(state)?],
+        state,
+        vec![experiment()?, result],
         Vec::new(),
     )
 }
@@ -594,7 +594,8 @@ fn experiment() -> Result<GraphNode, BuiltinTemplateError> {
         "builtin.agent.research-experimenter@1",
         "Read the planner selection and staging.json. Independently verify staged source \
          hashes, candidate scope, incumbent backup, and protected paths. If the handoff is invalid, \
-         do not edit candidate files; leave a draft explaining why. Otherwise execute exactly that \
+         do not edit candidate files; leave a draft that marks the staging failure and names the \
+         missing or mismatched evidence so judges can abort. Otherwise execute exactly that \
          experiment on the staged parent. Preserve the incumbent backup and record a manifest \
          covering modified, deleted, and new paths relative to the staged parent. Never use Git. Gather \
              evidence through the declared procedure. For an \
@@ -677,7 +678,8 @@ fn judge() -> Result<GraphNode, BuiltinTemplateError> {
         signals: research_review_signals()?,
         diagnostic: diagnostic_type()?,
         instructions: Some(instructions(
-            "Act only as the assigned judge. Reject missing or incomplete experiment output. Read the \
+            "Act only as the assigned judge. Return abort for invalid staging or missing or \
+             incomplete experiment output. Read the \
                 current iteration's selection, draft, task, charter, \
              ledger, and workspace. Review independently and do not edit files. Evidence checks whether \
              observations support the main claims and repeats the decisive computation, source check, or \
@@ -764,9 +766,10 @@ fn research_decision(state: PayloadType) -> Result<GraphNode, BuiltinTemplateErr
                 when: mapped_error_guard("research_judge")?,
                 node: recovery_worker(
                     "abort_review",
-                    "An independent judge failed. Restore the workspace from the current scratch \
-                     manifest, remove newly created paths, and prove restoration against the prior \
-                     state. Finalize the iteration as aborted with the five standard JSON records, \
+                    "An independent judge failed. Restore the pre-iteration incumbent byte-for-byte \
+                     from scratch/NNNNNN/incumbent, including changes made when staging an archived \
+                     parent. Remove paths absent from the incumbent inventory and prove its hashes. \
+                     Finalize the iteration as aborted with the five standard JSON records, \
                      record available reviews and the missing role, update the state, summary, and \
                      backlog, and advance the next iteration number. Remove this iteration's draft and \
                      backup only after restoration is proven. Keep prior finalized records unchanged \
@@ -1007,8 +1010,14 @@ fn decision_auditor(name: &str) -> Result<GraphNode, BuiltinTemplateError> {
         name,
         "builtin.agent.research-disposition-auditor@1",
         verdict_signals(&["continue", "stop", "rejected"])?,
-        "Inspect the newest iteration read-only before writing an audit or rejection feedback. \
-         Recompute the required disposition from the path that actually ran. A planner stop \
+        "Inspect exactly the current unaudited iteration, not an older audited directory. \
+         Derive its number as the successor of the latest audited iteration, starting at one. \
+         Require that new directory to contain all five current records, have no prior audit.json, \
+         and match state.json nextIteration minus one; older records cannot substitute for it. \
+         A settled recorder or recovery worker error does not invalidate complete, independently \
+         proven files; incomplete or inconsistent files require rejection. Inspect read-only \
+         before writing an audit or rejection feedback. Recompute the required disposition from \
+         the path that actually ran. A planner stop \
          requires disposition stop, no experiment or judge claims, an unchanged incumbent, \
          and a concrete challenge of affordable alternatives. A failed plan, staging, experiment, \
          or judge requires abort and no fabricated evaluations. For three valid judge verdicts, \
@@ -1028,9 +1037,11 @@ fn decision_auditor(name: &str) -> Result<GraphNode, BuiltinTemplateError> {
          archive; generated files recorded outside candidate scope are not required archive bytes. \
          Verify complete mutable scope, absence inventory, provenance, file types, modes, \
          symlink targets, and hashes of every declared archive file. Inspect for undeclared \
-         source files; treat incidental generated files as repairable contamination. For an \
-         experiment, artifacts.json \
+         source files; treat incidental generated files as repairable contamination. For a \
+         completed experiment, artifacts.json \
          must contain changed paths, selected parent, pre-iteration incumbent, reviewed candidate, \
+         and final-current hashes. For a failed experiment, require selected parent, \
+         pre-iteration incumbent, known changed paths, explicit absence of a reviewed candidate, \
          and final-current hashes. For stop or pre-experiment recovery, require explicit absent \
          candidate fields and hashes of the unchanged or restored incumbent. For abort or \
          record_only, require byte-for-byte equality with the pre-iteration incumbent, \

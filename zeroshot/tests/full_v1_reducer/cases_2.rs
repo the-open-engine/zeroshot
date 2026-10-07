@@ -86,6 +86,114 @@ async fn native_v2_loop_reuses_node_instance_with_fresh_attempt_one_executions()
 }
 
 #[tokio::test]
+async fn loop_does_not_reuse_an_error_after_a_later_success() {
+    let route = loop_choice(
+        "work_route",
+        vec![json!({
+            "when":{"kind":"in","value":{"name":"work","source":"error"},
+                "labels":["crash"]},
+            "node":step("recover",1)
+        })],
+        succeed("done"),
+    );
+    let graph = verified(
+        sequence(
+            "root",
+            vec![
+                json!({
+                    "kind":"loop", "name":"work_loop", "state":{"kind":"record","fields":{}},
+                    "body":sequence("iteration", vec![step("work",1), route]),
+                    "maxIterations":2, "promotedStatePaths":[]
+                }),
+                json!({"kind":"fail","name":"exhausted","reason":"exhausted"}),
+            ],
+        ),
+        json!({"work":1,"recover":1}),
+    )
+    .await;
+    let history = [
+        settled(
+            SettledSpec::new(1, 1, "work").position(3),
+            WorkerOutcome::declared_failure(openengine_cluster_protocol::WorkerErrorCode::Crash),
+        ),
+        settled(SettledSpec::new(2, 2, "recover").position(6), success(0)),
+        settled(SettledSpec::new(3, 1, "work").position(9), success(1)),
+    ];
+
+    assert_native_loop_succeeded(&graph, &history);
+}
+
+#[tokio::test]
+async fn loop_does_not_reuse_a_signal_after_a_later_error() {
+    let route = loop_choice(
+        "review_route",
+        vec![
+            json!({
+                "when":{"kind":"in","value":{"name":"check","source":"signal",
+                    "field":"verdict"},"labels":["accepted"]},
+                "node":step("advance",1)
+            }),
+            json!({
+                "when":{"kind":"in","value":{"name":"check","source":"error"},
+                    "labels":["crash"]},
+                "node":succeed("done")
+            }),
+        ],
+        json!({"kind":"fail","name":"bad_route","reason":"bad_route"}),
+    );
+    let graph = verified(
+        sequence(
+            "root",
+            vec![
+                json!({
+                    "kind":"loop", "name":"review_loop", "state":{"kind":"record","fields":{}},
+                    "body":sequence("iteration", vec![verifier("check",1), route]),
+                    "maxIterations":2, "promotedStatePaths":[]
+                }),
+                json!({"kind":"fail","name":"exhausted","reason":"exhausted"}),
+            ],
+        ),
+        json!({"check":1,"advance":1}),
+    )
+    .await;
+    let history = [
+        settled(
+            SettledSpec::new(1, 1, "check").position(3),
+            verdict("accepted"),
+        ),
+        settled(SettledSpec::new(2, 2, "advance").position(6), success(0)),
+        settled(
+            SettledSpec::new(3, 1, "check").position(9),
+            WorkerOutcome::declared_failure(openengine_cluster_protocol::WorkerErrorCode::Crash),
+        ),
+    ];
+
+    assert_native_loop_succeeded(&graph, &history);
+}
+
+fn loop_choice(name: &str, branches: Vec<Value>, otherwise: Value) -> Value {
+    json!({
+        "kind":"choice", "name":name, "state":{"kind":"record","fields":{}},
+        "branches":branches, "otherwise":otherwise, "promotedStatePaths":[]
+    })
+}
+
+fn assert_native_loop_succeeded(graph: &VerifiedGraph, history: &[DurableExecution]) {
+    let result = FullV1Reducer::native_v2(graph)
+        .reduce(ReductionInput {
+            initial_input: &json!({}),
+            executions: history,
+            next_node_instance: 3,
+            next_execution: history.len() as u64 + 1,
+        })
+        .assert_value();
+    assert!(matches!(
+        result.terminal,
+        Some(TerminalProjection::Succeeded { .. })
+    ));
+}
+
+#[tokio::test]
 async fn native_v2_retries_a_failed_execution_before_continuing() {
     let graph = retryable_verifier_graph(2).await;
     let failed = settled(
