@@ -1820,7 +1820,8 @@ terminal failure result.</p>
 </code></pre></div>
 <p><code>zeroshot template show software-change</code> prints the exact graph behind the first example as the same
 <code>GraphSpec</code> accepted by <code>--graph</code> and the Python SDK.</p>
-<p><code>zeroshot template show auto-research</code> prints the fixed ten-iteration research graph. It keeps
+<p><code>zeroshot template show auto-research</code> prints the research graph with its default of ten iterations.
+Supply a positive <code>options.iterations</code> integer in the run input to set the admitted loop bound. It keeps
 adopted, record-only, and aborted results under <code>.zeroshot/research</code>; add <code>--push</code> to a run when every
 finalized iteration should be published.</p>
 

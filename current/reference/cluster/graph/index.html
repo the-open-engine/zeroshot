@@ -1885,7 +1885,7 @@ Every graph node is tagged by <code>kind</code>. Node payloads reject unknown fi
 </tr>
 <tr>
 <td><code>loop</code></td>
-<td>Declared state, body, optional structured <code>until</code>, positive <code>maxIterations</code>, promoted paths; syntactically do-while</td>
+<td>Declared state, body, optional structured <code>until</code>, positive default <code>maxIterations</code>, optional <code>maxIterationsInput</code>, promoted paths; syntactically do-while</td>
 </tr>
 <tr>
 <td><code>map</code></td>
@@ -2032,6 +2032,11 @@ when earlier branches cover that space and does not participate in flow analysis
 do-while. When present, their exit guard must use a verifier guaranteed to execute on every
 iteration. When <code>until</code> is absent, the body repeats to <code>maxIterations</code> unless a terminal node ends
 the graph first.
+<code>maxIterationsInput</code>, when present, names an integer path in <code>initialInput</code>. Native-v2 run
+admission replaces the default bound with that run's positive safe integer, then verifies the
+resulting graph again. An absent input value retains the authored default. Reusable profiles are
+verified against that default; the general execution and loop-entry budgets still constrain each
+admitted run.
 Signal and error controls from one executable are mutually exclusive outcomes. Map aggregates
 count joint per-item outcomes, so one mapped execution cannot contribute both a success signal and
 an error. They also preserve per-item execution flow: guaranteed sequential successors,
@@ -2082,10 +2087,6 @@ optional descendants.</p>
 <tr>
 <td>Assignments per finite check</td>
 <td style="text-align: right;">65,536</td>
-</tr>
-<tr>
-<td>Loop iterations</td>
-<td style="text-align: right;">100</td>
 </tr>
 <tr>
 <td>Map items</td>
