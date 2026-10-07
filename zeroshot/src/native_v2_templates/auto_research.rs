@@ -111,8 +111,10 @@ fn bootstrap() -> Result<GraphNode, BuiltinTemplateError> {
          records and their audit outcomes agree with mutable state and summary. Use each \
          iteration's audit.json as the sole authority for its audit status; do not infer \
          acceptance from provisional records or summary prose. Never treat an \
-         unaudited stop proposal as an approved stop. If an earlier process left a draft, restore \
-         its backup and record an aborted iteration before proceeding. Treat provider sessions as \
+         unaudited stop proposal as an approved stop. If an earlier process left any unaudited \
+         iteration, draft, or unfinished backup, preserve its files and mutable state without \
+         starting new work. The preflight will reject a fresh graph in that state; resume from a \
+         checkpoint before the unfinished work or audit instead. Treat provider sessions as \
          disposable; files are authoritative. Do not use Git or rewrite an audited iteration; \
          and keep large logs or binaries out of the committed research directory. Read \
          'options.iterations' from input, using ten when absent. Admission has already checked \
@@ -207,7 +209,10 @@ fn topology_validation() -> Result<GraphNode, BuiltinTemplateError> {
              including cardinality, uniqueness, and order. Reject every other value with an actionable \
              diagnostic. Confirm state.json iterationLimit equals ten when options.iterations \
              is absent or the exact authored value otherwise. This preflight gates the \
-             iteration loop. Do not edit files.",
+             iteration loop. Reject any prior iteration without audit.json, draft, or unfinished \
+             scratch backup. Explain in the diagnostic that the operator should list the failed \
+             run's checkpoints and resume from one before the unfinished work or audit; a fresh \
+             graph must not scout past it. Do not edit files.",
         )?),
     }))
 }

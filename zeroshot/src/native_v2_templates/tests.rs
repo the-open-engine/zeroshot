@@ -407,6 +407,9 @@ fn assert_research_bootstrap(root: &GraphNode) {
             .as_str()
             .contains("best supported historical findings")
             && value.as_str().contains("archive/<artifact-id>/files/")
+            && value
+                .as_str()
+                .contains("checkpoint before the unfinished work or audit")
             && value.as_str().contains("exactly one experiment work item")
             && value.as_str().contains("rejects missing")
     }));
@@ -500,6 +503,10 @@ fn assert_topology_preflight(nodes: &[&GraphNode]) {
             .as_str()
             .contains("cardinality, uniqueness, and order")
             && value.as_str().contains("gates the iteration loop")
+            && value
+                .as_str()
+                .contains("Reject any prior iteration without audit.json")
+            && value.as_str().contains("checkpoints")
     }));
     let result = find_choice(nodes, "topology_result");
     assert_eq!(
