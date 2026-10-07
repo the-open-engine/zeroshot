@@ -36,7 +36,14 @@ import {
   FoldVertical,
   Clock3,
 } from 'lucide-react';
-import { findNode, pathTo, executable, type Document, type Positions } from './domain';
+import {
+  findNode,
+  pathTo,
+  executable,
+  type Document,
+  type GraphNode,
+  type Positions,
+} from './domain';
 import { typeSummary } from './schema';
 import { nodeOutputFields } from './node-data';
 import { nodePresentation, nodeIcons } from './node-presentation';
@@ -111,13 +118,87 @@ function ObservationBadge({ observation }: { observation: WorkflowNodeObservatio
   );
 }
 
+function ActivityToolbar({
+  data,
+  selected,
+  node,
+}: {
+  data: ActivityData;
+  selected: boolean;
+  node: GraphNode;
+}) {
+  const item = data.item;
+  const activity = item.role === 'activity';
+  const terminal = ['succeed', 'fail'].includes(item.kind);
+  const groupEnd = ['join', 'map-end', 'loop-end'].includes(item.role);
+  return (
+    <NodeToolbar
+      isVisible={
+        !!selected &&
+        !data.readOnly &&
+        ((activity && !terminal) ||
+          groupEnd ||
+          ['decision', 'fork', 'loop-start', 'map-start', 'empty'].includes(item.role))
+      }
+      position={Position.Bottom}
+      offset={8}
+    >
+      <div className="workflow-node-actions">
+        {groupEnd && (
+          <button
+            aria-label={`Add next after ${item.owner}`}
+            onClick={() => data.action?.({ kind: 'next', owner: item.owner })}
+          >
+            <Plus size={13} /> Add next
+          </button>
+        )}
+        {activity && !terminal && (
+          <>
+            <button onClick={() => data.action?.({ kind: 'next', owner: item.owner })}>
+              <Plus size={13} /> Add next
+            </button>
+            <button
+              title="Run in parallel"
+              aria-label={`Run ${item.owner} in parallel`}
+              onClick={() => data.action?.({ kind: 'parallel', owner: item.owner })}
+            >
+              <Columns3 size={14} />
+            </button>
+            <button
+              title={node.kind === 'step' ? 'Repeat until approved' : 'Repeat activity'}
+              aria-label={`Repeat ${item.owner}`}
+              onClick={() =>
+                data.action?.({
+                  kind: node.kind === 'step' ? 'review' : 'repeat',
+                  owner: item.owner,
+                })
+              }
+            >
+              <Repeat2 size={14} />
+            </button>
+          </>
+        )}
+        {item.role === 'decision' && (
+          <button onClick={() => data.action?.({ kind: 'outcome', owner: item.owner })}>
+            <Plus size={13} /> Add outcome
+          </button>
+        )}
+        {['fork', 'loop-start', 'map-start', 'empty'].includes(item.role) && (
+          <button onClick={() => data.action?.({ kind: 'append', owner: item.owner })}>
+            <Plus size={13} /> Add {item.role === 'fork' ? 'parallel activity' : 'activity'}
+          </button>
+        )}
+      </div>
+    </NodeToolbar>
+  );
+}
+
 function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
   const { item, document, workers } = data;
   const node = findNode(document.graph.root, item.owner)!;
   const presentation = nodePresentation(document, node, workers);
   const activity = item.role === 'activity';
   const completion = item.role === 'completion';
-  const groupEnd = ['join', 'map-end', 'loop-end'].includes(item.role);
   const Icon = activity ? presentation.Icon : (nodeIcons[item.kind] ?? presentation.Icon);
   const terminal = ['succeed', 'fail'].includes(item.kind);
   const junction = ['fork', 'join', 'loop-start', 'loop-end', 'map-end'].includes(item.role);
@@ -132,64 +213,7 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
       : '';
   return (
     <>
-      <NodeToolbar
-        isVisible={
-          !!selected &&
-          !data.readOnly &&
-          ((activity && !terminal) ||
-            groupEnd ||
-            ['decision', 'fork', 'loop-start', 'map-start', 'empty'].includes(item.role))
-        }
-        position={Position.Bottom}
-        offset={8}
-      >
-        <div className="workflow-node-actions">
-          {groupEnd && (
-            <button
-              aria-label={`Add next after ${item.owner}`}
-              onClick={() => data.action?.({ kind: 'next', owner: item.owner })}
-            >
-              <Plus size={13} /> Add next
-            </button>
-          )}
-          {activity && !terminal && (
-            <>
-              <button onClick={() => data.action?.({ kind: 'next', owner: item.owner })}>
-                <Plus size={13} /> Add next
-              </button>
-              <button
-                title="Run in parallel"
-                aria-label={`Run ${item.owner} in parallel`}
-                onClick={() => data.action?.({ kind: 'parallel', owner: item.owner })}
-              >
-                <Columns3 size={14} />
-              </button>
-              <button
-                title={node.kind === 'step' ? 'Repeat until approved' : 'Repeat activity'}
-                aria-label={`Repeat ${item.owner}`}
-                onClick={() =>
-                  data.action?.({
-                    kind: node.kind === 'step' ? 'review' : 'repeat',
-                    owner: item.owner,
-                  })
-                }
-              >
-                <Repeat2 size={14} />
-              </button>
-            </>
-          )}
-          {item.role === 'decision' && (
-            <button onClick={() => data.action?.({ kind: 'outcome', owner: item.owner })}>
-              <Plus size={13} /> Add outcome
-            </button>
-          )}
-          {['fork', 'loop-start', 'map-start', 'empty'].includes(item.role) && (
-            <button onClick={() => data.action?.({ kind: 'append', owner: item.owner })}>
-              <Plus size={13} /> Add {item.role === 'fork' ? 'parallel activity' : 'activity'}
-            </button>
-          )}
-        </div>
-      </NodeToolbar>
+      <ActivityToolbar data={data} selected={selected} node={node} />
       <div
         title={[item.label, item.detail].filter(Boolean).join(' · ')}
         aria-label={item.label}
@@ -213,20 +237,7 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
         {item.detail && !activity && !junction && item.role !== 'decision' && (
           <small title={item.detail}>{item.detail}</small>
         )}
-        {activity && executable(node) && (
-          <div className="workflow-fields">
-            {node.input?.kind && node.input.kind !== 'null' && (
-              <div title={typeSummary(node.input)}>
-                <b>In</b> {typeSummary(node.input)}
-              </div>
-            )}
-            {outputs && (
-              <div title={outputs}>
-                <b>Out</b> {outputs}
-              </div>
-            )}
-          </div>
-        )}
+        {activity && executable(node) && <ActivityFields node={node} outputs={outputs} />}
         {activity && <span className="workflow-node-identity">{node.name}</span>}
         {item.role === 'collapsed' && (
           <button
@@ -247,6 +258,23 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
         />
       </div>
     </>
+  );
+}
+
+function ActivityFields({ node, outputs }: { node: GraphNode; outputs: string }) {
+  return (
+    <div className="workflow-fields">
+      {node.input?.kind && node.input.kind !== 'null' && (
+        <div title={typeSummary(node.input)}>
+          <b>In</b> {typeSummary(node.input)}
+        </div>
+      )}
+      {outputs && (
+        <div title={outputs}>
+          <b>Out</b> {outputs}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -320,6 +348,175 @@ const dimensions = (item: WorkflowNode) =>
         : item.role === 'decision'
           ? { width: 164, height: 72 }
           : { width: 190, height: 104 };
+
+function CanvasToolbar({
+  p,
+  readOnly,
+  selectedNode,
+  collapseAll,
+  arrange,
+}: {
+  p: Parameters<typeof WorkflowCanvas>[0];
+  readOnly: boolean;
+  selectedNode: GraphNode | undefined;
+  collapseAll: () => void;
+  arrange: () => void;
+}) {
+  return (
+    <div className="canvas-toolbar">
+      <button className="button compact" onClick={() => p.select(p.document.graph.root.name)}>
+        {readOnly ? <Info size={14} /> : <Settings2 size={14} />}
+        {readOnly ? 'Run overview' : 'Run settings'}
+      </button>
+      <div className="canvas-actions">
+        {readOnly ? (
+          <button
+            className="icon-button"
+            title="Collapse all groups"
+            aria-label="Collapse all groups"
+            onClick={collapseAll}
+          >
+            <FoldVertical size={17} />
+          </button>
+        ) : (
+          <>
+            <button
+              className="icon-button"
+              title="Runtime settings · whole graph"
+              aria-label="Runtime settings"
+              onClick={p.runtime}
+            >
+              <SlidersHorizontal size={17} />
+            </button>
+            <button
+              className="icon-button"
+              title="Graph JSON"
+              aria-label="Graph JSON"
+              onClick={p.json}
+            >
+              <Braces size={17} />
+            </button>
+            <button
+              className="icon-button"
+              title="Workflow defaults"
+              aria-label="Workflow defaults"
+              onClick={p.info}
+            >
+              <Info size={17} />
+            </button>
+            <button
+              className="icon-button"
+              title="Arrange workflow"
+              aria-label="Arrange workflow"
+              onClick={arrange}
+            >
+              <LayoutGrid size={17} />
+            </button>
+          </>
+        )}
+        {p.inspectorHidden && (
+          <button className="icon-button" aria-label="Open inspector" onClick={p.showInspector}>
+            <PanelRightOpen size={17} />
+          </button>
+        )}
+        {!readOnly && (
+          <button
+            className="button compact"
+            disabled={!!selectedNode && ['succeed', 'fail'].includes(selectedNode.kind)}
+            onClick={() =>
+              p.action?.({
+                kind:
+                  selectedNode && executable(selectedNode)
+                    ? 'next'
+                    : selectedNode?.kind === 'choice'
+                      ? 'outcome'
+                      : 'append',
+                owner:
+                  selectedNode &&
+                  (['seq', 'choice', 'loop', 'map', 'par'].includes(selectedNode.kind) ||
+                    executable(selectedNode))
+                    ? selectedNode.name
+                    : p.document.graph.root.name,
+              })
+            }
+          >
+            <Plus size={15} /> Add activity
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function regionBoxes(
+  projection: ReturnType<typeof compactWorkflow>,
+  activities: Node[],
+  layoutPositions: Positions,
+  currentPositions: Positions,
+  layoutRegions: Record<string, { x: number; y: number; width: number; height: number }>,
+  dims: Record<string, { width: number; height: number }>
+) {
+  return projection.regions
+    .filter((r) => r.nodeIds.length)
+    .map((region) => {
+      const members = activities.filter((n) => region.nodeIds.includes(n.id));
+      const bounds = (values: Positions) => ({
+        left: Math.min(...members.map((n) => (values[n.id] ?? n.position).x)),
+        top: Math.min(...members.map((n) => (values[n.id] ?? n.position).y)),
+        right: Math.max(...members.map((n) => (values[n.id] ?? n.position).x + dims[n.id].width)),
+        bottom: Math.max(...members.map((n) => (values[n.id] ?? n.position).y + dims[n.id].height)),
+      });
+      const original = bounds(layoutPositions),
+        current = bounds(currentPositions),
+        geometry = layoutRegions[region.id];
+      const x = geometry ? geometry.x + current.left - original.left : current.left - 26;
+      const y = geometry ? geometry.y + current.top - original.top : current.top - 56;
+      const right = geometry
+        ? geometry.x + geometry.width + current.right - original.right
+        : current.right + 26;
+      const bottom = geometry
+        ? geometry.y + geometry.height + current.bottom - original.bottom
+        : current.bottom + 26;
+      return { region, x, y, width: right - x, height: bottom - y, bottom };
+    })
+    .filter((box) => Number.isFinite(box.x))
+    .sort((a, b) => b.width * b.height - a.width * a.height);
+}
+
+function workflowEdges(
+  projection: ReturnType<typeof compactWorkflow>,
+  boxes: ReturnType<typeof regionBoxes>,
+  activities: Node[],
+  dims: Record<string, { width: number; height: number }>,
+  readOnly: boolean,
+  p: Parameters<typeof WorkflowCanvas>[0]
+): Edge[] {
+  const edges: Edge[] = projection.edges.map((edge, index) => ({
+    ...edge,
+    label: edge.shortLabel ?? edge.label,
+    type: 'workflow',
+    markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
+    style: {
+      stroke: edge.secondary ? 'var(--muted)' : edge.repeat ? 'var(--rust-text)' : 'var(--edge)',
+      strokeWidth: edge.repeat ? 1.5 : 1.2,
+      strokeDasharray: edge.secondary ? '4 5' : undefined,
+    },
+    data: {
+      ...edge,
+      readOnly,
+      lane:
+        (boxes.find((b) => b.region.owner === edge.owner)?.bottom ??
+          Math.max(...activities.map((n) => n.position.y + dims[n.id].height))) +
+        28 +
+        (index % 3) * 12,
+      activate: () =>
+        !readOnly && (edge.branchIndex !== undefined || edge.otherwise)
+          ? p.editOutcome?.(edge)
+          : edge.owner && p.select(edge.owner),
+    },
+  }));
+  return edges;
+}
 
 export function WorkflowCanvas(p: {
   document: Document;
@@ -513,31 +710,14 @@ export function WorkflowCanvas(p: {
       measurements
     )
   );
-  const boxes = projection.regions
-    .filter((r) => r.nodeIds.length)
-    .map((region) => {
-      const members = activities.filter((n) => region.nodeIds.includes(n.id));
-      const bounds = (values: Positions) => ({
-        left: Math.min(...members.map((n) => (values[n.id] ?? n.position).x)),
-        top: Math.min(...members.map((n) => (values[n.id] ?? n.position).y)),
-        right: Math.max(...members.map((n) => (values[n.id] ?? n.position).x + dims[n.id].width)),
-        bottom: Math.max(...members.map((n) => (values[n.id] ?? n.position).y + dims[n.id].height)),
-      });
-      const original = bounds(layoutPositions),
-        current = bounds(currentPositions),
-        geometry = layoutRegions[region.id];
-      const x = geometry ? geometry.x + current.left - original.left : current.left - 26;
-      const y = geometry ? geometry.y + current.top - original.top : current.top - 56;
-      const right = geometry
-        ? geometry.x + geometry.width + current.right - original.right
-        : current.right + 26;
-      const bottom = geometry
-        ? geometry.y + geometry.height + current.bottom - original.bottom
-        : current.bottom + 26;
-      return { region, x, y, width: right - x, height: bottom - y, bottom };
-    })
-    .filter((box) => Number.isFinite(box.x))
-    .sort((a, b) => b.width * b.height - a.width * a.height);
+  const boxes = regionBoxes(
+    projection,
+    activities,
+    layoutPositions,
+    currentPositions,
+    layoutRegions,
+    dims
+  );
   const regions: Node[] = boxes.map((box, index) =>
     withWorkflowDimensions(
       {
@@ -561,118 +741,20 @@ export function WorkflowCanvas(p: {
       measurements
     )
   );
-  const edges: Edge[] = projection.edges.map((edge, index) => ({
-    ...edge,
-    label: edge.shortLabel ?? edge.label,
-    type: 'workflow',
-    markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
-    style: {
-      stroke: edge.secondary ? 'var(--muted)' : edge.repeat ? 'var(--rust-text)' : 'var(--edge)',
-      strokeWidth: edge.repeat ? 1.5 : 1.2,
-      strokeDasharray: edge.secondary ? '4 5' : undefined,
-    },
-    data: {
-      ...edge,
-      readOnly,
-      lane:
-        (boxes.find((b) => b.region.owner === edge.owner)?.bottom ??
-          Math.max(...activities.map((n) => n.position.y + dims[n.id].height))) +
-        28 +
-        (index % 3) * 12,
-      activate: () =>
-        !readOnly && (edge.branchIndex !== undefined || edge.otherwise)
-          ? p.editOutcome?.(edge)
-          : edge.owner && p.select(edge.owner),
-    },
-  }));
+  const edges = workflowEdges(projection, boxes, activities, dims, readOnly, p);
   const selectedNode = p.inspectorHidden ? undefined : findNode(p.document.graph.root, p.selected);
   return (
     <section
       className={`canvas-region workflow-canvas ${readOnly ? 'workflow-readonly' : ''}`}
       aria-label={readOnly ? 'Run graph' : 'Workflow editor'}
     >
-      <div className="canvas-toolbar">
-        <button className="button compact" onClick={() => p.select(p.document.graph.root.name)}>
-          {readOnly ? <Info size={14} /> : <Settings2 size={14} />}
-          {readOnly ? 'Run overview' : 'Run settings'}
-        </button>
-        <div className="canvas-actions">
-          {readOnly ? (
-            <button
-              className="icon-button"
-              title="Collapse all groups"
-              aria-label="Collapse all groups"
-              onClick={() => setCollapsed(collapsedWorkflowGroups(p.document.graph.root))}
-            >
-              <FoldVertical size={17} />
-            </button>
-          ) : (
-            <>
-              <button
-                className="icon-button"
-                title="Runtime settings · whole graph"
-                aria-label="Runtime settings"
-                onClick={p.runtime}
-              >
-                <SlidersHorizontal size={17} />
-              </button>
-              <button
-                className="icon-button"
-                title="Graph JSON"
-                aria-label="Graph JSON"
-                onClick={p.json}
-              >
-                <Braces size={17} />
-              </button>
-              <button
-                className="icon-button"
-                title="Workflow defaults"
-                aria-label="Workflow defaults"
-                onClick={p.info}
-              >
-                <Info size={17} />
-              </button>
-              <button
-                className="icon-button"
-                title="Arrange workflow"
-                aria-label="Arrange workflow"
-                onClick={() => void layout(true)}
-              >
-                <LayoutGrid size={17} />
-              </button>
-            </>
-          )}
-          {p.inspectorHidden && (
-            <button className="icon-button" aria-label="Open inspector" onClick={p.showInspector}>
-              <PanelRightOpen size={17} />
-            </button>
-          )}
-          {!readOnly && (
-            <button
-              className="button compact"
-              disabled={!!selectedNode && ['succeed', 'fail'].includes(selectedNode.kind)}
-              onClick={() =>
-                p.action?.({
-                  kind:
-                    selectedNode && executable(selectedNode)
-                      ? 'next'
-                      : selectedNode?.kind === 'choice'
-                        ? 'outcome'
-                        : 'append',
-                  owner:
-                    selectedNode &&
-                    (['seq', 'choice', 'loop', 'map', 'par'].includes(selectedNode.kind) ||
-                      executable(selectedNode))
-                      ? selectedNode.name
-                      : p.document.graph.root.name,
-                })
-              }
-            >
-              <Plus size={15} /> Add activity
-            </button>
-          )}
-        </div>
-      </div>
+      <CanvasToolbar
+        p={p}
+        readOnly={readOnly}
+        selectedNode={selectedNode}
+        collapseAll={() => setCollapsed(collapsedWorkflowGroups(p.document.graph.root))}
+        arrange={() => void layout(true)}
+      />
       <div ref={flowElement} className={`flow ${layoutBusy ? 'workflow-arranging' : ''}`}>
         <ReactFlow
           nodes={[...regions, ...activities]}

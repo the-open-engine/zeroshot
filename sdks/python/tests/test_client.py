@@ -88,6 +88,18 @@ def test_run_waits_for_terminal_result(fake_native: Path, tmp_path: Path) -> Non
     assert watch[watch.index("--after") + 1] == "v2:0"
 
 
+def test_unknown_options_fail_before_submission(fake_native: Path, tmp_path: Path) -> None:
+    async def exercise() -> None:
+        async with Client(target=LocalTarget(tmp_path), runtime=runtime()) as client:
+            with pytest.raises(TypeError, match="wait_timout"):
+                await client.run("change it", wait_timout=0.01)  # type: ignore[call-arg]
+            with pytest.raises(TypeError, match="titel"):
+                await client.submit("change it", titel="typo")  # type: ignore[call-arg]
+
+    asyncio.run(exercise())
+    assert read_invocations(fake_native) == []
+
+
 def test_direct_target_uses_the_same_client_and_durable_run_surface(fake_native: Path) -> None:
     async def exercise() -> None:
         async with direct_client(fake_native) as client:

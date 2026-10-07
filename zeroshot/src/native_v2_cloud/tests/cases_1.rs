@@ -63,9 +63,7 @@ impl CapsuleAllocator for RetainedCleanupFailureAllocator {
 
     async fn allocate(
         &self,
-        _run_id: &RunId,
-        _admitted: &AdmittedRun,
-        _github_token: Option<&str>,
+        _request: CapsuleAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         Err(CapsuleAllocationUnavailable::Runtime)
     }
@@ -127,6 +125,7 @@ async fn allocator_defaults_are_explicit_fail_closed_and_side_effect_free() {
     assert!(matches!(
         allocator
             .allocate_from_retained(RetainedAllocationRequest {
+                preparation: test_preparation(),
                 selection:
                     crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection::Latest,
                 source_run_id: &source_run_id,
@@ -261,7 +260,7 @@ async fn wave8_cli_contract_retained_cleanup_and_discard_fail_closed_across_reco
         .assert_value_with("initial controller");
     let successor_run_id = RunId::new("resume-successor");
 
-    let error = controller
+    controller
         .resume(RunResumeParams {
             from: None,
             run_id: source_run_id,
@@ -274,51 +273,19 @@ async fn wave8_cli_contract_retained_cleanup_and_discard_fail_closed_across_reco
             github_token: None,
         })
         .await
-        .expect_err("cleanup failure must fail resume");
+        .assert_value_with("accepted resume");
+    let terminal = terminal(&controller, &successor_run_id).await;
     assert!(
-        matches!(
-            error,
-            NativeV2CloudError::Supervisor(NativeV2SupervisorError::RuntimeCleanup(_))
-        ),
-        "unexpected resume error: {error:?}"
+        matches!(terminal, TerminalResult::Failed { reason } if reason.as_str() == "runtime_unavailable")
     );
-    let successor = ledger
-        .get(&successor_run_id)
-        .await
-        .assert_value_with("successor lookup")
-        .assert_value_with("successor run");
-    assert!(successor.snapshot.terminal.is_none());
-    let status = controller
-        .status(RunStatusParams {
-            run_id: successor_run_id.clone(),
-        })
-        .await
-        .assert_value_with("nonterminal successor status");
-    assert!(!status.workspace_recovery.recoverable);
-
-    drop(controller);
-    let replacement = NativeV2CloudController::new(ledger, allocator.clone())
-        .await
-        .assert_value_with("replacement controller");
     assert_eq!(
         allocator.cleanup_calls(),
         vec![(successor_run_id.clone(), RunRuntimeExit::RuntimeLost)]
     );
-    let status = replacement
-        .status(RunStatusParams {
-            run_id: successor_run_id.clone(),
-        })
+    drop(controller);
+    let replacement = NativeV2CloudController::new(ledger, allocator.clone())
         .await
-        .assert_value_with("reconciled successor status");
-    assert!(matches!(
-        status.status,
-        RunStatus::Finished {
-            terminal_result: TerminalResult::Failed { ref reason },
-            ..
-        } if reason.as_str() == "runtime_lost"
-    ));
-    assert!(status.workspace_recovery.recoverable);
-
+        .assert_value();
     assert_reconstructed_discard_contracts(&replacement, successor_run_id).await;
 }
 

@@ -4,7 +4,7 @@ import { ApiError } from './api';
 import { createEmbeddedFetch } from './embedded-fetch';
 const base = new URL('https://cloud.example/_bff/org/workspace/');
 const csrf = { cookieName: '__Host-zsc-csrf', headerName: 'X-Zeroshot-CSRF' };
-test('CSRF comes from the current unique cookie only on service POST writes', async () => {
+test('CSRF comes from the current unique cookie on service writes including environment deletion', async () => {
   const calls: RequestInit[] = [];
   const urls: string[] = [];
   let cookie = '__Host-zsc-csrf=first_token';
@@ -22,10 +22,13 @@ test('CSRF comes from the current unique cookie only on service POST writes', as
   await fetcher(new URL('validate', base), { method: 'POST' });
   cookie = '__Host-zsc-csrf=second_token';
   await fetcher('data', { method: 'POST' });
+  await fetcher('environments/env-1', { method: 'DELETE' });
   assert.equal(new Headers(calls[0].headers).get(csrf.headerName), null);
   assert.equal(new Headers(calls[1].headers).get(csrf.headerName), 'first_token');
   assert.equal(new Headers(calls[2].headers).get(csrf.headerName), 'second_token');
   assert.equal(urls[2], new URL('data', base).href);
+  assert.equal(calls[3].method, 'DELETE');
+  assert.equal(new Headers(calls[3].headers).get(csrf.headerName), 'second_token');
   assert.ok(calls.every((call) => call.redirect === 'error' && call.credentials === 'same-origin'));
 });
 test('missing/duplicate cookies and foreign service origins never send a token', async () => {

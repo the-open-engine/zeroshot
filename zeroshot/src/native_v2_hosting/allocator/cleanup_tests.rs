@@ -41,7 +41,7 @@ impl CleanupFixture {
         let run_root = directory.child("run");
         std::fs::create_dir(&run_root).assert_value();
         std::fs::write(run_root.join("candidate"), "preserved work\n").assert_value();
-        let seed = HostedProcessPool::new(128_002, 128_002, 129_000, 129_000).assert_value();
+        let seed = HostedProcessPool::new(128_002, 128_002, 129_000).assert_value();
         let pools = ActiveRunProcessPools::new(seed).assert_value();
         let lease = pools.acquire().assert_value();
         let identity = writer(lease.process_pool());
@@ -49,6 +49,7 @@ impl CleanupFixture {
         let (loss, _) = watch::channel(false);
         let run_id = RunId::new("delivery-lease-cleanup");
         let state = Arc::new(ProductionCapsuleState {
+            environment: EnvironmentProcesses::default(),
             restored_delivery_run_id: OnceLock::new(),
             endpoint: OnceLock::from(Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(
                 IdleRunner,

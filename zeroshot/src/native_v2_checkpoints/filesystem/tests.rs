@@ -505,7 +505,9 @@ fn nested_self_contained_repository_restores_inside_a_non_git_workspace() {
     let nested = fixture.workspace.join("vendor/library");
     initialize_git(&nested);
     fs::write(nested.join("ignored-artifact"), "artifact").assert_value();
-    let id = capture(&fixture.workspace, &fixture.snapshots, &()).assert_value();
+    let captured = capture(&fixture.workspace, &fixture.snapshots, &());
+    assert!(captured.is_ok(), "nested Git capture failed: {captured:?}");
+    let id = captured.assert_value();
     fs::write(nested.join("tracked"), "later").assert_value();
     git(&nested, &["commit", "-am", "later"]);
     restore(&fixture.snapshots, &id, &fixture.workspace).assert_value();
@@ -580,7 +582,9 @@ fn recursive_submodules_restore_as_self_contained_repositories_with_valid_status
 fn stale_private_git_locks_are_captured_and_replaced_without_blocking_repair() {
     let fixture = Fixture::new();
     fixture.initialize_git();
-    let clean = capture(&fixture.workspace, &fixture.snapshots, &()).assert_value();
+    let clean = capture(&fixture.workspace, &fixture.snapshots, &());
+    assert!(clean.is_ok(), "initial clean capture failed: {clean:?}");
+    let clean = clean.assert_value();
     let administrative = fixture.workspace.join(".git");
     for name in [
         "HEAD.lock",

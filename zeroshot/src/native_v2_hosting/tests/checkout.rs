@@ -29,6 +29,8 @@ struct CheckoutFixture {
     allocator: ProductionCapsuleAllocator,
     admitted: native_v2_contract::AdmittedRun,
     diagnostics: Arc<OperatorDiagnosticStore>,
+    diagnostic_receiver:
+        tokio::sync::broadcast::Receiver<openengine_cluster_protocol::TargetOperatorDiagnostic>,
     run_id: RunId,
 }
 
@@ -69,6 +71,8 @@ exec /usr/bin/git "$@"
         let mut config = capsule_config(root.path().to_owned());
         config.git_program = program;
         config.workspace_storage = storage;
+        let (output, diagnostic_receiver) = OperatorDiagnosticOutput::channel();
+        config.operator_diagnostics = Arc::new(OperatorDiagnosticStore::new(Some(output)));
         let diagnostics = config.operator_diagnostics.clone();
         let allocator = ProductionCapsuleAllocator::new(config)
             .assert_value()
@@ -85,13 +89,20 @@ exec /usr/bin/git "$@"
             allocator,
             admitted,
             diagnostics,
+            diagnostic_receiver,
             run_id: RunId::new("checkout-recovery"),
         }
     }
 
     async fn allocate(&self) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         self.allocator
-            .allocate(&self.run_id, &self.admitted, Some(CHECKOUT_TOKEN))
+            .allocate(
+                crate::native_v2_candidate::test_support::allocation_request(
+                    &self.run_id,
+                    &self.admitted,
+                    Some(CHECKOUT_TOKEN),
+                ),
+            )
             .await
     }
 
@@ -108,18 +119,33 @@ exec /usr/bin/git "$@"
         workspace
     }
 
+    fn retained_request<'a>(
+        &'a self,
+        source_run_id: &'a RunId,
+        run_id: &'a RunId,
+        selection: CheckpointRestoreSelection,
+    ) -> RetainedAllocationRequest<'a> {
+        RetainedAllocationRequest {
+            selection,
+            source_run_id,
+            run_id,
+            admitted: &self.admitted,
+            github_token: Some(CHECKOUT_TOKEN),
+            preparation: crate::native_v2_cloud::CapsulePreparation::quiet(&self.admitted.runtime)
+                .assert_value(),
+        }
+    }
+
     async fn allocate_retained(
         &self,
         successor: &RunId,
     ) -> Result<AllocatedCapsule, RetainedAllocationUnavailable> {
         self.allocator
-            .allocate_from_retained(RetainedAllocationRequest {
-                selection: CheckpointRestoreSelection::Latest,
-                source_run_id: &self.run_id,
-                run_id: successor,
-                admitted: &self.admitted,
-                github_token: Some(CHECKOUT_TOKEN),
-            })
+            .allocate_from_retained(self.retained_request(
+                &self.run_id,
+                successor,
+                CheckpointRestoreSelection::Latest,
+            ))
             .await
     }
 
@@ -196,7 +222,7 @@ esac"#,
 
 #[tokio::test]
 async fn exhausted_checkout_preserves_redacted_operator_diagnostics() {
-    let fixture = CheckoutFixture::new(
+    let mut fixture = CheckoutFixture::new(
         r#"case " $* " in
   *" fetch "*)
     /usr/bin/printf 'upstream status body\n'
@@ -214,6 +240,10 @@ esac"#,
     let snapshot = fixture.diagnostics.snapshot(&fixture.run_id);
     assert_eq!(snapshot.diagnostics.len(), 1);
     let diagnostic = &snapshot.diagnostics[0];
+    assert_eq!(
+        fixture.diagnostic_receiver.try_recv().assert_value(),
+        *diagnostic
+    );
     assert_eq!(diagnostic.operation, "source.checkout");
     assert_eq!(diagnostic.exit_status, Some(42));
     assert!(diagnostic.stdout.starts_with("upstream status body\n"));
@@ -664,6 +694,10 @@ async fn checkpoint_restore_survives_workspace_move_and_discard_removes_lineage_
             selection: CheckpointRestoreSelection::Checkpoint {
                 checkpoint_id: checkpoint_id.clone(),
             },
+            preparation: crate::native_v2_cloud::CapsulePreparation::quiet(
+                &fixture.admitted.runtime,
+            )
+            .assert_value(),
             source_run_id: &fixture.run_id,
             run_id: &successor,
             admitted: &fixture.admitted,
@@ -720,13 +754,11 @@ async fn missing_checkpoint_leaves_source_workspace_available_for_resume() {
     let checkpoint_id = CheckpointId::new("missing-checkpoint").assert_value();
     let result = fixture
         .allocator
-        .allocate_from_retained(RetainedAllocationRequest {
-            selection: CheckpointRestoreSelection::Checkpoint { checkpoint_id },
-            source_run_id: &fixture.run_id,
-            run_id: &successor,
-            admitted: &fixture.admitted,
-            github_token: Some(CHECKOUT_TOKEN),
-        })
+        .allocate_from_retained(fixture.retained_request(
+            &fixture.run_id,
+            &successor,
+            CheckpointRestoreSelection::Checkpoint { checkpoint_id },
+        ))
         .await;
     assert!(matches!(
         result,
@@ -772,13 +804,11 @@ async fn repeated_retained_successors_keep_the_root_delivery_identity() {
     let first_successor = RunId::new("checkout-recovery-first-successor");
     let first = fixture
         .allocator
-        .allocate_from_retained(RetainedAllocationRequest {
-            selection: CheckpointRestoreSelection::Latest,
-            source_run_id: &fixture.run_id,
-            run_id: &first_successor,
-            admitted: &fixture.admitted,
-            github_token: Some(CHECKOUT_TOKEN),
-        })
+        .allocate_from_retained(fixture.retained_request(
+            &fixture.run_id,
+            &first_successor,
+            CheckpointRestoreSelection::Latest,
+        ))
         .await
         .assert_value();
     assert_eq!(
@@ -810,13 +840,11 @@ async fn repeated_retained_successors_keep_the_root_delivery_identity() {
     let second_successor = RunId::new("checkout-recovery-second-successor");
     let second = fixture
         .allocator
-        .allocate_from_retained(RetainedAllocationRequest {
-            selection: CheckpointRestoreSelection::Latest,
-            source_run_id: &first_successor,
-            run_id: &second_successor,
-            admitted: &fixture.admitted,
-            github_token: Some(CHECKOUT_TOKEN),
-        })
+        .allocate_from_retained(fixture.retained_request(
+            &first_successor,
+            &second_successor,
+            CheckpointRestoreSelection::Latest,
+        ))
         .await
         .assert_value();
     assert_eq!(
@@ -994,7 +1022,13 @@ async fn retained_workspace_transfers_to_a_different_concurrent_writer_identity(
     let blocker_run_id = RunId::new("checkout-recovery-identity-blocker");
     let blocker = fixture
         .allocator
-        .allocate(&blocker_run_id, &fixture.admitted, Some(CHECKOUT_TOKEN))
+        .allocate(
+            crate::native_v2_candidate::test_support::allocation_request(
+                &blocker_run_id,
+                &fixture.admitted,
+                Some(CHECKOUT_TOKEN),
+            ),
+        )
         .await
         .assert_value();
     let blocker_workspace = fixture

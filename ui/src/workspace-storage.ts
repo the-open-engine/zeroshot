@@ -7,6 +7,7 @@ export function workspaceStorageKeys(mount: URL, workspace: WorkspaceIdentity) {
   )}`;
   return {
     draft: `${prefix}.draft`,
+    environmentDraft: `${prefix}.environment-draft`,
     lastProfile: `${prefix}.last-profile`,
     layout: (name: string) => `${prefix}.layout.${encodeURIComponent(name)}`,
   };

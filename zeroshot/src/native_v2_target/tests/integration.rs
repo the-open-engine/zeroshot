@@ -979,3 +979,33 @@ async fn websocket_dialer_rejects_cross_authority_before_network() {
         .assert_error_with("cross-authority session unexpectedly dialed");
     assert!(matches!(error, TargetConnectorError::InvalidOecpEndpoint));
 }
+
+#[tokio::test]
+async fn direct_submission_carries_preparation_and_authorizes_its_resume_connections() {
+    let registry = MemoryRegistry::default();
+    let target = direct_target("http://127.0.0.1:8080");
+    registry.insert(target.clone()).assert_value();
+    let authority = FakeAuthority::new("ws://127.0.0.1:8080/native-v2/oecp");
+    let connector =
+        NativeV2TargetConnector::new(registry.clone(), authority.clone(), FakeDialer::default());
+    let mut request = run_request();
+    let definition = serde_json::from_value(serde_json::json!({
+        "startup":"npm ci", "connections":{"registry":["NPM_TOKEN"]}
+    }))
+    .assert_value();
+    request.intent.environment = Some(definition);
+    let expected = request.intent.clone();
+    let receipt = connector.submit("vm", request).await.assert_value();
+    let calls = authority.calls();
+    let [AuthorityCall::Submit(_, submitted)] = calls.as_slice() else {
+        panic!("expected submission")
+    };
+    assert_eq!(submitted.submission.environment, expected.environment);
+    assert_eq!(submitted.submission.runtime, expected.runtime);
+    assert_eq!(
+        registry
+            .recovery_authorization(&target.id, &receipt.run_id)
+            .assert_value(),
+        expected.connection_requirements()
+    );
+}

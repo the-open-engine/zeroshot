@@ -32,7 +32,8 @@ another run. A failed Cloud run does not authorize silently implementing the tas
 
 - Local execution omits `--target` and is the only mode that edits the invoking worktree directly.
 - Zeroshot Cloud is built in. Sign in once with `zeroshot target login cloud`, then use
-  `--target cloud` explicitly on Cloud commands.
+  `--target cloud` explicitly on Cloud commands. Cloud setup (organizations, GitHub App,
+  connections) is documented at https://cloud.zeroshot.sh/docs.
 - Do not add or set up the built-in Cloud target. Named targets store endpoints and login identity,
   not repository configuration.
 
@@ -51,6 +52,41 @@ zeroshot connection list --target cloud --scope org
 
 Do not assume a profile creates a pull request. `--pr` requests pull-request delivery and `--ship`
 requests merge delivery when materializing a compatible template; use either only when intended.
+
+## Prepare the execution environment
+
+Environments belong to a run, independently of its profile. A `local:NAME` profile can run on a
+Docker target with its own environment. For Docker or Cloud, pass
+`--environment environment.json` with a flat definition such as:
+
+```json
+{
+  "setup": "apt-get update && apt-get install -y jq",
+  "startup": "npm ci",
+  "variables": { "CI": "true" }
+}
+```
+
+Cloud resolves an omitted environment from the repository's User default, then Org default, then
+Base. `--no-environment` bypasses defaults. Choose saved environments through Cloud's UI or API;
+the CLI accepts a concrete JSON file. Local runs use the invoking machine and reject setup/startup
+and hook connections.
+
+Setup runs as root before checkout or restoration, so it cannot read repository files. Startup
+runs as the workspace user in the checkout; workers and reviewers share its dependencies and
+services. Both hooks rerun on resume, so startup must tolerate existing workspace files.
+Checkpoints restore files and graph progress, not running services or agent conversations.
+
+Put shared executables in `$ZEROSHOT_TOOLS/bin` and project dependencies in the workspace.
+Shell exports do not persist between hooks or agents; use `variables` for nonsecret values and
+`connections` for required secret field names. Hook connections and node connections are separate.
+On a direct Docker target, root setup changes the container shared by its runs.
+
+Preparation failures stop before agent execution without spending repair attempts. Inspect the
+failed phase and logs; fix the environment instead of requesting unrelated code repairs. Resume
+reuses the accepted definition, so an edited environment requires a new run. For a pinned Node
+installation and service/Docker conventions, see the
+[environment guide](https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/).
 
 ## Expose a profile over ACP
 

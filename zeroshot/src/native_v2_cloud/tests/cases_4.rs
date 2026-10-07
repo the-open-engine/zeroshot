@@ -1,58 +1,55 @@
 use super::*;
 
 #[tokio::test]
-async fn force_waits_for_in_flight_allocation_then_destroys_without_a_post_force_leak() {
+async fn force_cancels_preparation_without_waiting_for_allocation_or_starting_nodes() {
     let GatedHarness {
         controller,
         ledger,
         cleanup,
         allocator,
     } = gated_harness().await;
-
-    let submit_controller = controller.clone();
-    let submit = tokio::spawn(async move {
-        submit_test_request(&submit_controller, request(Value::Null))
-            .await
-            .assert_value_with("submit")
-    });
+    let submission = request(Value::Null);
+    let receipt = tokio::time::timeout(
+        Duration::from_millis(250),
+        submit_test_request(&controller, submission.clone()),
+    )
+    .await
+    .assert_value()
+    .assert_value();
     allocator.wait_started().await;
-    let run_id = ledger
-        .list()
-        .await
-        .assert_value_with("list")
-        .into_iter()
-        .next()
-        .assert_value_with("durable run")
-        .run_id;
-    let force_controller = controller.clone();
-    let force_run_id = run_id.clone();
-    let mut force = tokio::spawn(async move {
-        force_controller
-            .force(RunForceParams {
-                run_id: force_run_id,
-            })
-            .await
-            .assert_value_with("force")
-    });
-
+    let replay = tokio::time::timeout(
+        Duration::from_millis(250),
+        submit_test_request(&controller, submission),
+    )
+    .await
+    .assert_value()
+    .assert_value();
+    assert!(replay.deduped);
+    assert_eq!(replay.run_id, receipt.run_id);
+    assert!(cleanup.exits().is_empty());
+    let forced = tokio::time::timeout(
+        Duration::from_secs(2),
+        controller.force(RunForceParams {
+            run_id: receipt.run_id.clone(),
+        }),
+    )
+    .await
+    .assert_value()
+    .assert_value();
     assert!(
-        tokio::time::timeout(Duration::from_millis(25), &mut force)
-            .await
-            .is_err()
+        matches!(forced.status, RunStatus::Finished { terminal_result: TerminalResult::Failed { reason }, .. }
+        if reason.as_str() == "force_stopped")
     );
     assert_eq!(allocator.allocation_count(), 1);
-    assert!(cleanup.exits().is_empty());
-
-    allocator.release();
-    assert_eq!(submit.await.assert_value_with("submit task").run_id, run_id);
-    let forced = tokio::time::timeout(Duration::from_secs(2), force)
-        .await
-        .assert_value_with("force completed")
-        .assert_value_with("force task");
-    assert!(matches!(forced.status, RunStatus::Finished { .. }));
-    assert_eq!(allocator.allocation_count(), 1);
-    assert_eq!(cleanup.exits().len(), 1);
+    assert_eq!(cleanup.exits(), vec![RunRuntimeExit::ForceStopped]);
     assert_eq!(cleanup.terminal_seen(), vec![false]);
+    let stored = ledger
+        .get(&receipt.run_id)
+        .await
+        .assert_value()
+        .assert_value();
+    assert!(stored.snapshot.executions.is_empty());
+    allocator.release();
 }
 
 #[tokio::test]

@@ -107,24 +107,7 @@ function plainErrorCheckpoint(node: GraphNode | undefined, activity: string, sta
   );
 }
 
-export function createReviewLoop(
-  document: Document,
-  activityName: string
-): { document: Document; name: string } {
-  assertDocument(document);
-  const selected = findNode(document.graph.root, activityName);
-  if (
-    !selected ||
-    selected.kind !== 'step' ||
-    document.runtime.nodes[activityName]?.kind !== 'agent'
-  )
-    throw new Error('Choose a writing Agent to repeat until a review approves its work.');
-  const ancestry = pathTo(document.graph.root, activityName);
-  const parent = ancestry.at(-2);
-  if (parent && parent.kind !== 'seq')
-    throw new Error('Place this activity in a Sequence before adding its review loop.');
-  if (ancestry.slice(0, -1).some((node) => !['seq', 'choice'].includes(node.kind)))
-    throw new Error('Add this review loop outside existing loops, maps, or parallel branches.');
+function reviewPayloads(document: Document, selected: GraphNode) {
   if (!recordFields(document.graph.initialInput))
     throw new Error('Use Object run inputs before adding a review loop with automatic feedback.');
   if (!recordFields(selected.input) && selected.input?.kind !== 'null')
@@ -136,12 +119,45 @@ export function createReviewLoop(
     );
   if (Object.values(output ?? {}).some((field: any) => field.required !== true))
     throw new Error('Make the activity’s output fields required before adding automatic review.');
+  return output;
+}
+
+function reviewWriter(document: Document, activityName: string) {
+  const selected = findNode(document.graph.root, activityName);
+  if (
+    !selected ||
+    selected.kind !== 'step' ||
+    document.runtime.nodes[activityName]?.kind !== 'agent'
+  )
+    throw new Error('Choose a writing Agent to repeat until a review approves its work.');
+  return selected;
+}
+
+function reviewMappings(selected: GraphNode) {
   for (const key of ['inputBindings', 'writeBindings'])
     if (!Array.isArray(selected[key] ?? []))
       throw new Error('Repair the activity’s unsupported mappings before adding a review loop.');
-  const originalWrites = uniquePaths(
+  return uniquePaths(
     (selected.writeBindings ?? []).map((binding: any) => binding.target)
   );
+}
+
+function reviewPlacement(document: Document, activityName: string) {
+  const ancestry = pathTo(document.graph.root, activityName);
+  const parent = ancestry.at(-2);
+  if (parent && parent.kind !== 'seq')
+    throw new Error('Place this activity in a Sequence before adding its review loop.');
+  if (ancestry.slice(0, -1).some((node) => !['seq', 'choice'].includes(node.kind)))
+    throw new Error('Add this review loop outside existing loops, maps, or parallel branches.');
+  return { ancestry, parent };
+}
+
+function reviewFollowing(
+  document: Document,
+  activityName: string,
+  ancestry: GraphNode[],
+  parent: GraphNode | undefined
+) {
   for (const ancestor of ancestry.slice(0, -1)) stateOf(ancestor);
   const at = parent?.children.findIndex((node: GraphNode) => node.name === activityName) ?? 0;
   const after = parent ? parent.children.slice(at + 1) : [];
@@ -149,6 +165,63 @@ export function createReviewLoop(
     throw new Error(
       'Add this review loop where its sequence has a following activity or completion.'
     );
+  return { at, after };
+}
+
+function wireReviewerResults(
+  work: GraphNode,
+  sequence: GraphNode,
+  output: ReturnType<typeof reviewPayloads>,
+  activityName: string,
+  fieldName: ReturnType<typeof fields>
+) {
+  const reviewerInput = clone(work.input);
+  const reviewerInputs = clone(work.inputBindings);
+  const resultBindings: any[] = [];
+  const reviewerFieldNames = new Set(Object.keys(reviewerInput.fields));
+  for (const [field, definition] of Object.entries(output ?? {})) {
+    const existing = work.writeBindings.find(
+      (binding: any) =>
+        binding.value?.node === activityName &&
+        binding.value?.channel === 'out' &&
+        bindingKey(binding.value.path) === bindingKey([field]) &&
+        payloadAtPath(sequence.state, binding.target)
+    );
+    const target = existing?.target ?? [fieldName(`${activityName}_${field}_result`)];
+    if (!existing) {
+      sequence.state = {
+        ...sequence.state,
+        fields: {
+          ...sequence.state.fields,
+          [target[0]]: { type: clone(definition.type), required: false },
+        },
+      };
+      work.writeBindings.push({
+        target,
+        value: { node: activityName, channel: 'out', path: [field] },
+      });
+    }
+    let inputField = field;
+    for (let suffix = 1; reviewerFieldNames.has(inputField); suffix++)
+      inputField = `${field.slice(0, 96)}_result${suffix === 1 ? '' : `_${suffix}`}`;
+    reviewerFieldNames.add(inputField);
+    reviewerInput.fields = { ...reviewerInput.fields, [inputField]: clone(definition) };
+    reviewerInputs.push({ target: [inputField], value: { source: 'state', path: clone(target) } });
+    resultBindings.push({ target: [field], value: { source: 'state', path: clone(target) } });
+  }
+  return { reviewerInput, reviewerInputs, resultBindings };
+}
+
+export function createReviewLoop(
+  document: Document,
+  activityName: string
+): { document: Document; name: string } {
+  assertDocument(document);
+  const selected = reviewWriter(document, activityName);
+  const { ancestry, parent } = reviewPlacement(document, activityName);
+  const output = reviewPayloads(document, selected);
+  const originalWrites = reviewMappings(selected);
+  const { at, after } = reviewFollowing(document, activityName, ancestry, parent);
 
   const next = clone(document);
   const nodeName = names(document),
@@ -187,40 +260,13 @@ export function createReviewLoop(
   work.writeBindings = clone(work.writeBindings ?? []);
   work.instructions = `${work.instructions ?? 'Complete the assigned task.'}\n\nReview feedback arrives in input.${feedback}. It is empty on the first attempt. On later attempts, address that feedback while preserving the original requirements; do not weaken the acceptance criteria.`;
 
-  const reviewerInput = clone(work.input);
-  const reviewerInputs = clone(work.inputBindings);
-  const resultBindings: any[] = [];
-  const reviewerFieldNames = new Set(Object.keys(reviewerInput.fields));
-  for (const [field, definition] of Object.entries(output ?? {})) {
-    const existing = work.writeBindings.find(
-      (binding: any) =>
-        binding.value?.node === activityName &&
-        binding.value?.channel === 'out' &&
-        bindingKey(binding.value.path) === bindingKey([field]) &&
-        payloadAtPath(sequence.state, binding.target)
-    );
-    const target = existing?.target ?? [fieldName(`${activityName}_${field}_result`)];
-    if (!existing) {
-      sequence.state = {
-        ...sequence.state,
-        fields: {
-          ...sequence.state.fields,
-          [target[0]]: { type: clone(definition.type), required: false },
-        },
-      };
-      work.writeBindings.push({
-        target,
-        value: { node: activityName, channel: 'out', path: [field] },
-      });
-    }
-    let inputField = field;
-    for (let suffix = 1; reviewerFieldNames.has(inputField); suffix++)
-      inputField = `${field.slice(0, 96)}_result${suffix === 1 ? '' : `_${suffix}`}`;
-    reviewerFieldNames.add(inputField);
-    reviewerInput.fields = { ...reviewerInput.fields, [inputField]: clone(definition) };
-    reviewerInputs.push({ target: [inputField], value: { source: 'state', path: clone(target) } });
-    resultBindings.push({ target: [field], value: { source: 'state', path: clone(target) } });
-  }
+  const { reviewerInput, reviewerInputs, resultBindings } = wireReviewerResults(
+    work,
+    sequence,
+    output,
+    activityName,
+    fieldName
+  );
   const state = clone(sequence.state);
   const feedbackPath = [feedback];
   const exposed = uniquePaths([
@@ -245,7 +291,16 @@ export function createReviewLoop(
       },
     ],
     attempts: 1,
-    instructions: `Independently review ${activityName}'s work against the original request and supplied inputs. Inspect its structured results and relevant workspace files and observable checks. The assignment under review is:\n\n${selected.instructions ?? 'Complete the assigned task.'}\n\nReturn verdict accepted only when the requested result is correct, complete, and supported by evidence. Otherwise return rejected with concise, actionable feedback naming the remaining defects. Feedback may be empty when accepted. Review only: do not modify files, use git commands, or perform delivery actions.`,
+    instructions: [
+      `Independently review ${activityName}'s work against the original request and supplied inputs. `,
+      'Inspect its structured results and relevant workspace files and observable checks. ',
+      'The assignment under review is:\n\n',
+      selected.instructions ?? 'Complete the assigned task.',
+      '\n\nReturn verdict accepted only when the requested result is correct, complete, and supported by evidence. ',
+      'Otherwise return rejected with concise, actionable feedback naming the remaining defects. ',
+      'Feedback may be empty when accepted. ',
+      'Review only: do not modify files, use git commands, or perform delivery actions.',
+    ].join(''),
   };
   const checkpoint = after[0];
   const reuse = plainErrorCheckpoint(

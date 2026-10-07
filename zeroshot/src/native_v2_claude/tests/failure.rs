@@ -49,8 +49,8 @@ async fn collect_logs(durable: &mut DurableOutput) -> Vec<String> {
     collect_durable(durable).await.logs
 }
 
-struct CapturedDurable {
-    logs: Vec<String>,
+pub(super) struct CapturedDurable {
+    pub(super) logs: Vec<String>,
     usages: Vec<Option<TokenUsageDelta>>,
 }
 
@@ -66,7 +66,9 @@ async fn collect_durable(durable: &mut DurableOutput) -> CapturedDurable {
     CapturedDurable { logs, usages }
 }
 
-async fn complete_with_durable(mut handle: ClaudeHandle) -> (CapturedDurable, CompletionResult) {
+pub(super) async fn complete_with_durable(
+    mut handle: ClaudeHandle,
+) -> (CapturedDurable, CompletionResult) {
     let mut durable = handle.take_initial_output().assert_value();
     tokio::join!(collect_durable(&mut durable), handle.completion())
 }
@@ -115,8 +117,10 @@ async fn run_failure_capture(
 }
 
 fn driver_failure_logs(captured: &CapturedDurable, completion: CompletionResult) -> String {
-    assert_eq!(completion, Err(NodeRunnerError::Driver));
-    captured.logs.join("\n")
+    let Err(NodeRunnerError::DriverDetail(detail)) = completion else {
+        panic!("expected a detailed provider failure: {completion:?}");
+    };
+    format!("{}\n{detail}", captured.logs.join("\n"))
 }
 
 async fn command_failure(label: &str, command: TestProviderCommand) -> String {
@@ -197,7 +201,7 @@ async fn assert_missing_terminal_failure(
 }
 
 #[tokio::test]
-async fn unsuccessful_result_emits_one_redacted_durable_error_and_fails() {
+async fn unsuccessful_result_returns_redacted_detail_without_duplicate_output() {
     let (_workspace, mut handle, mut durable) = scripted_failure(
         "claude-error-result",
         r#"
@@ -213,16 +217,17 @@ exit 1
     .await;
 
     let (output, completion) = tokio::join!(durable.recv_output(), handle.completion());
-    let output = output.assert_value();
-    assert_eq!(output.stream, LiveOutputStream::Error);
+    assert_eq!(output, Err(AttachReceiveError::Closed));
+    let Err(NodeRunnerError::DriverDetail(detail)) = completion else {
+        panic!("expected detailed failure: {completion:?}");
+    };
     assert_eq!(
-        output.text,
+        detail,
         concat!(
             "Claude provider failure: provider rejected [REDACTED] and [REDACTED]; ",
             "provider process exited with status 1"
         )
     );
-    assert_eq!(completion, Err(NodeRunnerError::Driver));
     assert_eq!(durable.recv_output().await, Err(AttachReceiveError::Closed));
 }
 

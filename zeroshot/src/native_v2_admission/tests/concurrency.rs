@@ -149,8 +149,22 @@ async fn admits_delivery_after_joined_writers_and_in_sequential_groups() {
         mapped("outer", 1, mapped("inner", 1, delivery())),
         looped(sequence(vec![writer(), delivery()])),
         choice(writer(), Some(delivery())),
-        parallel(delivery(), null_verifier("other", "agent.other@1")),
     ] {
         assert_concurrent_admission(request(node), DeliveryPolicy::Required).await;
     }
+}
+
+#[tokio::test]
+async fn delivery_cannot_overlap_a_reviewer_of_the_shared_workspace() {
+    assert_rejected(
+        request(parallel(
+            delivery(),
+            null_verifier("other", "agent.other@1"),
+        )),
+        NativeV2AdmissionError::ConcurrentDelivery {
+            delivery: named("deliver"),
+            writer: named("other"),
+        },
+    )
+    .await;
 }

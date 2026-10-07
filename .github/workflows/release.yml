@@ -308,6 +308,11 @@ jobs:
           name: zeroshot-restic-v${{ needs.plan.outputs.version }}
           path: restic-input
 
+      - name: Restore executable permission after artifact download
+        if: runner.os != 'Windows'
+        shell: bash
+        run: chmod 755 "$RESTIC_PATH"
+
       - name: Build embedded UI
         run: |
           npm --prefix ui ci --ignore-scripts

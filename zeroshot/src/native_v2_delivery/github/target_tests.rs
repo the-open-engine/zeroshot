@@ -274,7 +274,8 @@ done
 exec /usr/bin/git "${{arguments[@]}}""#
             ),
         );
-        fs::write(&fixture.git_program, wrapper).assert_value();
+        openengine_cluster_testkit::fixture::write_executable(&fixture.git_program, wrapper, 0o700)
+            .assert_value();
 
         let error = fixture
             .try_reconcile()

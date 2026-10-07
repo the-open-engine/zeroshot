@@ -5,6 +5,13 @@ set -eu
 test "$(id -u)" -ne 0
 test "$PATH" = /usr/local/bin:/usr/bin:/bin
 test ! -w /usr/local/bin
+# Package installation in setup must not autostart host-style system services.
+test -x /usr/sbin/policy-rc.d
+if /usr/sbin/policy-rc.d; then
+    exit 1
+else
+    test "$?" -eq 101
+fi
 test ! -e "$HOME"
 mkdir -m 0700 "$HOME"
 work=$(mktemp -d "$HOME/toolchain-proof.XXXXXX")
@@ -129,3 +136,18 @@ npm install --offline --ignore-scripts --no-audit --no-fund
 npm run build
 npm test
 printf 'node-native: 42\n'
+
+# Project-selected Node must not become the harness interpreter.
+mkdir "$work/project-bin"
+cat >"$work/project-bin/node" <<'NODE'
+#!/bin/sh
+echo 'project Node must not execute a platform harness' >&2
+exit 91
+NODE
+chmod 0755 "$work/project-bin/node"
+PATH="$work/project-bin:$PATH"
+export PATH
+codex --version
+claude --version
+copilot --no-auto-update --version
+printf 'harness-interpreters: independent of project PATH\n'

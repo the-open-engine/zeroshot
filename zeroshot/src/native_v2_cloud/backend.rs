@@ -239,21 +239,11 @@ pub(super) async fn append_terminal_failure(
     if stored.snapshot.terminal.is_some() {
         return Ok(());
     }
-    let mut events = stored
-        .snapshot
-        .active_executions()
-        .map(|node| RunEvent::NodeCompleted {
-            completion: NodeCompletion {
-                reference: node.reference.clone(),
-                outcome: WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
-            },
-        })
-        .collect::<Vec<_>>();
-    events.push(RunEvent::Terminal {
-        result: TerminalResult::Failed {
-            reason: EnumLabel::new(reason).map_err(|_| RunLedgerError::Corrupt)?,
-        },
-    });
+    let events = crate::native_v2_supervisor::logging::terminal_failure_events(
+        &stored.snapshot,
+        reason,
+        WorkerErrorCode::Crash,
+    )?;
     ledger.append(&stored.snapshot.run_id, events).await?;
     Ok(())
 }

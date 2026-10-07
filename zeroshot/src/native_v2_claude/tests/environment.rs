@@ -101,7 +101,7 @@ pub(super) fn provider_environment(
             "/usr/bin:/bin".to_owned(),
         )]))
         .assert_value(),
-        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
+        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000).assert_value(),
     })
     .assert_value();
     adapter.process_environment(&resolved, Path::new("/private/session"))

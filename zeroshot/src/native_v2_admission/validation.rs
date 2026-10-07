@@ -5,7 +5,7 @@ use openengine_cluster_protocol::{
     WorkerContract, WorkerRef, MAX_DECLARED_ENVIRONMENT_NAMES, RUNTIME_WORKER_ERRORS,
 };
 
-use super::{DeliveryPolicy, NativeV2AdmissionError, MAX_AGENT_VERIFIER_ATTEMPTS};
+use super::{DeliveryPolicy, NativeV2AdmissionError, RuntimePlan, MAX_AGENT_VERIFIER_ATTEMPTS};
 use crate::native_v2_contract::{
     AdmittedRun, NodeRuntimeBinding, PullRequestFeedback, GIT_DELIVERY_MERGE_V2_WORKER_REF,
     GIT_DELIVERY_MERGE_V3_WORKER_REF, GIT_DELIVERY_MERGE_WORKER_REF, GIT_DELIVERY_PR_V2_WORKER_REF,
@@ -27,14 +27,15 @@ pub(super) fn validate_graph_input(
 
 pub(super) fn validate_executable_bindings(
     declarations: &[ExecutableDeclaration],
-    bindings: &BTreeMap<NodeName, NodeRuntimeBinding>,
+    runtime: &RuntimePlan,
     delivery_policy: DeliveryPolicy,
 ) -> Result<(), NativeV2AdmissionError> {
+    let bindings = runtime.nodes();
     validate_attempts(declarations)?;
     validate_binding_coverage(declarations, bindings)?;
     validate_binding_kinds(declarations, bindings)?;
     validate_delivery_policy(delivery_policy, declarations)?;
-    validate_declared_environment(bindings)
+    validate_declared_environment(runtime, None)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -264,10 +265,6 @@ pub(crate) fn sole_delivery_node(admitted: &AdmittedRun) -> Option<(NodeName, De
 pub(crate) fn writer_nodes(admitted: &AdmittedRun) -> BTreeSet<NodeName> {
     executable_declarations(&admitted.graph.root)
         .into_iter()
-        .filter(|declaration| {
-            declaration.kind == LeafKind::Step
-                || DeliveryMode::from_worker(&declaration.worker).is_some()
-        })
         .map(|declaration| declaration.name)
         .collect()
 }
@@ -311,13 +308,19 @@ fn validate_delivery_declaration(
     })
 }
 
-fn validate_declared_environment(
-    bindings: &BTreeMap<NodeName, NodeRuntimeBinding>,
+pub(super) fn validate_declared_environment(
+    runtime: &RuntimePlan,
+    environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
 ) -> Result<(), NativeV2AdmissionError> {
-    let declared = bindings
+    let mut declared = runtime
+        .nodes()
         .values()
         .flat_map(|binding| binding.declared_connections().environment_names())
         .collect::<BTreeSet<_>>();
+    if let Some(environment) = environment {
+        declared.extend(environment.connections.environment_names());
+        declared.extend(environment.variables.keys());
+    }
     if declared.len() > MAX_DECLARED_ENVIRONMENT_NAMES {
         return Err(NativeV2AdmissionError::DeclaredEnvironmentTooLarge {
             found: declared.len(),

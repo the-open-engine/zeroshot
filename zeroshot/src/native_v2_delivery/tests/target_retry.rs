@@ -85,6 +85,7 @@ async fn admitted_legacy_delivery(
     }
     NativeV2Admission
         .admit(RunSubmission {
+            environment: None,
             title: original.title,
             graph: full_graph(vec![node, success_node()]),
             initial_input: original.initial_input,

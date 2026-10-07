@@ -248,3 +248,96 @@ test('the mounted graph view retries pending detail and page reads and aborts on
   assert.equal(readsAfterUnmount, 1);
   container.remove();
 });
+
+test('preparation logs are visible before the first node and remain readable after setup failure', async (t) => {
+  stubWorker(t);
+  installBrowser(t);
+  const { RunHistoryView } = await viewerModule(t);
+  const { createRoot } = await import('react-dom/client');
+  const detail = { ...runDetailFixture('preparing-run'), phase: 'admitted' };
+  const events: HistoryPage['events'] = [
+    {
+      cursor: 'v2:1',
+      event: {
+        kind: 'safe_log',
+        execution: null,
+        stream: 'system',
+        line: 'Installing the project toolchain',
+      },
+    },
+  ];
+  const source: RunHistoryReader = {
+    detail: async () => detail,
+    page: async () => ({
+      events,
+      nextCursor: `v2:${events.length}`,
+      headCursor: `v2:${events.length}`,
+      complete: true,
+    }),
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(RunHistoryView, {
+          runId: detail.runId,
+          source,
+          workers: [],
+        })
+      )
+    );
+    await flushEffects();
+    assert.match(renderedText(container), /Preparing environment/);
+    assert.match(renderedText(container), /Installing the project toolchain/);
+    assert.ok(container.querySelector('[aria-label="Run log entries"]'));
+
+    const runningSource: RunHistoryReader = {
+      ...source,
+      page: async () => ({
+        events: [...events, { cursor: 'v2:2', event: { kind: 'run_started' } }],
+        nextCursor: 'v2:2',
+        headCursor: 'v2:2',
+        complete: true,
+      }),
+    };
+    await act(async () =>
+      root.render(
+        createElement(RunHistoryView, {
+          key: 'running',
+          runId: detail.runId,
+          source: runningSource,
+          workers: [],
+        })
+      )
+    );
+    await flushEffects();
+    assert.doesNotMatch(renderedText(container), /Preparing environment/);
+
+    const failed = { status: 'failed' as const, reason: 'environment_setup_failed' };
+    events.push({ cursor: 'v2:2', event: { kind: 'terminal', result: failed } });
+    const failedSource: RunHistoryReader = {
+      ...source,
+      detail: async () => ({ ...detail, phase: 'finished', terminal: failed }),
+    };
+    await act(async () =>
+      root.render(
+        createElement(RunHistoryView, {
+          key: 'failed',
+          runId: detail.runId,
+          source: failedSource,
+          workers: [],
+        })
+      )
+    );
+    await flushEffects();
+    assert.match(renderedText(container), /Environment setup failed/);
+    assert.match(renderedText(container), /Graph execution did not start/);
+    assert.match(renderedText(container), /Installing the project toolchain/);
+    assert.doesNotMatch(renderedText(container), /History incomplete/);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});

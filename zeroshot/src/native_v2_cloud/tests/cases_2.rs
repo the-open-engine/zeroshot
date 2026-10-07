@@ -91,6 +91,7 @@ async fn valid_run_injects_only_declared_environment_and_retry_does_not_replace_
     let retry = request(Value::Null);
     let replacement = RunEnvironment::exact(
         &retry.submission.runtime,
+        retry.submission.environment.as_ref(),
         BTreeMap::from([(
             ConnectionKey::new("test").assert_value_with("connection key"),
             test_connection_values("replacement-secret"),

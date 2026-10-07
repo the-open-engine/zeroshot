@@ -135,7 +135,7 @@ Options:
 <section id="zeroshot-target"><h3><code>zeroshot target</code></h3>
 <pre><code>Manage named targets or serve a direct target.
 
-The built-in `cloud` target points to https://api.cloud.zeroshot.sh. Run `zeroshot target login cloud` to sign in.
+The built-in `cloud` target points to https://api.cloud.zeroshot.sh. Run `zeroshot target login cloud` to sign in. See https://cloud.zeroshot.sh/docs for Cloud setup.
 
 Usage: zeroshot target &lt;COMMAND&gt;
 
@@ -187,7 +187,7 @@ Builds with UI support also serve the profile editor and run history at /ui/. Th
 
 Direct mode is unauthenticated. Bind or publish it only on trusted networks.
 
-Usage: zeroshot target serve --listen &lt;ADDRESS&gt; --public-origin &lt;ORIGIN&gt; --storage &lt;DIRECTORY&gt;
+Usage: zeroshot target serve [OPTIONS] --listen &lt;ADDRESS&gt; --public-origin &lt;ORIGIN&gt; --storage &lt;DIRECTORY&gt;
 
 Options:
       --listen &lt;ADDRESS&gt;
@@ -200,6 +200,9 @@ Options:
 
       --storage &lt;DIRECTORY&gt;
           Directory that stores target state, UI profiles, and run data
+
+      --operator-diagnostics-json
+          Write private operator diagnostics as JSON lines to stdout
 
   -h, --help
           Print help (see a summary with &#39;-h&#39;)</code></pre></section>
@@ -718,6 +721,12 @@ Options:
       --uniform-runtime-config &lt;FILE&gt;
           Expand one secret-free agent runtime across every executable graph node
 
+      --environment &lt;FILE&gt;
+          Load a JSON environment definition: setup, startup, public variables, and hook connections
+
+      --no-environment
+          Send an empty environment ({}) to bypass the target&#39;s configured default
+
       --profile &lt;[SCOPE:]NAME&gt;
           Use a profile: NAME, local:NAME, user:NAME, or org:NAME.
 
@@ -744,7 +753,9 @@ Options:
           Return after submission instead of following NDJSON run events
 
       --validate-only
-          Validate and materialize the run without submitting it or contacting a target
+          Validate and materialize the run without submitting it or running preparation scripts.
+
+          Remote profiles still require target access. This does not check dependency installation or connection availability.
 
       --delivery &lt;MODE&gt;
           Materialize this template-owned delivery mode
@@ -806,7 +817,36 @@ RUNTIME CONFIGURATION
     across every executable graph node and supplies graph-visible Git delivery bindings itself.
     Omitted connections reuse native local login for codex/openai, claude/anthropic, and
     copilot/github; other local lanes and contained targets derive their canonical connection
-    requirements.</code></pre></section>
+    requirements.
+
+ENVIRONMENT PREPARATION
+    For Docker or Cloud targets, pass --environment environment.json with a separate, flat JSON
+    definition (not a profile field or an &quot;environment&quot; wrapper):
+
+      {
+        &quot;setup&quot;: &quot;apt-get update &amp;&amp; apt-get install -y jq&quot;,
+        &quot;startup&quot;: &quot;npm ci&quot;,
+        &quot;variables&quot;: {&quot;CI&quot;: &quot;true&quot;}
+      }
+
+    Setup runs as root before checkout or workspace restore. Startup runs as the non-root
+    workspace owner in the checkout before any agent starts. Workers and reviewers share the
+    prepared workspace. Both hooks rerun on resume; startup must tolerate existing files.
+
+    Install OS packages in setup, project dependencies in startup, and shared executable tools
+    under $ZEROSHOT_TOOLS/bin (already on every hook and agent&#39;s PATH). Shell exports last only
+    for that hook; use variables for public values shared with agents. Scripts and variables
+    are public. If hooks need secrets, add e.g. &quot;connections&quot;: {&quot;package-registry&quot;: [&quot;NPM_TOKEN&quot;]}.
+    Hook connections are separate from node connections.
+
+    Hook failures stop the run before agents start and use no graph retry attempts.
+    Inspect `zeroshot logs RUN_ID --target NAME` for preparation output.
+    Omit both flags to allow host defaults; direct Docker defaults to the base environment.
+    --no-environment sends {} to bypass host defaults. Local runs use the invoking machine and
+    reject hooks and hook connections.
+
+    Installation, services, limits, and recovery:
+    https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/</code></pre></section>
 <section id="zeroshot-update"><h3><code>zeroshot update</code></h3>
 <pre><code>Update this executable and managed agent skill to the newest canonical release.
 
@@ -918,7 +958,9 @@ Options:
 <section id="zeroshot-resume"><h3><code>zeroshot resume</code></h3>
 <pre><code>Start a new attempt from a failed run&#39;s retained workspace or a saved checkpoint.
 
-By default, restart the original graph using its latest retained workspace. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`.
+By default, restart the original graph using its latest retained workspace. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. The successor resolves credentials again. Export GH_TOKEN before resuming a named-target run that needs it for private source checkout or Git delivery.
+
+Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Services, Docker state, and agent conversations are not restored.
 
 Usage: zeroshot resume [OPTIONS] &lt;RUN_ID&gt;
 

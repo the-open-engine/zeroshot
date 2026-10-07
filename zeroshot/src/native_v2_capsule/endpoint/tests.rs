@@ -5,6 +5,7 @@ use openengine_cluster_protocol::RunId;
 use openengine_cluster_testkit::assertions::AssertValue;
 
 use super::*;
+use tokio::sync::Notify;
 use crate::native_v2_runner::remote_node_handle;
 
 struct NeverStarted(AtomicUsize);
@@ -114,4 +115,102 @@ async fn boundary_contract_handle_without_durable_output_is_cancelled_settled_an
     assert!(stream.recv().await.is_none());
     assert!(endpoint.state.lock().await.active.is_empty());
     assert!(!*endpoint.loss.borrow());
+}
+
+struct DetailedFailure {
+    during_start: bool,
+    await_cancel: bool,
+    cleanup_failure: bool,
+    started: Arc<Notify>,
+}
+
+#[async_trait]
+impl NodeRunner for DetailedFailure {
+    async fn start(&self, request: NodeRunRequest) -> Result<NodeHandle, NodeRunnerError> {
+        let error = NodeRunnerError::DriverDetail("upstream rejected model [REDACTED]".to_owned());
+        if self.during_start {
+            return Err(error);
+        }
+        let (handle, mut bridge) = remote_node_handle(request.invocation.reference);
+        let await_cancel = self.await_cancel;
+        let cleanup_failure = self.cleanup_failure;
+        tokio::spawn(async move {
+            if await_cancel {
+                bridge.cancelled().await;
+            }
+            if cleanup_failure {
+                bridge
+                    .emit(
+                        crate::native_v2_runner::LiveOutput::new(
+                            LiveOutputStream::Error,
+                            "upstream rejected model [REDACTED]",
+                        )
+                        .assert_value(),
+                    )
+                    .await
+                    .assert_value();
+                bridge.finish(Err(NodeRunnerError::CleanupUnconfirmed));
+            } else {
+                bridge.finish(Err(error));
+            }
+        });
+        self.started.notify_one();
+        Ok(handle)
+    }
+    async fn close_run(&self, _run_id: &RunId) {}
+}
+
+#[tokio::test]
+async fn returned_details_survive_startup_and_completion_capsule_transport_once() {
+    for (during_start, await_cancel, cleanup_failure) in [
+        (true, false, false),
+        (false, false, false),
+        (false, true, false),
+        (false, true, true),
+    ] {
+        let started = Arc::new(Notify::new());
+        let endpoint = Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(DetailedFailure {
+            during_start,
+            await_cancel,
+            cleanup_failure,
+            started: started.clone(),
+        })));
+        let proxy = RemoteCapsuleNodeRunner::new(endpoint);
+        let mut handle = proxy
+            .start(crate::native_v2_capsule::tests::request(
+                "detailed-failure",
+                1,
+            ))
+            .await
+            .assert_value();
+        let mut output = handle.take_initial_output().assert_value();
+        if await_cancel {
+            started.notified().await;
+            handle.cancel();
+        }
+        let (event, completion) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::join!(output.recv_output(), handle.completion())
+        })
+        .await
+        .assert_value();
+        let event = event.assert_value();
+        assert_eq!(event.stream, LiveOutputStream::Error);
+        assert_eq!(
+            event.text,
+            if cleanup_failure {
+                "upstream rejected model [REDACTED]"
+            } else {
+                "node execution failed: upstream rejected model [REDACTED]"
+            }
+        );
+        assert_eq!(
+            completion,
+            Err(if cleanup_failure {
+                NodeRunnerError::CleanupUnconfirmed
+            } else {
+                NodeRunnerError::Driver
+            })
+        );
+        assert!(output.recv().await.is_err());
+    }
 }

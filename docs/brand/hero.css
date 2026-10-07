@@ -1,0 +1,23 @@
+@font-face { font-family: Fraunces; src: url("assets/fraunces.ttf") format("truetype"); font-weight: 600; }
+@font-face { font-family: "Reenie Beanie"; src: url("assets/reenie-beanie.ttf") format("truetype"); font-weight: 400; }
+* { box-sizing: border-box; }
+:root { --paper: #faf7f1; --ink: #26221c; --muted: #6f675a; --accent: #c2240c; --line: #ded8cc; }
+:root[data-theme="dark"] { --paper: #171411; --ink: #faf7f1; --muted: #b9b0a2; --accent: #ed6b55; --line: #494239; }
+html, body { margin: 0; width: 1280px; height: 400px; }
+.hero { position: relative; width: 1280px; height: 400px; overflow: hidden; background: var(--paper); color: var(--ink); font-family: "Reenie Beanie", cursive; }
+.hero::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .035; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+.brand { position: absolute; top: 28px; left: 52px; display: flex; align-items: center; gap: 13px; font: 600 15px Fraunces, serif; letter-spacing: 1.3px; }
+.brand img { width: 33px; height: 36px; object-fit: contain; }
+[data-theme="dark"] .brand img { filter: invert(1); }
+h1 { position: absolute; margin: 0; left: 51px; top: 87px; font-size: 112px; font-weight: 400; line-height: 1; letter-spacing: -2px; }
+.description { position: absolute; top: 206px; left: 56px; margin: 0; font-size: 37px; line-height: 1.12; }
+.emphasis { position: relative; display: inline-block; }
+.emphasis::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 6px; border-bottom: 2px solid var(--accent); border-radius: 50%; transform: rotate(-1deg); }
+.url { position: absolute; bottom: 29px; left: 56px; margin: 0; color: var(--muted); font: 13px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .4px; }
+.note { position: absolute; top: 40px; right: 72px; width: 242px; height: 116px; padding: 18px 23px; margin: 0; background: linear-gradient(153deg,#fbef99 0%,#f5e777 65%,#f0de68 100%); box-shadow: 2px 8px 12px #00000020; transform: rotate(3deg); color: #26221c; font-size: 30px; line-height: 1.02; }
+.note .emphasis::after { border-color: #c2240c; }
+.diagram { position: absolute; top: 184px; right: 47px; width: 444px; height: 176px; overflow: visible; }
+.diagram text { font-family: "Reenie Beanie", cursive; font-size: 27px; fill: var(--ink); text-anchor: middle; }
+.diagram .stroke { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.diagram .retry { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linecap: round; stroke-dasharray: 5 5; }
+.diagram .label { fill: var(--accent); font-size: 23px; }

@@ -155,7 +155,7 @@ exit 1
         .await
         .assert_error_with("GitHub API rejection should be preserved");
 
-    assert_eq!(error.api_status(), Some(422));
+    assert_eq!(error.api_status(), Some(422), "{error}");
     assert!(error.to_string().contains("Head sha can't be blank"));
     assert!(error.to_string().contains("Validation Failed (HTTP 422)"));
     assert!(error.to_string().contains("exitStatus: Some(1)"));

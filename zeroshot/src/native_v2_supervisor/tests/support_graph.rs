@@ -226,3 +226,23 @@ pub(super) fn all_constructs_driver() -> FakeDriver {
 }
 
 use openengine_cluster_testkit::assertions::{AssertValue};
+
+pub(super) async fn dispatch_initial(harness: &Harness) -> ActiveDispatches {
+    let Initialization::Program(program) = harness.supervisor.initialize().await.assert_value()
+    else {
+        panic!("new run must initialize a program");
+    };
+    let snapshot = stored_run(&harness.ledger).await.snapshot;
+    let reduction = reduce(&program.admitted, &snapshot).assert_value();
+    let mut active = ActiveDispatches::default();
+    harness
+        .supervisor
+        .dispatch(
+            &program,
+            dispatch_decisions(&harness.supervisor.run_id, reduction.decisions),
+            &mut active,
+        )
+        .await
+        .assert_value();
+    active
+}

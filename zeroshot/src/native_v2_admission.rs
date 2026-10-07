@@ -44,6 +44,8 @@ pub enum DeliveryPolicy {
 pub enum NativeV2AdmissionError {
     #[error("native-v2 requires graph profile openengine.graph.full/v1")]
     UnsupportedGraphProfile,
+    #[error("invalid runtime environment: {0}")]
+    InvalidEnvironment(String),
     #[error("initial input does not match GraphSpec.initialInput: {0}")]
     InitialInput(#[from] PayloadValueError),
     #[error("loop iteration count at {path} must be a positive safe integer")]
@@ -120,7 +122,7 @@ impl NativeV2Admission {
             return Err(NativeV2AdmissionError::UnsupportedGraphProfile);
         }
         let declarations = executable_declarations(&graph.root);
-        validate_executable_bindings(&declarations, runtime.nodes(), delivery_policy)?;
+        validate_executable_bindings(&declarations, runtime, delivery_policy)?;
         validate_delivery_concurrency(&graph.root)?;
         let registry = GraphBoundWorkerRegistry::from_declarations(graph, &declarations, runtime)?;
         ProductionGraphVerifier::new(registry)
@@ -183,6 +185,7 @@ impl NativeV2Admission {
             graph,
             initial_input,
             runtime,
+            environment,
             source,
             submission_key,
         } = submission;
@@ -192,6 +195,7 @@ impl NativeV2Admission {
                 graph,
                 initial_input,
                 runtime,
+                environment,
                 branch: None,
                 submission_key,
             },
@@ -204,6 +208,7 @@ impl NativeV2Admission {
             graph: verified,
             initial_input: prepared.initial_input,
             runtime: prepared.runtime,
+            environment: prepared.environment,
             source,
         })
     }
@@ -224,6 +229,7 @@ struct PreparedSubmission {
     graph: GraphSpec,
     initial_input: serde_json::Value,
     runtime: RuntimePlan,
+    environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
     declarations: Vec<ExecutableDeclaration>,
 }
 
@@ -236,13 +242,15 @@ fn prepare_submission(
         mut graph,
         initial_input,
         runtime,
+        environment,
         branch: _,
         submission_key: _,
     } = intent;
+    validate_run_environment(&runtime, environment.as_ref())?;
     validate_graph_input(&graph, &initial_input)?;
     loop_limits::bind_input_limits(&mut graph.root, &initial_input)?;
     let declarations = executable_declarations(&graph.root);
-    validate_executable_bindings(&declarations, runtime.nodes(), delivery_policy)?;
+    validate_executable_bindings(&declarations, &runtime, delivery_policy)?;
     validate_delivery_concurrency(&graph.root)?;
 
     Ok(PreparedSubmission {
@@ -250,8 +258,21 @@ fn prepare_submission(
         graph,
         initial_input,
         runtime,
+        environment,
         declarations,
     })
+}
+
+pub(crate) fn validate_run_environment(
+    runtime: &RuntimePlan,
+    environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
+) -> Result<(), NativeV2AdmissionError> {
+    if let Some(environment) = environment {
+        environment
+            .validate()
+            .map_err(|error| NativeV2AdmissionError::InvalidEnvironment(error.to_string()))?;
+    }
+    validation::validate_declared_environment(runtime, environment)
 }
 
 async fn verify_submission(

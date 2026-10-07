@@ -139,6 +139,7 @@ pub(super) fn shipping_graph() -> GraphSpec {
 pub(super) async fn admitted(kind: RuntimePlanKind) -> AdmittedRun {
     NativeV2Admission
         .admit(RunSubmission {
+            environment: None,
             title: RunTitle::new("Candidate config").assert_value_with("title"),
             graph: shipping_graph(),
             initial_input: json!({}),
@@ -160,9 +161,10 @@ pub(super) fn candidate_config(
     repository: &TempRepository,
     github: Arc<ScriptedGitHub>,
 ) -> NativeV2CandidateConfig {
-    let pool = HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value_with("pool");
+    let pool = HostedProcessPool::new(10_002, 10_002, 20_000).assert_value_with("pool");
     let harness = match kind {
         RuntimePlanKind::Codex => NativeV2HarnessConfig::Codex(NativeV2CodexConfig {
+            base_environment: Default::default(),
             provider: CodexProvider::OpenAi,
             executable: PathBuf::from("/usr/bin/false"),
             workspace: repository.workspace.clone(),

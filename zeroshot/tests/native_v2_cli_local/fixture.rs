@@ -1,5 +1,4 @@
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Output};
 use std::time::Duration;
@@ -508,7 +507,7 @@ pub(super) fn git(repository: &Path, arguments: &[&str]) -> String {
 }
 
 fn write_fake_codex(path: &Path) {
-    fs::write(
+    openengine_cluster_testkit::fixture::write_executable(
         path,
         with_configuration_probe(
             br#"#!/bin/sh
@@ -545,10 +544,9 @@ printf '%s\n' '{"type":"turn.completed"}'
             "codex",
             &ProbeResponse::Configured(json!({})),
         ),
+        0o755,
     )
     .assert_value_with("write fake Codex");
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
-        .assert_value_with("make fake Codex executable");
 }
 
 enum ProbeResponse {

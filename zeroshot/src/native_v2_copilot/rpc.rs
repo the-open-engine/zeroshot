@@ -6,12 +6,12 @@ use crate::execution::process::{
     ProcessFrame, ProcessRunnerError, ProcessStdout, MAX_PROCESS_MESSAGE_BYTES,
 };
 use crate::native_v2_capsule::provider_process::{
-    ProviderProcess, ProviderExecutionFiles, redaction_values, safe_provider_text,
-    provider_failure_diagnostic,
+    ProviderProcess, ProviderExecutionFiles, redaction_values, report_provider_error,
+    safe_provider_text,
 };
 use crate::native_v2_runner::{
     AgentResponseState, DriverControl, DriverInvocation, NodeRunnerError, ProviderSchemaDialect,
-    VerifierWorkspace, render_agent_prompt_for, resolve_agent_response_with_dialect,
+    render_agent_prompt, resolve_agent_response_with_dialect,
 };
 use super::{auth, command, events, framing::Frames, provider, session::CopilotSession};
 
@@ -53,20 +53,17 @@ pub(super) struct CopilotRpc<'a> {
     frames: Frames,
     pub(super) invocation: &'a DriverInvocation,
     pub(super) control: &'a DriverControl,
-    verifier_workspace: VerifierWorkspace,
     sender: Option<mpsc::Sender<Value>>,
     next_id: u64,
     pending: BTreeSet<u64>,
     pub(super) session_id: String,
     pub(super) response: Option<String>,
-    pub(super) provider_error: Option<String>,
     pub(super) redactions: Vec<String>,
     authentication: auth::CopilotAuthentication<'a>,
     provider: Option<&'a provider::LocalProvider>,
 }
 
 pub(super) struct CopilotRpcNative<'a> {
-    pub verifier_workspace: VerifierWorkspace,
     pub authentication: auth::CopilotAuthentication<'a>,
     pub provider: Option<&'a provider::LocalProvider>,
     pub redactions: Vec<String>,
@@ -92,13 +89,11 @@ impl<'a> CopilotRpc<'a> {
             frames: Frames::default(),
             invocation,
             control,
-            verifier_workspace: native.verifier_workspace,
             sender: None,
             next_id: 0,
             pending: BTreeSet::new(),
             session_id: String::new(),
             response: None,
-            provider_error: None,
             redactions,
             authentication: native.authentication,
             provider: native.provider,
@@ -168,16 +163,14 @@ impl<'a> CopilotRpc<'a> {
     }
 
     async fn run_response(&mut self) -> Result<WorkerOutcome, NodeRunnerError> {
-        let prompt = render_agent_prompt_for(
+        let prompt = render_agent_prompt(
             self.invocation.agent_instructions()?,
             &self.invocation.node.input,
             &self.invocation.response,
-            self.verifier_workspace,
         )?;
         let mut response = AgentResponseState::new(prompt);
         loop {
             self.response = None;
-            self.provider_error = None;
             self.request("session.send", json!({
                 "sessionId":self.session_id, "prompt":response.prompt(), "wait":true,
                 "responseFormat":{"type":"json_schema", "jsonSchema":{
@@ -185,22 +178,30 @@ impl<'a> CopilotRpc<'a> {
                     "schema":self.invocation.response.provider_schema(ProviderSchemaDialect::OpenAiStrict),
                 }},
             })).await?;
-            if let Some(error) = self.provider_error.take() {
-                return Err(failure(error));
-            }
             let text = self
                 .response
                 .take()
                 .ok_or_else(|| failure("Copilot completed without an assistant response"))?;
-            let value = resolve_agent_response_with_dialect(
-                &self.invocation.response,
-                &text,
-                ProviderSchemaDialect::OpenAiStrict,
-            )?;
-            if let Some(outcome) = response.accept("Copilot", self.control, value).await? {
+            if let Some(outcome) = self.accept_response(&mut response, &text).await? {
                 return Ok(outcome);
             }
         }
+    }
+
+    async fn accept_response(
+        &self,
+        state: &mut AgentResponseState,
+        text: &str,
+    ) -> Result<Option<WorkerOutcome>, NodeRunnerError> {
+        let response = resolve_agent_response_with_dialect(
+            &self.invocation.response,
+            text,
+            ProviderSchemaDialect::OpenAiStrict,
+        )?;
+        if let Some(error) = response.correction_error() {
+            report_provider_error("Copilot", &error, &self.redactions, self.control).await?;
+        }
+        state.accept("Copilot", self.control, response).await
     }
 
     pub(super) fn queue(&self, value: Value) -> Result<(), NodeRunnerError> {
@@ -295,12 +296,7 @@ impl<'a> CopilotRpc<'a> {
             Err(error) => return error,
         };
         append_stderr_detail(&mut detail, completion);
-        failure(provider_failure_diagnostic(
-            "Copilot",
-            Some(&detail),
-            None,
-            &self.redactions,
-        ))
+        failure(safe_provider_text(&detail, &self.redactions))
     }
 
     pub(super) async fn drain(&mut self) -> Result<(), NodeRunnerError> {

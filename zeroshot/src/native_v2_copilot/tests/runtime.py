@@ -29,9 +29,12 @@ if "://" not in github_host:
     github_host = "https://" + github_host
 github_host = github_host.rstrip("/")
 
-def send(message):
+def frame(message):
     body = json.dumps({"jsonrpc": "2.0", **message}).encode()
-    sys.stdout.buffer.write(f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+    return f"Content-Length: {len(body)}\r\n\r\n".encode() + body
+
+def send(message):
+    sys.stdout.buffer.write(frame(message))
     sys.stdout.buffer.flush()
 
 def event(kind, data):
@@ -58,6 +61,8 @@ while (message := read()) is not None:
         with open(os.environ["CAPTURE_PATH"], "a", encoding="utf-8") as capture:
             capture.write(json.dumps(message) + "\n")
     if method == "connect":
+        if mode == "version":
+            print("launch note: gho_fake-secret", file=sys.stderr, flush=True)
         result = {"protocolVersion": 99 if mode == "version" else 3}
     elif method in ("session.create", "session.resume"):
         assert "COPILOT_GITHUB_TOKEN" not in os.environ
@@ -169,7 +174,7 @@ while (message := read()) is not None:
         result = {"sessionId": "wrong" if mode == "identity" else session}
     elif method == "session.send":
         turn += 1
-        if mode == "refresh":
+        if mode in ("refresh", "refresh_error"):
             send({"id": "auth-refresh", "method": "gitHubToken.getToken", "params": {
                 "registrationId": registration, "host": github_host,
                 "sessionId": session, "reason": "refresh"}})
@@ -186,8 +191,24 @@ while (message := read()) is not None:
         if mode == "cancel":
             event("tool.execution_start", {"toolName": "ready"})
             time.sleep(60)
+        if mode == "error_cleanup":
+            # Leave one slot in the Rust durable queue (capacity 1024). The error and
+            # trailing usage share one pipe write, so cleanup drains them after failure.
+            for _ in range(1022):
+                event("assistant.usage", usage)
+            messages = [("session.error", {"message": "rejected gho_fake-secret"})]
+            messages.extend(("assistant.usage", usage) for _ in range(4))
+            sys.stdout.buffer.write(b"".join(frame({"method": "session.event", "params": {
+                "sessionId": session, "event": {"type": kind, "data": data}}})
+                for kind, data in messages))
+            sys.stdout.buffer.flush()
         if mode == "error":
             event("session.error", {"message": "rejected gho_fake-secret"})
+        if mode == "refresh_error":
+            print("refresh failure: rotated-sensitive-value", file=sys.stderr, flush=True)
+            event("session.error", {"message": "rejected rotated-sensitive-value"})
+        if mode in ("error", "refresh_error", "error_cleanup"):
+            continue  # A session error must settle even without the session.send response.
         if mode == "permission":
             event("assistant.message", {
                 "parentToolCallId": "tool-child", "content": "ignored child output"})
@@ -208,7 +229,14 @@ while (message := read()) is not None:
             for _ in range(80):
                 event("future.event", {"padding": "x" * 1048576})
         answer = "invalid" if mode == "malformed" or (mode == "correction" and turn == 1) else 42
-        event("assistant.message", {"content": json.dumps({"response": {"answer": answer}})})
+        response = {"response": {"answer": answer}}
+        if mode in ("validation_secret", "validation_secret_long"):
+            padding = ""
+            if mode == "validation_secret_long":
+                prefix = "provider response must be exactly an object containing response: unknown field `"
+                padding = "x" * (8192 - 3 - len(prefix) - 7)
+            response[padding + "gho_fake-secret"] = True
+        event("assistant.message", {"content": json.dumps(response)})
         result = {"messageId": "message"}
     elif method == "session.detach":
         result = {"success": True}

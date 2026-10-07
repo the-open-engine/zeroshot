@@ -28,6 +28,9 @@ Direct `target serve` mounts `/ui/` on its existing listener, stores profiles/hi
 `--storage`, and requires the browser's exact `--public-origin`. Private/hosted targets exclude
 this mount. See the [target image guide](../docker/zeroshot-target/README.md) for persistence and restart behavior.
 
+Profiles contain graphs and agent runtime configuration. Environments belong to run submission,
+not profile authoring. Plain local UI has no environment catalog or management page.
+
 For frontend development, keep the native server running:
 
 ```sh
@@ -98,7 +101,7 @@ The authenticated bootstrap must return `version: 1` and
 `workspace: {kind: "cloud", id: workspaceId}`. Bind this ID to user, organization and profile
 scope. Recreating the iframe binds a different authority; protect the old draft before doing so.
 Optional CSRF configuration contains names only. The iframe reads the existing cookie for each
-service POST and rejects missing/duplicate cookies. Cloud omits this configuration only for its
+service write and rejects missing/duplicate cookies. Cloud omits this configuration only for its
 server-selected local authentication mode. Credentials never enter messages.
 
 After `init`, every message carries `version`, `workspaceId`, `documentId`, `generation` and
@@ -133,6 +136,12 @@ Unsolicited `state` messages report `dirty`, `pending`, `validation`, `saving`, 
 `name`. Command replies report `accepted` or a structured `problem`. `navigate` messages from the
 workspace request the host's `save` or `defaults` action. The host keeps selection and outer menus.
 
+Set `view: "environments"` and an explicit `environmentApi` collection URL in `init` to mount the hosted environment manager;
+`readOnly: true` disables mutation controls. The server remains responsible for write authorization.
+The manager reuses the same theme, state, and guarded navigation messages, with one document identity
+for its mounted surface. It handles resource selection and conditional CRUD through the service below;
+profile-specific bridge commands are unavailable. Failed writes preserve the draft and saved revision.
+
 ### Authenticated service paths and history lifecycle
 
 `apiBase` must be a same-origin absolute path ending with `/`. The embedded workspace uses these
@@ -140,12 +149,25 @@ paths beneath it; its profile load/save work passes through the host bridge inst
 
 | Request                              | Response                                                                 |
 | ------------------------------------ | ------------------------------------------------------------------------ |
+| `GET environmentApi` | `{environments: [{id, name, revision}]}`. |
+| `GET environmentApi/{id}` | `{id, name, definition, revision}`. |
+| `POST environmentApi` | Save `{id?, name, definition, expectedRevision: string or null}`; returns the saved resource. |
+| `DELETE environmentApi/{id}` | Delete with `{expectedRevision}`; returns `{deleted: true}`. |
 | `GET bootstrap`                      | Existing workspace bootstrap with templates, workers and runtime schema. |
 | `POST validate`                      | Native validation of `{graph, runtime}`.                                 |
 | `POST authoring`, `POST data`        | Native draft transform of `{graph, runtime, action}`.                    |
 | `GET runs/{id}`                      | Version 1 admitted definition with projection version 1.                 |
 | `GET runs/{id}/history?after=CURSOR` | Existing ordered native history page.                                    |
 | `GET runs/{id}/events?after=CURSOR`  | SSE `history` pages and structured `history_error` problems.             |
+
+Environment writes carry the pinned `X-Zeroshot-Workspace` bootstrap identity. The generic hosted
+manager preserves the explicit collection URL's query parameters for CRUD and draft recovery;
+the host owns repository matching, defaults, authorization, and any additional resource fields.
+It reports opaque `resourceId`/`resourceRevision` state changes so host controls can refresh their
+catalog. Plain local services never create this adapter. Profiles reject `runtime.environment`.
+Committed drafts and their original CAS baseline recover in the same authority and collection
+context. Save, delete, and explicit discard clear recovery. Storage errors or size overflow warn
+that recovery is unavailable; accepted runs retain their already resolved environment snapshot.
 
 The shared fetch SSE reader retains HTTP/stream problem codes and details, reconnects network
 interruptions using the last accepted `Last-Event-ID`, and cancels readers/timers on disposal.

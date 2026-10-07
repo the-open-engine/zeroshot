@@ -532,7 +532,6 @@ fn reap_action(target: ReapTarget, result: i32, error: Option<i32>) -> ReapActio
     }
 }
 
-#[cfg(target_os = "linux")]
 fn process_is_missing(error: &io::Error) -> bool {
     error.raw_os_error() == Some(libc::ESRCH)
 }

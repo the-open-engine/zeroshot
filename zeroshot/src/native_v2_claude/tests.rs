@@ -38,8 +38,8 @@ use crate::native_v2_contract::{
     RuntimePlan, TokenUsageDelta,
 };
 use crate::native_v2_runner::{
-    AttachReceiveError, LiveOutputStream, NativeNodeRunner, NodeRunRequest, NodeRunner,
-    NodeRunnerError, ResolvedEnvironment,
+    AttachReceiveError, NativeNodeRunner, NodeRunRequest, NodeRunner, NodeRunnerError,
+    ResolvedEnvironment,
 };
 use crate::worker_catalog::{self, ReasoningEffort};
 
@@ -61,7 +61,7 @@ fn adapter_configuration(
             ("TERM".to_owned(), "dumb".to_owned()),
         ]))
         .assert_value(),
-        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
+        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000).assert_value(),
     }
 }
 
@@ -310,6 +310,7 @@ async fn runner_with_command(
         nodes: BTreeMap::from([(NodeName::new("agent").assert_value(), binding)]),
     };
     let admitted = admit(RunSubmission {
+        environment: None,
         title: RunTitle::new("Claude adapter test").assert_value(),
         graph: graph(verifier),
         initial_input: Value::Null,
@@ -342,7 +343,7 @@ async fn runner_with_command(
             local_user_home: None,
             native_environment: Default::default(),
             base_environment,
-            process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
+            process_pool: HostedProcessPool::new(10_002, 10_002, 20_000).assert_value(),
         })
         .assert_value(),
     );

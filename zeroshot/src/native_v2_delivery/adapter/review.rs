@@ -48,6 +48,15 @@ impl ReviewProgress {
     }
 }
 
+pub(super) async fn failed_review(
+    control: &DriverControl,
+    detail: &str,
+) -> Result<ReviewStep, DeliveryStop> {
+    let error = NodeRunnerError::DriverDetail(detail.to_owned());
+    let _ = report_provider_error("Git delivery", &error, &[], control).await;
+    Err(crash_outcome())
+}
+
 pub(super) fn crash_outcome() -> DeliveryStop {
     DeliveryStop::Outcome(WorkerOutcome::declared_failure(WorkerErrorCode::Crash))
 }

@@ -398,6 +398,7 @@ pub(super) fn exact_run_request() -> TargetRunRequest {
     TargetRunRequest {
         run_id: request.run_id,
         submission: openengine_cluster_protocol::RunSubmission {
+            environment: None,
             title: request.intent.title,
             graph: request.intent.graph,
             initial_input: request.intent.initial_input,

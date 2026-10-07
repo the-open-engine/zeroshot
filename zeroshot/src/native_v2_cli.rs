@@ -95,6 +95,7 @@ pub struct TargetServe {
     pub listen: SocketAddr,
     pub public_origin: String,
     pub storage: PathBuf,
+    pub operator_diagnostics_json: bool,
     pub bootstrap_key_file: Option<PathBuf>,
 }
 
@@ -122,6 +123,7 @@ pub struct RunCommand {
     pub target: Option<String>,
     pub title: RunTitle,
     pub selection: RunSelection,
+    pub environment: Option<RunEnvironmentInput>,
     pub input: PathBuf,
     pub repository: Option<SourceRepositoryId>,
     pub branch: Option<SourceBranchId>,
@@ -129,6 +131,12 @@ pub struct RunCommand {
     pub detach: bool,
     pub validate_only: bool,
     pub submission_key: Option<IdempotencyKey>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RunEnvironmentInput {
+    File(PathBuf),
+    Empty,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -179,6 +187,7 @@ pub struct PreparedMergePlanRequest {
     pub source: MergePlanSource,
     pub profile: RunProfileSelector,
     pub runs: Vec<MergePlanRunRequest>,
+    pub environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
     pub connections: RunConnectionValues,
     pub github_token: Option<String>,
 }

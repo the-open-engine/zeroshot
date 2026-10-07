@@ -5,7 +5,10 @@ archive for the current Node platform and architecture, verifies it against that
 `SHA256SUMS`, and installs the executable.
 
 Read the [Zeroshot documentation](https://the-open-engine.github.io/zeroshot/) for installation,
-runtime configuration, targets, and CLI reference.
+runtime configuration, targets, and CLI reference. Zeroshot Cloud is documented at
+[cloud.zeroshot.sh/docs](https://cloud.zeroshot.sh/docs).
+
+The product site is [zeroshot.sh](https://zeroshot.sh/?utm_source=npm&utm_medium=readme&utm_campaign=zeroshot).
 
 The same managed skill is installed for Codex and GitHub Copilot at
 `$HOME/.agents/skills/zeroshot/SKILL.md`, and for Claude Code at

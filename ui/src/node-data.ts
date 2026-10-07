@@ -272,6 +272,48 @@ function requiredType(schema: any, path: string[]): Payload | undefined {
   return current;
 }
 
+function loopScopes(document: Document, node: GraphNode, loopName: string): GraphNode[] | undefined {
+  const scopes = pathTo(document.graph.root, node.name).slice(0, -1);
+  return [...scopes].reverse().find((scope) => scope.kind === 'loop')?.name === loopName &&
+    !scopes.some((scope) => scope.kind === 'map')
+    ? scopes
+    : undefined;
+}
+
+function loopInputBinding(donor: GraphNode, field: ReturnType<typeof nodeInputRows>[number]) {
+  const bindings = list(donor.inputBindings).filter(
+    (binding) => binding?.target?.[0] === field.name
+  );
+  const [binding] = bindings;
+  return field.required &&
+    bindings.length === 1 &&
+    samePath(binding?.target, [field.name]) &&
+    binding?.value?.source === 'state' &&
+    Array.isArray(binding.value.path) &&
+    binding.value.path.length
+    ? binding
+    : undefined;
+}
+
+function matchingPreviousOrigin(
+  document: Document,
+  donor: GraphNode,
+  consumer: GraphNode,
+  path: string[]
+): ReturnType<typeof inputOrigins>[number] | undefined {
+  const origins = inputOrigins(document, donor, path);
+  const targets = inputOrigins(document, consumer, path);
+  if (origins.length !== 1 || targets.length !== 1 || !origins[0].previous || !targets[0].previous)
+    return undefined;
+  const origin = origins[0],
+    target = targets[0];
+  return origin.node === target.node &&
+    origin.channel === target.channel &&
+    samePath(origin.path, target.path)
+    ? origin
+    : undefined;
+}
+
 /** Offer existing feedback routes only; selecting one never creates a recurrence. */
 function existingLoopInputChoices(document: Document, consumer: GraphNode): NodeDataChoice[] {
   if (!executable(consumer)) return [];
@@ -281,49 +323,18 @@ function existingLoopInputChoices(document: Document, consumer: GraphNode): Node
   const writers = allNodes(document.graph.root).filter(executable);
   const choices = new Map<string, NodeDataChoice>();
   for (const donor of writers) {
-    const donorScopes = pathTo(document.graph.root, donor.name).slice(0, -1);
-    if (
-      [...donorScopes].reverse().find((node) => node.kind === 'loop')?.name !== loop.name ||
-      donorScopes.some((node) => node.kind === 'map')
-    )
-      continue;
+    const donorScopes = loopScopes(document, donor, loop.name);
+    if (!donorScopes) continue;
     for (const field of nodeInputRows(donor)) {
-      const bindings = list(donor.inputBindings).filter(
-        (binding) => binding?.target?.[0] === field.name
-      );
-      const [binding] = bindings;
-      if (
-        !field.required ||
-        bindings.length !== 1 ||
-        !samePath(binding?.target, [field.name]) ||
-        binding?.value?.source !== 'state' ||
-        !Array.isArray(binding.value.path) ||
-        !binding.value.path.length
-      )
-        continue;
+      const binding = loopInputBinding(donor, field);
+      if (!binding) continue;
       const path: string[] = binding.value.path;
-      const origins = inputOrigins(document, donor, path);
-      const targets = inputOrigins(document, consumer, path);
-      if (
-        origins.length !== 1 ||
-        targets.length !== 1 ||
-        !origins[0].previous ||
-        !targets[0].previous
-      )
-        continue;
-      const origin = origins[0],
-        target = targets[0];
-      if (
-        origin.node !== target.node ||
-        origin.channel !== target.channel ||
-        !samePath(origin.path, target.path)
-      )
-        continue;
+      const origin = matchingPreviousOrigin(document, donor, consumer, path);
+      if (!origin) continue;
       const writer = findNode(document.graph.root, origin.node)!;
-      const writerScopes = pathTo(document.graph.root, writer.name).slice(0, -1);
+      const writerScopes = loopScopes(document, writer, loop.name);
       if (
-        [...writerScopes].reverse().find((node) => node.kind === 'loop')?.name !== loop.name ||
-        writerScopes.some((node) => node.kind === 'map') ||
+        !writerScopes ||
         (donor.name !== writer.name && !beforeInSequence(document, donor, writer)) ||
         (consumer.name !== writer.name && !beforeInSequence(document, consumer, writer))
       )
@@ -516,6 +527,55 @@ function renameOutputReferences(
   );
 }
 
+function editSignalOutput(node: GraphNode, next: NodeOutputField, previousName?: string): void {
+  if (node.kind !== 'verifier' || next.type.kind !== 'enum')
+    throw new Error('Choose an outcome field.');
+  if (
+    node.signals !== undefined &&
+    (!node.signals || typeof node.signals !== 'object' || Array.isArray(node.signals))
+  )
+    throw new Error('Edit this output with its JSON control.');
+  const signals =
+    node.signals && typeof node.signals === 'object' && !Array.isArray(node.signals)
+      ? node.signals
+      : {};
+  if (next.name !== previousName && Object.hasOwn(signals, next.name))
+    throw new Error('This field already exists.');
+  node.signals = Object.fromEntries(
+    Object.entries(signals).filter(([name]) => name !== previousName)
+  );
+  node.signals[next.name] = clone(next.type.values);
+}
+
+function editRecordOutput(
+  node: GraphNode,
+  field: NodeOutputField | undefined,
+  next: NodeOutputField
+): void {
+  const previousName = field?.name;
+  const key = next.channel === 'diagnostic' ? 'diagnostic' : 'output';
+  let schema = node[key];
+  if (!recordFields(schema)) {
+    if (schema?.kind !== 'null' && schema !== undefined)
+      throw new Error('Edit this output with its JSON control.');
+    schema = { kind: 'record', fields: {} };
+  }
+  if (field && next.name !== previousName) schema = renameField(schema, previousName!, next.name);
+  else if (!field && Object.hasOwn(recordFields(schema)!, next.name))
+    throw new Error('This field already exists.');
+  node[key] = {
+    ...schema,
+    fields: {
+      ...recordFields(schema),
+      [next.name]: {
+        ...(recordFields(schema)?.[next.name] ?? {}),
+        type: clone(next.type),
+        required: next.required,
+      },
+    },
+  };
+}
+
 export function editOutputField(
   document: Document,
   nodeName: string,
@@ -528,47 +588,8 @@ export function editOutputField(
     throw new Error('Enter a valid field name.');
   const previousName = field?.name;
   if (field && field.channel !== next.channel) throw new Error('Choose a new output field.');
-  if (next.channel === 'signal') {
-    if (node.kind !== 'verifier' || next.type.kind !== 'enum')
-      throw new Error('Choose an outcome field.');
-    if (
-      node.signals !== undefined &&
-      (!node.signals || typeof node.signals !== 'object' || Array.isArray(node.signals))
-    )
-      throw new Error('Edit this output with its JSON control.');
-    const signals =
-      node.signals && typeof node.signals === 'object' && !Array.isArray(node.signals)
-        ? node.signals
-        : {};
-    if (next.name !== previousName && Object.hasOwn(signals, next.name))
-      throw new Error('This field already exists.');
-    node.signals = Object.fromEntries(
-      Object.entries(signals).filter(([name]) => name !== previousName)
-    );
-    node.signals[next.name] = clone(next.type.values);
-  } else {
-    const key = next.channel === 'diagnostic' ? 'diagnostic' : 'output';
-    let schema = node[key];
-    if (!recordFields(schema)) {
-      if (schema?.kind !== 'null' && schema !== undefined)
-        throw new Error('Edit this output with its JSON control.');
-      schema = { kind: 'record', fields: {} };
-    }
-    if (field && next.name !== previousName) schema = renameField(schema, previousName!, next.name);
-    else if (!field && Object.hasOwn(recordFields(schema)!, next.name))
-      throw new Error('This field already exists.');
-    node[key] = {
-      ...schema,
-      fields: {
-        ...recordFields(schema),
-        [next.name]: {
-          ...(recordFields(schema)?.[next.name] ?? {}),
-          type: clone(next.type),
-          required: next.required,
-        },
-      },
-    };
-  }
+  if (next.channel === 'signal') editSignalOutput(node, next, previousName);
+  else editRecordOutput(node, field, next);
   if (previousName && previousName !== next.name)
     renameOutputReferences(result.graph.root, nodeName, next.channel, previousName, next.name);
   if (field && JSON.stringify(field.type) !== JSON.stringify(next.type))
@@ -692,6 +713,143 @@ function synchronizeMapItems(original: Document, result: Document): void {
   }
 }
 
+function hasCompetingWrite(
+  original: Document,
+  write: any,
+  scopes: Set<string>,
+  matches: (binding: any) => boolean
+): boolean {
+  return allNodes(original.graph.root)
+    .filter(executable)
+    .some((other) =>
+      list(other.writeBindings).some(
+        (binding) =>
+          !matches(binding) &&
+          overlaps(binding?.target, write.target) &&
+          writeScopes(original, other, write.target).some((scope) => scopes.has(scope))
+      )
+    );
+}
+
+type ConsumerRoute = {
+  original: Document;
+  result: Document;
+  nodeName: string;
+  field: NodeOutputField;
+  write: any;
+  before: Payload;
+  after: Payload | undefined;
+  scopes: Set<string>;
+  competing: boolean;
+  callerOwned: boolean;
+};
+
+function synchronizeConsumers({
+  original,
+  result,
+  nodeName,
+  field,
+  write,
+  before,
+  after,
+  scopes,
+  competing,
+  callerOwned,
+}: ConsumerRoute): void {
+  for (const consumer of allNodes(original.graph.root)) {
+    if (!executable(consumer) && consumer.kind !== 'succeed' && consumer.kind !== 'map') continue;
+    const map = consumer.kind === 'map';
+    const key = consumer.kind === 'succeed' ? 'bindings' : 'inputBindings';
+    const targetSchema = consumer.kind === 'succeed' ? 'output' : 'input';
+    const nextConsumer = findNode(result.graph.root, consumer.name)!;
+    const bindings = map ? [{ target: [], value: consumer.over }] : list(consumer[key]);
+    for (const binding of bindings) {
+      if (binding?.value?.source !== 'state' || !prefix(write.target, binding.value.path))
+        continue;
+      const origins = inputOrigins(original, consumer, binding.value.path);
+      if (
+        !origins.length ||
+        !origins.every(
+          (origin) =>
+            origin.node === nodeName &&
+            origin.channel === field.channel &&
+            prefix([field.name], origin.path)
+        )
+      )
+        continue;
+      origins.forEach((origin) => origin.scopes.forEach((scope) => scopes.add(scope)));
+      if (map) scopes.add(consumer.name);
+      updateConsumerBinding({ before, after, write, callerOwned, competing }, {
+        binding, map, key, targetSchema, nextConsumer,
+      });
+    }
+  }
+}
+
+function updateConsumerBinding(
+  route: Pick<ConsumerRoute, 'before' | 'after' | 'write' | 'callerOwned' | 'competing'>,
+  consumer: { binding: any; map: boolean; key: string; targetSchema: string; nextConsumer: any }
+): void {
+  const { before, after, write, callerOwned, competing } = route;
+  const { binding, map, key, targetSchema, nextConsumer } = consumer;
+  const suffix = binding.value.path.slice(write.target.length);
+  const sourceBefore = suffix.length ? payloadAtPath(before, suffix) : before;
+  const sourceAfter = after && (suffix.length ? payloadAtPath(after, suffix) : after);
+  if (!sourceAfter) {
+    if (map) nextConsumer.over = null;
+    else
+      nextConsumer[key] = list(nextConsumer[key]).filter(
+        (entry) => !samePath(entry.target, binding.target)
+      );
+    return;
+  }
+  if (callerOwned || competing || !after) return;
+  if (map) {
+    if (sourceAfter.kind !== 'array') nextConsumer.over = null;
+    return;
+  }
+  if (sourceBefore && sourceAfter) {
+    nextConsumer[targetSchema] = clone(nextConsumer[targetSchema]);
+    updateFieldType(nextConsumer[targetSchema], binding.target, sourceBefore, sourceAfter);
+  }
+}
+
+function synchronizeOutputScopes({
+  original,
+  result,
+  writer,
+  write,
+  before,
+  after,
+  scopes,
+  matches,
+}: {
+  original: Document;
+  result: Document;
+  writer: GraphNode;
+  write: any;
+  before: Payload;
+  after: Payload | undefined;
+  scopes: Set<string>;
+  matches: (binding: any) => boolean;
+}): void {
+  if (after)
+    carriedOutputScopes(original, writer, write.target, matches).forEach((scope) =>
+      scopes.add(scope)
+    );
+  for (const name of scopes) {
+    const scope = findNode(result.graph.root, name)!;
+    if (before && after) {
+      scope.state = clone(scope.state);
+      updateFieldType(scope.state, write.target, before, after);
+    }
+    if (!after && Array.isArray(scope.promotedStatePaths))
+      scope.promotedStatePaths = scope.promotedStatePaths.filter(
+        (path: unknown) => !samePath(path, write.target)
+      );
+  }
+}
+
 /** Follow exact existing routes; unrelated same-name fields and competing sources stay intact. */
 function synchronizeOutputRoutes(
   original: Document,
@@ -719,80 +877,22 @@ function synchronizeOutputRoutes(
     if (!before) continue;
     if (!after) removedWrites.add(write);
     const scopes = new Set(writeScopes(original, writer, write.target));
-    const competing = allNodes(original.graph.root)
-      .filter(executable)
-      .some((other) =>
-        list(other.writeBindings).some(
-          (binding) =>
-            !matches(binding) &&
-            overlaps(binding?.target, write.target) &&
-            writeScopes(original, other, write.target).some((scope) => scopes.has(scope))
-        )
-      );
+    const competing = hasCompetingWrite(original, write, scopes, matches);
     const callerOwned = !!payloadAtPath(original.graph.initialInput, write.target);
-    for (const consumer of allNodes(original.graph.root)) {
-      if (!executable(consumer) && consumer.kind !== 'succeed' && consumer.kind !== 'map') continue;
-      const map = consumer.kind === 'map';
-      const key = consumer.kind === 'succeed' ? 'bindings' : 'inputBindings';
-      const targetSchema = consumer.kind === 'succeed' ? 'output' : 'input';
-      const nextConsumer = findNode(result.graph.root, consumer.name)!;
-      const bindings = map ? [{ target: [], value: consumer.over }] : list(consumer[key]);
-      for (const binding of bindings) {
-        if (binding?.value?.source !== 'state' || !prefix(write.target, binding.value.path))
-          continue;
-        const origins = inputOrigins(original, consumer, binding.value.path);
-        if (
-          !origins.length ||
-          !origins.every(
-            (origin) =>
-              origin.node === nodeName &&
-              origin.channel === field.channel &&
-              prefix([field.name], origin.path)
-          )
-        )
-          continue;
-        origins.forEach((origin) => origin.scopes.forEach((scope) => scopes.add(scope)));
-        if (map) scopes.add(consumer.name);
-        const suffix = binding.value.path.slice(write.target.length);
-        const sourceBefore = suffix.length ? payloadAtPath(before, suffix) : before;
-        const sourceAfter = after && (suffix.length ? payloadAtPath(after, suffix) : after);
-        if (!sourceAfter) {
-          if (map) {
-            nextConsumer.over = null;
-            continue;
-          }
-          nextConsumer[key] = list(nextConsumer[key]).filter(
-            (entry) => !samePath(entry.target, binding.target)
-          );
-          continue;
-        }
-        if (callerOwned || competing || !after) continue;
-        if (map) {
-          if (sourceAfter.kind !== 'array') nextConsumer.over = null;
-          continue;
-        }
-        if (sourceBefore && sourceAfter) {
-          nextConsumer[targetSchema] = clone(nextConsumer[targetSchema]);
-          updateFieldType(nextConsumer[targetSchema], binding.target, sourceBefore, sourceAfter);
-        }
-      }
-    }
+    synchronizeConsumers({
+      original,
+      result,
+      nodeName,
+      field,
+      write,
+      before,
+      after,
+      scopes,
+      competing,
+      callerOwned,
+    });
     if (competing || callerOwned) continue;
-    if (after)
-      carriedOutputScopes(original, writer, write.target, matches).forEach((scope) =>
-        scopes.add(scope)
-      );
-    for (const name of scopes) {
-      const scope = findNode(result.graph.root, name)!;
-      if (before && after) {
-        scope.state = clone(scope.state);
-        updateFieldType(scope.state, write.target, before, after);
-      }
-      if (!after && Array.isArray(scope.promotedStatePaths))
-        scope.promotedStatePaths = scope.promotedStatePaths.filter(
-          (path: unknown) => !samePath(path, write.target)
-        );
-    }
+    synchronizeOutputScopes({ original, result, writer, write, before, after, scopes, matches });
   }
   if (Array.isArray(writer.writeBindings))
     findNode(result.graph.root, nodeName)!.writeBindings = list(

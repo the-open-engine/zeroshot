@@ -78,8 +78,38 @@ pub struct RunSubmission {
     pub graph: GraphSpec,
     pub initial_input: Value,
     pub runtime: RuntimePlan,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<super::RuntimeEnvironment>,
     pub source: ResolvedSource,
     pub submission_key: IdempotencyKey,
+}
+
+impl RunSubmission {
+    /// Exact fields required by all nodes and the accepted preparation definition.
+    #[must_use]
+    pub fn connection_requirements(
+        &self,
+    ) -> BTreeMap<ConnectionKey, BTreeSet<EnvironmentVariableName>> {
+        run_connection_requirements(&self.runtime, self.environment.as_ref())
+    }
+}
+
+/// Combine node and preparation requirements without resolving any connection values.
+#[must_use]
+pub fn run_connection_requirements(
+    runtime: &RuntimePlan,
+    environment: Option<&super::RuntimeEnvironment>,
+) -> BTreeMap<ConnectionKey, BTreeSet<EnvironmentVariableName>> {
+    let mut requirements = runtime.connection_requirements();
+    if let Some(environment) = environment {
+        for (key, fields) in environment.connections.iter() {
+            requirements
+                .entry(key.clone())
+                .or_default()
+                .extend(fields.iter().cloned());
+        }
+    }
+    requirements
 }
 
 /// Trusted controller bootstrap admission. The host assigns the only public run identity before
@@ -106,10 +136,13 @@ pub struct RunResumeParams {
     /// Omission preserves restarting from the latest retained workspace.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<super::RunResumeFrom>,
+    /// Fresh static connection values for the successor attempt.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub connections: RunConnectionValues,
+    /// Run-scoped callback used to resolve fresh dynamic connection values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_resolver: Option<TargetConnectionResolver>,
+    /// Fresh GitHub credential for private source checkout or Git delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,
 }

@@ -183,6 +183,56 @@ describe('release-note validation', () => {
   });
 });
 
+describe('historical release metadata recovery', () => {
+  it('recovers only the recorded README summaries', () => {
+    for (const historical of [
+      {
+        hash: '6da880abae8fd454c60f80d2b23d94939c194859',
+        subject: "docs: say Zeroshot runs the user's existing coding agent (#1191)",
+        summary:
+          "Clarify that Zeroshot runs the user's existing coding agent as workers and reviewers.",
+      },
+      {
+        hash: '101ec9d9f50d6f7a5d871e5bc655dc03bfc54a99',
+        subject: 'docs: label the custom topology as an example (#1192)',
+        summary:
+          "Clarify that the README's custom bugfinder/E2E topology is an example and only the review loop is built in.",
+      },
+    ]) {
+      const input = { ...historical, body: 'README change without a Summary heading.' };
+      assert.equal(parseReleaseCommit(input).summary, historical.summary);
+      assert.throws(
+        () => parseReleaseCommit({ ...input, hash: 'b'.repeat(40) }),
+        /has no release summary/
+      );
+      assert.equal(
+        parseReleaseCommit({ ...input, body: '## Summary\n\nExplicit summary.' }).summary,
+        'Explicit summary.'
+      );
+    }
+  });
+
+  it('recovers the immutable Dependabot update without accepting later missing summaries', () => {
+    const historical = {
+      hash: '0d688ae5773febd2e6c81def59790b04c9e8fd58',
+      subject: 'chore(deps-dev): bump prettier from 3.9.6 to 3.9.8 (#1136)',
+      body: 'Bumps the development-dependencies group with 1 update:\n[prettier].',
+    };
+    assert.equal(
+      parseReleaseCommit(historical).summary,
+      'Update the development formatter Prettier from 3.9.6 to 3.9.8.'
+    );
+    assert.throws(
+      () => parseReleaseCommit({ ...historical, hash: 'b'.repeat(40) }),
+      /has no release summary/
+    );
+    assert.equal(
+      parseReleaseCommit({ ...historical, body: '## Summary\n\nExplicit summary.' }).summary,
+      'Explicit summary.'
+    );
+  });
+});
+
 describe('release-note Git history', () => {
   it('uses the preceding canonical tag and immutable first-parent range', () => {
     const repository = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-release-notes-'));

@@ -113,12 +113,27 @@ async fn allocation_cleanup_refusal_remains_nonterminal_until_recovery_confirms_
         .fail_next_allocation(CapsuleAllocationUnavailable::SourceCheckout);
     harness.cleanup.fail_next();
     let submission = request(Value::Null);
-    assert!(matches!(
-        submit_test_request(&harness.controller, submission.clone()).await,
-        Err(NativeV2CloudError::Supervisor(
-            NativeV2SupervisorError::RuntimeCleanup(_)
-        ))
-    ));
+    let accepted = submit_test_request(&harness.controller, submission.clone())
+        .await
+        .assert_value();
+    let task = match harness
+        .controller
+        .runtimes
+        .lock()
+        .await
+        .get(&accepted.run_id)
+        .cloned()
+    {
+        Some(RuntimeSlot::Preparing(task)) => task,
+        _ => panic!("preparation owns allocation"),
+    };
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !task.is_finished() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .assert_value();
     let stored = harness
         .ledger
         .get_by_submission_key(&submission.submission.submission_key)
@@ -139,7 +154,7 @@ async fn allocation_cleanup_refusal_remains_nonterminal_until_recovery_confirms_
     assert_eq!(
         terminal(&harness.controller, &receipt.run_id).await,
         TerminalResult::Failed {
-            reason: EnumLabel::new("runtime_lost").assert_value_with("label")
+            reason: EnumLabel::new("source_checkout_unavailable").assert_value_with("label")
         }
     );
     assert_eq!(

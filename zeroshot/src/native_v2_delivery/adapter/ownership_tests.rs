@@ -135,7 +135,7 @@ fn probe(directory: &TestDirectory, fault: Fault) -> Arc<FenceProbe> {
         Fault::Panic => 121_002,
         Fault::CleanupDenied => 123_002,
     };
-    let identity = HostedProcessPool::new(uid, uid, uid + 100, uid + 100)
+    let identity = HostedProcessPool::new(uid, uid, uid + 100)
         .assert_value()
         .identity(HostedProcessScope::Writer)
         .assert_value();
@@ -169,22 +169,33 @@ fn probe(directory: &TestDirectory, fault: Fault) -> Arc<FenceProbe> {
 
 async fn run_probe(
     probe: Arc<FenceProbe>,
-) -> Result<crate::native_v2_contract::NodeCompletion, NodeRunnerError> {
+) -> (
+    Result<crate::native_v2_contract::NodeCompletion, NodeRunnerError>,
+    Vec<LiveOutput>,
+) {
     let runner =
         NativeNodeRunner::new(&test_support::admitted(), probe.clone(), probe).assert_value();
     let mut handle = runner
         .start(test_support::request("delivery-fence", "worker", (1, 1)))
         .await
         .assert_value();
-    let _output = handle.take_initial_output().assert_value();
-    let result = handle.completion().await;
+    let mut output = handle.take_initial_output().assert_value();
+    let (result, events) = tokio::join!(handle.completion(), async {
+        let mut events = Vec::new();
+        while let Ok(event) = output.recv().await {
+            if let crate::native_v2_runner::DurableNodeEvent::Output { output, .. } = event {
+                events.push(output);
+            }
+        }
+        events
+    });
     tokio::time::timeout(
         Duration::from_secs(2),
         runner.close_run(&openengine_cluster_protocol::RunId::new("delivery-fence")),
     )
     .await
     .assert_value_with("delivery failure must settle runner activity before run close");
-    result
+    (result, events)
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -195,10 +206,19 @@ async fn root_delivery_panic_reaps_helpers_and_settles_runner_activity() {
     }
     let directory = TestDirectory::new("delivery-panic-cleanup");
     let probe = probe(&directory, Fault::Panic);
-    let Err(NodeRunnerError::DriverDetail(message)) = run_probe(probe.clone()).await else {
+    let (result, events) = run_probe(probe.clone()).await;
+    let Err(NodeRunnerError::DriverDetail(message)) = result else {
         panic!("delivery panic must settle as a sanitized driver failure");
     };
     assert_eq!(message, "Git delivery panicked");
+    assert!(
+        !events
+            .iter()
+            .any(|output| output.stream == LiveOutputStream::Error)
+    );
+    let encoded = format!("{events:?}");
+    assert!(!encoded.contains("injected"));
+    assert!(!encoded.contains("test-only-delivery-credential"));
     assert!(!message.contains("injected"));
     assert!(!message.contains("test-only-delivery-credential"));
     assert!(probe.session.pid.load(Ordering::SeqCst) > 0);
@@ -214,7 +234,7 @@ async fn root_delivery_cleanup_refusal_overrides_an_ordinary_outcome() {
     let directory = TestDirectory::new("delivery-cleanup-refusal");
     let probe = probe(&directory, Fault::CleanupDenied);
     assert!(matches!(
-        run_probe(probe.clone()).await,
+        run_probe(probe.clone()).await.0,
         Err(NodeRunnerError::CleanupUnconfirmed)
     ));
     assert!(probe.helper_survived_fence.load(Ordering::SeqCst));

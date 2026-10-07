@@ -1,4 +1,4 @@
-//! Disposable build workspaces and session-private homes for provider processes.
+//! Shared run workspace and session-private homes for provider processes.
 
 use std::fs;
 use std::io;
@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 
 use crate::execution::driver::DriverCancellation;
 use crate::execution::process::{HostedProcessIdentity, LocalProcessRunner, ProcessRunnerError};
-use crate::native_v2_runner::{DriverControl, DriverInvocation, NodeRole};
+use crate::native_v2_runner::{DriverControl, DriverInvocation};
 
 use super::{ProviderProcessRunners, ProviderSessionCore, process_scope};
 
@@ -88,7 +88,6 @@ impl<'a> ProviderExecution<'a> {
                 self.invocation.node.reference.execution.get()
             )),
             candidate: self.config.workspace.to_owned(),
-            verifier_copy: identity.is_some() && self.invocation.role == NodeRole::Verifier,
             identity,
             cancellation: control.cancellation(),
         })
@@ -135,7 +134,6 @@ struct ExecutionFilesystemSpec {
     home: Arc<PrivateDirectory>,
     root: PathBuf,
     candidate: PathBuf,
-    verifier_copy: bool,
     identity: Option<HostedProcessIdentity>,
     cancellation: DriverCancellation,
 }
@@ -161,13 +159,7 @@ impl ProviderExecutionFiles {
         let scratch = root.path.join("tmp");
         create_private_directory(&scratch)?;
         set_owner(&scratch, specification.identity)?;
-        let workspace = if specification.verifier_copy {
-            let workspace = root.path.join("workspace");
-            copy_candidate(&specification, &workspace)?;
-            workspace
-        } else {
-            specification.candidate
-        };
+        let workspace = specification.candidate;
         set_owner(&root.path, specification.identity)?;
         Ok(Self {
             runner: specification.runner,
@@ -231,27 +223,6 @@ fn set_owner(path: &Path, identity: Option<HostedProcessIdentity>) -> io::Result
     #[cfg(not(target_os = "linux"))]
     let _ = (path, identity);
     Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn copy_candidate(specification: &ExecutionFilesystemSpec, workspace: &Path) -> io::Result<()> {
-    let source = open_copy_root(&specification.candidate)?;
-    let candidate = fs::read_link(copy_source_path(&source))?;
-    let runtime_root = fs::canonicalize(
-        specification
-            .root
-            .parent()
-            .ok_or_else(|| io::Error::other("missing runtime root"))?,
-    )?;
-    if candidate.starts_with(&runtime_root) || runtime_root.starts_with(&candidate) {
-        return Err(io::Error::other("candidate and runtime roots overlap"));
-    }
-    copy_entry(source, workspace, specification)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn copy_candidate(_specification: &ExecutionFilesystemSpec, _workspace: &Path) -> io::Result<()> {
-    Err(io::Error::other("hosted verifier copies require Linux"))
 }
 
 // Hosted filesystem preparation canonicalizes paths before writers start. Pin every component
@@ -344,19 +315,6 @@ fn read_copy_symlink(source: &fs::File) -> io::Result<PathBuf> {
         ));
     }
     Ok(std::ffi::OsString::from_vec(buffer[..length].to_vec()).into())
-}
-
-#[cfg(target_os = "linux")]
-fn copy_entry(
-    source: fs::File,
-    destination: &Path,
-    specification: &ExecutionFilesystemSpec,
-) -> io::Result<()> {
-    let copy = CopySpecification {
-        identity: specification.identity,
-        cancellation: &specification.cancellation,
-    };
-    copy_owned_entry(source, destination, &copy)
 }
 
 #[cfg(target_os = "linux")]

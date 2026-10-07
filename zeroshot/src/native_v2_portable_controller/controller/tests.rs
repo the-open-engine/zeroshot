@@ -84,8 +84,26 @@ async fn boundary_contract_single_run_allocator_refuses_foreign_runs_and_confirm
     assert!(allocator.require_run(&foreign).is_err());
     assert!(allocator.claim_controller(&foreign).await.is_err());
     let admitted = crate::native_v2_runner::test_support::admitted();
-    assert!(allocator.allocate(&foreign, &admitted, None).await.is_err());
-    assert!(allocator.allocate(&run_id, &admitted, None).await.is_err());
+    assert!(
+        allocator
+            .allocate(
+                crate::native_v2_candidate::test_support::allocation_request(
+                    &foreign, &admitted, None
+                )
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        allocator
+            .allocate(
+                crate::native_v2_candidate::test_support::allocation_request(
+                    &run_id, &admitted, None
+                )
+            )
+            .await
+            .is_err()
+    );
     let claim = allocator.claim_controller(&run_id).await.assert_value();
     drop(claim);
 

@@ -640,9 +640,7 @@ fi
         release = release,
     );
     let executable = bin.join("codex");
-    std::fs::write(&executable, script).unwrap();
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+    openengine_cluster_testkit::fixture::write_executable(&executable, script, 0o755).unwrap();
 }
 
 fn write_profile_files(root: &Path) -> (PathBuf, PathBuf) {

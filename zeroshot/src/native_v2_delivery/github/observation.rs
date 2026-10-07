@@ -183,11 +183,8 @@ pub(super) mod test_support {
         program: &std::path::Path,
         source: String,
     ) {
-        use std::os::unix::fs::PermissionsExt;
-
-        std::fs::write(program, source).expect("fixture script must be writable");
-        std::fs::set_permissions(program, std::fs::Permissions::from_mode(0o700))
-            .expect("fixture script must be executable");
+        let result = openengine_cluster_testkit::fixture::write_executable(program, source, 0o700);
+        assert!(result.is_ok(), "write test executable: {result:?}");
     }
 
     #[cfg(unix)]

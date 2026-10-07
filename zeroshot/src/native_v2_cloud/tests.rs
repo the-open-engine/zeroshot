@@ -6,10 +6,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    ConnectionKey, DeclaredConnections, DeclaredEnvironment, GraphSpec, IdempotencyKey, NodeName,
-    NodeRuntimeBinding, ResolvedSource, RunForceParams, RunId, RunSize, RunStatus, RunStatusParams,
-    RunSubmitParams, RunTitle, RuntimePlan, SourceBranchId, SourceRepositoryId, SourceRevisionId,
-    StaticConnectionValues, TerminalResult, WorkerOutcome,
+    ConnectionKey, EnumLabel, DeclaredConnections, DeclaredEnvironment, GraphSpec, IdempotencyKey,
+    NodeName, NodeRuntimeBinding, ResolvedSource, RunForceParams, RunId, RunSize, RunStatus,
+    RunStatusParams, RunSubmitParams, RunTitle, RuntimePlan, SourceBranchId, SourceRepositoryId,
+    SourceRevisionId, StaticConnectionValues, TerminalResult, WorkerOutcome,
 };
 use serde_json::{json, Value};
 use tokio::sync::watch;
@@ -358,6 +358,7 @@ fn exact_test_environment(request: &RunSubmitParams) -> Result<RunEnvironment, N
     ]);
     Ok(RunEnvironment::from_available(
         &request.submission.runtime,
+        request.submission.environment.as_ref(),
         &available,
     )?)
 }
@@ -407,3 +408,20 @@ mod runtime_failure;
 
 #[path = "tests/initialization.rs"]
 mod initialization;
+
+#[path = "tests/restart_logs.rs"]
+mod restart_logs;
+
+fn test_preparation() -> CapsulePreparation {
+    struct Quiet;
+    #[async_trait]
+    impl PreparationProgress for Quiet {
+        async fn log(&self, _line: &str) -> Result<(), CapsuleAllocationUnavailable> {
+            Ok(())
+        }
+    }
+    CapsulePreparation {
+        environment: exact_test_environment(&request(Value::Null)).assert_value(),
+        progress: Arc::new(Quiet),
+    }
+}

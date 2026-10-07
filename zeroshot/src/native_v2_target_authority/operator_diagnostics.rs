@@ -1,3 +1,9 @@
+mod json_lines;
+mod output;
+
+pub use output::OperatorDiagnosticOutput;
+pub use json_lines::OperatorDiagnosticJsonLines;
+
 use std::collections::VecDeque;
 use std::fmt;
 use std::sync::Mutex;
@@ -27,6 +33,7 @@ struct DiagnosticState {
 #[derive(Default)]
 pub(crate) struct OperatorDiagnosticStore {
     state: Mutex<DiagnosticState>,
+    output: Option<OperatorDiagnosticOutput>,
 }
 
 impl fmt::Debug for OperatorDiagnosticStore {
@@ -36,6 +43,13 @@ impl fmt::Debug for OperatorDiagnosticStore {
 }
 
 impl OperatorDiagnosticStore {
+    pub(crate) fn new(output: Option<OperatorDiagnosticOutput>) -> Self {
+        Self {
+            state: Mutex::default(),
+            output,
+        }
+    }
+
     pub(crate) fn record(&self, mut diagnostic: NewOperatorDiagnostic) {
         let (stdout, stdout_truncated) = bounded_text(diagnostic.stdout);
         let (stderr, stderr_truncated) = bounded_text(diagnostic.stderr);
@@ -52,7 +66,7 @@ impl OperatorDiagnosticStore {
             state.diagnostics.pop_front();
         }
         let id = state.next_id.to_string();
-        state.diagnostics.push_back(TargetOperatorDiagnostic {
+        let record = TargetOperatorDiagnostic {
             id,
             run_id: diagnostic.run_id,
             code: diagnostic.code.to_owned(),
@@ -62,7 +76,13 @@ impl OperatorDiagnosticStore {
             stderr: diagnostic.stderr,
             stdout_truncated: diagnostic.stdout_truncated,
             stderr_truncated: diagnostic.stderr_truncated,
-        });
+        };
+        if let Some(output) = &self.output {
+            // The bounded channel has no callbacks or I/O. Publish under the store lock so
+            // concurrent producers preserve the same ordering as the private snapshot IDs.
+            output.publish(record.clone());
+        }
+        state.diagnostics.push_back(record);
     }
 
     pub(crate) fn snapshot(&self, run_id: &RunId) -> TargetOperatorDiagnostics {
@@ -82,23 +102,19 @@ impl OperatorDiagnosticStore {
 }
 
 fn bounded_text(text: String) -> (String, bool) {
-    let mut normalized = text
-        .chars()
-        .map(|character| match character {
+    let mut normalized = String::with_capacity(text.len().min(MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES));
+    for character in text.chars() {
+        let character = match character {
             '\n' | '\r' | '\t' => character,
             character if character.is_control() => '\u{fffd}',
             character => character,
-        })
-        .collect::<String>();
-    if normalized.len() <= MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES {
-        return (normalized, false);
+        };
+        if normalized.len() + character.len_utf8() > MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES {
+            return (normalized, true);
+        }
+        normalized.push(character);
     }
-    let mut boundary = MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES;
-    while !normalized.is_char_boundary(boundary) {
-        boundary = boundary.saturating_sub(1);
-    }
-    normalized.truncate(boundary);
-    (normalized, true)
+    (normalized, false)
 }
 
 #[cfg(test)]

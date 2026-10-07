@@ -61,10 +61,18 @@ impl LocalCliBackend {
         mut recovery: LocalRecoveryDocument,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
         let connections = LocalConnectionStore::new(self.state_root.clone())
-            .resolve(&recovery.submission.runtime, &params.connections)?
+            .resolve(
+                &recovery.submission.runtime,
+                recovery.submission.environment.as_ref(),
+                &params.connections,
+            )?
             .bootstrap_values();
-        let environment = RunEnvironment::exact(&recovery.submission.runtime, connections)
-            .map_err(local_error)?;
+        let environment = RunEnvironment::exact(
+            &recovery.submission.runtime,
+            recovery.submission.environment.as_ref(),
+            connections,
+        )
+        .map_err(local_error)?;
         let checkpoint = self.checkpoint_selection(&params)?;
         recovery.successor_run_id = Some(params.successor_run_id.clone());
         self.write_recovery_document(&params.run_id, &recovery)?;

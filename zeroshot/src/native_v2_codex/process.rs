@@ -12,10 +12,17 @@ use crate::native_v2_contract::TokenUsageDelta;
 use crate::native_v2_runner::{DriverControl, LiveOutput, LiveOutputStream, NodeRunnerError};
 
 use super::output::{CodexOutput, CodexOutputDecoder};
+use super::session::CodexSession;
 
 pub(super) enum ProcessOpen {
     Ready(ProviderProcess),
     ProviderFailure(String),
+}
+
+pub(super) struct ProcessTurnContext<'a> {
+    pub(super) control: &'a DriverControl,
+    pub(super) session: &'a CodexSession,
+    pub(super) resumed: bool,
 }
 
 struct CollectedOutput {
@@ -64,11 +71,11 @@ async fn collect_output(
 pub(super) async fn exchange_turn(
     process: &mut ProviderProcess,
     prompt: &str,
-    control: &DriverControl,
+    context: &ProcessTurnContext<'_>,
     redactions: &[String],
 ) -> Result<CodexOutput, NodeRunnerError> {
     let stdout = process.detach_stdout();
-    let collected = collect_output(stdout, control, redactions);
+    let collected = collect_output(stdout, context.control, redactions);
     let exchange = exchange_process_io(process, prompt.as_bytes(), collected).await;
     let (resolved, usage) = match exchange {
         ProcessExchange::Complete(collected) => {
@@ -76,7 +83,7 @@ pub(super) async fn exchange_turn(
             let output = retain_delivery_evidence(collected.output, collected.delivery_error);
             let completion = finish_process(process, output_complete).await;
             (
-                resolve_process_completion(output, completion, control.is_cancelled()),
+                resolve_process_completion(output, completion, context.control.is_cancelled()),
                 collected.usage,
             )
         }
@@ -87,12 +94,18 @@ pub(super) async fn exchange_turn(
         }) => {
             let output = retain_delivery_evidence(collected.output, collected.delivery_error);
             (
-                resolve_input_failure(output, input_error, completion, control.is_cancelled()),
+                resolve_input_failure(
+                    output,
+                    input_error,
+                    completion,
+                    context.control.is_cancelled(),
+                ),
                 collected.usage,
             )
         }
     };
-    let recorded = control.record_token_usage(usage).await;
+    let normalized_usage = context.session.usage_delta(usage, context.resumed).await;
+    let recorded = context.control.record_token_usage(normalized_usage).await;
     if matches!(
         &resolved,
         Err(NodeRunnerError::Cancelled | NodeRunnerError::CleanupUnconfirmed)
@@ -100,6 +113,7 @@ pub(super) async fn exchange_turn(
         return resolved;
     }
     recorded?;
+    context.session.commit_usage(usage, context.resumed).await;
     resolved
 }
 

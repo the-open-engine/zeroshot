@@ -8,9 +8,8 @@ use openengine_cluster_client::websocket::{DialedWebSocketTransport, WebSocketTr
 use openengine_cluster_protocol::{
     CheckpointId, IdempotencyKey, ResolvedSource, RunCheckpointsParams, RunDiscardWorkspaceParams,
     RunId, RunListParams, RunResumeFrom, NOT_FOUND, WORKSPACE_CHECKPOINTS_KIND, RunResumeParams,
-    RunSize, RunSubmission, RunTitle, RuntimePlan, SourceBranchId, INVALID_PARAMS,
-    SCHEMA_VIOLATION, SourceRepositoryId, SourceRevisionId, TargetPrivateBootstrapRequest,
-    WORKSPACE_RECOVERY_KIND,
+    RunSubmission, RunTitle, SourceBranchId, INVALID_PARAMS, SCHEMA_VIOLATION, SourceRepositoryId,
+    SourceRevisionId, TargetPrivateBootstrapRequest, WORKSPACE_RECOVERY_KIND,
 };
 use openengine_cluster_server::identity::{
     BindingAttributes, ConnectionIdentity, ConnectionIdentityConfig, PrincipalId, TenantId,
@@ -28,7 +27,6 @@ use crate::native_v2_cloud::{
     AllocatedCapsule, CapsuleAllocationUnavailable, CapsuleAllocator, CapsuleCleanupUnavailable,
     CapsuleDestroyed, ControllerClaimUnavailable, ExclusiveControllerClaim,
 };
-use crate::native_v2_contract::{AdmittedRun, CodexProvider};
 use crate::native_v2_supervisor::RunRuntimeExit;
 use crate::v2_run_ledger::fake::FakeRunLedger;
 
@@ -58,10 +56,14 @@ impl CapsuleAllocator for NoAllocation {
 
     async fn allocate(
         &self,
-        _run_id: &RunId,
-        _admitted: &AdmittedRun,
-        _github_token: Option<&str>,
+        request: crate::native_v2_cloud::CapsuleAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
+        let crate::native_v2_cloud::CapsuleAllocationRequest {
+            run_id: _run_id,
+            admitted: _admitted,
+            github_token: _github_token,
+            ..
+        } = request;
         Err(CapsuleAllocationUnavailable::Runtime)
     }
 
@@ -220,14 +222,11 @@ fn request() -> TargetRunRequest {
     TargetRunRequest {
         run_id: run_id(),
         submission: RunSubmission {
+            environment: None,
             title: RunTitle::new("Target authority test").assert_value(),
             graph: graph_fixture("worker", json!({"kind": "null"})),
             initial_input: Value::Null,
-            runtime: RuntimePlan::Codex {
-                provider: CodexProvider::OpenAi,
-                size: RunSize::Small,
-                nodes: BTreeMap::new(),
-            },
+            runtime: crate::native_v2_candidate::test_support::codex_runtime(BTreeMap::new()),
             source: ResolvedSource {
                 repository: SourceRepositoryId::new("owner/repo").assert_value(),
                 branch: SourceBranchId::new("main").assert_value(),

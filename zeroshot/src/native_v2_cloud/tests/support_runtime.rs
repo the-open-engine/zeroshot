@@ -57,7 +57,7 @@ impl AllocatorCore {
 }
 
 #[async_trait]
-trait AllocationGate: Send + Sync {
+pub(super) trait AllocationGate: Send + Sync {
     async fn enter(&self) -> Result<(), CapsuleAllocationUnavailable>;
 }
 
@@ -179,9 +179,7 @@ where
 
     async fn allocate(
         &self,
-        _run_id: &RunId,
-        admitted: &AdmittedRun,
-        _github_token: Option<&str>,
+        request: CapsuleAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         self.core.allocations.fetch_add(1, Ordering::SeqCst);
         self.gate.enter().await?;
@@ -194,7 +192,7 @@ where
         {
             return Err(error);
         }
-        self.core.allocate(admitted)
+        self.core.allocate(request.admitted)
     }
 
     async fn destroy_or_confirm_absent(
@@ -334,3 +332,17 @@ pub(super) async fn seed_controller_reconstructed_run(
 }
 
 use openengine_cluster_testkit::assertions::{AssertValue};
+
+pub(super) async fn wait_for_allocations<G: AllocationGate>(
+    allocator: &TestAllocator<G>,
+    count: usize,
+) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while allocator.allocation_count() < count {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .assert_value();
+    assert_eq!(allocator.allocation_count(), count);
+}

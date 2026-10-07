@@ -242,6 +242,7 @@ impl TargetCommand {
                 listen: args.listen,
                 public_origin: args.public_origin,
                 storage: args.storage,
+                operator_diagnostics_json: args.operator_diagnostics_json,
                 bootstrap_key_file: args.bootstrap_key_file,
             })),
         }
@@ -325,6 +326,12 @@ impl RunArgs {
             title: RunTitle::new(self.title)
                 .map_err(|error| usage(format!("invalid --title: {error}")))?,
             input: self.input,
+            environment: if self.no_environment {
+                Some(crate::native_v2_cli::RunEnvironmentInput::Empty)
+            } else {
+                self.environment
+                    .map(crate::native_v2_cli::RunEnvironmentInput::File)
+            },
             selection,
             repository: route.repository,
             branch: route.branch,

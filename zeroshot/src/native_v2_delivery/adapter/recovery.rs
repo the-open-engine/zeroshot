@@ -122,7 +122,11 @@ impl NativeV2DeliveryAdapter {
         )
     }
 
-    fn redact_feedback(&self, invocation: &DriverInvocation, mut diagnostic: String) -> String {
+    pub(super) fn redact_feedback(
+        &self,
+        invocation: &DriverInvocation,
+        mut diagnostic: String,
+    ) -> String {
         let tokens = [
             self.trusted_github_token.as_deref(),
             github_credential(&invocation.environment).map(GitHubCredential::expose),

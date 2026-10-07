@@ -4,9 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 use openengine_cluster_protocol::{IdempotencyKey, NodeName, RunSize, RunTitle};
-use openengine_cluster_testkit::assertions::AssertValue;
+use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{Value, json};
 use super::*;
+use crate::native_v2_runner::LiveOutputStream;
 use crate::execution::SessionScope;
 use crate::native_v2_candidate::test_support::{
     NodeRequestFixture, TestDirectory, admit, environment_name, full_graph, success_node,
@@ -25,7 +26,13 @@ mod hosted;
 
 const INSTRUCTIONS: &str = "Return answer 42 using the required schema.";
 
-const SCRIPT: &str = include_str!("tests/runtime.py");
+fn script() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/native_v2_copilot/tests/runtime.py"
+    ))
+    .unwrap()
+}
 
 fn binding(names: impl Iterator<Item = String>) -> NodeRuntimeBinding {
     binding_for_model(names, "auto")
@@ -60,6 +67,7 @@ async fn admitted(binding: NodeRuntimeBinding, instructions: &str) -> AdmittedRu
         success_node(),
     ]);
     admit(RunSubmission {
+        environment: None,
         title: RunTitle::new("Copilot contract test").assert_value(),
         graph,
         initial_input: Value::Null,
@@ -115,7 +123,7 @@ impl Fixture {
 
     async fn with_values(mode: &str, extra: BTreeMap<String, String>) -> Self {
         let directory = TestDirectory::new("copilot");
-        let executable = directory.write_executable("copilot", SCRIPT);
+        let executable = directory.write_executable("copilot", &script());
         let mut values = fixture_values(&directory, mode);
         values.insert(auth::TOKEN.to_owned(), "gho_fake-secret".to_owned());
         values.extend(extra);
@@ -186,7 +194,7 @@ impl Fixture {
         base_environment: BTreeMap<String, String>,
     ) -> Self {
         let directory = TestDirectory::new("copilot-provider");
-        let executable = directory.write_executable("copilot", SCRIPT);
+        let executable = directory.write_executable("copilot", &script());
         let mut values = fixture_values(&directory, mode);
         values.extend(extra_values);
         let local_user = local_user(&directory);
@@ -262,7 +270,7 @@ impl Fixture {
 
     async fn registry(explicit: bool, command: bool) -> Self {
         let directory = TestDirectory::new("copilot-registry");
-        let executable = directory.write_executable("copilot", SCRIPT);
+        let executable = directory.write_executable("copilot", &script());
         let copilot_home = directory.child("copilot-home");
         std::fs::create_dir_all(&copilot_home).assert_value();
         let registry = if command {
@@ -326,7 +334,7 @@ impl Fixture {
 
     async fn invalid_registry(contents: &[u8]) -> Self {
         let directory = TestDirectory::new("copilot-invalid-registry");
-        let executable = directory.write_executable("copilot", SCRIPT);
+        let executable = directory.write_executable("copilot", &script());
         let registry_path = directory.child("providers.json");
         std::fs::write(&registry_path, contents).assert_value();
         let values = fixture_values(&directory, "native");
@@ -724,7 +732,17 @@ fn hosted_adapter_discards_user_only_credentials_and_provider_controls() {
 async fn malformed_output_receives_only_two_corrections_in_the_same_session() {
     for mode in ["correction", "malformed"] {
         let fixture = Fixture::new(mode).await;
-        let (_, outcome) = complete(fixture.start(1).await).await;
+        let (events, outcome) = complete(fixture.start(1).await).await;
+        let errors = error_output(&events);
+        let expected = if mode == "correction" { 1 } else { 3 };
+        assert_eq!(
+            errors
+                .iter()
+                .filter(|line| line
+                    .contains("final output rejected: output $.answer must be a integer"))
+                .count(),
+            expected
+        );
         if mode == "correction" {
             verified(outcome);
         } else {
@@ -750,12 +768,106 @@ async fn malformed_output_receives_only_two_corrections_in_the_same_session() {
 
 #[tokio::test]
 async fn fails_closed_on_protocol_identity_and_provider_errors() {
-    for mode in ["version", "identity", "error"] {
+    for (mode, detail) in [
+        ("version", "is incompatible; install CLI 1.0.86"),
+        ("identity", "Copilot returned a different session"),
+        ("error", "rejected [REDACTED]"),
+    ] {
         let fixture = Fixture::new(mode).await;
         let (events, outcome) = complete(fixture.start(1).await).await;
-        assert!(outcome.is_err());
-        assert!(!format!("{events:?} {outcome:?}").contains("gho_fake-secret"));
+        let Err(NodeRunnerError::DriverDetail(error)) = outcome else {
+            panic!("expected provider detail: {outcome:?}");
+        };
+        assert!(error.contains(detail), "missing useful error: {error}");
+        assert!(
+            error_output(&events).is_empty(),
+            "terminal detail must not be emitted twice"
+        );
+        if mode == "version" {
+            assert!(error.contains("stderr: launch note: [REDACTED]"));
+        }
+        assert!(!format!("{events:?} {error}").contains("gho_fake-secret"));
     }
+}
+
+#[tokio::test]
+async fn validation_errors_keep_the_explanation_and_redact_credentials() {
+    for mode in ["validation_secret", "validation_secret_long"] {
+        let fixture = Fixture::new(mode).await;
+        let (events, outcome) = complete(fixture.start(1).await).await;
+        assert_eq!(outcome.assert_value(), WorkerOutcome::malformed());
+        let errors = error_output(&events);
+        assert_eq!(errors.len(), 3);
+        for error in errors {
+            assert!(error.contains("final output rejected:"));
+            assert!(error.contains("unknown field"));
+            assert!(error.contains("[REDACTED]"));
+            assert!(!error.contains("gho_fak"));
+            assert!(!error.contains("Response contract:"));
+            assert!(error.len() <= 8 * 1024);
+        }
+    }
+}
+
+#[tokio::test]
+async fn terminal_failure_returns_detail_with_no_durable_consumer() {
+    let fixture = Fixture::new("version").await;
+    let mut handle = fixture.start(1).await;
+    drop(handle.take_initial_output().assert_value());
+    let error = handle.completion().await.assert_error();
+    assert!(matches!(error, NodeRunnerError::DriverDetail(ref detail)
+        if detail.contains("is incompatible; install CLI 1.0.86")));
+    assert!(!error.to_string().contains("gho_fake-secret"));
+}
+
+fn error_output(events: &[DurableNodeEvent]) -> Vec<&str> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            DurableNodeEvent::Output { output, .. } if output.stream == LiveOutputStream::Error => {
+                Some(output.text.as_str())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn startup_failures_return_actionable_details() {
+    let directory = TestDirectory::new("copilot-missing-executable");
+    let missing = directory.child("missing-copilot");
+    let fixture = Fixture::with_executable(
+        directory,
+        missing,
+        BTreeMap::from([(auth::TOKEN.to_owned(), "gho_fake-secret".to_owned())]),
+        INSTRUCTIONS,
+    )
+    .await;
+    assert_startup_error(
+        &fixture,
+        "process launch failed before start",
+        "gho_fake-secret",
+    )
+    .await;
+
+    let fixture = Fixture::invalid_registry(b"{invalid-secret-registry").await;
+    assert_startup_error(
+        &fixture,
+        "Copilot provider registry is invalid",
+        "invalid-secret-registry",
+    )
+    .await;
+}
+
+async fn assert_startup_error(fixture: &Fixture, detail: &str, secret: &str) {
+    let (events, outcome) = complete(fixture.start(1).await).await;
+    let Err(NodeRunnerError::DriverDetail(error)) = outcome else {
+        panic!("expected startup detail: {outcome:?}");
+    };
+    assert!(error.contains(detail));
+    assert!(error_output(&events).is_empty());
+    assert!(!format!("{events:?} {error}").contains(secret));
+    assert!(!fixture.directory.child("capture").exists());
 }
 
 #[tokio::test]
@@ -835,4 +947,45 @@ fn assert_no_persisted_token(directory: &std::path::Path, token: &[u8]) {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn cancellation_during_cleanup_preserves_an_already_received_provider_error() {
+    let fixture = Fixture::new("error_cleanup").await;
+    let mut handle = fixture.start(1).await;
+    let mut output = handle.take_initial_output().assert_value();
+    tokio::time::timeout(Duration::from_secs(5), output.wait_until_saturated())
+        .await
+        .assert_value();
+    handle.cancel();
+    let (events, completion) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(
+            async {
+                let mut events = Vec::new();
+                while let Ok(event) = output.recv().await {
+                    events.push(event);
+                }
+                events
+            },
+            handle.completion()
+        )
+    })
+    .await
+    .assert_value();
+    let error = completion.assert_error();
+    assert!(
+        matches!(&error, NodeRunnerError::DriverDetail(detail)
+        if detail.contains("rejected [REDACTED]")),
+        "{error:?}"
+    );
+    assert!(!format!("{events:?} {error}").contains("gho_fake-secret"));
+    assert_eq!(
+        events.len(),
+        1027,
+        "all trailing usage must survive cleanup"
+    );
+    assert!(
+        error_output(&events).is_empty(),
+        "terminal detail must not be duplicated"
+    );
 }

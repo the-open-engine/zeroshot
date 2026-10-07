@@ -10,7 +10,6 @@ use super::{DriverControl, LiveOutput, LiveOutputStream, NodeRunnerError};
 
 #[path = "response/guidance.rs"]
 mod guidance;
-pub(crate) use guidance::VerifierWorkspace;
 
 const MAX_RESPONSE_ERROR_BYTES: usize = 8 * 1024;
 const MAX_OUTPUT_CORRECTIONS: usize = 2;
@@ -186,22 +185,31 @@ impl NodeResponseContract {
 pub(crate) struct NodeResponseError(Box<str>);
 
 impl NodeResponseError {
-    fn new(mut message: String) -> Self {
-        if message.len() > MAX_RESPONSE_ERROR_BYTES {
-            let mut end = MAX_RESPONSE_ERROR_BYTES.saturating_sub(3);
-            while !message.is_char_boundary(end) {
-                end -= 1;
-            }
-            message.truncate(end);
-            message.push_str("...");
-        }
+    fn new(message: String) -> Self {
+        // Keep original text transiently until the provider can redact credentials. Display
+        // bounds correction prompts; public diagnostics are bounded only after redaction.
         Self(message.into_boxed_str())
     }
 }
 
 pub(crate) enum AgentResponse {
     Complete(WorkerOutcome),
-    Correction(String),
+    Correction {
+        prompt: String,
+        diagnostic: NodeResponseError,
+    },
+}
+
+impl AgentResponse {
+    pub(crate) fn correction_error(&self) -> Option<NodeRunnerError> {
+        match self {
+            Self::Correction { diagnostic, .. } => Some(NodeRunnerError::DriverDetail(format!(
+                "final output rejected: {}",
+                diagnostic.0
+            ))),
+            Self::Complete(_) => None,
+        }
+    }
 }
 
 pub(crate) struct AgentResponseState {
@@ -233,7 +241,7 @@ impl AgentResponseState {
     ) -> Result<Option<WorkerOutcome>, NodeRunnerError> {
         match response {
             AgentResponse::Complete(outcome) => Ok(Some(outcome)),
-            AgentResponse::Correction(_) if self.corrections == MAX_OUTPUT_CORRECTIONS => {
+            AgentResponse::Correction { .. } if self.corrections == MAX_OUTPUT_CORRECTIONS => {
                 control
                     .emit(LiveOutput::new(
                         LiveOutputStream::System,
@@ -242,9 +250,9 @@ impl AgentResponseState {
                     .await?;
                 Ok(Some(WorkerOutcome::malformed()))
             }
-            AgentResponse::Correction(correction) => {
+            AgentResponse::Correction { prompt, .. } => {
                 self.corrections += 1;
-                self.prompt = correction;
+                self.prompt = prompt;
                 Ok(None)
             }
         }
@@ -275,7 +283,10 @@ pub(crate) fn resolve_agent_response_with_dialect(
     };
     Ok(match parsed {
         Ok(outcome) => AgentResponse::Complete(outcome),
-        Err(error) => AgentResponse::Correction(render_agent_correction(contract, &error)?),
+        Err(error) => AgentResponse::Correction {
+            prompt: render_agent_correction(contract, &error)?,
+            diagnostic: error,
+        },
     })
 }
 
@@ -296,7 +307,15 @@ struct ProviderResponseEnvelope {
 
 impl fmt::Display for NodeResponseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
+        if self.0.len() <= MAX_RESPONSE_ERROR_BYTES {
+            return formatter.write_str(&self.0);
+        }
+        let mut end = MAX_RESPONSE_ERROR_BYTES.saturating_sub(3);
+        while !self.0.is_char_boundary(end) {
+            end -= 1;
+        }
+        formatter.write_str(&self.0[..end])?;
+        formatter.write_str("...")
     }
 }
 
@@ -445,22 +464,13 @@ fn closed_object_schema(properties: BTreeMap<String, Value>, required: Vec<Strin
     })
 }
 
-/// Renders a provider-neutral node turn contract with isolated verifier guidance.
+/// Renders a provider-neutral node turn contract for the shared workspace.
 pub fn render_agent_prompt(
     instructions: &NodeInstructions,
     input: &Value,
     response: &NodeResponseContract,
 ) -> Result<String, NodeRunnerError> {
-    render_agent_prompt_for(instructions, input, response, VerifierWorkspace::Isolated)
-}
-
-pub(crate) fn render_agent_prompt_for(
-    instructions: &NodeInstructions,
-    input: &Value,
-    response: &NodeResponseContract,
-    verifier_workspace: VerifierWorkspace,
-) -> Result<String, NodeRunnerError> {
-    let runtime_guidance = guidance::runtime_guidance(response, verifier_workspace);
+    let runtime_guidance = guidance::runtime_guidance(response);
     let instructions = instructions.as_str();
     let input = serde_json::to_string(input).map_err(|_| NodeRunnerError::Driver)?;
     let response = serde_json::to_string(response).map_err(|_| NodeRunnerError::Driver)?;

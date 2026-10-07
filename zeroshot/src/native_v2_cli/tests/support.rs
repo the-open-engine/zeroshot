@@ -60,7 +60,7 @@ pub(in crate::native_v2_cli) enum Call {
     },
     ProfileSet {
         target: Option<String>,
-        request: RunProfileSetRequest,
+        request: Box<RunProfileSetRequest>,
     },
     ProfileDelete {
         target: Option<String>,
@@ -74,6 +74,7 @@ pub(in crate::native_v2_cli) enum Call {
         target: Option<String>,
         title: RunTitle,
         runtime: RuntimePlan,
+        environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
         input: Value,
         connections: RunConnectionValues,
         github_token: Option<String>,
@@ -539,7 +540,7 @@ impl NativeV2CliBackend for FakeBackend {
     ) -> Result<RunProfileMutationResult, NativeV2CliError> {
         self.calls.lock().assert_value().push(Call::ProfileSet {
             target: target.map(str::to_owned),
-            request: request.clone(),
+            request: Box::new(request.clone()),
         });
         Ok(RunProfileMutationResult {
             profile: RunProfile {
@@ -621,6 +622,7 @@ impl NativeV2CliBackend for FakeBackend {
             target: target.map(str::to_owned),
             title: intent.title,
             runtime: intent.runtime,
+            environment: intent.environment,
             input: intent.initial_input,
             connections,
             github_token,

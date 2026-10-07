@@ -14,7 +14,11 @@ const fixtureEnvironment = Object.fromEntries(
 );
 
 function execute(command, args, options) {
-  const result = spawnSync(command, args, { encoding: 'utf8', env: fixtureEnvironment, ...options });
+  const result = spawnSync(command, args, {
+    encoding: 'utf8',
+    env: fixtureEnvironment,
+    ...options,
+  });
   assert.equal(result.status, 0, result.error?.message ?? result.stdout + result.stderr);
   return result.stdout.trim();
 }
@@ -29,11 +33,12 @@ function sourceFixture(directory) {
   fs.writeFileSync(path.join(directory, 'scripts/docs_hook.py'), 'release hook');
   fs.writeFileSync(path.join(directory, 'docs/project/versioning.md'), 'release policy');
   fs.writeFileSync(path.join(directory, 'source-marker'), 'release');
-  git(['add', '.']);
+  git(['add', 'scripts/docs_hook.py', 'docs/project/versioning.md', 'source-marker']);
   git(['commit', '--quiet', '-m', 'release source']);
   const release = git(['rev-parse', 'HEAD']);
   fs.writeFileSync(path.join(directory, 'source-marker'), 'main');
-  git(['commit', '--quiet', '-am', 'main source']);
+  git(['add', 'source-marker']);
+  git(['commit', '--quiet', '-m', 'main source']);
   const main = git(['rev-parse', 'HEAD']);
   git(['update-ref', 'refs/remotes/origin/main', main]);
   git(['checkout', '--quiet', '--detach', release]);

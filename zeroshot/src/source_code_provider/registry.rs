@@ -21,6 +21,39 @@ fn validate_operation_inspection(
     Ok(inspection)
 }
 
+async fn reconcile_returned_receipt(
+    provider: &dyn SourceCodeProvider,
+    request: &SourceOperationRequest,
+    receipt: SourceOperationReceipt,
+) -> Result<SourceOperationReceipt, SourceCallError> {
+    let outcome = SourceInvocationOutcome::ReturnedReceipt;
+    let observed = provider
+        .inspect_operation(request)
+        .await
+        .map_err(|failure| SourceCallError::PostEffectInspectionFailed { outcome, failure })?;
+    let authoritative = validate_operation_inspection(request, observed).map_err(|_| {
+        SourceCallError::PostEffectInvalidEvidence {
+            outcome,
+            reason: "post-effect inspection changed exact source operation authority",
+        }
+    })?;
+    match authoritative {
+        SourceOperationInspection::Applied(observed)
+            if receipt.matches_request(request) && *observed == receipt =>
+        {
+            Ok(receipt)
+        }
+        SourceOperationInspection::Applied(_) => Err(SourceCallError::PostEffectInvalidEvidence {
+            outcome,
+            reason: "direct and inspected receipts did not prove the same exact authority",
+        }),
+        inspection => Err(SourceCallError::UnreconciledUncertainty {
+            outcome,
+            inspection,
+        }),
+    }
+}
+
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum SourceRegistryError {
     #[error("source provider {provider} is already registered")]
@@ -273,39 +306,7 @@ impl SourceCodeProviderRegistry {
 
         let performed = provider.operate(request, workspace).await;
         match performed {
-            Ok(receipt) => {
-                let outcome = SourceInvocationOutcome::ReturnedReceipt;
-                let observed = provider
-                    .inspect_operation(request)
-                    .await
-                    .map_err(|failure| SourceCallError::PostEffectInspectionFailed {
-                        outcome,
-                        failure,
-                    })?;
-                let authoritative = validate_operation_inspection(request, observed).map_err(
-                    |_| SourceCallError::PostEffectInvalidEvidence {
-                        outcome,
-                        reason: "post-effect inspection changed exact source operation authority",
-                    },
-                )?;
-                match authoritative {
-                    SourceOperationInspection::Applied(observed)
-                        if receipt.matches_request(request) && *observed == receipt =>
-                    {
-                        Ok(receipt)
-                    }
-                    SourceOperationInspection::Applied(_) => {
-                        Err(SourceCallError::PostEffectInvalidEvidence {
-                            outcome,
-                            reason: "direct and inspected receipts did not prove the same exact authority",
-                        })
-                    }
-                    inspection => Err(SourceCallError::UnreconciledUncertainty {
-                        outcome,
-                        inspection,
-                    }),
-                }
-            }
+            Ok(receipt) => reconcile_returned_receipt(provider.as_ref(), request, receipt).await,
             Err(failure) if failure.code() == SourceProviderFailureCode::Indeterminate => {
                 let outcome = SourceInvocationOutcome::Indeterminate;
                 let observed = provider

@@ -62,6 +62,7 @@ async fn source_checkout_resolves_again_instead_of_reusing_an_earlier_token() {
     };
     let environment = RunEnvironment::with_resolver(
         &runtime,
+        None,
         BTreeMap::new(),
         DynamicConnectionPlan {
             resolver: Arc::new(RotatingResolver::default()),

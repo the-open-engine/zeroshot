@@ -242,7 +242,9 @@ async fn prepare_controller_start(
     let admitted = NativeV2Admission
         .admit_with_policy(bootstrap.submission.clone(), bootstrap.delivery_policy)
         .await?;
-    let environment = bootstrap.environment.for_runtime(&admitted.runtime)?;
+    let environment = bootstrap
+        .environment
+        .for_runtime(&admitted.runtime, admitted.environment.as_ref())?;
     let (paths, lease, ledger) = open_controller_storage(&bootstrap.storage)?;
     let existing = validate_existing_run(ledger.as_ref(), &bootstrap.run_id).await?;
     Ok(PreparedControllerStart {
@@ -416,11 +418,9 @@ impl CapsuleAllocator for SingleRunAllocator {
 
     async fn allocate(
         &self,
-        run_id: &RunId,
-        _admitted: &AdmittedRun,
-        _github_token: Option<&str>,
+        request: crate::native_v2_cloud::CapsuleAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
-        self.require_run(run_id)?;
+        self.require_run(request.run_id)?;
         let runtime = self
             .runtime
             .lock()

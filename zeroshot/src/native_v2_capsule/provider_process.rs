@@ -16,7 +16,6 @@ use crate::execution::process::{
 use crate::native_v2_contract::NodeRuntimeBinding;
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeRole, NodeRunnerError,
-    VerifierWorkspace,
 };
 use crate::worker_catalog::ReasoningEffort;
 
@@ -49,7 +48,7 @@ pub(crate) fn agent_workspace_access(
 
 #[path = "provider_process/diagnostic.rs"]
 mod diagnostic;
-pub(crate) use diagnostic::{provider_failure_diagnostic, safe_provider_text};
+pub(crate) use diagnostic::{provider_failure_diagnostic, redact_provider_error, safe_provider_text};
 #[cfg(test)]
 use diagnostic::MAX_PROVIDER_DIAGNOSTIC_BYTES;
 
@@ -66,13 +65,6 @@ impl ProviderProcessRunners {
 
     pub(crate) const fn local() -> Self {
         Self::Local
-    }
-
-    pub(crate) const fn verifier_workspace(self) -> VerifierWorkspace {
-        match self {
-            Self::Hosted(_) => VerifierWorkspace::Isolated,
-            Self::Local => VerifierWorkspace::Shared,
-        }
     }
 
     pub(crate) const fn is_hosted(self) -> bool {
@@ -429,12 +421,12 @@ impl ProviderFailureRetry {
     ) -> Result<String, NodeRunnerError> {
         let diagnostic =
             provider_failure_diagnostic(self.provider, failure.detail, None, &self.redactions);
+        if !failure.retryable || self.used {
+            return Err(NodeRunnerError::DriverDetail(diagnostic));
+        }
         control
             .emit(LiveOutput::new(LiveOutputStream::Error, diagnostic)?)
             .await?;
-        if !failure.retryable || self.used {
-            return Err(NodeRunnerError::Driver);
-        }
         self.used = true;
         control
             .emit(LiveOutput::new(
@@ -449,22 +441,35 @@ impl ProviderFailureRetry {
         })
     }
 
-    pub(crate) async fn report_terminal(
+    pub(crate) fn redact_error(&self, error: NodeRunnerError) -> NodeRunnerError {
+        redact_provider_error(error, &self.redactions)
+    }
+
+    pub(crate) async fn report_correction(
         &self,
         control: &DriverControl,
         error: &NodeRunnerError,
     ) -> Result<(), NodeRunnerError> {
-        let detail = match error {
-            NodeRunnerError::Driver => None,
-            NodeRunnerError::DriverDetail(detail) => Some(detail.as_str()),
-            _ => return Ok(()),
-        };
-        let diagnostic = provider_failure_diagnostic(self.provider, detail, None, &self.redactions);
-        control
-            .emit(LiveOutput::new(LiveOutputStream::Error, diagnostic)?)
-            .await?;
-        Ok(())
+        report_provider_error(self.provider, error, &self.redactions, control).await
     }
+}
+
+/// Publish useful provider-owned detail after redacting credentials known at this boundary.
+pub(crate) async fn report_provider_error(
+    provider: &str,
+    error: &NodeRunnerError,
+    redactions: &[String],
+    control: &DriverControl,
+) -> Result<(), NodeRunnerError> {
+    let detail = match error {
+        NodeRunnerError::Driver => None,
+        NodeRunnerError::DriverDetail(detail) => Some(detail.as_str()),
+        _ => return Ok(()),
+    };
+    let diagnostic = provider_failure_diagnostic(provider, detail, None, redactions);
+    control
+        .emit(LiveOutput::new(LiveOutputStream::Error, diagnostic)?)
+        .await
 }
 
 pub(crate) fn redaction_values<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {

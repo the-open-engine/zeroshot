@@ -17,7 +17,12 @@ async fn allocated_start(harness: &Harness) -> AllocatedRunStart {
         .assert_value();
     let capsule = harness
         .allocator
-        .allocate(&run_id, &stored.admitted, None)
+        .allocate(CapsuleAllocationRequest {
+            run_id: &run_id,
+            admitted: &stored.admitted,
+            github_token: None,
+            preparation: test_preparation(),
+        })
         .await
         .assert_value();
     let controller_claim = harness
@@ -36,7 +41,12 @@ async fn allocated_start(harness: &Harness) -> AllocatedRunStart {
 async fn oversized_seed_start(harness: &Harness) -> AllocatedRunStart {
     let mut start = allocated_start(harness).await;
     // An explicitly malformed prerequisite exceeds the separate combined-event bound.
-    start.capsule.execution_seed = vec![DurableExecution {
+    start.capsule.execution_seed = oversized_seed();
+    start
+}
+
+fn oversized_seed() -> Vec<DurableExecution> {
+    vec![DurableExecution {
         dispatch_position: HistoryPosition::new(1).assert_value(),
         node_instance: NodeInstanceId::new(1).assert_value(),
         execution: ExecutionId::new(1).assert_value(),
@@ -53,8 +63,7 @@ async fn oversized_seed_start(harness: &Harness) -> AllocatedRunStart {
                 artifacts: Vec::new(),
             },
         },
-    }];
-    start
+    }]
 }
 
 async fn assert_not_launched(harness: &Harness, run_id: &RunId, terminal_expected: bool) {
@@ -144,4 +153,65 @@ async fn rejected_seed_waits_for_confirmed_cleanup_before_terminalization() {
     );
     assert_eq!(harness.cleanup.terminal_seen(), vec![false, false]);
     assert_eq!(harness.allocator.allocation_count(), 1);
+}
+
+struct InvalidSeedAllocator(Arc<FakeAllocator>);
+
+#[async_trait]
+impl CapsuleAllocator for InvalidSeedAllocator {
+    async fn claim_controller(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Arc<dyn ExclusiveControllerClaim>, ControllerClaimUnavailable> {
+        self.0.claim_controller(run_id).await
+    }
+
+    async fn allocate(
+        &self,
+        request: CapsuleAllocationRequest<'_>,
+    ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
+        let mut capsule = self.0.allocate(request).await?;
+        capsule.execution_seed = oversized_seed();
+        Ok(capsule)
+    }
+
+    async fn destroy_or_confirm_absent(
+        &self,
+        run_id: &RunId,
+        exit: RunRuntimeExit,
+    ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable> {
+        self.0.destroy_or_confirm_absent(run_id, exit).await
+    }
+}
+
+#[tokio::test]
+async fn asynchronous_initialization_failure_releases_preparation_and_controller_authority() {
+    let harness = harness(Behavior::Complete).await;
+    let controller = NativeV2CloudController::new(
+        harness.ledger.clone(),
+        Arc::new(InvalidSeedAllocator(harness.allocator.clone())),
+    )
+    .await
+    .assert_value();
+    let receipt = submit_test_request(&controller, request(Value::Null))
+        .await
+        .assert_value();
+    assert!(matches!(terminal(&controller, &receipt.run_id).await,
+        TerminalResult::Failed { reason } if reason.as_str() == "runtime_unavailable"));
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !controller.runtimes.lock().await.is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .assert_value();
+    assert!(
+        harness
+            .allocator
+            .claim_controller(&receipt.run_id)
+            .await
+            .is_ok()
+    );
+    assert_eq!(harness.driver.starts.load(Ordering::SeqCst), 0);
+    assert_eq!(harness.cleanup.exits(), vec![RunRuntimeExit::RuntimeLost]);
 }

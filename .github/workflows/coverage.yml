@@ -94,6 +94,9 @@ jobs:
           chmod +x target/llvm-cov-target/debug/restic
           cargo llvm-cov --workspace --no-report
           cargo llvm-cov --package zeroshot --features ui --no-report
+          # Run the hosted boundary tests instead of their non-root early returns.
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER='sudo -n --preserve-env=LLVM_PROFILE_FILE' \
+            cargo llvm-cov test --package zeroshot --lib --no-report root_ -- --test-threads=1
           cargo llvm-cov report --ignore-filename-regex "$COVERAGE_IGNORE_REGEX" --json --output-path coverage.json
           cargo llvm-cov report --ignore-filename-regex "$COVERAGE_IGNORE_REGEX" --lcov --output-path lcov.info
 

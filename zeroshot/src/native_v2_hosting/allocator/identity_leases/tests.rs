@@ -6,10 +6,9 @@ use super::ActiveRunProcessPools;
 
 #[test]
 fn active_leases_are_disjoint_and_the_released_slot_is_reused() {
-    let pools = ActiveRunProcessPools::new(
-        HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
-    )
-    .assert_value();
+    let pools =
+        ActiveRunProcessPools::new(HostedProcessPool::new(10_002, 10_002, 20_000).assert_value())
+            .assert_value();
     let first = pools.acquire().assert_value();
     let second = pools.acquire().assert_value();
     let first_uid = writer_uid(first.process_pool());
@@ -26,7 +25,7 @@ fn active_leases_are_disjoint_and_the_released_slot_is_reused() {
 fn exhausted_identity_space_rejects_the_lease() {
     assert!(
         ActiveRunProcessPools::new(
-            HostedProcessPool::new(10_002, 10_002, u32::MAX - 1, 20_000).assert_value(),
+            HostedProcessPool::new(10_002, 10_002, u32::MAX - 1).assert_value(),
         )
         .is_err()
     );

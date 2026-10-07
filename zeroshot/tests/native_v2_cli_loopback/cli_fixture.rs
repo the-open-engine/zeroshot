@@ -178,12 +178,10 @@ pub(crate) fn cli_command(invocation: CliInvocation<'_>) -> tokio::process::Comm
 }
 
 fn install_source_git(config: &Path, revision: &str) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
     assert!(revision.len() == 40 && revision.bytes().all(|byte| byte.is_ascii_hexdigit()));
     std::fs::create_dir_all(config).assert_value();
     let path = config.join("source-git");
-    std::fs::write(
+    openengine_cluster_testkit::fixture::write_executable(
         &path,
         format!(
             r#"#!/bin/sh
@@ -197,11 +195,9 @@ case " $* " in
 esac
 "#
         ),
+        0o700,
     )
     .assert_value();
-    let mut permissions = std::fs::metadata(&path).assert_value().permissions();
-    permissions.set_mode(0o700);
-    std::fs::set_permissions(&path, permissions).assert_value();
     path
 }
 

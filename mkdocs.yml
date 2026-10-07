@@ -54,6 +54,8 @@ nav:
       - Runtimes and connections: concepts/runtimes-and-connections.md
       - Targets: concepts/targets.md
   - Guides:
+      - Prepare a runtime environment: guides/runtime-environments.md
+      - Build a review loop: guides/review-loop.md
       - Observe and control runs: guides/observe-and-control.md
       - Use a local graph as an ACP agent: guides/acp.md
       - Python SDK: guides/python-sdk.md
@@ -68,6 +70,7 @@ nav:
       - Cluster protocol:
           - API: reference/cluster/api.md
           - Graph contract: reference/cluster/graph.md
+          - RuntimePlan: reference/runtime-plan.md
           - Admission: reference/cluster/admission.md
           - Lifecycle: reference/cluster/lifecycle.md
           - Watch and replay: reference/cluster/watch.md
@@ -76,6 +79,8 @@ nav:
   - Project:
       - Documentation versions: project/versioning.md
       - Distribution contract: zeroshot-distribution.md
+  - Zeroshot Cloud: https://cloud.zeroshot.sh/docs
+  - zeroshot.sh: https://zeroshot.sh/?utm_source=github&utm_medium=docs&utm_campaign=zeroshot
 
 plugins:
   - search
@@ -109,6 +114,10 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path: [docs]
+      check_paths: true
+      restrict_base_path: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -127,10 +136,13 @@ extra:
     default: current
     alias: false
   social:
+    - icon: fontawesome/solid/globe
+      link: https://zeroshot.sh/?utm_source=github&utm_medium=docs&utm_campaign=zeroshot
+      name: zeroshot.sh
     - icon: fontawesome/brands/github
       link: https://github.com/the-open-engine/zeroshot
     - icon: fontawesome/brands/discord
-      link: https://discord.gg/9Tnxd7XWa
+      link: https://theopenengine.com/discord
     - icon: fontawesome/brands/linkedin
       link: https://www.linkedin.com/company/the-open-engine-company
     - icon: fontawesome/brands/x-twitter

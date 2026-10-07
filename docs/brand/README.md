@@ -1,55 +1,176 @@
-# Zeroshot brand assets
+# Zeroshot README banners
 
-These repository and social assets use **The Open Engine** visual system. The Fraunces wordmark ends
-with a rust period (`Zeroshot.`). In the engraved **guilloché seal**, an executor-verifier lemniscate
-crosses at the rust verdict node; engineering-plate registration ticks and the `№ 001` serial
-complete the mark.
+Editable HTML/CSS sources and rendered light/dark PNGs for the repository README.
+The design follows [The Open Engine](https://theopenengine.com) and
+[Zeroshot](https://zeroshot.sh), inspected on October 2, 2026: warm paper,
+handwritten headings and diagrams, yellow notes, and the company mascot.
 
 ## Files
 
-| File                                                  | What                                                           | Size            |
-| ----------------------------------------------------- | -------------------------------------------------------------- | --------------- |
-| `oec-crow.png`, `oec-favicon.svg`                     | Company crow for the docs header and browser icon              | 908×968 / 64×64 |
-| `zeroshot-hero-light.png` / `zeroshot-hero-dark.png`  | README hero (`<picture>`, light/dark)                          | 2560×640        |
-| `zeroshot-og.png`                                     | Social / OpenGraph card (dark)                                 | 2400×1260       |
-| `zeroshot-seal.svg`                                   | Standalone seal                                                | n/a             |
-| `zeroshot-hero-{light,dark}.html`, `zeroshot-og.html` | Reproducible sources (Fraunces via Google Fonts + inline seal) | n/a             |
+- `zeroshot-hero-light.html` and `zeroshot-hero-dark.html`: source layouts.
+- `hero.css`: shared layout and theme tokens.
+- `zeroshot-hero-light.png` and `zeroshot-hero-dark.png`: 2560 × 800 exports
+  from a 1280 × 400 canvas at 2× scale.
+- `social/starred-by.html`: the "Starred by engineers at" strip under the README badges. Its
+  companies come from the self-reported GitHub company field of zeroshot stargazers, each profile
+  checked by hand, so the copy says "engineers at", never "used by". Marks are Simple Icons (CC0);
+  brands that asked Simple Icons to remove their marks stay off. `starred-by-light.png` and
+  `starred-by-dark.png` are its transparent 2× exports; re-render steps are below.
+- `assets/`: local fonts, font licenses, and the website mascot. Rendering needs
+  no network requests.
 
-## Tokens
+## Design
 
-Rust `#C2240C` is the only accent. Reserve it for the period, the verdict/PASS mark, or one rule;
-never use it as decoration or fill. The remaining colors are cream `#FAF7F1`, ink `#171411`, and OG
-dark `#14110E`.
-
-Set the wordmark and headlines in **Fraunces**, body copy in **Spline Sans**, and labels or `№` in
-the system monospace face.
+Reenie Beanie is the handwriting face; Fraunces 600 is the company wordmark.
+The light palette uses paper `#FAF7F1`, pen ink `#26221C`, and rust `#C2240C`.
+Dark mode uses `#171411`, cream text, and the documentation theme's lighter rust
+`#ED6B55` for readable accents. Notes retain yellow paper and dark ink in both themes.
+The diagrams illustrate each product's feedback loop, rather than runtime status.
 
 ## Re-render
 
-Edit the `.html` source files, then render PNGs with headless Chrome at 2× device scale. Puppeteer is
-not a project dependency; install it on demand (`npx puppeteer browsers install chrome`) or run the
-snippet below with a one-off `npx -p puppeteer node`:
+From the repository root, install rendering tools outside the product dependencies:
 
-```js
-const puppeteer = require('puppeteer');
-
-async function render() {
-  const browser = await puppeteer.launch();
+```sh
+npm install --prefix /tmp/open-engine-banner-tools playwright@1.61.0
+/tmp/open-engine-banner-tools/node_modules/.bin/playwright install chromium
+NODE_PATH=/tmp/open-engine-banner-tools/node_modules node <<'JS'
+const { chromium } = require('playwright');
+const { resolve } = require('node:path');
+const { pathToFileURL } = require('node:url');
+(async () => {
+  const browser = await chromium.launch();
   try {
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 320, deviceScaleFactor: 2 }); // OG: 1200x630
-    await page.goto('file://.../zeroshot-hero-light.html', { waitUntil: 'networkidle0' });
-    await page.evaluate(() => document.fonts.ready);
-    const hero = await page.$('.hero'); // OG: '.og'
-    if (hero === null) throw new Error('render target not found');
-    await hero.screenshot({ path: 'zeroshot-hero-light.png' });
+    const page = await browser.newPage({
+      viewport: { width: 1280, height: 400 },
+      deviceScaleFactor: 2,
+    });
+    for (const theme of ['light', 'dark']) {
+      const stem = resolve(`docs/brand/zeroshot-hero-${theme}`);
+      await page.goto(pathToFileURL(`${stem}.html`).href);
+      await page.evaluate(() => document.fonts.ready);
+      const ready = await page.evaluate(() =>
+        [...document.fonts].every(font => font.status === 'loaded') &&
+        [...document.images].every(image => image.complete && image.naturalWidth > 0)
+      );
+      if (!ready) throw new Error('Banner assets failed to load');
+      await page.locator('.hero').screenshot({ path: `${stem}.png` });
+    }
   } finally {
     await browser.close();
   }
-}
+})().catch(error => { console.error(error); process.exitCode = 1; });
+JS
+```
 
-render().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+Review both exports at full resolution and README display width before committing.
+
+## Asset provenance
+
+- `assets/oec-mascot.png`: unchanged copy of
+  `company/content/brand/logos/open-engine-mascot-website.png`, originally from
+  <https://theopenengine.com/landing/oec-mascot.png>.
+- Fonts: Google Fonts' Fraunces 600 (optical-size variable) and Reenie Beanie 400,
+  downloaded October 2, 2026. Their SIL Open Font Licenses are bundled beside them.
+  Upstream: [Fraunces](https://github.com/google/fonts/tree/main/ofl/fraunces),
+  [Reenie Beanie](https://github.com/google/fonts/tree/main/ofl/reeniebeanie).
+
+## Other assets
+
+`zeroshot-og.html` / `zeroshot-og.png` and `zeroshot-seal.svg` retain the earlier
+engraved-seal design. They are separate from the README banners. `social/` contains
+the existing README social links, and `oec-crow.png` / `oec-favicon.svg` are used by
+the documentation theme.
+
+## Workflow diagrams
+
+The workflow diagram shows both reviewers, both repair paths, and optional Git delivery.
+Editable SVG labels and shapes live in `diagram-sources/`. Run the exporter after
+editing them:
+
+```sh
+python3 -m venv /tmp/open-engine-diagram-tools
+/tmp/open-engine-diagram-tools/bin/pip install fonttools==4.63.0
+/tmp/open-engine-diagram-tools/bin/python docs/brand/outline-diagrams.py
+```
+
+Exports land in `docs/assets/`. Text becomes vector paths, retaining accessible
+labels, so GitHub needs no external fonts. Each SVG supports light and dark mode.
+Review both themes after changes, including the mobile layouts where supplied.
+Body text uses [Spline Sans](https://github.com/google/fonts/tree/main/ofl/splinesans),
+with its SIL Open Font License bundled in `assets/`.
+
+The animated version is authored in the [shared assets repository](https://github.com/the-open-engine/assets/tree/main/compositions/zeroshot-readme). Its timeline illustrates a review rejection and
+a delivery failure; both repairs return to both reviewers.
+
+The 22-second GIF exports are `docs/assets/zeroshot-demo.gif` (light) and
+`docs/assets/zeroshot-demo-dark.gif` (dark), rendered at 1600 × 940 and 15 fps.
+The README uses the static SVG when reduced motion is preferred.
+
+## Social buttons
+
+`social/buttons.html` is the source for the README call-to-action, zeroshot.sh,
+and X buttons. The Discord button is the row's only filled rust button, so it reads
+as the primary action; the other buttons stay ink pills with rust icons. Exports are
+70 px tall (35 px at 2×) and are displayed at `height="30"`.
+
+Re-render both themes with the Playwright install above:
+
+```sh
+NODE_PATH=/tmp/open-engine-banner-tools/node_modules node <<'JS'
+const { chromium } = require('playwright');
+const { resolve } = require('node:path');
+const { pathToFileURL } = require('node:url');
+(async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({ viewport: { width: 480, height: 160 }, deviceScaleFactor: 2 });
+    for (const theme of ['light', 'dark']) {
+      await page.goto(pathToFileURL(resolve('docs/brand/social/buttons.html')).href);
+      await page.evaluate(t => { document.documentElement.dataset.theme = t; }, theme);
+      await page.evaluate(() => document.fonts.ready);
+      for (const id of ['discord-cta', 'zeroshot-site', 'x']) {
+        await page.locator(`#${id}`).screenshot({
+          path: resolve(`docs/brand/social/${id}-${theme}.png`),
+          omitBackground: true,
+        });
+      }
+    }
+  } finally {
+    await browser.close();
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });
+JS
+```
+
+### Starred-by strip
+
+With the same tools installed, render both themes of `social/starred-by.html`:
+
+```sh
+NODE_PATH=/tmp/open-engine-banner-tools/node_modules node <<'JS'
+const { chromium } = require('playwright');
+const { resolve } = require('node:path');
+const { pathToFileURL } = require('node:url');
+(async () => {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 300 }, deviceScaleFactor: 2 });
+    const source = resolve('docs/brand/social/starred-by.html');
+    for (const theme of ['light', 'dark']) {
+      await page.goto(pathToFileURL(source).href);
+      await page.evaluate(t => { document.documentElement.dataset.theme = t; }, theme);
+      await page.evaluate(() => document.fonts.ready);
+      const ready = await page.evaluate(() => [...document.fonts].every(font => font.status === 'loaded'));
+      if (!ready) throw new Error('Strip fonts failed to load');
+      await page.locator('.strip').screenshot({
+        path: `docs/brand/social/starred-by-${theme}.png`,
+        omitBackground: true,
+      });
+    }
+  } finally {
+    await browser.close();
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });
+JS
 ```

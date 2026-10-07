@@ -31,6 +31,14 @@ async fn terminalizing_cancelled_writer_requires_confirmed_cleanup() {
                 ));
                 assert!(snapshot.terminal.is_none());
                 assert_eq!(snapshot.active_executions().count(), 1);
+                let tail = harness
+                    .ledger
+                    .snapshot_and_tail(&harness.supervisor.run_id, None)
+                    .await
+                    .assert_value();
+                assert!(tail.events.iter().any(|stored| matches!(&stored.event,
+                    RunEvent::SafeLog { execution: Some(_), stream: SafeLogStream::Error, line, .. }
+                        if line.as_str().contains("provider process cleanup could not be confirmed"))));
             } else {
                 let expected = TerminalResult::Failed {
                     reason: EnumLabel::new(reason).assert_value(),
@@ -68,24 +76,51 @@ async fn start_cancellable_writer(error: NodeRunnerError) -> (Harness, ActiveDis
         )]),
     )
     .await;
-    let Initialization::Program(program) = harness.supervisor.initialize().await.assert_value()
-    else {
-        panic!("new run must initialize a program");
-    };
-    let snapshot = stored_run(&harness.ledger).await.snapshot;
-    let reduction = reduce(&program.admitted, &snapshot).assert_value();
-    let mut active = ActiveDispatches::default();
-    harness
-        .supervisor
-        .dispatch(
-            &program,
-            dispatch_decisions(&harness.supervisor.run_id, reduction.decisions),
-            &mut active,
-        )
-        .await
-        .assert_value();
+    let active = dispatch_initial(&harness).await;
     tokio::time::timeout(Duration::from_secs(1), barrier.wait())
         .await
         .assert_value_with("writer entered driver");
     (harness, active)
+}
+
+struct RejectedRuntimeCleanup;
+
+#[async_trait]
+impl RunRuntimeCleanup for RejectedRuntimeCleanup {
+    async fn cleanup(&self, _exit: RunRuntimeExit) -> Result<(), RuntimeCleanupUnavailable> {
+        Err(RuntimeCleanupUnavailable)
+    }
+}
+
+#[tokio::test]
+async fn runtime_cleanup_failure_retains_actual_node_errors_without_settling_them() {
+    for force in [false, true] {
+        let (mut harness, mut active) =
+            start_cancellable_writer(NodeRunnerError::SessionLost).await;
+        harness.supervisor.runtime_cleanup = Some(Arc::new(RejectedRuntimeCleanup));
+        let result = if force {
+            harness
+                .supervisor
+                .terminalize_force(&mut active.tasks)
+                .await
+        } else {
+            harness.supervisor.terminalize_lost(&mut active.tasks).await
+        };
+        assert!(matches!(
+            result,
+            Err(NativeV2SupervisorError::RuntimeCleanup(_))
+        ));
+        let snapshot = stored_run(&harness.ledger).await.snapshot;
+        assert!(snapshot.terminal.is_none());
+        assert_eq!(snapshot.active_executions().count(), 1);
+        let mut logs = super::failure_logs::public_subscription(&harness).await;
+        let records = logs.read_available().await.assert_value();
+        assert!(records.iter().any(|record| {
+            record
+                .record
+                .message
+                .as_str()
+                .contains("a reusable node session was lost")
+        }));
+    }
 }

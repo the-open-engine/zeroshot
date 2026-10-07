@@ -66,6 +66,7 @@ async fn same_environment_name_can_resolve_from_different_keys_on_different_node
     };
     let environment = RunEnvironment::exact(
         &runtime,
+        None,
         BTreeMap::from([
             (
                 ConnectionKey::new("first").assert_value(),
@@ -128,14 +129,14 @@ fn dynamic_environment(
 ) -> (EnvironmentVariableName, NodeRuntimeBinding, RunEnvironment) {
     let name = EnvironmentVariableName::new("GH_TOKEN").assert_value();
     let node = binding("github", &name);
-    let runtime = RuntimePlan::Codex {
-        provider: CodexProvider::OpenAi,
-        size: RunSize::Small,
-        nodes: BTreeMap::from([(NodeName::new("deliver").assert_value(), node.clone())]),
-    };
+    let runtime = crate::native_v2_candidate::test_support::codex_runtime(BTreeMap::from([(
+        NodeName::new("deliver").assert_value(),
+        node.clone(),
+    )]));
     let key = ConnectionKey::new("github").assert_value();
     let environment = RunEnvironment::with_resolver(
         &runtime,
+        None,
         BTreeMap::new(),
         DynamicConnectionPlan {
             keys: BTreeSet::from([key.clone()]),
@@ -194,4 +195,45 @@ async fn runtime_refresh_preserves_resolution_failure_classification() {
             Some(expected)
         );
     }
+}
+
+#[tokio::test]
+async fn rebind_uses_admitted_public_variables_without_replacing_connection_values() {
+    let token = EnvironmentVariableName::new("TOKEN").assert_value();
+    let setting = EnvironmentVariableName::new("NODE_ENV").assert_value();
+    let node = binding("registry", &token);
+    let runtime = RuntimePlan::Codex {
+        provider: CodexProvider::OpenAi,
+        size: RunSize::Small,
+        nodes: BTreeMap::from([(NodeName::new("agent").assert_value(), node.clone())]),
+    };
+    let definition = |value: &str| RuntimeEnvironment {
+        variables: BTreeMap::from([(setting.clone(), value.to_owned())]),
+        ..Default::default()
+    };
+    let original = RunEnvironment::from_available(
+        &runtime,
+        Some(&definition("old")),
+        &BTreeMap::from([(token.clone(), "private-value".to_owned())]),
+    )
+    .assert_value();
+    let admitted = definition("new");
+    let rebound = original
+        .for_runtime(&runtime, Some(&admitted))
+        .assert_value();
+    let resolved = rebound.resolve(&node).await.assert_value();
+    assert_eq!(resolved.get(&setting), Some("new"));
+    assert_eq!(resolved.get(&token), Some("private-value"));
+    assert_eq!(
+        original.resolve(&node).await.assert_value().get(&setting),
+        Some("old")
+    );
+    assert_eq!(
+        rebound
+            .preparation_values(&admitted)
+            .await
+            .assert_value()
+            .get("NODE_ENV"),
+        Some(&"new".to_owned())
+    );
 }

@@ -543,12 +543,13 @@ fn assert_update_process_boundaries_fail_before_replacement() {
 
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt as _;
-
+        let write_executable = |path: &Path, contents: &[u8]| {
+            openengine_cluster_testkit::fixture::write_executable(path, contents, 0o755)
+                .assert_value()
+        };
         let directory = tempfile::tempdir().assert_value();
         let candidate = directory.path().join("zeroshot");
-        fs::write(&candidate, b"#!/bin/sh\nprintf 'zeroshot 8.2.1\\n'\n").assert_value();
-        fs::set_permissions(&candidate, fs::Permissions::from_mode(0o755)).assert_value();
+        write_executable(&candidate, b"#!/bin/sh\nprintf 'zeroshot 8.2.1\\n'\n");
         smoke(&candidate, version).assert_value();
         assert!(smoke(&candidate, ReleaseVersion([8, 2, 2])).is_err());
         let missing = directory.path().join("missing");
@@ -556,18 +557,16 @@ fn assert_update_process_boundaries_fail_before_replacement() {
         assert!(smoke(&missing, version).is_err());
 
         let restic = directory.path().join("restic");
-        fs::write(
+        write_executable(
             &restic,
             b"#!/bin/sh\nprintf 'restic 0.19.1 compiled with go1.25\\n'\n",
-        )
-        .assert_value();
-        fs::set_permissions(&restic, fs::Permissions::from_mode(0o755)).assert_value();
+        );
         smoke_restic(&restic).assert_value();
         for invalid in [
             b"#!/bin/sh\nprintf 'restic 0.19.0 compiled with go1.25\\n'\n".as_slice(),
             b"#!/bin/sh\nexit 1\n".as_slice(),
         ] {
-            fs::write(&restic, invalid).assert_value();
+            write_executable(&restic, invalid);
             assert!(smoke_restic(&restic).is_err());
         }
         assert!(smoke_restic(&missing).is_err());

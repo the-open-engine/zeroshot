@@ -51,6 +51,7 @@ enum CliCommand {
     ///
     /// The built-in `cloud` target points to https://api.cloud.zeroshot.sh.
     /// Run `zeroshot target login cloud` to sign in.
+    /// See https://cloud.zeroshot.sh/docs for Cloud setup.
     Target {
         #[command(subcommand)]
         command: TargetCommand,
@@ -134,6 +135,12 @@ enum UtilityCommand {
     ///
     /// By default, restart the original graph using its latest retained workspace.
     /// Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`.
+    /// The successor resolves credentials again. Export GH_TOKEN before resuming a named-target
+    /// run that needs it for private source checkout or Git delivery.
+    ///
+    /// Target runs reuse the saved environment definition: setup runs before workspace restore,
+    /// then startup runs before the graph. Startup must tolerate existing workspace files.
+    /// Services, Docker state, and agent conversations are not restored.
     Resume(RunResumeArgs),
 
     /// List one page of a run's saved workspace checkpoints as JSON.
@@ -345,6 +352,10 @@ struct TargetServeArgs {
     #[arg(long, value_name = "DIRECTORY")]
     storage: PathBuf,
 
+    /// Write private operator diagnostics as JSON lines to stdout.
+    #[arg(long)]
+    operator_diagnostics_json: bool,
+
     #[arg(long, value_name = "PATH", hide = true)]
     bootstrap_key_file: Option<PathBuf>,
 }
@@ -449,7 +460,36 @@ struct TemplateShowArgs {
     across every executable graph node and supplies graph-visible Git delivery bindings itself.
     Omitted connections reuse native local login for codex/openai, claude/anthropic, and
     copilot/github; other local lanes and contained targets derive their canonical connection
-    requirements."#)]
+    requirements.
+
+ENVIRONMENT PREPARATION
+    For Docker or Cloud targets, pass --environment environment.json with a separate, flat JSON
+    definition (not a profile field or an "environment" wrapper):
+
+      {
+        "setup": "apt-get update && apt-get install -y jq",
+        "startup": "npm ci",
+        "variables": {"CI": "true"}
+      }
+
+    Setup runs as root before checkout or workspace restore. Startup runs as the non-root
+    workspace owner in the checkout before any agent starts. Workers and reviewers share the
+    prepared workspace. Both hooks rerun on resume; startup must tolerate existing files.
+
+    Install OS packages in setup, project dependencies in startup, and shared executable tools
+    under $ZEROSHOT_TOOLS/bin (already on every hook and agent's PATH). Shell exports last only
+    for that hook; use variables for public values shared with agents. Scripts and variables
+    are public. If hooks need secrets, add e.g. "connections": {"package-registry": ["NPM_TOKEN"]}.
+    Hook connections are separate from node connections.
+
+    Hook failures stop the run before agents start and use no graph retry attempts.
+    Inspect `zeroshot logs RUN_ID --target NAME` for preparation output.
+    Omit both flags to allow host defaults; direct Docker defaults to the base environment.
+    --no-environment sends {} to bypass host defaults. Local runs use the invoking machine and
+    reject hooks and hook connections.
+
+    Installation, services, limits, and recovery:
+    https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/"#)]
 struct RunArgs {
     /// Human-readable title recorded with the run.
     #[arg(long, value_name = "TITLE")]
@@ -474,6 +514,14 @@ struct RunArgs {
     /// Expand one secret-free agent runtime across every executable graph node.
     #[arg(long, value_name = "FILE")]
     uniform_runtime_config: Option<PathBuf>,
+
+    /// Load a JSON environment definition: setup, startup, public variables, and hook connections.
+    #[arg(long, value_name = "FILE", conflicts_with = "no_environment")]
+    environment: Option<PathBuf>,
+
+    /// Send an empty environment ({}) to bypass the target's configured default.
+    #[arg(long, conflicts_with = "environment")]
+    no_environment: bool,
 
     /// Use a profile: NAME, local:NAME, user:NAME, or org:NAME.
     ///
@@ -508,7 +556,10 @@ struct RunArgs {
     #[arg(short = 'd', long)]
     detach: bool,
 
-    /// Validate and materialize the run without submitting it or contacting a target.
+    /// Validate and materialize the run without submitting it or running preparation scripts.
+    ///
+    /// Remote profiles still require target access. This does not check dependency installation
+    /// or connection availability.
     #[arg(long)]
     validate_only: bool,
 

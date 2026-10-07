@@ -136,7 +136,11 @@ where
     materialize_provider_access(&mut resolved.runtime, placement)
         .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
     let intent = prepare_intent(run, resolved.graph, resolved.runtime)?;
-    let connections = select_connections(&intent.runtime, &available)?;
+    if run.target.is_none() {
+        crate::native_v2_local::validate_local_environment(intent.environment.as_ref())
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+    }
+    let connections = select_connections(&intent.runtime, intent.environment.as_ref(), &available)?;
     let github_token = run
         .target
         .as_ref()
@@ -287,6 +291,13 @@ fn prepare_intent(
         graph,
         initial_input,
         runtime,
+        environment: match &run.environment {
+            None => None,
+            Some(crate::native_v2_cli::RunEnvironmentInput::Empty) => Some(Default::default()),
+            Some(crate::native_v2_cli::RunEnvironmentInput::File(path)) => {
+                Some(read_json("run environment", path)?)
+            }
+        },
         branch: run.branch.clone(),
         submission_key,
     })
@@ -294,13 +305,16 @@ fn prepare_intent(
 
 pub(super) fn select_connections<F>(
     runtime: &RuntimePlan,
+    definition: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
     available: F,
 ) -> Result<RunConnectionValues, NativeV2CliError>
 where
     F: Fn(&str) -> Option<OsString>,
 {
     let mut selected = BTreeMap::new();
-    for (key, fields) in runtime.connection_requirements() {
+    for (key, fields) in
+        openengine_cluster_protocol::run_connection_requirements(runtime, definition)
+    {
         let mut values = BTreeMap::new();
         for name in fields {
             let Some(value) = available(name.as_str()) else {

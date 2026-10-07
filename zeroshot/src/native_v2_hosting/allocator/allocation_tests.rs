@@ -64,7 +64,7 @@ exec /usr/bin/git "$@"
             executable_search_path: "/usr/local/bin:/usr/bin:/bin".to_owned(),
             git_program: program,
             gh_program: PathBuf::from("/usr/bin/false"),
-            process_pool: HostedProcessPool::new(uid - 1, uid - 1, uid, uid).assert_value(),
+            process_pool: HostedProcessPool::new(uid - 1, uid - 1, uid).assert_value(),
             operator_diagnostics: Arc::new(OperatorDiagnosticStore::default()),
         })
         .assert_value()
@@ -113,14 +113,12 @@ exec /usr/bin/git "$@"
         }
     }
 
-    async fn allocate(&self) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
-        self.allocator
-            .allocate(
-                &self.run_id,
-                &self.admitted,
-                Some("checkout-test-only-credential"),
-            )
-            .await
+    fn request(&self) -> CapsuleAllocationRequest<'_> {
+        crate::native_v2_candidate::test_support::allocation_request(
+            &self.run_id,
+            &self.admitted,
+            Some("checkout-test-only-credential"),
+        )
     }
 
     fn helper_pid(&self) -> Option<libc::pid_t> {
@@ -201,7 +199,7 @@ async fn root_failed_checkout_retains_helper_workspace_and_lease_until_cleanup_s
     let fixture = AllocationFixture::new(false).await;
     let failure = {
         let _denied = KillCapabilityGuard::suspend();
-        fixture.allocate().await
+        fixture.allocator.allocate(fixture.request()).await
     };
     assert!(matches!(
         failure,
@@ -242,11 +240,20 @@ async fn root_cancelled_checkout_remains_destroyable_before_its_uid_is_reused() 
         return;
     }
     let fixture = AllocationFixture::new(true).await;
-    let mut allocation = Box::pin(fixture.allocate());
+    let mut allocation = Box::pin(fixture.allocator.allocate(fixture.request()));
     let pid = tokio::select! {
         _ = &mut allocation => panic!("checkout returned before cancellation"),
         pid = fixture.wait_for_helper() => pid,
     };
+    // A different accepted run can be stopped before it allocates, without waiting for this one.
+    let unrelated = RunId::new("cancelled-before-allocation");
+    let cleanup = tokio::time::timeout(
+        Duration::from_secs(1),
+        fixture
+            .allocator
+            .destroy_or_confirm_absent(&unrelated, RunRuntimeExit::ForceStopped),
+    )
+    .await;
     drop(allocation);
     assert!(helper_running(pid));
     let state = fixture.retained_state().await;
@@ -254,6 +261,7 @@ async fn root_cancelled_checkout_remains_destroyable_before_its_uid_is_reused() 
     assert!(state.process_pool.lock().await.is_some());
     fixture.destroy().await.assert_value();
     fixture.assert_released(pid).await;
+    cleanup.assert_value().assert_value();
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -264,7 +272,7 @@ async fn preexisting_run_directory_is_preserved_after_allocation_and_destroy_fai
     let sentinel = run_root.join("retained-work");
     std::fs::write(&sentinel, "must survive allocation refusal").assert_value();
     assert!(matches!(
-        fixture.allocate().await,
+        fixture.allocator.allocate(fixture.request()).await,
         Err(CapsuleAllocationUnavailable::Runtime)
     ));
     assert!(fixture.destroy().await.is_err());
@@ -310,7 +318,7 @@ async fn root_idle_domain_refusal_preserves_unowned_helpers_and_existing_work() 
             std::fs::write(&sentinel, "belongs to an earlier allocation").assert_value();
         }
         assert!(matches!(
-            fixture.allocate().await,
+            fixture.allocator.allocate(fixture.request()).await,
             Err(CapsuleAllocationUnavailable::Runtime)
         ));
         assert!(

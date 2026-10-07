@@ -12,6 +12,10 @@ pub enum CapsuleAllocationUnavailable {
     Runtime,
     #[error("source checkout failed: repository access, branch, or revision is unavailable")]
     SourceCheckout,
+    #[error("environment setup failed; inspect the preparation log")]
+    EnvironmentSetup,
+    #[error("environment startup failed; inspect the preparation log")]
+    EnvironmentStartup,
 }
 
 impl CapsuleAllocationUnavailable {
@@ -20,6 +24,8 @@ impl CapsuleAllocationUnavailable {
         match self {
             Self::Runtime => "runtime_unavailable",
             Self::SourceCheckout => "source_checkout_unavailable",
+            Self::EnvironmentSetup => "environment_setup_failed",
+            Self::EnvironmentStartup => "environment_startup_failed",
         }
     }
 }
@@ -95,7 +101,47 @@ impl AllocatedCapsule {
     }
 }
 
+/// Run-owned preparation output. Implementations persist safe lines before returning.
+#[async_trait]
+pub trait PreparationProgress: Send + Sync {
+    async fn log(&self, line: &str) -> Result<(), CapsuleAllocationUnavailable>;
+}
+
+#[derive(Clone)]
+pub struct CapsulePreparation {
+    pub environment: RunEnvironment,
+    pub progress: Arc<dyn PreparationProgress>,
+}
+
+impl CapsulePreparation {
+    pub fn quiet(
+        runtime: &crate::native_v2_contract::RuntimePlan,
+    ) -> Result<Self, crate::native_v2_supervisor::RunEnvironmentError> {
+        Ok(Self {
+            environment: RunEnvironment::exact(runtime, None, Default::default())?,
+            progress: Arc::new(QuietPreparation),
+        })
+    }
+}
+
+struct QuietPreparation;
+
+#[async_trait]
+impl PreparationProgress for QuietPreparation {
+    async fn log(&self, _line: &str) -> Result<(), CapsuleAllocationUnavailable> {
+        Ok(())
+    }
+}
+
+pub struct CapsuleAllocationRequest<'a> {
+    pub run_id: &'a RunId,
+    pub admitted: &'a AdmittedRun,
+    pub github_token: Option<&'a str>,
+    pub preparation: CapsulePreparation,
+}
+
 pub struct RetainedAllocationRequest<'a> {
+    pub preparation: CapsulePreparation,
     pub selection: crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection,
     pub source_run_id: &'a RunId,
     pub run_id: &'a RunId,
@@ -123,9 +169,7 @@ pub trait CapsuleAllocator: Send + Sync {
     /// Once allocation succeeds, cleanup authority is also carried by [`AllocatedCapsule`].
     async fn allocate(
         &self,
-        run_id: &RunId,
-        admitted: &AdmittedRun,
-        github_token: Option<&str>,
+        request: CapsuleAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable>;
 
     /// Destroys an allocator-known capsule for a controller-reconstructed run, or confirms that

@@ -184,3 +184,29 @@ test('template open messages cannot also supply a profile or a foreign revision'
   state.emit(command);
   assert.deepEqual(state.commands, [command]);
 });
+
+test('hosted environment storage requires an explicit collection inside the authorized service mount', () => {
+  for (const environmentApi of [
+    undefined,
+    '//other.example/environments',
+    '/another/environments',
+    '/_bff/orgs/org/workspace/user/environments#fragment',
+    '/_bff/orgs/org/workspace/user/environments/',
+  ]) {
+    const state = setup();
+    state.emit({ ...state.init, view: 'environments', environmentApi });
+    assert.equal(state.configurations.length, 0);
+    state.bridge.dispose();
+  }
+  const state = setup();
+  const environmentApi = `${state.init.apiBase}environments?context=repository-1`;
+  state.emit({ ...state.init, environmentApi });
+  assert.equal(
+    state.configurations.length,
+    0,
+    'Plain profile authoring cannot receive an environment service'
+  );
+  state.emit({ ...state.init, view: 'environments', environmentApi });
+  assert.equal(state.bridge.configuration?.environmentApi, environmentApi);
+  state.bridge.dispose();
+});

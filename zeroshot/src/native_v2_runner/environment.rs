@@ -47,6 +47,17 @@ impl ResolvedEnvironment {
         })
     }
 
+    pub(crate) fn with_variables(
+        mut self,
+        variables: &BTreeMap<EnvironmentVariableName, String>,
+    ) -> Self {
+        let values = Arc::make_mut(&mut self.values);
+        for (name, value) in variables {
+            values.entry(name.clone()).or_insert_with(|| value.clone());
+        }
+        self
+    }
+
     #[must_use]
     pub fn get(&self, name: &EnvironmentVariableName) -> Option<&str> {
         self.values.get(name).map(String::as_str)

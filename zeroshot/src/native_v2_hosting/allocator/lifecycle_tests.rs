@@ -52,8 +52,7 @@ fn test_allocator(root: &Path) -> ProductionCapsuleAllocator {
         executable_search_path: "/usr/bin:/bin".to_owned(),
         git_program: harness.clone(),
         gh_program: harness,
-        process_pool: HostedProcessPool::new(8_000_000, 8_000_000, 8_001_000, 8_001_000)
-            .assert_value(),
+        process_pool: HostedProcessPool::new(8_000_000, 8_000_000, 8_001_000).assert_value(),
         operator_diagnostics: Arc::new(OperatorDiagnosticStore::default()),
     })
     .assert_value()
@@ -451,7 +450,15 @@ fn hosted_copilot_harness_and_invalid_filesystem_layout_preserve_capsule_boundar
     assert_eq!(config.executable, PathBuf::from("/usr/bin/false"));
     assert_eq!(config.workspace, filesystem.workspace);
     assert_eq!(config.runtime_home, filesystem.runtime_home);
-    assert!(config.base_environment.is_empty());
+    assert_eq!(
+        config.base_environment.get("ZEROSHOT_TOOLS"),
+        Some(&root.child("tools").to_string_lossy().into_owned())
+    );
+    assert!(
+        config
+            .search_path
+            .starts_with(&format!("{}:", root.child("tools/bin").display()))
+    );
     assert!(config.local_command_environment.is_empty());
 
     assert!(production_filesystem(root.path(), root.path(), process_pool).is_err());

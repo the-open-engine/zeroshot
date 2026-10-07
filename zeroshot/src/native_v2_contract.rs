@@ -48,6 +48,8 @@ pub struct RunSubmissionIntent {
     pub initial_input: Value,
     pub runtime: RuntimePlan,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<SourceBranchId>,
     pub submission_key: IdempotencyKey,
 }
@@ -59,6 +61,7 @@ impl From<&RunSubmission> for RunSubmissionIntent {
             graph: submission.graph.clone(),
             initial_input: submission.initial_input.clone(),
             runtime: submission.runtime.clone(),
+            environment: submission.environment.clone(),
             branch: None,
             submission_key: submission.submission_key.clone(),
         }
@@ -74,7 +77,24 @@ pub struct AdmittedRun {
     pub graph: CompiledGraphIr,
     pub initial_input: Value,
     pub runtime: RuntimePlan,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
     pub source: ResolvedSource,
+}
+
+impl RunSubmissionIntent {
+    #[must_use]
+    pub fn connection_requirements(
+        &self,
+    ) -> openengine_cluster_protocol::RunConnectionRequirements {
+        openengine_cluster_protocol::run_connection_requirements(
+            &self.runtime,
+            self.environment.as_ref(),
+        )
+        .into_iter()
+        .map(|(key, names)| (key, names.into_iter().collect()))
+        .collect()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]

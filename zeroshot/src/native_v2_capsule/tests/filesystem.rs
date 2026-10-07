@@ -12,7 +12,7 @@ fn temporary_root() -> PathBuf {
 fn capsule_filesystem_rejects_nested_workspace_and_runtime_roots() {
     let root = temporary_root();
     fs::create_dir(&root).assert_value();
-    let pool = HostedProcessPool::new(31_002, 31_002, 32_000, 32_000).assert_value();
+    let pool = HostedProcessPool::new(31_002, 31_002, 32_000).assert_value();
 
     let workspace = root.join("workspace-parent");
     fs::create_dir(&workspace).assert_value();
@@ -60,7 +60,7 @@ fn run_as(uid: u32, gid: u32, program: &str, arguments: &[&Path]) -> bool {
 /// Run this exact test as root (the cloud capsule's launch identity) to exercise real UID checks.
 #[test]
 #[cfg(target_os = "linux")]
-fn root_capsule_permissions_enforce_writer_and_parallel_verifier_boundaries() {
+fn root_capsule_permissions_share_workspace_and_keep_distinct_session_homes() {
     if unsafe { libc::geteuid() } != 0 {
         eprintln!("root-only capsule permission gate skipped outside the capsule identity");
         return;
@@ -69,7 +69,7 @@ fn root_capsule_permissions_enforce_writer_and_parallel_verifier_boundaries() {
     fs::create_dir(&root).assert_value();
     let workspace = root.join("workspace");
     let runtime_home = root.join("runtime-home");
-    let pool = HostedProcessPool::new(31_002, 31_002, 32_000, 32_000).assert_value();
+    let pool = HostedProcessPool::new(31_002, 31_002, 32_000).assert_value();
     assert!(matches!(
         prepare_capsule_filesystem(CapsuleFilesystemSpec {
             workspace: &workspace,
@@ -94,7 +94,7 @@ fn root_capsule_permissions_enforce_writer_and_parallel_verifier_boundaries() {
 
     assert_prepared_metadata(&prepared, &writer);
     assert_workspace_access(&prepared, &writer, &left, &right);
-    assert_private_home_isolation(&prepared, &left, &right);
+    assert_distinct_session_homes(&prepared, &left, &right);
     fs::remove_dir_all(root).assert_value();
 }
 
@@ -134,13 +134,13 @@ fn assert_workspace_access(
         "/usr/bin/touch",
         &[&writer_file]
     ));
-    assert!(!run_as(
+    assert!(run_as(
         left.uid(),
         left.gid(),
         "/usr/bin/touch",
         &[&writer_file]
     ));
-    assert!(!run_as(
+    assert!(run_as(
         right.uid(),
         right.gid(),
         "/usr/bin/touch",
@@ -155,7 +155,7 @@ fn assert_workspace_access(
 }
 
 #[cfg(target_os = "linux")]
-fn assert_private_home_isolation(
+fn assert_distinct_session_homes(
     prepared: &CapsuleFilesystem,
     left: &crate::execution::process::HostedProcessIdentity,
     right: &crate::execution::process::HostedProcessIdentity,
@@ -166,33 +166,31 @@ fn assert_private_home_isolation(
     let right_home = right
         .prepare_private_home(&prepared.runtime_home)
         .assert_value();
-    assert_ne!(left.uid(), right.uid());
-    let mut left_child = verifier_isolation_child(left.uid(), left.gid(), &left_home, &right_home);
-    let mut right_child =
-        verifier_isolation_child(right.uid(), right.gid(), &right_home, &left_home);
+    assert_eq!(left.uid(), right.uid());
+    assert_ne!(left_home, right_home);
+    let mut left_child = session_home_child(left.uid(), left.gid(), &left_home);
+    let mut right_child = session_home_child(right.uid(), right.gid(), &right_home);
     assert!(left_child.wait().assert_value().success());
     assert!(right_child.wait().assert_value().success());
-    assert!(left_home.join("own").exists());
-    assert!(right_home.join("own").exists());
-    assert!(!left_home.join("stolen").exists());
-    assert!(!right_home.join("stolen").exists());
+    assert_eq!(
+        fs::read_to_string(left_home.join("session")).assert_value(),
+        left_home.to_string_lossy()
+    );
+    assert_eq!(
+        fs::read_to_string(right_home.join("session")).assert_value(),
+        right_home.to_string_lossy()
+    );
 }
 
 #[cfg(target_os = "linux")]
-fn verifier_isolation_child(
-    uid: u32,
-    gid: u32,
-    own_home: &Path,
-    peer_home: &Path,
-) -> std::process::Child {
+fn session_home_child(uid: u32, gid: u32, own_home: &Path) -> std::process::Child {
     use std::os::unix::process::CommandExt;
 
     Command::new("/bin/sh")
         .arg("-c")
-        .arg("touch \"$OWN/own\"; ! touch \"$PEER/stolen\"")
+        .arg("printf %s \"$OWN\" > \"$OWN/session\"")
         .env_clear()
         .env("OWN", own_home)
-        .env("PEER", peer_home)
         .uid(uid)
         .gid(gid)
         .stdin(Stdio::null())

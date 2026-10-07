@@ -323,10 +323,17 @@ async fn only_exact_acp_leases_keep_an_embedded_owner_live_without_a_socket() {
             .is_none()
     );
     drop(acp_turn_lease);
-    assert!(
-        !crate::native_v2_portable_controller::ControllerLease::is_held(&paths.acp_turn_lease())
-            .expect("probe released ACP turn lease")
-    );
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while crate::native_v2_portable_controller::ControllerLease::is_held(
+            &paths.acp_turn_lease(),
+        )
+        .expect("probe released ACP turn lease")
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("inherited ACP turn lease descriptor should close");
     assert!(
         crate::native_v2_portable_controller::ControllerLease::is_held(&paths.lease())
             .expect("probe retained controller lease")
@@ -348,10 +355,15 @@ async fn only_exact_acp_leases_keep_an_embedded_owner_live_without_a_socket() {
     .assert_value_with("write unusable controller readiness");
     assert!(status.failure(&snapshot).await.is_err());
     drop(controller_lease);
-    assert!(
-        !crate::native_v2_portable_controller::ControllerLease::is_held(&paths.lease())
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while crate::native_v2_portable_controller::ControllerLease::is_held(&paths.lease())
             .expect("probe released controller lease")
-    );
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("inherited controller lease descriptor should close");
 }
 
 #[tokio::test]

@@ -260,6 +260,7 @@ fn profile_set_request() -> RunProfileSetRequest {
 
 fn merge_plan_request() -> PreparedMergePlanRequest {
     PreparedMergePlanRequest {
+        environment: None,
         submission_key: IdempotencyKey::new("oecp-merge-plan").assert_value(),
         title: RunTitle::new("OECP merge plan").assert_value(),
         expires_at: "2026-09-24T00:00:00Z".to_owned(),

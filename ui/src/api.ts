@@ -6,7 +6,8 @@ export type ApiClient = <T>(
   path: string,
   body?: unknown,
   signal?: AbortSignal,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
+  method?: 'GET' | 'POST' | 'DELETE'
 ) => Promise<T>;
 
 export class ApiError extends Error {
@@ -27,10 +28,11 @@ export function createApiClient(base: URL, fetcher: typeof fetch = fetch): ApiCl
     path: string,
     body?: unknown,
     signal?: AbortSignal,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
+    method: 'GET' | 'POST' | 'DELETE' = body === undefined ? 'GET' : 'POST'
   ): Promise<T> => {
     const response = await fetcher(new URL(path, base), {
-      method: body === undefined ? 'GET' : 'POST',
+      method,
       headers: {
         ...headers,
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),

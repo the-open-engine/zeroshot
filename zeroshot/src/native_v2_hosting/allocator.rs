@@ -1,4 +1,8 @@
+mod environment_hooks;
+use environment_hooks::HookContext;
 mod identity_leases;
+mod lifecycle;
+use lifecycle::AllocationTurns;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
@@ -23,9 +27,10 @@ use crate::native_v2_capsule::{
 };
 use crate::native_v2_claude::{ClaudeAdapterConfig, ClaudeProcessEnvironment};
 use crate::native_v2_cloud::{
-    AllocatedCapsule, CapsuleAllocationUnavailable, CapsuleAllocator, CapsuleCleanup,
-    CapsuleCleanupUnavailable, CapsuleDestroyed, ControllerClaimUnavailable,
-    ExclusiveControllerClaim, RetainedAllocationRequest, RetainedAllocationUnavailable,
+    AllocatedCapsule, CapsuleAllocationRequest, CapsuleAllocationUnavailable, CapsuleAllocator,
+    CapsuleCleanup, CapsulePreparation, CapsuleCleanupUnavailable, CapsuleDestroyed,
+    ControllerClaimUnavailable, ExclusiveControllerClaim, RetainedAllocationRequest,
+    RetainedAllocationUnavailable,
 };
 use crate::native_v2_codex::NativeV2CodexConfig;
 use crate::native_v2_contract::{AdmittedRun, RuntimePlan};
@@ -45,6 +50,7 @@ use super::{
     HostedWorkspace, HostedWorkspaceRequest, HostedWorkspaceStorage, ProductionHostingError,
     set_traversable_directory,
 };
+use super::environment::{self, EnvironmentProcesses, HookPhase};
 use super::repository::{RepositoryInstall, install_repository, production_source};
 use identity_leases::{ActiveRunProcessPool, ActiveRunProcessPools};
 
@@ -91,6 +97,8 @@ struct CapsuleBuildRequest<'a> {
     github_token: Option<&'a str>,
     install_source: bool,
     transfer_retained_workspace: bool,
+    preparation: CapsulePreparation,
+    retained_restore: Option<(&'a RunId, CheckpointRestoreSelection)>,
 }
 
 struct WorkspacePreparation<'a> {
@@ -157,7 +165,7 @@ pub(super) struct ProductionCapsuleAllocator {
     process_pools: ActiveRunProcessPools,
     active: Arc<Mutex<BTreeMap<RunId, Arc<ProductionCapsuleState>>>>,
     allocated: Mutex<BTreeSet<RunId>>,
-    allocation_turn: Mutex<()>,
+    allocation_turns: AllocationTurns,
     prepare_filesystem: FilesystemPreparer,
     #[cfg(test)]
     source_override: Option<PathBuf>,
@@ -182,7 +190,7 @@ impl ProductionCapsuleAllocator {
             process_pools,
             active: Arc::new(Mutex::new(BTreeMap::new())),
             allocated: Mutex::new(BTreeSet::new()),
-            allocation_turn: Mutex::new(()),
+            allocation_turns: AllocationTurns::default(),
             prepare_filesystem: production_filesystem,
             #[cfg(test)]
             source_override: None,
@@ -191,10 +199,14 @@ impl ProductionCapsuleAllocator {
 
     async fn allocate_one(
         &self,
-        run_id: &RunId,
-        admitted: &AdmittedRun,
-        github_token: Option<&str>,
+        request: CapsuleAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
+        let CapsuleAllocationRequest {
+            run_id,
+            admitted,
+            github_token,
+            preparation,
+        } = request;
         let allocation = self
             .build_capsule(CapsuleBuildRequest {
                 run_id,
@@ -204,6 +216,8 @@ impl ProductionCapsuleAllocator {
                 github_token,
                 install_source: true,
                 transfer_retained_workspace: false,
+                preparation,
+                retained_restore: None,
             })
             .await;
         if allocation.is_err() {
@@ -231,6 +245,7 @@ impl ProductionCapsuleAllocator {
         let (loss_sender, _) = watch::channel(false);
         let state = Arc::new(ProductionCapsuleState {
             endpoint: OnceLock::new(),
+            environment: EnvironmentProcesses::default(),
             run_root: run_directory(&self.config.storage_root, request.run_id),
             checkpoint_directory: checkpoint_directory(&self.config.storage_root, request.run_id),
             checkpoint_repository: checkpoint_repository(
@@ -281,6 +296,25 @@ impl ProductionCapsuleAllocator {
             process_pool: active_process_pool,
             git_identity,
         } = pending;
+        self.run_environment_hook(
+            request,
+            &filesystem,
+            HookContext {
+                state: &state,
+                process_pool: active_process_pool,
+                phase: HookPhase::Setup,
+            },
+        )
+        .await?;
+        let restored_seed = if let Some((source_run_id, selection)) = &request.retained_restore {
+            let seed = self
+                .restore_retained_workspace(source_run_id, selection.clone(), &filesystem.workspace)
+                .await?;
+            transfer_retained_workspace_to_writer(&filesystem.workspace, active_process_pool)?;
+            seed
+        } else {
+            Vec::new()
+        };
         let target = self
             .capsule_delivery_target(request, &filesystem, active_process_pool)
             .await?;
@@ -294,6 +328,59 @@ impl ProductionCapsuleAllocator {
                 process_pool: active_process_pool,
             })
             .await?;
+        self.run_environment_hook(
+            request,
+            &filesystem,
+            HookContext {
+                state: &state,
+                process_pool: active_process_pool,
+                phase: HookPhase::Startup,
+            },
+        )
+        .await?;
+        let hosted_workspace = HostedWorkspace {
+            execution_seed: if request.retained_restore.is_some() {
+                restored_seed
+            } else {
+                hosted_workspace.execution_seed
+            },
+            ..hosted_workspace
+        };
+        self.finish_capsule(
+            PendingCapsule {
+                run_id,
+                state,
+                process_pool: active_process_pool,
+                git_identity,
+            },
+            request,
+            PreparedCapsule {
+                filesystem,
+                target,
+                hosted_workspace,
+                paths,
+            },
+        )
+    }
+
+    fn finish_capsule(
+        &self,
+        pending: PendingCapsule<'_>,
+        request: &CapsuleBuildRequest<'_>,
+        prepared: PreparedCapsule,
+    ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
+        let PendingCapsule {
+            run_id,
+            state,
+            process_pool: active_process_pool,
+            git_identity,
+        } = pending;
+        let PreparedCapsule {
+            filesystem,
+            target,
+            hosted_workspace,
+            paths,
+        } = prepared;
         let delivery_run_id = state
             .restored_delivery_run_id
             .get()
@@ -395,16 +482,6 @@ impl ProductionCapsuleAllocator {
         })
     }
 
-    async fn build_retained_capsule(
-        &self,
-        request: CapsuleBuildRequest<'_>,
-        execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
-    ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
-        let mut capsule = self.build_capsule(request).await?;
-        capsule.execution_seed = execution_seed;
-        Ok(capsule)
-    }
-
     fn prepare_capsule_workspace(
         &self,
         pending: &PendingCapsule<'_>,
@@ -419,7 +496,18 @@ impl ProductionCapsuleAllocator {
         if request.transfer_retained_workspace {
             transfer_retained_workspace_to_writer(&paths.workspace, pending.process_pool)?;
         }
-        (self.prepare_filesystem)(&paths.workspace, &paths.runtime_home, pending.process_pool)
+        let filesystem =
+            (self.prepare_filesystem)(&paths.workspace, &paths.runtime_home, pending.process_pool)?;
+        let identity = pending
+            .process_pool
+            .identity(HostedProcessScope::Environment)
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        #[cfg(test)]
+        let owner = (!self.portable_test_processes()).then_some(identity);
+        #[cfg(not(test))]
+        let owner = Some(identity);
+        environment::prepare_tools(&pending.state.run_root, owner)?;
+        Ok(filesystem)
     }
 
     async fn capsule_delivery_target(
@@ -465,10 +553,22 @@ impl ProductionCapsuleAllocator {
         .map_err(|_| CapsuleAllocationUnavailable::Runtime)
     }
 
+    fn validate_retained_selection(
+        &self,
+        source_run_id: &RunId,
+        selection: &CheckpointRestoreSelection,
+    ) -> Result<(), CapsuleAllocationUnavailable> {
+        if matches!(selection, CheckpointRestoreSelection::Latest) {
+            return Ok(());
+        }
+        self.validate_retained_checkpoint(source_run_id, selection.clone())
+    }
+
     async fn restore_retained_workspace(
         &self,
         source_run_id: &RunId,
         selection: CheckpointRestoreSelection,
+        workspace: &Path,
     ) -> Result<Vec<crate::full_v1_reducer::DurableExecution>, CapsuleAllocationUnavailable> {
         let directory = checkpoint_directory(&self.config.storage_root, source_run_id);
         if matches!(&selection, CheckpointRestoreSelection::Latest)
@@ -483,7 +583,7 @@ impl ProductionCapsuleAllocator {
                 directory,
                 selection,
             },
-            &CapsuleBuildPaths::new(&self.config.storage_root, source_run_id).workspace,
+            workspace,
         )
         .await
         .map_err(|_| CapsuleAllocationUnavailable::Runtime)
@@ -538,7 +638,7 @@ impl ProductionCapsuleAllocator {
         process_pool: HostedProcessPool,
     ) -> Result<HostedProcessIdentity, CapsuleAllocationUnavailable> {
         let identity = process_pool
-            .identity(HostedProcessScope::Writer)
+            .identity(HostedProcessScope::Delivery)
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         #[cfg(test)]
         if self.portable_test_processes() {
@@ -546,8 +646,9 @@ impl ProductionCapsuleAllocator {
         }
         // Never reuse a surviving identity after checkout failure or target restart.
         // No checkout credential may reach this UID until its domain is proven empty.
-        identity
-            .prepare_command_domain()
+        process_pool
+            .identity(HostedProcessScope::Writer)
+            .and_then(HostedProcessIdentity::prepare_command_domain)
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         Ok(identity)
     }
@@ -558,6 +659,17 @@ impl ProductionCapsuleAllocator {
         filesystem: &CapsuleFilesystem,
         process_pool: HostedProcessPool,
     ) -> Result<NativeV2HarnessConfig, CapsuleAllocationUnavailable> {
+        let run_root = filesystem
+            .workspace
+            .parent()
+            .ok_or(CapsuleAllocationUnavailable::Runtime)?;
+        let search_path = environment::search_path(run_root, &self.config.executable_search_path);
+        let base_environment = BTreeMap::from([(
+            "ZEROSHOT_TOOLS".to_owned(),
+            environment::tools_directory(run_root)
+                .to_string_lossy()
+                .into_owned(),
+        )]);
         match &admitted.runtime {
             RuntimePlan::Copilot { .. } => Ok(NativeV2HarnessConfig::Copilot(
                 crate::native_v2_copilot::CopilotConfig {
@@ -565,9 +677,9 @@ impl ProductionCapsuleAllocator {
                     workspace: filesystem.workspace.clone(),
                     runtime_home: filesystem.runtime_home.clone(),
                     local_user: None,
-                    base_environment: std::collections::BTreeMap::new(),
+                    base_environment: base_environment.clone(),
                     local_command_environment: std::collections::BTreeMap::new(),
-                    search_path: self.config.executable_search_path.clone(),
+                    search_path: search_path.clone(),
                     process_pool,
                 },
             )),
@@ -579,7 +691,8 @@ impl ProductionCapsuleAllocator {
                     runtime_home: filesystem.runtime_home.clone(),
                     local_user: None,
                     native_environment: Default::default(),
-                    search_path: self.config.executable_search_path.clone(),
+                    base_environment: base_environment.clone(),
+                    search_path: search_path.clone(),
                     process_pool,
                 }))
             }
@@ -587,10 +700,16 @@ impl ProductionCapsuleAllocator {
                 let base_environment = self
                     .config
                     .claude_process_environment
-                    .for_capsule(
-                        &filesystem.runtime_home,
-                        &self.config.executable_search_path,
-                    )
+                    .for_capsule(&filesystem.runtime_home, &search_path)
+                    .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+                let mut values = base_environment.clone_values();
+                values.insert(
+                    "ZEROSHOT_TOOLS".to_owned(),
+                    environment::tools_directory(run_root)
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+                let base_environment = ClaudeProcessEnvironment::new(values)
                     .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
                 Ok(NativeV2HarnessConfig::Claude(ClaudeAdapterConfig {
                     provider: *provider,
@@ -651,15 +770,14 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
 
     async fn allocate(
         &self,
-        run_id: &RunId,
-        admitted: &AdmittedRun,
-        github_token: Option<&str>,
+        request: CapsuleAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
-        let _turn = self.allocation_turn.lock().await;
+        let run_id = request.run_id;
+        let _turn = self.allocation_turns.lock(run_id).await;
         if !self.allocated.lock().await.insert(run_id.clone()) {
             return Err(CapsuleAllocationUnavailable::Runtime);
         }
-        self.allocate_one(run_id, admitted, github_token).await
+        self.allocate_one(request).await
     }
 
     async fn destroy_or_confirm_absent(
@@ -667,7 +785,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
         run_id: &RunId,
         exit: RunRuntimeExit,
     ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable> {
-        let _turn = self.allocation_turn.lock().await;
+        let _turn = self.allocation_turns.lock(run_id).await;
         let state = self.active.lock().await.get(run_id).cloned();
         if let Some(state) = state {
             cleanup_state(run_id, &state, &self.active, exit).await?;
@@ -725,31 +843,25 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
             run_id,
             admitted,
             github_token,
+            preparation,
         } = request;
-        let _turn = self.allocation_turn.lock().await;
+        self.validate_retained_selection(source_run_id, &selection)?;
         let paths = RetainedAllocationPaths::new(&self.config.storage_root, source_run_id, run_id);
-        // Restore before claiming or moving the retained workspace. A crash leaves the source
-        // claimable, and a retry can repeat the restore from the durable snapshot.
-        let execution_seed = self
-            .restore_retained_workspace(source_run_id, selection)
+        let (claim, _turn) = self
+            .begin_retained_allocation(source_run_id, run_id, &paths)
             .await?;
-        let claim = self.claim_retained_allocation(source_run_id, run_id, &paths)?;
-        if std::fs::rename(&paths.source_root, &paths.run_root).is_err() {
-            return Err(retained_claim_failure(&paths, &claim.original_source));
-        }
         let allocation = self
-            .build_retained_capsule(
-                CapsuleBuildRequest {
-                    run_id,
-                    delivery_run_id: &claim.delivery_run_id,
-                    adopt_existing_delivery: true,
-                    admitted,
-                    github_token,
-                    install_source: false,
-                    transfer_retained_workspace: true,
-                },
-                execution_seed,
-            )
+            .build_capsule(CapsuleBuildRequest {
+                run_id,
+                delivery_run_id: &claim.delivery_run_id,
+                adopt_existing_delivery: true,
+                admitted,
+                github_token,
+                install_source: false,
+                transfer_retained_workspace: true,
+                preparation,
+                retained_restore: Some((source_run_id, selection)),
+            })
             .await;
         match allocation {
             Ok(capsule) => {
@@ -819,7 +931,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
     }
 
     async fn discard_workspace(&self, run_id: &RunId) -> Result<bool, CapsuleCleanupUnavailable> {
-        let _turn = self.allocation_turn.lock().await;
+        let _turn = self.allocation_turns.lock(run_id).await;
         let root = run_directory(&self.config.storage_root, run_id);
         let metadata_path = recovery_path(&self.config.storage_root, run_id);
         let Some(mut document) = read_recovery(&metadata_path) else {
@@ -847,6 +959,13 @@ struct ProductionControllerClaim {
 
 impl ExclusiveControllerClaim for ProductionControllerClaim {}
 
+struct PreparedCapsule {
+    filesystem: CapsuleFilesystem,
+    target: DeliveryTarget,
+    hosted_workspace: HostedWorkspace,
+    paths: CapsuleBuildPaths,
+}
+
 struct PendingCapsule<'a> {
     run_id: &'a RunId,
     state: Arc<ProductionCapsuleState>,
@@ -855,6 +974,7 @@ struct PendingCapsule<'a> {
 }
 
 struct ProductionCapsuleState {
+    environment: EnvironmentProcesses,
     endpoint: OnceLock<Arc<NativeCapsuleNodeEndpoint>>,
     run_root: PathBuf,
     checkpoint_directory: PathBuf,
@@ -977,6 +1097,7 @@ async fn cleanup_state(
     if let Some(endpoint) = state.endpoint.get() {
         endpoint.disconnect().await;
     }
+    state.environment.cleanup().await?;
     let mut process_pool = state.process_pool.lock().await;
     let identity = process_pool
         .as_ref()
@@ -993,6 +1114,7 @@ async fn cleanup_state(
     if requires_cleanup && !identity.cleanup().await.proves_tree_empty() {
         return Err(CapsuleCleanupUnavailable);
     }
+    state.environment.finish_output().await?;
     state.cleanup_owned_directory(run_id, exit)?;
     active.lock().await.remove(run_id);
     process_pool.take();
@@ -1083,6 +1205,7 @@ fn retain_failed_workspace(
     request: CleanupRunRequest<'_>,
 ) -> Result<(), CapsuleCleanupUnavailable> {
     remove_run_directory(&request.checkpoint_directory.join("staging"))?;
+    remove_run_directory(&request.run_root.join("tools"))?;
     let runtime = request.run_root.join("runtime");
     if runtime.exists() {
         std::fs::remove_dir_all(runtime).map_err(|_| CapsuleCleanupUnavailable)?;
@@ -1346,53 +1469,7 @@ fn remove_run_directory(path: &Path) -> Result<(), CapsuleCleanupUnavailable> {
 }
 
 #[cfg(all(test, unix))]
-impl ProductionCapsuleAllocator {
-    pub(super) fn with_test_filesystem_and_source(
-        mut self,
-        source: PathBuf,
-        prepare: FilesystemPreparer,
-    ) -> Self {
-        self.source_override = Some(source);
-        self.prepare_filesystem = prepare;
-        self
-    }
-
-    pub(super) fn run_path(&self, run_id: &RunId) -> PathBuf {
-        run_directory(&self.config.storage_root, run_id)
-    }
-
-    pub(super) fn recovery_delivery_run_id(&self, run_id: &RunId) -> Option<RunId> {
-        read_recovery(&recovery_path(&self.config.storage_root, run_id))?.delivery_run_id
-    }
-
-    pub(super) fn set_test_filesystem(&mut self, prepare: FilesystemPreparer) {
-        self.prepare_filesystem = prepare;
-    }
-
-    pub(super) fn write_test_recovery(
-        &self,
-        run_id: &RunId,
-        state: (bool, Option<RunId>, Option<RunId>),
-    ) {
-        let (recoverable, resumed_from, successor_run_id) = state;
-        write_recovery(
-            &recovery_path(&self.config.storage_root, run_id),
-            &HostedRecoveryDocument {
-                recoverable,
-                run_id: Some(run_id.clone()),
-                delivery_run_id: Some(run_id.clone()),
-                resumed_from,
-                successor_run_id,
-            },
-        )
-        .expect("test recovery metadata should be writable");
-    }
-
-    pub(super) fn reconcile_test_recovery(&self) {
-        reconcile_retained_allocations(&self.config.storage_root)
-            .expect("test recovery metadata should reconcile");
-    }
-}
+mod test_support;
 
 #[cfg(all(test, target_os = "linux"))]
 mod cleanup_tests;

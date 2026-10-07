@@ -6,6 +6,22 @@ use tokio::net::TcpStream;
 
 use super::*;
 
+async fn assert_listener_released(address: std::net::SocketAddr) {
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            match TcpListener::bind(address).await {
+                Ok(listener) => break listener,
+                Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+                Err(error) => panic!("listener rebind failed: {error}"),
+            }
+        }
+    })
+    .await
+    .expect("server listener should be released");
+}
+
 #[tokio::test]
 async fn shutdown_closes_idle_and_websocket_connections_and_releases_listener() {
     let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
@@ -45,7 +61,7 @@ async fn shutdown_closes_idle_and_websocket_connections_and_releases_listener() 
         .await
         .assert_value_with("OECP connection is owned by the server");
     assert!(frame.is_none_or(|frame| frame.is_err() || frame.is_ok_and(|frame| frame.is_close())));
-    TcpListener::bind(address).await.assert_value();
+    assert_listener_released(address).await;
     assert_eq!(factory.controllers.load(Ordering::SeqCst), 1);
 }
 
@@ -61,7 +77,7 @@ async fn dropping_listener_task_also_drops_accepted_connections() {
         .await
         .assert_value_with("aborted server cannot leave a detached connection task");
     assert!(frame.is_none_or(|frame| frame.is_err() || frame.is_ok_and(|frame| frame.is_close())));
-    TcpListener::bind(address).await.assert_value();
+    assert_listener_released(address).await;
 }
 
 #[tokio::test]

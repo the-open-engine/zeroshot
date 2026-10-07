@@ -27,7 +27,7 @@ async fn assert_active_submission_conflicts(
             if existing_run_id == first.run_id
     ));
 
-    assert_eq!(allocator.allocation_count(), 1);
+    wait_for_allocations(allocator, 1).await;
     assert_eq!(ledger.list().await.assert_value().len(), 1);
 }
 
@@ -60,8 +60,7 @@ async fn distinct_nonterminal_runs_are_both_admitted() {
     let second =
         tokio::spawn(async move { submit_test_request(&second_controller, second_request).await });
 
-    tokio::task::yield_now().await;
-    assert_eq!(allocator.allocation_count(), 1);
+    wait_for_allocations(allocator.as_ref(), 2).await;
 
     allocator.release();
     let first = first
@@ -159,7 +158,7 @@ async fn exact_source_revision_participates_in_retry_identity() {
             RunLedgerError::SubmissionConflict { .. }
         ))
     ));
-    assert_eq!(harness.allocator.allocation_count(), 1);
+    wait_for_allocations(harness.allocator.as_ref(), 1).await;
     harness
         .controller
         .force(RunForceParams {
@@ -170,69 +169,48 @@ async fn exact_source_revision_participates_in_retry_identity() {
 }
 
 #[tokio::test]
-async fn wave8_cli_contract_aborted_allocation_is_terminal_and_exact_retry_reconciles_it() {
+async fn detached_submitter_does_not_cancel_preparation_or_allow_duplicate_allocation() {
     let GatedHarness {
         controller,
         ledger,
         cleanup,
         allocator,
     } = gated_harness().await;
-
-    let abandoned_controller = controller.clone();
-    let abandoned = tokio::spawn(async move {
-        submit_test_request(
-            &abandoned_controller,
-            request_with_key(Value::Null, "cloud-abandoned"),
-        )
-        .await
+    let owner = controller.clone();
+    let (accepted, receipt) = tokio::sync::oneshot::channel();
+    let submitter = tokio::spawn(async move {
+        let result = submit_test_request(&owner, request_with_key(Value::Null, "detached")).await;
+        let _ = accepted.send(result);
+        std::future::pending::<()>().await;
     });
+    let receipt = receipt.await.assert_value().assert_value();
     allocator.wait_started().await;
-    let run_id = ledger
-        .list()
+    submitter.abort();
+    assert!(submitter.await.assert_error().is_cancelled());
+    let replay = submit_test_request(&controller, request_with_key(Value::Null, "detached"))
         .await
-        .assert_value_with("list after durable create")
-        .into_iter()
-        .next()
-        .assert_value_with("durable run")
-        .run_id;
-    abandoned.abort();
+        .assert_value();
+    assert!(replay.deduped);
+    assert_eq!(replay.run_id, receipt.run_id);
+    assert!(cleanup.exits().is_empty());
+    assert_eq!(allocator.allocation_count(), 1);
     assert!(
-        abandoned
+        ledger
+            .get(&receipt.run_id)
             .await
-            .assert_error_with("submit was aborted")
-            .is_cancelled()
+            .assert_value()
+            .assert_value()
+            .snapshot
+            .terminal
+            .is_none()
     );
-
     allocator.release();
-    let distinct =
-        submit_test_request(&controller, request_with_key(Value::Null, "cloud-distinct"))
-            .await
-            .assert_value_with("distinct run is independently admitted");
-    assert_ne!(distinct.run_id, run_id);
-    assert_eq!(allocator.allocation_count(), 2);
-
-    let exact = submit_test_request(
-        &controller,
-        request_with_key(Value::Null, "cloud-abandoned"),
-    )
-    .await
-    .assert_value_with("exact retry reconciles abandoned allocation");
-    assert!(exact.deduped);
-    assert_eq!(exact.run_id, run_id);
-    assert_eq!(allocator.allocation_count(), 2);
-    assert_eq!(
-        terminal(&controller, &run_id).await,
-        TerminalResult::Failed {
-            reason: EnumLabel::new("runtime_lost").assert_value_with("label")
-        }
-    );
-    assert_eq!(cleanup.exits(), vec![RunRuntimeExit::RuntimeLost]);
     controller
         .force(RunForceParams {
-            run_id: distinct.run_id,
+            run_id: receipt.run_id,
         })
         .await
-        .assert_value_with("distinct cleanup");
+        .assert_value();
 }
 
 #[tokio::test]
@@ -243,12 +221,9 @@ async fn wave9_cli_contract_settled_allocation_refusal_cleans_up_before_terminal
         .fail_next_allocation(CapsuleAllocationUnavailable::Runtime);
     let request = request_with_key(Value::Null, "cloud-wave9-allocation-refusal");
     let run_id = request.run_id.clone();
-    assert!(matches!(
-        submit_test_request(&harness.controller, request).await,
-        Err(NativeV2CloudError::Allocation(
-            CapsuleAllocationUnavailable::Runtime
-        ))
-    ));
+    submit_test_request(&harness.controller, request)
+        .await
+        .assert_value_with("accepted before allocation");
     assert_eq!(
         terminal(&harness.controller, &run_id).await,
         TerminalResult::Failed {

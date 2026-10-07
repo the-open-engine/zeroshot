@@ -12,9 +12,6 @@ const POLICY_QUERY: &str = r#"
 query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
   repository(owner: $owner, name: $name) {
     nameWithOwner
-    mergeCommitAllowed
-    squashMergeAllowed
-    rebaseMergeAllowed
     pullRequest(number: $number) {
       id
       number
@@ -81,21 +78,13 @@ const MAX_FAILURE_FEEDBACK_CHARS: usize = 64 * 1_024;
 pub(super) struct PolicySnapshot {
     pub(super) state: GitHubReviewState,
     pub(super) failed_job_ids: Vec<u64>,
-    pub(super) merge_method: Option<MergeMethod>,
+    pub(super) is_merge_queue_enabled: bool,
     pub(super) head_update: Option<HeadUpdate>,
     pub(super) pull_request_ready: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct HeadUpdate(pub(super) String);
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum MergeMethod {
-    Queue,
-    Merge,
-    Squash,
-    Rebase,
-}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -215,47 +204,25 @@ struct QueryDataWire {
 #[serde(rename_all = "camelCase")]
 struct RepositoryPolicyWire {
     name_with_owner: String,
-    merge_commit_allowed: bool,
-    squash_merge_allowed: bool,
-    rebase_merge_allowed: bool,
     pull_request: Option<PullRequestPolicyWire>,
 }
 
 pub(super) fn query_arguments(
     review: &GitHubReviewReceipt,
 ) -> Result<Vec<String>, GitHubAuthorityError> {
-    let (owner, name) = review
-        .repository
-        .split_once('/')
-        .filter(|(owner, name)| !owner.is_empty() && !name.is_empty() && !name.contains('/'))
-        .ok_or(GitHubAuthorityError::Rejected)?;
-    let number = review
-        .review_id
-        .parse::<u64>()
-        .ok()
-        .filter(|number| *number > 0)
-        .ok_or(GitHubAuthorityError::Rejected)?;
-    Ok(vec![
-        "graphql".to_owned(),
-        "--paginate".to_owned(),
-        "--slurp".to_owned(),
-        "-f".to_owned(),
-        format!("query={POLICY_QUERY}"),
-        "-F".to_owned(),
-        format!("owner={owner}"),
-        "-F".to_owned(),
-        format!("name={name}"),
-        "-F".to_owned(),
-        format!("number={number}"),
-    ])
+    review_query_arguments(review, POLICY_QUERY)
 }
 
 pub(super) fn classify_policy(
     value: Value,
     review: &GitHubReviewReceipt,
 ) -> Result<PolicySnapshot, GitHubAuthorityError> {
-    let pages: Vec<QueryPageWire> =
-        serde_json::from_value(value).map_err(|_| GitHubAuthorityError::Rejected)?;
+    let pages: Vec<QueryPageWire> = serde_json::from_value(value).map_err(|error| {
+        GitHubAuthorityError::api(
+            None,
+            format!("GitHub returned invalid delivery policy: {error}"),
+        )
+    })?;
     let first = pages.first().ok_or(GitHubAuthorityError::Rejected)?;
     let first_repository = first
         .data
@@ -267,7 +234,10 @@ pub(super) fn classify_policy(
     if !complete {
         return Ok(waiting_snapshot());
     }
-    classify_snapshot(first_repository, &first_pull_request, &contexts)
+    if let Some(snapshot) = terminal_snapshot(&first_pull_request)? {
+        return Ok(snapshot);
+    }
+    Ok(classify_snapshot(&first_pull_request, &contexts))
 }
 
 fn collect_contexts(
@@ -286,7 +256,7 @@ fn collect_contexts(
             .as_ref()
             .ok_or(GitHubAuthorityError::Rejected)?;
         let pull_request = require_identity(repository, review)?;
-        complete &= page_policy_is_stable(first_repository, repository, pull_request)?;
+        complete &= page_policy_is_stable(first_repository, pull_request)?;
         let Some(page_contexts) = check_contexts(pull_request)? else {
             complete &= pages.len() == 1;
             continue;
@@ -299,15 +269,13 @@ fn collect_contexts(
 
 fn page_policy_is_stable(
     first_repository: &RepositoryPolicyWire,
-    repository: &RepositoryPolicyWire,
     pull_request: &PullRequestPolicyWire,
 ) -> Result<bool, GitHubAuthorityError> {
     let first_pull_request = first_repository
         .pull_request
         .as_ref()
         .ok_or(GitHubAuthorityError::Rejected)?;
-    Ok(same_repository_policy(first_repository, repository)
-        && same_policy(first_pull_request, pull_request))
+    Ok(same_policy(first_pull_request, pull_request))
 }
 
 fn page_is_complete(
@@ -391,13 +359,6 @@ fn same_policy(left: &PullRequestPolicyWire, right: &PullRequestPolicyWire) -> b
     )
 }
 
-fn same_repository_policy(left: &RepositoryPolicyWire, right: &RepositoryPolicyWire) -> bool {
-    left.name_with_owner == right.name_with_owner
-        && left.merge_commit_allowed == right.merge_commit_allowed
-        && left.squash_merge_allowed == right.squash_merge_allowed
-        && left.rebase_merge_allowed == right.rebase_merge_allowed
-}
-
 fn check_contexts(
     pull_request: &PullRequestPolicyWire,
 ) -> Result<Option<&CheckContextConnectionWire>, GitHubAuthorityError> {
@@ -412,29 +373,25 @@ fn check_contexts(
 }
 
 fn classify_snapshot(
-    repository: &RepositoryPolicyWire,
     pull_request: &PullRequestPolicyWire,
     contexts: &[CheckContextWire],
-) -> Result<PolicySnapshot, GitHubAuthorityError> {
-    if let Some(snapshot) = terminal_snapshot(pull_request)? {
-        return Ok(snapshot);
-    }
+) -> PolicySnapshot {
     let mut evidence = classify_required_checks(contexts);
     if required_context_is_missing(pull_request, contexts) {
         evidence.checks = RequiredChecks::Pending;
     }
     if !evidence.failures.is_empty() {
-        return Ok(PolicySnapshot {
+        return PolicySnapshot {
             state: GitHubReviewState::Open {
                 checks: GitHubChecks::Failed {
                     diagnostic: failure_diagnostic(evidence.failures),
                 },
             },
             failed_job_ids: evidence.failed_job_ids,
-            merge_method: merge_method(repository, pull_request),
+            is_merge_queue_enabled: pull_request.is_merge_queue_enabled,
             head_update: head_update(pull_request),
             pull_request_ready: false,
-        });
+        };
     }
     let policy_ready = merge_gate_ready(pull_request) || pull_request_ready(pull_request);
     let checks = match (policy_ready, evidence.checks) {
@@ -444,13 +401,13 @@ fn classify_snapshot(
     };
     let pull_request_ready =
         !matches!(evidence.checks, RequiredChecks::Pending) && pull_request_ready(pull_request);
-    Ok(PolicySnapshot {
+    PolicySnapshot {
         state: GitHubReviewState::Open { checks },
         failed_job_ids: Vec::new(),
-        merge_method: merge_method(repository, pull_request),
+        is_merge_queue_enabled: pull_request.is_merge_queue_enabled,
         head_update: head_update(pull_request),
         pull_request_ready,
-    })
+    }
 }
 
 fn required_context_is_missing(
@@ -485,23 +442,6 @@ fn head_update(pull_request: &PullRequestPolicyWire) -> Option<HeadUpdate> {
         .then(|| HeadUpdate(pull_request.id.clone()))
 }
 
-fn merge_method(
-    repository: &RepositoryPolicyWire,
-    pull_request: &PullRequestPolicyWire,
-) -> Option<MergeMethod> {
-    if pull_request.is_merge_queue_enabled {
-        Some(MergeMethod::Queue)
-    } else if repository.merge_commit_allowed {
-        Some(MergeMethod::Merge)
-    } else if repository.squash_merge_allowed {
-        Some(MergeMethod::Squash)
-    } else if repository.rebase_merge_allowed {
-        Some(MergeMethod::Rebase)
-    } else {
-        None
-    }
-}
-
 fn merge_gate_ready(pull_request: &PullRequestPolicyWire) -> bool {
     let state_ready = matches!(
         pull_request.merge_state_status.as_str(),
@@ -529,7 +469,7 @@ fn terminal_snapshot(
     Ok(state.map(|state| PolicySnapshot {
         state,
         failed_job_ids: Vec::new(),
-        merge_method: None,
+        is_merge_queue_enabled: false,
         head_update: None,
         pull_request_ready: false,
     }))
@@ -548,7 +488,7 @@ fn merged_snapshot(
         .then_some(PolicySnapshot {
             state: GitHubReviewState::Merged { merge_revision },
             failed_job_ids: Vec::new(),
-            merge_method: None,
+            is_merge_queue_enabled: false,
             head_update: None,
             pull_request_ready: false,
         })
@@ -583,7 +523,7 @@ fn waiting_snapshot() -> PolicySnapshot {
             checks: GitHubChecks::Pending,
         },
         failed_job_ids: Vec::new(),
-        merge_method: None,
+        is_merge_queue_enabled: false,
         head_update: None,
         pull_request_ready: false,
     }

@@ -35,19 +35,20 @@ Executable nodes are `step` and `verifier`. Groups compose them:
 
 Selectors, guards, and bindings are structured data. They are not snippets of JavaScript, JSONPath,
 shell code, or prompt text. Full field rules live in the
-[graph contract](../reference/cluster/graph.md).
+[graph contract](../reference/cluster/graph.md), and [Build a review loop](../guides/review-loop.md)
+builds a custom graph step by step.
 
 ## Concurrent workspace changes
 
 `par` branches and `map` items can run multiple writing agents at once. Writers share the run's
-workspace, so the graph and agent instructions must coordinate edits to the same files. Hosted
-verifiers work in disposable copies; copying while a writer is active does not provide an atomic
-snapshot. Place verification after the writers when it needs their completed changes.
+workspace, including reviewers, so the graph and agent instructions must coordinate edits to the
+same files. Reviewers see the same installed dependencies, generated output, and services as workers.
+Place verification after the writers when it needs their completed changes.
 
 Sequence Git delivery after the writing branches or map have joined. Graph validation rejects
-parallel delivery and writing, including delivery in a map that can have multiple items. Delivery
-can run alongside verifiers, which are instructed not to edit the candidate. A delivery receipt can
-certify run success only when every other writer settled before that delivery execution started.
+delivery alongside any other executable node, including reviewers, and delivery in a map that can
+have multiple items. A delivery receipt can certify run success only when every other executable
+settled before that delivery execution started.
 
 ## State reduction chooses the next step
 
@@ -111,6 +112,6 @@ metadata from the finalized ledger, then the graph revisits its single Git deliv
 iteration rather than only at graph completion. Manifest failures, delivery repair requests, and
 failed or rejected receipt audits stop the run instead of publishing an unreviewed repair.
 
-PR and merge delivery consider feedback by default. Use `--no-pr-feedback`, or set
-`pullRequestFeedback` to `ignore` on the delivery runtime binding, when the run should ignore PR
-discussion. CI, conflict, freshness, and merge-policy checks remain active.
+PR and merge delivery consider feedback by default. Use `--no-pr-feedback` to ignore PR discussion;
+the [`git_delivery` binding](../reference/runtime-plan.md#git_delivery) describes the runtime
+setting.

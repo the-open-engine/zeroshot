@@ -181,6 +181,7 @@ async fn wave8_cli_contract_validate_only_preflight_materializes_without_backend
     )
     .assert_value();
     let run = RunCommand {
+        environment: None,
         target: None,
         title: RunTitle::new("Validate only").assert_value(),
         selection: RunSelection::Inline {

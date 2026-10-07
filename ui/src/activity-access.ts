@@ -38,13 +38,7 @@ export function makeReadOnlyVerifier(document: Document, name: string): Document
   return next;
 }
 
-/** Explicit role conversion never removes a live verifier-only data or control source. */
-export function makeWritingAgent(document: Document, name: string): Document {
-  assertDocument(document);
-  const node = findNode(document.graph.root, name);
-  if (!node || !editableActivityRole(node, bindingFor(document.runtime, name)))
-    throw new Error('Choose an Agent-backed activity with an editable contract.');
-  if (node.kind === 'step') return document;
+function requireNoVerifierReferences(document: Document, name: string) {
   const pending: unknown[] = [document.graph];
   while (pending.length) {
     const value = pending.pop();
@@ -59,6 +53,9 @@ export function makeWritingAgent(document: Document, name: string): Document {
       );
     pending.push(...Object.values(record));
   }
+}
+
+function emptyVerifierOutputs(node: GraphNode): boolean {
   const emptySignals =
     node.signals === undefined ||
     (node.signals !== null &&
@@ -75,7 +72,18 @@ export function makeWritingAgent(document: Document, name: string): Document {
       typeof diagnostic.fields === 'object' &&
       !Array.isArray(diagnostic.fields) &&
       Object.keys(diagnostic.fields).length === 0);
-  if (!emptySignals || !emptyDiagnostic)
+  return emptySignals && emptyDiagnostic;
+}
+
+/** Explicit role conversion never removes a live verifier-only data or control source. */
+export function makeWritingAgent(document: Document, name: string): Document {
+  assertDocument(document);
+  const node = findNode(document.graph.root, name);
+  if (!node || !editableActivityRole(node, bindingFor(document.runtime, name)))
+    throw new Error('Choose an Agent-backed activity with an editable contract.');
+  if (node.kind === 'step') return document;
+  requireNoVerifierReferences(document, name);
+  if (!emptyVerifierOutputs(node))
     throw new Error(
       'Remove this activity’s outcome and feedback output fields before making it a writing Agent. Regular outputs stay unchanged.'
     );

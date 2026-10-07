@@ -107,12 +107,28 @@ async fn missing_api_executable_preserves_os_error_and_redacts_command() {
 
 #[cfg(unix)]
 fn script(root: &std::path::Path, source: &str) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
     let program = root.join("gh-fixture");
-    std::fs::write(&program, format!("#!/bin/sh\n{source}")).assert_value();
-    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).assert_value();
+    openengine_cluster_testkit::fixture::write_executable(
+        &program,
+        format!("#!/bin/sh\n{source}"),
+        0o755,
+    )
+    .assert_value_with("write GitHub API fixture");
     program
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn empty_api_output_remains_an_error() {
+    let root = TemporaryDirectory::for_test("github-empty-api");
+    let program = script(root.as_path(), "exit 0\n");
+    let error = authority(program, Duration::from_secs(1))
+        .api_output(&["graphql".to_owned()], GitHubCredential("test-token"))
+        .await
+        .err()
+        .assert_value();
+    assert!(matches!(error, GitHubAuthorityError::Api(_)));
+    assert!(!error.retryable_operation());
 }
 
 #[cfg(unix)]
@@ -350,7 +366,7 @@ exec /bin/cat "$HOME/payload"
             },
         },
         failed_job_ids: vec![91],
-        merge_method: None,
+        is_merge_queue_enabled: false,
         head_update: None,
         pull_request_ready: false,
     };
@@ -436,4 +452,47 @@ fn schema_failures_preserve_bounded_redacted_response_details() {
     assert!(!diagnostic.contains(&encode_basic_credential(token)));
     assert!(diagnostic.len() < 32 * 1024);
     assert!(!error.retryable_operation());
+}
+
+#[test]
+fn native_cli_http_errors_preserve_status_and_retry_classification() {
+    for (text, status, retryable) in [
+        (
+            "HTTP 401: Bad credentials (https://api.github.com/graphql)",
+            Some(401),
+            false,
+        ),
+        (
+            "HTTP 429: Too Many Requests (https://api.github.com/graphql)",
+            Some(429),
+            true,
+        ),
+        ("HTTP 503 (https://api.github.com/graphql)", Some(503), true),
+        (
+            "HTTP 403: API rate limit exceeded for user ID 123. (https://api.github.com/graphql)",
+            Some(403),
+            true,
+        ),
+        (
+            "HTTP 403: You have exceeded a secondary rate limit. (https://api.github.com/graphql)",
+            Some(403),
+            true,
+        ),
+        (
+            "HTTP 403: Resource not accessible by integration (https://api.github.com/graphql)",
+            Some(403),
+            false,
+        ),
+        (
+            "GraphQL: Resource not accessible by integration (mergePullRequest)",
+            None,
+            false,
+        ),
+        ("HTTP unavailable", None, false),
+    ] {
+        let error = github_api_error(text.as_bytes());
+        assert_eq!(error.api_status(), status, "{text}");
+        assert_eq!(error.retryable_operation(), retryable, "{text}");
+        assert_eq!(error.authentication_failed(), status == Some(401), "{text}");
+    }
 }

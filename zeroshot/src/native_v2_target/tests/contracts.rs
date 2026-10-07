@@ -33,6 +33,7 @@ fn profile_operations() -> (
         set_default: true,
     };
     let run = RunProfileRunRequest {
+        environment: prepared.intent.environment.clone(),
         run_id: prepared.run_id,
         profile: selector.clone(),
         title: prepared.intent.title,

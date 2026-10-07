@@ -212,14 +212,19 @@ macro_rules! define_run_status_projection {
 
 define_run_status_projection!(RunStatusResult);
 
+/// Public recovery state. It never contains credentials, workspace paths, or checkpoint bytes.
 #[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct WorkspaceRecovery {
+    /// Whether this run can admit a successor from retained workspace state.
     pub recoverable: bool,
+    /// Exact connection fields that the successor must resolve again.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub connection_requirements: RunConnectionRequirements,
+    /// Immediate predecessor when this run is itself a recovery successor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resumed_from: Option<RunId>,
+    /// Successor already admitted from this run, if one exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub successor_run_id: Option<RunId>,
 }

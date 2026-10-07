@@ -27,9 +27,7 @@ pub(crate) use zeroshot_engine::native_v2_cloud::{
 pub(crate) use zeroshot_engine::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
 pub(crate) use zeroshot_engine::native_v2_cli::TargetRunIntent;
 pub(crate) use zeroshot_engine::native_v2_claude::ClaudeProcessEnvironment;
-pub(crate) use zeroshot_engine::native_v2_contract::{
-    AdmittedRun, NodeInvocation, NodeRuntimeBinding, RuntimePlan,
-};
+pub(crate) use zeroshot_engine::native_v2_contract::{NodeInvocation, NodeRuntimeBinding, RuntimePlan};
 pub(crate) use zeroshot_engine::native_v2_delivery::{
     DeliveryPollPolicy, DeliveryTarget, GitHubAuthorityError, GitHubChecks, GitHubCredential,
     GitHubDeliveryAuthority, GitHubMergeRequestOutcome, GitHubPushRequest, GitHubReviewObservation,
@@ -115,10 +113,9 @@ impl CapsuleAllocator for ImmediateAllocator {
 
     async fn allocate(
         &self,
-        _run_id: &RunId,
-        admitted: &AdmittedRun,
-        _github_token: Option<&str>,
+        request: zeroshot_engine::native_v2_cloud::CapsuleAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
+        let admitted = request.admitted;
         let runner = NativeNodeRunner::new(
             admitted,
             Arc::new(BlockingDriver),
@@ -265,8 +262,12 @@ pub(crate) async fn submit_test_run(
         connection_resolver: _,
         github_token,
     } = request;
-    let exact_environment = RunEnvironment::exact(&submission.runtime, connections)
-        .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
+    let exact_environment = RunEnvironment::exact(
+        &submission.runtime,
+        submission.environment.as_ref(),
+        connections,
+    )
+    .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
     let receipt = controller
         .submit_with_exact_environment_and_github_token(
             RunSubmitParams { run_id, submission },

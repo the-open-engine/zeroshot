@@ -105,6 +105,9 @@ pub struct RunProfileRunRequest {
     pub initial_input: serde_json::Value,
     pub source: ResolvedSource,
     pub submission_key: IdempotencyKey,
+    /// Omission permits a host default; an empty definition explicitly selects its base environment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<super::RuntimeEnvironment>,
     pub connections: RunConnectionValues,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,

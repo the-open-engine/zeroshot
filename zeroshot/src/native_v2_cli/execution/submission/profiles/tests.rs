@@ -130,6 +130,7 @@ async fn management_contract_selects_and_materializes_profiles() {
 async fn wave6_cli_contract_remote_profile_resolution_preserves_selector_and_payload() {
     let backend = FakeBackend::default();
     let run = RunCommand {
+        environment: None,
         target: Some("prod".to_owned()),
         title: RunTitle::new("Use a stored profile").assert_value(),
         input: "unused.json".into(),

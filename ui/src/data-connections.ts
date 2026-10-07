@@ -270,23 +270,14 @@ function freshStatePath(document: Document, source: ProducerSelector, consumer: 
   return [name];
 }
 
-export function previewDataConnection(
-  document: Document,
-  request: DataConnectionRequest
-): DataConnectionPreview {
-  const consumer = findNode(document.graph.root, request.consumer);
-  const producer =
-    typeof request.source?.node === 'string'
-      ? findNode(document.graph.root, request.source.node)
-      : undefined;
-  const selected = selectedOutput(document, request.source);
-  const route = routeStructure(document, producer?.name ?? '', consumer?.name ?? '');
-  const reasons = [...route.reasons];
-  const target =
-    consumer &&
-    dataInputFields(consumer).find(
-      (field) => bindingKey(field.path) === bindingKey(request.target)
-    );
+function dataFieldReasons(
+  request: DataConnectionRequest,
+  consumer: GraphNode | undefined,
+  producer: GraphNode | undefined,
+  selected: ReturnType<typeof selectedOutput>,
+  target: ReturnType<typeof dataInputFields>[number] | undefined
+): string[] {
+  const reasons: string[] = [];
   if (!consumer || (!executable(consumer) && consumer.kind !== 'succeed'))
     reasons.push('Select an Agent, Verifier, or Success consumer.');
   if (!target) reasons.push('The target field is not declared in this consumer schema.');
@@ -313,16 +304,15 @@ export function previewDataConnection(
   }
   if (producer && producer.writeBindings !== undefined && !Array.isArray(producer.writeBindings))
     reasons.push('The producer has an unsupported write format; use advanced mappings.');
-  const groups = [route.common, ...route.producerScopes, ...route.consumerScopes].filter(
-    (node): node is GraphNode => !!node && isGroup(node)
-  );
-  const authored =
-    producer && selected.type ? authoredRoutes(document, request.source, request.consumer) : [];
-  const reused = authored.length === 1 ? authored[0] : undefined;
-  if (authored.length > 1)
-    reasons.push(
-      'Multiple authored routes carry this producer. Choose the intended state path in advanced mappings.'
-    );
+  return reasons;
+}
+
+function scopeReasons(
+  route: ReturnType<typeof routeStructure>,
+  groups: GraphNode[],
+  reused: string[] | undefined
+): string[] {
+  const reasons: string[] = [];
   if (!reused && route.producerScopes.some((group) => group.kind === 'par'))
     reasons.push(parallelRouteReason);
   for (const group of groups) {
@@ -335,6 +325,40 @@ export function previewDataConnection(
     )
       reasons.push(`${group.name} has an unsupported promotion format; use advanced mappings.`);
   }
+  return reasons;
+}
+
+export function previewDataConnection(
+  document: Document,
+  request: DataConnectionRequest
+): DataConnectionPreview {
+  const consumer = findNode(document.graph.root, request.consumer);
+  const producer =
+    typeof request.source?.node === 'string'
+      ? findNode(document.graph.root, request.source.node)
+      : undefined;
+  const selected = selectedOutput(document, request.source);
+  const route = routeStructure(document, producer?.name ?? '', consumer?.name ?? '');
+  const target =
+    consumer &&
+    dataInputFields(consumer).find(
+      (field) => bindingKey(field.path) === bindingKey(request.target)
+    );
+  const reasons = [
+    ...route.reasons,
+    ...dataFieldReasons(request, consumer, producer, selected, target || undefined),
+  ];
+  const groups = [route.common, ...route.producerScopes, ...route.consumerScopes].filter(
+    (node): node is GraphNode => !!node && isGroup(node)
+  );
+  const authored =
+    producer && selected.type ? authoredRoutes(document, request.source, request.consumer) : [];
+  const reused = authored.length === 1 ? authored[0] : undefined;
+  if (authored.length > 1)
+    reasons.push(
+      'Multiple authored routes carry this producer. Choose the intended state path in advanced mappings.'
+    );
+  reasons.push(...scopeReasons(route, groups, reused));
   return {
     request: clone(request),
     canConnect: reasons.length === 0,

@@ -1,5 +1,7 @@
 use futures_util::FutureExt;
 
+use crate::native_v2_capsule::provider_process::report_provider_error;
+
 use super::*;
 
 mod conflict;
@@ -16,7 +18,7 @@ const MAX_FEEDBACK_DIAGNOSTIC_BYTES: usize = 4 * 1024 * 1024;
 #[cfg(all(test, target_os = "linux"))]
 mod ownership_tests;
 use input::delivery_input;
-use review::{crash_outcome, review_completion, ReviewProgress, ReviewStep};
+use review::{review_completion, ReviewProgress, ReviewStep};
 
 #[derive(Clone)]
 pub struct NativeV2DeliveryAdapter {
@@ -102,7 +104,7 @@ impl NodeDriver for NativeV2DeliveryAdapter {
                 .prepare_command_domain()
                 .map_err(|_| NodeRunnerError::CleanupUnconfirmed)?;
         }
-        let result = std::panic::AssertUnwindSafe(self.run_delivery(invocation, control))
+        let result = std::panic::AssertUnwindSafe(self.run_delivery(invocation, control.clone()))
             .catch_unwind()
             .await;
         // A cancelled or panicking Git future drops its process-group guard first. Reap any
@@ -163,6 +165,10 @@ impl NativeV2DeliveryAdapter {
         match result {
             Ok(outcome) => Ok(outcome),
             Err(DeliveryStop::Repair(failure)) => {
+                let error = NodeRunnerError::DriverDetail(
+                    self.redact_feedback(&invocation, failure.diagnostic.clone()),
+                );
+                let _ = report_provider_error("Git delivery", &error, &[], &control).await;
                 self.repair_outcome(&invocation, mode, failure).await
             }
             Err(stop) => stop.result(),
@@ -586,7 +592,13 @@ impl NativeV2DeliveryAdapter {
                 )
                 .await
             }
-            ReviewProgress::Merged(_) | ReviewProgress::Closed => Err(crash_outcome()),
+            ReviewProgress::Merged(_) | ReviewProgress::Closed => {
+                review::failed_review(
+                    drive.control,
+                    "pull request was closed or merged before delivery completed",
+                )
+                .await
+            }
         }
     }
 
@@ -621,7 +633,13 @@ impl NativeV2DeliveryAdapter {
                 .await?;
                 Ok(ReviewStep::Continue)
             }
-            ReviewProgress::Merged(_) | ReviewProgress::Closed => Err(crash_outcome()),
+            ReviewProgress::Merged(_) | ReviewProgress::Closed => {
+                review::failed_review(
+                    drive.control,
+                    "pull request was closed or merged before delivery completed",
+                )
+                .await
+            }
         }
     }
 
@@ -653,7 +671,13 @@ impl NativeV2DeliveryAdapter {
                 emit(drive.control, "delivery: waiting for GitHub merge policy").await?;
                 Ok(ReviewStep::Continue)
             }
-            ReviewProgress::Closed => Err(crash_outcome()),
+            ReviewProgress::Closed => {
+                review::failed_review(
+                    drive.control,
+                    "pull request was closed or merged before delivery completed",
+                )
+                .await
+            }
         }
     }
 

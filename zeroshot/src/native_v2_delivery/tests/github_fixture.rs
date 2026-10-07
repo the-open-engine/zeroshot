@@ -1,5 +1,4 @@
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -47,6 +46,7 @@ pub(super) enum Script {
     HeadUpdatePending,
     HeadUpdateResponseLost,
     HeadUpdateUnavailable,
+    HeadUpdatePermanentFailure,
     RepeatedBehind,
     ProtectedBranch,
     ReviewSyncRace,
@@ -235,6 +235,7 @@ impl FakeGitHub {
                 | Script::HeadUpdatePending
                 | Script::HeadUpdateResponseLost
                 | Script::HeadUpdateUnavailable
+                | Script::HeadUpdatePermanentFailure
         )
     }
 
@@ -243,6 +244,13 @@ impl FakeGitHub {
     ) -> Option<Result<GitHubHeadUpdateOutcome, GitHubAuthorityError>> {
         match self.script {
             Script::HeadUpdatePending => Some(Ok(GitHubHeadUpdateOutcome::Pending)),
+            Script::HeadUpdatePermanentFailure => Some(Err(GitHubAuthorityError::api(
+                Some(422),
+                format!(
+                    "branch update rejected test-token {}",
+                    git_auth::encode_basic_credential("test-token")
+                ),
+            ))),
             Script::HeadUpdateConflict => Some(Ok(GitHubHeadUpdateOutcome::Conflict)),
             Script::HeadUpdateUnavailable
             | Script::HeadRecoveryReviewMissing
@@ -831,10 +839,8 @@ async fn push_succeeded(request: &GitHubPushRequest, remote: &Path) -> bool {
 
 pub(super) fn write_executable(directory: &Path, name: &str, contents: &str) -> PathBuf {
     let path = directory.join(name);
-    fs::write(&path, contents).assert_value();
-    let mut permissions = fs::metadata(&path).assert_value().permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&path, permissions).assert_value();
+    openengine_cluster_testkit::fixture::write_executable(&path, contents, 0o700)
+        .assert_value_with("write test executable");
     path
 }
 
@@ -909,7 +915,9 @@ case "$endpoint:$method" in
       '"id":"PR_node_17","number":17,"state":"OPEN","merged":false,"mergeCommit":null,' \
       '"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false,' \
       '"isInMergeQueue":false,"isMergeQueueEnabled":false,"baseRefName":"main",' \
-      '"baseRef":{"name":"main","refUpdateRule":{"requiredApprovingReviewCount":0,' \
+      '"baseRef":{"name":"main","branchProtectionRule":null,' \
+      '"rules":{"totalCount":0,"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}},' \
+      '"refUpdateRule":{"requiredApprovingReviewCount":0,' \
       '"requiredStatusCheckContexts":[],' \
       '"requiresCodeOwnerReviews":false,"requiresConversationResolution":false,' \
       '"requiresLinearHistory":false,"requiresSignatures":false}},' \

@@ -143,6 +143,7 @@ async fn rejected_research_audit_repairs_then_rechecks_before_continuing() {
             graph: authored,
             initial_input: input.clone(),
             runtime,
+            environment: None,
             source: resolved_source(),
             submission_key: IdempotencyKey::new("audit-repair-routing").assert_value(),
         })

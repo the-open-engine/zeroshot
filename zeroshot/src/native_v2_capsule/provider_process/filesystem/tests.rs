@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
 use openengine_cluster_testkit::assertions::AssertValue;
@@ -43,7 +43,6 @@ impl Fixture {
             home: Arc::new(PrivateDirectory::retained(home)),
             root: self.runtime.join(format!("execution-{execution}")),
             candidate: self.candidate.clone(),
-            verifier_copy: true,
             identity: None,
             cancellation: DriverCancellation::new(self.cancellation.subscribe()),
         }
@@ -52,49 +51,6 @@ impl Fixture {
     fn prepare(&self, execution: u64) -> Arc<ProviderExecutionFiles> {
         Arc::new(ProviderExecutionFiles::prepare(self.specification(execution)).assert_value())
     }
-}
-
-#[test]
-fn boundary_contract_filesystem_helpers_reject_overlap_non_directories_invalid_names_and_cancelled_reads()
- {
-    use std::io::Read as _;
-    use std::os::unix::ffi::OsStringExt;
-
-    let fixture = Fixture::new();
-    let mut overlap = fixture.specification(90);
-    overlap.candidate = fixture.runtime.clone();
-    assert!(copy_candidate(&overlap, &fixture.runtime.join("copy")).is_err());
-
-    let nested = fixture.candidate.join("nested");
-    fs::create_dir(&nested).assert_value();
-    let pinned = open_copy_root(&nested.join("../nested")).assert_value();
-    assert!(pinned.metadata().assert_value().is_dir());
-
-    let regular = fixture.candidate.join("regular");
-    fs::write(&regular, b"contents").assert_value();
-    assert!(open_copy_directory(libc::AT_FDCWD, &regular).is_err());
-    assert!(open_copy_source(libc::AT_FDCWD, Path::new("missing-entry")).is_err());
-    let nul = PathBuf::from(std::ffi::OsString::from_vec(b"bad\0name".to_vec()));
-    assert!(open_copy_source(libc::AT_FDCWD, &nul).is_err());
-
-    fixture.cancellation.send_replace(true);
-    let mut reader = CancellableReader {
-        source: fs::File::open(&regular).assert_value(),
-        cancellation: &DriverCancellation::new(fixture.cancellation.subscribe()),
-    };
-    assert!(reader.read(&mut [0_u8; 4]).is_err());
-    assert!(
-        copy_entry(
-            open_copy_source(libc::AT_FDCWD, &regular).assert_value(),
-            &fixture.runtime.join("cancelled-copy"),
-            &fixture.specification(91),
-        )
-        .is_err()
-    );
-    assert!(!fixture.runtime.join("cancelled-copy").exists());
-
-    let metadata = fs::metadata(&regular).assert_value();
-    assert!(preserve_times(&fixture.runtime.join("absent"), &metadata).is_err());
 }
 
 #[test]
@@ -141,46 +97,7 @@ fn boundary_contract_private_directory_drop_removes_only_idle_directories() {
 }
 
 #[test]
-fn candidate_copy_preserves_artifacts_metadata_and_symlinks_without_shared_inodes() {
-    let fixture = Fixture::new();
-    fs::create_dir(fixture.candidate.join("target")).assert_value();
-    fs::write(fixture.candidate.join(".gitignore"), "target/\n").assert_value();
-    fs::write(fixture.candidate.join("untracked.rs"), "actual candidate").assert_value();
-    let artifact = fixture.candidate.join("target/build-helper");
-    fs::write(&artifact, "#!/bin/sh\nexit 0\n").assert_value();
-    fs::set_permissions(&artifact, fs::Permissions::from_mode(0o751)).assert_value();
-    let external = fixture.runtime.join("external");
-    fs::write(&external, "outside the candidate").assert_value();
-    std::os::unix::fs::symlink(&external, fixture.candidate.join("external-link")).assert_value();
-    let metadata = fs::metadata(&artifact).assert_value();
-
-    let files = fixture.prepare(1);
-    assert_eq!(
-        fs::read(files.workspace.join("untracked.rs")).assert_value(),
-        b"actual candidate"
-    );
-    let copy = files.workspace.join("target/build-helper");
-    let copied = fs::metadata(&copy).assert_value();
-    assert_ne!(metadata.ino(), copied.ino());
-    assert_eq!(metadata.permissions().mode(), copied.permissions().mode());
-    assert_eq!(
-        (metadata.mtime(), metadata.mtime_nsec()),
-        (copied.mtime(), copied.mtime_nsec())
-    );
-    assert_eq!(
-        fs::read_link(files.workspace.join("external-link")).assert_value(),
-        external
-    );
-    fs::write(copy, "verifier changes").assert_value();
-    assert_eq!(fs::read(&artifact).assert_value(), b"#!/bin/sh\nexit 0\n");
-    let execution = files.root.path.clone();
-    drop(files);
-    assert!(!execution.exists());
-    assert_eq!(fs::read(external).assert_value(), b"outside the candidate");
-}
-
-#[test]
-fn each_execution_observes_the_latest_candidate_without_promoting_verifier_writes() {
+fn each_execution_shares_workspace_artifacts_and_observes_edits() {
     let fixture = Fixture::new();
     fs::write(fixture.candidate.join("source"), "version one").assert_value();
     let first = fixture.prepare(1);
@@ -193,8 +110,8 @@ fn each_execution_observes_the_latest_candidate_without_promoting_verifier_write
         fs::read(second.workspace.join("source")).assert_value(),
         b"version two"
     );
-    assert!(!second.workspace.join("private-cache").exists());
-    assert!(!fixture.candidate.join("private-cache").exists());
+    assert!(second.workspace.join("private-cache").exists());
+    assert!(fixture.candidate.join("private-cache").exists());
 }
 
 #[tokio::test]
@@ -228,21 +145,6 @@ fn unconfirmed_process_cleanup_retains_files_and_rejects_another_provider_launch
     drop(files);
     assert!(execution.exists());
     assert!(home.exists());
-}
-
-#[test]
-fn cancelled_or_unsupported_copy_does_not_leave_partial_execution_resources() {
-    let fixture = Fixture::new();
-    fixture.cancellation.send_replace(true);
-    assert!(ProviderExecutionFiles::prepare(fixture.specification(1)).is_err());
-    assert!(!fixture.runtime.join("execution-1").exists());
-    assert!(!fixture.runtime.join("home-1").exists());
-    fixture.cancellation.send_replace(false);
-    let _socket =
-        std::os::unix::net::UnixListener::bind(fixture.candidate.join("socket")).assert_value();
-    assert!(ProviderExecutionFiles::prepare(fixture.specification(2)).is_err());
-    assert!(!fixture.runtime.join("execution-2").exists());
-    assert!(!fixture.runtime.join("home-2").exists());
 }
 
 fn command(files: &ProviderExecutionFiles, script: &str) -> ProcessSessionCommand {
@@ -306,114 +208,8 @@ async fn nonzero_exit_and_cancelled_process_tree_release_execution_files() {
     }
 }
 
-fn hosted_files(fixture: &Fixture, execution: u64) -> Arc<ProviderExecutionFiles> {
-    let pool = HostedProcessPool::new(71_002, 71_002, 72_000, 72_000).assert_value();
-    let identity = pool
-        .identity(HostedProcessScope::VerifierExecution(execution))
-        .assert_value();
-    let mut specification = fixture.specification(execution);
-    specification.runner = identity.runner();
-    specification.identity = Some(identity);
-    set_owner(specification.home.path(), Some(identity)).assert_value();
-    Arc::new(ProviderExecutionFiles::prepare(specification).assert_value())
-}
-
-fn writer_build(fixture: &Fixture) {
-    use std::os::unix::process::CommandExt;
-
-    fs::write(
-        fixture.candidate.join("main.c"),
-        "int main(void) { return 0; }\n",
-    )
-    .assert_value();
-    fs::write(
-        fixture.candidate.join("Makefile"),
-        "target/proof: main.c\n\tmkdir -p target\n\tcc main.c -o target/proof\n",
-    )
-    .assert_value();
-    std::os::unix::fs::chown(&fixture.candidate, Some(71_002), Some(71_002)).assert_value();
-    let output = std::process::Command::new("/usr/bin/make")
-        .current_dir(&fixture.candidate)
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .uid(71_002)
-        .gid(71_002)
-        .output()
-        .assert_value();
-    assert!(
-        output.status.success(),
-        "writer build: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-/// Run this exact gate as root to exercise the hosted UID boundary and native build execution.
-#[tokio::test]
-async fn root_writer_artifacts_support_parallel_private_verifier_builds() {
-    // SAFETY: geteuid has no preconditions or side effects.
-    if unsafe { libc::geteuid() } != 0 {
-        eprintln!("root-only verifier build gate skipped outside the capsule identity");
-        return;
-    }
-    let fixture = Fixture::new();
-    writer_build(&fixture);
-    let left = hosted_files(&fixture, 1);
-    let right = hosted_files(&fixture, 2);
-    let script = r#"set -eu
-make -q
-./target/proof
-! touch "$CANDIDATE/forbidden" 2>/dev/null
-! touch "$PEER/forbidden" 2>/dev/null
-rm target/proof
-make >/dev/null
-./target/proof
-printf '#!/bin/sh\nexit 0\n' > "$TMPDIR/executable"
-chmod 700 "$TMPDIR/executable"
-"$TMPDIR/executable"
-printf private > private-cache
-"#;
-    let mut left_command = command(&left, script);
-    left_command.environment.insert(
-        "CANDIDATE".to_owned(),
-        fixture.candidate.display().to_string(),
-    );
-    left_command
-        .environment
-        .insert("PEER".to_owned(), right.workspace.display().to_string());
-    let mut right_command = command(&right, script);
-    right_command.environment.insert(
-        "CANDIDATE".to_owned(),
-        fixture.candidate.display().to_string(),
-    );
-    right_command
-        .environment
-        .insert("PEER".to_owned(), left.workspace.display().to_string());
-    let (mut left_process, mut right_process) = tokio::join!(
-        open(left.clone(), left_command, &fixture.cancellation),
-        open(right.clone(), right_command, &fixture.cancellation)
-    );
-    let (left_output, right_output) = tokio::join!(left_process.wait(), right_process.wait());
-    for output in [left_output, right_output] {
-        let output = output.assert_value();
-        assert_eq!(
-            output.exit_code,
-            Some(0),
-            "{}",
-            String::from_utf8_lossy(&output.stderr_tail)
-        );
-        assert!(output.cleanup.proves_tree_empty());
-    }
-    assert!(!fixture.candidate.join("private-cache").exists());
-    assert!(fixture.candidate.join("target/proof").exists());
-    drop((left_process, left));
-    assert!(!fixture.runtime.join("execution-1").exists());
-    assert!(right.workspace.join("private-cache").exists());
-    drop((right_process, right));
-    assert!(!fixture.runtime.join("execution-2").exists());
-}
-
 #[test]
-fn copied_cargo_target_reuses_compiled_artifacts_and_build_script_outputs() {
+fn shared_cargo_target_reuses_compiled_artifacts_and_build_script_outputs() {
     let fixture = Fixture::new();
     fs::write(
         fixture.candidate.join("Cargo.toml"),
@@ -480,14 +276,14 @@ fn build_cargo_fixture(workspace: &Path, scratch: &Path) -> std::process::Output
 }
 
 #[tokio::test]
-async fn root_concurrent_writers_share_files_and_cleanup_independently() {
+async fn root_workers_and_reviewers_share_files_and_cleanup_independently() {
     // SAFETY: geteuid only inspects the current process identity.
     if unsafe { libc::geteuid() } != 0 {
         eprintln!("root-only concurrent writer gate skipped outside the capsule identity");
         return;
     }
     let fixture = Fixture::new();
-    let pool = HostedProcessPool::new(91_002, 91_002, 92_000, 92_000).assert_value();
+    let pool = HostedProcessPool::new(91_002, 91_002, 92_000).assert_value();
     crate::native_v2_capsule::prepare_capsule_filesystem(
         crate::native_v2_capsule::CapsuleFilesystemSpec {
             workspace: &fixture.candidate,
@@ -501,7 +297,7 @@ async fn root_concurrent_writers_share_files_and_cleanup_independently() {
         .identity(HostedProcessScope::WriterExecution(1))
         .assert_value();
     let right_identity = pool
-        .identity(HostedProcessScope::WriterExecution(2))
+        .identity(HostedProcessScope::VerifierExecution(2))
         .assert_value();
     assert_eq!(left_identity.uid(), right_identity.uid());
     let left = shared_writer_files(&fixture, pool, 1);
@@ -572,12 +368,15 @@ fn shared_writer_files(
     execution: u64,
 ) -> Arc<ProviderExecutionFiles> {
     let identity = pool
-        .identity(HostedProcessScope::WriterExecution(execution))
+        .identity(if execution == 2 {
+            HostedProcessScope::VerifierExecution(execution)
+        } else {
+            HostedProcessScope::WriterExecution(execution)
+        })
         .assert_value();
     let mut specification = fixture.specification(execution);
     specification.runner = identity.runner();
     specification.identity = Some(identity);
-    specification.verifier_copy = false;
     set_owner(specification.home.path(), Some(identity)).assert_value();
     Arc::new(ProviderExecutionFiles::prepare(specification).assert_value())
 }
@@ -599,101 +398,4 @@ fn initialize_writer_repository(fixture: &Fixture, pool: HostedProcessPool) {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-}
-
-#[test]
-fn candidate_copy_preserves_a_pinned_symlink_after_its_path_is_replaced() {
-    let fixture = Fixture::new();
-    let link = fixture.candidate.join("link");
-    std::os::unix::fs::symlink("original-target", &link).assert_value();
-    let source = open_copy_source(libc::AT_FDCWD, &link).assert_value();
-    fs::remove_file(&link).assert_value();
-    std::os::unix::fs::symlink("replacement-target", &link).assert_value();
-
-    let specification = fixture.specification(1);
-    let destination = fixture.runtime.join("copied-link");
-    copy_entry(source, &destination, &specification).assert_value();
-    assert_eq!(
-        fs::read_link(destination).assert_value(),
-        Path::new("original-target")
-    );
-}
-
-#[test]
-fn root_candidate_copy_does_not_follow_a_writer_replaced_directory() {
-    use std::os::unix::process::CommandExt;
-
-    // SAFETY: geteuid only inspects the current process identity.
-    if unsafe { libc::geteuid() } != 0 {
-        eprintln!("root-only candidate copy race gate skipped outside the capsule identity");
-        return;
-    }
-    let fixture = Fixture::new();
-    let writer_uid = 121_003;
-    let writer_gid = 121_000;
-    std::os::unix::fs::chown(&fixture.candidate, Some(writer_uid), Some(writer_gid)).assert_value();
-    let changing = fixture.candidate.join("changing");
-    let candidate = changing.join("workspace");
-    fs::create_dir_all(&candidate).assert_value();
-    fs::write(candidate.join("public"), "candidate contents").assert_value();
-    let private = fixture._directory.child("root-private");
-    create_private_directory(&private).assert_value();
-    fs::create_dir(private.join("workspace")).assert_value();
-    let secret = private.join("workspace/secret");
-    fs::write(&secret, "private session state").assert_value();
-    fs::set_permissions(&secret, fs::Permissions::from_mode(0o600)).assert_value();
-    // Existing configured aliases are resolved by the filesystem preparer before workers start.
-    let alias = fixture._directory.child("candidate-alias");
-    std::os::unix::fs::symlink(&fixture.candidate, &alias).assert_value();
-    let prepared = crate::native_v2_capsule::prepare_capsule_filesystem(
-        crate::native_v2_capsule::CapsuleFilesystemSpec {
-            workspace: &alias.join("changing/workspace"),
-            runtime_home: &fixture.runtime,
-            process_pool: HostedProcessPool::new(writer_uid, writer_gid, 122_000, 122_000)
-                .assert_value(),
-        },
-    )
-    .assert_value();
-    assert_eq!(
-        prepared.workspace,
-        fs::canonicalize(candidate).assert_value()
-    );
-    let candidate = prepared.workspace;
-    let source = open_copy_root(&candidate).assert_value();
-    let writer = std::process::Command::new("/bin/sh")
-        .args([
-            "-c",
-            "test ! -r \"$1/workspace/secret\" && mv changing retained && ln -s \"$1\" changing",
-            "copy-race",
-        ])
-        .arg(&private)
-        .current_dir(&fixture.candidate)
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .uid(writer_uid)
-        .gid(writer_gid)
-        .output()
-        .assert_value();
-    assert!(
-        writer.status.success(),
-        "{}",
-        String::from_utf8_lossy(&writer.stderr)
-    );
-
-    // A source root reopened after the swap must reject the symlinked ancestor, even though
-    // the final workspace component is a directory and the target is outside the runtime root.
-    let mut specification = fixture.specification(1);
-    specification.candidate = candidate;
-    assert!(ProviderExecutionFiles::prepare(specification).is_err());
-
-    // A root pinned before the swap must still copy the original directory inode.
-    let specification = fixture.specification(2);
-    let destination = fixture.runtime.join("copied-directory");
-    copy_entry(source, &destination, &specification).assert_value();
-    assert_eq!(
-        fs::read_to_string(destination.join("public")).assert_value(),
-        "candidate contents"
-    );
-    assert!(!destination.join("secret").exists());
-    assert_eq!(fs::read_link(changing).assert_value(), private);
 }

@@ -2,7 +2,7 @@
   "name": "@the-open-engine-company/zeroshot",
   "version": "0.0.0-development",
   "description": "Verified prebuilt binary installer for the standalone Zeroshot engine",
-  "homepage": "https://the-open-engine.github.io/zeroshot/",
+  "homepage": "https://zeroshot.sh",
   "license": "MIT",
   "repository": {
     "type": "git",

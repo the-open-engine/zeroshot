@@ -33,7 +33,7 @@ fn possible_writers(node: &GraphNode) -> Result<PossibleWriters<'_>, NativeV2Adm
         GraphNode::Verifier(verifier) => {
             let delivery = DeliveryMode::from_worker(&verifier.worker).map(|_| &verifier.name);
             Ok(PossibleWriters {
-                writer: delivery,
+                writer: Some(&verifier.name),
                 delivery,
             })
         }

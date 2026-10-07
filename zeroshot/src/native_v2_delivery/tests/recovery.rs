@@ -8,7 +8,26 @@ async fn locked_index_provides_raw_git_feedback_and_can_recover() {
         let lock = repo.workspace.join(".git/index.lock");
         fs::write(&lock, "").assert_value();
         let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::NoCi));
-        let failure = run_delivery(&repo, authority.clone(), 3, mode).await;
+        let execution = run_delivery_execution(
+            DeliveryRunRequest {
+                repo: &repo,
+                attempts: 3,
+                mode,
+                run_id: "delivery-run",
+                refresh: None,
+            },
+            authority.clone(),
+        )
+        .await;
+        assert!(
+            execution
+                .output
+                .iter()
+                .any(|output| output.stream == LiveOutputStream::Error
+                    && output.text.contains("index.lock")
+                    && output.text.contains("File exists"))
+        );
+        let failure = execution.outcome;
         let output = assert_delivery_signal(&failure, DELIVERY_REPAIR_REQUIRED_LABEL);
         assert_eq!(output["pullRequestId"], "");
         assert!(!authority.pushed.load(Ordering::SeqCst));

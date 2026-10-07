@@ -40,6 +40,9 @@ impl fmt::Display for NativeV2RunValueError {
 
 impl std::error::Error for NativeV2RunValueError {}
 
+mod environment;
+pub use environment::*;
+
 mod string_kind_sealed {
     pub trait Sealed {}
 }
@@ -437,6 +440,7 @@ mod wire;
 pub use wire::{
     RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunListParams, RunListResult,
     RunResumeParams, RunResumeResult, RunSubmission, RunSubmitParams, RunSubmitResult, RuntimePlan,
+    run_connection_requirements,
 };
 
 #[cfg(test)]

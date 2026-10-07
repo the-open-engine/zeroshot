@@ -69,6 +69,10 @@ RUN cd /tmp/github-cli \
         bash \
         build-essential \
         ca-certificates \
+        curl \
+        docker-cli \
+        docker-buildx \
+        docker-compose \
         /tmp/github-cli/gh_${GH_VERSION}_linux_${TARGETARCH}.deb \
         git \
         libbz2-1.0 \
@@ -81,6 +85,7 @@ RUN cd /tmp/github-cli \
         libssl-dev \
         libuuid1 \
         pkgconf \
+        procps \
         ripgrep \
     && git_version="$(git --version)" \
     && dpkg --compare-versions "${git_version#git version }" ge 2.47 \
@@ -94,14 +99,20 @@ RUN for tool in cargo cargo-clippy cargo-fmt clippy-driver rustc rustdoc rustfmt
     done \
     && ldconfig
 
-RUN npm install --global --no-audit --no-fund "npm@${NPM_VERSION}" \
-    && npm install --global --no-audit --no-fund \
+COPY --chmod=0755 docker/zeroshot-target/harness.sh /usr/local/libexec/zeroshot-harness
+RUN install -d /opt/zeroshot/bin /opt/zeroshot/harness/lib/node_modules \
+    && cp /usr/local/bin/node /opt/zeroshot/bin/node \
+    && npm install --global --no-audit --no-fund "npm@${NPM_VERSION}" \
+    && npm install --global --prefix /opt/zeroshot/harness --no-audit --no-fund \
         --strict-allow-scripts \
         --allow-scripts=@anthropic-ai/claude-code \
         "@github/copilot@${COPILOT_VERSION}" \
         "@openai/codex@${CODEX_VERSION}" \
         "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-    && npm cache clean --force
+    && npm cache clean --force \
+    && for tool in codex claude copilot; do \
+        ln -s /usr/local/libexec/zeroshot-harness "/usr/local/bin/$tool"; \
+    done
 
 FROM tooling AS runtime
 

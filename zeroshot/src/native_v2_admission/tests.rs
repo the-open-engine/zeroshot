@@ -119,6 +119,7 @@ fn resolved_source() -> ResolvedSource {
 
 fn submission(graph: GraphSpec, nodes: BTreeMap<NodeName, NodeRuntimeBinding>) -> RunSubmission {
     RunSubmission {
+        environment: None,
         title: RunTitle::new("Admission test").assert_value(),
         graph,
         initial_input: json!({"items":[null]}),
@@ -346,6 +347,7 @@ async fn rejects_inconsistent_worker_reuse() {
 async fn admits_bedrock_for_both_harnesses_and_preserves_provider_owned_models() {
     let graph = graph(vec![null_step("work", "agent.work@1"), succeed("done")]);
     let codex_runtime = RunSubmission {
+        environment: None,
         title: RunTitle::new("Opaque Codex model").assert_value(),
         graph: graph.clone(),
         initial_input: json!({"items":[null]}),
@@ -432,19 +434,6 @@ async fn admits_parallel_writers_mixed_parallelism_and_writer_maps() {
     ]);
     assert_concurrent_admission(submission(mixed, nodes), DeliveryPolicy::Optional).await;
 
-    let delivery_parallel = par(
-        delivery_verifier("deliver", DeliveryMode::PullRequest),
-        null_verifier("reader", "verify.reader@1"),
-    );
-    let delivery_request = submission(
-        delivery_parallel,
-        BTreeMap::from([
-            (named("deliver"), delivery_binding()),
-            (named("reader"), binding("claude-sonnet-5", None)),
-        ]),
-    );
-    assert_concurrent_admission(delivery_request, DeliveryPolicy::Required).await;
-
     let mapped = graph(vec![
         json!({
             "kind":"map","name":"each","state":{"kind":"record","fields":{
@@ -516,11 +505,49 @@ mod concurrency;
 
 fn submission_intent(request: &RunSubmission) -> RunSubmissionIntent {
     RunSubmissionIntent {
+        environment: request.environment.clone(),
         title: request.title.clone(),
         graph: request.graph.clone(),
         initial_input: request.initial_input.clone(),
         runtime: request.runtime.clone(),
         branch: None,
         submission_key: request.submission_key.clone(),
+    }
+}
+
+#[tokio::test]
+async fn environment_name_limit_counts_distinct_names_across_nodes_hooks_and_variables() {
+    for extra_variable in [false, true] {
+        let mut request = submission(
+            graph(vec![null_step("work", "agent.work@1"), succeed("done")]),
+            BTreeMap::from([(
+                named("work"),
+                binding_with_environment((0..60).map(|index| format!("ENV_{index}"))),
+            )]),
+        );
+        let mut definition = json!({
+            "connections": {"registry": ["PACKAGE_TOKEN", "PACKAGE_URL"]},
+            "variables": {"ENV_0": "same name", "PUBLIC_ONE": "one", "PUBLIC_TWO": "two"}
+        });
+        if extra_variable {
+            definition["variables"]["PUBLIC_THREE"] = json!("over limit");
+        }
+        request.environment = Some(serde_json::from_value(definition).assert_value());
+        let expected = if extra_variable {
+            Err(NativeV2AdmissionError::DeclaredEnvironmentTooLarge { found: 65 })
+        } else {
+            Ok(())
+        };
+        NativeV2Admission
+            .validate_profile(&request.graph, &request.runtime, DeliveryPolicy::Optional)
+            .await
+            .assert_value();
+        assert_eq!(
+            NativeV2Admission
+                .validate_intent(&submission_intent(&request), DeliveryPolicy::Optional)
+                .await,
+            expected
+        );
+        assert_eq!(NativeV2Admission.admit(request).await.map(|_| ()), expected);
     }
 }

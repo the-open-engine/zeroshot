@@ -21,6 +21,7 @@ use crate::execution::process::HostedProcessPool;
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderExecution, ProviderFilesystemConfig, ProviderProcessRunners,
     ProviderExecutionFiles, ProviderProcess, open_provider_process, require_process_cleanup,
+    redact_provider_error, report_provider_error,
 };
 use crate::native_v2_runner::{DriverControl, DriverInvocation, NodeRunnerError, ResolvedEnvironment};
 use session::CopilotSession;
@@ -114,49 +115,59 @@ impl CopilotAdapter {
         control: &DriverControl,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
         let _turn = session.core.turn.lock().await;
-        session.core.ensure_live(ClosedSessionFailure::Driver)?;
-        let authentication = auth::CopilotAuthentication::new(
-            &invocation.environment,
-            self.local_token.as_deref(),
-            self.config.local_user.is_some(),
-            &self.config.base_environment,
-        )?;
-        let local_provider = self.provider_configuration(
-            &invocation.environment,
-            &authentication,
-            command::agent_model(invocation)?,
-        )?;
-        let execution = ProviderExecution::new(
-            ProviderFilesystemConfig {
-                runners: self.runners,
-                root: &self.config.runtime_home,
-                workspace: &self.config.workspace,
-            },
-            invocation,
-            &session.core,
-        );
-        let files = execution
-            .prepare(control)
-            .await
-            .map_err(rpc::process_error)?;
-        let command = command::command(&self.config, invocation, &files, local_provider.as_ref())?;
-        let mut process = open_provider_process(files.clone(), command, control)
-            .await?
-            .map_err(rpc::process_error)?;
-        let mut connection = rpc::CopilotRpc::new(
-            process.detach_stdout(),
-            invocation,
-            control,
-            rpc::CopilotRpcNative {
-                verifier_workspace: self.runners.verifier_workspace(),
-                authentication,
-                provider: local_provider.as_ref(),
-                redactions: self
-                    .provider_redactions(&invocation.environment, local_provider.as_ref()),
-            },
-        );
-        let outcome = exchange_rpc(&mut connection, &process, session, &files).await;
-        finish_rpc(&mut connection, &mut process, control, outcome).await
+        let mut redactions = self.provider_redactions(&invocation.environment, None);
+        redactions.extend(self.local_token.iter().cloned());
+        let result = async {
+            session.core.ensure_live(ClosedSessionFailure::Driver)?;
+            let authentication = auth::CopilotAuthentication::new(
+                &invocation.environment,
+                self.local_token.as_deref(),
+                self.config.local_user.is_some(),
+                &self.config.base_environment,
+            )?;
+            let local_provider = self.provider_configuration(
+                &invocation.environment,
+                &authentication,
+                command::agent_model(invocation)?,
+            )?;
+            redactions.extend(
+                local_provider
+                    .iter()
+                    .flat_map(provider::LocalProvider::redactions),
+            );
+            let execution = ProviderExecution::new(
+                ProviderFilesystemConfig {
+                    runners: self.runners,
+                    root: &self.config.runtime_home,
+                    workspace: &self.config.workspace,
+                },
+                invocation,
+                &session.core,
+            );
+            let files = execution
+                .prepare(control)
+                .await
+                .map_err(rpc::process_error)?;
+            let command =
+                command::command(&self.config, invocation, &files, local_provider.as_ref())?;
+            let mut process = open_provider_process(files.clone(), command, control)
+                .await?
+                .map_err(rpc::process_error)?;
+            let mut connection = rpc::CopilotRpc::new(
+                process.detach_stdout(),
+                invocation,
+                control,
+                rpc::CopilotRpcNative {
+                    authentication,
+                    provider: local_provider.as_ref(),
+                    redactions: redactions.clone(),
+                },
+            );
+            let outcome = exchange_rpc(&mut connection, &process, session, &files).await;
+            finish_rpc(&mut connection, &mut process, control, outcome).await
+        }
+        .await;
+        result.map_err(|error| redact_provider_error(error, &redactions))
     }
 
     fn provider_configuration(
@@ -200,11 +211,25 @@ async fn finish_rpc(
     // Stop the owned tree while draining its remaining events, including token usage.
     // Releasing an intentionally completed headless server is not a provider cancellation.
     let (completion, drained) = tokio::join!(process.release(), connection.drain());
-    let completion = require_process_cleanup(&completion)?;
-    if control.is_cancelled() {
+    let outcome = outcome.and_then(|outcome| drained.map(|()| outcome));
+    let completion = match require_process_cleanup(&completion) {
+        Ok(completion) => completion,
+        Err(cleanup_error) => {
+            // Cleanup owns settlement, but its classification cannot carry the original cause.
+            // Preserve that cause without letting a stopped log consumer delay cleanup failure.
+            if let Err(error @ NodeRunnerError::DriverDetail(_)) = &outcome {
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_millis(100),
+                    report_provider_error("Copilot", error, &connection.redactions, control),
+                )
+                .await;
+            }
+            return Err(cleanup_error);
+        }
+    };
+    if control.is_cancelled() && outcome.is_ok() {
         return Err(NodeRunnerError::Cancelled);
     }
-    drained?;
     outcome.map_err(|error| connection.failure_diagnostic(error, completion))
 }
 

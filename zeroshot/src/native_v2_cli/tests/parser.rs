@@ -879,3 +879,28 @@ async fn unsupported_graph_profile_fails_before_target_contact() {
     let error = rejected_without_backend_contact(command, &backend).await;
     assert!(matches!(error, NativeV2CliError::Usage(_)));
 }
+
+#[test]
+fn target_serve_diagnostic_json_is_opt_in() {
+    for enabled in [false, true] {
+        let mut arguments = vec![
+            "target",
+            "serve",
+            "--listen",
+            "127.0.0.1:8080",
+            "--public-origin",
+            "http://127.0.0.1:8080",
+            "--storage",
+            "/tmp/zeroshot-target",
+        ];
+        if enabled {
+            arguments.push("--operator-diagnostics-json");
+        }
+        let NativeV2CliCommand::TargetServe(target) =
+            parse_native_v2_args(args(&arguments)).assert_value()
+        else {
+            panic!("target serve")
+        };
+        assert_eq!(target.operator_diagnostics_json, enabled);
+    }
+}

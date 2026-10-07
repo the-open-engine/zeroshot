@@ -7,6 +7,7 @@
 
 mod allocator;
 mod connections;
+mod environment;
 mod repository;
 mod workspaces;
 
@@ -30,8 +31,8 @@ use crate::native_v2_claude::ClaudeProcessEnvironment;
 use crate::native_v2_cloud::{NativeV2CloudController, NativeV2CloudError};
 use crate::native_v2_cloud::submission_digest;
 use crate::native_v2_target_authority::{
-    NativeV2TargetAuthority, OperatorDiagnosticStore, TargetAuthorityError,
-    TargetControllerFactory, TargetRunReceipt, TargetRunRequest,
+    NativeV2TargetAuthority, OperatorDiagnosticOutput, OperatorDiagnosticStore,
+    TargetAuthorityError, TargetControllerFactory, TargetRunReceipt, TargetRunRequest,
 };
 use crate::v2_run_ledger::RunLedger;
 use crate::v2_run_ledger::RunLedgerError;
@@ -56,6 +57,8 @@ pub async fn build_production_target_authority(
 /// Host-owned non-secret capabilities used to compose one installed target.
 #[derive(Clone)]
 pub struct ProductionHostingConfig {
+    /// Private diagnostics collection; the host owns the receiver and durable storage.
+    pub operator_diagnostic_output: Option<OperatorDiagnosticOutput>,
     pub workspace_storage: Option<Arc<dyn HostedWorkspaceStorage>>,
     pub storage_root: PathBuf,
     pub copilot_executable: PathBuf,
@@ -92,9 +95,12 @@ pub struct ProductionTargetControllerFactory {
 impl ProductionTargetControllerFactory {
     #[must_use]
     pub fn new(config: ProductionHostingConfig) -> Self {
+        let operator_diagnostics = Arc::new(OperatorDiagnosticStore::new(
+            config.operator_diagnostic_output.clone(),
+        ));
         Self {
             config: Arc::new(config),
-            operator_diagnostics: Arc::new(OperatorDiagnosticStore::default()),
+            operator_diagnostics,
         }
     }
 
@@ -177,9 +183,18 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
         let environment = match connection_resolver {
             Some(wire) => {
                 let resolution = build_connection_resolver(run_id.clone(), wire)?;
-                RunEnvironment::with_resolver(&submission.runtime, connections, resolution)
+                RunEnvironment::with_resolver(
+                    &submission.runtime,
+                    submission.environment.as_ref(),
+                    connections,
+                    resolution,
+                )
             }
-            None => RunEnvironment::exact(&submission.runtime, connections),
+            None => RunEnvironment::exact(
+                &submission.runtime,
+                submission.environment.as_ref(),
+                connections,
+            ),
         }
         .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
         let receipt = controller
@@ -315,6 +330,7 @@ fn set_traversable_directory(_path: &std::path::Path) -> Result<(), std::io::Err
 impl Default for ProductionHostingConfig {
     fn default() -> Self {
         Self {
+            operator_diagnostic_output: None,
             workspace_storage: None,
             storage_root: PathBuf::from("/var/lib/zeroshot/native-v2"),
             copilot_executable: PathBuf::from("/usr/local/bin/copilot"),

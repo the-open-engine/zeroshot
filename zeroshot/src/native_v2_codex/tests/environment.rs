@@ -8,6 +8,7 @@ fn local_configuration(
     native_environment: BTreeMap<String, String>,
 ) -> NativeV2CodexConfig {
     NativeV2CodexConfig {
+        base_environment: Default::default(),
         provider,
         executable: PathBuf::from("codex"),
         workspace: PathBuf::from("/workspace"),
@@ -18,7 +19,7 @@ fn local_configuration(
         }),
         native_environment: LocalHarnessEnvironment::new(native_environment),
         search_path: "/usr/bin:/bin".to_owned(),
-        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000, 20_000).assert_value(),
+        process_pool: HostedProcessPool::new(10_002, 10_002, 20_000).assert_value(),
     }
 }
 
@@ -143,7 +144,9 @@ async fn coverage_contract_command_path_failures_preserve_driver_detail_across_o
         let runtime = runner(&admitted, adapter);
         let (logs, completion) = complete_with_logs(start(&runtime, &admitted, 1, &[]).await).await;
 
-        assert_eq!(completion, Err(NodeRunnerError::Driver));
+        assert!(
+            matches!(completion, Err(NodeRunnerError::DriverDetail(ref detail)) if detail.contains(expected))
+        );
         assert!(logs.contains(expected), "missing {expected:?} in {logs:?}");
         assert!(logs.contains("Codex provider failed; continuing once"));
     }

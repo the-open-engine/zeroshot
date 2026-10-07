@@ -1,4 +1,4 @@
-//! Exercises hosted permission defaults and verifier private copies.
+//! Exercises hosted permission defaults and the shared run workspace.
 #![cfg(unix)]
 
 use std::{collections::BTreeMap, fs, sync::Arc};
@@ -69,7 +69,7 @@ async fn hosted_case(harness: &str, verifier: bool, policy: &str, native: Option
     let runtime = fixture.child("runtime");
     fs::create_dir(&workspace).assert_value();
     fs::create_dir(&runtime).assert_value();
-    let pool = HostedProcessPool::new(83_002, 83_002, 84_000, 84_000).assert_value();
+    let pool = HostedProcessPool::new(83_002, 83_002, 84_000).assert_value();
     super::prepare_capsule_filesystem(super::CapsuleFilesystemSpec {
         workspace: &workspace,
         runtime_home: &runtime,
@@ -157,7 +157,7 @@ async fn hosted_case(harness: &str, verifier: bool, policy: &str, native: Option
     );
     assert!(!logs.contains("private-config-sentinel"));
     assert!(!workspace.join("inspection-proof").exists());
-    assert_eq!(workspace.join("model-proof").exists(), !verifier);
+    assert!(workspace.join("model-proof").exists());
     runner.close_run(&RunId::new("permission-test")).await;
 }
 
@@ -170,6 +170,7 @@ fn hosted_runner(
     match harness {
         "codex" => {
             let adapter = Arc::new(NativeV2CodexAdapter::new(NativeV2CodexConfig {
+                base_environment: Default::default(),
                 provider: CodexProvider::OpenAi,
                 executable: fixture.child("harness"),
                 workspace: fixture.child("workspace"),
@@ -230,6 +231,7 @@ async fn admission(harness: &str, verifier: bool, binding: NodeRuntimeBinding) -
         }
     };
     admit(RunSubmission {
+        environment: None,
         title: RunTitle::new("Hosted permissions").assert_value(),
         graph: full_graph(vec![node, success_node()]),
         initial_input: Value::Null,

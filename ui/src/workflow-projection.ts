@@ -282,7 +282,6 @@ export function projectWorkflow(
   document: Document,
   collapsed: Set<string> = new Set()
 ): WorkflowProjection {
-  const result: WorkflowProjection = { nodes: [], edges: [], regions: [] };
   const outcomes = analyzeWorkflowOutcomes(document);
   const hiddenBranches = new Map<string, Set<number>>();
   for (const policy of outcomes.policies) {
@@ -305,19 +304,46 @@ export function projectWorkflow(
     );
   }
   collectBranchTerminals(document.graph.root, new Set());
-  const used = new Set<string>();
-  function unique(preferred: string): string {
+  return new WorkflowProjectionBuilder(
+    document,
+    collapsed,
+    outcomes,
+    hiddenBranches,
+    finalCompletions,
+    branchTerminals
+  ).project();
+}
+
+class WorkflowProjectionBuilder {
+  private readonly result: WorkflowProjection = { nodes: [], edges: [], regions: [] };
+  private readonly used = new Set<string>();
+
+  constructor(
+    private readonly document: Document,
+    private readonly collapsed: Set<string>,
+    private readonly outcomes: ReturnType<typeof analyzeWorkflowOutcomes>,
+    private readonly hiddenBranches: Map<string, Set<number>>,
+    private readonly finalCompletions: Set<string>,
+    private readonly branchTerminals: Set<string>
+  ) {}
+
+  project(): WorkflowProjection {
+    this.visit(this.document.graph.root, new Set());
+    return this.result;
+  }
+
+  private unique(preferred: string): string {
     let id = preferred,
       suffix = 2;
-    while (used.has(id)) id = `${preferred}:${suffix++}`;
-    used.add(id);
+    while (this.used.has(id)) id = `${preferred}:${suffix++}`;
+    this.used.add(id);
     return id;
   }
-  function addNode(owner: GraphNode, role: WorkflowRole, label: string, detail?: string): string {
-    const id = unique(
+  private addNode(owner: GraphNode, role: WorkflowRole, label: string, detail?: string): string {
+    const id = this.unique(
       `workflow:${role === 'activity' ? 'node' : 'virtual'}:${encodedName(owner.name)}:${role}`
     );
-    result.nodes.push({
+    this.result.nodes.push({
       id,
       owner: owner.name,
       role,
@@ -327,49 +353,50 @@ export function projectWorkflow(
     });
     return id;
   }
-  function edge(source: string, target: string, detail: EdgeDetail = {}) {
-    result.edges.push({
-      id: `workflow:edge:${result.edges.length + 1}`,
+  private edge(source: string, target: string, detail: EdgeDetail = {}) {
+    this.result.edges.push({
+      id: `workflow:edge:${this.result.edges.length + 1}`,
       source,
       target,
       ...detail,
     });
   }
-  function connect(exits: Exit[], target: string, owner: GraphNode, detail: EdgeDetail = {}) {
+  private connect(exits: Exit[], target: string, owner: GraphNode, detail: EdgeDetail = {}) {
     for (const exit of exits)
-      edge(exit.source, target, {
+      this.edge(exit.source, target, {
         owner: exit.owner ?? owner.name,
         ...(exit.label ? { label: exit.label } : {}),
         ...detail,
       });
   }
-  function region(owner: GraphNode, kind: WorkflowRegion['kind'], label: string, ids: string[]) {
-    result.regions.push({
-      id: unique(`workflow:region:${encodedName(owner.name)}:${kind}`),
+  private region(owner: GraphNode, kind: WorkflowRegion['kind'], label: string, ids: string[]) {
+    this.result.regions.push({
+      id: this.unique(`workflow:region:${encodedName(owner.name)}:${kind}`),
       owner: owner.name,
       kind,
       label,
       nodeIds: [...ids],
     });
   }
-  function empty(owner: GraphNode, label: string): Fragment {
-    const id = addNode(owner, 'empty', label, 'Draft · add workflow content');
+  private empty(owner: GraphNode, label: string): Fragment {
+    const id = this.addNode(owner, 'empty', label, 'Draft · add workflow content');
     return { entry: id, exits: [{ source: id }], ids: [id] };
   }
 
-  function visit(node: GraphNode, ancestors: Set<GraphNode>, preceding?: Preceding): Fragment {
-    if (ancestors.has(node) || ancestors.size > 64) return empty(node, 'Nesting limit reached');
+  private visit(node: GraphNode, ancestors: Set<GraphNode>, preceding?: Preceding): Fragment {
+    if (ancestors.has(node) || ancestors.size > 64)
+      return this.empty(node, 'Nesting limit reached');
     const next = new Set(ancestors).add(node);
     // These routes remain authored controls and editable policies at the same
     // checkpoint. Removing their presentation does not move state or bindings.
     if (
       node.kind === 'choice' &&
       list(node.branches).length > 0 &&
-      hiddenBranches.get(node.name)?.size === list(node.branches).length &&
+      this.hiddenBranches.get(node.name)?.size === list(node.branches).length &&
       nodeLike(node.otherwise)
     )
-      return visit(node.otherwise, next);
-    if (groups.has(node.kind) && collapsed.has(node.name)) {
+      return this.visit(node.otherwise, next);
+    if (groups.has(node.kind) && this.collapsed.has(node.name)) {
       const loop = node.kind === 'loop' ? loopLabels(node) : undefined;
       const description = loop
         ? `${loop.bounds}${loop.until ? ` · Stop when ${loop.until}` : ''}`
@@ -380,7 +407,7 @@ export function projectWorkflow(
             : node.kind === 'choice'
               ? 'Ordered decision'
               : 'Subprocess';
-      const id = addNode(node, 'collapsed', title(node.name), `${description} · collapsed`);
+      const id = this.addNode(node, 'collapsed', title(node.name), `${description} · collapsed`);
       return {
         entry: id,
         exits: structurallyContinues(node)
@@ -390,267 +417,282 @@ export function projectWorkflow(
       };
     }
     switch (node.kind) {
-      case 'seq': {
-        const children = childrenOf(node);
-        if (!children.length) return empty(node, 'Add first step');
-        const fragments: Fragment[] = [];
-        children.forEach((child, index) => {
-          fragments.push(
-            visit(
-              child,
-              next,
-              index ? { node: children[index - 1], fragment: fragments[index - 1] } : undefined
-            )
-          );
-        });
-        let exits = fragments[0].exits;
-        for (const fragment of fragments.slice(1)) {
-          if (exits.length) {
-            if (!fragment.attached) connect(exits, fragment.entry, node);
-            exits = fragment.exits;
-          }
-          // Preserve unreachable authored draft nodes, but do not draw an edge
-          // from a terminal or restart flow at the following disconnected node.
-        }
-        return {
-          entry: fragments[0].entry,
-          exits,
-          ids: fragments.flatMap((fragment) => fragment.ids),
-        };
-      }
-      case 'choice': {
-        const branches = list(node.branches);
-        if (!branches.length && !nodeLike(node.otherwise)) return empty(node, 'Add an outcome');
-        const attached =
-          !!preceding &&
-          preceding.fragment.ids.length === 1 &&
-          preceding.fragment.exits.length === 1 &&
-          preceding.fragment.exits[0].source === preceding.fragment.entry &&
-          decisionReadsVerifier(node, preceding.node, hiddenBranches.get(node.name) ?? new Set());
-        const decision = attached
-          ? preceding!.fragment.entry
-          : addNode(
-              node,
-              'decision',
-              title(node.name),
-              'First matching outcome wins · evaluate top to bottom'
-            );
-        const ids = attached ? [] : [decision],
-          exits: Exit[] = [];
-        branches.forEach((branch, index) => {
-          if (hiddenBranches.get(node.name)?.has(index)) return;
-          const label = `${index + 1}. ${guardLabel(branch?.when)}`;
-          const caption = compactGuardLabel(branch?.when);
-          const fragment = nodeLike(branch?.node)
-            ? visit(branch.node, next)
-            : empty(node, `Add outcome ${index + 1}`);
-          edge(decision, fragment.entry, {
-            owner: node.name,
-            branchIndex: index,
-            label,
-            shortLabel: caption ? `${index + 1}. ${caption}` : label,
-          });
-          ids.push(...fragment.ids);
-          exits.push(...fragment.exits);
-        });
-        if (nodeLike(node.otherwise)) {
-          const fragment = visit(node.otherwise, next);
-          edge(decision, fragment.entry, {
-            owner: node.name,
-            otherwise: true,
-            label: 'OTHERWISE · no earlier match',
-          });
-          ids.push(...fragment.ids);
-          exits.push(...fragment.exits);
-        }
-        return { entry: decision, exits, ids, ...(attached ? { attached: true } : {}) };
-      }
-      case 'par': {
-        const branches = childrenOf(node);
-        if (!branches.length) return empty(node, 'Add parallel branches');
-        const fork = addNode(
-          node,
-          'fork',
-          title(node.name),
-          `Parallel branches · ${joinLabel(node)}`
-        );
-        const fragments = branches.map((branch, index) => {
-          const fragment = visit(branch, next);
-          edge(fork, fragment.entry, { owner: node.name, branchIndex: index });
-          return fragment;
-        });
-        const ids = [fork, ...fragments.flatMap((fragment) => fragment.ids)];
-        const reachableJoin = parallelCanReachJoin(
-          node,
-          fragments.map((fragment) => fragment.exits.length > 0)
-        );
-        let exits: Exit[] = [];
-        {
-          const join = addNode(
-            node,
-            'join',
-            reachableJoin ? joinLabel(node) : 'Parallel group ends',
-            !reachableJoin
-              ? 'Terminal branches cannot satisfy this join; handle its group result.'
-              : node.join?.kind === 'first'
-                ? 'The rule may finish without a matching branch; handle its group result.'
-                : undefined
-          );
-          for (const fragment of fragments) connect(fragment.exits, join, node);
-          if (!reachableJoin)
-            edge(fork, join, {
-              owner: node.name,
-              secondary: true,
-              label: 'Branches settle · join not reached',
-            });
-          ids.push(join);
-          exits = [{ source: join }];
-        }
-        region(node, 'par', `${title(node.name)} · ${joinLabel(node)}`, ids);
-        return { entry: fork, exits, ids };
-      }
-      case 'loop': {
-        const { limit, bounds, until, continuation } = loopLabels(node);
-        const exhaustionStops = outcomes.policies.some(
-          (policy) =>
-            policy.sources.includes(node.name) &&
-            policy.guard.kind === 'in' &&
-            policy.guard.value?.name === node.name &&
-            policy.guard.value?.source === 'group' &&
-            policy.guard.value?.field === 'terminated' &&
-            policy.guard.labels?.length === 1 &&
-            policy.guard.labels[0] === 'exhausted'
-        );
-        const untilParts = node.until?.kind === 'any' ? list(node.until.guards) : [node.until];
-        const review = untilParts.find((part) => part?.value?.source === 'signal');
-        const approved =
-          exhaustionStops &&
-          review?.kind === 'in' &&
-          review.value?.field === 'verdict' &&
-          review.labels?.length === 1 &&
-          review.labels[0] === 'accepted' &&
-          untilParts.every(
-            (part) =>
-              part === review ||
-              (part?.kind === 'in' &&
-                part.value?.source === 'error' &&
-                part.value.field == null &&
-                part.labels?.length === workerErrors.size &&
-                new Set(part.labels).size === workerErrors.size &&
-                part.labels.every((label: string) => workerErrors.has(label)) &&
-                outcomes.policies.some(
-                  (policy) => policy.owner === node.name && policy.sources.includes(part.value.name)
-                ))
-          );
-        const start = addNode(
-          node,
-          'loop-start',
-          title(node.name),
-          `${bounds}${until ? ` · Stop when ${until}` : ''}`
-        );
-        const body = nodeLike(node.body)
-          ? visit(node.body, next)
-          : empty(node, 'Add repeated work');
-        edge(start, body.entry, { owner: node.name, label: 'First round' });
-        const ids = [start, ...body.ids];
-        let exits: Exit[] = [];
-        if (body.exits.length) {
-          const end = addNode(
-            node,
-            'loop-end',
-            'Round complete',
-            until ? `Check ${until}; otherwise respect the round limit.` : bounds
-          );
-          connect(body.exits, end, node);
-          ids.push(end);
-          if (limit && limit > 1)
-            edge(end, body.entry, {
-              owner: node.name,
-              repeat: true,
-              label: approved
-                ? `Try again · up to ${limit} attempts`
-                : `${until ? 'Until not met · ' : ''}More rounds remain (max ${limit})`,
-            });
-          exits = [
-            {
-              source: end,
-              owner: node.name,
-              label: approved ? 'Approved' : continuation,
-            },
-          ];
-        }
-        region(node, 'loop', `${title(node.name)} · ${bounds}`, ids);
-        return { entry: start, exits, ids };
-      }
-      case 'map': {
-        const limit = positive(node.maxItems) ? node.maxItems : undefined;
-        const start = addNode(
-          node,
-          'map-start',
-          title(node.name),
-          `${mapSourceLabel(document, node)}${limit ? ` · Up to ${limit} items` : ''}`
-        );
-        const body = nodeLike(node.body) ? visit(node.body, next) : empty(node, 'Add item work');
-        const end = addNode(node, 'map-end', 'Results', undefined);
-        edge(start, body.entry, { owner: node.name, label: 'Each item' });
-        connect(body.exits, end, node, { label: 'Item completes' });
-        edge(start, end, {
-          owner: node.name,
-          secondary: true,
-          label: 'No items or item limit exceeded',
-        });
-        if (body.exits.length && limit && limit > 1)
-          edge(end, body.entry, {
-            owner: node.name,
-            repeat: true,
-            secondary: true,
-            label: 'Repeat independently for other items',
-          });
-        const ids = [start, ...body.ids, end];
-        region(node, 'map', `${title(node.name)} · For each item`, ids);
-        return {
-          entry: start,
-          exits: [{ source: end, owner: node.name, label: 'Items processed or limit exceeded' }],
-          ids,
-        };
-      }
-      default: {
-        const known = ['step', 'verifier', 'succeed', 'fail'].includes(node.kind);
-        const terminal = node.kind === 'succeed' || node.kind === 'fail';
-        const branchTerminal = branchTerminals.has(node.name);
-        const detail =
-          node.kind === 'succeed'
-            ? branchTerminal
-              ? 'End this branch; the parallel join determines what follows'
-              : finalCompletions.has(node.name)
-                ? 'Return the configured run result'
-                : 'Finish the whole run here'
-            : node.kind === 'fail'
-              ? `${branchTerminal ? 'Stop this branch' : 'Stop run'}${typeof node.reason === 'string' ? ` · ${node.reason}` : ''}`
-              : node.kind === 'verifier'
-                ? 'Verifier'
-                : node.kind === 'step'
-                  ? 'Agent'
-                  : 'Advanced node · inspect its contract';
-        const label =
-          node.kind === 'succeed'
-            ? branchTerminal
-              ? 'End branch'
-              : finalCompletions.has(node.name)
-                ? 'Complete'
-                : 'Finish run early'
-            : title(node.name);
-        const id = addNode(node, terminal ? 'completion' : 'activity', label, detail);
-        return {
-          entry: id,
-          exits:
-            known && (node.kind === 'step' || node.kind === 'verifier') ? [{ source: id }] : [],
-          ids: [id],
-        };
-      }
+      case 'seq':
+        return this.visitSeq(node, next);
+      case 'choice':
+        return this.visitChoice(node, next, preceding);
+      case 'par':
+        return this.visitPar(node, next);
+      case 'loop':
+        return this.visitLoop(node, next);
+      case 'map':
+        return this.visitMap(node, next);
+      default:
+        return this.visitDefault(node);
     }
   }
+  private visitSeq(node: GraphNode, next: Set<GraphNode>): Fragment {
+    const children = childrenOf(node);
+    if (!children.length) return this.empty(node, 'Add first step');
+    const fragments: Fragment[] = [];
+    children.forEach((child, index) => {
+      fragments.push(
+        this.visit(
+          child,
+          next,
+          index ? { node: children[index - 1], fragment: fragments[index - 1] } : undefined
+        )
+      );
+    });
+    let exits = fragments[0].exits;
+    for (const fragment of fragments.slice(1)) {
+      if (exits.length) {
+        if (!fragment.attached) this.connect(exits, fragment.entry, node);
+        exits = fragment.exits;
+      }
+      // Preserve unreachable authored draft nodes, but do not draw an edge
+      // from a terminal or restart flow at the following disconnected node.
+    }
+    return {
+      entry: fragments[0].entry,
+      exits,
+      ids: fragments.flatMap((fragment) => fragment.ids),
+    };
+  }
 
-  visit(document.graph.root, new Set());
-  return result;
+  private visitChoice(node: GraphNode, next: Set<GraphNode>, preceding?: Preceding): Fragment {
+    const branches = list(node.branches);
+    if (!branches.length && !nodeLike(node.otherwise)) return this.empty(node, 'Add an outcome');
+    const attached =
+      !!preceding &&
+      preceding.fragment.ids.length === 1 &&
+      preceding.fragment.exits.length === 1 &&
+      preceding.fragment.exits[0].source === preceding.fragment.entry &&
+      decisionReadsVerifier(node, preceding.node, this.hiddenBranches.get(node.name) ?? new Set());
+    const decision = attached
+      ? preceding!.fragment.entry
+      : this.addNode(
+          node,
+          'decision',
+          title(node.name),
+          'First matching outcome wins · evaluate top to bottom'
+        );
+    const ids = attached ? [] : [decision],
+      exits: Exit[] = [];
+    branches.forEach((branch, index) => {
+      if (this.hiddenBranches.get(node.name)?.has(index)) return;
+      const label = `${index + 1}. ${guardLabel(branch?.when)}`;
+      const caption = compactGuardLabel(branch?.when);
+      const fragment = nodeLike(branch?.node)
+        ? this.visit(branch.node, next)
+        : this.empty(node, `Add outcome ${index + 1}`);
+      this.edge(decision, fragment.entry, {
+        owner: node.name,
+        branchIndex: index,
+        label,
+        shortLabel: caption ? `${index + 1}. ${caption}` : label,
+      });
+      ids.push(...fragment.ids);
+      exits.push(...fragment.exits);
+    });
+    if (nodeLike(node.otherwise)) {
+      const fragment = this.visit(node.otherwise, next);
+      this.edge(decision, fragment.entry, {
+        owner: node.name,
+        otherwise: true,
+        label: 'OTHERWISE · no earlier match',
+      });
+      ids.push(...fragment.ids);
+      exits.push(...fragment.exits);
+    }
+    return { entry: decision, exits, ids, ...(attached ? { attached: true } : {}) };
+  }
+
+  private visitPar(node: GraphNode, next: Set<GraphNode>): Fragment {
+    const branches = childrenOf(node);
+    if (!branches.length) return this.empty(node, 'Add parallel branches');
+    const fork = this.addNode(
+      node,
+      'fork',
+      title(node.name),
+      `Parallel branches · ${joinLabel(node)}`
+    );
+    const fragments = branches.map((branch, index) => {
+      const fragment = this.visit(branch, next);
+      this.edge(fork, fragment.entry, { owner: node.name, branchIndex: index });
+      return fragment;
+    });
+    const ids = [fork, ...fragments.flatMap((fragment) => fragment.ids)];
+    const reachableJoin = parallelCanReachJoin(
+      node,
+      fragments.map((fragment) => fragment.exits.length > 0)
+    );
+    let exits: Exit[] = [];
+    {
+      const join = this.addNode(
+        node,
+        'join',
+        reachableJoin ? joinLabel(node) : 'Parallel group ends',
+        !reachableJoin
+          ? 'Terminal branches cannot satisfy this join; handle its group result.'
+          : node.join?.kind === 'first'
+            ? 'The rule may finish without a matching branch; handle its group result.'
+            : undefined
+      );
+      for (const fragment of fragments) this.connect(fragment.exits, join, node);
+      if (!reachableJoin)
+        this.edge(fork, join, {
+          owner: node.name,
+          secondary: true,
+          label: 'Branches settle · join not reached',
+        });
+      ids.push(join);
+      exits = [{ source: join }];
+    }
+    this.region(node, 'par', `${title(node.name)} · ${joinLabel(node)}`, ids);
+    return { entry: fork, exits, ids };
+  }
+
+  private visitLoop(node: GraphNode, next: Set<GraphNode>): Fragment {
+    const { limit, bounds, until, continuation } = loopLabels(node);
+    const exhaustionStops = this.outcomes.policies.some(
+      (policy) =>
+        policy.sources.includes(node.name) &&
+        policy.guard.kind === 'in' &&
+        policy.guard.value?.name === node.name &&
+        policy.guard.value?.source === 'group' &&
+        policy.guard.value?.field === 'terminated' &&
+        policy.guard.labels?.length === 1 &&
+        policy.guard.labels[0] === 'exhausted'
+    );
+    const untilParts = node.until?.kind === 'any' ? list(node.until.guards) : [node.until];
+    const review = untilParts.find((part) => part?.value?.source === 'signal');
+    const approved =
+      exhaustionStops &&
+      review?.kind === 'in' &&
+      review.value?.field === 'verdict' &&
+      review.labels?.length === 1 &&
+      review.labels[0] === 'accepted' &&
+      untilParts.every(
+        (part) =>
+          part === review ||
+          (part?.kind === 'in' &&
+            part.value?.source === 'error' &&
+            part.value.field == null &&
+            part.labels?.length === workerErrors.size &&
+            new Set(part.labels).size === workerErrors.size &&
+            part.labels.every((label: string) => workerErrors.has(label)) &&
+            this.outcomes.policies.some(
+              (policy) => policy.owner === node.name && policy.sources.includes(part.value.name)
+            ))
+      );
+    const start = this.addNode(
+      node,
+      'loop-start',
+      title(node.name),
+      `${bounds}${until ? ` · Stop when ${until}` : ''}`
+    );
+    const body = nodeLike(node.body)
+      ? this.visit(node.body, next)
+      : this.empty(node, 'Add repeated work');
+    this.edge(start, body.entry, { owner: node.name, label: 'First round' });
+    const ids = [start, ...body.ids];
+    let exits: Exit[] = [];
+    if (body.exits.length) {
+      const end = this.addNode(
+        node,
+        'loop-end',
+        'Round complete',
+        until ? `Check ${until}; otherwise respect the round limit.` : bounds
+      );
+      this.connect(body.exits, end, node);
+      ids.push(end);
+      if (limit && limit > 1)
+        this.edge(end, body.entry, {
+          owner: node.name,
+          repeat: true,
+          label: approved
+            ? `Try again · up to ${limit} attempts`
+            : `${until ? 'Until not met · ' : ''}More rounds remain (max ${limit})`,
+        });
+      exits = [
+        {
+          source: end,
+          owner: node.name,
+          label: approved ? 'Approved' : continuation,
+        },
+      ];
+    }
+    this.region(node, 'loop', `${title(node.name)} · ${bounds}`, ids);
+    return { entry: start, exits, ids };
+  }
+
+  private visitMap(node: GraphNode, next: Set<GraphNode>): Fragment {
+    const limit = positive(node.maxItems) ? node.maxItems : undefined;
+    const start = this.addNode(
+      node,
+      'map-start',
+      title(node.name),
+      `${mapSourceLabel(this.document, node)}${limit ? ` · Up to ${limit} items` : ''}`
+    );
+    const body = nodeLike(node.body)
+      ? this.visit(node.body, next)
+      : this.empty(node, 'Add item work');
+    const end = this.addNode(node, 'map-end', 'Results', undefined);
+    this.edge(start, body.entry, { owner: node.name, label: 'Each item' });
+    this.connect(body.exits, end, node, { label: 'Item completes' });
+    this.edge(start, end, {
+      owner: node.name,
+      secondary: true,
+      label: 'No items or item limit exceeded',
+    });
+    if (body.exits.length && limit && limit > 1)
+      this.edge(end, body.entry, {
+        owner: node.name,
+        repeat: true,
+        secondary: true,
+        label: 'Repeat independently for other items',
+      });
+    const ids = [start, ...body.ids, end];
+    this.region(node, 'map', `${title(node.name)} · For each item`, ids);
+    return {
+      entry: start,
+      exits: [{ source: end, owner: node.name, label: 'Items processed or limit exceeded' }],
+      ids,
+    };
+  }
+
+  private visitDefault(node: GraphNode): Fragment {
+    const known = ['step', 'verifier', 'succeed', 'fail'].includes(node.kind);
+    const terminal = node.kind === 'succeed' || node.kind === 'fail';
+    const branchTerminal = this.branchTerminals.has(node.name);
+    const detail =
+      node.kind === 'succeed'
+        ? branchTerminal
+          ? 'End this branch; the parallel join determines what follows'
+          : this.finalCompletions.has(node.name)
+            ? 'Return the configured run result'
+            : 'Finish the whole run here'
+        : node.kind === 'fail'
+          ? `${branchTerminal ? 'Stop this branch' : 'Stop run'}${typeof node.reason === 'string' ? ` · ${node.reason}` : ''}`
+          : node.kind === 'verifier'
+            ? 'Verifier'
+            : node.kind === 'step'
+              ? 'Agent'
+              : 'Advanced node · inspect its contract';
+    const label =
+      node.kind === 'succeed'
+        ? branchTerminal
+          ? 'End branch'
+          : this.finalCompletions.has(node.name)
+            ? 'Complete'
+            : 'Finish run early'
+        : title(node.name);
+    const id = this.addNode(node, terminal ? 'completion' : 'activity', label, detail);
+    return {
+      entry: id,
+      exits: known && (node.kind === 'step' || node.kind === 'verifier') ? [{ source: id }] : [],
+      ids: [id],
+    };
+  }
 }

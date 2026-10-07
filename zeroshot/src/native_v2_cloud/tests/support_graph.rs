@@ -37,6 +37,7 @@ pub(super) fn request_with_key(input: Value, submission_key: &str) -> RunSubmitP
     RunSubmitParams {
         run_id: RunId::new(format!("run-{submission_key}")),
         submission: RunSubmission {
+            environment: None,
             title: RunTitle::new("Cloud test run").assert_value_with("title"),
             graph: graph(),
             initial_input: valid_input_or(input),
@@ -302,6 +303,7 @@ pub(super) fn complex_request() -> RunSubmitParams {
     RunSubmitParams {
         run_id: RunId::new("run-cloud-complex"),
         submission: RunSubmission {
+            environment: None,
             title: RunTitle::new("Complex cloud test").assert_value_with("title"),
             graph: complex_graph(),
             initial_input: valid_input_or(Value::Null),

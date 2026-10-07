@@ -29,7 +29,7 @@ use crate::native_v2_contract::CodexProvider;
 use crate::native_v2_runner::{
     AgentResponse, AgentResponseState, DriverControl, DriverInvocation, LiveOutput,
     LiveOutputStream, NodeRunnerError, ProviderSchemaDialect, ResolvedEnvironment,
-    render_agent_prompt_for, resolve_agent_response_with_dialect,
+    render_agent_prompt, resolve_agent_response_with_dialect,
 };
 
 use command::{
@@ -37,7 +37,7 @@ use command::{
     configure_provider_auth, process_environment, path_text,
 };
 use output::CodexOutput;
-use process::{ProcessOpen, exchange_turn, open_process};
+use process::{ProcessOpen, ProcessTurnContext, exchange_turn, open_process};
 use schema_file::CodexSchemaFile;
 use session::CodexSession;
 use turn::{CodexCommandInput, CodexTurnProcess, CodexTurnProcessOpen};
@@ -53,6 +53,7 @@ pub struct NativeV2CodexConfig {
     pub local_user: Option<NativeV2CodexUser>,
     /// Invoking-shell snapshot available only to the built-in local target.
     pub native_environment: LocalHarnessEnvironment,
+    pub base_environment: BTreeMap<String, String>,
     /// Explicit executable search path for Codex and commands launched by the agent.
     pub search_path: String,
     pub process_pool: HostedProcessPool,
@@ -204,6 +205,7 @@ impl NativeV2CodexAdapter {
                 "Codex declared environment conflicts with reserved runtime configuration",
             )
         })?;
+        values.extend(self.config.base_environment.clone());
         merge_local_environment(&mut values, environment, &self.local_environment);
         configure_provider_auth(
             &mut values,
@@ -241,19 +243,18 @@ impl NativeV2CodexAdapter {
             control: &control,
             execution: &execution,
         };
-        let prompt = render_agent_prompt_for(
-            invocation.agent_instructions()?,
-            &invocation.node.input,
-            &invocation.response,
-            self.runners.verifier_workspace(),
-        )
-        .map_err(|error| with_driver_detail(error, "Codex prompt could not be serialized"))?;
-        let mut state = CodexRunState::new(
-            prompt,
-            provider_redactions(&invocation.environment, &self.local_environment),
-        );
+        let redactions = provider_redactions(&invocation.environment, &self.local_environment);
+        let prompt = invocation.agent_instructions().and_then(|instructions| {
+            render_agent_prompt(instructions, &invocation.node.input, &invocation.response)
+                .map_err(|error| with_driver_detail(error, "Codex prompt could not be serialized"))
+        })?;
+        let mut state = CodexRunState::new(prompt, redactions);
         loop {
-            if let Some(outcome) = self.advance_run(&turn, &mut state).await? {
+            if let Some(outcome) = self
+                .advance_run(&turn, &mut state)
+                .await
+                .map_err(|error| state.retry.redact_error(error))?
+            {
                 return Ok(outcome);
             }
         }
@@ -313,7 +314,7 @@ impl NativeV2CodexAdapter {
         {
             return Ok(CodexTurnAdvance::ProviderFailure(detail.to_owned()));
         }
-        resolve_codex_output(turn, output).await
+        resolve_codex_output(turn, output, retry).await
     }
 
     async fn execute_turn(
@@ -334,10 +335,15 @@ impl NativeV2CodexAdapter {
             provider_redactions(&turn.invocation.environment, &self.local_environment);
         redactions.extend(turn_process.native_redactions.iter().cloned());
         let redactions = redaction_values(redactions.iter().map(String::as_str));
+        let context = ProcessTurnContext {
+            control: turn.control,
+            session: turn.session,
+            resumed: execution.resume.is_some(),
+        };
         exchange_turn(
             &mut turn_process.process,
             execution.prompt,
-            turn.control,
+            &context,
             &redactions,
         )
         .await
@@ -474,6 +480,7 @@ enum CodexTurnAdvance {
 async fn resolve_codex_output(
     turn: &CodexTurn<'_>,
     output: CodexOutput,
+    retry: &ProviderFailureRetry,
 ) -> Result<CodexTurnAdvance, NodeRunnerError> {
     if let Some(failure) = output.failure_message() {
         return Ok(CodexTurnAdvance::ProviderFailure(failure.to_owned()));
@@ -483,6 +490,9 @@ async fn resolve_codex_output(
         output.final_message()?,
         ProviderSchemaDialect::OpenAiStrict,
     )?;
+    if let Some(error) = response.correction_error() {
+        retry.report_correction(turn.control, &error).await?;
+    }
     if let Some(diagnostic) = turn
         .session
         .missing_required_thread(turn.invocation, &response)
@@ -490,7 +500,7 @@ async fn resolve_codex_output(
     {
         return Ok(CodexTurnAdvance::ProviderFailure(diagnostic.to_owned()));
     }
-    if matches!(response, AgentResponse::Correction(_)) {
+    if matches!(response, AgentResponse::Correction { .. }) {
         turn.control
             .emit(LiveOutput::new(
                 LiveOutputStream::System,

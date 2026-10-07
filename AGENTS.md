@@ -103,13 +103,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   model prompt, suppress Claude hooks/auth helpers, and require confirmed process cleanup before the
   model turn. They do not rewrite settings files; normal native startup state may still be updated.
   Verifier nodes use the same permission handling as workers across all harnesses. The shared prompt
-  renderer tells workers to use repository-declared setup in the checkout, await terminal command
-  status, and keep standalone executable tools out of `/tmp`. Hosted verifiers receive private copies
-  and may perform repository setup there. Local verifiers share the candidate and may run concurrently,
-  so their prompt prohibits setup or dependency installs that rewrite it. Verifiers may run checks and
-  create artifacts but cannot edit reviewed material or make repairs. A missing declared dependency
-  requires setup and retry in a private copy, but rejects from a shared checkout rather than becoming
-  an unavailable check. This local review boundary is instructional, not filesystem enforcement.
+  renderer tells workers to use repository-declared setup, await terminal command status, and keep
+  standalone executable tools in the run's `ZEROSHOT_TOOLS/bin` when provided. All workers and
+  verifiers share the prepared workspace and can write files. Review instructions prohibit repairs
+  and warn that other nodes may execute concurrently; this is an instructional boundary. Missing
+  dependencies are reported with environment evidence rather than unrelated code repair requests.
   Shared inspection owns bounded JSONL exchange and process cleanup. Each harness owns its native
   policy parser and `apply_permission_default` entry point; `PermissionPolicy` distinguishes unset,
   configured, and unavailable inspection results. Codex browser/computer access controls and explicit
@@ -230,10 +228,27 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and tombstones execution activity atomically; no late work may surface after close returns.
 - Node deadlines are optional: omitted `timeoutMs` means completion or explicit cancellation.
   Built-in graphs have no node deadlines, and provider adapters impose no separate turn timeout.
-  The supervisor records node error codes and elapsed time in durable logs before settlement.
+  The supervisor records every node error in durable logs before settlement, including handled
+  failures and retries. Summaries preserve error code, typed refusal/malformed reason, elapsed time,
+  and returned error context; provider adapters redact credentials before returning details. Runtime failure,
+  runtime loss/restart reconciliation, and force-stop use the same completion/log transaction for
+  every active node. Failed runs also retain a run-wide error log, including before graph dispatch.
+  An actual node error remains logged if a parallel winner voids that execution; intentional
+  cancellation is not presented as a new crash. Unconfirmed cleanup preserves a bounded best-effort
+  error log without completing the still-active execution or masking the primary failure.
+  Detailed provider, validation, and delivery errors retain their useful explanation in ordinary
+  run logs. Adapters redact their known credentials before returning error details; the supervisor
+  preserves these through ordinary completion logs. Capsule transport retains details as an existing
+  output event before reducing the failure to its wire code; the existing bounded cancellation queue
+  retains errors during draining; capsule terminal metadata preserves bounded error records too. Retries, corrections, and typed delivery
+  outcomes log detail separately only when completion would lose it. Correction prompts stay out of
+  diagnostics. Public error formatting is bounded and control-safe without suppressing causes.
+  These public summaries stay separate from private operator diagnostics.
 - A failed durable-output bridge cancels and drains its provider immediately. Fatal supervisor
-  errors and task panics close owned work and attempt runtime cleanup before durable failure.
-  If persistence is unavailable, the controller retains a minimal `runtime_failed` status at the
+  errors and task panics publish their private primary diagnostic before recovery waits or stderr
+  writes, then close owned work and attempt runtime cleanup before durable failure. Recovery failures
+  publish a separate private diagnostic without replacing the primary cause. If persistence is
+  unavailable, the controller retains a minimal `runtime_failed` status at the
   last observed durable cursor and records private operator diagnostics, including SQLite error codes.
   This fallback creates no history events. Readable retained history drains normally; unavailable
   history closes with `SOURCE_UNAVAILABLE`, never `done`. Compiler/runtime failure reasons
@@ -256,7 +271,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Hosted delivery Git runs as the pinned workspace writer UID/GID, matching source checkout, so
   fetched objects, commits, merges, and partial failures remain writable by subsequent repairs.
   Admission excludes overlapping writers and requires their process cleanup before delivery;
-  concurrent hosted verifiers retain distinct identities. Delivery confirms UID-wide helper cleanup
+  all agents share the workspace identity. Delivery confirms its own supplementary-group helper cleanup
   before success, repair, error, cancellation, or panic can release that identity; unconfirmed cleanup
   is fatal. A caught delivery panic settles as a node crash after confirmed cleanup, without exposing
   its payload. Allocation requires an idle writer domain before authenticated checkout and rechecks
@@ -281,7 +296,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   when their tree has no staged difference. Other unfinished Git operations return raw status for
   repair before staging or reconciliation. Delivery does not inspect or filter user-installed tooling.
 - GitHub delivery treats aggregate merge policy and required contexts as authority, waits through
-  merge queues/deferrals, and succeeds only after observing the exact merged result. Configured
+  merge queues/deferrals, and succeeds only after observing the exact merged result. Merge methods
+  must satisfy repository capabilities, base-ref branch protection, and every active applicable
+  ruleset returned by GitHub. Either branch-protection view can require linear history; neither
+  overrides a stricter restriction. Direct merge submission reads all rule pages with an independent
+  cursor; PR observation and queues do not require direct-method discovery. Incomplete rule reads and
+  empty method intersections stop merge submission with policy diagnostics. Merge queues choose their
+  own method. Merge commands retain contained process cleanup and use the GitHub API error boundary,
+  never Git repair; changed gates cannot mask a permanent rejection. Configured
   branch-protection contexts remain pending until they appear on the exact PR head, preventing a
   newly opened PR from looking ready before its required workflow registers. Missing or stale human
   review may satisfy PR readiness when aggregate ref-update policy positively requires approval,
@@ -390,23 +412,38 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Native-v2 admits concurrent writers in parallel branches and map items. Writers share the run's
   workspace owner identity; hosted session cleanup tracks an immutable supplementary group marker
   per session. Authored graphs coordinate overlapping edits. Admission rejects Git delivery that
-  can overlap another writer or delivery; delivery may run alongside verifiers, which are instructed
-  not to edit the candidate.
+  can overlap another agent or delivery, including verifiers. Every executable node participates
+  in workspace checkpoint and final delivery accounting.
   A delivery receipt certifies success only if every other writer settled before delivery started.
   Unconfirmed process cleanup is a fatal runtime failure, including after cancellation; it cannot
   be reduced to a retryable node crash or an authored parallel-join void.
   Retained workspace handoff commits when the source workspace moves to its successor. A later
   allocation failure preserves that successor for recovery; unconfirmed cleanup keeps its durable
   run nonterminal until replacement-controller reconciliation confirms cleanup.
-- Hosted verifiers build in disposable writable copies of the current candidate. Copies include
-  dirty files and build artifacts, preserve metadata, and use reflinks or independent file copies.
-  Hosted candidate workspace roots are writer-owned `0700`; workers cannot traverse another run's
-  candidate, and the supervisor-owned production ledger and existing SQLite sidecars are `0600`.
-  Source traversal pins descriptors without following symlinks so concurrent renames cannot escape
-  the candidate; copying alongside writers does not provide an atomic snapshot. Verifier writes
-  are never promoted to the candidate or peers. Provider scratch permits execution.
-  Managed copies and execution-scoped homes are removed only after confirmed process-tree cleanup;
-  node-instance homes survive authorized continuation and loop revisits until session closure.
+- Workers and verifiers use one canonical workspace, including ignored dependencies, build outputs
+  and services. Provider session homes and scratch directories remain separate; individual process
+  cleanup uses session group markers so it cannot terminate a peer or a startup service. Workspace
+  roots are run-owner `0700`, runtime roots supervisor-owned `0711`, and production ledgers `0600`.
+  Session homes disappear only after confirmed cleanup; node-instance homes survive loop revisits.
+- An optional top-level run `environment` carries public setup/startup scripts, nonsecret variables,
+  and explicit hook connection references. Profiles and runtime plans have no environment field.
+  The CLI accepts `--environment FILE` or `--no-environment`; hosts may resolve an omitted definition
+  before acceptance, while an explicit empty object selects the base environment. Core stores no
+  saved environment catalog and has no resource discovery or local environment UI. Hosted
+  preparation is accepted asynchronously and owns its
+  controller lease before allocation. Setup runs as root before checkout or checkpoint restore;
+  startup runs as the workspace owner in the restored checkout before graph dispatch. Both rerun
+  on each resume attempt. Hooks have fifteen-minute limits within one thirty-minute preparation
+  budget, emit bounded redacted run logs, and fail before agent retries. Force-stop signals
+  preparation before waiting for cleanup; failed cleanup retains authority for replay/recovery.
+  `ZEROSHOT_TOOLS/bin` precedes the base PATH for hooks and all agents; shell exports do not persist.
+  Startup services retain a separate run-owned process marker and stop at run cleanup. Checkpoints
+  retain files and graph state, not services, Docker state, or conversations; users reconstruct
+  services idempotently and keep live database state outside file checkpoint guarantees.
+  Local runs reject hooks and use the invoking environment. Direct Docker setup modifies its
+  operator-owned target container, shared by that target's runs; separate target containers are
+  needed for independent OS dependency sets. Cloud supplies its own disposable execution placement.
+  Image-owned harness wrappers pin their Node interpreter independently of the project PATH.
 
 - Native local CLI and in-process execution support Unix and Windows. Shared OS facilities live in
   `execution::platform`; local controller transport selects Unix sockets or private Windows named
@@ -460,7 +497,18 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Target HTTP failures use the shared bounded `{code,message,details?}` protocol problem; message-only
   bodies are invalid, and details contain only user-safe structured metadata.
 - Operator diagnostics are private-capability-only, run-scoped, bounded, sanitized, and excluded
-  from public run status and logs.
+  from public run status and logs. `ProductionHostingConfig::operator_diagnostic_output` accepts an
+  optional `OperatorDiagnosticOutput` created before target construction. Its nonblocking channel
+  exports the same normalized records from checkout, Git push, and fatal runtime producers; the
+  two-record private snapshot remains independent. The channel retains at most 128 records and
+  reports overwritten records through Tokio's `Lagged` error. Hosts own continuous collection,
+  durable storage/export, deployment identity, timestamps, retention, and shutdown draining; this
+  in-memory handoff cannot guarantee preservation across abrupt process termination. Treat lag as
+  incomplete diagnostics. Namespace IDs by target process/attempt and keep collected data private.
+  `OperatorDiagnosticJsonLines` optionally drains those records on a dedicated writer thread,
+  flushing each line and reporting overflow. `target serve --operator-diagnostics-json` enables
+  stdout output. Writer shutdown is bounded; it cannot guarantee delivery after abrupt termination.
+  Output has no deployment metadata or cloud-specific envelope.
 - Hosted merge plans are atomic, immutable, merge-only DAGs over one explicit repository, branch,
   and profile. The target resolves each node's exact revision only after its dependencies succeed;
   plans have static inputs, no cross-node dataflow, and no retry-in-place. Agent runtime bindings
@@ -614,6 +662,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   hooks, CI gates, other skills, or checked-in state for personal analysis tooling.
 - New Rust APIs must respect the four-parameter Clippy ceiling; use request structs rather than
   raising or bypassing the limit.
+- Unix tests that create executable fixtures use
+  `openengine_cluster_testkit::fixture::write_executable`; its lock handoff covers writable
+  descriptors inherited by concurrent process spawns.
+- `.opcore.json` owns the full-source Opcore policy. `.github/workflows/opcore.yml` runs the Fast
+  and native Rust providers on every PR and main commit. Its two exact PowerShell exclusions reflect
+  unsupported parsing; the Windows native CI lane still runs those scripts.
 - Preserve bounded values, explicit overflow, cancellation safety, and exact source provenance at
   every public boundary.
 - Add focused tests beside the owning crate/module.
@@ -648,17 +702,18 @@ python -m mkdocs build --strict
 ## Release convention
 
 - CI has native, Python, repository-tooling, npm-package, and strict-documentation lanes plus stable
-  aggregate `required`. `.github/ci-path-classifier.js` owns fail-closed path routing and cross-lane
+  aggregate `required`. Native changes also require macOS product and test compilation with the UI
+  feature. `.github/ci-path-classifier.js` owns fail-closed path routing and cross-lane
   producer/consumer dependencies. The native lane runs on Linux and Windows, including real local
   CLI subprocess tests. Windows uses
   `scripts/test-windows.ps1` to run test executables outside Cargo's restrictive Job; the CI-only
   `.github/scripts/test-windows-host.ps1` also starts outside the hosted runner's Job. Linux also executes
   hosted process and filesystem boundary tests as root against its built test binary.
-- `.github/workflows/coverage.yml` measures the default workspace and UI-feature Rust test surfaces
-  on native changes and publishes LCOV to Coveralls. Coverage is observational and stays outside the
-  required CI aggregate. Keep Rust test implementations in `tests/`, `tests.rs`, `*_tests.rs`, or
-  `*-tests.rs`; do not embed test bodies in production-named source files, because production coverage
-  totals explicitly exclude those test-source paths.
+- `.github/workflows/coverage.yml` measures the default workspace, UI-feature Rust tests, and hosted
+  root boundary tests on native changes, enforces coverage floors, and publishes LCOV to Coveralls.
+  It stays outside the required CI aggregate. Keep Rust test implementations in `tests/`, `tests.rs`,
+  `*_tests.rs`, or `*-tests.rs`; do not embed test bodies in production-named source files, because
+  production coverage totals explicitly exclude those test-source paths.
 - `.github/workflows/release.yml` is the only canonical product release workflow.
 - It generates the GitHub Release body from the exact first-parent commits since the preceding
   canonical tag. Every released commit must retain a Conventional Commit squash title ending in

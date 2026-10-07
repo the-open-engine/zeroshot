@@ -4,6 +4,9 @@ A graph defines the work and its control flow; the runtime plan supplies executi
 executable node. Since the two documents are separate, local, self-hosted, and managed targets can
 run the same graph.
 
+The [RuntimePlan reference](../reference/runtime-plan.md) lists every field, limit, and admission
+rule.
+
 ## Four explicit choices
 
 Each agent binding names:
@@ -13,15 +16,8 @@ Each agent binding names:
 3. an opaque provider-owned **model** identifier;
 4. zero or more named **connections**, each declaring exact environment field names.
 
-Zeroshot accepts these harness/provider pairs:
-
-| Harness   | Providers                                       |
-| --------- | ----------------------------------------------- |
-| `codex`   | `openai`, `openrouter`, `bedrock`, `gateway`    |
-| `claude`  | `anthropic`, `openrouter`, `bedrock`, `gateway` |
-| `copilot` | `github`                                        |
-
-Admission rejects known-incompatible pairs, such as `codex` with `anthropic` and `claude` with
+The [RuntimePlan reference](../reference/runtime-plan.md#harness-and-provider) lists the accepted
+harness/provider pairs. Admission rejects known-incompatible pairs, such as `codex` with `anthropic` and `claude` with
 `openai`. Zeroshot does not check current provider availability, and model names remain
 provider-owned.
 
@@ -45,9 +41,8 @@ built-in template configuration short:
 when reviewers and workers need different models, effort, sessions, or connections. Inspect node
 names first with `zeroshot template show TEMPLATE`.
 
-Session scope is either `execution` or `node_instance`. An `execution` scope opens a fresh provider
-session for each execution; `node_instance` reuses a live session when the same graph node instance
-runs again, such as across loop iterations.
+Session scope decides whether a node that runs again, such as in a loop, continues its provider
+session; see [session scope](../reference/runtime-plan.md#agent).
 
 ## Runtime configuration contains names, not secret values
 
@@ -82,6 +77,12 @@ Compatible authored connections take precedence, including `CODEX_API_KEY` for c
 access and Claude's supported auth-token variables for contained Anthropic access. Local profiles
 keep the authored runtime unchanged; applying one to a target derives the contained requirements at
 submission time. Profiles stored on a target derive those requirements when they are stored.
+
+Local Claude workers and reviewers preserve the invoking shell's `USER` for macOS Keychain login
+and reuse native CLAUDE.md, plugins, and MCP configuration. Claude's `--safe-mode` applies only to
+the permission-settings probe before a model turn. Hosted runs use private homes and do not inherit
+the caller's `USER` or user configuration. Declare additional environment fields needed by MCP
+servers through runtime connections.
 
 Store a local static connection by prompting for its fields:
 
@@ -120,3 +121,7 @@ preserves that path. For OpenRouter, use `https://openrouter.ai/api/v1` with Cod
 `https://openrouter.ai/api` with Claude. Base URLs must use HTTP(S) and cannot contain embedded
 credentials, query parameters, or fragments. Both fields remain connection values, outside runtime
 JSON and run history. Exact plans declare these fields under any chosen connection key.
+
+Docker runtimes can prepare shared tools, project dependencies, and services with setup and
+startup hooks. See [Prepare a runtime environment](../guides/runtime-environments.md) for the
+installation conventions, resume behavior, and direct-target ownership boundary.

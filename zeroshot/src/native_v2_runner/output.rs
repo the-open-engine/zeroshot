@@ -6,7 +6,8 @@ use openengine_cluster_protocol::{MAX_SAFE_GENERATION, UnixTimestampMillis};
 use tokio::sync::{broadcast, mpsc, watch, Notify};
 
 use super::{
-    DURABLE_OUTPUT_CAPACITY, DurableNodeEvent, LiveOutput, NodeRunnerError, wait_for_cancellation,
+    DURABLE_OUTPUT_CAPACITY, DurableNodeEvent, LiveOutput, LiveOutputStream, NodeRunnerError,
+    wait_for_cancellation,
 };
 
 /// Built-in providers emit at most four terminal-usage records per execution: the initial turn,
@@ -14,7 +15,43 @@ use super::{
 /// leaves generous headroom for custom drivers while keeping cancellation cleanup memory bounded.
 pub(super) const CANCELLED_TERMINAL_CAPACITY: usize = DURABLE_OUTPUT_CAPACITY;
 pub(super) const CANCELLED_TERMINAL_OVERFLOW_DETAIL: &str =
-    "terminal usage exceeded the cancellation-safe durable queue capacity";
+    "terminal events exceeded the cancellation-safe durable queue capacity";
+
+const DIAGNOSTIC_TRUNCATION_MARKER: &str = " ... [middle truncated] ... ";
+
+pub(crate) fn bounded_log_text(text: String, maximum_bytes: usize) -> String {
+    let diagnostic = text
+        .chars()
+        .map(|character| match character {
+            '\0' => '\u{fffd}',
+            character if character.is_control() && !matches!(character, '\n' | '\t') => ' ',
+            character => character,
+        })
+        .collect::<String>();
+    if diagnostic.len() <= maximum_bytes {
+        return diagnostic;
+    }
+    let content_bytes = maximum_bytes.saturating_sub(DIAGNOSTIC_TRUNCATION_MARKER.len());
+    let prefix = utf8_prefix(&diagnostic, content_bytes / 2);
+    let suffix = utf8_suffix(&diagnostic, content_bytes.saturating_sub(prefix.len()));
+    format!("{prefix}{DIAGNOSTIC_TRUNCATION_MARKER}{suffix}")
+}
+
+fn utf8_prefix(value: &str, maximum_bytes: usize) -> &str {
+    let mut end = maximum_bytes.min(value.len());
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    &value[..end]
+}
+
+fn utf8_suffix(value: &str, maximum_bytes: usize) -> &str {
+    let mut start = value.len().saturating_sub(maximum_bytes);
+    while !value.is_char_boundary(start) {
+        start += 1;
+    }
+    &value[start..]
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum AttachReceiveError {
@@ -52,7 +89,7 @@ pub(super) fn closed_live_attach() -> ReadOnlyAttach {
 ///
 /// Provider adapters emit bounded chunks while continuously draining the child process. The
 /// bounded output queue applies backpressure until the durable consumer has persisted earlier
-/// events. Once cancellation begins, terminal usage metadata takes a bounded, nonblocking side
+/// events. Once cancellation begins, usage metadata and errors take a bounded, nonblocking side
 /// channel so process cleanup cannot deadlock behind a saturated output queue. Side-channel
 /// overflow is reported immediately and becomes one trailing incomplete-usage marker after both
 /// queues close and drain.
@@ -80,7 +117,7 @@ impl DurableOutput {
         }
     }
 
-    pub(super) async fn wait_until_saturated(&self) {
+    pub(crate) async fn wait_until_saturated(&self) {
         if self.receiver.capacity() > 0 {
             self.saturated.notified().await;
         }
@@ -199,6 +236,10 @@ impl DurableEventSender {
         event: DurableNodeEvent,
         mut cancellation: watch::Receiver<bool>,
     ) -> Result<(), NodeRunnerError> {
+        if matches!(&event, DurableNodeEvent::Output { output, .. } if output.stream == LiveOutputStream::Error)
+        {
+            return self.send_terminal(event, cancellation).await;
+        }
         tokio::select! {
             biased;
             _ = wait_for_cancellation(&mut cancellation) => Err(NodeRunnerError::Cancelled),

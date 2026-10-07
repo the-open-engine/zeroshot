@@ -1,9 +1,7 @@
 use std::ffi::OsString;
 
 use openengine_cluster_protocol::RuntimePlan;
-use openengine_cluster_testkit::assertions::AssertValue;
-#[cfg(unix)]
-use openengine_cluster_testkit::assertions::AssertError;
+use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::json;
 
 use super::*;
@@ -563,4 +561,162 @@ async fn local_copilot_uniform_runtime_preserves_model_without_inventing_a_token
     assert_eq!(runtime["provider"], "github");
     assert_eq!(runtime["nodes"]["worker"]["model"], "opaque-future-model");
     assert!(runtime["nodes"]["worker"]["connections"].is_null());
+}
+
+#[tokio::test]
+async fn explicit_run_environment_is_independent_of_inline_or_named_profile_selection() {
+    let directory = tempfile::tempdir().assert_value();
+    let path = directory.path().join("environment.json");
+    let definition = json!({"setup":"echo install", "startup":"npm ci", "variables":{"CI":"true"},
+        "connections":{"registry":["NPM_TOKEN"]}});
+    std::fs::write(&path, serde_json::to_vec(&definition).assert_value()).assert_value();
+    for named in [false, true] {
+        let (_files, mut command) =
+            environment_command(&["--environment", path.to_str().unwrap(), "-d"]);
+        if named {
+            let NativeV2CliCommand::Run(run) = &mut command else {
+                unreachable!()
+            };
+            run.selection = RunSelection::Profile(Some(ProfileReference {
+                qualifier: Some(ProfileQualifier::Org),
+                name: openengine_cluster_protocol::RunProfileName::new("alpha").assert_value(),
+            }));
+        }
+        let backend = FakeBackend::default();
+        let available =
+            |name: &str| (name == "NPM_TOKEN").then(|| OsString::from("package-secret"));
+        execute_with_environment(command, &backend, &available)
+            .await
+            .assert_value();
+        let calls = backend.calls();
+        let (environment, connections) = calls
+            .iter()
+            .find_map(|call| match call {
+                Call::Submit {
+                    environment,
+                    connections,
+                    ..
+                } => Some((environment, connections)),
+                _ => None,
+            })
+            .assert_value();
+        assert_eq!(serde_json::to_value(environment).assert_value(), definition);
+        let token = connections
+            .get(&ConnectionKey::new("registry").assert_value())
+            .assert_value();
+        assert_eq!(
+            token.as_map().values().collect::<Vec<_>>(),
+            vec!["package-secret"]
+        );
+    }
+}
+
+#[tokio::test]
+async fn no_environment_is_an_explicit_empty_override_and_omission_stays_unselected() {
+    for flag in [false, true] {
+        let extra: &[&str] = if flag {
+            &["--no-environment", "-d"]
+        } else {
+            &["-d"]
+        };
+        let (_files, command) = environment_command(extra);
+        let backend = FakeBackend::default();
+        execute_with_environment(command, &backend, &|_| None)
+            .await
+            .assert_value();
+        let calls = backend.calls();
+        let Some(Call::Submit { environment, .. }) = calls.last() else {
+            panic!("expected submit")
+        };
+        assert_eq!(environment.as_ref(), flag.then_some(&Default::default()));
+    }
+    let files = FixtureFiles::with_runtime(
+        environment_graph(),
+        json!({"task":"ship it"}),
+        runtime_with_environment(),
+    );
+    assert!(
+        parse_native_v2_args(run_args(
+            &files.graph,
+            &files.input,
+            &files.runtime,
+            &["--environment", "environment.json", "--no-environment"]
+        ))
+        .is_err()
+    );
+}
+
+#[tokio::test]
+async fn preparation_hooks_require_a_target_during_validation_and_submission() {
+    use crate::native_v2_cli::execution::try_execute_native_v2_preflight;
+
+    let directory = tempfile::tempdir().assert_value();
+    let path = directory.path().join("environment.json");
+    for definition in [
+        json!({"setup":"echo install"}),
+        json!({"startup":"npm ci"}),
+        json!({"connections":{"registry":["NPM_TOKEN"]}}),
+    ] {
+        std::fs::write(&path, serde_json::to_vec(&definition).assert_value()).assert_value();
+        for contained in [false, true] {
+            let (_files, mut command) = uniform_runtime_command_for_placement(
+                "Validate preparation placement",
+                json!({"harness":"codex", "provider":"openai", "model":"test-model"}),
+                contained,
+            );
+            let NativeV2CliCommand::Run(run) = &mut command else {
+                unreachable!()
+            };
+            run.environment = Some(RunEnvironmentInput::File(path.clone()));
+            run.validate_only = true;
+            let result = try_execute_native_v2_preflight(&command, &mut Vec::new()).await;
+            if contained {
+                assert_eq!(result.assert_value(), Some(CliOutcome::Completed));
+                continue;
+            }
+            let expected = result.assert_error().to_string();
+            assert!(expected.contains("setup and startup require a Docker target"));
+            let NativeV2CliCommand::Run(run) = &mut command else {
+                unreachable!()
+            };
+            run.validate_only = false;
+            let backend = FakeBackend::default();
+            let result = execute_with_environment(command, &backend, &|_| {
+                panic!("local hook rejection must precede credential reads")
+            })
+            .await;
+            assert_eq!(result.assert_error().to_string(), expected);
+            assert!(backend.calls().is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn local_environment_validation_allows_empty_base_and_public_variables() {
+    use crate::native_v2_cli::execution::try_execute_native_v2_preflight;
+
+    let directory = tempfile::tempdir().assert_value();
+    let path = directory.path().join("environment.json");
+    std::fs::write(&path, br#"{"variables":{"CI":"true"}}"#).assert_value();
+    for environment in [
+        Some(RunEnvironmentInput::Empty),
+        Some(RunEnvironmentInput::File(path)),
+        None,
+    ] {
+        let (_files, mut command) = local_uniform_runtime_command(
+            "Validate local environment",
+            json!({"harness":"codex", "provider":"openai", "model":"test-model"}),
+        );
+        let NativeV2CliCommand::Run(run) = &mut command else {
+            unreachable!()
+        };
+        run.environment = environment;
+        run.validate_only = true;
+        assert_eq!(
+            try_execute_native_v2_preflight(&command, &mut Vec::new())
+                .await
+                .assert_value(),
+            Some(CliOutcome::Completed)
+        );
+    }
 }

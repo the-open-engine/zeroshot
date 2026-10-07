@@ -812,7 +812,7 @@
       }
     },
     {
-      "description": "Omitting from or selecting restart starts the graph at its root on the latest retained workspace. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Original admission and delivery metadata remain fixed; provider sessions are not resumed.",
+      "description": "Omitting from or selecting restart starts the graph at its root on the latest retained workspace. Selecting checkpoint restores the matching workspace and predecessor outputs and reruns the named node or atomic concurrent group. Original admission and delivery metadata remain fixed. Credentials are resolved again for the successor; provider sessions are not resumed.",
       "name": "run/resume",
       "paramStructure": "by-name",
       "params": [
@@ -850,6 +850,7 @@
           "required": false,
           "schema": {
             "additionalProperties": false,
+            "description": "Fresh static connection values for the successor attempt.",
             "patternProperties": {
               "^[^\\u0000-\\u001f\\u007f-\\u009f]+$": {
                 "$ref": "#/$defs/StaticConnectionValues"
@@ -869,13 +870,15 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Run-scoped callback used to resolve fresh dynamic connection values."
           }
         },
         {
           "name": "githubToken",
           "required": false,
           "schema": {
+            "description": "Fresh GitHub credential for private source checkout or Git delivery.",
             "type": [
               "string",
               "null"

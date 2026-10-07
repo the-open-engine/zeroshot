@@ -292,8 +292,9 @@ async fn handle_remote_bridge(
         )
         .await
         {
-            CancelOutcome::Forwarded => Some(Err(error)),
-            CancelOutcome::Closing => {
+            // Keep capsule ownership until terminal cleanup or connection loss, including
+            // when failed output forced ordinary cancellation before run closure.
+            CancelOutcome::Forwarded | CancelOutcome::Closing => {
                 if context.pending_bridge_failure.is_none() {
                     *context.pending_bridge_failure = Some(error);
                 }

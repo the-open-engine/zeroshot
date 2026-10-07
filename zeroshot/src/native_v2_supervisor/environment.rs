@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
     ConnectionKey, EnvironmentVariableName, RunConnectionRequirements, RunConnectionValues,
-    RuntimePlan, StaticConnectionValues,
+    RuntimePlan, RuntimeEnvironment, StaticConnectionValues, run_connection_requirements,
 };
 use thiserror::Error;
 
@@ -49,6 +49,7 @@ pub(crate) struct DynamicConnectionPlan {
 #[derive(Clone)]
 pub struct RunEnvironment {
     values: Arc<RunConnectionValues>,
+    variables: Arc<BTreeMap<EnvironmentVariableName, String>>,
     dynamic_keys: Arc<BTreeSet<ConnectionKey>>,
     source_connection: Option<ConnectionKey>,
     resolver: Option<Arc<dyn RunConnectionResolver>>,
@@ -57,11 +58,13 @@ pub struct RunEnvironment {
 impl RunEnvironment {
     pub fn exact(
         runtime: &RuntimePlan,
+        definition: Option<&RuntimeEnvironment>,
         values: RunConnectionValues,
     ) -> Result<Self, RunEnvironmentError> {
-        validate_bootstrap(runtime, &values, &BTreeSet::new())?;
+        validate_bootstrap(runtime, definition, &values, &BTreeSet::new())?;
         Ok(Self {
             values: Arc::new(values),
+            variables: runtime_variables(definition),
             dynamic_keys: Arc::new(BTreeSet::new()),
             source_connection: None,
             resolver: None,
@@ -70,6 +73,7 @@ impl RunEnvironment {
 
     pub(crate) fn with_resolver(
         runtime: &RuntimePlan,
+        definition: Option<&RuntimeEnvironment>,
         values: RunConnectionValues,
         dynamic: DynamicConnectionPlan,
     ) -> Result<Self, RunEnvironmentError> {
@@ -81,9 +85,10 @@ impl RunEnvironment {
         {
             return Err(RunEnvironmentError::InvalidPlan);
         }
-        validate_bootstrap(runtime, &values, &dynamic.keys)?;
+        validate_bootstrap(runtime, definition, &values, &dynamic.keys)?;
         Ok(Self {
             values: Arc::new(values),
+            variables: runtime_variables(definition),
             dynamic_keys: Arc::new(dynamic.keys),
             source_connection: dynamic.source_connection,
             resolver: Some(dynamic.resolver),
@@ -93,10 +98,11 @@ impl RunEnvironment {
     /// Selects one run's exact keyed snapshots from a trusted host environment inventory.
     pub fn from_available(
         runtime: &RuntimePlan,
+        definition: Option<&RuntimeEnvironment>,
         available: &BTreeMap<EnvironmentVariableName, String>,
     ) -> Result<Self, RunEnvironmentError> {
         let mut values = RunConnectionValues::new();
-        for (key, fields) in runtime.connection_requirements() {
+        for (key, fields) in run_connection_requirements(runtime, definition) {
             let selected = select_environment_values(key.clone(), fields.iter(), available)?;
             values.insert(
                 key,
@@ -104,13 +110,48 @@ impl RunEnvironment {
                     .map_err(|_| RunEnvironmentError::InvalidPlan)?,
             );
         }
-        Self::exact(runtime, values)
+        Self::exact(runtime, definition, values)
     }
 
     /// Revalidates the static/dynamic partition against an immutable admitted runtime plan.
-    pub fn for_runtime(&self, runtime: &RuntimePlan) -> Result<Self, RunEnvironmentError> {
-        validate_bootstrap(runtime, self.values.as_ref(), self.dynamic_keys.as_ref())?;
-        Ok(self.clone())
+    pub fn for_runtime(
+        &self,
+        runtime: &RuntimePlan,
+        definition: Option<&RuntimeEnvironment>,
+    ) -> Result<Self, RunEnvironmentError> {
+        validate_bootstrap(
+            runtime,
+            definition,
+            self.values.as_ref(),
+            self.dynamic_keys.as_ref(),
+        )?;
+        Ok(Self {
+            variables: runtime_variables(definition),
+            ..self.clone()
+        })
+    }
+
+    /// Resolve only the explicitly selected hook connection fields; never inherit node credentials.
+    pub(crate) async fn preparation_values(
+        &self,
+        environment: &RuntimeEnvironment,
+    ) -> Result<BTreeMap<String, String>, RunEnvironmentError> {
+        let requirements = declared_requirements(&environment.connections);
+        let resolved = self.resolve_requirements(requirements).await?;
+        let mut values: BTreeMap<String, String> = environment
+            .variables
+            .iter()
+            .map(|(key, value)| (key.as_str().to_owned(), value.clone()))
+            .collect();
+        for connection in resolved.values() {
+            values.extend(
+                connection
+                    .as_map()
+                    .iter()
+                    .map(|(key, value)| (key.as_str().to_owned(), value.clone())),
+            );
+        }
+        Ok(values)
     }
 
     pub(crate) fn bootstrap_values(&self) -> RunConnectionValues {
@@ -158,11 +199,7 @@ impl RunEnvironment {
         &self,
         binding: &NodeRuntimeBinding,
     ) -> Result<ResolvedEnvironment, RunEnvironmentError> {
-        let requirements = binding
-            .declared_connections()
-            .iter()
-            .map(|(key, fields)| (key.clone(), fields.as_set().clone()))
-            .collect();
+        let requirements = declared_requirements(binding.declared_connections());
         let resolved = self.resolve_requirements(requirements).await?;
         let mut values = BTreeMap::new();
         for (key, fields) in binding.declared_connections().iter() {
@@ -179,7 +216,9 @@ impl RunEnvironment {
                 }
             }
         }
-        ResolvedEnvironment::exact(binding, values).map_err(|_| RunEnvironmentError::InvalidPlan)
+        let resolved = ResolvedEnvironment::exact(binding, values)
+            .map_err(|_| RunEnvironmentError::InvalidPlan)?;
+        Ok(resolved.with_variables(self.variables.as_ref()))
     }
 
     async fn resolve_requirements(
@@ -214,6 +253,25 @@ impl RunEnvironment {
     }
 }
 
+fn runtime_variables(
+    definition: Option<&RuntimeEnvironment>,
+) -> Arc<BTreeMap<EnvironmentVariableName, String>> {
+    Arc::new(
+        definition
+            .map(|value| value.variables.clone())
+            .unwrap_or_default(),
+    )
+}
+
+fn declared_requirements(
+    connections: &openengine_cluster_protocol::DeclaredConnections,
+) -> BTreeMap<ConnectionKey, BTreeSet<EnvironmentVariableName>> {
+    connections
+        .iter()
+        .map(|(key, fields)| (key.clone(), fields.as_set().clone()))
+        .collect()
+}
+
 #[derive(Clone)]
 struct NodeEnvironmentRefresh {
     environment: RunEnvironment,
@@ -234,10 +292,11 @@ impl RuntimeEnvironmentRefresh for NodeEnvironmentRefresh {
 
 fn validate_bootstrap(
     runtime: &RuntimePlan,
+    definition: Option<&RuntimeEnvironment>,
     values: &RunConnectionValues,
     dynamic_keys: &BTreeSet<ConnectionKey>,
 ) -> Result<(), RunEnvironmentError> {
-    let declared = runtime.connection_requirements();
+    let declared = run_connection_requirements(runtime, definition);
     if let Some(key) = declared
         .keys()
         .find(|key| !values.contains_key(*key) && !dynamic_keys.contains(*key))

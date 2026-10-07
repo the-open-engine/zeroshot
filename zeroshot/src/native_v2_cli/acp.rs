@@ -503,6 +503,7 @@ impl AcpSession {
         let prepared = prepare_session(&state_root, requested_workspace)?;
         let environment = Arc::new(RunEnvironment::exact(
             &profile.runtime,
+            None,
             RunConnectionValues::new(),
         )?);
         let seed_run_id = new_run_id();
@@ -835,6 +836,7 @@ fn submission(
         graph: profile.graph.clone(),
         initial_input: json!({ "task": task }),
         runtime: profile.runtime.clone(),
+        environment: None,
         source: source.clone(),
         submission_key: IdempotencyKey::new(format!("acp-{identity}"))
             .map_err(|_| AcpServeError::Profile("invalid submission identity"))?,

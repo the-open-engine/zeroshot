@@ -224,8 +224,7 @@ pub struct CapsuleFilesystem {
 
 /// Establishes the capsule's role-aware Linux filesystem boundary.
 ///
-/// Writers share the run's private workspace owner identity. Hosted verifiers receive separate
-/// supervisor-created copies instead of access to this candidate. The runtime root remains
+/// All agents share the run's workspace owner identity and candidate. The runtime root remains
 /// root-owned and non-writable; provider-specific private homes are created beneath it by
 /// [`HostedProcessPool`] identities.
 pub fn prepare_capsule_filesystem(

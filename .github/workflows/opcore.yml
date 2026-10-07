@@ -1,0 +1,39 @@
+name: Opcore
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Full source check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: 1.97.0
+
+      - name: Install Opcore
+        run: OPCORE_NO_HOOKS=1 npm install --global @the-open-engine-company/opcore@0.3.2
+
+      - name: Fetch locked Rust dependencies
+        run: cargo fetch --locked
+
+      - name: Check all supported source with native Rust
+        run: opcore check --repo . --committed --comparison all --providers fast,rust-native --allow-unsandboxed-native

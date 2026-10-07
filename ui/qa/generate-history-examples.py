@@ -233,7 +233,11 @@ def build(profiles):
     f.batch(review("compatibility_review", "Concurrent old/new writes remain valid throughout the expand phase."),
             review("rollback_review", "Rollback preserves backfilled data and excludes irreversible cleanup until sign-off."))
     examples.append(f.finish("done"))
+    return examples + build_more(profiles)
 
+
+def build_more(profiles):
+    examples = []
     claims = [
         {"text": "Inspection leaves available quota unchanged.", "source": "notes/quota-observation.md"},
         {"text": "Tenant isolation prevents shared client IDs from colliding.", "source": "notes/tenant-isolation.md"},

@@ -40,7 +40,7 @@ impl OwnershipFixture {
         let workspace = directory.child("workspace");
         let remote = directory.child("remote.git");
         let upstream = directory.child("upstream");
-        let pool = HostedProcessPool::new(111_002, 111_002, 112_000, 112_000).assert_value();
+        let pool = HostedProcessPool::new(111_002, 111_002, 112_000).assert_value();
         for candidate in [&workspace, &remote, &upstream] {
             prepare_capsule_filesystem(CapsuleFilesystemSpec {
                 workspace: candidate,
@@ -471,6 +471,7 @@ async fn start_delivery(fixture: &OwnershipFixture) -> crate::native_v2_runner::
     };
     let node = NodeName::new("deliver").assert_value();
     let admitted = admit(contract::RunSubmission {
+        environment: None,
         title: contract::RunTitle::new("Ownership handoff").assert_value(),
         graph: full_graph(vec![git_delivery_node(), success_node()]),
         initial_input: serde_json::Value::Null,

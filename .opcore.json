@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "verify": {
+    "maxCyclomaticComplexity": 30,
+    "maxFunctionLines": 300,
+    "maxNesting": 5,
+    "maxParameters": 8
+  },
+  "targets": {
+    "exclude": [".github/scripts/test-windows-host.ps1", "scripts/test-windows.ps1"]
+  }
+}

@@ -80,9 +80,11 @@ impl LocalConnectionStore {
     pub(super) fn resolve(
         &self,
         runtime: &RuntimePlan,
+        definition: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
         explicit: &RunConnectionValues,
     ) -> Result<RunEnvironment, NativeV2CliError> {
-        let requirements = runtime.connection_requirements();
+        let requirements =
+            openengine_cluster_protocol::run_connection_requirements(runtime, definition);
         let lock = self.lock()?;
         FileExt::lock_shared(&lock).map_err(local_io)?;
         let stored = self.read()?;
@@ -94,7 +96,7 @@ impl LocalConnectionStore {
                     .map_err(|_| local_message("resolved connection shape is invalid"))?,
             );
         }
-        RunEnvironment::exact(runtime, resolved).map_err(Into::into)
+        RunEnvironment::exact(runtime, definition, resolved).map_err(Into::into)
     }
 
     fn lock(&self) -> Result<File, NativeV2CliError> {

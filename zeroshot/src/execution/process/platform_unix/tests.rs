@@ -729,7 +729,7 @@ async fn root_writer_membership_survives_namespaces_and_detached_exec() {
         eprintln!("root-only process membership gate skipped outside the capsule identity");
         return;
     }
-    let pool = HostedProcessPool::new(131_002, 131_002, 132_000, 132_000).assert_value();
+    let pool = HostedProcessPool::new(131_002, 131_002, 132_000).assert_value();
     let identity = pool
         .identity(HostedProcessScope::WriterExecution(1))
         .assert_value();

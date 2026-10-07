@@ -301,6 +301,7 @@ async fn admit_research_input(
                 graph,
                 initial_input,
                 runtime,
+                environment: None,
                 source: resolved_source(),
                 submission_key: IdempotencyKey::new("research-iteration-count").assert_value(),
             },
@@ -1320,6 +1321,7 @@ async fn assert_admissible(
     let admitted = NativeV2Admission
         .validate_intent(
             &RunSubmissionIntent {
+                environment: None,
                 title: RunTitle::new("Built-in template admission").assert_value(),
                 graph,
                 initial_input,
@@ -1360,6 +1362,7 @@ async fn verified_software_template(
     };
     let admitted = NativeV2Admission
         .admit(RunSubmission {
+            environment: None,
             title: RunTitle::new("Template behavior").assert_value(),
             graph,
             initial_input: initial_input.clone(),

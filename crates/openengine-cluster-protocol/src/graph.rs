@@ -381,7 +381,12 @@ impl FailReason {
     pub fn new(value: EnumLabel) -> Result<Self, FailReasonError> {
         if matches!(
             value.as_str(),
-            "unhandled" | "runtime_failed" | "runtime_lost"
+            "unhandled"
+                | "runtime_failed"
+                | "runtime_lost"
+                | "environment_setup_failed"
+                | "environment_startup_failed"
+                | "environment_preparation_timeout"
         ) {
             Err(FailReasonError)
         } else {
@@ -423,7 +428,10 @@ impl JsonSchema for FailReason {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
-            "pattern": "^(?!(?:unhandled|runtime_failed|runtime_lost)$)[A-Za-z_][A-Za-z0-9_.-]*$"
+            "pattern": concat!(
+                "^(?!(?:unhandled|runtime_failed|runtime_lost|environment_setup_failed|",
+                "environment_startup_failed|environment_preparation_timeout)$)[A-Za-z_][A-Za-z0-9_.-]*$"
+            )
         })
     }
 }

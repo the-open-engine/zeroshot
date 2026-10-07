@@ -129,7 +129,7 @@ fn resolution_selects_declared_fields_and_rejects_partial_explicit_overrides() {
         .assert_value();
     let single_field_runtime = runtime(&["OPENAI_API_KEY"]);
     let resolved = store
-        .resolve(&single_field_runtime, &BTreeMap::new())
+        .resolve(&single_field_runtime, None, &BTreeMap::new())
         .assert_value();
     assert_eq!(
         resolved.bootstrap_values(),
@@ -138,6 +138,7 @@ fn resolution_selects_declared_fields_and_rejects_partial_explicit_overrides() {
     let refreshed = store
         .resolve(
             &single_field_runtime,
+            None,
             &BTreeMap::from([(key("provider"), values(&[("OPENAI_API_KEY", "fresh-key")]))]),
         )
         .assert_value();
@@ -150,6 +151,7 @@ fn resolution_selects_declared_fields_and_rejects_partial_explicit_overrides() {
     let error = store
         .resolve(
             &runtime,
+            None,
             &BTreeMap::from([(key("provider"), values(&[("OPENAI_API_KEY", "inline")]))]),
         )
         .assert_error();

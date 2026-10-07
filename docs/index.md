@@ -67,7 +67,7 @@ charter, use `auto-research`; custom graphs follow the same protocol contracts.
   Cloud accepts the same graph and runtime plan through a managed target. Its documentation covers
   accounts, organization policy, and queue behavior.
 
-  [Open the Cloud docs](https://dev.theopenengine.com/docs)
+  [Open the Cloud docs](https://cloud.zeroshot.sh/docs)
 
 </div>
 
@@ -75,10 +75,12 @@ charter, use `auto-research`; custom graphs follow the same protocol contracts.
 
 [How execution works](concepts/execution.md) describes the graph and reduction model. Read
 [Runtimes and connections](concepts/runtimes-and-connections.md) before choosing models or supplying
-credentials; [Observe and control runs](guides/observe-and-control.md) covers durable status and log
-streams. [Use a local graph as an ACP agent](guides/acp.md) covers the experimental stdio endpoint.
+credentials; [Observe and control runs](guides/observe-and-control.md) covers failed-run recovery,
+durable status, and log streams. [Use a local graph as an ACP agent](guides/acp.md) covers the
+experimental stdio endpoint. [Build a review loop](guides/review-loop.md) builds a custom graph and
+runtime plan step by step.
 
-The reference section is built from product-owned definitions:
+These reference pages are generated from product-owned definitions:
 
 - [CLI reference](zeroshot-cli.md), generated from the Clap command tree;
 - [Python API](reference/python.md), generated from the SDK's public objects and docstrings;
