@@ -1782,6 +1782,9 @@ Older minor versions remain available.</p>
 </table>
 <p>The selector does not list legacy aliases. Existing patch links retain their page, query string,
 and fragment, but now show the minor version's newest patch. New releases do not create patch paths.</p>
+<p>Search engines should index Current. A minor version's page declares the same page in Current as
+its canonical URL, or its own <code>https://zeroshot.sh/docs/vX.Y/</code> URL when Current no longer has that
+page. The publisher reapplies this to every minor version on each publication.</p>
 <h2 id="build-manifest">Build manifest<a class="headerlink" href="#build-manifest" title="Permanent link">&para;</a></h2>
 <p>Manifest schema 2 distinguishes a docs channel from the exact product used to generate its APIs:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span>
