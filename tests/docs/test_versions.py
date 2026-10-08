@@ -125,6 +125,132 @@ class MigrationTests(unittest.TestCase):
         self.assertTrue((self.root / "v10.2.1/large-asset.bin").exists())
 
 
+GITHUB_PAGES = "https://the-open-engine.github.io/zeroshot/"
+ZEROSHOT_SH = "https://zeroshot.sh/docs/"
+
+
+class CanonicalTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        versions.write_json(
+            self.root / "versions.json",
+            [
+                {"version": "current", "title": "Current", "aliases": ["dev"]},
+                {"version": "v10.3", "title": "v10.3", "aliases": ["stable"]},
+                {"version": "v10.2", "title": "v10.2", "aliases": []},
+            ],
+        )
+
+    def write(self, relative, text):
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def page(self, version, route, origin=GITHUB_PAGES):
+        url = f"{origin}{version}/{route}"
+        self.write(
+            f"{version}/{route}index.html",
+            "<html><head>"
+            f'<link rel="canonical" href="{url}">'
+            f'<meta property="og:url" content="{url}">'
+            "</head><body>"
+            f'<p>Served from <a href="{GITHUB_PAGES}">{GITHUB_PAGES}</a>.</p>'
+            "</body></html>",
+        )
+
+    def read(self, relative):
+        return (self.root / relative).read_text(encoding="utf-8")
+
+    def canonical(self, relative):
+        return versions.CANONICAL_LINK.search(self.read(relative))[1]
+
+    def files(self):
+        return {
+            str(path): path.read_bytes()
+            for path in self.root.rglob("*")
+            if path.is_file()
+        }
+
+    def test_minor_pages_credit_current_or_their_own_zeroshot_sh_url(self):
+        for route in ("", "getting-started/install/"):
+            self.page("current", route, ZEROSHOT_SH)
+            self.page("v10.2", route)
+            # Releases built after site_url changed already name zeroshot.sh.
+            self.page("v10.3", route, ZEROSHOT_SH)
+        self.page("v10.2", "guides/retired/")
+        self.write(
+            "v10.2/sitemap.xml",
+            f"<urlset><url><loc>{GITHUB_PAGES}v10.2/guides/retired/</loc></url></urlset>",
+        )
+        self.write("v10.2/sitemap.xml.gz", "stale compressed sitemap")
+        stub = (
+            '<html><head><link rel="canonical" href="../../../v10.2/guides/retired/">'
+            "</head><body></body></html>"
+        )
+        self.write("v10.2.0/guides/retired/index.html", stub)
+        self.write("stable/index.html", "<html><head></head><body>v10.3/</body></html>")
+        untouched = {
+            path: data
+            for path, data in self.files().items()
+            if Path(path).relative_to(self.root).parts[0] in {"current", "stable"}
+        }
+
+        versions.migrate(self.root)
+
+        for version in ("v10.2", "v10.3"):
+            with self.subTest(version=version):
+                self.assertEqual(
+                    self.canonical(f"{version}/getting-started/install/index.html"),
+                    f"{ZEROSHOT_SH}current/getting-started/install/",
+                )
+                self.assertEqual(
+                    self.canonical(f"{version}/index.html"), f"{ZEROSHOT_SH}current/"
+                )
+        retired = self.read("v10.2/guides/retired/index.html")
+        self.assertEqual(
+            self.canonical("v10.2/guides/retired/index.html"),
+            f"{ZEROSHOT_SH}v10.2/guides/retired/",
+        )
+        self.assertIn(
+            f'<meta property="og:url" content="{ZEROSHOT_SH}v10.2/guides/retired/">',
+            retired,
+        )
+        self.assertIn(f'<a href="{GITHUB_PAGES}">{GITHUB_PAGES}</a>', retired)
+        self.assertEqual(
+            self.read("v10.2/sitemap.xml"),
+            f"<urlset><url><loc>{ZEROSHOT_SH}v10.2/guides/retired/</loc></url></urlset>",
+        )
+        self.assertFalse((self.root / "v10.2/sitemap.xml.gz").exists())
+        self.assertEqual(self.read("v10.2.0/guides/retired/index.html"), stub)
+        for path, data in untouched.items():
+            self.assertEqual(Path(path).read_bytes(), data, path)
+
+        migrated = self.files()
+        versions.migrate(self.root)
+        self.assertEqual(self.files(), migrated)
+
+    def test_canonical_follows_current_when_it_drops_a_page(self):
+        self.page("current", "guides/acp/", ZEROSHOT_SH)
+        self.page("v10.2", "guides/acp/")
+        versions.migrate(self.root)
+        self.assertEqual(
+            self.canonical("v10.2/guides/acp/index.html"),
+            f"{ZEROSHOT_SH}current/guides/acp/",
+        )
+        (self.root / "current/guides/acp/index.html").unlink()
+        versions.migrate(self.root)
+        self.assertEqual(
+            self.canonical("v10.2/guides/acp/index.html"),
+            f"{ZEROSHOT_SH}v10.2/guides/acp/",
+        )
+
+    def test_site_url_matches_mkdocs_configuration(self):
+        configuration = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+        self.assertIn(f"\nsite_url: {versions.SITE_URL}\n", configuration)
+
+
 class PublicationTests(unittest.TestCase):
     def test_minor_updates_allow_forward_progress_and_identical_retries(self):
         manifest = {

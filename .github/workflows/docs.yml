@@ -213,7 +213,7 @@ jobs:
                   raise SystemExit(f"Python API directives did not render in {relative}")
           PY
 
-      - name: Consolidate published patch versions
+      - name: Consolidate published versions and canonical links
         shell: bash
         run: |
           set -euo pipefail
@@ -233,7 +233,7 @@ jobs:
             python .docs-publisher/scripts/docs_versions.py migrate "$pages_dir"
             git -C "$pages_dir" add --all
             if ! git -C "$pages_dir" diff --cached --quiet; then
-              git -C "$pages_dir" commit -m "docs: consolidate Current and minor versions"
+              git -C "$pages_dir" commit -m "docs: consolidate versions and canonical links"
               git update-ref refs/heads/gh-pages "$(git -C "$pages_dir" rev-parse HEAD)" "$previous"
             fi
             if [[ "$DOCS_VERSION" != "current" && -f "$pages_dir/$DOCS_VERSION/manifest.json" ]]; then

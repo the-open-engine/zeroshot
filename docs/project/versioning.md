@@ -26,6 +26,10 @@ The docs base is `https://zeroshot.sh/docs/`, which serves the GitHub Pages site
 The selector does not list legacy aliases. Existing patch links retain their page, query string,
 and fragment, but now show the minor version's newest patch. New releases do not create patch paths.
 
+Search engines should index Current. A minor version's page declares the same page in Current as
+its canonical URL, or its own `https://zeroshot.sh/docs/vX.Y/` URL when Current no longer has that
+page. The publisher reapplies this to every minor version on each publication.
+
 ## Build manifest
 
 Manifest schema 2 distinguishes a docs channel from the exact product used to generate its APIs:
