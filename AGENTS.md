@@ -504,10 +504,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   SDK, source, and publication-tooling identity. Legacy patch page URLs redirect to their minor.
 - Documentation publication tools come from the workflow commit separately from the exact release
   source. The publisher migrates the existing Pages tree locally and pushes once after validation.
-  That migration points each minor page's canonical link at the same Current page on
-  `https://zeroshot.sh/docs/`, or at its own minor URL when Current lacks the page, and rewrites
-  older GitHub Pages origins in minor sitemaps. `SITE_URL` in `scripts/docs_versions.py` must
-  match `mkdocs.yml`.
+  That migration, and a second pass after `mike deploy`, point each minor page's canonical link at
+  the same Current page on `https://zeroshot.sh/docs/`, or at its own minor URL when Current lacks
+  the page, and rewrite older GitHub Pages origins in minor sitemaps. `SITE_URL` in
+  `scripts/docs_versions.py` must match `mkdocs.yml`.
   A first release publication bootstraps Current from `main` in an isolated checkout before setting
   the default; Current never inherits the requested release's product identity.
 - The direct target's discovery, sourceful run request, and run-scoped OECP session are versioned

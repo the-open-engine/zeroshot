@@ -236,6 +236,16 @@ def canonicalize_minor(root: Path, version: str) -> None:
             (directory / "sitemap.xml.gz").unlink(missing_ok=True)
 
 
+def canonicalize(root: Path) -> None:
+    """Apply the canonical policy to every minor listed in versions.json."""
+    versions_path = root / "versions.json"
+    if not versions_path.exists():
+        return
+    for entry in json.loads(versions_path.read_text(encoding="utf-8")):
+        if MINOR.fullmatch(entry["version"]):
+            canonicalize_minor(root, entry["version"])
+
+
 def migrate(root: Path) -> None:
     """Keep the newest patch of each minor and preserve old HTML links.
 
@@ -265,16 +275,14 @@ def migrate(root: Path) -> None:
         reverse=True,
     )
     write_json(versions_path, retained)
-    for entry in retained:
-        if MINOR.fullmatch(entry["version"]):
-            canonicalize_minor(root, entry["version"])
+    canonicalize(root)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    migration = subparsers.add_parser("migrate")
-    migration.add_argument("root", type=Path)
+    for command in ("migrate", "canonicalize"):
+        subparsers.add_parser(command).add_argument("root", type=Path)
     check = subparsers.add_parser("check-update")
     check.add_argument("manifest", type=Path)
     check.add_argument("version")
@@ -282,6 +290,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "migrate":
         migrate(args.root)
+    elif args.command == "canonicalize":
+        canonicalize(args.root)
     else:
         check_update(
             json.loads(args.manifest.read_text(encoding="utf-8")),
