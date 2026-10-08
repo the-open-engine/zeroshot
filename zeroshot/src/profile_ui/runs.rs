@@ -37,7 +37,6 @@ impl From<HistoryError> for ApiError {
             status: StatusCode::from_u16(error.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
             code: error.code.as_str(),
             message: error.message,
-            field: None,
         }
     }
 }
@@ -581,7 +580,6 @@ fn remote_problem(status: StatusCode, body: &[u8]) -> ApiError {
         status,
         code: code.as_str(),
         message: problem.message().to_owned(),
-        field: None,
     }
 }
 
@@ -759,7 +757,6 @@ fn incompatible() -> ApiError {
         status: StatusCode::BAD_GATEWAY,
         code: HistoryProblemCode::HistoryIncompatible.as_str(),
         message: "The target does not provide compatible run history.".to_owned(),
-        field: None,
     }
 }
 fn runtime_unavailable() -> ApiError {

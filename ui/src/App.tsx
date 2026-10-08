@@ -11,7 +11,8 @@ import {
   wrapParallelActivities,
 } from './workflow-authoring';
 import type { WorkflowEdge } from './workflow-projection';
-import { errorField, type Bootstrap, type Summary } from './api';
+import { type Bootstrap, type Summary } from './api';
+import { missingRuntimeSetting } from './runtime-readiness';
 import type { WorkspaceServices } from './workspace-services';
 import { createHostedProfile, useHostWorkspace } from './use-host-workspace';
 import { workspaceStorageKeys } from './workspace-storage';
@@ -392,6 +393,11 @@ function useProfileEffects(
   }, [positions, positionKey]);
   useEffect(() => {
     if (!doc) return;
+    const missing = missingRuntimeSetting(doc);
+    if (missing) {
+      setValidation({ state: 'invalid', ...missing });
+      return;
+    }
     const controller = new AbortController();
     setValidation({ state: 'checking' });
     const snapshot = { graph: doc.graph, runtime: doc.runtime };
@@ -402,8 +408,7 @@ function useProfileEffects(
           if (!controller.signal.aborted) setValidation({ state: 'valid' });
         })
         .catch((e) => {
-          if (!controller.signal.aborted)
-            setValidation({ state: 'invalid', message: message(e), field: errorField(e) });
+          if (!controller.signal.aborted) setValidation({ state: 'invalid', message: message(e) });
         });
     }, 450);
     return () => {
@@ -869,6 +874,13 @@ function useProfileActions(
     try {
       await flushPendingEdits();
       if (generation !== documentGeneration.current || !current.current) return;
+      const missing = missingRuntimeSetting(current.current);
+      if (missing) {
+        setModalError(missing.message);
+        setError(missing.message);
+        setIssues(true);
+        return;
+      }
       const snapshot = snapshotProfileSave(current.current, {
         name: profileName,
         revision: asCopy ? undefined : revision,

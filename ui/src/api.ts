@@ -22,13 +22,6 @@ export class ApiError extends Error {
   }
 }
 
-/** The request field a server problem points at, as a JSON path such as `runtime.provider`. */
-export function errorField(error: unknown): string | undefined {
-  const field =
-    error instanceof ApiError ? (error.details as { field?: unknown })?.field : undefined;
-  return typeof field === 'string' ? field : undefined;
-}
-
 /** Only this adapter knows the browser API's mount point and HTTP error envelope. */
 export function createApiClient(base: URL, fetcher: typeof fetch = fetch): ApiClient {
   return async <T>(

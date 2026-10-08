@@ -123,47 +123,15 @@ async fn direct_authoring_and_validation_handlers_preserve_drafts_and_reject_bad
         json!({"kind":"string"})
     );
 
-    let error = validate(Ok(Bytes::from("{".to_owned())))
-        .await
-        .err()
-        .assert_value();
-    assert_eq!(error.status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(error.code, "invalid_profile");
-    assert!(error.message.contains("Invalid profile JSON"));
-    assert!(error.field.is_none());
-
-    let error = validate(Ok(Bytes::from(
-        r#"{"graph":null,"runtime":null,"extra":true}"#.to_owned(),
-    )))
-    .await
-    .err()
-    .assert_value();
-    assert_eq!(error.status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(error.code, "invalid_profile");
-    assert!(error.message.contains("Invalid profile JSON"));
-    assert!(error.field.is_none());
-}
-
-#[tokio::test]
-async fn field_problems_reach_the_browser_in_details() {
-    let error = ApiError {
-        field: Some(("runtime.harness".into(), "unknown variant ``".into())),
-        ..ApiError::invalid("Choose a harness.".into())
-    };
-    let response = error.into_response();
-    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    let body = axum::body::to_bytes(response.into_body(), MAX_BODY)
-        .await
-        .assert_value();
-    let body: Value = serde_json::from_slice(&body).assert_value();
-    assert_eq!(
-        body,
-        json!({
-            "code":"invalid_profile",
-            "message":"Choose a harness.",
-            "details":{"field":"runtime.harness","detail":"unknown variant ``"},
-        })
-    );
+    for malformed in ["{", r#"{"graph":null,"runtime":null,"extra":true}"#] {
+        let error = validate(Ok(Bytes::from(malformed.to_owned())))
+            .await
+            .err()
+            .assert_value();
+        assert_eq!(error.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(error.code, "invalid_profile");
+        assert!(error.message.contains("Invalid profile JSON"));
+    }
 }
 
 #[tokio::test]

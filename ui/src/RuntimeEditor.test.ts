@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createElement } from 'react';
 import { newDocument } from './domain';
-import { ApiError, errorField } from './api';
 
 test('template runtime metadata keeps delivery bindings when creating a profile', () => {
   const template = {
@@ -157,13 +156,4 @@ test('harness labels and provider choices follow the native schema, including fu
   } finally {
     await server.close();
   }
-});
-
-test('server problems expose the rejected field path only when the server names one', () => {
-  const located = new ApiError(422, 'invalid_profile', 'Choose a harness.', {
-    field: 'runtime.harness',
-  });
-  assert.equal(errorField(located), 'runtime.harness');
-  assert.equal(errorField(new ApiError(422, 'invalid_profile', 'Invalid profile JSON')), undefined);
-  assert.equal(errorField(new Error('offline')), undefined);
 });
