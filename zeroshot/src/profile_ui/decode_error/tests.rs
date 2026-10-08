@@ -34,6 +34,8 @@ fn decode_document(runtime: Value) -> Result<ProfileDocument, DecodeError> {
 
 #[test]
 fn field_problems_name_the_field_in_plain_words() {
+    let mut listed = runtime("codex", "openai", Some("small"), "m");
+    listed["nodes"] = json!([]);
     let mut dotted = runtime("codex", "openai", Some("small"), "");
     dotted["nodes"] = json!({"worker.a":{"kind":"agent","model":""}});
     let cases = [
@@ -62,6 +64,7 @@ fn field_problems_name_the_field_in_plain_words() {
             "runtime.provider",
             "Provider `nope` is not supported. Expected one of openai, openrouter, gateway, bedrock.",
         ),
+        (listed, "runtime.nodes", "Nodes must be a map."),
         (
             dotted,
             "runtime.nodes.worker.a.model",

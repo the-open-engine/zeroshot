@@ -88,7 +88,13 @@ fn locate_runtime(runtime: &Value) -> Option<(Vec<String>, String)> {
     if let Some(detail) = check::<RunSize>(runtime.get("size")) {
         return Some((path(&["runtime", "size"]), detail));
     }
-    for (name, binding) in runtime.get("nodes")?.as_object()? {
+    // A missing `nodes` falls back to serde's own "missing field" report at `runtime`.
+    let nodes = runtime.get("nodes")?;
+    let Some(nodes) = nodes.as_object() else {
+        let detail = check::<serde_json::Map<String, Value>>(Some(nodes))?;
+        return Some((path(&["runtime", "nodes"]), detail));
+    };
+    for (name, binding) in nodes {
         if binding.get("kind").and_then(Value::as_str) == Some("agent") {
             if let Some(detail) = check::<ModelId>(binding.get("model")) {
                 return Some((path(&["runtime", "nodes", name, "model"]), detail));
