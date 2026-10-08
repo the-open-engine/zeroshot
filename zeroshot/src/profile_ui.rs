@@ -210,12 +210,12 @@ fn decode<T: serde::de::DeserializeOwned>(
 ) -> Result<T, ApiError> {
     let bytes = bytes
         .map_err(|_| ApiError::invalid("The profile exceeds the 2 MiB request limit.".into()))?;
-    decode_error::decode(&bytes).map_err(|problem| match problem {
-        Ok(problem) => ApiError {
+    decode_error::decode(&bytes).map_err(|error| match error {
+        decode_error::DecodeError::Field(problem) => ApiError {
             field: Some((problem.field, problem.detail)),
             ..ApiError::invalid(problem.message)
         },
-        Err(message) => ApiError::invalid(message),
+        decode_error::DecodeError::Malformed(message) => ApiError::invalid(message),
     })
 }
 fn envelope(profile: RunProfile) -> Result<Json<Value>, ApiError> {

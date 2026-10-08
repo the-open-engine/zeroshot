@@ -15,9 +15,17 @@ pub(super) struct FieldProblem {
     pub detail: String,
 }
 
+/// Why a request body could not be decoded.
+pub(super) enum DecodeError {
+    /// The JSON is well formed but a field has the wrong value or shape.
+    Field(FieldProblem),
+    /// The body is not a single well-formed JSON document.
+    Malformed(String),
+}
+
 /// Decodes `bytes`, reporting data errors at the field that caused them. Syntax errors keep the
 /// generic "Invalid profile JSON" wording because no field is involved.
-pub(super) fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, Result<FieldProblem, String>> {
+pub(super) fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, DecodeError> {
     let deserializer = &mut serde_json::Deserializer::from_slice(bytes);
     let error = match serde_path_to_error::deserialize(&mut *deserializer) {
         Ok(value) => {
@@ -25,12 +33,15 @@ pub(super) fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, Result<Fiel
             return deserializer
                 .end()
                 .map(|()| value)
-                .map_err(|error| Err(format!("Invalid profile JSON: {error}")));
+                .map_err(|error| DecodeError::Malformed(format!("Invalid profile JSON: {error}")));
         }
         Err(error) => error,
     };
     if !error.inner().is_data() {
-        return Err(Err(format!("Invalid profile JSON: {}", error.inner())));
+        return Err(DecodeError::Malformed(format!(
+            "Invalid profile JSON: {}",
+            error.inner()
+        )));
     }
     let document: Value = serde_json::from_slice(bytes).unwrap_or(Value::Null);
     let path = segments(error.path());
@@ -39,7 +50,7 @@ pub(super) fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, Result<Fiel
         .flatten()
         .unwrap_or_else(|| (path, strip_position(&error.inner().to_string())));
     let value = lookup(&document, &field);
-    Err(Ok(FieldProblem {
+    Err(DecodeError::Field(FieldProblem {
         message: describe(&field, &detail, value),
         field: field.join("."),
         detail,
@@ -173,3 +184,7 @@ fn capitalize(text: &str) -> String {
         .map(|first| first.to_uppercase().chain(chars).collect())
         .unwrap_or_default()
 }
+
+#[cfg(test)]
+#[path = "decode_error/tests.rs"]
+mod tests;
