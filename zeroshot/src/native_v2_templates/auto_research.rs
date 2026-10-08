@@ -93,9 +93,12 @@ fn bootstrap() -> Result<GraphNode, BuiltinTemplateError> {
          secrets, large generated output, or Git data. Mark oversize or incomplete candidates \
          nonrestorable in the backlog. Treat old backlog-only entries as nonrestorable on resume; \
          never invent missing candidate bytes. Capture a restorable baseline and incumbent before switching \
-         parents; immutable archive entries are append-only. Put the current provisional \
-         iteration under 'iterations/NNNNNN/'; its five records contain 'proposal.json', 'experiment.json', \
-         'evaluations.json', 'decision.json', and 'artifacts.json'. A successful auditor \
+         parents; immutable archive entries are append-only. Bootstrap must not create \
+         'iterations/NNNNNN/' or prefill its records on a fresh run. Do not mark a \
+         current provisional iteration in state or summary before preflight. The loop \
+         creates that provisional directory after topology preflight. Each iteration uses \
+         'proposal.json', 'experiment.json', 'evaluations.json', 'decision.json', and \
+         'artifacts.json'. A successful auditor \
          appends 'audit.json' with continue or stop and any stop counterproposal. Keep reversible backups under \
          'scratch/' and add that directory to the research '.gitignore'. Initialize 'state.json' \
          with schema version 1, the next iteration number, the retained workspace identity, its \

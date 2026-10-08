@@ -351,8 +351,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `options.iterations` is a positive safe integer bound at admission; generic execution and
   loop-entry budgets still apply. Bootstrap records the resolved count in durable state. A
   one-time read-only topology preflight checks the exact scout, judge, and work-item role arrays
-  before the loop. Three independent scout reviewers (explorer, synthesizer, challenger) propose
-  bounded directions. One planner reads them, the incumbent, and the durable archive; it selects
+  before the loop. On a fresh run, bootstrap leaves iteration directories absent and records
+  no current provisional iteration; the loop creates one only after preflight. Three independent scout reviewers
+  (explorer, synthesizer, challenger) propose bounded directions. One planner reads them,
+  the incumbent, and the durable archive; it selects
   an experiment and a restorable `parentArtifactId`, or proposes stop when no affordable
   direction remains. The planner emits `work`, `stop`, or `abort` directly and writes
   its selection under ignored scratch. It weighs expected progress and information gain against
