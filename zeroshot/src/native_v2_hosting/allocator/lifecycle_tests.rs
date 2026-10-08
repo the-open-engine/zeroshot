@@ -137,6 +137,49 @@ fn hosting_source_contract_cleanup_retains_only_failed_candidate_workspaces() {
 }
 
 #[test]
+fn failed_hosted_recovery_ignores_scratch_failure_but_requires_runtime_cleanup() {
+    let root = TestDirectory::new("host-checkpoint-scratch-cleanup");
+    let run_id = RunId::new("failed-run");
+    let run_root = run_directory(root.path(), &run_id);
+    let checkpoints = checkpoint_directory(root.path(), &run_id);
+    let repository = checkpoint_repository(root.path(), &run_id);
+    let recovery = recovery_path(root.path(), &run_id);
+    retained_workspace(&run_root);
+    std::fs::create_dir_all(&checkpoints).assert_value();
+    // A non-directory scratch path is rejected by the disposable-tree remover.
+    std::fs::write(checkpoints.join("staging"), b"uncollectable scratch").assert_value();
+    std::fs::remove_dir_all(run_root.join("runtime")).assert_value();
+    std::fs::write(run_root.join("runtime"), b"uncollectable runtime").assert_value();
+
+    assert!(
+        cleanup_run_directory(cleanup_request(
+            (&run_root, &checkpoints, &repository, &recovery),
+            (&run_id, &run_id),
+            true,
+            RunRuntimeExit::Failed,
+        ))
+        .is_err()
+    );
+    assert!(!recovery.exists());
+
+    std::fs::remove_file(run_root.join("runtime")).assert_value();
+    std::fs::create_dir(run_root.join("runtime")).assert_value();
+
+    cleanup_run_directory(cleanup_request(
+        (&run_root, &checkpoints, &repository, &recovery),
+        (&run_id, &run_id),
+        true,
+        RunRuntimeExit::Failed,
+    ))
+    .assert_value();
+
+    assert!(run_root.join("workspace/candidate").is_file());
+    assert!(!run_root.join("runtime").exists());
+    assert!(checkpoints.join("staging").is_file());
+    assert!(confirmed_retained_workspace(&run_root, &recovery, &run_id).assert_value());
+}
+
+#[test]
 fn hosting_source_contract_interrupted_handoffs_reconcile_exact_lineage() {
     let root = TestDirectory::new("host-handoff-reconcile");
     reconcile_retained_allocations(root.path()).assert_value();

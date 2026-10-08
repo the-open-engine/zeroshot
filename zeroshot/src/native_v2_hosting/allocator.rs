@@ -1204,7 +1204,11 @@ fn failed_run_directory_state(
 fn retain_failed_workspace(
     request: CleanupRunRequest<'_>,
 ) -> Result<(), CapsuleCleanupUnavailable> {
-    remove_run_directory(&request.checkpoint_directory.join("staging"))?;
+    // Scratch can contain copied read-only workspace paths. Its collection must not prevent
+    // confirmed runtime cleanup, ownership transfer, and durable recovery metadata.
+    let _ = crate::native_v2_supervisor::checkpoints::filesystem::remove_disposable_tree(
+        &request.checkpoint_directory.join("staging"),
+    );
     remove_run_directory(&request.run_root.join("tools"))?;
     let runtime = request.run_root.join("runtime");
     if runtime.exists() {

@@ -210,6 +210,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   retain both for resume. Disposable checkpoint staging cleanup is best effort after confirmed
   runtime cleanup and before observer ledger access. Copied read-only directories are made writable
   only inside private scratch; staging cleanup failure cannot block terminal truth or status.
+  Hosted failed runs likewise collect checkpoint staging as best effort after process cleanup;
+  retained recovery still requires runtime cleanup, workspace ownership transfer, and durable
+  recovery metadata. Force-stop and explicit discard retain authoritative lineage deletion.
   Hosted factories advertise checkpoints only when they implement storage and restore. Snapshot
   restore requires exclusive workspace ownership and preserves the checkout root and Git identity.
 - Hosted workspace recovery advertises `resume`, `checkpoints`, and `discard_workspace` in the
