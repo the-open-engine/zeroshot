@@ -1,7 +1,7 @@
 {
   "name": "@the-open-engine-company/zeroshot",
   "version": "0.0.0-development",
-  "description": "Runs coding agents as a graph: one agent implements, independent agents review, failures go to repair, and nothing ships until the checks pass. Works with Codex, Claude Code and Copilot.",
+  "description": "Runs coding agents as a graph: one agent implements, independent agents review, failures go to repair, and nothing ships until the checks pass. Works with Codex, Claude Code and GitHub Copilot.",
   "keywords": [
     "claude-code",
     "codex",
@@ -11,7 +11,6 @@
     "multi-agent",
     "agent-orchestration",
     "code-review",
-    "ai-code-review",
     "verification",
     "cli"
   ],
