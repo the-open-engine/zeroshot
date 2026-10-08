@@ -213,7 +213,7 @@ jobs:
                   raise SystemExit(f"Python API directives did not render in {relative}")
           PY
 
-      - name: Consolidate published patch versions
+      - name: Consolidate published versions and canonical links
         shell: bash
         run: |
           set -euo pipefail
@@ -233,7 +233,7 @@ jobs:
             python .docs-publisher/scripts/docs_versions.py migrate "$pages_dir"
             git -C "$pages_dir" add --all
             if ! git -C "$pages_dir" diff --cached --quiet; then
-              git -C "$pages_dir" commit -m "docs: consolidate Current and minor versions"
+              git -C "$pages_dir" commit -m "docs: consolidate versions and canonical links"
               git update-ref refs/heads/gh-pages "$(git -C "$pages_dir" rev-parse HEAD)" "$previous"
             fi
             if [[ "$DOCS_VERSION" != "current" && -f "$pages_dir/$DOCS_VERSION/manifest.json" ]]; then
@@ -301,6 +301,16 @@ jobs:
             fi
             git worktree remove "$llms_tree"
           fi
+          # Re-check minor canonicals against the Current tree published above,
+          # including pages it just dropped and a minor this run just built.
+          canonical_tree="$RUNNER_TEMP/zeroshot-pages-canonical"
+          git worktree add --quiet "$canonical_tree" gh-pages
+          python .docs-publisher/scripts/docs_versions.py canonicalize "$canonical_tree"
+          git -C "$canonical_tree" add --update
+          if ! git -C "$canonical_tree" diff --cached --quiet; then
+            git -C "$canonical_tree" commit --quiet --message "docs: point minor canonical links at Current"
+          fi
+          git worktree remove "$canonical_tree"
 
       - name: Stage and push the complete site
         shell: bash
