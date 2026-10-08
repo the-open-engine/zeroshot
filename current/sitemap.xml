@@ -1,111 +1,111 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/</loc>
+         <loc>https://zeroshot.sh/docs/current/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/zeroshot-cli/</loc>
+         <loc>https://zeroshot.sh/docs/current/zeroshot-cli/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/zeroshot-distribution/</loc>
+         <loc>https://zeroshot.sh/docs/current/zeroshot-distribution/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/concepts/execution/</loc>
+         <loc>https://zeroshot.sh/docs/current/concepts/execution/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/concepts/runtimes-and-connections/</loc>
+         <loc>https://zeroshot.sh/docs/current/concepts/runtimes-and-connections/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/concepts/targets/</loc>
+         <loc>https://zeroshot.sh/docs/current/concepts/targets/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/getting-started/first-run/</loc>
+         <loc>https://zeroshot.sh/docs/current/getting-started/first-run/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/getting-started/install/</loc>
+         <loc>https://zeroshot.sh/docs/current/getting-started/install/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/guides/acp/</loc>
+         <loc>https://zeroshot.sh/docs/current/guides/acp/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/guides/observe-and-control/</loc>
+         <loc>https://zeroshot.sh/docs/current/guides/observe-and-control/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/guides/python-sdk/</loc>
+         <loc>https://zeroshot.sh/docs/current/guides/python-sdk/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/guides/review-loop/</loc>
+         <loc>https://zeroshot.sh/docs/current/guides/review-loop/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/</loc>
+         <loc>https://zeroshot.sh/docs/current/guides/runtime-environments/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/project/versioning/</loc>
+         <loc>https://zeroshot.sh/docs/current/project/versioning/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/reference/python/</loc>
+         <loc>https://zeroshot.sh/docs/current/reference/python/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/reference/runtime-plan/</loc>
+         <loc>https://zeroshot.sh/docs/current/reference/runtime-plan/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/reference/cluster/admission/</loc>
+         <loc>https://zeroshot.sh/docs/current/reference/cluster/admission/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/reference/cluster/api/</loc>
+         <loc>https://zeroshot.sh/docs/current/reference/cluster/api/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/reference/cluster/data-plane/</loc>
+         <loc>https://zeroshot.sh/docs/current/reference/cluster/data-plane/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/reference/cluster/graph/</loc>
+         <loc>https://zeroshot.sh/docs/current/reference/cluster/graph/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/reference/cluster/lifecycle/</loc>
+         <loc>https://zeroshot.sh/docs/current/reference/cluster/lifecycle/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/reference/cluster/portable-bindings/</loc>
+         <loc>https://zeroshot.sh/docs/current/reference/cluster/portable-bindings/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/reference/cluster/watch/</loc>
+         <loc>https://zeroshot.sh/docs/current/reference/cluster/watch/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/reference/python/client/</loc>
+         <loc>https://zeroshot.sh/docs/current/reference/python/client/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/reference/python/configuration/</loc>
+         <loc>https://zeroshot.sh/docs/current/reference/python/configuration/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/reference/python/errors/</loc>
+         <loc>https://zeroshot.sh/docs/current/reference/python/errors/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
     <url>
-         <loc>https://the-open-engine.github.io/zeroshot/current/reference/python/results/</loc>
+         <loc>https://zeroshot.sh/docs/current/reference/python/results/</loc>
          <lastmod>2026-10-08</lastmod>
     </url>
 </urlset>
