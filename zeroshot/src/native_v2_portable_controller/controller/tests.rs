@@ -359,6 +359,45 @@ fn coverage_contract_directory_cleanup_does_not_treat_a_non_directory_as_absent(
 }
 
 #[tokio::test]
+async fn observer_opens_durable_status_when_checkpoint_scratch_gc_fails() {
+    let root = tempfile::tempdir().assert_value();
+    let (paths, original_ledger) = observer_storage(root.path());
+    drop(original_ledger);
+    std::fs::create_dir(paths.storage().join("checkpoints")).assert_value();
+    let staging = paths.storage().join("checkpoints/staging");
+    std::fs::write(&staging, "uncollectable scratch").assert_value();
+
+    let (_lease, reopened_ledger) = open_observer_storage(&paths).assert_value();
+
+    assert!(reopened_ledger.list().await.is_ok());
+    assert_eq!(
+        std::fs::read_to_string(&staging).assert_value(),
+        "uncollectable scratch"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn observer_removes_legacy_readonly_checkpoint_stage() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempfile::tempdir().assert_value();
+    let (paths, original_ledger) = observer_storage(root.path());
+    drop(original_ledger);
+    let readonly = paths
+        .storage()
+        .join("checkpoints/staging/.capture-old/workspace");
+    std::fs::create_dir_all(&readonly).assert_value();
+    std::fs::write(readonly.join("source"), "copied").assert_value();
+    std::fs::set_permissions(&readonly, std::fs::Permissions::from_mode(0o555)).assert_value();
+
+    let (_lease, reopened_ledger) = open_observer_storage(&paths).assert_value();
+
+    assert!(reopened_ledger.list().await.is_ok());
+    assert!(!paths.storage().join("checkpoints/staging").exists());
+}
+
+#[tokio::test]
 async fn coverage_contract_existing_ledger_requires_one_exact_run_identity() {
     let ledger = FakeRunLedger::new();
     let expected = RunId::new("expected-run");

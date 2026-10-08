@@ -229,8 +229,8 @@ fn open_observer_storage(
     validate_existing_ledger_path(&paths.ledger())?;
     let lease = Arc::new(ControllerLease::acquire(paths.lease())?);
     clear_stale_endpoint(paths)?;
-    remove_directory_if_present(&paths.storage().join("checkpoints/staging"))
-        .map_err(PortableControllerError::Io)?;
+    // Staging is disposable scratch. Its deletion must not block durable status recovery.
+    let _ = remove_directory_if_present(&paths.storage().join("checkpoints/staging"));
     let ledger = Arc::new(SqliteRunLedger::open(paths.ledger())?);
     Ok((lease, ledger))
 }
@@ -342,8 +342,8 @@ impl CapsuleCleanup for PortableCheckpointCleanup {
         exit: RunRuntimeExit,
     ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable> {
         let destroyed = self.inner.destroy_or_confirm_absent(exit).await?;
-        remove_directory_if_present(&self.directory.join("staging"))
-            .map_err(|_| CapsuleCleanupUnavailable)?;
+        // Provider cleanup is authoritative; checkpoint scratch collection is best effort.
+        let _ = remove_directory_if_present(&self.directory.join("staging"));
         // Explicitly stopped runs have no durable terminal path that can perform post-terminal GC.
         if matches!(exit, RunRuntimeExit::ForceStopped) {
             for path in [&self.directory, &self.repository] {
@@ -359,11 +359,7 @@ impl CapsuleCleanup for PortableCheckpointCleanup {
 }
 
 fn remove_directory_if_present(path: &Path) -> io::Result<()> {
-    match std::fs::remove_dir_all(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
+    crate::native_v2_supervisor::checkpoints::filesystem::remove_disposable_tree(path)
 }
 
 struct SingleRunAllocator {

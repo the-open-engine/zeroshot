@@ -253,9 +253,7 @@ impl ResticCheckpointStore {
         let (stage, snapshot) = tokio::task::spawn_blocking(move || {
             let stages = directory.join("staging");
             crate::execution::platform::private_directory(&stages)?;
-            let stage = tempfile::Builder::new()
-                .prefix(".capture-")
-                .tempdir_in(stages)?;
+            let stage = filesystem::private_stage(&stages, ".capture-")?;
             let snapshot = filesystem::capture(&workspace, &stage.path().join("snapshots"), &())?;
             Ok::<_, std::io::Error>((stage, snapshot))
         })
@@ -424,9 +422,7 @@ async fn restore_snapshot(
     let restore_root = workspace
         .parent()
         .ok_or_else(|| catalog::invalid("workspace has no parent directory"))?;
-    let stage = tempfile::Builder::new()
-        .prefix(".zeroshot-restore-")
-        .tempdir_in(restore_root)?;
+    let stage = filesystem::private_stage(restore_root, ".zeroshot-restore-")?;
     let snapshots = stage.path().join("snapshots");
     crate::execution::platform::private_directory(&snapshots)?;
     let restored = snapshots.join(point.as_str());

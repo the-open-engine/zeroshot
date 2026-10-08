@@ -178,26 +178,94 @@ fn install_children(tree: &Path, workspace: &Path, preserve_git: bool) -> io::Re
     Ok(())
 }
 
-struct PrivateStage(PathBuf);
+pub(super) struct PrivateStage(PathBuf);
 
 impl PrivateStage {
-    fn path(&self) -> &Path {
+    pub(super) fn path(&self) -> &Path {
         &self.0
     }
 }
 
 impl Drop for PrivateStage {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(self.path());
+        let _ = remove_disposable_tree(self.path());
     }
 }
 
-fn private_stage(parent: &Path, prefix: &str) -> io::Result<PrivateStage> {
+pub(super) fn private_stage(parent: &Path, prefix: &str) -> io::Result<PrivateStage> {
     let path = parent.join(format!("{prefix}{}", uuid::Uuid::now_v7()));
     // Windows may give ordinary temporary directories the Administrators owner. Set the
     // current-user owner and private ACL atomically rather than trying to repair that owner.
     platform::create_private_directory(&path)?;
     Ok(PrivateStage(path))
+}
+
+/// Deletes only a caller-owned disposable checkpoint directory. Copied workspace directories
+/// retain their original permissions, which can prevent ordinary recursive deletion. Never
+/// follow symlinks or change permissions in the source workspace or published snapshots.
+pub(crate) fn remove_disposable_tree(path: &Path) -> io::Result<()> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(invalid("checkpoint staging path is not a plain directory"));
+    }
+    remove_disposable_directory(path)
+}
+
+fn remove_disposable_directory(path: &Path) -> io::Result<()> {
+    prepare_disposable_directory(path)?;
+    for entry in fs::read_dir(path)? {
+        let child = entry?.path();
+        let metadata = fs::symlink_metadata(&child)?;
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            remove_disposable_directory(&child)?;
+        } else {
+            remove_disposable_non_directory(&child, &metadata)?;
+        }
+    }
+    fs::remove_dir(path)
+}
+
+#[cfg(unix)]
+fn prepare_disposable_directory(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+}
+
+#[cfg(windows)]
+fn prepare_disposable_directory(path: &Path) -> io::Result<()> {
+    platform::private_directory(path)?;
+    let mut permissions = fs::symlink_metadata(path)?.permissions();
+    #[expect(
+        clippy::permissions_set_readonly_false,
+        reason = "Windows-only: this is a disposable private checkpoint directory"
+    )]
+    permissions.set_readonly(false);
+    fs::set_permissions(path, permissions)
+}
+
+fn remove_disposable_non_directory(path: &Path, metadata: &fs::Metadata) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        if metadata.file_type().is_symlink() {
+            return fs::remove_file(path).or_else(|_| fs::remove_dir(path));
+        }
+        if metadata.permissions().readonly() {
+            let mut permissions = metadata.permissions();
+            #[expect(
+                clippy::permissions_set_readonly_false,
+                reason = "Windows-only: this is a disposable private checkpoint file"
+            )]
+            permissions.set_readonly(false);
+            fs::set_permissions(path, permissions)?;
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = metadata;
+    fs::remove_file(path)
 }
 
 fn prepare_snapshots_root(workspace: &Path, root: &Path) -> io::Result<PathBuf> {

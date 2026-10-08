@@ -105,8 +105,39 @@ fn staging_directory_is_private_at_creation_and_removed_with_its_contents() {
     }
     fs::create_dir(path.join("nested")).assert_value();
     fs::write(path.join("nested/file"), "unfinished capture").assert_value();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path.join("nested"), fs::Permissions::from_mode(0o555)).assert_value();
+    }
     drop(stage);
     assert!(!path.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn disposable_tree_cleanup_does_not_follow_workspace_symlinks() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    let root = tempfile::tempdir().assert_value();
+    let stage = super::private_stage(root.path(), ".test-").assert_value();
+    let outside = root.path().join("outside");
+    fs::create_dir(&outside).assert_value();
+    fs::write(outside.join("retained"), "original").assert_value();
+    let nested = stage.path().join("readonly");
+    fs::create_dir(&nested).assert_value();
+    symlink(&outside, nested.join("link")).assert_value();
+    fs::set_permissions(&nested, fs::Permissions::from_mode(0o555)).assert_value();
+
+    super::remove_disposable_tree(stage.path()).assert_value();
+
+    assert!(!stage.path().exists());
+    assert_eq!(
+        fs::read_to_string(outside.join("retained")).assert_value(),
+        "original"
+    );
+    assert!(super::remove_disposable_tree(&root.path().join("missing")).is_ok());
+    assert!(super::remove_disposable_tree(&outside.join("retained")).is_err());
 }
 
 #[test]
