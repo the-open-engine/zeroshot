@@ -10,8 +10,8 @@ Older minor versions remain available.
 
 ## URL contract
 
-The docs base is `https://the-open-engine.github.io/zeroshot/`. Resolve these paths against that
-base, including its `/zeroshot/` project prefix:
+The docs base is `https://zeroshot.sh/docs/`, which serves the GitHub Pages site at
+`https://the-open-engine.github.io/zeroshot/`. Resolve these paths against either base:
 
 | Relative path                                 | Meaning                                                          |
 | --------------------------------------------- | ---------------------------------------------------------------- |

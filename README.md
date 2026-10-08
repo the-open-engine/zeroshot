@@ -18,7 +18,7 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/the-open-engine/zeroshot/ci.yml?branch=main&style=flat&label=build&labelColor=171411)](https://github.com/the-open-engine/zeroshot/actions/workflows/ci.yml?query=branch%3Amain)
 [![Opcore](https://img.shields.io/github/actions/workflow/status/the-open-engine/zeroshot/opcore.yml?branch=main&style=flat&label=opcore&labelColor=171411)](https://github.com/the-open-engine/zeroshot/actions/workflows/opcore.yml?query=branch%3Amain)
 [![Coverage](https://coveralls.io/repos/github/the-open-engine/zeroshot/badge.svg?branch=main)](https://coveralls.io/github/the-open-engine/zeroshot?branch=main)
-[![Docs](https://img.shields.io/github/actions/workflow/status/the-open-engine/zeroshot/docs.yml?branch=main&style=flat&label=docs&labelColor=171411)](https://the-open-engine.github.io/zeroshot/)
+[![Docs](https://img.shields.io/github/actions/workflow/status/the-open-engine/zeroshot/docs.yml?branch=main&style=flat&label=docs&labelColor=171411)](https://zeroshot.sh/docs/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-171411?style=flat)](LICENSE)
 
 &nbsp;
@@ -274,12 +274,12 @@ See [Execution](docs/concepts/execution.md) for the research workflow's decision
 
 ## Reference
 
-- [Versioned documentation](https://the-open-engine.github.io/zeroshot/)
+- [Versioned documentation](https://zeroshot.sh/docs/)
 - [Get started](docs/getting-started/first-run.md)
 - [CLI reference](docs/zeroshot-cli.md)
 - [Target image guide](docker/zeroshot-target/README.md)
 - [Python SDK](sdks/python/README.md)
-- [Cluster API reference](https://the-open-engine.github.io/zeroshot/current/reference/cluster/api/)
+- [Cluster API reference](https://zeroshot.sh/docs/current/reference/cluster/api/)
 - [Graph contract](docs/reference/cluster/graph.md)
 
 Also check out: [Opcore](https://github.com/the-open-engine/opcore).

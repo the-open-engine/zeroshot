@@ -1,6 +1,6 @@
 site_name: Zeroshot
 site_description: Versioned documentation for the Zeroshot CLI, protocol, and Python SDK
-site_url: https://the-open-engine.github.io/zeroshot/
+site_url: https://zeroshot.sh/docs/
 repo_url: https://github.com/the-open-engine/zeroshot
 repo_name: the-open-engine/zeroshot
 copyright: Copyright &copy; The Open Engine
