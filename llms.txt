@@ -35,28 +35,28 @@ zeroshot run --title "Add JSON status output" --template software-change \
   --input input.json --uniform-runtime-config runtime.json --validate-only
 ```
 
-Replace `YOUR_MODEL_ID` with a model your installed Codex CLI supports, and drop `--validate-only` to start the run. The worker edits the current Git worktree, so start in a clean one. The [first-run guide](https://the-open-engine.github.io/zeroshot/current/getting-started/first-run/) covers other harnesses.
+Replace `YOUR_MODEL_ID` with a model your installed Codex CLI supports, and drop `--validate-only` to start the run. The worker edits the current Git worktree, so start in a clean one. The [first-run guide](https://zeroshot.sh/docs/current/getting-started/first-run/) covers other harnesses.
 
 The installer needs Node.js 18+ and installs a verified native binary plus a Zeroshot skill for Codex, Claude Code, and GitHub Copilot. Local runs reuse the harness's existing login.
 
 ## Docs
 
-- [Install](https://the-open-engine.github.io/zeroshot/current/getting-started/install/): prerequisites and harness setup
-- [First run](https://the-open-engine.github.io/zeroshot/current/getting-started/first-run/): input, runtime config, and inspecting a run
-- [Execution](https://the-open-engine.github.io/zeroshot/current/concepts/execution/): built-in graphs and delivery behavior
-- [Runtimes and connections](https://the-open-engine.github.io/zeroshot/current/concepts/runtimes-and-connections/): supported harness and provider pairs
-- [Graph contract](https://the-open-engine.github.io/zeroshot/current/reference/cluster/graph/): authoring custom graphs
-- [Build a review loop](https://the-open-engine.github.io/zeroshot/current/guides/review-loop/): a worked custom graph and runtime plan
-- [RuntimePlan reference](https://the-open-engine.github.io/zeroshot/current/reference/runtime-plan/): every runtime binding field and admission limit
-- [Observe and control runs](https://the-open-engine.github.io/zeroshot/current/guides/observe-and-control/): status, logs, resume
-- [CLI reference](https://the-open-engine.github.io/zeroshot/current/zeroshot-cli/)
+- [Install](https://zeroshot.sh/docs/current/getting-started/install/): prerequisites and harness setup
+- [First run](https://zeroshot.sh/docs/current/getting-started/first-run/): input, runtime config, and inspecting a run
+- [Execution](https://zeroshot.sh/docs/current/concepts/execution/): built-in graphs and delivery behavior
+- [Runtimes and connections](https://zeroshot.sh/docs/current/concepts/runtimes-and-connections/): supported harness and provider pairs
+- [Graph contract](https://zeroshot.sh/docs/current/reference/cluster/graph/): authoring custom graphs
+- [Build a review loop](https://zeroshot.sh/docs/current/guides/review-loop/): a worked custom graph and runtime plan
+- [RuntimePlan reference](https://zeroshot.sh/docs/current/reference/runtime-plan/): every runtime binding field and admission limit
+- [Observe and control runs](https://zeroshot.sh/docs/current/guides/observe-and-control/): status, logs, resume
+- [CLI reference](https://zeroshot.sh/docs/current/zeroshot-cli/)
 - [Zeroshot Cloud docs](https://cloud.zeroshot.sh/docs): organizations, GitHub App, connections, profiles, and issue-triggered runs
 
 ## Optional
 
-- [Prepare a runtime environment](https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/)
-- [ACP agent preview](https://the-open-engine.github.io/zeroshot/current/guides/acp/)
-- [Python SDK](https://the-open-engine.github.io/zeroshot/current/guides/python-sdk/)
+- [Prepare a runtime environment](https://zeroshot.sh/docs/current/guides/runtime-environments/)
+- [ACP agent preview](https://zeroshot.sh/docs/current/guides/acp/)
+- [Python SDK](https://zeroshot.sh/docs/current/guides/python-sdk/)
 - [Source](https://github.com/the-open-engine/zeroshot)
 - [Discord community](https://theopenengine.com/discord)
 - [GitHub Discussions](https://github.com/the-open-engine/zeroshot/discussions)
