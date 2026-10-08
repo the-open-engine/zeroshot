@@ -41,7 +41,7 @@ Code, Codex or Copilot. It runs one of them as the worker and as the reviewers.
 Use the built-in graph or bring your own topology. Add reviewers, tests, and repair loops, then save
 the setup as a profile for the next task.
 
-The product site, [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot), has the FAQ and Zeroshot Cloud pricing.
+The product site, [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot), has the FAQ.
 
 **[▶ Video: a single agent vs. Zeroshot](https://x.com/eivindmeyer_cv/status/2106898797771288828)** (scripted)
 
@@ -229,9 +229,8 @@ Keep the first result local, then enable the delivery mode that fits your proces
 PR and ship runs address visible pull request review feedback by default; pass `--no-pr-feedback` to
 ignore it.
 
-Graphs can execute locally, on a self-hosted target, or in Zeroshot Cloud. Each environment needs
-its own tools and authentication setup. Hosted merge plans, which coordinate several dependent jobs,
-are a Zeroshot Cloud feature.
+Graphs can execute locally or on a self-hosted target. Each environment needs its own tools and
+authentication setup.
 
 ### Self-hosted: run the Docker target
 
@@ -251,19 +250,6 @@ The target also serves its profile editor and run viewer at `http://127.0.0.1:80
 
 See the [target image guide](docker/zeroshot-target/README.md) for persistent storage, network
 isolation, builds, and HTTPS.
-
-### Zeroshot Cloud: close the laptop
-
-Use the built-in `cloud` target at `https://api.cloud.zeroshot.sh` for a shared team queue and
-durable run history:
-
-```bash
-zeroshot target login cloud
-```
-
-Open the printed link to sign in with the device code already filled in. Use `--target cloud` when
-submitting runs. The [Zeroshot Cloud docs](https://cloud.zeroshot.sh/docs) cover organizations, the
-GitHub App, saved connections and profiles, and starting runs from issues.
 
 A failed run with a recoverable workspace can be
 [restarted or resumed](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run).
@@ -289,7 +275,6 @@ See [Execution](docs/concepts/execution.md) for the research workflow's decision
 ## Reference
 
 - [Versioned documentation](https://the-open-engine.github.io/zeroshot/)
-- [Zeroshot Cloud documentation](https://cloud.zeroshot.sh/docs)
 - [Get started](docs/getting-started/first-run.md)
 - [CLI reference](docs/zeroshot-cli.md)
 - [Target image guide](docker/zeroshot-target/README.md)
