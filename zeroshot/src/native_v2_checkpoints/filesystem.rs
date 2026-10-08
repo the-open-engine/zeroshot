@@ -237,7 +237,10 @@ fn prepare_disposable_directory(path: &Path) -> io::Result<()> {
 
 #[cfg(windows)]
 fn prepare_disposable_directory(path: &Path) -> io::Result<()> {
-    platform::private_directory(path)?;
+    // Staging children may have the Administrators owner when created by an elevated process.
+    // Opening the entry rejects reparse points without requiring its owner to be the user or
+    // changing the inherited ACL of a copied workspace directory.
+    drop(platform::open_directory(path)?);
     let mut permissions = fs::symlink_metadata(path)?.permissions();
     #[expect(
         clippy::permissions_set_readonly_false,

@@ -114,6 +114,25 @@ fn staging_directory_is_private_at_creation_and_removed_with_its_contents() {
     assert!(!path.exists());
 }
 
+#[cfg(windows)]
+#[test]
+fn disposable_tree_removes_readonly_ordinary_nested_directories() {
+    let root = tempfile::tempdir().assert_value();
+    let stage = super::private_stage(root.path(), ".test-").assert_value();
+    let nested = stage.path().join("nested");
+    fs::create_dir(&nested).assert_value();
+    let file = nested.join("file");
+    fs::write(&file, "unfinished capture").assert_value();
+    for entry in [&file, &nested] {
+        let mut permissions = fs::metadata(entry).assert_value().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(entry, permissions).assert_value();
+    }
+
+    super::remove_disposable_tree(stage.path()).assert_value_with("remove ordinary nested tree");
+    assert!(!stage.path().exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn disposable_tree_cleanup_does_not_follow_workspace_symlinks() {
