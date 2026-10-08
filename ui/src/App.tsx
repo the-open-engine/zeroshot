@@ -11,7 +11,7 @@ import {
   wrapParallelActivities,
 } from './workflow-authoring';
 import type { WorkflowEdge } from './workflow-projection';
-import { type Bootstrap, type Summary } from './api';
+import { errorField, type Bootstrap, type Summary } from './api';
 import type { WorkspaceServices } from './workspace-services';
 import { createHostedProfile, useHostWorkspace } from './use-host-workspace';
 import { workspaceStorageKeys } from './workspace-storage';
@@ -106,6 +106,7 @@ function useAppState({ services, bootstrap, host }: AppProps) {
   const [validation, setValidation] = useState<{
       state: 'checking' | 'valid' | 'invalid';
       message?: string;
+      field?: string;
     }>({ state: 'checking' }),
     [issues, setIssues] = useState(false);
   const [modal, setModal] = useState<
@@ -401,7 +402,8 @@ function useProfileEffects(
           if (!controller.signal.aborted) setValidation({ state: 'valid' });
         })
         .catch((e) => {
-          if (!controller.signal.aborted) setValidation({ state: 'invalid', message: message(e) });
+          if (!controller.signal.aborted)
+            setValidation({ state: 'invalid', message: message(e), field: errorField(e) });
         });
     }, 450);
     return () => {

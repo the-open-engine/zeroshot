@@ -9,6 +9,7 @@ export function ModelPicker({
   onChange,
   openRuntime,
   compact = false,
+  invalid,
 }: {
   label: string;
   value: string;
@@ -17,6 +18,7 @@ export function ModelPicker({
   onChange: (value: string) => void;
   openRuntime?: () => void;
   compact?: boolean;
+  invalid?: boolean;
 }) {
   const id = useId(),
     options = suggestedModels(harness, provider),
@@ -32,6 +34,7 @@ export function ModelPicker({
           id={id}
           value={value}
           placeholder="Model ID"
+          aria-invalid={invalid || undefined}
           aria-describedby={showRuntimeHint ? `${id}-runtime-hint` : undefined}
           onChange={(e) => onChange(e.target.value)}
         />

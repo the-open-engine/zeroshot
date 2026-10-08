@@ -177,6 +177,11 @@ select:hover:not(:disabled),
 textarea:hover:not(:disabled) {
   border-color: var(--border-hover);
 }
+:is(input, select, textarea)[aria-invalid='true'],
+:is(input, select, textarea)[aria-invalid='true']:hover {
+  border-color: var(--error-text);
+  background: var(--error-surface);
+}
 input::placeholder,
 textarea::placeholder {
   color: var(--muted);

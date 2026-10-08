@@ -140,6 +140,7 @@ function AppDialogs({ model }: { model: AppModel }) {
     setModal,
     openJson,
     adopt,
+    validation,
     name,
     setName,
     template,
@@ -191,6 +192,7 @@ function AppDialogs({ model }: { model: AppModel }) {
             <RuntimeEditor
               document={doc}
               schema={bootstrap?.runtimeSchema}
+              invalidField={validation.state === 'invalid' ? validation.field : undefined}
               edit={apply}
               openJson={() => openJson('runtime')}
             />
@@ -818,6 +820,11 @@ function ProfileWorkspace({ model }: { model: AppModel }) {
             <div className="validation-detail" role="alert">
               <AlertCircle size={17} />
               <span>{validation.message}</span>
+              {validation.field?.startsWith('runtime') && (
+                <button className="text-button" onClick={() => setModal('runtime')}>
+                  Open runtime settings
+                </button>
+              )}
               <button
                 className="icon-button"
                 aria-label="Dismiss validation details"

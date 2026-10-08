@@ -20,6 +20,7 @@ use crate::native_v2_cli::{
     profile_revision, LocalRunProfileStore, NativeV2CliError, ProfileSaveConflict,
 };
 
+mod decode_error;
 mod run_history_transport;
 mod runs;
 mod server;
@@ -188,7 +189,7 @@ async fn save(
     match result {
         Ok(result) => envelope(result.profile),
         Err(ProfileSaveConflict::Workspace) => Err(workspace_changed()),
-        Err(ProfileSaveConflict::Revision) => Err(ApiError { status: StatusCode::CONFLICT, code:"profile_conflict", message:"This profile changed elsewhere, or the name is already taken. Reload it or save a copy with another name.".into() }),
+        Err(ProfileSaveConflict::Revision) => Err(ApiError { status: StatusCode::CONFLICT, code:"profile_conflict", message:"This profile changed elsewhere, or the name is already taken. Reload it or save a copy with another name.".into(), field: None }),
     }
 }
 fn workspace_changed() -> ApiError {
@@ -196,6 +197,7 @@ fn workspace_changed() -> ApiError {
         status: StatusCode::CONFLICT,
         code: "workspace_changed",
         message: "This workspace changed. Reload before saving. Your draft is unchanged.".into(),
+        field: None,
     }
 }
 async fn admit(graph: &GraphSpec, runtime: &RuntimePlan) -> Result<(), ApiError> {
@@ -208,8 +210,13 @@ fn decode<T: serde::de::DeserializeOwned>(
 ) -> Result<T, ApiError> {
     let bytes = bytes
         .map_err(|_| ApiError::invalid("The profile exceeds the 2 MiB request limit.".into()))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|e| ApiError::invalid(format!("Invalid profile JSON: {e}")))
+    decode_error::decode(&bytes).map_err(|problem| match problem {
+        Ok(problem) => ApiError {
+            field: Some((problem.field, problem.detail)),
+            ..ApiError::invalid(problem.message)
+        },
+        Err(message) => ApiError::invalid(message),
+    })
 }
 fn envelope(profile: RunProfile) -> Result<Json<Value>, ApiError> {
     let revision = profile_revision(&profile).map_err(|e| ApiError::internal(e.to_string()))?;
@@ -235,6 +242,8 @@ struct ApiError {
     status: StatusCode,
     code: &'static str,
     message: String,
+    /// JSON path of the request field at fault, with the raw decoder text behind the message.
+    field: Option<(String, String)>,
 }
 impl ApiError {
     fn invalid(message: String) -> Self {
@@ -242,6 +251,7 @@ impl ApiError {
             status: StatusCode::UNPROCESSABLE_ENTITY,
             code: "invalid_profile",
             message,
+            field: None,
         }
     }
     fn internal(message: String) -> Self {
@@ -249,6 +259,7 @@ impl ApiError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "profile_store_error",
             message,
+            field: None,
         }
     }
 }
@@ -258,12 +269,21 @@ impl From<workspace::WorkspaceError> for ApiError {
             status: StatusCode::from_u16(error.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
             code: error.code,
             message: error.message,
+            field: None,
         }
     }
 }
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        problem(self.status, self.code, &self.message)
+        let Some((field, detail)) = self.field else {
+            return problem(self.status, self.code, &self.message);
+        };
+        let body = json!({
+            "code":self.code,
+            "message":self.message,
+            "details":{"field":field,"detail":detail},
+        });
+        (self.status, Json(body)).into_response()
     }
 }
 fn problem(status: StatusCode, code: &str, message: &str) -> Response {

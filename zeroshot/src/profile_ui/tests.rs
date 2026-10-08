@@ -123,15 +123,102 @@ async fn direct_authoring_and_validation_handlers_preserve_drafts_and_reject_bad
         json!({"kind":"string"})
     );
 
-    for malformed in ["{", r#"{"graph":null,"runtime":null,"extra":true}"#] {
-        let error = validate(Ok(Bytes::from(malformed.to_owned())))
+    let error = validate(Ok(Bytes::from("{".to_owned())))
+        .await
+        .err()
+        .assert_value();
+    assert_eq!(error.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(error.code, "invalid_profile");
+    assert!(error.message.contains("Invalid profile JSON"));
+    assert!(error.field.is_none());
+
+    let error = validate(Ok(Bytes::from(
+        r#"{"graph":null,"runtime":null,"extra":true}"#.to_owned(),
+    )))
+    .await
+    .err()
+    .assert_value();
+    assert_eq!(error.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(error.code, "invalid_profile");
+    assert_eq!(error.field.assert_value().0, "graph");
+}
+
+#[tokio::test]
+async fn decoding_problems_name_the_field_in_plain_words() {
+    let graph = profile_request()["graph"].clone();
+    let runtime = |harness: &str, provider: &str, size: Value, model: &str| {
+        let mut runtime = json!({
+            "harness":harness, "provider":provider, "size":size,
+            "nodes":{"worker":{"kind":"agent","model":model}}
+        });
+        if size.is_null() {
+            runtime.as_object_mut().assert_value().remove("size");
+        }
+        runtime
+    };
+    let cases = [
+        (
+            runtime("", "", json!("small"), ""),
+            "runtime.harness",
+            "Choose a harness.",
+        ),
+        (
+            runtime("codex", "", json!("small"), "m"),
+            "runtime.provider",
+            "Choose a provider.",
+        ),
+        (
+            runtime("codex", "openai", json!("small"), ""),
+            "runtime.nodes.worker.model",
+            "Choose a model for `worker`.",
+        ),
+        (
+            runtime("codex", "openai", Value::Null, "m"),
+            "runtime.size",
+            "Choose a size.",
+        ),
+        (
+            runtime("codex", "nope", json!("small"), "m"),
+            "runtime.provider",
+            "Provider `nope` is not supported. Expected one of openai, openrouter, gateway, bedrock.",
+        ),
+    ];
+    for (runtime, field, message) in cases {
+        let document = json!({"graph":graph,"runtime":runtime}).to_string();
+        let error = validate(Ok(Bytes::from(document)))
             .await
             .err()
             .assert_value();
-        assert_eq!(error.status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(error.code, "invalid_profile");
-        assert!(error.message.contains("Invalid profile JSON"));
+        let (actual_field, detail) = error.field.clone().assert_value();
+        assert_eq!(
+            (actual_field.as_str(), error.message.as_str()),
+            (field, message)
+        );
+        assert!(!detail.is_empty() && !detail.contains(" at line "));
     }
+}
+
+#[tokio::test]
+async fn field_problems_reach_the_browser_in_details() {
+    let error = ApiError {
+        field: Some(("runtime.harness".into(), "unknown variant ``".into())),
+        ..ApiError::invalid("Choose a harness.".into())
+    };
+    let response = error.into_response();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = axum::body::to_bytes(response.into_body(), MAX_BODY)
+        .await
+        .assert_value();
+    let body: Value = serde_json::from_slice(&body).assert_value();
+    assert_eq!(
+        body,
+        json!({
+            "code":"invalid_profile",
+            "message":"Choose a harness.",
+            "details":{"field":"runtime.harness","detail":"unknown variant ``"},
+        })
+    );
 }
 
 #[tokio::test]
