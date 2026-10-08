@@ -6,6 +6,7 @@ use openengine_cluster_protocol::{
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use serde_path_to_error::Segment;
 
 /// A decoding failure located at a field, with the raw serde text kept for diagnostics.
 pub(super) struct FieldProblem {
@@ -18,30 +19,52 @@ pub(super) struct FieldProblem {
 /// generic "Invalid profile JSON" wording because no field is involved.
 pub(super) fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, Result<FieldProblem, String>> {
     let deserializer = &mut serde_json::Deserializer::from_slice(bytes);
-    let error = match serde_path_to_error::deserialize(deserializer) {
-        Ok(value) => return Ok(value),
+    let error = match serde_path_to_error::deserialize(&mut *deserializer) {
+        Ok(value) => {
+            // Trailing values or text after the document are malformed input, not ignorable.
+            return deserializer
+                .end()
+                .map(|()| value)
+                .map_err(|error| Err(format!("Invalid profile JSON: {error}")));
+        }
         Err(error) => error,
     };
     if !error.inner().is_data() {
         return Err(Err(format!("Invalid profile JSON: {}", error.inner())));
     }
     let document: Value = serde_json::from_slice(bytes).unwrap_or(Value::Null);
-    let path = error.path().to_string();
-    let (field, detail) = (path == "runtime")
+    let path = segments(error.path());
+    let (field, detail) = (path == ["runtime"])
         .then(|| document.get("runtime").and_then(locate_runtime))
         .flatten()
         .unwrap_or_else(|| (path, strip_position(&error.inner().to_string())));
     let value = lookup(&document, &field);
     Err(Ok(FieldProblem {
         message: describe(&field, &detail, value),
-        field,
+        field: field.join("."),
         detail,
     }))
 }
 
+/// Keeps each key whole: node names may contain dots, so a joined path cannot be split again.
+fn segments(path: &serde_path_to_error::Path) -> Vec<String> {
+    path.iter()
+        .filter_map(|segment| match segment {
+            Segment::Seq { index } => Some(index.to_string()),
+            Segment::Map { key } => Some(key.clone()),
+            Segment::Enum { variant } => Some(variant.clone()),
+            Segment::Unknown => None,
+        })
+        .collect()
+}
+
+fn path(parts: &[&str]) -> Vec<String> {
+    parts.iter().map(|part| (*part).to_owned()).collect()
+}
+
 /// `RuntimePlan` is an internally tagged enum, so serde loses the path below `runtime`. Re-check
 /// its parts with the same protocol types, in declaration order, to find the field.
-fn locate_runtime(runtime: &Value) -> Option<(String, String)> {
+fn locate_runtime(runtime: &Value) -> Option<(Vec<String>, String)> {
     let provider = match runtime.get("harness")?.as_str()? {
         "codex" => check::<CodexProvider>(runtime.get("provider")),
         "claude" => check::<ClaudeProvider>(runtime.get("provider")),
@@ -49,19 +72,19 @@ fn locate_runtime(runtime: &Value) -> Option<(String, String)> {
         _ => None,
     };
     if let Some(detail) = provider {
-        return Some(("runtime.provider".into(), detail));
+        return Some((path(&["runtime", "provider"]), detail));
     }
     if let Some(detail) = check::<RunSize>(runtime.get("size")) {
-        return Some(("runtime.size".into(), detail));
+        return Some((path(&["runtime", "size"]), detail));
     }
     for (name, binding) in runtime.get("nodes")?.as_object()? {
         if binding.get("kind").and_then(Value::as_str) == Some("agent") {
             if let Some(detail) = check::<ModelId>(binding.get("model")) {
-                return Some((format!("runtime.nodes.{name}.model"), detail));
+                return Some((path(&["runtime", "nodes", name, "model"]), detail));
             }
         }
         if let Some(detail) = check::<NodeRuntimeBinding>(Some(binding)) {
-            return Some((format!("runtime.nodes.{name}"), detail));
+            return Some((path(&["runtime", "nodes", name]), detail));
         }
     }
     None
@@ -76,11 +99,12 @@ fn check<T: DeserializeOwned>(value: Option<&Value>) -> Option<String> {
         .map(|error| strip_position(&error.to_string()))
 }
 
-fn lookup<'a>(document: &'a Value, path: &str) -> Option<&'a Value> {
-    path.split('.')
+fn lookup<'a>(document: &'a Value, field: &[String]) -> Option<&'a Value> {
+    field
+        .iter()
         .try_fold(document, |value, segment| match value {
             Value::Array(items) => items.get(segment.parse::<usize>().ok()?),
-            _ => value.get(segment),
+            _ => value.get(segment.as_str()),
         })
 }
 
@@ -92,17 +116,16 @@ fn strip_position(message: &str) -> String {
     }
 }
 
-fn describe(field: &str, detail: &str, value: Option<&Value>) -> String {
+fn describe(field: &[String], detail: &str, value: Option<&Value>) -> String {
     let name = label(field);
     if value.and_then(Value::as_str) == Some("") || detail == "missing field" {
         return format!("Choose {} {name}.", article(&name));
     }
     if let Some(rest) = detail.strip_prefix("missing field `") {
         let missing = rest.split('`').next().unwrap_or(rest);
-        return format!(
-            "{} is required.",
-            capitalize(&label(&format!("{field}.{missing}")))
-        );
+        let mut missing_field = field.to_vec();
+        missing_field.push(missing.to_owned());
+        return format!("{} is required.", capitalize(&label(&missing_field)));
     }
     if let Some(rest) = detail.strip_prefix("unknown variant `") {
         let (given, expected) = rest.split_once("`, expected ").unwrap_or((rest, ""));
@@ -124,14 +147,13 @@ fn describe(field: &str, detail: &str, value: Option<&Value>) -> String {
 }
 
 /// `runtime.nodes.work.model` reads as "model for `work`"; other paths use their last segment.
-fn label(field: &str) -> String {
-    let segments: Vec<&str> = field.split('.').filter(|s| !s.is_empty()).collect();
-    let last = segments.last().copied().unwrap_or("profile");
-    match segments.iter().position(|s| *s == "nodes") {
-        Some(index) if index + 2 < segments.len() => {
-            format!("{last} for `{}`", segments[index + 1])
+fn label(field: &[String]) -> String {
+    let last = field.last().map_or("profile", String::as_str);
+    match field.iter().position(|segment| segment == "nodes") {
+        Some(index) if index + 2 < field.len() => {
+            format!("{last} for `{}`", field[index + 1])
         }
-        Some(index) if index + 2 == segments.len() => format!("runtime for `{last}`"),
+        Some(index) if index + 2 == field.len() => format!("runtime for `{last}`"),
         _ => last.replace('_', " "),
     }
 }

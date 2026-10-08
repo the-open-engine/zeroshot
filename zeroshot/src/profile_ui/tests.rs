@@ -183,6 +183,13 @@ async fn decoding_problems_name_the_field_in_plain_words() {
             "Provider `nope` is not supported. Expected one of openai, openrouter, gateway, bedrock.",
         ),
     ];
+    let mut dotted = runtime("codex", "openai", json!("small"), "");
+    dotted["nodes"] = json!({"worker.a":{"kind":"agent","model":""}});
+    let cases = cases.into_iter().chain([(
+        dotted,
+        "runtime.nodes.worker.a.model",
+        "Choose a model for `worker.a`.",
+    )]);
     for (runtime, field, message) in cases {
         let document = json!({"graph":graph,"runtime":runtime}).to_string();
         let error = validate(Ok(Bytes::from(document)))
@@ -196,6 +203,21 @@ async fn decoding_problems_name_the_field_in_plain_words() {
             (field, message)
         );
         assert!(!detail.is_empty() && !detail.contains(" at line "));
+    }
+}
+
+#[tokio::test]
+async fn trailing_content_after_a_valid_profile_is_rejected() {
+    let request = profile_request();
+    let document = json!({"graph":request["graph"],"runtime":request["runtime"]});
+    for trailing in [format!("{document} {{}}"), format!("{document} stray")] {
+        let error = validate(Ok(Bytes::from(trailing)))
+            .await
+            .err()
+            .assert_value();
+        assert_eq!(error.code, "invalid_profile");
+        assert!(error.message.contains("Invalid profile JSON"));
+        assert!(error.field.is_none());
     }
 }
 
