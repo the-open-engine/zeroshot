@@ -1,7 +1,20 @@
 {
   "name": "@the-open-engine-company/zeroshot",
   "version": "0.0.0-development",
-  "description": "Verified prebuilt binary installer for the standalone Zeroshot engine",
+  "description": "Runs coding agents as a graph: one agent implements, independent agents review, failures go to repair, and nothing ships until the checks pass. Works with Codex, Claude Code and Copilot.",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "github-copilot",
+    "coding-agents",
+    "ai-agents",
+    "multi-agent",
+    "agent-orchestration",
+    "code-review",
+    "ai-code-review",
+    "verification",
+    "cli"
+  ],
   "homepage": "https://zeroshot.sh",
   "license": "MIT",
   "repository": {
