@@ -21,6 +21,7 @@ fn assert_research_scouts(iteration_nodes: &[&GraphNode]) {
     assert!(scout.instructions.as_ref().is_some_and(|text| {
         text.as_str().contains("Act only in the assigned role")
             && text.as_str().contains("next iteration number")
+            && text.as_str().contains("Do not use Git commands")
     }));
 }
 
@@ -32,6 +33,9 @@ fn assert_research_planner(iteration_nodes: &[&GraphNode]) {
             && value.as_str().contains("Compare expected progress and information")
             && value.as_str().contains("considered alternatives")
             && value.as_str().contains("parentArtifactId")
+            && value.as_str().contains("one invalid scout does not invalidate")
+            && value.as_str().contains("never infer or fabricate partial outputs")
+            && value.as_str().contains("verified directions in the durable")
     }));
     assert_eq!(
         planner.signals.get(&field_name(VERDICT_FIELD).assert_value()),
@@ -366,4 +370,129 @@ async fn auditor_crash_fails_without_retrying_a_written_audit() {
         decision,
         Decision::Dispatch { occurrence, .. } if occurrence.node.as_str() == "audit_disposition"
     )));
+}
+
+
+fn scout_handoff_history(first: &Reduction, malformed_middle_scout: bool) -> Vec<DurableExecution> {
+    use crate::full_v1_reducer::{DurableExecutionState, HistoryPosition};
+    use openengine_cluster_protocol::{WorkerErrorCode, WorkerOutcome};
+
+    let scouts = first
+        .decisions
+        .iter()
+        .filter_map(|decision| match decision {
+            Decision::Dispatch {
+                node_instance,
+                execution,
+                occurrence,
+                attempt,
+                input,
+                ..
+            } if occurrence.node.as_str() == "research_scout" => {
+                Some((*node_instance, *execution, occurrence, *attempt, input))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(scouts.len(), 3);
+    scouts
+        .into_iter()
+        .enumerate()
+        .map(|(index, (node_instance, execution, occurrence, attempt, input))| {
+            let outcome = if index == 1 && malformed_middle_scout {
+                WorkerOutcome::declared_failure(WorkerErrorCode::Malformed)
+            } else {
+                let proposal = if index == 1 {
+                    "iteration 1 synthesizer: self-reported invalid procedure"
+                } else {
+                    "iteration 1: bounded valid direction"
+                };
+                WorkerOutcome::Verifier {
+                    output: json!({"proposal": proposal}),
+                    signals: Default::default(),
+                    diagnostic: Value::Null,
+                    artifacts: Vec::new(),
+                }
+            };
+            DurableExecution {
+                dispatch_position: HistoryPosition::new(index as u64 * 2).assert_value(),
+                node_instance,
+                execution,
+                occurrence: occurrence.clone(),
+                attempt,
+                input: input.clone(),
+                state: DurableExecutionState::Settled {
+                    position: HistoryPosition::new(index as u64 * 2 + 1).assert_value(),
+                    outcome,
+                },
+            }
+        })
+        .collect()
+}
+
+fn dispatched_planner_input(reduction: &Reduction) -> &Value {
+    reduction
+        .decisions
+        .iter()
+        .find_map(|decision| match decision {
+            Decision::Dispatch { occurrence, input, .. }
+                if occurrence.node.as_str() == "plan_experiment" => Some(input),
+            _ => None,
+        })
+        .assert_value_with("planner dispatch")
+}
+
+#[tokio::test]
+async fn failed_scout_map_preserves_no_partial_proposals_and_dispatches_planner() {
+    let authored = super::auto_research::scout_handoff_probe_graph().assert_value();
+    let input = json!({
+        "task": "research a bounded improvement",
+        "scoutRoles": [
+            {"role": "explorer"},
+            {"role": "synthesizer"},
+            {"role": "challenger"}
+        ],
+        "proposals": []
+    });
+    let verified = verified_research_probe(
+        authored,
+        &input,
+        "Scout handoff routing",
+        "scout-handoff-routing",
+    )
+    .await;
+    let first = reduce(&verified, &input, &[]);
+
+    let semantic = reduce(&verified, &input, &scout_handoff_history(&first, false));
+    let semantic_input = dispatched_planner_input(&semantic);
+    assert_eq!(semantic_input["proposals"].as_array().unwrap().len(), 3);
+    assert!(semantic_input["proposals"][1]
+        .as_str()
+        .unwrap()
+        .contains("self-reported invalid procedure"));
+
+    let mut failed_history = scout_handoff_history(&first, true);
+    let failed = reduce(&verified, &input, &failed_history);
+    let failed_input = dispatched_planner_input(&failed);
+    assert_eq!(failed_input["proposals"], json!([]));
+    assert!(failed.terminal.is_none());
+
+    failed_history.push(settle_audit_dispatch(
+        &failed,
+        7,
+        openengine_cluster_protocol::WorkerOutcome::Verifier {
+            output: Value::Null,
+            signals: std::collections::BTreeMap::from([(
+                field_name(VERDICT_FIELD).assert_value(),
+                enum_label("work").assert_value(),
+            )]),
+            diagnostic: json!({"message": "archived direction independently verified"}),
+            artifacts: Vec::new(),
+        },
+    ));
+    let finished = reduce(&verified, &input, &failed_history);
+    assert!(matches!(
+        finished.terminal,
+        Some(TerminalProjection::Succeeded { output }) if output.is_null()
+    ));
 }

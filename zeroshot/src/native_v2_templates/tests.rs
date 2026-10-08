@@ -411,7 +411,9 @@ fn assert_research_bootstrap(root: &GraphNode) {
                 .as_str()
                 .contains("checkpoint before the unfinished work or audit")
             && value.as_str().contains("exactly one experiment work item")
-            && value.as_str().contains("rejects missing")
+            && value
+                .as_str()
+                .contains("planner excludes invalid scout outputs")
     }));
 }
 

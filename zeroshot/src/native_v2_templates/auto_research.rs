@@ -128,7 +128,8 @@ fn bootstrap() -> Result<GraphNode, BuiltinTemplateError> {
          experiment work item, and empty continuationItems, proposals, reviews, and \
          verdicts arrays. \
              The graph validates role and work-item coverage before \
-         dependent work and rejects missing, duplicate, extra, or failed entries.",
+         dependent work. The planner excludes invalid scout outputs and preserves \
+         independent valid directions without inventing missing map outputs.",
         )?),
         input: research_task_input_type()?,
         output: bootstrap_output_type()?,
@@ -315,7 +316,9 @@ fn scout() -> Result<GraphNode, BuiltinTemplateError> {
              available evidence and the candidate archive. Tag the proposal with the current state.json \
              next iteration number. Do not edit anything. Return one bounded proposal with its question or \
              hypothesis, expected knowledge or artifact change, exact scope, procedure, evidence needed, \
-             risks, falsification condition, and relation to prior attempts. It must fit in one iteration.",
+             risks, falsification condition, and relation to prior attempts. It must fit in one iteration. \
+             Do not use Git commands; inspect files and observable outputs. Disclose any procedure \
+             mistake in the proposal so the planner can exclude unsupported claims.",
         )?),
     }))
 }
@@ -543,11 +546,18 @@ fn planner() -> Result<GraphNode, BuiltinTemplateError> {
         name: node_name("plan_experiment")?,
         worker: worker_ref("builtin.agent.research-planner@1")?,
         instructions: Some(instructions(
-            "Require three fresh scout proposals tagged with the current iteration; if any are \
-             missing, stale, or failed, write no valid selection and signal abort. Read the task, \
-             charter, state, summary, backlog, immutable candidate archive, finalized records, \
-             including the latest audit.json, and current incumbent. Consider refinement of the \
-             incumbent, the strongest live archived branch, and fresh directions when warranted; \
+            "Inspect all available scout proposals and their current-iteration tags. Exclude \
+             missing, stale, failed, or procedurally invalid scouts and disclose each exclusion. \
+             Unless the charter requires a complete handoff, one invalid scout does not invalidate \
+             independent valid directions. A worker error can leave the mapped proposal collection \
+             empty; never infer or fabricate partial outputs. When needed, use only independently \
+             verified directions in the durable backlog, restorable archive, or incumbent. Do not \
+             rely on an excluded scout's claims. Abort if workspace or evidence integrity cannot be \
+             established, no trustworthy basis supports work or stop, or a charter-required complete \
+             handoff is missing. Read the task, charter, state, summary, backlog, \
+             immutable candidate archive, finalized records, including the latest audit.json, \
+             and current incumbent. Consider refinement of the incumbent, the strongest live \
+             archived branch, and fresh directions when warranted; \
              do not force a fixed schema of alternatives. Compare expected progress and information \
              gain against cost, uncertainty, risk, and diminishing returns. When the two most \
              recent audited iterations did not adopt a candidate, explicitly compare a new \
@@ -566,11 +576,12 @@ fn planner() -> Result<GraphNode, BuiltinTemplateError> {
              selected proposal, and reason to use that parent; signal work only after writing a \
              complete selection. For stop, explain why the strongest concrete affordable scout or \
              archived alternative fails charter cost and risk limits; signal stop only after writing \
-             the stop selection. For an incomplete or invalid handoff, signal abort with a diagnostic. \
-             Record the three scouts, other considered alternatives, evidence references, expected \
-             value, costs, and why the selected direction wins now. Include the chosen question, \
-             expected learning or artifact change, falsification condition, protected paths or data, \
-             procedure, observations or sources to collect, comparison or reference checks when \
+             the stop selection. Do not treat missing scouts as proof that work is exhausted. \
+             Record all available scout outputs, missing or excluded slots and reasons, other \
+             considered alternatives, evidence references, expected value, costs, and why the \
+             selected direction wins now. Include the chosen question, expected learning or artifact \
+             change, falsification condition, protected paths or data, procedure, observations \
+             or sources to collect, comparison or reference checks when \
              useful, evaluation rules, resource limits, and disposition conditions. Predeclare \
              evidence collection and evaluation order when observations may be noisy or order-dependent; \
              use charter-defined controls, repetitions, and thresholds rather than choosing them after \
@@ -871,10 +882,11 @@ fn decision_worker(disposition: ResearchDisposition) -> Result<GraphNode, Builti
          findings, including findings from restored artifacts. Describe the finalized disposition \
          in summary.md without asserting the current audit outcome or leaving a pending-audit \
          claim that will become stale. An iteration's audit.json alone determines its audit status. \
-         Keep all scouts and considered alternatives in proposal.json; index actionable unresolved \
-         directions in the backlog with evidence and useful next tests. Preserve \
-         promising branches even when another experiment was chosen. Never attribute a historical finding or \
-         measure to the retained workspace unless hashes or provenance match. Update the retained \
+         Preserve all available scout outputs, mark missing or excluded slots and reasons in \
+         proposal.json, and index actionable unresolved directions in the backlog with evidence and \
+         useful next tests. Preserve promising branches even when another experiment was chosen. \
+         Never attribute a historical finding or measure to the retained workspace unless \
+         hashes or provenance match. Update the retained \
          workspace identity, hashes, invariant status, open violations, and accepted measures only for \
          an adopted result. Advance the next iteration number and remove scratch only after any required \
          restoration is proven. Before returning, resolve every evidence reference newly written \
@@ -1036,10 +1048,13 @@ fn decision_auditor(name: &str) -> Result<GraphNode, BuiltinTemplateError> {
          audit.json files as the sole authority for audit status, and reject summary wording that \
          conflicts with them or would falsely remain pending after this audit is appended. The current \
          records are provisional until audit acceptance; any repair must preserve original \
-         observations, selection, and judge verdicts. Proposal.json preserves the full scout \
-         handoff; backlog indexes actionable unresolved \
-         directions without copying every scout. Check evidence references, parent identity, \
-         disposition, archive IDs, retained workspace hashes, and protected paths. Require no \
+         observations, selection, and judge verdicts. Proposal.json preserves all available \
+         scout outputs and marks missing or excluded slots without inventing partial map output. \
+         Check that the chosen direction rests on a valid current scout or independently verified \
+         durable evidence, never an excluded scout's claims alone. One excluded scout does not \
+         itself require abort unless the charter requires a complete handoff. Backlog indexes \
+         actionable unresolved directions without copying every scout. Check evidence references, \
+         parent identity, disposition, archive IDs, retained workspace hashes, and protected paths. Require no \
          draft or incumbent \
          scratch backup to remain. The manifest's declared candidate files are the restorable \
          archive; generated files recorded outside candidate scope are not required archive bytes. \

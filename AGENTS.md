@@ -353,11 +353,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   one-time read-only topology preflight checks the exact scout, judge, and work-item role arrays
   before the loop. On a fresh run, bootstrap leaves iteration directories absent and records
   no current provisional iteration; the loop creates one only after preflight. Three independent scout reviewers
-  (explorer, synthesizer, challenger) propose bounded directions. One planner reads them,
-  the incumbent, and the durable archive; it selects
-  an experiment and a restorable `parentArtifactId`, or proposes stop when no affordable
-  direction remains. The planner emits `work`, `stop`, or `abort` directly and writes
-  its selection under ignored scratch. It weighs expected progress and information gain against
+  (explorer, synthesizer, challenger) propose bounded directions. One planner reads their
+  available outputs, the incumbent, and the durable archive; it selects an experiment and a
+  restorable `parentArtifactId`, or proposes stop when no affordable direction remains. All
+  three scouts are invoked, but the planner excludes and records invalid, stale, or missing
+  proposals and can use independent valid proposals or verified durable directions unless the
+  charter requires a complete handoff. A map worker error leaves the promoted proposal collection
+  unchanged; the planner never invents partial outputs and aborts if workspace integrity or the
+  basis for a choice cannot be established. The planner emits `work`, `stop`, or `abort` directly
+  and writes its selection under ignored scratch. It weighs expected progress and information gain against
   cost, risk, and diminishing returns without a fixed exploration quota or mandatory alternative
   schema. After two consecutive audited non-adoptions, it explicitly compares a new mechanism,
   a restorable archived branch, and a bounded measurement or discriminating test, explaining
@@ -380,8 +384,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   abort, unanimous adoption, and the remaining record-only
   consensus to separate finalizers. Record-only may archive a viable candidate before restoring
   the incumbent; abort restores it without promoting invalid evidence; adopt retains the reviewed
-  candidate and may archive the displaced incumbent. Finalizers preserve the full scout handoff
-  and considered alternatives in the current proposal record; backlog indexes actionable
+  candidate and may archive the displaced incumbent. Finalizers preserve available scout
+  outputs, missing or excluded slots, and considered alternatives in the current proposal record;
+  backlog indexes actionable
   unresolved leads without duplicating every scout. Before returning, finalizers resolve newly
   written evidence paths and JSON fragments against the ledger after scratch cleanup. Summaries
   describe finalized work without asserting a provisional audit outcome; each iteration's

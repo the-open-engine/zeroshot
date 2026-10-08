@@ -97,3 +97,18 @@ pub(super) fn recorder_audit_probe_graph() -> Result<GraphSpec, BuiltinTemplateE
         "recorder_audit_probe_done",
     )
 }
+
+
+pub(super) fn scout_handoff_probe_graph() -> Result<GraphSpec, BuiltinTemplateError> {
+    let state = record_type(vec![
+        (TASK_FIELD, PayloadType::String, true),
+        (SCOUT_ROLES_FIELD, role_array_type(&SCOUT_ROLE_LABELS)?, true),
+        (PROPOSALS_FIELD, array_type(PayloadType::String), true),
+    ])?;
+    probe_graph(
+        state.clone(),
+        "scout_handoff_probe",
+        vec![scout_stage(state)?, planner()?],
+        "scout_handoff_done",
+    )
+}
