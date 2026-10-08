@@ -16,7 +16,7 @@ path = "src/main.rs"
 
 [features]
 workspace = ["dep:schemars"]
-ui = ["workspace", "dep:axum", "dep:serde_path_to_error", "dep:hyper", "dep:hyper-util", "dep:include_dir"]
+ui = ["workspace", "dep:axum", "dep:hyper", "dep:hyper-util", "dep:include_dir"]
 
 [dependencies]
 agent-client-protocol = { version = "=0.10.4", features = [
@@ -62,7 +62,6 @@ tokio-util = { workspace = true, features = ["compat"] }
 tokio-tungstenite.workspace = true
 url.workspace = true
 uuid.workspace = true
-serde_path_to_error = { version = "0.1", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = [

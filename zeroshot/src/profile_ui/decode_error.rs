@@ -1,12 +1,13 @@
-//! Turns request decoding failures into editor-facing problems: a plain sentence plus the JSON
-//! path of the offending field. Messages come from the protocol types' own serde errors; nothing
-//! here knows which harnesses, providers, or models exist.
+//! Turns runtime-settings decoding failures into editor-facing problems: a plain sentence plus
+//! the JSON path of the offending field. Messages come from the protocol types' own serde errors;
+//! nothing here knows which harnesses, providers, or models exist. Other failures keep the
+//! generic "Invalid profile JSON" message.
 use openengine_cluster_protocol::{
     ClaudeProvider, CodexProvider, CopilotProvider, ModelId, NodeRuntimeBinding, RunSize,
+    RuntimePlan,
 };
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use serde_path_to_error::Segment;
 
 /// A decoding failure located at a field, with the raw serde text kept for diagnostics.
 pub(super) struct FieldProblem {
@@ -17,70 +18,55 @@ pub(super) struct FieldProblem {
 
 /// Why a request body could not be decoded.
 pub(super) enum DecodeError {
-    /// The JSON is well formed but a field has the wrong value or shape.
+    /// A runtime setting has the wrong value or shape.
     Field(FieldProblem),
-    /// The body is not a single well-formed JSON document.
+    /// Anything else, reported with serde's own wording.
     Malformed(String),
 }
 
-/// Decodes `bytes`, reporting data errors at the field that caused them. Syntax errors keep the
-/// generic "Invalid profile JSON" wording because no field is involved.
+/// Decodes `bytes`. When the failure is in the runtime settings, it is reported at that field.
 pub(super) fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, DecodeError> {
-    let deserializer = &mut serde_json::Deserializer::from_slice(bytes);
-    let error = match serde_path_to_error::deserialize(&mut *deserializer) {
-        Ok(value) => {
-            // Trailing values or text after the document are malformed input, not ignorable.
-            return deserializer
-                .end()
-                .map(|()| value)
-                .map_err(|error| DecodeError::Malformed(format!("Invalid profile JSON: {error}")));
-        }
+    let error = match serde_json::from_slice(bytes) {
+        Ok(value) => return Ok(value),
         Err(error) => error,
     };
-    if !error.inner().is_data() {
-        return Err(DecodeError::Malformed(format!(
-            "Invalid profile JSON: {}",
-            error.inner()
-        )));
-    }
-    let document: Value = serde_json::from_slice(bytes).unwrap_or(Value::Null);
-    let path = segments(error.path());
-    let (field, detail) = (path == ["runtime"])
-        .then(|| document.get("runtime").and_then(locate_runtime))
+    let located = error
+        .is_data()
+        .then(|| serde_json::from_slice::<Value>(bytes).ok())
         .flatten()
-        .unwrap_or_else(|| (path, strip_position(&error.inner().to_string())));
-    let value = lookup(&document, &field);
-    Err(DecodeError::Field(FieldProblem {
-        message: describe(&field, &detail, value),
-        field: field.join("."),
-        detail,
-    }))
+        .and_then(|document| {
+            let (field, detail) = locate_runtime(document.get("runtime")?)?;
+            let message = describe(&field, &detail, lookup(&document, &field));
+            Some(FieldProblem {
+                field: field.join("."),
+                message,
+                detail,
+            })
+        });
+    Err(located.map_or_else(
+        || DecodeError::Malformed(format!("Invalid profile JSON: {error}")),
+        DecodeError::Field,
+    ))
 }
 
-/// Keeps each key whole: node names may contain dots, so a joined path cannot be split again.
-fn segments(path: &serde_path_to_error::Path) -> Vec<String> {
-    path.iter()
-        .filter_map(|segment| match segment {
-            Segment::Seq { index } => Some(index.to_string()),
-            Segment::Map { key } => Some(key.clone()),
-            Segment::Enum { variant } => Some(variant.clone()),
-            Segment::Unknown => None,
-        })
-        .collect()
-}
-
+/// Field paths stay as whole segments: node names may contain dots.
 fn path(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|part| (*part).to_owned()).collect()
 }
 
-/// `RuntimePlan` is an internally tagged enum, so serde loses the path below `runtime`. Re-check
-/// its parts with the same protocol types, in declaration order, to find the field.
+/// serde reports errors without a path, so re-check the runtime's parts with the same protocol
+/// types, in declaration order, to find the field.
 fn locate_runtime(runtime: &Value) -> Option<(Vec<String>, String)> {
-    let provider = match runtime.get("harness")?.as_str()? {
-        "codex" => check::<CodexProvider>(runtime.get("provider")),
-        "claude" => check::<ClaudeProvider>(runtime.get("provider")),
-        "copilot" => check::<CopilotProvider>(runtime.get("provider")),
-        _ => None,
+    runtime.as_object()?;
+    let provider = match runtime.get("harness").and_then(Value::as_str) {
+        Some("codex") => check::<CodexProvider>(runtime.get("provider")),
+        Some("claude") => check::<ClaudeProvider>(runtime.get("provider")),
+        Some("copilot") => check::<CopilotProvider>(runtime.get("provider")),
+        // An unknown or missing harness: let the runtime type itself say what it expects.
+        _ => {
+            let detail = check::<RuntimePlan>(Some(runtime))?;
+            return Some((path(&["runtime", "harness"]), detail));
+        }
     };
     if let Some(detail) = provider {
         return Some((path(&["runtime", "provider"]), detail));

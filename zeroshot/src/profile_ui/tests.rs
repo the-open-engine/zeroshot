@@ -140,7 +140,8 @@ async fn direct_authoring_and_validation_handlers_preserve_drafts_and_reject_bad
     .assert_value();
     assert_eq!(error.status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(error.code, "invalid_profile");
-    assert_eq!(error.field.assert_value().0, "graph");
+    assert!(error.message.contains("Invalid profile JSON"));
+    assert!(error.field.is_none());
 }
 
 #[tokio::test]
