@@ -471,9 +471,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `execution::platform`; local controller transport selects Unix sockets or private Windows named
   pipes behind one NDJSON protocol. Windows state uses protected current-user/SYSTEM ACLs, rejects
   reparse points, and pins volume/file identity. Provider and delivery descendants belong to
-  kill-on-close Job Objects before their first instruction. Detached controllers inherit no caller
-  handles and resume only after proving they escaped every caller Job; restrictive Job policies
-  reject controller startup. Windows config defaults to
+  kill-on-close Job Objects before their first instruction. Detached controllers run on a new
+  windowless console shared by their console descendants, ignore Ctrl-C/Ctrl-Break delivered to it,
+  inherit no caller handles, and resume only after proving they escaped every caller Job;
+  restrictive Job policies reject controller startup. Windows config defaults to
   `%LOCALAPPDATA%/zeroshot` and state to its `state` directory. Hosted target isolation remains Linux-only.
 - The experimental local ACP endpoint owns one workspace lease and reusable runner for the outer
   ACP session. Each prompt remains a separate admitted run with its own controller lock, durable

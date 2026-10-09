@@ -95,6 +95,10 @@ pub(crate) fn open_directory(path: &Path) -> io::Result<File> {
 
 pub(crate) type ControllerChild = tokio::process::Child;
 
+pub(crate) fn guard_controller_console() -> io::Result<()> {
+    Ok(())
+}
+
 pub(crate) fn spawn_controller(
     command: &mut tokio::process::Command,
 ) -> io::Result<ControllerChild> {

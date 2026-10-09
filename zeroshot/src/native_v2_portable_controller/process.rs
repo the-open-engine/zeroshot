@@ -127,6 +127,13 @@ pub async fn wait_ready(
     .map_err(|_| PortableControllerError::Readiness)
 }
 
+/// Prepares the private controller process before any controller work. On Windows the
+/// controller's console interrupts are ignored; startup fails rather than running unguarded.
+pub fn guard_controller_process() -> Result<(), PortableControllerError> {
+    crate::execution::platform::guard_controller_console()
+        .map_err(PortableControllerError::ConsoleGuard)
+}
+
 /// Runs the private one-run controller child used by the shipped executable's re-exec path.
 /// The bootstrap is consumed before any durable controller effect and is never retained.
 pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), PortableControllerError> {

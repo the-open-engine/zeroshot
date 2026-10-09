@@ -28,7 +28,7 @@ pub use lease::{ControllerLease, ControllerLeaseError};
 pub use process::{load_bootstrap_file, read_ready, wait_ready, write_bootstrap_file};
 pub use process::{
     PortableControllerServer, PortableControllerTransport, connect_transport,
-    run_controller_process,
+    guard_controller_process, run_controller_process,
 };
 
 #[cfg(test)]
@@ -165,6 +165,8 @@ pub enum PortableControllerError {
     DurableIdentity,
     #[error("portable runtime could not be constructed")]
     RuntimeUnavailable,
+    #[error("portable controller could not install its console control guard")]
+    ConsoleGuard(#[source] io::Error),
     #[error(transparent)]
     Admission(#[from] crate::native_v2_admission::NativeV2AdmissionError),
     #[error(transparent)]

@@ -1,12 +1,14 @@
-//! Detached controller creation with no inherited handles, including extra pipeline handles
-//! that PowerShell may pass in addition to the child's standard input/output/error.
+//! Detached controller creation on a new windowless console with no inherited handles, including
+//! extra pipeline handles that PowerShell may pass in addition to the child's standard streams.
 use std::ffi::OsStr;
 use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::time::Duration;
 
+use windows_sys::core::BOOL;
 use windows_sys::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler};
 use windows_sys::Win32::System::JobObjects::IsProcessInJob;
 use windows_sys::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, PROCESS_INFORMATION,
@@ -43,6 +45,17 @@ impl ControllerChild {
         .await
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "controller exit timed out"))?
     }
+}
+
+/// Keeps console interrupts from terminating the controller. `SetConsoleCtrlHandler(None, TRUE)`
+/// ignores only Ctrl-C, so Ctrl-Break needs a handler routine; registration is not inherited by
+/// children. Close, logoff, and shutdown events keep their default handling.
+pub(crate) fn guard_controller_console() -> io::Result<()> {
+    check(unsafe { SetConsoleCtrlHandler(Some(ignore_console_interrupt), 1) })
+}
+
+unsafe extern "system" fn ignore_console_interrupt(event: u32) -> BOOL {
+    BOOL::from(matches!(event, CTRL_C_EVENT | CTRL_BREAK_EVENT))
 }
 
 /// The caller supplies the complete environment (its Command uses env_clear). This private
@@ -129,7 +142,11 @@ fn detachment_denied() -> io::Error {
     )
 }
 
-// Leave caller-owned Jobs only through their permitted breakaway policy.
+// A parent without a console makes every console child open its own visible console, so the
+// controller gets a new windowless console that its console descendants share. Being a new console
+// keeps the invoking terminal's Ctrl-C and close events out; controller mode guards against
+// Ctrl-Break sent to the hidden console. Leave caller-owned Jobs only through their permitted
+// breakaway policy.
 fn detached_creation_flags() -> io::Result<u32> {
     use windows_sys::Win32::System::JobObjects::{
         QueryInformationJobObject, JobObjectExtendedLimitInformation,
@@ -137,9 +154,10 @@ fn detached_creation_flags() -> io::Result<u32> {
         JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
     };
     use windows_sys::Win32::System::Threading::{
-        GetCurrentProcess, CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS,
+        GetCurrentProcess, CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW,
     };
-    let mut flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+    // Windows ignores CREATE_NO_WINDOW when it is combined with a detached or new-console flag.
+    let mut flags = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP;
     if in_job(unsafe { GetCurrentProcess() })? {
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         check(unsafe {
