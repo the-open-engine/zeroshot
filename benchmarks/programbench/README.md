@@ -445,7 +445,7 @@ prompt alone, against a session told to build and check.
 | parqeye (Rust) | $0.42 | 59.2% (56.8 to 62.3) | 55.8% (53.9 to 57.8) | Session, intervals overlap | 189% |
 | igrep (Rust) | $0.12 | 72.6% (69.7 to 75.5) | 68.6% (60.5 to 74.3) | Session, intervals overlap | 391% |
 
-![Zeroshot's loop outperforms one session prompted with both roles at equal cost in 70% of 20 sampled ProgramBench tasks: GPT-5.6 Luna's loop at the sessions' mean cost against single GPT-5.6 Luna sessions prompted to build and check, means of 5 runs with 95% bootstrap intervals](figures/prompt-study-equal-cost.png)
+![Zeroshot's loop outperforms one session prompted with both roles at equal cost in 14 of 20 sampled ProgramBench tasks: GPT-5.6 Luna's loop at the sessions' mean cost against single GPT-5.6 Luna sessions prompted to build and check, means of 5 runs with 95% bootstrap intervals](figures/prompt-study-equal-cost.png)
 
 ![The loop reaches the score of one session prompted with both roles for 140% of its cost (median of 20 sampled ProgramBench tasks): per task, the loop's cost to reach the sessions' mean score as a share of their mean cost](figures/prompt-study-equal-score.png)
 

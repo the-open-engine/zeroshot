@@ -27,7 +27,7 @@ import plot_parity
 from plot_pass_rate import CANVAS, INK, INK_2, MUTED, RUST, load_fonts
 
 LEGEND = ("GPT-5.6 Luna (xhigh), one prompted session", "GPT-5.6 Luna (xhigh), loop at the same cost")
-TITLE = "Zeroshot's loop outperforms one session\nprompted with both roles at equal cost\nin {share}% of {n} sampled ProgramBench tasks"
+TITLE = "Zeroshot's loop outperforms one session\nprompted with both roles at equal cost\nin {count} of {n} sampled ProgramBench tasks"
 
 
 def task_of(o: dict) -> str:
