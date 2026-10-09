@@ -32,8 +32,14 @@ TASKS = [("svgbob", "Rust: ASCII diagrams to SVG"), ("ditaa", "Java: ASCII diagr
          ("ascii-image-converter", "Go: images to ASCII art"), ("xz", "C: XZ compression tools"), ("samtools", "C: sequencing alignment tools")]
 
 
-def main(paths: list[Path], out_dir: Path | None = None, order: str = "lead") -> Path:
-    prices = "promotional"  # Sol's prices, which set each task's budget
+LEGEND = ("GPT-5.6 Sol (xhigh), single worker", "GPT-5.6 Luna (xhigh), loop at the same model cost")
+TITLE = "A small model with a review loop outperforms\na single-shot large model at cost parity\nin {share}% of {n} sampled ProgramBench tasks"
+
+
+def main(paths: list[Path], out_dir: Path | None = None, order: str = "lead", legend: tuple[str, str] = LEGEND, title: str = TITLE,
+         name: str = "cost-parity.png") -> Path:
+    """``legend`` names the single-worker and loop arms; ``title`` gets the loop's share of leads and the task count."""
+    prices = "promotional"  # the single workers' prices, which set each task's budget
     data = {}
     for p in paths:
         o = json.loads(p.read_text())
@@ -72,14 +78,14 @@ def main(paths: list[Path], out_dir: Path | None = None, order: str = "lead") ->
     ax.set_axisbelow(True)
     for label in ax.get_xticklabels():
         label.set_fontproperties(font_manager.FontProperties(family="DejaVu Sans Mono", size=9))
-    handles = [Line2D([], [], color=INK, marker="o", lw=2.4, ms=7, mec=CANVAS, label="GPT-5.6 Sol (xhigh), single worker"),
-               Line2D([], [], color=RUST, marker="D", lw=2.4, ms=6.5, mec=CANVAS, label="GPT-5.6 Luna (xhigh), loop at the same model cost")]
+    handles = [Line2D([], [], color=INK, marker="o", lw=2.4, ms=7, mec=CANVAS, label=legend[0]),
+               Line2D([], [], color=RUST, marker="D", lw=2.4, ms=6.5, mec=CANVAS, label=legend[1])]
     ax.legend(handles=handles, loc="lower left", frameon=False, fontsize=9.3, bbox_to_anchor=(0.0, 1.0), ncol=2, handlelength=2.2, columnspacing=1.6)
     share = round(100 * sum(data[t]["comparisons"][prices]["luna_mean"] > data[t]["comparisons"][prices]["sol_mean"] for t, _ in tasks) / len(tasks))
-    ax.set_title(f"A small model with a review loop outperforms\na single-shot large model at cost parity\nin {share}% of {len(tasks)} sampled ProgramBench tasks", loc="left", fontfamily=["Fraunces", "DejaVu Serif"],
+    ax.set_title(title.format(share=share, n=len(tasks)), loc="left", fontfamily=["Fraunces", "DejaVu Serif"],
                  fontweight="semibold", fontsize=16, color=INK, pad=30, linespacing=1.15)
     fig.tight_layout()
-    out = (out_dir or Path(__file__).resolve().parent.parent / "figures") / "cost-parity.png"
+    out = (out_dir or Path(__file__).resolve().parent.parent / "figures") / name
     fig.savefig(out)
     return out
 

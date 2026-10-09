@@ -404,6 +404,62 @@ single workers. P is the sessions' mean model cost at Luna's prices.
 
 As before, every task is reported and there is no pooled test.
 
+#### Result on 20 tasks (2026-10-09)
+
+Asked to take both roles in one session, Luna does not loop. All 100 sessions ended on their own,
+with the model's final answer, after 4 to 20 minutes (median 9); none came near the 6-hour limit.
+They cost $0.08 to $0.78 each, $0.27 on average and $26.97 in all: about as much as one build of the
+loop. At the sessions' mean cost the loop has therefore done exactly one build in 98 of the 99
+compared runs (in 47 of 100 that build alone costs more, and the rule then still takes build 1), so
+the equal-cost comparison is in effect the loop's first build, whose instructions are the builder's
+prompt alone, against a session told to build and check.
+
+- Equal cost: the loop has the higher mean on 14 of the 20 tasks (70%), robustly only on dust; the
+  sessions on 6 (revive, calcurse, samtools, crowbook, parqeye and igrep), never robustly. As
+  pre-registered, there is no pooled test.
+- Equal score: the loop reaches the sessions' mean score for 90% to 391% of their mean cost (median
+  140%). On the 14 tasks where it leads at equal cost it gets there the moment the last of its five
+  runs finishes build 1, since a run without a build counts as 0; at budgets this small the measure
+  mostly reflects what the dearest first build cost. On the other 6 it needs 3 to 5 rounds.
+
+| Task | Sessions' cost | Sessions | Loop at that cost | Verdict | Loop's cost to reach the sessions' score |
+|---|---|---|---|---|---|
+| keifu (Rust) | $0.22 | 56.2% (37.3 to 75.0) | 69.6% (61.1 to 75.0) | Loop, intervals overlap | 117% |
+| datasurgeon (Rust) | $0.17 | 48.0% (45.8 to 50.2) | 55.4% (46.5 to 64.3) | Loop, intervals overlap | 121% |
+| ascii-image-converter (Go) | $0.40 | 57.6% (54.2 to 61.0) | 64.3% (59.0 to 69.8) | Loop, intervals overlap | 127% |
+| direnv (Go) | $0.37 | 52.6% (49.4 to 55.7) | 58.0% (48.2 to 67.3) | Loop, intervals overlap | 90% |
+| fasttext (C++) | $0.17 | 57.9% (53.7 to 62.1) | 63.2% (58.8 to 67.6) | Loop, intervals overlap | 124% |
+| marmite (Rust) | $0.20 | 44.8% (39.6 to 49.5) | 49.0% (45.1 to 53.8) | Loop, intervals overlap | 210% |
+| dust (Rust) | $0.37 | 62.1% (58.9 to 64.2) | 66.3% (65.3 to 66.9) | Loop, robustly | 161% |
+| svgbob (Rust) | $0.34 | 43.4% (39.5 to 47.4) | 45.7% (43.3 to 49.3) | Loop, intervals overlap | 137% |
+| ditaa (Java) | $0.29 | 26.0% (23.7 to 28.3) | 27.9% (24.5 to 31.3) | Loop, intervals overlap | 114% |
+| gittype (Rust) | $0.13 | 57.1% (52.8 to 61.5) | 58.5% (53.3 to 64.6) | Loop, intervals overlap | 136% |
+| tree-sitter (Rust) | $0.17 | 29.5% (25.6 to 34.6) | 30.8% (26.6 to 35.6) | Loop, intervals overlap | 138% |
+| xz (C) | $0.30 | 35.7% (30.9 to 40.6) | 37.0% (32.8 to 39.9) | Loop, intervals overlap | 90% |
+| gdu (Go) | $0.23 | 71.5% (69.2 to 73.7) | 72.5% (70.0 to 74.0) | Loop, intervals overlap | 143% |
+| dstask (Go) | $0.16 | 56.2% (49.7 to 62.6) | 56.8% (51.0 to 62.6) | Loop, intervals overlap | 166% |
+| revive (Go) | $0.25 | 44.6% (39.2 to 49.9) | 44.1% (40.3 to 47.8) | Session, intervals overlap | 166% |
+| calcurse (C) | $0.51 | 62.1% (57.2 to 66.2) | 60.6% (57.6 to 64.3) | Session, intervals overlap | 151% |
+| samtools (C) | $0.27 | 24.3% (17.1 to 30.0) | 21.7% (15.1 to 28.3) | Session, intervals overlap | 292% |
+| crowbook (Rust) | $0.30 | 48.1% (45.5 to 51.7) | 45.2% (41.4 to 49.0) | Session, intervals overlap | 304% |
+| parqeye (Rust) | $0.42 | 59.2% (56.8 to 62.3) | 55.8% (53.9 to 57.8) | Session, intervals overlap | 189% |
+| igrep (Rust) | $0.12 | 72.6% (69.7 to 75.5) | 68.6% (60.5 to 74.3) | Session, intervals overlap | 391% |
+
+![Zeroshot's loop outperforms one session prompted with both roles at equal cost in 70% of 20 sampled ProgramBench tasks: GPT-5.6 Luna's loop at the sessions' mean cost against single GPT-5.6 Luna sessions prompted to build and check, means of 5 runs with 95% bootstrap intervals](figures/prompt-study-equal-cost.png)
+
+![The loop reaches the score of one session prompted with both roles for 140% of its cost (median of 20 sampled ProgramBench tasks): per task, the loop's cost to reach the sessions' mean score as a share of their mean cost](figures/prompt-study-equal-score.png)
+
+- Every session entered the comparisons. direnv's loop run 02 is left out of the equal-cost
+  comparison: its build 1 was scored on 850 tests instead of 849 (an extra entry,
+  `test_subcommand_dispatch`, for a test module that did not load in that evaluation).
+- The loop's advantage comes from its later rounds. At Sol's budgets, 9 to 36 times the sessions'
+  cost (median 16), the same loops average 69.5% over the 20 tasks, against 50.5% for the sessions
+  and 65.6% for Sol's single workers, and they are ahead of the sessions on every task.
+- The study's model cost was $26.97.
+
+Per-task results: `figures/prompt-study/<loop>.json` (from `bench parity`) and `<loop>.match.json`
+(from `bench match`); figures: `scripts/plot_prompt_study.py figures/prompt-study/*.json`.
+
 ## The graph and prompts
 
 Both arms share one byte-identical `build` node; round 1 of the loop is exactly the single arm.
