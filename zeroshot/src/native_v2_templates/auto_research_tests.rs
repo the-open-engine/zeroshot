@@ -20,7 +20,7 @@ fn assert_research_scouts(iteration_nodes: &[&GraphNode]) {
     );
     assert!(scout.instructions.as_ref().is_some_and(|text| {
         text.as_str().contains("Act only in the assigned role")
-            && text.as_str().contains("next iteration number")
+            && text.as_str().contains("nextIterationNumber")
             && text.as_str().contains("Do not use Git commands")
     }));
 }
@@ -30,12 +30,15 @@ fn assert_research_planner(iteration_nodes: &[&GraphNode]) {
     assert_eq!(planner.worker.as_str(), "builtin.agent.research-planner@1");
     assert!(planner.instructions.as_ref().is_some_and(|value| {
         value.as_str().contains("retained workspace violates a charter invariant")
-            && value.as_str().contains("Compare expected progress and information")
+            && value.as_str().contains("expected progress or information value")
             && value.as_str().contains("considered alternatives")
             && value.as_str().contains("parentArtifactId")
             && value.as_str().contains("one invalid scout does not invalidate")
             && value.as_str().contains("never infer or fabricate partial outputs")
             && value.as_str().contains("verified directions in the durable")
+            && value.as_str().contains("Tie every adoption veto")
+            && value.as_str().contains("continuing with the strongest concrete viable")
+            && value.as_str().contains("nextIterationNumber")
     }));
     assert_eq!(
         planner.signals.get(&field_name(VERDICT_FIELD).assert_value()),

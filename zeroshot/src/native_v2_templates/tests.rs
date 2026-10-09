@@ -422,7 +422,7 @@ fn assert_research_bootstrap(root: &GraphNode) {
             && value.as_str().contains("exactly one experiment work item")
             && value
                 .as_str()
-                .contains("planner excludes invalid scout outputs")
+                .contains("with schema version 1, nextIterationNumber")
     }));
 }
 
@@ -516,7 +516,7 @@ fn assert_topology_preflight(nodes: &[&GraphNode]) {
             && value.as_str().contains("gates the iteration loop")
             && value
                 .as_str()
-                .contains("Reject any prior iteration without audit.json")
+                .contains("Reject an unaudited prior iteration")
             && value.as_str().contains("checkpoints")
     }));
     let result = find_choice(nodes, "topology_result");
@@ -579,6 +579,13 @@ fn assert_judge_topology(iteration_nodes: &[&GraphNode]) {
         value
             .as_str()
             .contains("restoring the known-invalid predecessor")
+            && value
+                .as_str()
+                .contains("predeclaration alone does not make a planner-added veto binding")
+            && value
+                .as_str()
+                .contains("Evidence and Method vote on their own")
+            && value.as_str().contains("Do not use Git commands")
     }));
     assert_eq!(
         judge.signals.get(&field_name(VERDICT_FIELD).assert_value()),
@@ -795,6 +802,7 @@ fn assert_disposition_stages(iteration_nodes: &[&GraphNode]) {
                 .as_str()
                 .contains("provisional until audit acceptance")
             && value.as_str().contains("audit-feedback.json")
+            && value.as_str().contains("nextIterationNumber")
     }));
     let recheck = find_verifier(iteration_nodes, "audit_disposition_recheck");
     assert_eq!(recheck.attempts.get(), 1);
