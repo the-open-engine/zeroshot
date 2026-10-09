@@ -8,6 +8,9 @@ transcripts at Luna's prices) does not exceed C; build 1 if build 1 alone costs 
 workspace if the run stops first. Parity workspaces are scored under ``parity/`` in the Luna results,
 reusing an existing evaluation of an identical workspace, so the pre-registered schedule's scores and
 summary stay as they are. Descriptive sensitivity: C at Sol's launch prices.
+
+The prompt study (README) uses the same comparison with Luna's own single sessions in place of Sol's
+single workers: C is then at Luna's prices, and there is no launch-price sensitivity.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ from .util import log, read_json, write_json
 RESAMPLES, SEED = 10_000, 20260924
 # Sol's launch prices per million tokens; cache writes at 1.25 times input, as in the promotional prices.
 LAUNCH_PRICES = {"usd_per_million_tokens": {"input": 5.0, "cached_input": 0.5, "cache_write": 6.25, "output": 30.0}}
+LAUNCH_PRICED_MODEL = "gpt-5.6-sol"
 
 
 def cumulative_costs(trajectories: Path, pricing: dict[str, Any]) -> list[float]:
@@ -66,13 +70,13 @@ def bootstrap_interval(values: list[float]) -> tuple[float, float]:
     return _percentile(means, 2.5), _percentile(means, 97.5)
 
 
-def verdict(luna: list[float], sol: list[float]) -> dict[str, Any]:
+def verdict(luna: list[float], sol: list[float], names: tuple[str, str] = ("Luna", "Sol")) -> dict[str, Any]:
     luna_ci, sol_ci = bootstrap_interval(luna), bootstrap_interval(sol)
     luna_mean, sol_mean = statistics.fmean(luna), statistics.fmean(sol)
     if luna_mean > sol_mean:
-        text = "Luna outperforms robustly (intervals do not overlap)" if luna_ci[0] > sol_ci[1] else "Luna outperforms (higher mean; intervals overlap)"
+        text = f"{names[0]} outperforms robustly (intervals do not overlap)" if luna_ci[0] > sol_ci[1] else f"{names[0]} outperforms (higher mean; intervals overlap)"
     elif sol_mean > luna_mean:
-        text = "Sol is ahead robustly (intervals do not overlap)" if sol_ci[0] > luna_ci[1] else "Sol is ahead (higher mean; intervals overlap)"
+        text = f"{names[1]} is ahead robustly (intervals do not overlap)" if sol_ci[0] > luna_ci[1] else f"{names[1]} is ahead (higher mean; intervals overlap)"
     else:
         text = "tie"
     return {"luna_mean": luna_mean, "luna_ci": luna_ci, "sol_mean": sol_mean, "sol_ci": sol_ci, "verdict": text}
@@ -189,7 +193,9 @@ def compare(luna: Experiment, sol: Experiment, luna_results: Path, sol_results: 
     if not included:
         raise ValueError(f"no Sol single worker of {sol.id} enters the comparison")
     budgets = {"promotional": statistics.fmean(r["cost_usd"] for r in included)}
-    if all(r["cost_launch_usd"] is not None for r in included):
+    same_model = luna.model == sol.model  # the prompt study: Luna's loop against Luna's single sessions
+    names = ("The loop", "The single session") if same_model else ("Luna", "Sol")
+    if sol.model == LAUNCH_PRICED_MODEL and all(r["cost_launch_usd"] is not None for r in included):
         budgets["launch"] = statistics.fmean(r["cost_launch_usd"] for r in included)
     summary = read_json(luna_results / "summary.json")
     loops = [a for a in summary["attempts"] if a["arm"] == "loop"]
@@ -207,7 +213,8 @@ def compare(luna: Experiment, sol: Experiment, luna_results: Path, sol_results: 
     scores = _parity_eval(luna, luna_results, cache, wanted)
     expected = summary.get("expected_scored_tests")
     outcome: dict[str, Any] = {"luna": luna.id, "sol": sol.id, "task": luna.instance_id, "scored_tests": expected, "sol_runs": sol_list,
-                               "budgets_usd": budgets, "launch_prices": LAUNCH_PRICES["usd_per_million_tokens"], "luna_runs": [], "comparisons": {}}
+                               "budgets_usd": budgets, "launch_prices": LAUNCH_PRICES["usd_per_million_tokens"], "luna_runs": [], "comparisons": {},
+                               "labels": ["Loop", "Single session"] if same_model else ["Luna loop", "Sol single worker"]}
     for a in loops:
         plan = plans[a["label"]]
         run: dict[str, Any] = {"run": a["label"], "cumulative_usd": plan["cumulative_usd"], "excluded": _disqualified(a)}
@@ -227,27 +234,28 @@ def compare(luna: Experiment, sol: Experiment, luna_results: Path, sol_results: 
     for name in budgets:
         luna_pct = [100 * r[name]["passed"] / expected for r in outcome["luna_runs"] if not r["excluded"] and not r[name]["excluded"]]
         outcome["comparisons"][name] = {"budget_usd": budgets[name], "luna_runs": len(luna_pct), "sol_runs": len(sol_pct),
-                                        **(verdict(luna_pct, sol_pct) if luna_pct else {"verdict": "no eligible Luna runs"})}
+                                        **(verdict(luna_pct, sol_pct, names) if luna_pct else {"verdict": "no eligible loop runs"})}
     write_json(luna_results / "parity" / f"{sol.id}.json", outcome)
     (luna_results / "parity" / f"{sol.id}.md").write_text(render(outcome))
     return outcome
 
 
 def render(o: dict[str, Any]) -> str:
+    loop, single = o.get("labels", ["Luna loop", "Sol single worker"])
     lines = [f"# Cost parity: {o['luna']} against {o['sol']}", "", f"Task {o['task']}, {o['scored_tests']} scored tests.", ""]
     for name, c in o["comparisons"].items():
-        lines.append(f"## At Sol's {name} prices: C = ${c['budget_usd']:.2f} per run")
+        lines.append(f"## At {name} prices: C = ${c['budget_usd']:.2f} per run")
         if "luna_mean" in c:
-            lines += ["", f"- Luna loop at parity: {c['luna_mean']:.1f}% (95% CI {c['luna_ci'][0]:.1f} to {c['luna_ci'][1]:.1f}), {c['luna_runs']} runs",
-                      f"- Sol single worker: {c['sol_mean']:.1f}% (95% CI {c['sol_ci'][0]:.1f} to {c['sol_ci'][1]:.1f}), {c['sol_runs']} runs",
+            lines += ["", f"- {loop} at parity: {c['luna_mean']:.1f}% (95% CI {c['luna_ci'][0]:.1f} to {c['luna_ci'][1]:.1f}), {c['luna_runs']} runs",
+                      f"- {single}: {c['sol_mean']:.1f}% (95% CI {c['sol_ci'][0]:.1f} to {c['sol_ci'][1]:.1f}), {c['sol_runs']} runs",
                       f"- {c['verdict']}", ""]
         else:
             lines += ["", f"- {c['verdict']}", ""]
-    lines += ["| Sol run | Workspace | Passed | Cost | Excluded |", "|---|---|---|---|---|"]
+    lines += ["| Single run | Workspace | Passed | Cost | Excluded |", "|---|---|---|---|---|"]
     for r in o["sol_runs"]:
         cost = "-" if r["cost_usd"] is None else f"${r['cost_usd']:.2f}"
         lines.append(f"| {r['run']} | {r['workspace']} | {r['passed']} | {cost} | {', '.join(r['excluded']) or '-'} |")
-    lines += ["", "| Luna run | Budget | Workspace | Passed | Cost to there | Excluded |", "|---|---|---|---|---|---|"]
+    lines += ["", "| Loop run | Budget | Workspace | Passed | Cost to there | Excluded |", "|---|---|---|---|---|---|"]
     for r in o["luna_runs"]:
         for name in o["comparisons"]:
             p = r[name]

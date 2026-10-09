@@ -1,0 +1,69 @@
+{
+ "id": "luna-xhigh-crowbook-prompt",
+ "description": "Prompt study: 5 GPT-5.6 Luna sessions at xhigh on crowbook, each one build node whose instructions are prompts/builder-checker.md (the loop's builder and checker prompts verbatim, Zeroshot's verifier guidance for the checker, and three sentences describing the loop), with a 6-hour time limit; otherwise luna-xhigh-crowbook-v1's task, model, resources, evaluation and pricing. Compared with luna-xhigh-crowbook-v1's check-and-repair loop at the sessions' mean cost and at their mean score (decision_rule.prompt_study).",
+ "task": {
+  "instance_id": "crowdagger__crowbook.ea214d7",
+  "image": "programbench/crowdagger_1776_crowbook.ea214d7:task_cleanroom_v6@sha256:101ae969bc8831f9a8a1c20794a3f48ee6becaaca2669235ef9da9fc2fbd964b",
+  "reference_path": "/reference/executable",
+  "adjustments_rationale": "As in the svgbob experiments v2 to v5, the reference moves to a root-owned directory outside the workspace (the task statement points there), so builders cannot overwrite or delete it at the build target's path. This adjustment is general, not specific to the task. The bundled documentation is left as shipped: no task-specific corrections.",
+  "fidelity_reference": {
+   "submission": "20260508_mini-v2.2.6_gpt-5-5-xhigh",
+   "commit": "530a7b8f969840d17efac1e1e5aaca1078cc2b3a",
+   "archive_url": "https://huggingface.co/datasets/programbench/20260508_mini-v2.2.6_gpt-5-5-xhigh/resolve/main/crowdagger__crowbook.ea214d7/submission.tar.gz",
+   "archive_sha256": "03f30214fb28ed5f0ac6164a4a851d930ce351f54b09afc4849ba5c7a292de3f",
+   "registry_commit": "794fa30bbfd65059d5c67e192ceb6da659c9ef51"
+  }
+ },
+ "model": {
+  "id": "gpt-5.6-luna",
+  "effort": "xhigh"
+ },
+ "prompts": {
+  "build": "builder-checker"
+ },
+ "arms": {
+  "single": {
+   "repeats": 5
+  }
+ },
+ "order": [
+  "single",
+  "single",
+  "single",
+  "single",
+  "single"
+ ],
+ "limits": {
+  "attempt_seconds": 22500,
+  "build_timeout_ms": 21600000,
+  "check_timeout_ms": 3600000
+ },
+ "resources": {
+  "concurrency": 5,
+  "cpus": 4,
+  "memory": "7g",
+  "pids_limit": 8192
+ },
+ "eval": {
+  "workers": 8,
+  "docker_cpus": 3,
+  "timeout_seconds": 43200,
+  "rounds": [
+   1
+  ]
+ },
+ "pricing": {
+  "model": "gpt-5.6-luna",
+  "usd_per_million_tokens": {
+   "input": 0.2,
+   "cached_input": 0.02,
+   "cache_write": 0.25,
+   "output": 1.2
+  },
+  "source": "https://developers.openai.com/api/docs/pricing",
+  "retrieved": "2026-09-23"
+ },
+ "decision_rule": {
+  "prompt_study": "Pre-registered 2026-10-09 (README, prompt study), before any run of this study. Single sessions: the 5 runs of luna-xhigh-crowbook-prompt, GPT-5.6 Luna at xhigh in one build node whose instructions are prompts/builder-checker.md, with a 6-hour node time limit; a session that reaches the limit is scored as it stands. P = their mean model cost at Luna's prices (from the Codex transcripts). Equal cost: each loop run of luna-xhigh-crowbook-v1 is compared through the workspace after its last build whose cumulative cost (builds 1..k and checks 1..k-1) does not exceed P (build 1 if build 1 alone exceeds P; the final workspace if the run ends first), and the mean hidden-test pass rate of those workspaces is compared with the mean of the 5 single sessions, each with a 95% percentile bootstrap interval (runs resampled, 10,000 resamples, seed 20260924); the higher mean leads, robustly if the intervals do not overlap (bench parity --against luna-xhigh-crowbook-prompt). Equal score: the smallest budget at which the mean score of the loop runs' deliverables (each run's last build within the budget; 0 before build 1) reaches the single sessions' mean score, reported as a share of P; not reached if no budget up to the end of the loop runs reaches it (bench match --against luna-xhigh-crowbook-prompt). Runs enter as in the cost-parity study: completed, scored on all tests, no disqualifying audit finding, harness unchanged, no reference executable in the scored workspace; an attempt that ends in an infrastructure error is re-run once. No pooled test across tasks."
+ }
+}

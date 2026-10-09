@@ -12,6 +12,9 @@ from typing import Any
 from . import ROOT
 
 ARMS = ("loop", "single")
+# Instructions for the build node (prompts/<name>.md). builder-checker runs the loop's two roles in
+# one session (the builder's and checker's prompts verbatim); only a single arm may use it.
+BUILD_PROMPTS = ("builder", "builder-checker")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 # Agent harness -> model provider it runs against, and the API key variable that provider needs.
 HARNESSES = {"codex": "openai", "claude": "anthropic"}  # each harness's default provider
@@ -145,6 +148,11 @@ class Experiment:
         return self.raw["resources"].get("reap_orphans", False)
 
     @property
+    def build_prompt(self) -> str:
+        """The prompt file whose text is the build node's instructions."""
+        return self.raw.get("prompts", {}).get("build", "builder")
+
+    @property
     def max_iterations(self) -> int:
         return self.raw["arms"]["loop"]["max_iterations"]
 
@@ -230,6 +238,9 @@ def _validate(raw: dict[str, Any]) -> None:
     if "usd_cap_per_attempt" in raw["limits"] and (harness != "claude" or float(raw["limits"]["usd_cap_per_attempt"]) <= 0):
         raise ValueError("limits.usd_cap_per_attempt must be positive and needs the Claude gateway")
     arms = raw["arms"]
+    prompts = raw.get("prompts", {})
+    if set(prompts) - {"build"} or prompts.get("build", "builder") not in BUILD_PROMPTS or (prompts.get("build", "builder") != "builder" and "loop" in arms):
+        raise ValueError(f"prompts.build must be one of {BUILD_PROMPTS}, and only a single-arm experiment may change it")
     if set(arms) - set(ARMS):
         raise ValueError(f"unknown arms: {set(arms) - set(ARMS)}")
     order = raw["order"]
@@ -259,6 +270,18 @@ def pins() -> dict[str, Any]:
 
 def prompt(name: str) -> str:
     return (ROOT / "prompts" / f"{name}.md").read_text().strip()
+
+
+def node_of(first_prompt: str) -> str:
+    """The graph node a session ran, from its first node prompt. The builder-checker prompt quotes
+    both roles' instructions and is the single arm's build node, so it is matched first."""
+    if prompt("builder-checker") in first_prompt:
+        return "build"
+    if prompt("checker") in first_prompt:
+        return "check"
+    if prompt("builder") in first_prompt:
+        return "build"
+    return "other"
 
 
 def task_statement(exp: Experiment) -> str:

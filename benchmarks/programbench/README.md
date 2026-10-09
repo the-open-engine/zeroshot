@@ -373,6 +373,37 @@ Per-task results: `figures/cost-parity/*.json` (from `bench parity`); figure:
 `scripts/plot_parity.py figures/cost-parity/*.json` (rows by Luna's lead; `--order luna` sorts them by
 Luna's score).
 
+### Prompt study (pre-registered 2026-10-09)
+
+Is the loop's benefit the topology, or would the same instructions in one session do as well? The
+same GPT-5.6 Luna at xhigh runs once per attempt, as a single build node whose instructions describe
+the loop (`prompts/builder-checker.md`): the builder's and checker's prompts verbatim, the verifier
+guidance Zeroshot gives every check, and three sentences of glue:
+
+> Work in rounds. In each round, act first as the builder and then as the checker, following the
+> instructions for each role below. If the checker rejects, its list of discrepancies is the review
+> feedback for the builder in the next round. Repeat until the checker accepts, then return.
+
+Everything else is Luna's single run on the same task (task statement, input, model, resources,
+evaluation, prices), except the node's time limit: 6 hours instead of 3, since the loops took 1.5 to
+4.9 hours to reach the cost-parity budget. The 50-round cap is not mentioned, as the loop's own nodes
+never saw it. What a prompt cannot copy is the separation: the loop's checker starts a fresh session
+every round, while here both roles share one.
+
+The runs are `luna-xhigh-<task>-prompt`, 5 sessions on each of the 20 tasks, all launched side by
+side; each task is scored once its sessions have finished (2 tasks at a time while sessions still
+run, 3 afterwards; samtools on a quiet host, as before). The comparison (each experiment's
+`decision_rule.prompt_study`) reuses the cost-parity machinery with the sessions in place of Sol's
+single workers. P is the sessions' mean model cost at Luna's prices.
+
+- Equal cost: each loop run is compared through its last build whose cumulative cost does not exceed
+  P (`scripts/zsbench parity experiments/<loop>.json --against experiments/luna-xhigh-<task>-prompt.json`);
+  the higher mean leads, robustly if the 95% bootstrap intervals do not overlap.
+- Equal score: the cost at which the loop runs first reach the sessions' mean score, as a share of P
+  (`scripts/zsbench match` with the same arguments); not reached if the loops never get there.
+
+As before, every task is reported and there is no pooled test.
+
 ## The graph and prompts
 
 Both arms share one byte-identical `build` node; round 1 of the loop is exactly the single arm.
@@ -402,6 +433,9 @@ The only text we wrote is two generic role prompts, frozen before any run
 > checks from the task statement and whatever it makes available; do not rely on the builder's
 > tests, notes, or claims. Run the checks. Accept only with concrete evidence that nothing is wrong.
 > Otherwise reject and list the most important discrepancies, each with a minimal reproduction.
+
+The prompt study's single sessions use a third file, `prompts/builder-checker.md`, which quotes both
+(see above).
 
 Zeroshot wraps each prompt in its standard node guidance (for workers: install
 manifest/lockfile dependencies and verify before returning; for verifiers: do not modify reviewed

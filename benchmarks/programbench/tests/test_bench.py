@@ -76,6 +76,23 @@ class GraphTests(unittest.TestCase):
             for word in ("ProgramBench", "svgbob", "SVG", "reverse", "executable"):
                 self.assertNotIn(word, text)
 
+    def test_prompt_study_runs_both_roles_in_one_build_node(self):
+        combined = config.prompt("builder-checker")
+        self.assertIn(config.prompt("builder"), combined)  # verbatim, as concatenated as possible
+        self.assertIn(config.prompt("checker"), combined)
+        for word in ("ProgramBench", "svgbob", "SVG", "reverse", "executable"):
+            self.assertNotIn(word, combined)
+        for path in sorted(Path(__file__).resolve().parent.parent.glob("experiments/luna-xhigh-*-prompt.json")):
+            exp = config.load(path)
+            loop = config.load(f"experiments/{exp.raw['description'].split(' otherwise ', 1)[1].split(chr(39), 1)[0]}.json")
+            files, plain = run_files(exp, "single"), run_files(loop, "single")
+            build = files["graph.json"]["root"]["children"][0]
+            self.assertEqual((build["instructions"], build["timeoutMs"]), (combined, 6 * 3600 * 1000))
+            plain_build = plain["graph.json"]["root"]["children"][0]
+            self.assertEqual({**build, "instructions": None, "timeoutMs": None}, {**plain_build, "instructions": None, "timeoutMs": None})
+            self.assertEqual(files["input.json"], plain["input.json"])
+            self.assertEqual(files["runtime.json"], plain["runtime.json"])
+
     def test_loop_stops_on_accept_and_feeds_back_diagnostics(self):
         loop = run_files(EXPERIMENT, "loop")["graph.json"]["root"]["children"][0]
         self.assertEqual(loop["until"]["value"], {"name": "check", "source": "signal", "field": "verdict"})
@@ -277,6 +294,35 @@ class ConfigTests(unittest.TestCase):
             expected = expected.replace("luna-xhigh-calcurse-v1", luna.id).replace("sol-xhigh-calcurse-single", sol.id)
             self.assertEqual(rule.split(" C = ", 1)[1], expected)  # the study's rule, word for word
 
+    def test_prompt_study_changes_only_the_build_instructions_and_time_limit(self):
+        paths = sorted(Path(__file__).resolve().parent.parent.glob("experiments/luna-xhigh-*-prompt.json"))
+        parity_loops = sorted(json.loads(p.read_text())["luna"] for p in Path(__file__).resolve().parent.parent.glob("figures/cost-parity/*.json"))
+        self.assertEqual(len(paths), 20)
+        loops = []
+        for path in paths:
+            exp = config.load(path)
+            loop_id = exp.raw["description"].split(" otherwise ", 1)[1].split("'", 1)[0]
+            loops.append(loop_id)
+            loop = config.load(f"experiments/{loop_id}.json")
+            self.assertEqual(exp.id, loop_id.rsplit("-v", 1)[0] + "-prompt")
+            self.assertEqual(exp.build_prompt, "builder-checker")
+            self.assertEqual((exp.raw["arms"], exp.raw["order"]), ({"single": {"repeats": 5}}, ["single"] * 5))
+            for key in ("task", "model", "pricing"):
+                self.assertEqual(exp.raw[key], loop.raw[key], key)
+            self.assertEqual(exp.raw["eval"], {**loop.raw["eval"], "rounds": [1]})
+            self.assertEqual(exp.resources, {**loop.resources, "concurrency": 5})
+            self.assertEqual(exp.limits, {**loop.limits, "build_timeout_ms": 6 * 3600 * 1000, "attempt_seconds": 6 * 3600 + 900})
+            rule = exp.raw["decision_rule"]["prompt_study"]
+            self.assertTrue(rule.startswith("Pre-registered 2026-10-09"))
+            self.assertIn(f"each loop run of {loop_id} is compared", rule)
+            self.assertIn(f"bench parity --against {exp.id}", rule)
+        self.assertEqual(sorted(loops), parity_loops)  # the 20 loops of the cost-parity study
+        raw = config.load(paths[0]).raw
+        with self.assertRaises(ValueError):
+            self._load({**raw, "prompts": {"build": "task"}})
+        with self.assertRaises(ValueError):  # the loop's builder keeps the builder prompt
+            self._load({**raw, "arms": {"loop": {"repeats": 5, "max_iterations": 50}}, "order": ["loop"] * 5})
+
     def test_attempts_reach_their_proxy_by_a_short_alias(self):
         # A container name can exceed a DNS label's 63 characters and then does not resolve.
         long_name = "zsbench-sol-xhigh-ascii-image-converter-single-01-single-net"
@@ -370,6 +416,8 @@ class ConfigTests(unittest.TestCase):
         overlapping = parity.verdict([50, 30, 60, 45, 52], [44, 46, 45, 43, 47])
         self.assertEqual(overlapping["verdict"], "Luna outperforms (higher mean; intervals overlap)")
         self.assertTrue(parity.verdict([40, 41, 39, 40, 42], [50, 51, 52, 50, 49])["verdict"].startswith("Sol is ahead robustly"))
+        named = parity.verdict([40, 41, 39, 40, 42], [50, 51, 52, 50, 49], ("The loop", "The single session"))
+        self.assertTrue(named["verdict"].startswith("The single session is ahead robustly"))
 
     def test_parallel_runners_only_on_request(self):
         from unittest import mock
@@ -471,6 +519,16 @@ class AccountingTests(unittest.TestCase):
         self.assertEqual(usage["nodes"]["total"]["outputTokens"], 160)
         self.assertEqual(usage["first_build_round"]["inputTokens"], 1000)
         self.assertEqual(sorted((s["node"], s["rounds"]) for s in usage["sessions"]), [("build", 2), ("check", 1)])
+
+    def test_a_builder_checker_session_is_the_build_node(self):
+        # The combined prompt quotes the checker's instructions; it still runs as the build node.
+        with tempfile.TemporaryDirectory() as tmp:
+            _tar(Path(tmp, "trajectories.tar.gz"), {".codex/sessions/rollout-a.jsonl": _rollout(config.prompt("builder-checker"), [(1000, 100)])})
+            usage = accounting.usage(Path(tmp))
+        self.assertEqual([s["node"] for s in usage["sessions"]], ["build"])
+        self.assertEqual(usage["first_build_round"]["inputTokens"], 1000)
+        self.assertEqual(audit._node_of(f"Authored instructions:\n{config.prompt('builder-checker')}"), "build")
+        self.assertEqual(audit._node_of(f"Authored instructions:\n{config.prompt('checker')}"), "check")
 
     def test_a_continuation_turn_belongs_to_its_round(self):
         with tempfile.TemporaryDirectory() as tmp:

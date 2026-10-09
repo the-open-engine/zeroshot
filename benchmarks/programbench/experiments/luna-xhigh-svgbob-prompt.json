@@ -1,0 +1,84 @@
+{
+ "id": "luna-xhigh-svgbob-prompt",
+ "description": "Prompt study: 5 GPT-5.6 Luna sessions at xhigh on svgbob, each one build node whose instructions are prompts/builder-checker.md (the loop's builder and checker prompts verbatim, Zeroshot's verifier guidance for the checker, and three sentences describing the loop), with a 6-hour time limit; otherwise luna-xhigh-svgbob-v3's task, model, resources, evaluation and pricing. Compared with luna-xhigh-svgbob-v3's check-and-repair loop at the sessions' mean cost and at their mean score (decision_rule.prompt_study).",
+ "task": {
+  "instance_id": "ivanceras__svgbob.6d00ad9",
+  "image": "programbench/ivanceras_1776_svgbob.6d00ad9:task_cleanroom_v6@sha256:8656583769698b008c6ca1b02ca7da4207a4a3c7dc2d8105d82dc6ae0a2a6f67",
+  "reference_path": "/reference/executable",
+  "doc_fixes": [
+   {
+    "file": "README.md",
+    "old": "- `--font-family <font>` - Set font family for text (default: arial)",
+    "new": "- `--font-family <font>` - Set font family for text (default: Iosevka Fixed, monospace)"
+   },
+   {
+    "file": "README.md",
+    "old": "- `-s, --inline` - Parse an inline string",
+    "new": "- `-s` - Parse an inline string"
+   },
+   {
+    "file": "README.md",
+    "old": "- Server mode available for REST API usage",
+    "new": "- A separate server program (`svgbob_server`) for REST API usage"
+   },
+   {
+    "file": "README.md",
+    "old": "Svgbob can also run as a REST API server. Send ASCII art as a POST request and receive SVG output.",
+    "new": "The separate Svgbob Server (see `crates/svgbob_server/README.md`) runs svgbob as a REST API server. Send ASCII art as a POST request and receive SVG output."
+   }
+  ],
+  "adjustments_rationale": "Pilot v1 (luna-xhigh-svgbob-v1) showed builders overwriting or deleting the reference at ./executable (the build target) and later checkers enforcing README statements that contradict the reference. The reference moves to a root-owned directory outside the workspace (the task statement points there); README statements that contradict the reference's behavior are corrected: default font (renders Iosevka Fixed, monospace), --inline (only -s exists), server mode (a separate svgbob_server program). The reference's own --help text is unchanged. The --scale line is ambiguous rather than false and is left as is."
+ },
+ "model": {
+  "id": "gpt-5.6-luna",
+  "effort": "xhigh"
+ },
+ "prompts": {
+  "build": "builder-checker"
+ },
+ "arms": {
+  "single": {
+   "repeats": 5
+  }
+ },
+ "order": [
+  "single",
+  "single",
+  "single",
+  "single",
+  "single"
+ ],
+ "limits": {
+  "attempt_seconds": 22500,
+  "build_timeout_ms": 21600000,
+  "check_timeout_ms": 3600000
+ },
+ "resources": {
+  "concurrency": 5,
+  "cpus": 4,
+  "memory": "7g",
+  "pids_limit": 8192
+ },
+ "eval": {
+  "workers": 8,
+  "docker_cpus": 3,
+  "timeout_seconds": 14400,
+  "rounds": [
+   1
+  ]
+ },
+ "pricing": {
+  "model": "gpt-5.6-luna",
+  "usd_per_million_tokens": {
+   "input": 0.2,
+   "cached_input": 0.02,
+   "cache_write": 0.25,
+   "output": 1.2
+  },
+  "source": "https://developers.openai.com/api/docs/pricing",
+  "retrieved": "2026-09-23"
+ },
+ "decision_rule": {
+  "prompt_study": "Pre-registered 2026-10-09 (README, prompt study), before any run of this study. Single sessions: the 5 runs of luna-xhigh-svgbob-prompt, GPT-5.6 Luna at xhigh in one build node whose instructions are prompts/builder-checker.md, with a 6-hour node time limit; a session that reaches the limit is scored as it stands. P = their mean model cost at Luna's prices (from the Codex transcripts). Equal cost: each loop run of luna-xhigh-svgbob-v3 is compared through the workspace after its last build whose cumulative cost (builds 1..k and checks 1..k-1) does not exceed P (build 1 if build 1 alone exceeds P; the final workspace if the run ends first), and the mean hidden-test pass rate of those workspaces is compared with the mean of the 5 single sessions, each with a 95% percentile bootstrap interval (runs resampled, 10,000 resamples, seed 20260924); the higher mean leads, robustly if the intervals do not overlap (bench parity --against luna-xhigh-svgbob-prompt). Equal score: the smallest budget at which the mean score of the loop runs' deliverables (each run's last build within the budget; 0 before build 1) reaches the single sessions' mean score, reported as a share of P; not reached if no budget up to the end of the loop runs reaches it (bench match --against luna-xhigh-svgbob-prompt). Runs enter as in the cost-parity study: completed, scored on all tests, no disqualifying audit finding, harness unchanged, no reference executable in the scored workspace; an attempt that ends in an infrastructure error is re-run once. No pooled test across tasks."
+ }
+}

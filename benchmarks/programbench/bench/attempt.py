@@ -139,7 +139,7 @@ def _retry_once(probe):
 
 
 def run_files(exp: Experiment, arm: str) -> dict[str, Any]:
-    builder, checker = prompt("builder"), prompt("checker")
+    builder, checker = prompt(exp.build_prompt), prompt("checker")
     limits = exp.limits
     if arm == "loop":
         graph = graphs.loop_graph(builder, checker, exp.max_iterations, limits["build_timeout_ms"], limits["check_timeout_ms"])

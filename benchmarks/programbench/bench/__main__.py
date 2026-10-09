@@ -140,7 +140,7 @@ def _prepare(exp: config.Experiment, results: Path, allow_mixed: bool) -> tuple[
         "harness_config": info.get("harness_config"),
         "task_adjustments": info["task_adjustments"],
         "proxy_image": proxy_image,
-        "prompts": {name: config.prompt(name) for name in ("builder", "checker", "task")},
+        "prompts": {name: config.prompt(name) for name in dict.fromkeys(("builder", "checker", "task", exp.build_prompt))},
         "runner": {"python": platform.python_version()},
         "host": {"docker": docker("version", "--format", "{{.Server.Version}}").strip(), "cpus": docker("info", "--format", "{{.NCPU}}").strip(), "memory_bytes": docker("info", "--format", "{{.MemTotal}}").strip()},
     })

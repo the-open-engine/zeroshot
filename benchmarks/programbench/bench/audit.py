@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .accounting import claude_parent, claude_text, claude_transcripts, is_node_prompt
-from .config import prompt
+from .config import node_of
 from .util import secret_values
 
 KEY_SHAPE = re.compile(rb"(?<![A-Za-z0-9_-])sk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}")
@@ -236,11 +236,7 @@ def _session_commands(records: list[dict[str, Any]]) -> Iterator[tuple[int, str,
 
 
 def _node_of(first_prompt: str) -> str:
-    if prompt("checker") in first_prompt:
-        return "check"
-    if prompt("builder") in first_prompt:
-        return "build"
-    return "other"
+    return node_of(first_prompt)
 
 
 def loaded_agents_md(record: dict[str, Any]) -> bool:

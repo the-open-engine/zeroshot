@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from . import ledger
-from .config import prompt
+from .config import node_of
 
 FIELDS = ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens")
 _CODEX = {"input_tokens": "inputTokens", "output_tokens": "outputTokens", "cached_input_tokens": "cacheReadInputTokens", "cache_write_input_tokens": "cacheCreationInputTokens"}
@@ -71,11 +71,7 @@ def claude_text(message: dict[str, Any] | None) -> str:
 
 
 def node_of_session(first_prompt: str) -> str:
-    if prompt("checker") in first_prompt:
-        return "check"
-    if prompt("builder") in first_prompt:
-        return "build"
-    return "other"
+    return node_of(first_prompt)
 
 
 def is_node_prompt(record: dict[str, Any]) -> bool:
