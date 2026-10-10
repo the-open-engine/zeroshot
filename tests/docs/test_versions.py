@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -273,12 +272,13 @@ class PublicationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     versions.check_update(manifest, version, commit)
 
-    def test_last_change_is_the_newest_commit_touching_the_file(self):
+    def test_last_change_is_the_newest_commit_touching_the_files(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        repository = Path(temporary.name)
+        repository = Path(temporary.name) / "repository"
+        repository.mkdir()
 
-        def git(*arguments, when):
+        def git(*arguments, when="2026-01-01T12:00:00+00:00"):
             env = {**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
             subprocess.run(
                 [
@@ -295,22 +295,23 @@ class PublicationTests(unittest.TestCase):
                 env=env,
             )
 
-        git("init", "--quiet", when="2026-01-01T12:00:00+00:00")
+        git("init", "--quiet")
         page, other = repository / "page.md", repository / "other.md"
         page.write_text("first\n", encoding="utf-8")
         other.write_text("first\n", encoding="utf-8")
-        git("add", "page.md", "other.md", when="2026-01-01T12:00:00+00:00")
+        git("add", "page.md", "other.md")
         git("commit", "--quiet", "-m", "first", when="2026-03-04T12:00:00+00:00")
         other.write_text("second\n", encoding="utf-8")
         git("commit", "--quiet", "-am", "second", when="2026-05-06T12:00:00+00:00")
 
-        self.assertEqual(hook._last_change(page, repository), date(2026, 3, 4))
-        self.assertEqual(hook._last_change(other, repository), date(2026, 5, 6))
-        self.assertIsNone(hook._last_change(repository / "untracked.md", repository))
+        self.assertEqual(hook._last_change([page], repository), date(2026, 3, 4))
+        self.assertEqual(hook._last_change([other], repository), date(2026, 5, 6))
+        # A page is as new as the newest file it shows.
+        self.assertEqual(hook._last_change([page, other], repository), date(2026, 5, 6))
+        self.assertIsNone(hook._last_change([repository / "untracked.md"], repository))
 
         # A shallow clone sees one commit, which would date every page the same.
-        shallow = repository.parent / (repository.name + "-shallow")
-        self.addCleanup(shutil.rmtree, shallow, True)
+        shallow = Path(temporary.name) / "shallow"
         subprocess.run(
             [
                 "git",
@@ -324,13 +325,31 @@ class PublicationTests(unittest.TestCase):
             check=True,
             capture_output=True,
         )
-        self.assertIsNone(hook._last_change(shallow / "page.md", shallow))
+        self.assertIsNone(hook._last_change([shallow / "page.md"], shallow))
 
-    def test_last_change_is_unknown_outside_a_complete_history(self):
+        # Content that no longer matches its commit, like a publisher's copy, has no date.
+        page.write_text("replaced\n", encoding="utf-8")
+        self.assertIsNone(hook._last_change([page], repository))
+        self.assertIsNone(hook._last_change([page, other], repository))
+
+    def test_last_change_is_unknown_outside_git(self):
         with tempfile.TemporaryDirectory() as directory:
             self.assertIsNone(
-                hook._last_change(Path(directory) / "page.md", Path(directory))
+                hook._last_change([Path(directory) / "page.md"], Path(directory))
             )
+
+    def test_page_is_dated_by_everything_it_shows(self):
+        source = hook._DOCS / "guides/review-loop.md"
+        plain = hook._content_sources(source, "text")
+        self.assertEqual(plain, [source])
+        snippet = hook._content_sources(
+            source, '```json\n--8<-- "assets/review-loop/input.json"\n```'
+        )
+        self.assertEqual(
+            snippet, [source, hook._DOCS / "assets/review-loop/input.json"]
+        )
+        api = hook._content_sources(source, "# Client\n\n::: zeroshot.Client\n")
+        self.assertEqual(api, [source, hook._PYTHON_SOURCE])
 
     def test_page_shows_its_last_change(self):
         page = SimpleNamespace(
