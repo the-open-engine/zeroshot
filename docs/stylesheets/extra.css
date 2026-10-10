@@ -239,7 +239,7 @@ body::after {
 }
 
 /* The overview graph is drawn twice, wide and tall for phones, like the
-   landing page's. */
+   landing page's. Each links to its full-size file. */
 .md-typeset .docs-graph-wide {
   display: block;
 }
