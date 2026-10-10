@@ -36,6 +36,7 @@ impl RunConnectionResolver for RotatingResolver {
 
 fn binding(key: &str, name: &EnvironmentVariableName) -> NodeRuntimeBinding {
     NodeRuntimeBinding::Agent {
+        lane: None,
         model: ModelId::new("gpt-5.6").assert_value(),
         effort: None,
         session_scope: SessionScope::Execution,

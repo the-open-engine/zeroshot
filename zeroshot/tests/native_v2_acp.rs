@@ -155,6 +155,77 @@ async fn active_turn_interruption_is_terminal_and_bounded() {
     }
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn startup_checks_lane_executables_after_the_profile_gate() {
+    for (lane, error) in [
+        (
+            json!({"harness":"claude","provider":"anthropic"}),
+            "lane claude/anthropic needs the `claude` executable on PATH",
+        ),
+        (
+            json!({"harness":"copilot","provider":"github"}),
+            "ACP profile is not eligible: only Codex and Claude lanes are supported",
+        ),
+    ] {
+        let fixture = AcpFixture::new();
+        fixture.install_profile_with_worker_lane(Some(lane));
+        let output = fixture.start_with_fixture_path_only().await;
+
+        assert!(!output.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            format!("zeroshot: {error}\n")
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn sessions_check_lane_executables_against_their_own_workspace() {
+    let fixture = AcpFixture::new();
+    fixture
+        .install_profile_with_worker_lane(Some(json!({"harness":"claude","provider":"anthropic"})));
+    let launch = fixture._root.path().join("launch");
+    std::fs::create_dir(&launch).unwrap();
+    let path = format!(
+        "bin:{}:/usr/bin:/bin",
+        fixture._root.path().join("bin").display()
+    );
+    let mut child = fixture.spawn_server_in(&launch, &path);
+    let outgoing = child.stdin.take().unwrap();
+    let incoming = child.stdout.take().unwrap();
+    let workspace = fixture.workspace.clone();
+
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            let (connection, io) =
+                connect(outgoing, incoming, Arc::new(RecordingClient::default())).await;
+            install_fake_claude(&launch.join("bin"));
+            let error = connection
+                .new_session(acp::NewSessionRequest::new(workspace.clone()))
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, acp::ErrorCode::InvalidParams);
+            assert_eq!(
+                error.message,
+                "lane claude/anthropic needs the `claude` executable on PATH"
+            );
+
+            install_fake_claude(&workspace.join("bin"));
+            let session = connection
+                .new_session(acp::NewSessionRequest::new(workspace))
+                .await
+                .unwrap();
+            connection
+                .close_session(acp::CloseSessionRequest::new(session.session_id))
+                .await
+                .unwrap();
+            drop(connection);
+            disconnect_client(io).await;
+        })
+        .await;
+    assert_server_exits(&mut child).await;
+}
+
 #[cfg(feature = "ui")]
 #[tokio::test(flavor = "current_thread")]
 async fn active_acp_turn_streams_through_the_workspace_ui() {
@@ -282,7 +353,11 @@ impl AcpFixture {
     }
 
     fn install_profile(&self) {
-        let (graph, runtime) = write_profile_files(self._root.path());
+        self.install_profile_with_worker_lane(None);
+    }
+
+    fn install_profile_with_worker_lane(&self, lane: Option<Value>) {
+        let (graph, runtime) = write_profile_files(self._root.path(), lane);
         let profile = Command::new(&self.executable)
             .args([
                 "profile",
@@ -305,11 +380,16 @@ impl AcpFixture {
     }
 
     fn spawn_server(&self) -> tokio::process::Child {
+        self.spawn_server_in(&self.workspace, &self.path)
+    }
+
+    fn spawn_server_in(&self, directory: &Path, path: &str) -> tokio::process::Child {
         let mut command = tokio::process::Command::new(&self.executable);
         command
             .args(["acp", "--profile", "local:acp-test"])
-            .current_dir(&self.workspace)
+            .current_dir(directory)
             .envs(self.environment())
+            .env("PATH", path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -320,6 +400,22 @@ impl AcpFixture {
     fn spawn_stalled_server(&self) -> tokio::process::Child {
         std::fs::write(self._root.path().join("provider-gate-enabled"), []).unwrap();
         self.spawn_server()
+    }
+
+    async fn start_with_fixture_path_only(&self) -> std::process::Output {
+        let mut command = tokio::process::Command::new(&self.executable);
+        command
+            .args(["acp", "--profile", "local:acp-test"])
+            .current_dir(&self.workspace)
+            .envs(self.environment())
+            .env("PATH", self._root.path().join("bin"))
+            .env_remove("ZEROSHOT_ERROR_FORMAT")
+            .stdin(Stdio::null())
+            .kill_on_drop(true);
+        tokio::time::timeout(Duration::from_secs(30), command.output())
+            .await
+            .expect("ACP server did not exit after its startup checks")
+            .unwrap()
     }
 
     #[cfg(feature = "ui")]
@@ -437,6 +533,22 @@ async fn open_session(
     tokio::task::JoinHandle<acp::Result<()>>,
     acp::SessionId,
 ) {
+    let (connection, io) = connect(outgoing, incoming, client).await;
+    let session = connection
+        .new_session(acp::NewSessionRequest::new(workspace))
+        .await
+        .unwrap();
+    (connection, io, session.session_id)
+}
+
+async fn connect(
+    outgoing: tokio::process::ChildStdin,
+    incoming: tokio::process::ChildStdout,
+    client: Arc<RecordingClient>,
+) -> (
+    acp::ClientSideConnection,
+    tokio::task::JoinHandle<acp::Result<()>>,
+) {
     let (connection, io) = acp::ClientSideConnection::new(
         client,
         outgoing.compat_write(),
@@ -451,11 +563,7 @@ async fn open_session(
         .await
         .unwrap();
     assert_eq!(initialized.protocol_version, acp::ProtocolVersion::V1);
-    let session = connection
-        .new_session(acp::NewSessionRequest::new(workspace))
-        .await
-        .unwrap();
-    (connection, io, session.session_id)
+    (connection, io)
 }
 
 #[cfg(feature = "ui")]
@@ -643,7 +751,17 @@ fi
     openengine_cluster_testkit::fixture::write_executable(&executable, script, 0o755).unwrap();
 }
 
-fn write_profile_files(root: &Path) -> (PathBuf, PathBuf) {
+fn install_fake_claude(bin: &Path) {
+    std::fs::create_dir_all(bin).unwrap();
+    openengine_cluster_testkit::fixture::write_executable(
+        &bin.join("claude"),
+        "#!/bin/sh\nexit 1\n",
+        0o755,
+    )
+    .unwrap();
+}
+
+fn write_profile_files(root: &Path, worker_lane: Option<Value>) -> (PathBuf, PathBuf) {
     let string = || json!({"kind":"string"});
     let field = || json!({"type":string(),"required":true});
     let state = json!({"kind":"record","fields":{
@@ -684,7 +802,7 @@ fn write_profile_files(root: &Path) -> (PathBuf, PathBuf) {
             "promotedStatePaths":[]
         }
     });
-    let runtime = json!({
+    let mut runtime = json!({
         "harness":"codex",
         "provider":"openai",
         "size":"medium",
@@ -694,6 +812,9 @@ fn write_profile_files(root: &Path) -> (PathBuf, PathBuf) {
             "sessionScope":"node_instance"
         }}
     });
+    if let Some(lane) = worker_lane {
+        runtime["nodes"]["worker"]["lane"] = lane;
+    }
     let graph_path = root.join("graph.json");
     let runtime_path = root.join("runtime.json");
     std::fs::write(&graph_path, serde_json::to_vec(&graph).unwrap()).unwrap();

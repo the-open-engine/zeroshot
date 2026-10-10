@@ -20,15 +20,17 @@ change.
 
 ## Files
 
-The example has three files. Download them or copy them from the sections below, and keep them
-outside the repository you are changing, for example in `~/review-loop/`, so they stay out of the
-change.
+The example has three files, plus an optional runtime plan for
+[cross-vendor review](#cross-vendor-review). Download them or copy them from the sections below, and
+keep them outside the repository you are changing, for example in `~/review-loop/`, so they stay out
+of the change.
 
-| File                                                                         | Purpose                                       |
-| ---------------------------------------------------------------------------- | --------------------------------------------- |
-| [`input.json`](../assets/review-loop/input.json)                             | The task                                      |
-| [`review-loop.graph.json`](../assets/review-loop/review-loop.graph.json)     | Worker, reviewers, loop, and terminal result  |
-| [`review-loop.runtime.json`](../assets/review-loop/review-loop.runtime.json) | Harness, provider, models, and session scopes |
+| File                                                                                                   | Purpose                                       |
+| ------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
+| [`input.json`](../assets/review-loop/input.json)                                                       | The task                                      |
+| [`review-loop.graph.json`](../assets/review-loop/review-loop.graph.json)                               | Worker, reviewers, loop, and terminal result  |
+| [`review-loop.runtime.json`](../assets/review-loop/review-loop.runtime.json)                           | Harness, provider, models, and session scopes |
+| [`review-loop.cross-vendor.runtime.json`](../assets/review-loop/review-loop.cross-vendor.runtime.json) | Optional: Codex worker, Claude Code reviewers |
 
 The graph controls order and data flow. The runtime plan binds only the three nodes that run agents.
 
@@ -179,10 +181,10 @@ The worker uses `node_instance`, so each loop pass continues the same provider c
 reviewers use `execution`, so each review starts a fresh session and does not see the previous pass.
 The graph state still carries the feedback explicitly either way.
 
-Replace `YOUR_MODEL_ID` with a model the provider accepts. Nodes can use different models or effort
-values; harness, provider, and size apply to the whole run. The bindings omit `connections`, so a
-local Codex run reuses the Codex CLI's login, and a Docker or cloud target derives the canonical
-`OPENAI_API_KEY` requirement. See
+Replace `YOUR_MODEL_ID` with a model the provider accepts. Nodes can use different models, effort
+values, or [harnesses and providers](#cross-vendor-review); size applies to the whole run. The
+bindings omit `connections`, so a local Codex run reuses the Codex CLI's login, and a Docker or
+cloud target derives the canonical `OPENAI_API_KEY` requirement. See
 the [RuntimePlan reference](../reference/runtime-plan.md) for every field.
 
 ## 7. Validate, then run
@@ -226,3 +228,24 @@ upstream branch, not local uncommitted changes, and resolves `OPENAI_API_KEY` fr
 environment or its connection store. The graph has no delivery node, so a target run does not push
 the accepted change. Add a Git delivery verifier after the loop, or use the `software-change` template with
 `--push`, `--pr`, or `--ship`, when the result must leave the target.
+
+## Cross-vendor review
+
+A reviewer from the worker's model family can share its blind spots. An agent binding can carry its
+own [lane](../reference/runtime-plan.md#per-node-lanes), a harness and provider pair that overrides
+the plan's default. This runtime plan keeps the worker on Codex and runs both reviewers on Claude
+Code; the graph does not change:
+
+```json title="review-loop.cross-vendor.runtime.json"
+--8<-- "assets/review-loop/review-loop.cross-vendor.runtime.json"
+```
+
+Replace `YOUR_OPENAI_MODEL_ID` with a model OpenAI accepts and `YOUR_ANTHROPIC_MODEL_ID` with one
+Anthropic accepts. Pass the file to `--runtime-config` in [step 7](#7-validate-then-run) in place of
+`review-loop.runtime.json`.
+
+A local run needs both the Codex CLI and Claude Code installed and signed in. Before the run starts,
+Zeroshot checks that `codex` and `claude` are on `PATH`; it does not check login state, so a missing
+Claude Code login fails at the first review. On a target, the run requires both `OPENAI_API_KEY` and
+`ANTHROPIC_API_KEY`, and the target must advertise `openengine.node-runtime-lanes/v1`. The CLI
+refuses to send the plan to a target that does not.

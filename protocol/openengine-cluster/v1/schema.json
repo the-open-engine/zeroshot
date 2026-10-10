@@ -3399,6 +3399,16 @@
               "const": "agent",
               "type": "string"
             },
+            "lane": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RuntimeLane"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "model": {
               "maxLength": 2048,
               "minLength": 1,
@@ -4777,6 +4787,62 @@
         }
       },
       "type": "object"
+    },
+    "RuntimeLane": {
+      "description": "One harness and provider pair: the run-level default, or an agent node's override.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "harness": {
+              "const": "copilot",
+              "type": "string"
+            },
+            "provider": {
+              "$ref": "#/$defs/CopilotProvider"
+            }
+          },
+          "required": [
+            "harness",
+            "provider"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "harness": {
+              "const": "codex",
+              "type": "string"
+            },
+            "provider": {
+              "$ref": "#/$defs/CodexProvider"
+            }
+          },
+          "required": [
+            "harness",
+            "provider"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "harness": {
+              "const": "claude",
+              "type": "string"
+            },
+            "provider": {
+              "$ref": "#/$defs/ClaudeProvider"
+            }
+          },
+          "required": [
+            "harness",
+            "provider"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "RuntimePlan": {
       "oneOf": [

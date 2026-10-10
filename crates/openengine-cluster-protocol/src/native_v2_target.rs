@@ -445,6 +445,15 @@ pub struct TargetWorkspaceRecoveryDiscovery {
     pub kind: String,
 }
 
+pub const NODE_RUNTIME_LANES_KIND: &str = "openengine.node-runtime-lanes/v1";
+
+/// Frozen at `{"kind": ...}` so older clients parse it; new data needs a new extension key.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetNodeRuntimeLanesDiscovery {
+    pub kind: String,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct TargetDiscoveryExtensions {
@@ -464,6 +473,8 @@ pub struct TargetDiscoveryExtensions {
     pub workspace_checkpoints: Option<TargetWorkspaceCheckpointsDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hosted_workspace_recovery: Option<TargetHostedWorkspaceRecoveryDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_runtime_lanes: Option<TargetNodeRuntimeLanesDiscovery>,
 }
 
 /// One discovery document for direct Docker targets and OAuth-hosted targets.
@@ -497,6 +508,7 @@ impl TargetDiscoveryExtensions {
             && self.workspace_recovery.is_none()
             && self.workspace_checkpoints.is_none()
             && self.hosted_workspace_recovery.is_none()
+            && self.node_runtime_lanes.is_none()
     }
 }
 
@@ -540,6 +552,15 @@ impl TargetDiscoveryDocument {
                 kind: WORKSPACE_RECOVERY_KIND.to_owned(),
             });
         }
+        self
+    }
+
+    /// Adds the per-node runtime lanes extension to discovery in every authentication mode.
+    #[must_use]
+    pub fn with_node_runtime_lanes(mut self) -> Self {
+        self.extensions.node_runtime_lanes = Some(TargetNodeRuntimeLanesDiscovery {
+            kind: NODE_RUNTIME_LANES_KIND.to_owned(),
+        });
         self
     }
 

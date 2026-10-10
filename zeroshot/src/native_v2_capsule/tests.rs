@@ -23,6 +23,7 @@ use crate::worker_catalog::{self, ReasoningEffort};
 
 pub(super) fn request(run: &str, execution: u64) -> NodeRunRequest {
     let binding = NodeRuntimeBinding::Agent {
+        lane: None,
         model: worker_catalog::ModelId::new("gpt-5.6").assert_value(),
         effort: Some(ReasoningEffort::Max),
         session_scope: SessionScope::Execution,

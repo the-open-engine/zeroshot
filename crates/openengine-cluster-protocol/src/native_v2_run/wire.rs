@@ -11,6 +11,7 @@ use crate::{
 
 use super::{
     ClaudeProvider, CodexProvider, CopilotProvider, NodeRuntimeBinding, RunSize, ResolvedSource,
+    RuntimeLane,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -50,6 +51,59 @@ impl RuntimePlan {
             | Self::Codex { nodes, .. }
             | Self::Claude { nodes, .. } => nodes,
         }
+    }
+
+    #[must_use]
+    pub fn nodes_mut(&mut self) -> &mut BTreeMap<NodeName, NodeRuntimeBinding> {
+        match self {
+            Self::Copilot { nodes, .. }
+            | Self::Codex { nodes, .. }
+            | Self::Claude { nodes, .. } => nodes,
+        }
+    }
+
+    #[must_use]
+    pub const fn lane(&self) -> RuntimeLane {
+        match self {
+            Self::Copilot { provider, .. } => RuntimeLane::Copilot {
+                provider: *provider,
+            },
+            Self::Codex { provider, .. } => RuntimeLane::Codex {
+                provider: *provider,
+            },
+            Self::Claude { provider, .. } => RuntimeLane::Claude {
+                provider: *provider,
+            },
+        }
+    }
+
+    /// The binding's own lane, else the run-level lane; Git delivery bindings have no lane.
+    #[must_use]
+    pub const fn effective_lane(&self, binding: &NodeRuntimeBinding) -> Option<RuntimeLane> {
+        match binding {
+            NodeRuntimeBinding::Agent {
+                lane: Some(lane), ..
+            } => Some(*lane),
+            NodeRuntimeBinding::Agent { lane: None, .. } => Some(self.lane()),
+            NodeRuntimeBinding::GitDelivery { .. } => None,
+        }
+    }
+
+    /// Distinct effective lanes of the agent bindings, in harness and then provider order.
+    #[must_use]
+    pub fn lanes(&self) -> BTreeSet<RuntimeLane> {
+        self.nodes()
+            .values()
+            .filter_map(|binding| self.effective_lane(binding))
+            .collect()
+    }
+
+    /// Whether any agent binding carries its own `lane`, even one equal to the run-level lane.
+    #[must_use]
+    pub fn has_lane_overrides(&self) -> bool {
+        self.nodes()
+            .values()
+            .any(|binding| matches!(binding, NodeRuntimeBinding::Agent { lane: Some(_), .. }))
     }
 
     /// Union of the fields required from each connection key across all executable nodes.

@@ -21,6 +21,7 @@ use openengine_cluster_testkit::assertions::AssertValue;
 
 fn agent_binding() -> NodeRuntimeBinding {
     NodeRuntimeBinding::Agent {
+        lane: None,
         model: crate::worker_catalog::ModelId::new("gpt-5.6-sol").assert_value(),
         effort: Some(ReasoningEffort::Max),
         session_scope: SessionScope::Execution,

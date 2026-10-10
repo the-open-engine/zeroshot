@@ -13,8 +13,8 @@ use acp::Client as _;
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
     FieldName, GraphNode, IdempotencyKey, PayloadType, RunConnectionValues, RunId, RunProfile,
-    RunProfileName, RunProfileScope, RunProfileSelector, RunSubmission, RunTitle, RuntimePlan,
-    SessionScope, TerminalResult,
+    RunProfileName, RunProfileScope, RunProfileSelector, RunSubmission, RunTitle, RuntimeLane,
+    RuntimePlan, SessionScope, TerminalResult,
 };
 use serde_json::{json, Map, Value};
 use thiserror::Error;
@@ -74,6 +74,8 @@ pub enum AcpServeError {
     Profile(&'static str),
     #[error("ACP request is invalid: {0}")]
     Request(&'static str),
+    #[error("{0}")]
+    MissingLaneExecutable(String),
     #[error("ACP transport failed: {0}")]
     Transport(String),
 }
@@ -83,6 +85,9 @@ impl AcpServeError {
         match self {
             Self::Profile(message) | Self::Request(message) => {
                 acp::Error::new(ACP_ERROR_INVALID_PARAMS, *message)
+            }
+            Self::MissingLaneExecutable(message) => {
+                acp::Error::new(ACP_ERROR_INVALID_PARAMS, message)
             }
             error => {
                 eprintln!("zeroshot acp: {error}");
@@ -100,6 +105,7 @@ pub async fn serve_local_acp(profile_name: RunProfileName) -> Result<(), AcpServ
     })?;
     materialize_acp_provider_access(&mut profile.runtime)?;
     validate_profile(&profile).await?;
+    check_acp_lane_executables(&profile.runtime)?;
     let core = Arc::new(AcpCore::new(profile, default_local_state_root()?));
     let local = tokio::task::LocalSet::new();
     local
@@ -111,6 +117,22 @@ pub async fn serve_local_acp(profile_name: RunProfileName) -> Result<(), AcpServ
 fn materialize_acp_provider_access(runtime: &mut RuntimePlan) -> Result<(), AcpServeError> {
     materialize_provider_access(runtime, ProviderAccessPlacement::Local)
         .map_err(|error| NativeV2CliError::Usage(error.to_string()).into())
+}
+
+fn check_acp_lane_executables(runtime: &RuntimePlan) -> Result<(), AcpServeError> {
+    let invoking_directory = std::env::current_dir().map_err(AcpServeError::Storage)?;
+    let native_environment =
+        crate::native_v2_local::capture_local_native_environment(&invoking_directory)?;
+    // The result depends on the directory, so each session checks against its own workspace.
+    if crate::native_v2_local::search_path_depends_on_working_directory(&native_environment) {
+        return Ok(());
+    }
+    crate::native_v2_local::check_lane_executables(
+        runtime,
+        &native_environment,
+        &invoking_directory,
+    )
+    .map_err(|error| NativeV2CliError::Usage(error.to_string()).into())
 }
 
 async fn serve_stdio(core: Arc<AcpCore>) -> acp::Result<()> {
@@ -501,6 +523,15 @@ impl AcpSession {
         requested_workspace: PathBuf,
     ) -> Result<Arc<Self>, AcpServeError> {
         let prepared = prepare_session(&state_root, requested_workspace)?;
+        let invoking_directory = std::env::current_dir().map_err(AcpServeError::Storage)?;
+        let native_environment =
+            crate::native_v2_local::capture_local_native_environment(&invoking_directory)?;
+        crate::native_v2_local::check_lane_executables(
+            &profile.runtime,
+            &native_environment,
+            &prepared.workspace,
+        )
+        .map_err(|error| AcpServeError::MissingLaneExecutable(error.to_string()))?;
         let environment = Arc::new(RunEnvironment::exact(
             &profile.runtime,
             None,
@@ -515,9 +546,6 @@ impl AcpSession {
                 seed_run_id.as_str(),
             )?)
             .await?;
-        let invoking_directory = std::env::current_dir().map_err(AcpServeError::Storage)?;
-        let native_environment =
-            crate::native_v2_local::capture_local_native_environment(&invoking_directory)?;
         let runner = build_local_owner_process_candidate(LocalProcessCandidateRequest {
             admitted: &admitted,
             delivery_run_id: seed_run_id,
@@ -845,12 +873,14 @@ fn submission(
 
 async fn validate_profile(profile: &RunProfile) -> Result<(), AcpServeError> {
     validate_task_type(&profile.graph.initial_input)?;
-    if !matches!(
-        profile.runtime,
-        RuntimePlan::Codex { .. } | RuntimePlan::Claude { .. }
-    ) {
+    if profile
+        .runtime
+        .lanes()
+        .iter()
+        .any(|lane| matches!(lane, RuntimeLane::Copilot { .. }))
+    {
         return Err(AcpServeError::Profile(
-            "only Codex and Claude runtimes are supported",
+            "only Codex and Claude lanes are supported",
         ));
     }
     let mut success_count = 0;

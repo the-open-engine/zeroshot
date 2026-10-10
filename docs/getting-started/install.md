@@ -96,13 +96,13 @@ can leave the `ui` feature disabled.
 
 ## Prepare a local run
 
-Run Zeroshot from a Git worktree, and install the agent harness named by the runtime plan:
+Run Zeroshot from a Git worktree, and install each agent harness named by the runtime plan:
 
 - install and sign in to Codex for `"harness": "codex"`;
 - install and sign in to Claude Code for `"harness": "claude"`;
 - install GitHub Copilot CLI 1.0.86 for `"harness": "copilot"` with `"provider": "github"`.
 
-Local Codex/OpenAI, Claude/Anthropic, and Copilot/GitHub runs reuse the installed harness's native
+Local Codex/OpenAI, Claude/Anthropic, and Copilot/GitHub lanes reuse the installed harness's native
 login and configuration. Other provider lanes can read declared values from the current environment
 or the private Zeroshot connection store. For example, this command prompts without echo and keeps
 an OpenAI value out of runtime JSON for a contained target:

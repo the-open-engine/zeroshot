@@ -1,6 +1,6 @@
 //! Claude CLI adapter for native-v2 graph nodes.
 //!
-//! One adapter serves the graph-wide Anthropic, OpenRouter, gateway, or Amazon Bedrock lane.
+//! One adapter serves one Anthropic, OpenRouter, gateway, or Amazon Bedrock lane.
 //! Admission has already selected the model, effort, session scope, and declared environment for
 //! each node. Only the local adapter inherits the current user's harness configuration environment.
 
@@ -109,7 +109,7 @@ impl std::fmt::Debug for ClaudeProcessEnvironment {
     }
 }
 
-/// One graph-wide Claude provider lane.
+/// Claude adapter for one provider lane.
 pub struct ClaudeAdapter {
     provider: ClaudeProvider,
     executable: String,

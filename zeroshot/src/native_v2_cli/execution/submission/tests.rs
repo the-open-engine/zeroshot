@@ -80,6 +80,7 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
     invalid_nodes.insert(
         delivery_name.clone(),
         NodeRuntimeBinding::Agent {
+            lane: None,
             model: ModelId::new("wrong-kind").assert_value(),
             effort: None,
             session_scope: SessionScope::Execution,

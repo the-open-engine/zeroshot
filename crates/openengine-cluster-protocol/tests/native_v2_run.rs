@@ -9,11 +9,13 @@ mod json_read;
 
 use assert_value::AssertValue;
 use openengine_cluster_protocol::{
-    ClaudeProvider, CodexProvider, ResolvedSource, RunId, RunListParams, RunListResult, RunSize,
-    RunResumeParams, RunStatus, RunStatusResult, RunSubmitParams, RunSubmitResult, RunTitle,
-    SourceBranchId, SourceRepositoryId, SourceRevisionId,
+    ClaudeProvider, CodexProvider, NodeName, ResolvedSource, RunId, RunListParams, RunListResult,
+    RunSize, RunResumeParams, RunStatus, RunStatusResult, RunSubmitParams, RunSubmitResult,
+    RunTitle, RuntimeLane, SourceBranchId, SourceRepositoryId, SourceRevisionId,
 };
 use serde_json::{json, Value};
+
+const LANE_SUBMISSION: &str = include_str!("fixtures/native-v2-lane-submission.json");
 
 fn graph() -> Value {
     serde_json::from_str(
@@ -68,6 +70,32 @@ fn submit_is_closed_secret_free_and_requires_actual_initial_input() {
     let mut unknown = wire;
     json_insert::json_insert(&mut unknown, "/submission", "credential", json!("secret"));
     assert!(serde_json::from_value::<RunSubmitParams>(unknown).is_err());
+}
+
+#[test]
+fn lane_submission_fixture_round_trips_with_per_node_lanes() {
+    let wire: Value = serde_json::from_str(LANE_SUBMISSION).assert_value();
+    let params: RunSubmitParams = serde_json::from_value(wire.clone()).assert_value();
+    let runtime = &params.submission.runtime;
+    let codex = RuntimeLane::Codex {
+        provider: CodexProvider::OpenAi,
+    };
+    let claude = RuntimeLane::Claude {
+        provider: ClaudeProvider::Anthropic,
+    };
+    let effective_lane = |node: &str| {
+        let binding = runtime
+            .nodes()
+            .get(&NodeName::new(node).assert_value())
+            .assert_value();
+        runtime.effective_lane(binding)
+    };
+
+    assert_eq!(runtime.lane(), codex);
+    assert_eq!(effective_lane("worker"), Some(codex));
+    assert_eq!(effective_lane("acceptance"), Some(claude));
+    assert!(runtime.has_lane_overrides());
+    assert_eq!(serde_json::to_value(&params).assert_value(), wire);
 }
 
 #[test]

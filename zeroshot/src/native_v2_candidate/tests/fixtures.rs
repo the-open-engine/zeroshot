@@ -3,24 +3,47 @@ use openengine_cluster_protocol::GraphSpec;
 use super::*;
 use crate::native_v2_candidate::test_support::git_delivery_node;
 
+pub(super) const CODEX_OPENAI: RuntimeLane = RuntimeLane::Codex {
+    provider: CodexProvider::OpenAi,
+};
+pub(super) const CLAUDE_ANTHROPIC: RuntimeLane = RuntimeLane::Claude {
+    provider: ClaudeProvider::Anthropic,
+};
+pub(super) const COPILOT_GITHUB: RuntimeLane = RuntimeLane::Copilot {
+    provider: CopilotProvider::Github,
+};
+
 #[derive(Clone, Copy)]
 pub(super) enum RuntimePlanKind {
     Codex,
     Claude,
+    ClaudeOverride,
+    ClaudeReviewer,
+    CopilotReviewer,
 }
 
-pub(super) fn runtime(kind: RuntimePlanKind) -> RuntimePlan {
-    let agent = NodeRuntimeBinding::Agent {
-        model: worker_catalog::ModelId::new(match kind {
-            RuntimePlanKind::Codex => "gpt-5.6-sol",
-            RuntimePlanKind::Claude => "claude-sonnet-5",
-        })
-        .assert_value_with("model"),
+impl RuntimePlanKind {
+    fn reviewer_lane(self) -> Option<RuntimeLane> {
+        match self {
+            Self::ClaudeReviewer => Some(CLAUDE_ANTHROPIC),
+            Self::CopilotReviewer => Some(COPILOT_GITHUB),
+            Self::Codex | Self::Claude | Self::ClaudeOverride => None,
+        }
+    }
+}
+
+pub(super) fn agent_binding(lane: Option<RuntimeLane>, model: &str) -> NodeRuntimeBinding {
+    NodeRuntimeBinding::Agent {
+        lane,
+        model: worker_catalog::ModelId::new(model).assert_value_with("model"),
         effort: Some(ReasoningEffort::Max),
         session_scope: SessionScope::Execution,
         connections: DeclaredConnections::empty(),
-    };
-    let delivery = NodeRuntimeBinding::GitDelivery {
+    }
+}
+
+pub(super) fn delivery_binding() -> NodeRuntimeBinding {
+    NodeRuntimeBinding::GitDelivery {
         connections: DeclaredConnections::single(
             "github",
             DeclaredEnvironment::new([
@@ -30,32 +53,51 @@ pub(super) fn runtime(kind: RuntimePlanKind) -> RuntimePlan {
         )
         .assert_value_with("delivery connection"),
         pull_request_feedback: Default::default(),
+    }
+}
+
+pub(super) fn runtime(kind: RuntimePlanKind) -> RuntimePlan {
+    let worker = match kind {
+        RuntimePlanKind::Codex
+        | RuntimePlanKind::ClaudeReviewer
+        | RuntimePlanKind::CopilotReviewer => agent_binding(None, "gpt-5.6-sol"),
+        RuntimePlanKind::Claude => agent_binding(None, "claude-sonnet-5"),
+        RuntimePlanKind::ClaudeOverride => agent_binding(Some(CLAUDE_ANTHROPIC), "claude-sonnet-5"),
     };
-    let nodes = BTreeMap::from([
+    let mut nodes = BTreeMap::from([
         (
             NodeName::new("worker").assert_value_with("worker name"),
-            agent,
+            worker,
         ),
         (
             NodeName::new("deliver").assert_value_with("delivery name"),
-            delivery,
+            delivery_binding(),
         ),
     ]);
+    if let Some(lane) = kind.reviewer_lane() {
+        nodes.insert(
+            NodeName::new("reviewer").assert_value_with("reviewer name"),
+            agent_binding(Some(lane), "claude-sonnet-5"),
+        );
+    }
     match kind {
-        RuntimePlanKind::Codex => RuntimePlan::Codex {
+        RuntimePlanKind::Codex
+        | RuntimePlanKind::ClaudeOverride
+        | RuntimePlanKind::ClaudeReviewer
+        | RuntimePlanKind::CopilotReviewer => RuntimePlan::Codex {
             provider: CodexProvider::OpenAi,
             size: RunSize::Medium,
             nodes,
         },
         RuntimePlanKind::Claude => RuntimePlan::Claude {
-            provider: crate::native_v2_contract::ClaudeProvider::Anthropic,
+            provider: ClaudeProvider::Anthropic,
             size: RunSize::Medium,
             nodes,
         },
     }
 }
 
-pub(super) fn shipping_graph() -> GraphSpec {
+pub(super) fn shipping_graph(kind: RuntimePlanKind) -> GraphSpec {
     let receipt_type = serde_json::to_value(
         crate::native_v2_delivery::delivery_result_schema(
             crate::native_v2_delivery::DeliveryMode::Merge,
@@ -97,6 +139,38 @@ pub(super) fn shipping_graph() -> GraphSpec {
             })
         })
         .collect::<Vec<_>>();
+    let mut children = vec![json!({
+        "kind":"step","name":"worker","worker":"agent.worker@1",
+        "instructions":"Exercise the candidate worker.",
+        "input":{"kind":"null"},"output":{"kind":"null"},
+        "inputBindings":[],"writeBindings":[],"timeoutMs":10000,"attempts":1
+    })];
+    if kind.reviewer_lane().is_some() {
+        children.push(json!({
+            "kind":"verifier","name":"reviewer","worker":"agent.reviewer@1",
+            "instructions":"Review the candidate worker.",
+            "input":{"kind":"null"},"output":{"kind":"null"},
+            "inputBindings":[],"writeBindings":[],"timeoutMs":10000,"attempts":1,
+            "signals":{},"diagnostic":{"kind":"null"}
+        }));
+    }
+    children.push(delivery);
+    children.push(json!({
+        "kind":"choice","name":"delivery_result","state":state_type,
+        "branches":[{
+            "when":{
+                "kind":"in",
+                "value":{"name":"deliver","source":"signal","field":"delivery"},
+                "labels":["merged"]
+            },
+            "node":{
+                "kind":"succeed","name":"done","output":terminal_type,
+                "bindings":terminal_bindings
+            }
+        }],
+        "otherwise":{"kind":"fail","name":"delivery_failed","reason":"delivery_failed"},
+        "promotedStatePaths":[]
+    }));
     serde_json::from_value(json!({
         "profile":"openengine.graph.full/v1",
         "initialInput":state_type,
@@ -105,31 +179,7 @@ pub(super) fn shipping_graph() -> GraphSpec {
             "kind":"seq",
             "name":"root",
             "state":state_type,
-            "children":[
-                {
-                    "kind":"step","name":"worker","worker":"agent.worker@1",
-                    "instructions":"Exercise the candidate worker.",
-                    "input":{"kind":"null"},"output":{"kind":"null"},
-                    "inputBindings":[],"writeBindings":[],"timeoutMs":10000,"attempts":1
-                },
-                delivery,
-                {
-                    "kind":"choice","name":"delivery_result","state":state_type,
-                    "branches":[{
-                        "when":{
-                            "kind":"in",
-                            "value":{"name":"deliver","source":"signal","field":"delivery"},
-                            "labels":["merged"]
-                        },
-                        "node":{
-                            "kind":"succeed","name":"done","output":terminal_type,
-                            "bindings":terminal_bindings
-                        }
-                    }],
-                    "otherwise":{"kind":"fail","name":"delivery_failed","reason":"delivery_failed"},
-                    "promotedStatePaths":[]
-                }
-            ],
+            "children":children,
             "promotedStatePaths":[]
         }
     }))
@@ -141,7 +191,7 @@ pub(super) async fn admitted(kind: RuntimePlanKind) -> AdmittedRun {
         .admit(RunSubmission {
             environment: None,
             title: RunTitle::new("Candidate config").assert_value_with("title"),
-            graph: shipping_graph(),
+            graph: shipping_graph(kind),
             initial_input: json!({}),
             runtime: runtime(kind),
             source: ResolvedSource {
@@ -161,11 +211,45 @@ pub(super) fn candidate_config(
     repository: &TempRepository,
     github: Arc<ScriptedGitHub>,
 ) -> NativeV2CandidateConfig {
+    NativeV2CandidateConfig {
+        lanes: runtime(kind)
+            .lanes()
+            .into_iter()
+            .map(|lane| harness_config(lane, repository))
+            .collect(),
+        delivery: NativeV2DeliveryConfig {
+            delivery_run_id: RunId::new("candidate-fixture"),
+            adopt_existing_delivery: false,
+            git_identity: None,
+            workspace: repository.workspace.clone(),
+            git_program: PathBuf::from("/usr/bin/git"),
+            target: DeliveryTarget::new("acme/project", "main", repository.base.clone())
+                .assert_value_with("target"),
+            poll: DeliveryPollPolicy::new(2, Duration::ZERO).assert_value_with("poll"),
+        },
+        github,
+    }
+}
+
+pub(super) fn harness_config(
+    lane: RuntimeLane,
+    repository: &TempRepository,
+) -> NativeV2HarnessConfig {
     let pool = HostedProcessPool::new(10_002, 10_002, 20_000).assert_value_with("pool");
-    let harness = match kind {
-        RuntimePlanKind::Codex => NativeV2HarnessConfig::Codex(NativeV2CodexConfig {
+    match lane {
+        RuntimeLane::Copilot { .. } => NativeV2HarnessConfig::Copilot(CopilotConfig {
+            executable: PathBuf::from("/usr/bin/false"),
+            workspace: repository.workspace.clone(),
+            runtime_home: repository.root.child("copilot-runtime"),
+            local_user: None,
+            base_environment: BTreeMap::new(),
+            local_command_environment: BTreeMap::new(),
+            search_path: "/usr/bin:/bin".to_owned(),
+            process_pool: pool,
+        }),
+        RuntimeLane::Codex { provider } => NativeV2HarnessConfig::Codex(NativeV2CodexConfig {
             base_environment: Default::default(),
-            provider: CodexProvider::OpenAi,
+            provider,
             executable: PathBuf::from("/usr/bin/false"),
             workspace: repository.workspace.clone(),
             runtime_home: repository.root.child("codex-home"),
@@ -174,8 +258,8 @@ pub(super) fn candidate_config(
             search_path: "/usr/bin:/bin".to_owned(),
             process_pool: pool,
         }),
-        RuntimePlanKind::Claude => NativeV2HarnessConfig::Claude(ClaudeAdapterConfig {
-            provider: crate::native_v2_contract::ClaudeProvider::Anthropic,
+        RuntimeLane::Claude { provider } => NativeV2HarnessConfig::Claude(ClaudeAdapterConfig {
+            provider,
             executable: "/usr/bin/false".to_owned(),
             prefix_arguments: Vec::new(),
             workspace: repository.workspace.clone(),
@@ -192,20 +276,6 @@ pub(super) fn candidate_config(
             .assert_value_with("Claude environment"),
             process_pool: pool,
         }),
-    };
-    NativeV2CandidateConfig {
-        harness,
-        delivery: NativeV2DeliveryConfig {
-            delivery_run_id: RunId::new("candidate-fixture"),
-            adopt_existing_delivery: false,
-            git_identity: None,
-            workspace: repository.workspace.clone(),
-            git_program: PathBuf::from("/usr/bin/git"),
-            target: DeliveryTarget::new("acme/project", "main", repository.base.clone())
-                .assert_value_with("target"),
-            poll: DeliveryPollPolicy::new(2, Duration::ZERO).assert_value_with("poll"),
-        },
-        github,
     }
 }
 

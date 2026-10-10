@@ -23,6 +23,8 @@ pub(super) use direct::{spawn_direct_target_authority, spawn_rejecting_direct_ta
 mod merge_plans;
 #[path = "hosted_authority/problem_errors.rs"]
 mod problem_errors;
+#[path = "hosted_authority/runtime_lanes.rs"]
+mod runtime_lanes;
 
 type HostedTestBackend = zeroshot_engine::native_v2_cli::oecp::NamedTargetCliBackend<
     NativeV2TargetConnector<

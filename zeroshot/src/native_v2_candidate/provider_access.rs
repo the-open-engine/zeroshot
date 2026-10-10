@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use openengine_cluster_protocol::{
     ClaudeProvider, CodexProvider, ConnectionKey, DeclaredConnections, DeclaredEnvironment,
-    EnvironmentVariableName, NativeV2RunValueError, NodeRuntimeBinding, RuntimePlan,
+    EnvironmentVariableName, NativeV2RunValueError, NodeRuntimeBinding, RuntimeLane, RuntimePlan,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -41,23 +41,23 @@ pub(crate) fn materialize_provider_access(
     runtime: &mut RuntimePlan,
     placement: ProviderAccessPlacement,
 ) -> Result<(), NativeV2RunValueError> {
-    let contract = provider_access_contract(runtime);
-    for binding in runtime_nodes_mut(runtime).values_mut() {
-        materialize_binding(binding, contract, placement)?;
+    let default_lane = runtime.lane();
+    for binding in runtime.nodes_mut().values_mut() {
+        materialize_binding(binding, default_lane, placement)?;
     }
     Ok(())
 }
 
-fn provider_access_contract(runtime: &RuntimePlan) -> ProviderAccessContract {
-    match runtime {
-        RuntimePlan::Copilot { .. } => ProviderAccessContract::new(
+fn provider_access_contract(lane: RuntimeLane) -> ProviderAccessContract {
+    match lane {
+        RuntimeLane::Copilot { .. } => ProviderAccessContract::new(
             true,
             "github",
             &["COPILOT_GITHUB_TOKEN"],
             &[&["COPILOT_GITHUB_TOKEN"]],
         ),
-        RuntimePlan::Codex { provider, .. } => codex_contract(*provider),
-        RuntimePlan::Claude { provider, .. } => claude_contract(*provider),
+        RuntimeLane::Codex { provider } => codex_contract(provider),
+        RuntimeLane::Claude { provider } => claude_contract(provider),
     }
 }
 
@@ -124,24 +124,18 @@ fn claude_contract(provider: ClaudeProvider) -> ProviderAccessContract {
     }
 }
 
-fn runtime_nodes_mut(
-    runtime: &mut RuntimePlan,
-) -> &mut BTreeMap<openengine_cluster_protocol::NodeName, NodeRuntimeBinding> {
-    match runtime {
-        RuntimePlan::Copilot { nodes, .. }
-        | RuntimePlan::Codex { nodes, .. }
-        | RuntimePlan::Claude { nodes, .. } => nodes,
-    }
-}
-
 fn materialize_binding(
     binding: &mut NodeRuntimeBinding,
-    contract: ProviderAccessContract,
+    default_lane: RuntimeLane,
     placement: ProviderAccessPlacement,
 ) -> Result<(), NativeV2RunValueError> {
-    let NodeRuntimeBinding::Agent { connections, .. } = binding else {
+    let NodeRuntimeBinding::Agent {
+        lane, connections, ..
+    } = binding
+    else {
         return Ok(());
     };
+    let contract = provider_access_contract(lane.unwrap_or(default_lane));
     if supports_authored_access(connections, contract)
         || placement == ProviderAccessPlacement::Local && contract.native_local
     {

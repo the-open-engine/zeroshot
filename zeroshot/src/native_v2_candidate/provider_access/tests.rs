@@ -27,6 +27,53 @@ fn requirements(runtime: &RuntimePlan) -> Value {
     serde_json::to_value(runtime.connection_requirements()).assert_value()
 }
 
+fn mixed_runtime(worker: Value, reviewer: Value, router: Value) -> RuntimePlan {
+    serde_json::from_value(json!({
+        "harness": "codex",
+        "provider": "openai",
+        "size": "medium",
+        "nodes": {
+            "worker": {
+                "kind": "agent",
+                "model": "provider-owned-model",
+                "connections": worker
+            },
+            "reviewer": {
+                "kind": "agent",
+                "lane": {"harness": "claude", "provider": "anthropic"},
+                "model": "provider-owned-model",
+                "connections": reviewer
+            },
+            "router": {
+                "kind": "agent",
+                "lane": {"harness": "codex", "provider": "openrouter"},
+                "model": "provider-owned-model",
+                "connections": router
+            },
+            "deliver": {
+                "kind": "git_delivery",
+                "connections": {"github": ["GH_TOKEN"]}
+            }
+        }
+    }))
+    .assert_value()
+}
+
+fn node_connections(runtime: &RuntimePlan) -> Value {
+    Value::Object(
+        runtime
+            .nodes()
+            .iter()
+            .map(|(name, binding)| {
+                (
+                    name.as_str().to_owned(),
+                    serde_json::to_value(binding.declared_connections()).assert_value(),
+                )
+            })
+            .collect(),
+    )
+}
+
 #[test]
 fn native_local_lanes_do_not_invent_provider_connections() {
     for (harness, provider) in [
@@ -110,6 +157,73 @@ fn authored_access_wins_and_partial_connections_receive_only_missing_fields() {
             "gateway":["GATEWAY_API_KEY"],
             "github":["GH_TOKEN"],
             "internal":["GATEWAY_BASE_URL"]
+        })
+    );
+}
+
+#[test]
+fn mixed_lanes_materialize_each_node_from_its_own_effective_lane() {
+    let mut local = mixed_runtime(json!({}), json!({}), json!({}));
+    materialize_provider_access(&mut local, ProviderAccessPlacement::Local).assert_value();
+    assert_eq!(
+        node_connections(&local),
+        json!({
+            "deliver":{"github":["GH_TOKEN"]},
+            "reviewer":{},
+            "router":{"openrouter":["OPENROUTER_API_KEY"]},
+            "worker":{}
+        })
+    );
+    assert_eq!(
+        requirements(&local),
+        json!({"github":["GH_TOKEN"],"openrouter":["OPENROUTER_API_KEY"]})
+    );
+
+    let mut contained = mixed_runtime(json!({}), json!({}), json!({}));
+    materialize_provider_access(&mut contained, ProviderAccessPlacement::Contained).assert_value();
+    assert_eq!(
+        node_connections(&contained),
+        json!({
+            "deliver":{"github":["GH_TOKEN"]},
+            "reviewer":{"anthropic":["ANTHROPIC_API_KEY"]},
+            "router":{"openrouter":["OPENROUTER_API_KEY"]},
+            "worker":{"openai":["OPENAI_API_KEY"]}
+        })
+    );
+    assert_eq!(
+        requirements(&contained),
+        json!({
+            "anthropic":["ANTHROPIC_API_KEY"],
+            "github":["GH_TOKEN"],
+            "openai":["OPENAI_API_KEY"],
+            "openrouter":["OPENROUTER_API_KEY"]
+        })
+    );
+}
+
+#[test]
+fn authored_access_wins_only_when_it_fits_the_node_lane() {
+    let mut runtime = mixed_runtime(
+        json!({"internal":["CODEX_API_KEY"]}),
+        json!({"internal":["OPENAI_API_KEY"]}),
+        json!({"internal":["OPENROUTER_API_KEY"]}),
+    );
+    materialize_provider_access(&mut runtime, ProviderAccessPlacement::Contained).assert_value();
+    assert_eq!(
+        node_connections(&runtime),
+        json!({
+            "deliver":{"github":["GH_TOKEN"]},
+            "reviewer":{"anthropic":["ANTHROPIC_API_KEY"],"internal":["OPENAI_API_KEY"]},
+            "router":{"internal":["OPENROUTER_API_KEY"]},
+            "worker":{"internal":["CODEX_API_KEY"]}
+        })
+    );
+    assert_eq!(
+        requirements(&runtime),
+        json!({
+            "anthropic":["ANTHROPIC_API_KEY"],
+            "github":["GH_TOKEN"],
+            "internal":["CODEX_API_KEY","OPENAI_API_KEY","OPENROUTER_API_KEY"]
         })
     );
 }

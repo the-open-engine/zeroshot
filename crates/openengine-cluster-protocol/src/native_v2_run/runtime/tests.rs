@@ -31,6 +31,86 @@ fn pr_feedback_defaults_to_consider_and_runtime_can_select_ignore() {
 }
 
 #[test]
+fn agent_lane_round_trips_exactly() {
+    let wire = r#"{"kind":"agent","lane":{"harness":"claude","provider":"anthropic"},"model":"review-model"}"#;
+    let binding: NodeRuntimeBinding = serde_json::from_str(wire).unwrap();
+    assert!(matches!(
+        binding,
+        NodeRuntimeBinding::Agent {
+            lane: Some(crate::RuntimeLane::Claude {
+                provider: crate::ClaudeProvider::Anthropic
+            }),
+            ..
+        }
+    ));
+    assert_eq!(serde_json::to_string(&binding).unwrap(), wire);
+}
+
+#[test]
+fn agent_without_a_lane_serializes_without_a_lane_key() {
+    let binding = NodeRuntimeBinding::Agent {
+        lane: None,
+        model: crate::ModelId::new("worker-model").unwrap(),
+        effort: None,
+        session_scope: SessionScope::Execution,
+        connections: DeclaredConnections::empty(),
+    };
+    let wire = r#"{"kind":"agent","model":"worker-model"}"#;
+    assert_eq!(serde_json::to_string(&binding).unwrap(), wire);
+    assert_eq!(
+        serde_json::from_str::<NodeRuntimeBinding>(wire).unwrap(),
+        binding
+    );
+}
+
+#[test]
+fn lane_is_rejected_on_git_delivery() {
+    let error = serde_json::from_value::<NodeRuntimeBinding>(serde_json::json!({
+        "kind": "git_delivery",
+        "lane": {"harness": "claude", "provider": "anthropic"}
+    }))
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("unknown field `lane`"),
+        "{error}"
+    );
+}
+
+#[test]
+fn lane_rejects_incompatible_pairs_and_unknown_or_missing_fields() {
+    for (lane, expected) in [
+        (
+            serde_json::json!({"harness": "codex", "provider": "anthropic"}),
+            "unknown variant `anthropic`",
+        ),
+        (
+            serde_json::json!({"harness": "claude", "provider": "openai"}),
+            "unknown variant `openai`",
+        ),
+        (
+            serde_json::json!({"harness": "copilot", "provider": "openai"}),
+            "unknown variant `openai`",
+        ),
+        (
+            serde_json::json!({"harness": "claude", "provider": "anthropic", "model": "m"}),
+            "unknown field `model`",
+        ),
+        (
+            serde_json::json!({"harness": "claude"}),
+            "missing field `provider`",
+        ),
+    ] {
+        let error = serde_json::from_value::<NodeRuntimeBinding>(serde_json::json!({
+            "kind": "agent",
+            "lane": lane,
+            "model": "review-model"
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains(expected), "{lane}: {error}");
+    }
+}
+
+#[test]
 fn declared_runtime_inputs_enforce_unique_bounded_connection_authority() {
     let token = EnvironmentVariableName::new("TOKEN").unwrap();
     let one = DeclaredEnvironment::new([token.clone()]).unwrap();

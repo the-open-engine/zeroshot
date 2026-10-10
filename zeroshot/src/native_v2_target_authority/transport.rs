@@ -405,7 +405,8 @@ impl NativeV2TargetServer {
     }
 
     fn discovery_document(&self) -> TargetDiscoveryDocument {
-        let mut document = TargetDiscoveryDocument::direct(self.access.authentication());
+        let mut document =
+            TargetDiscoveryDocument::direct(self.access.authentication()).with_node_runtime_lanes();
         if self.workspace_recovery() {
             document = document.with_workspace_recovery();
         }

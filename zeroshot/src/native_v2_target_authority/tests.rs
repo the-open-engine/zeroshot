@@ -10,6 +10,7 @@ use openengine_cluster_protocol::{
     RunId, RunListParams, RunResumeFrom, NOT_FOUND, WORKSPACE_CHECKPOINTS_KIND, RunResumeParams,
     RunSubmission, RunTitle, SourceBranchId, INVALID_PARAMS, SCHEMA_VIOLATION, SourceRepositoryId,
     SourceRevisionId, TargetPrivateBootstrapRequest, WORKSPACE_RECOVERY_KIND,
+    NODE_RUNTIME_LANES_KIND,
 };
 use openengine_cluster_server::identity::{
     BindingAttributes, ConnectionIdentity, ConnectionIdentityConfig, PrincipalId, TenantId,
@@ -283,6 +284,7 @@ async fn hosted_sessions_are_authenticated_and_run_scoped() {
     assert_eq!(document.authentication, TargetAuthentication::HostedOauth);
     assert_eq!(document.kind, DISCOVERY_KIND);
     assert_workspace_recovery_capability(&document, false);
+    assert_node_runtime_lanes_capability(&document);
     assert_eq!(
         http(
             address,
@@ -445,6 +447,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
     let (address, endpoint, task) = direct_test_server(Arc::new(FakeFactory::default())).await;
     let document = target_discovery(address).await;
     assert_workspace_recovery_capability(&document, true);
+    assert_node_runtime_lanes_capability(&document);
     let client = connect_client(&endpoint, None).await;
     assert!(document.extensions.workspace_checkpoints.is_none());
     let errors = [
@@ -549,6 +552,7 @@ async fn target_without_workspace_recovery_support_omits_and_rejects_the_capabil
     let (address, endpoint, task) = direct_test_server(Arc::new(RejectingFactory)).await;
     let document = target_discovery(address).await;
     assert_workspace_recovery_capability(&document, false);
+    assert_node_runtime_lanes_capability(&document);
     assert_workspace_recovery(&endpoint, None, false).await;
     task.abort();
 }
@@ -558,6 +562,7 @@ async fn private_target_closes_bootstrap_and_rejects_unprivileged_children() {
     let (root, address, endpoint, task) = private_test_server().await;
     let document = target_discovery(address).await;
     assert_workspace_recovery_capability(&document, true);
+    assert_node_runtime_lanes_capability(&document);
     assert_private_routes_require_capability(address, &endpoint).await;
     let token = bootstrap_private_target(address).await;
     assert_private_session(address, &endpoint, &token).await;
@@ -783,6 +788,17 @@ fn private_bootstrap_payload(token: &str) -> Vec<u8> {
 async fn target_discovery(address: std::net::SocketAddr) -> TargetDiscoveryDocument {
     let response = http(address, TestHttpRequest::empty("GET", DISCOVERY_PATH, None)).await;
     serde_json::from_slice(&response.body).assert_value()
+}
+
+fn assert_node_runtime_lanes_capability(document: &TargetDiscoveryDocument) {
+    assert_eq!(
+        document
+            .extensions
+            .node_runtime_lanes
+            .as_ref()
+            .map(|capability| capability.kind.as_str()),
+        Some(NODE_RUNTIME_LANES_KIND)
+    );
 }
 
 fn assert_workspace_recovery_capability(document: &TargetDiscoveryDocument, advertised: bool) {

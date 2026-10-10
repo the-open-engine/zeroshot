@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use acp::Agent as _;
 use super::*;
@@ -143,6 +143,22 @@ async fn agent_surface_advertises_its_contract_and_rejects_unsupported_session_i
     }
 }
 
+#[test]
+fn a_missing_lane_executable_reaches_the_client_as_invalid_params() {
+    let missing = LocalCompositionError::MissingLaneExecutable {
+        lane: RuntimeLane::Claude {
+            provider: ClaudeProvider::Anthropic,
+        },
+        executable: "claude",
+    };
+    let error = AcpServeError::MissingLaneExecutable(missing.to_string()).rpc_error();
+    assert_eq!(error.code, acp::ErrorCode::InvalidParams);
+    assert_eq!(
+        error.message,
+        "lane claude/anthropic needs the `claude` executable on PATH"
+    );
+}
+
 fn acp_graph() -> openengine_cluster_protocol::GraphSpec {
     let field = || json!({"type":{"kind":"string"},"required":true});
     let response = || json!({"kind":"record","fields":{"response":field()}});
@@ -193,6 +209,7 @@ fn acp_profile(runtime: RuntimePlan) -> RunProfile {
 
 fn runtime(harness: &str, scope: &str, connections: Value) -> RuntimePlan {
     let binding = NodeRuntimeBinding::Agent {
+        lane: None,
         model: ModelId::new("provider-model").assert_value(),
         effort: None,
         session_scope: match scope {
@@ -219,6 +236,105 @@ fn runtime(harness: &str, scope: &str, connections: Value) -> RuntimePlan {
             nodes,
         },
     }
+}
+
+fn two_agent_profile(mut runtime: RuntimePlan, reviewer_lane: Option<RuntimeLane>) -> RunProfile {
+    let mut graph = serde_json::to_value(acp_graph()).assert_value();
+    let children = graph
+        .pointer_mut("/root/children")
+        .and_then(Value::as_array_mut)
+        .expect("single-worker sequence");
+    let mut reviewer = children[0].clone();
+    reviewer["name"] = json!("reviewer");
+    reviewer["worker"] = json!("agent.reviewer@1");
+    reviewer["output"] = json!({"kind":"null"});
+    reviewer["writeBindings"] = json!([]);
+    children.insert(1, reviewer);
+
+    let worker = NodeName::new("worker").assert_value();
+    let mut binding = runtime.nodes()[&worker].clone();
+    let NodeRuntimeBinding::Agent { lane, .. } = &mut binding else {
+        panic!("the ACP runtime binds worker as an agent");
+    };
+    *lane = reviewer_lane;
+    runtime
+        .nodes_mut()
+        .insert(NodeName::new("reviewer").assert_value(), binding);
+    RunProfile {
+        graph: serde_json::from_value(graph).assert_value(),
+        ..acp_profile(runtime)
+    }
+}
+
+fn with_worker_lane(mut runtime: RuntimePlan, lane: RuntimeLane) -> RuntimePlan {
+    let worker = NodeName::new("worker").assert_value();
+    let Some(NodeRuntimeBinding::Agent {
+        lane: worker_lane, ..
+    }) = runtime.nodes_mut().get_mut(&worker)
+    else {
+        panic!("the ACP runtime binds worker as an agent");
+    };
+    *worker_lane = Some(lane);
+    runtime
+}
+
+#[tokio::test]
+async fn acp_profile_validation_checks_every_effective_lane() {
+    let claude_worker = with_worker_lane(
+        runtime("codex", "node_instance", json!({})),
+        RuntimeLane::Claude {
+            provider: ClaudeProvider::Anthropic,
+        },
+    );
+    validate_profile(&acp_profile(claude_worker))
+        .await
+        .unwrap_or_else(|error| panic!("a Claude lane on a Codex plan was rejected: {error}"));
+
+    let copilot_worker = with_worker_lane(
+        runtime("claude", "node_instance", json!({})),
+        RuntimeLane::Copilot {
+            provider: CopilotProvider::Github,
+        },
+    );
+    assert_eq!(
+        validate_profile(&acp_profile(copilot_worker))
+            .await
+            .assert_error()
+            .to_string(),
+        "ACP profile is not eligible: only Codex and Claude lanes are supported"
+    );
+}
+
+#[tokio::test]
+async fn acp_profile_validation_accepts_mixed_codex_and_claude_lanes() {
+    let codex = RuntimeLane::Codex {
+        provider: CodexProvider::OpenAi,
+    };
+    let claude = RuntimeLane::Claude {
+        provider: ClaudeProvider::Anthropic,
+    };
+    let mixed = two_agent_profile(runtime("codex", "node_instance", json!({})), Some(claude));
+    assert_eq!(mixed.runtime.lanes(), BTreeSet::from([codex, claude]));
+    validate_profile(&mixed)
+        .await
+        .unwrap_or_else(|error| panic!("a mixed Codex and Claude profile was rejected: {error}"));
+
+    let copilot = RuntimeLane::Copilot {
+        provider: CopilotProvider::Github,
+    };
+    let with_copilot =
+        two_agent_profile(runtime("codex", "node_instance", json!({})), Some(copilot));
+    assert_eq!(
+        with_copilot.runtime.lanes(),
+        BTreeSet::from([copilot, codex])
+    );
+    assert_eq!(
+        validate_profile(&with_copilot)
+            .await
+            .assert_error()
+            .to_string(),
+        "ACP profile is not eligible: only Codex and Claude lanes are supported"
+    );
 }
 
 #[tokio::test]

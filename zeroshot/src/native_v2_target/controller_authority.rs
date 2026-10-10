@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use openengine_cluster_protocol::{NODE_RUNTIME_LANES_KIND, RuntimePlan};
 use reqwest::header::{ACCEPT, AUTHORIZATION, CACHE_CONTROL, HeaderValue};
 use reqwest::{Client, Url};
 use serde::de::DeserializeOwned;
@@ -366,7 +367,16 @@ impl TargetHttpControlAuthority {
         &self,
         target: &TargetRecord,
     ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
-        self.controller_access_inner(target, TargetSessionPurpose::General)
+        self.controller_access_inner(target, TargetSessionPurpose::General, None)
+            .await
+    }
+
+    async fn controller_access_for_runtime(
+        &self,
+        target: &TargetRecord,
+        runtime: &RuntimePlan,
+    ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
+        self.controller_access_inner(target, TargetSessionPurpose::General, Some(runtime))
             .await
     }
 
@@ -374,7 +384,7 @@ impl TargetHttpControlAuthority {
         &self,
         target: &TargetRecord,
     ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
-        self.controller_access_inner(target, TargetSessionPurpose::WorkspaceRecovery)
+        self.controller_access_inner(target, TargetSessionPurpose::WorkspaceRecovery, None)
             .await
     }
 
@@ -382,7 +392,7 @@ impl TargetHttpControlAuthority {
         &self,
         target: &TargetRecord,
     ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
-        self.controller_access_inner(target, TargetSessionPurpose::WorkspaceCheckpoints)
+        self.controller_access_inner(target, TargetSessionPurpose::WorkspaceCheckpoints, None)
             .await
     }
 
@@ -390,10 +400,14 @@ impl TargetHttpControlAuthority {
         &self,
         target: &TargetRecord,
         purpose: TargetSessionPurpose,
+        runtime: Option<&RuntimePlan>,
     ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
         match &target.access {
             TargetAccess::Hosted { .. } => {
                 let (auth, controller) = self.descriptors_inner(target, purpose).await?;
+                if let Some(runtime) = runtime {
+                    require_node_runtime_lanes(&controller, runtime)?;
+                }
                 let access = self
                     .access_token(target, &auth, &controller.audience)
                     .await?;
@@ -402,6 +416,9 @@ impl TargetHttpControlAuthority {
             TargetAccess::Direct => {
                 let controller = self.controller_descriptor(target).await?;
                 require_session_capability(&controller, purpose)?;
+                if let Some(runtime) = runtime {
+                    require_node_runtime_lanes(&controller, runtime)?;
+                }
                 Ok((controller, None))
             }
         }
@@ -465,6 +482,19 @@ fn require_session_capability(
     }
 }
 
+/// Checked before any access token is requested, so a refused plan sends no request body.
+fn require_node_runtime_lanes(
+    controller: &ControllerDescriptor,
+    runtime: &RuntimePlan,
+) -> Result<(), TargetAuthorityError> {
+    if runtime.has_lane_overrides() && !controller.node_runtime_lanes {
+        return Err(authority_error(format!(
+            "target does not support per-node runtime lanes ({NODE_RUNTIME_LANES_KIND})"
+        )));
+    }
+    Ok(())
+}
+
 enum TokenPollOutcome {
     Ready(TokenWire),
     Pending,
@@ -472,3 +502,7 @@ enum TokenPollOutcome {
 }
 
 pub(super) use credentials::TargetCredentialStore;
+
+#[cfg(test)]
+#[path = "controller_authority/tests.rs"]
+mod tests;

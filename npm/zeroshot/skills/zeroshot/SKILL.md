@@ -98,9 +98,9 @@ zeroshot acp --profile local:NAME
 ```
 
 Check the profile first. It must accept exactly one required string named `task`; every success node
-must return exactly one required string named `response`. The runtime must use Codex or Claude, and
-every executable node must have an agent binding with `sessionScope: node_instance`. Maps, delivery,
-runtime connections, MCP servers, and session reload are unsupported.
+must return exactly one required string named `response`. The runtime must use Codex or Claude for
+every node, and every executable node must have an agent binding with `sessionScope: node_instance`.
+Maps, delivery, runtime connections, MCP servers, and session reload are unsupported.
 
 Each ACP prompt is a separate durable local run. The outer ACP session keeps the Git workspace and
 node provider sessions alive across prompts. Inspect the returned run ID with `zeroshot status` or

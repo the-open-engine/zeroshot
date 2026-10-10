@@ -109,6 +109,7 @@ async fn hosted_case(harness: &str, verifier: bool, policy: &str, native: Option
         }
     }
     let binding = NodeRuntimeBinding::Agent {
+        lane: None,
         model: ModelId::new("opaque-model").assert_value(),
         effort: None,
         session_scope: SessionScope::Execution,

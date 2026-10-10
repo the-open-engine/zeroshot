@@ -9,17 +9,23 @@ rule.
 
 ## Four explicit choices
 
-Each agent binding names:
+Each agent node uses:
 
 1. a **harness**, `codex`, `claude`, or `copilot`;
 2. a **provider** supported by that harness;
 3. an opaque provider-owned **model** identifier;
 4. zero or more named **connections**, each declaring exact environment field names.
 
+The harness and provider form the node's effective lane. A plan's run-level `harness` and
+`provider` are the default lane for every agent node, and a binding can override them with its own
+[`lane`](../reference/runtime-plan.md#per-node-lanes), for example to have Codex implement and
+Claude Code review. Zeroshot starts one harness adapter per distinct effective lane, and each node
+runs on its own lane's CLI. Model and connections are always chosen per node.
+
 The [RuntimePlan reference](../reference/runtime-plan.md#harness-and-provider) lists the accepted
-harness/provider pairs. Admission rejects known-incompatible pairs, such as `codex` with `anthropic` and `claude` with
-`openai`. Zeroshot does not check current provider availability, and model names remain
-provider-owned.
+harness/provider pairs, which apply to the default lane and to every node's lane. Admission rejects
+known-incompatible pairs, such as `codex` with `anthropic` and `claude` with `openai`. Zeroshot does
+not check current provider availability, and model names remain provider-owned.
 
 ## Uniform and exact plans
 
@@ -38,8 +44,8 @@ built-in template configuration short:
 ```
 
 `--runtime-config` accepts a full plan with one same-named binding per executable graph node. Use it
-when reviewers and workers need different models, effort, sessions, or connections. Inspect node
-names first with `zeroshot template show TEMPLATE`.
+when reviewers and workers need different lanes, models, effort, sessions, or connections. Inspect
+node names first with `zeroshot template show TEMPLATE`.
 
 Session scope decides whether a node that runs again, such as in a loop, continues its provider
 session; see [session scope](../reference/runtime-plan.md#agent).
@@ -59,10 +65,11 @@ A connection maps a stable key to required environment field names:
 The submission environment or a target-owned connection store supplies the values. Zeroshot keeps
 them out of the graph, runtime JSON, run ledger, and observation records.
 
-When `connections` is omitted, Zeroshot materializes provider access for the selected execution
-placement. Local `codex`/`openai`, `claude`/`anthropic`, and `copilot`/`github` runs reuse the
-harness's native login and configuration without inventing a connection. A contained target, or
-any non-native provider lane, receives these canonical requirements:
+When `connections` is omitted, Zeroshot materializes provider access for each node from its
+effective lane and the selected execution placement. On a local run, nodes on the `codex`/`openai`,
+`claude`/`anthropic`, and `copilot`/`github` lanes reuse the harness's native login and
+configuration without inventing a connection. On a contained target, or on any non-native provider
+lane, a node receives these canonical requirements:
 
 | Provider     | Connection key | Fields                                   |
 | ------------ | -------------- | ---------------------------------------- |
@@ -72,6 +79,10 @@ any non-native provider lane, receives these canonical requirements:
 | `gateway`    | `gateway`      | `GATEWAY_BASE_URL`, `GATEWAY_API_KEY`    |
 | `bedrock`    | `bedrock`      | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_REGION` |
 | `github`     | `github`       | `COPILOT_GITHUB_TOKEN`                   |
+
+A run's connection requirements are the union over its nodes. A contained run with a Codex/OpenAI
+worker and Claude/Anthropic reviewers can therefore require both `OPENAI_API_KEY` and
+`ANTHROPIC_API_KEY`.
 
 Compatible authored connections take precedence, including `CODEX_API_KEY` for contained OpenAI
 access and Claude's supported auth-token variables for contained Anthropic access. Local profiles

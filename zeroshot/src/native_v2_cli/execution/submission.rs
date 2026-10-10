@@ -497,6 +497,7 @@ impl UniformRuntimePlan {
             return git_delivery_binding(pull_request_feedback);
         }
         Ok(NodeRuntimeBinding::Agent {
+            lane: None,
             model: self.model.clone(),
             effort: self.effort,
             session_scope: self.session_scope,
@@ -591,11 +592,7 @@ fn insert_template_binding(
     binding: NodeRuntimeBinding,
     override_feedback: bool,
 ) -> Result<(), NativeV2CliError> {
-    let nodes = match runtime {
-        RuntimePlan::Copilot { nodes, .. }
-        | RuntimePlan::Codex { nodes, .. }
-        | RuntimePlan::Claude { nodes, .. } => nodes,
-    };
+    let nodes = runtime.nodes_mut();
     if let Some(existing) = nodes.get_mut(&name) {
         let NodeRuntimeBinding::GitDelivery {
             pull_request_feedback,

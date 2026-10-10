@@ -46,6 +46,7 @@ async fn source_checkout_resolves_again_instead_of_reusing_an_earlier_token() {
     let key = ConnectionKey::new("github").assert_value();
     let field = EnvironmentVariableName::new(GITHUB_TOKEN_ENV).assert_value();
     let node = NodeRuntimeBinding::Agent {
+        lane: None,
         model: ModelId::new("gpt-5.6").assert_value(),
         effort: None,
         session_scope: SessionScope::Execution,

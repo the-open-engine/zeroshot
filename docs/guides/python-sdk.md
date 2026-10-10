@@ -152,6 +152,9 @@ async def submit_exact(
     result.raise_for_failure()
 ```
 
+An opaque `RuntimePlan` may carry [per-node lanes](../reference/runtime-plan.md#per-node-lanes) and
+passes through unchanged, while `UniformRuntime` applies one lane to every agent node.
+
 Before starting a local controller or contacting a direct target, the bundled executable performs
 the same preflight as the CLI.
 

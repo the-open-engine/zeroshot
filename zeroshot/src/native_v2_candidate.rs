@@ -1,13 +1,15 @@
 //! Composition root for the integrated native-v2 capsule candidate.
 //!
 //! The cloud controller owns admission, durability, observation, and runtime allocation. Inside
-//! one allocated capsule this module binds the graph-wide agent harness together with the
+//! one allocated capsule this module binds one agent adapter per runtime lane together with the
 //! trusted Git delivery lane and hands the resulting runner to the private capsule transport.
 
 #[path = "native_v2_candidate/provider_access.rs"]
 mod provider_access;
 pub(crate) use provider_access::{ProviderAccessPlacement, materialize_provider_access};
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -16,7 +18,9 @@ use thiserror::Error;
 use crate::native_v2_claude::{ClaudeAdapter, ClaudeAdapterConfig, ClaudeAdapterConfigError};
 use crate::native_v2_codex::{NativeV2CodexAdapter, NativeV2CodexConfig};
 use crate::native_v2_copilot::{CopilotAdapter, CopilotConfig};
-use crate::native_v2_contract::{AdmittedRun, NodeInvocation, NodeRuntimeBinding, RuntimePlan};
+use crate::native_v2_contract::{
+    AdmittedRun, CopilotProvider, NodeInvocation, NodeRuntimeBinding, RuntimeLane,
+};
 use crate::native_v2_delivery::{
     GitHubDeliveryAuthority, NativeV2DeliveryAdapter, NativeV2DeliveryConfig,
 };
@@ -32,15 +36,40 @@ mod tests;
 #[cfg(test)]
 pub(crate) mod test_support;
 
-/// The one harness/provider lane selected for the entire graph.
+/// Configuration of one lane's agent adapter: a harness and the provider it is fixed to.
 pub enum NativeV2HarnessConfig {
     Copilot(CopilotConfig),
     Codex(NativeV2CodexConfig),
     Claude(ClaudeAdapterConfig),
 }
 
+impl NativeV2HarnessConfig {
+    #[must_use]
+    pub fn lane(&self) -> RuntimeLane {
+        match self {
+            Self::Copilot(_) => RuntimeLane::Copilot {
+                provider: CopilotProvider::Github,
+            },
+            Self::Codex(config) => RuntimeLane::Codex {
+                provider: config.provider,
+            },
+            Self::Claude(config) => RuntimeLane::Claude {
+                provider: config.provider,
+            },
+        }
+    }
+
+    fn workspace(&self) -> &Path {
+        match self {
+            Self::Copilot(config) => &config.workspace,
+            Self::Codex(config) => &config.workspace,
+            Self::Claude(config) => &config.workspace,
+        }
+    }
+}
+
 pub struct NativeV2CandidateConfig {
-    pub harness: NativeV2HarnessConfig,
+    pub lanes: Vec<NativeV2HarnessConfig>,
     pub delivery: NativeV2DeliveryConfig,
     pub github: Arc<dyn GitHubDeliveryAuthority>,
 }
@@ -72,7 +101,7 @@ impl CandidatePlacement {
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum NativeV2CandidateError {
-    #[error("candidate harness/provider does not match the admitted graph runtime")]
+    #[error("candidate lanes do not match the admitted graph runtime")]
     RuntimeMismatch,
     #[error("agent and delivery adapters must use the same run workspace")]
     WorkspaceMismatch,
@@ -146,59 +175,75 @@ fn build_candidate(
     github_token: Option<Arc<str>>,
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
     validate_config(admitted, &config)?;
+    let NativeV2CandidateConfig {
+        lanes,
+        delivery,
+        github,
+    } = config;
     let delivery = Arc::new(
-        NativeV2DeliveryAdapter::new(config.delivery, config.github)
-            .with_trusted_github_token(github_token),
+        NativeV2DeliveryAdapter::new(delivery, github).with_trusted_github_token(github_token),
     );
-    match config.harness {
+    let agents = lane_agents(lanes, placement)?;
+    assemble_runner(admitted, agents, delivery, placement)
+}
+
+fn lane_agents(
+    lanes: Vec<NativeV2HarnessConfig>,
+    placement: CandidatePlacement,
+) -> Result<BTreeMap<RuntimeLane, CandidateAgents>, NativeV2CandidateError> {
+    lanes
+        .into_iter()
+        .map(|harness| Ok((harness.lane(), build_lane_agents(harness, placement)?)))
+        .collect()
+}
+
+fn build_lane_agents(
+    harness: NativeV2HarnessConfig,
+    placement: CandidatePlacement,
+) -> Result<CandidateAgents, NativeV2CandidateError> {
+    Ok(match harness {
         NativeV2HarnessConfig::Copilot(config) => {
-            let agent = Arc::new(if placement.is_local() {
+            CandidateAgents::new(Arc::new(if placement.is_local() {
                 CopilotAdapter::new_local(config)
             } else {
                 CopilotAdapter::new(config)
-            });
-            assemble_runner(admitted, CandidateAgents::new(agent), delivery, placement)
+            }))
         }
         NativeV2HarnessConfig::Codex(config) => {
-            let agent = Arc::new(if placement.is_local() {
+            CandidateAgents::new(Arc::new(if placement.is_local() {
                 NativeV2CodexAdapter::new_local(config)
             } else {
                 NativeV2CodexAdapter::new(config)
-            });
-            assemble_runner(admitted, CandidateAgents::new(agent), delivery, placement)
+            }))
         }
         NativeV2HarnessConfig::Claude(config) => {
-            let agent = Arc::new(if placement.is_local() {
+            CandidateAgents::new(Arc::new(if placement.is_local() {
                 ClaudeAdapter::new_local(config)?
             } else {
                 ClaudeAdapter::new(config)?
-            });
-            assemble_runner(admitted, CandidateAgents::new(agent), delivery, placement)
+            }))
         }
-    }
+    })
 }
 
 fn validate_config(
     admitted: &AdmittedRun,
     config: &NativeV2CandidateConfig,
 ) -> Result<(), NativeV2CandidateError> {
-    let workspace_matches = match (&admitted.runtime, &config.harness) {
-        (RuntimePlan::Copilot { .. }, NativeV2HarnessConfig::Copilot(harness)) => {
-            harness.workspace == config.delivery.workspace
+    let mut lanes = BTreeSet::new();
+    for harness in &config.lanes {
+        if !lanes.insert(harness.lane()) {
+            return Err(NativeV2CandidateError::RuntimeMismatch);
         }
-        (RuntimePlan::Codex { provider, .. }, NativeV2HarnessConfig::Codex(harness))
-            if provider == &harness.provider =>
-        {
-            harness.workspace == config.delivery.workspace
-        }
-        (RuntimePlan::Claude { provider, .. }, NativeV2HarnessConfig::Claude(harness))
-            if provider == &harness.provider =>
-        {
-            harness.workspace == config.delivery.workspace
-        }
-        _ => return Err(NativeV2CandidateError::RuntimeMismatch),
-    };
-    if !workspace_matches {
+    }
+    if lanes != admitted.runtime.lanes() {
+        return Err(NativeV2CandidateError::RuntimeMismatch);
+    }
+    if config
+        .lanes
+        .iter()
+        .any(|harness| harness.workspace() != config.delivery.workspace.as_path())
+    {
         return Err(NativeV2CandidateError::WorkspaceMismatch);
     }
     Ok(())
@@ -206,18 +251,20 @@ fn validate_config(
 
 fn assemble_runner(
     admitted: &AdmittedRun,
-    agents: CandidateAgents,
+    agents: BTreeMap<RuntimeLane, CandidateAgents>,
     delivery: Arc<NativeV2DeliveryAdapter>,
     placement: CandidatePlacement,
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
-    let lane = Arc::new(CandidateNodeLane {
-        agent_driver: agents.driver,
-        agent_sessions: agents.sessions,
+    let routes = Arc::new(CandidateNodeLane {
+        default_lane: admitted.runtime.lane(),
+        agents,
         delivery,
     });
     Ok(match placement.session_boundary() {
-        SessionBoundary::Run => NativeNodeRunner::new(admitted, lane.clone(), lane)?,
-        SessionBoundary::Owner => NativeNodeRunner::new_owner_scoped(admitted, lane.clone(), lane)?,
+        SessionBoundary::Run => NativeNodeRunner::new(admitted, routes.clone(), routes)?,
+        SessionBoundary::Owner => {
+            NativeNodeRunner::new_owner_scoped(admitted, routes.clone(), routes)?
+        }
     })
 }
 
@@ -238,12 +285,27 @@ impl CandidateAgents {
     }
 }
 
-/// Routes only by the admitted closed binding: agent nodes use the graph-wide harness and the
-/// graph-visible delivery verifier uses trusted Git delivery.
+/// Routes only by the admitted closed binding: agent nodes use their effective lane's adapter,
+/// never another lane's, and the graph-visible delivery verifier uses trusted Git delivery.
 struct CandidateNodeLane {
-    agent_driver: Arc<dyn NodeDriver>,
-    agent_sessions: Arc<dyn SessionFactory>,
+    default_lane: RuntimeLane,
+    agents: BTreeMap<RuntimeLane, CandidateAgents>,
     delivery: Arc<NativeV2DeliveryAdapter>,
+}
+
+impl CandidateNodeLane {
+    fn agents_for(
+        &self,
+        binding: &NodeRuntimeBinding,
+    ) -> Result<&CandidateAgents, NodeRunnerError> {
+        match binding {
+            NodeRuntimeBinding::Agent { lane, .. } => self
+                .agents
+                .get(&lane.unwrap_or(self.default_lane))
+                .ok_or(NodeRunnerError::Driver),
+            NodeRuntimeBinding::GitDelivery { .. } => Err(NodeRunnerError::Driver),
+        }
+    }
 }
 
 #[async_trait]
@@ -255,7 +317,10 @@ impl SessionFactory for CandidateNodeLane {
     ) -> Result<Arc<dyn NodeSession>, NodeRunnerError> {
         match &invocation.binding {
             NodeRuntimeBinding::Agent { .. } => {
-                self.agent_sessions.open(invocation, environment).await
+                self.agents_for(&invocation.binding)?
+                    .sessions
+                    .open(invocation, environment)
+                    .await
             }
             NodeRuntimeBinding::GitDelivery { .. } => {
                 self.delivery.open(invocation, environment).await
@@ -272,7 +337,10 @@ impl NodeDriver for CandidateNodeLane {
         control: DriverControl,
     ) -> Result<openengine_cluster_protocol::WorkerOutcome, NodeRunnerError> {
         match &invocation.node.binding {
-            NodeRuntimeBinding::Agent { .. } => self.agent_driver.run(invocation, control).await,
+            NodeRuntimeBinding::Agent { .. } => {
+                let agents = self.agents_for(&invocation.node.binding)?;
+                agents.driver.run(invocation, control).await
+            }
             NodeRuntimeBinding::GitDelivery { .. } => self.delivery.run(invocation, control).await,
         }
     }

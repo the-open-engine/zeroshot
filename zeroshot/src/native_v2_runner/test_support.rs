@@ -40,6 +40,7 @@ impl DurableOutput {
 
 pub(crate) fn binding(scope: SessionScope) -> NodeRuntimeBinding {
     NodeRuntimeBinding::Agent {
+        lane: None,
         model: crate::worker_catalog::ModelId::new("gpt-5.6").assert_value(),
         effort: Some(ReasoningEffort::Max),
         session_scope: scope,

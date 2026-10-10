@@ -51,6 +51,7 @@ fn runtime(fields: &[&str]) -> RuntimePlan {
         nodes: BTreeMap::from([(
             NodeName::new("worker").assert_value(),
             NodeRuntimeBinding::Agent {
+                lane: None,
                 model: ModelId::new("gpt-5.6").assert_value(),
                 effort: None,
                 session_scope: SessionScope::Execution,

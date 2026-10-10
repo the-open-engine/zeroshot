@@ -96,7 +96,9 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         target: &TargetRecord,
         request: &TargetRunRequest,
     ) -> Result<RunSubmitResult, TargetAuthorityError> {
-        let (controller, access) = self.controller_access(target).await?;
+        let (controller, access) = self
+            .controller_access_for_runtime(target, &request.submission.runtime)
+            .await?;
         let response = self
             .with_access(
                 self.client.post(controller.run_url.clone()),

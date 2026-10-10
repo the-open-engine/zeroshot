@@ -74,6 +74,7 @@ fn graph(children: Vec<Value>) -> GraphSpec {
 
 fn binding(model: &str, effort: Option<ReasoningEffort>) -> NodeRuntimeBinding {
     NodeRuntimeBinding::Agent {
+        lane: None,
         model: crate::worker_catalog::ModelId::new(model).assert_value(),
         effort,
         session_scope: SessionScope::Execution,
@@ -83,6 +84,7 @@ fn binding(model: &str, effort: Option<ReasoningEffort>) -> NodeRuntimeBinding {
 
 fn binding_with_environment(names: impl IntoIterator<Item = String>) -> NodeRuntimeBinding {
     NodeRuntimeBinding::Agent {
+        lane: None,
         model: crate::worker_catalog::ModelId::new("claude-sonnet-5").assert_value(),
         effort: None,
         session_scope: SessionScope::Execution,

@@ -66,3 +66,47 @@ fn controller_descriptor_requires_the_exact_checkpoint_capability_version() {
         "workspace-checkpoints discovery is incompatible"
     );
 }
+
+#[test]
+fn controller_descriptor_reads_node_runtime_lanes_from_the_exact_kind_only() {
+    let origin = Url::parse("http://127.0.0.1:8080").assert_value();
+    let advertised = build_controller_descriptor(
+        &origin,
+        TargetDiscoveryDocument::direct(TargetAuthentication::None).with_node_runtime_lanes(),
+        TargetAuthentication::None,
+    )
+    .assert_value();
+    assert!(advertised.node_runtime_lanes);
+
+    let absent = build_controller_descriptor(
+        &origin,
+        TargetDiscoveryDocument::direct(TargetAuthentication::None),
+        TargetAuthentication::None,
+    )
+    .assert_value();
+    assert!(!absent.node_runtime_lanes);
+
+    let mut other_kind =
+        TargetDiscoveryDocument::direct(TargetAuthentication::None).with_node_runtime_lanes();
+    other_kind
+        .extensions
+        .node_runtime_lanes
+        .as_mut()
+        .assert_value()
+        .kind = "openengine.node-runtime-lanes/v2".to_owned();
+    let other_kind =
+        build_controller_descriptor(&origin, other_kind, TargetAuthentication::None).assert_value();
+    assert!(!other_kind.node_runtime_lanes);
+
+    let mut newer =
+        serde_json::to_value(TargetDiscoveryDocument::direct(TargetAuthentication::None))
+            .assert_value();
+    newer["extensions"] = serde_json::json!({
+        "future_capability": {"kind": "openengine.future/v1", "detail": true},
+        "node_runtime_lanes": {"kind": "openengine.node-runtime-lanes/v2"}
+    });
+    let newer = serde_json::from_value::<TargetDiscoveryDocument>(newer).assert_value();
+    let newer =
+        build_controller_descriptor(&origin, newer, TargetAuthentication::None).assert_value();
+    assert!(!newer.node_runtime_lanes);
+}

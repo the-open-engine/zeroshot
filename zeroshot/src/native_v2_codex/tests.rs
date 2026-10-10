@@ -236,6 +236,7 @@ fn binding_with_model(
         DeclaredConnections::single("provider", environment_names(environment)).assert_value()
     };
     NodeRuntimeBinding::Agent {
+        lane: None,
         model: worker_catalog::ModelId::new(model).assert_value(),
         effort: Some(ReasoningEffort::Max),
         session_scope: scope,

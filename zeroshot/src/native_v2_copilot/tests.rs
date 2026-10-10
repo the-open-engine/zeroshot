@@ -40,6 +40,7 @@ fn binding(names: impl Iterator<Item = String>) -> NodeRuntimeBinding {
 
 fn binding_for_model(names: impl Iterator<Item = String>, model: &str) -> NodeRuntimeBinding {
     NodeRuntimeBinding::Agent {
+        lane: None,
         model: crate::worker_catalog::ModelId::new(model).assert_value(),
         effort: None,
         session_scope: SessionScope::NodeInstance,

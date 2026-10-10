@@ -1,4 +1,6 @@
-use openengine_cluster_protocol::{WORKSPACE_CHECKPOINTS_KIND, WORKSPACE_RECOVERY_KIND};
+use openengine_cluster_protocol::{
+    NODE_RUNTIME_LANES_KIND, WORKSPACE_CHECKPOINTS_KIND, WORKSPACE_RECOVERY_KIND,
+};
 use reqwest::Url;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -57,6 +59,7 @@ pub(super) struct ControllerDescriptor {
     pub(super) audience: String,
     pub(super) workspace_recovery: bool,
     pub(super) workspace_checkpoints: bool,
+    pub(super) node_runtime_lanes: bool,
 }
 
 pub(super) fn build_controller_descriptor(
@@ -67,12 +70,14 @@ pub(super) fn build_controller_descriptor(
     validate_controller_discovery(&wire, authentication)?;
     let workspace_recovery = parse_workspace_recovery(&wire)?;
     let workspace_checkpoints = parse_workspace_checkpoints(&wire)?;
+    let node_runtime_lanes = parse_node_runtime_lanes(&wire);
     Ok(ControllerDescriptor {
         run_url: same_origin_path(origin, &wire.run_path)?,
         session_url: same_origin_path(origin, &wire.session_path)?,
         audience: wire.audience,
         workspace_recovery,
         workspace_checkpoints,
+        node_runtime_lanes,
     })
 }
 
@@ -116,6 +121,14 @@ fn parse_workspace_checkpoints(
         }
         None => false,
     })
+}
+
+/// Unlike the workspace markers, another kind reads as unsupported so lane-free plans still run.
+fn parse_node_runtime_lanes(wire: &TargetDiscoveryDocument) -> bool {
+    wire.extensions
+        .node_runtime_lanes
+        .as_ref()
+        .is_some_and(|capability| capability.kind == NODE_RUNTIME_LANES_KIND)
 }
 
 pub(super) struct DevicePoll<'a> {

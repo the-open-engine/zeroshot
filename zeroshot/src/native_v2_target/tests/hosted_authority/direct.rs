@@ -98,6 +98,7 @@ fn discovery(address: std::net::SocketAddr) -> String {
         &TargetDiscoveryDocument::direct(TargetAuthentication::None)
             .with_workspace_recovery()
             .with_workspace_checkpoints()
+            .with_node_runtime_lanes()
             .with_run_history(TargetRunHistoryDiscovery {
                 kind: RUN_HISTORY_KIND.to_owned(),
                 base_url: format!("http://{address}"),

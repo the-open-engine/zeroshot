@@ -11,8 +11,8 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 
 use openengine_cluster_protocol::{
-    RunId, RunSubmission, RuntimePlan, SourceBranchId, SourceRepositoryId, SourceRevisionId,
-    ResolvedSource,
+    RunId, RunSubmission, RuntimeLane, RuntimePlan, SourceBranchId, SourceRepositoryId,
+    SourceRevisionId, ResolvedSource,
 };
 use thiserror::Error;
 use url::Url;
@@ -60,6 +60,11 @@ pub enum LocalCompositionError {
     Storage,
     #[error("local harness environment could not be represented")]
     NativeEnvironment,
+    #[error("lane {lane} needs the `{executable}` executable on PATH")]
+    MissingLaneExecutable {
+        lane: RuntimeLane,
+        executable: &'static str,
+    },
     #[error(transparent)]
     Claude(#[from] ClaudeAdapterConfigError),
     #[error(transparent)]
@@ -293,7 +298,7 @@ fn build_local_candidate_config(
     } = request;
     let runtime_home = storage.join("runtime");
     prepare_private_directory(&runtime_home)?;
-    let harness = local_harness(admitted, workspace, &runtime_home, native_environment)?;
+    let lanes = local_lanes(admitted, workspace, &runtime_home, native_environment)?;
     let target = DeliveryTarget::new(
         admitted.source.repository.as_str(),
         admitted.source.branch.as_str(),
@@ -304,7 +309,7 @@ fn build_local_candidate_config(
     github_config.git_program = PathBuf::from("git");
     github_config.gh_program = PathBuf::from("gh");
     let config = NativeV2CandidateConfig {
-        harness,
+        lanes,
         delivery: NativeV2DeliveryConfig {
             delivery_run_id,
             adopt_existing_delivery,
@@ -328,23 +333,55 @@ fn build_local_candidate_config(
     }
 }
 
-fn local_harness(
+struct LocalLaneInputs<'a> {
+    workspace: &'a Path,
+    runtime_home: &'a Path,
+    native_environment: LocalHarnessEnvironment,
+    local_command_environment: BTreeMap<String, String>,
+    search_path: String,
+    local_home: Option<PathBuf>,
+    process_pool: HostedProcessPool,
+}
+
+fn local_lanes(
     admitted: &AdmittedRun,
     workspace: &Path,
     runtime_home: &Path,
     native_environment: &BTreeMap<String, String>,
-) -> Result<NativeV2HarnessConfig, LocalCompositionError> {
+) -> Result<Vec<NativeV2HarnessConfig>, LocalCompositionError> {
     let native_environment = LocalHarnessEnvironment::new(native_environment.clone());
-    let local_command_environment = native_environment.clone().into_values();
-    let search_path = native_environment
-        .get("PATH")
-        .filter(|value| !value.is_empty())
-        .cloned()
-        .unwrap_or_else(|| default_search_path(&native_environment));
-    let local_home = current_user_home(&native_environment);
-    let process_pool = HostedProcessPool::hosted_default();
-    let harness = match &admitted.runtime {
-        RuntimePlan::Copilot { .. } => NativeV2HarnessConfig::Copilot(CopilotConfig {
+    let inputs = LocalLaneInputs {
+        workspace,
+        runtime_home,
+        local_command_environment: native_environment.clone().into_values(),
+        search_path: local_search_path(&native_environment),
+        local_home: current_user_home(&native_environment),
+        process_pool: HostedProcessPool::hosted_default(),
+        native_environment,
+    };
+    admitted
+        .runtime
+        .lanes()
+        .into_iter()
+        .map(|lane| local_lane(lane, &inputs))
+        .collect()
+}
+
+fn local_lane(
+    lane: RuntimeLane,
+    inputs: &LocalLaneInputs<'_>,
+) -> Result<NativeV2HarnessConfig, LocalCompositionError> {
+    let LocalLaneInputs {
+        workspace,
+        runtime_home,
+        ref native_environment,
+        ref local_command_environment,
+        ref search_path,
+        ref local_home,
+        process_pool,
+    } = *inputs;
+    let harness = match lane {
+        RuntimeLane::Copilot { .. } => NativeV2HarnessConfig::Copilot(CopilotConfig {
             executable: PathBuf::from("copilot"),
             workspace: workspace.to_owned(),
             runtime_home: runtime_home.to_owned(),
@@ -356,13 +393,13 @@ fn local_harness(
                 home,
             }),
             base_environment: native_environment.selected(COPILOT_LOCAL_ENVIRONMENT),
-            local_command_environment,
+            local_command_environment: local_command_environment.clone(),
             search_path: search_path.clone(),
             process_pool,
         }),
-        RuntimePlan::Codex { provider, .. } => NativeV2HarnessConfig::Codex(NativeV2CodexConfig {
+        RuntimeLane::Codex { provider } => NativeV2HarnessConfig::Codex(NativeV2CodexConfig {
             base_environment: Default::default(),
-            provider: *provider,
+            provider,
             executable: PathBuf::from("codex"),
             workspace: workspace.to_owned(),
             runtime_home: runtime_home.to_owned(),
@@ -377,21 +414,53 @@ fn local_harness(
             search_path: search_path.clone(),
             process_pool,
         }),
-        RuntimePlan::Claude { provider, .. } => {
-            NativeV2HarnessConfig::Claude(ClaudeAdapterConfig {
-                provider: *provider,
-                executable: "claude".to_owned(),
-                prefix_arguments: Vec::new(),
-                workspace: workspace.to_owned(),
-                runtime_home: runtime_home.to_owned(),
-                local_user_home: local_home,
-                native_environment: native_environment.clone(),
-                base_environment: local_claude_environment(&search_path, &native_environment)?,
-                process_pool,
-            })
-        }
+        RuntimeLane::Claude { provider } => NativeV2HarnessConfig::Claude(ClaudeAdapterConfig {
+            provider,
+            executable: "claude".to_owned(),
+            prefix_arguments: Vec::new(),
+            workspace: workspace.to_owned(),
+            runtime_home: runtime_home.to_owned(),
+            local_user_home: local_home.clone(),
+            native_environment: native_environment.clone(),
+            base_environment: local_claude_environment(search_path, native_environment)?,
+            process_pool,
+        }),
     };
     Ok(harness)
+}
+
+pub(crate) fn local_search_path(environment: &LocalHarnessEnvironment) -> String {
+    environment
+        .get("PATH")
+        .filter(|value| !value.is_empty())
+        .cloned()
+        .unwrap_or_else(|| default_search_path(environment))
+}
+
+pub(crate) fn search_path_depends_on_working_directory(
+    native_environment: &BTreeMap<String, String>,
+) -> bool {
+    let search_path = local_search_path(&LocalHarnessEnvironment::new(native_environment.clone()));
+    std::env::split_paths(&search_path).any(|entry| entry.is_relative())
+}
+
+/// Checks that each lane's harness executable is on the search path its adapter spawns with.
+pub(crate) fn check_lane_executables(
+    runtime: &RuntimePlan,
+    native_environment: &BTreeMap<String, String>,
+    working_directory: &Path,
+) -> Result<(), LocalCompositionError> {
+    let search_path = local_search_path(&LocalHarnessEnvironment::new(native_environment.clone()));
+    let lookup = BTreeMap::from([("PATH".to_owned(), search_path)]);
+    for lane in runtime.lanes() {
+        let executable = lane.harness_name();
+        if crate::execution::platform::find_executable(executable, &lookup, working_directory)
+            .is_none()
+        {
+            return Err(LocalCompositionError::MissingLaneExecutable { lane, executable });
+        }
+    }
+    Ok(())
 }
 
 fn current_user_home(environment: &LocalHarnessEnvironment) -> Option<PathBuf> {

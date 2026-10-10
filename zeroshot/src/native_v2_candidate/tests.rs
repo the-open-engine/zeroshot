@@ -1,12 +1,12 @@
 #![cfg(unix)]
 
-use std::any::Any;
-use std::collections::BTreeMap;
+use std::any::{Any, TypeId};
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use openengine_cluster_protocol::{
@@ -20,7 +20,9 @@ use serde_json::{json, Value};
 use super::*;
 use crate::execution::process::HostedProcessPool;
 use crate::execution::SessionScope;
-use crate::native_v2_candidate::test_support::{TestGitRepository, git_output};
+use crate::native_v2_candidate::test_support::{
+    TestDirectory, TestGitRepository, full_graph, git_output, success_node,
+};
 use crate::native_v2_admission::NativeV2Admission;
 use crate::native_v2_capsule::{NativeCapsuleNodeEndpoint, RemoteCapsuleNodeRunner};
 use crate::native_v2_claude::ClaudeProcessEnvironment;
@@ -37,9 +39,9 @@ use crate::native_v2_cloud::{
     ExclusiveControllerClaim, NativeV2CloudController,
 };
 use crate::native_v2_contract::{
-    CodexProvider, DeclaredConnections, DeclaredEnvironment, EnvironmentVariableName,
-    NodeInvocation, RunSize, RunSubmission, RunTitle, SourceBranchId, SourceRepositoryId,
-    SourceRevisionId, ResolvedSource,
+    ClaudeProvider, CodexProvider, DeclaredConnections, DeclaredEnvironment,
+    EnvironmentVariableName, NodeInvocation, RunSize, RunSubmission, RunTitle, RuntimePlan,
+    SourceBranchId, SourceRepositoryId, SourceRevisionId, ResolvedSource,
 };
 use crate::native_v2_delivery::{
     GitHubDeliveryRead, GitHubDeliverySnapshot, GitHubHeadReconciliation,
@@ -48,7 +50,7 @@ use crate::native_v2_delivery::{
     GitHubMergeRequestOutcome, GitHubPushRequest, GitHubReviewObservation, GitHubReviewReceipt,
     GitHubReviewRequest, GitHubReviewState, GITHUB_TOKEN_ENV,
 };
-use crate::native_v2_runner::NodeRole;
+use crate::native_v2_runner::{NodeRole, NodeRunner};
 use crate::native_v2_supervisor::{RunEnvironment, RunRuntimeExit};
 use crate::v2_run_ledger::fake::FakeRunLedger;
 use crate::worker_catalog::{self, ReasoningEffort};
@@ -206,9 +208,60 @@ impl NodeSession for AgentSession {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ScriptedRun {
+    node: String,
+    role: NodeRole,
+    environment: Vec<String>,
+    session: Option<usize>,
+}
+
+fn scripted_run(node: &str, role: NodeRole, environment: &[&str], session: usize) -> ScriptedRun {
+    ScriptedRun {
+        node: node.to_owned(),
+        role,
+        environment: environment.iter().map(|name| (*name).to_owned()).collect(),
+        session: Some(session),
+    }
+}
+
 struct ScriptedAgent {
     workspace: PathBuf,
-    starts: AtomicUsize,
+    sessions: Mutex<Vec<Arc<AgentSession>>>,
+    runs: Mutex<Vec<ScriptedRun>>,
+}
+
+impl ScriptedAgent {
+    fn new(workspace: PathBuf) -> Self {
+        Self {
+            workspace,
+            sessions: Mutex::new(Vec::new()),
+            runs: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn runs(&self) -> Vec<ScriptedRun> {
+        self.runs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn opened_sessions(&self) -> usize {
+        self.sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
+    }
+
+    fn session_index(&self, session: &Arc<dyn NodeSession>) -> Option<usize> {
+        let session = Arc::as_ptr(session).cast::<()>();
+        self.sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .position(|opened| Arc::as_ptr(opened).cast::<()>() == session)
+    }
 }
 
 #[async_trait]
@@ -218,7 +271,12 @@ impl SessionFactory for ScriptedAgent {
         _invocation: &NodeInvocation,
         _environment: &ResolvedEnvironment,
     ) -> Result<Arc<dyn NodeSession>, NodeRunnerError> {
-        Ok(Arc::new(AgentSession(AtomicBool::new(true))))
+        let session = Arc::new(AgentSession(AtomicBool::new(true)));
+        self.sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(session.clone());
+        Ok(session)
     }
 }
 
@@ -229,22 +287,43 @@ impl NodeDriver for ScriptedAgent {
         invocation: DriverInvocation,
         control: DriverControl,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
-        if invocation.role != NodeRole::Worker {
-            return Err(NodeRunnerError::InvalidRole);
+        let session = self.session_index(&invocation.session);
+        self.runs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(ScriptedRun {
+                node: invocation.node.reference.node.as_str().to_owned(),
+                role: invocation.role,
+                environment: invocation
+                    .environment
+                    .iter()
+                    .map(|(name, _)| name.as_str().to_owned())
+                    .collect(),
+                session,
+            });
+        match invocation.role {
+            NodeRole::Worker => {
+                fs::write(self.workspace.join("result.txt"), "native v2\n")
+                    .map_err(|_| NodeRunnerError::Driver)?;
+                control
+                    .emit(crate::native_v2_runner::LiveOutput::new(
+                        crate::native_v2_runner::LiveOutputStream::Output,
+                        "worker: mutation ready",
+                    )?)
+                    .await?;
+                Ok(WorkerOutcome::Verified {
+                    output: Value::Null,
+                    artifacts: Vec::new(),
+                })
+            }
+            NodeRole::Verifier => Ok(WorkerOutcome::Verifier {
+                output: Value::Null,
+                signals: BTreeMap::new(),
+                diagnostic: Value::Null,
+                artifacts: Vec::new(),
+            }),
+            NodeRole::GitDelivery => Err(NodeRunnerError::InvalidRole),
         }
-        self.starts.fetch_add(1, Ordering::SeqCst);
-        fs::write(self.workspace.join("result.txt"), "native v2\n")
-            .map_err(|_| NodeRunnerError::Driver)?;
-        control
-            .emit(crate::native_v2_runner::LiveOutput::new(
-                crate::native_v2_runner::LiveOutputStream::Output,
-                "worker: mutation ready",
-            )?)
-            .await?;
-        Ok(WorkerOutcome::Verified {
-            output: Value::Null,
-            artifacts: Vec::new(),
-        })
     }
 }
 
@@ -280,6 +359,7 @@ struct CandidateAllocator {
     target: DeliveryTarget,
     github: Arc<ScriptedGitHub>,
     agent: Arc<ScriptedAgent>,
+    lane_agents: Vec<(RuntimeLane, Arc<ScriptedAgent>)>,
     cleanup: Arc<ConfirmCleanup>,
 }
 
@@ -322,13 +402,17 @@ impl CapsuleAllocator for CandidateAllocator {
             },
             self.github.clone(),
         ));
-        let local = assemble_runner(
-            admitted,
+        let mut agents = BTreeMap::from([(
+            admitted.runtime.lane(),
             CandidateAgents::new(self.agent.clone()),
-            delivery,
-            CandidatePlacement::Capsule,
-        )
-        .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        )]);
+        agents.extend(
+            self.lane_agents
+                .iter()
+                .map(|(lane, agent)| (*lane, CandidateAgents::new(agent.clone()))),
+        );
+        let local = assemble_runner(admitted, agents, delivery, CandidatePlacement::Capsule)
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let endpoint = Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(local)));
         let remote = Arc::new(RemoteCapsuleNodeRunner::new(endpoint));
         Ok(AllocatedCapsule {
@@ -355,10 +439,7 @@ async fn cloud_oecp_candidate_runs_worker_and_trusted_merge_entirely_through_v2(
     let target = DeliveryTarget::new("acme/project", "main", repository.base.clone())
         .assert_value_with("delivery target");
     let github = Arc::new(ScriptedGitHub::new(repository.remote.clone()));
-    let agent = Arc::new(ScriptedAgent {
-        workspace: repository.workspace.clone(),
-        starts: AtomicUsize::new(0),
-    });
+    let agent = Arc::new(ScriptedAgent::new(repository.workspace.clone()));
     let cleanup = Arc::new(ConfirmCleanup(AtomicUsize::new(0)));
     let allocator = Arc::new(CandidateAllocator {
         claims: ClaimAuthority::default(),
@@ -366,6 +447,7 @@ async fn cloud_oecp_candidate_runs_worker_and_trusted_merge_entirely_through_v2(
         target,
         github: github.clone(),
         agent: agent.clone(),
+        lane_agents: Vec::new(),
         cleanup: cleanup.clone(),
     });
     let ledger = Arc::new(FakeRunLedger::new());
@@ -377,16 +459,10 @@ async fn cloud_oecp_candidate_runs_worker_and_trusted_merge_entirely_through_v2(
     let submitted = submit_through_cli(
         &repository,
         controller.clone(),
-        BTreeMap::from([
-            (
-                EnvironmentVariableName::new(GITHUB_TOKEN_ENV).assert_value_with("token name"),
-                "test-github-token".to_owned(),
-            ),
-            (
-                EnvironmentVariableName::new("OPENAI_API_KEY")
-                    .assert_value_with("provider token name"),
-                "test-provider-token".to_owned(),
-            ),
+        RuntimePlanKind::Codex,
+        available_environment(&[
+            (GITHUB_TOKEN_ENV, "test-github-token"),
+            ("OPENAI_API_KEY", "test-provider-token"),
         ]),
     )
     .await;
@@ -412,7 +488,15 @@ async fn cloud_oecp_candidate_runs_worker_and_trusted_merge_entirely_through_v2(
         output.pointer("/delivery/repository"),
         Some(&json!("acme/project"))
     );
-    assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        agent.runs(),
+        [scripted_run(
+            "worker",
+            NodeRole::Worker,
+            &["OPENAI_API_KEY"],
+            0
+        )]
+    );
     assert!(github.pushed.load(Ordering::SeqCst));
     assert!(github.merge_requested.load(Ordering::SeqCst));
     assert_eq!(cleanup.0.load(Ordering::SeqCst), 1);
@@ -420,9 +504,142 @@ async fn cloud_oecp_candidate_runs_worker_and_trusted_merge_entirely_through_v2(
     assert!(!git_output(&repository.remote, &["show-ref", "--heads"]).is_empty());
 }
 
+#[tokio::test]
+async fn cloud_oecp_candidate_runs_each_agent_node_on_its_own_lane_and_provider_access() {
+    let repository = TempRepository::candidate();
+    let target = DeliveryTarget::new("acme/project", "main", repository.base.clone())
+        .assert_value_with("delivery target");
+    let github = Arc::new(ScriptedGitHub::new(repository.remote.clone()));
+    let codex = Arc::new(ScriptedAgent::new(repository.workspace.clone()));
+    let claude = Arc::new(ScriptedAgent::new(repository.workspace.clone()));
+    let cleanup = Arc::new(ConfirmCleanup(AtomicUsize::new(0)));
+    let allocator = Arc::new(CandidateAllocator {
+        claims: ClaimAuthority::default(),
+        workspace: repository.workspace.clone(),
+        target,
+        github: github.clone(),
+        agent: codex.clone(),
+        lane_agents: vec![(CLAUDE_ANTHROPIC, claude.clone())],
+        cleanup: cleanup.clone(),
+    });
+    let controller = Arc::new(
+        NativeV2CloudController::new(Arc::new(FakeRunLedger::new()), allocator)
+            .await
+            .assert_value_with("controller"),
+    );
+    let submitted = submit_through_cli(
+        &repository,
+        controller.clone(),
+        RuntimePlanKind::ClaudeReviewer,
+        available_environment(&[
+            (GITHUB_TOKEN_ENV, "test-github-token"),
+            ("OPENAI_API_KEY", "test-openai-token"),
+            ("ANTHROPIC_API_KEY", "test-anthropic-token"),
+        ]),
+    )
+    .await;
+    let terminal = wait_for_terminal(&controller, &submitted.run_id).await;
+
+    assert!(
+        matches!(terminal, TerminalResult::Succeeded { .. }),
+        "cross-lane candidate must succeed: {terminal:?}"
+    );
+    assert_eq!(
+        codex.runs(),
+        [scripted_run(
+            "worker",
+            NodeRole::Worker,
+            &["OPENAI_API_KEY"],
+            0
+        )]
+    );
+    assert_eq!(
+        claude.runs(),
+        [scripted_run(
+            "reviewer",
+            NodeRole::Verifier,
+            &["ANTHROPIC_API_KEY"],
+            0
+        )]
+    );
+    assert!(github.merge_requested.load(Ordering::SeqCst));
+    assert_eq!(cleanup.0.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn node_instance_session_reused_through_a_loop_stays_on_its_lane() {
+    let root = TestDirectory::new("candidate-session-lanes");
+    let mut admitted = crate::native_v2_runner::test_support::admitted();
+    set_agent_lane(
+        admitted
+            .runtime
+            .nodes_mut()
+            .get_mut(&NodeName::new("looped").assert_value())
+            .assert_value(),
+        CLAUDE_ANTHROPIC,
+    );
+    let codex = Arc::new(ScriptedAgent::new(root.path().to_owned()));
+    let claude = Arc::new(ScriptedAgent::new(root.path().to_owned()));
+    let runner = assemble_runner(
+        &admitted,
+        BTreeMap::from([
+            (CODEX_OPENAI, CandidateAgents::new(codex.clone())),
+            (CLAUDE_ANTHROPIC, CandidateAgents::new(claude.clone())),
+        ]),
+        routing_delivery(root.path()),
+        CandidatePlacement::Local(SessionBoundary::Run),
+    )
+    .assert_value_with("candidate runner");
+
+    for execution in 1..=2 {
+        let mut request = crate::native_v2_runner::test_support::request(
+            "candidate-session-lanes",
+            "looped",
+            (1, execution),
+        );
+        set_agent_lane(&mut request.invocation.binding, CLAUDE_ANTHROPIC);
+        runner
+            .start(request)
+            .await
+            .assert_value_with("start looped execution")
+            .completion()
+            .await
+            .assert_value_with("looped execution completes");
+    }
+
+    let looped = scripted_run("looped", NodeRole::Worker, &[], 0);
+    assert_eq!(claude.runs(), [looped.clone(), looped]);
+    assert_eq!(claude.opened_sessions(), 1);
+    assert!(codex.runs().is_empty());
+    assert_eq!(codex.opened_sessions(), 0);
+}
+
+fn set_agent_lane(binding: &mut NodeRuntimeBinding, lane: RuntimeLane) {
+    let NodeRuntimeBinding::Agent {
+        lane: binding_lane, ..
+    } = binding
+    else {
+        panic!("expected an agent binding");
+    };
+    *binding_lane = Some(lane);
+}
+
+fn available_environment(values: &[(&str, &str)]) -> BTreeMap<EnvironmentVariableName, String> {
+    values
+        .iter()
+        .map(|(name, value)| {
+            (
+                EnvironmentVariableName::new(*name).assert_value_with("environment name"),
+                (*value).to_owned(),
+            )
+        })
+        .collect()
+}
+
 async fn submit_through_cli(
     repository: &TempRepository,
     controller: Arc<NativeV2CloudController>,
+    kind: RuntimePlanKind,
     environment: BTreeMap<EnvironmentVariableName, String>,
 ) -> RunSubmitResult {
     let graph_path = repository.root.child("graph.json");
@@ -430,13 +647,13 @@ async fn submit_through_cli(
     let runtime_path = repository.root.child("runtime.json");
     fs::write(
         &graph_path,
-        serde_json::to_vec(&shipping_graph()).assert_value_with("encode graph"),
+        serde_json::to_vec(&shipping_graph(kind)).assert_value_with("encode graph"),
     )
     .assert_value_with("write graph");
     fs::write(&input_path, b"{}\n").assert_value_with("write input");
     fs::write(
         &runtime_path,
-        serde_json::to_vec(&runtime(RuntimePlanKind::Codex)).assert_value_with("encode runtime"),
+        serde_json::to_vec(&runtime(kind)).assert_value_with("encode runtime"),
     )
     .assert_value_with("write runtime");
     let backend = InProcessCliBackend { controller };
@@ -554,6 +771,282 @@ async fn coverage_contract_candidate_builders_bind_only_to_their_admitted_lane_a
     .assert_value_with("local Claude candidate");
 }
 
+#[tokio::test]
+async fn candidate_lanes_must_be_exactly_the_admitted_effective_lanes() {
+    let repository = TempRepository::candidate();
+    let github = Arc::new(ScriptedGitHub::new(repository.remote.clone()));
+    let config = |kind| candidate_config(kind, &repository, github.clone());
+    for lane in [
+        COPILOT_GITHUB,
+        CODEX_OPENAI,
+        RuntimeLane::Codex {
+            provider: CodexProvider::OpenRouter,
+        },
+        CLAUDE_ANTHROPIC,
+        RuntimeLane::Claude {
+            provider: ClaudeProvider::Bedrock,
+        },
+    ] {
+        assert_eq!(harness_config(lane, &repository).lane(), lane);
+    }
+
+    let claude_override = admitted(RuntimePlanKind::ClaudeOverride).await;
+    build_native_v2_candidate(&claude_override, config(RuntimePlanKind::ClaudeOverride))
+        .assert_value_with("override plan takes its Claude lane");
+    assert_eq!(
+        build_native_v2_candidate(&claude_override, config(RuntimePlanKind::Codex))
+            .assert_error_with("the unused run-level lane must be refused"),
+        NativeV2CandidateError::RuntimeMismatch
+    );
+
+    let reviewed = admitted(RuntimePlanKind::ClaudeReviewer).await;
+    build_native_v2_candidate(&reviewed, config(RuntimePlanKind::ClaudeReviewer))
+        .assert_value_with("mixed plan takes both lanes");
+    let mut reversed = config(RuntimePlanKind::ClaudeReviewer);
+    reversed.lanes.reverse();
+    build_local_native_v2_candidate(&reviewed, reversed)
+        .assert_value_with("lane order does not matter");
+    for missing in [RuntimePlanKind::Codex, RuntimePlanKind::Claude] {
+        assert_eq!(
+            validate_config(&reviewed, &config(missing)).assert_error(),
+            NativeV2CandidateError::RuntimeMismatch
+        );
+    }
+    let mut misplaced = config(RuntimePlanKind::ClaudeReviewer);
+    let Some(NativeV2HarnessConfig::Claude(claude)) = misplaced.lanes.last_mut() else {
+        panic!("the mixed plan's last lane is Claude");
+    };
+    claude.workspace = repository.root.child("different-workspace");
+    assert_eq!(
+        validate_config(&reviewed, &misplaced).assert_error(),
+        NativeV2CandidateError::WorkspaceMismatch
+    );
+
+    let copilot_reviewed = admitted(RuntimePlanKind::CopilotReviewer).await;
+    build_native_v2_candidate(&copilot_reviewed, config(RuntimePlanKind::CopilotReviewer))
+        .assert_value_with("hosted plan takes its Copilot lane");
+    build_local_native_v2_candidate(&copilot_reviewed, config(RuntimePlanKind::CopilotReviewer))
+        .assert_value_with("local plan takes its Copilot lane");
+    let mut copilot_misplaced = config(RuntimePlanKind::CopilotReviewer);
+    let Some(NativeV2HarnessConfig::Copilot(copilot)) = copilot_misplaced.lanes.first_mut() else {
+        panic!("the Copilot lane sorts first");
+    };
+    copilot.workspace = repository.root.child("different-workspace");
+    assert_eq!(
+        validate_config(&copilot_reviewed, &copilot_misplaced).assert_error(),
+        NativeV2CandidateError::WorkspaceMismatch
+    );
+
+    let codex = admitted(RuntimePlanKind::Codex).await;
+    let mut duplicated = config(RuntimePlanKind::Codex);
+    duplicated
+        .lanes
+        .push(harness_config(CODEX_OPENAI, &repository));
+    duplicated.delivery.workspace = repository.root.child("different-workspace");
+    assert_eq!(
+        validate_config(&codex, &duplicated).assert_error(),
+        NativeV2CandidateError::RuntimeMismatch
+    );
+    let mut mismatched = config(RuntimePlanKind::Claude);
+    mismatched.delivery.workspace = repository.root.child("different-workspace");
+    assert_eq!(
+        validate_config(&codex, &mismatched).assert_error(),
+        NativeV2CandidateError::RuntimeMismatch
+    );
+
+    let mut empty = config(RuntimePlanKind::Codex);
+    empty.lanes.clear();
+    assert_eq!(
+        build_native_v2_candidate(&codex, empty)
+            .assert_error_with("a plan with agent nodes needs their lanes"),
+        NativeV2CandidateError::RuntimeMismatch
+    );
+
+    let without_agents = admitted_without_agents().await;
+    assert!(without_agents.runtime.lanes().is_empty());
+    let mut empty = config(RuntimePlanKind::Codex);
+    empty.lanes.clear();
+    build_native_v2_candidate(&without_agents, empty)
+        .assert_value_with("a plan without agent nodes takes no lanes");
+    assert_eq!(
+        build_native_v2_candidate(&without_agents, config(RuntimePlanKind::Codex))
+            .assert_error_with("a lane no node runs on must be refused"),
+        NativeV2CandidateError::RuntimeMismatch
+    );
+}
+
+#[tokio::test]
+async fn candidate_keys_each_built_adapter_by_the_lane_its_configuration_serves() {
+    let repository = TempRepository::candidate();
+    let github = Arc::new(ScriptedGitHub::new(repository.remote.clone()));
+    let codex = harness_session_type(CODEX_OPENAI, &repository).await;
+    assert_ne!(
+        codex,
+        harness_session_type(CLAUDE_ANTHROPIC, &repository).await
+    );
+    assert_ne!(
+        codex,
+        harness_session_type(COPILOT_GITHUB, &repository).await
+    );
+
+    for kind in [
+        RuntimePlanKind::ClaudeReviewer,
+        RuntimePlanKind::CopilotReviewer,
+    ] {
+        for placement in [
+            CandidatePlacement::Capsule,
+            CandidatePlacement::Local(SessionBoundary::Run),
+        ] {
+            let mut lanes = candidate_config(kind, &repository, github.clone()).lanes;
+            lanes.reverse();
+            let agents = lane_agents(lanes, placement).assert_value_with("lane adapters");
+            assert_eq!(
+                agents.keys().copied().collect::<BTreeSet<_>>(),
+                runtime(kind).lanes()
+            );
+            for (lane, adapter) in &agents {
+                assert_eq!(
+                    Arc::as_ptr(&adapter.driver).cast::<()>(),
+                    Arc::as_ptr(&adapter.sessions).cast::<()>(),
+                    "lane {lane} must drive and open sessions through one adapter"
+                );
+                assert_eq!(
+                    session_type(&*adapter.sessions).await,
+                    harness_session_type(*lane, &repository).await,
+                    "lane {lane} holds another lane's adapter"
+                );
+            }
+        }
+    }
+}
+
+async fn harness_session_type(lane: RuntimeLane, repository: &TempRepository) -> TypeId {
+    match harness_config(lane, repository) {
+        NativeV2HarnessConfig::Copilot(config) => session_type(&CopilotAdapter::new(config)).await,
+        NativeV2HarnessConfig::Codex(config) => {
+            session_type(&NativeV2CodexAdapter::new(config)).await
+        }
+        NativeV2HarnessConfig::Claude(config) => {
+            session_type(&ClaudeAdapter::new(config).assert_value_with("Claude adapter")).await
+        }
+    }
+}
+
+async fn session_type(sessions: &dyn SessionFactory) -> TypeId {
+    let request =
+        crate::native_v2_runner::test_support::request("candidate-lanes", "worker", (1, 1));
+    sessions
+        .open(&request.invocation, &request.environment)
+        .await
+        .assert_value_with("agent session")
+        .as_any()
+        .type_id()
+}
+
+#[test]
+fn candidate_node_lane_routes_each_agent_binding_only_to_its_own_lane() {
+    let workspace = PathBuf::from("/nonexistent/candidate-routing");
+    let codex = Arc::new(ScriptedAgent::new(workspace.clone()));
+    let claude = Arc::new(ScriptedAgent::new(workspace.clone()));
+    let codex_agent = Arc::as_ptr(&codex).cast::<()>();
+    let claude_agent = Arc::as_ptr(&claude).cast::<()>();
+    let routes = CandidateNodeLane {
+        default_lane: CODEX_OPENAI,
+        agents: BTreeMap::from([
+            (CODEX_OPENAI, CandidateAgents::new(codex)),
+            (CLAUDE_ANTHROPIC, CandidateAgents::new(claude.clone())),
+        ]),
+        delivery: routing_delivery(&workspace),
+    };
+
+    assert_eq!(
+        routed_agent(&routes, &agent_binding(Some(CLAUDE_ANTHROPIC), "model")),
+        Ok((claude_agent, claude_agent))
+    );
+    assert_eq!(
+        routed_agent(&routes, &agent_binding(None, "model")),
+        Ok((codex_agent, codex_agent))
+    );
+    assert_eq!(
+        routed_agent(&routes, &agent_binding(Some(CODEX_OPENAI), "model")),
+        Ok((codex_agent, codex_agent))
+    );
+    let unconfigured = RuntimeLane::Claude {
+        provider: ClaudeProvider::Bedrock,
+    };
+    assert_eq!(
+        routed_agent(&routes, &agent_binding(Some(unconfigured), "model")),
+        Err(NodeRunnerError::Driver)
+    );
+    assert_eq!(
+        routed_agent(&routes, &delivery_binding()),
+        Err(NodeRunnerError::Driver)
+    );
+
+    let claude_only = CandidateNodeLane {
+        default_lane: CODEX_OPENAI,
+        agents: BTreeMap::from([(CLAUDE_ANTHROPIC, CandidateAgents::new(claude))]),
+        delivery: routing_delivery(&workspace),
+    };
+    assert_eq!(
+        routed_agent(&claude_only, &agent_binding(None, "model")),
+        Err(NodeRunnerError::Driver)
+    );
+}
+
+fn routed_agent(
+    routes: &CandidateNodeLane,
+    binding: &NodeRuntimeBinding,
+) -> Result<(*const (), *const ()), NodeRunnerError> {
+    routes.agents_for(binding).map(|agents| {
+        (
+            Arc::as_ptr(&agents.driver).cast::<()>(),
+            Arc::as_ptr(&agents.sessions).cast::<()>(),
+        )
+    })
+}
+
+fn routing_delivery(workspace: &Path) -> Arc<NativeV2DeliveryAdapter> {
+    Arc::new(NativeV2DeliveryAdapter::new(
+        NativeV2DeliveryConfig {
+            delivery_run_id: RunId::new("candidate-routing"),
+            adopt_existing_delivery: false,
+            git_identity: None,
+            workspace: workspace.to_owned(),
+            git_program: PathBuf::from("/usr/bin/git"),
+            target: DeliveryTarget::new("acme/project", "main", "a".repeat(40))
+                .assert_value_with("target"),
+            poll: DeliveryPollPolicy::new(2, Duration::ZERO).assert_value_with("poll"),
+        },
+        Arc::new(ScriptedGitHub::new(workspace.to_owned())),
+    ))
+}
+
+async fn admitted_without_agents() -> AdmittedRun {
+    let submission = serde_json::from_value(json!({
+        "title": "Candidate without agents",
+        "graph": full_graph(vec![success_node()]),
+        "initialInput": null,
+        "runtime": {
+            "harness": "codex",
+            "provider": "openai",
+            "size": "medium",
+            "nodes": {}
+        },
+        "source": {
+            "repository": "acme/project",
+            "branch": "main",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "submissionKey": "candidate-without-agents"
+    }))
+    .assert_value_with("submission without agents");
+    NativeV2Admission
+        .admit(submission)
+        .await
+        .assert_value_with("admitted without agents")
+}
+
 #[test]
 fn candidate_source_has_no_route_to_the_replaced_runtime_paths() {
     let source = include_str!("../native_v2_candidate.rs");
@@ -578,7 +1071,8 @@ fn candidate_source_has_no_route_to_the_replaced_runtime_paths() {
 #[path = "tests/fixtures.rs"]
 mod fixtures;
 use fixtures::{
-    RuntimePlanKind, admitted, candidate_config, runtime, shipping_graph, wait_for_terminal,
+    CLAUDE_ANTHROPIC, CODEX_OPENAI, COPILOT_GITHUB, RuntimePlanKind, admitted, agent_binding,
+    candidate_config, delivery_binding, harness_config, runtime, shipping_graph, wait_for_terminal,
 };
 
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue, JsonAt};

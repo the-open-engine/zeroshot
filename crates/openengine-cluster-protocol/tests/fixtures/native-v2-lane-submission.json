@@ -1,0 +1,72 @@
+{
+  "runId": "018f5e78-7f95-7c22-8d98-3f15af20c991",
+  "submission": {
+    "title": "Cross-vendor review",
+    "graph": {
+      "profile": "openengine.graph.full/v1",
+      "initialInput": { "kind": "null" },
+      "policy": { "policy": "policy.native-v2@1", "default": "deny" },
+      "root": {
+        "kind": "seq",
+        "name": "run",
+        "state": { "kind": "null" },
+        "children": [
+          {
+            "kind": "step",
+            "name": "worker",
+            "worker": "agent.worker@1",
+            "instructions": "Implement the requested change.",
+            "input": { "kind": "null" },
+            "output": { "kind": "null" },
+            "inputBindings": [],
+            "writeBindings": [],
+            "attempts": 1
+          },
+          {
+            "kind": "step",
+            "name": "acceptance",
+            "worker": "agent.acceptance@1",
+            "instructions": "Check the change against the request.",
+            "input": { "kind": "null" },
+            "output": { "kind": "null" },
+            "inputBindings": [],
+            "writeBindings": [],
+            "attempts": 1
+          },
+          {
+            "kind": "succeed",
+            "name": "done",
+            "output": { "kind": "null" },
+            "bindings": []
+          }
+        ],
+        "promotedStatePaths": []
+      }
+    },
+    "initialInput": null,
+    "runtime": {
+      "harness": "codex",
+      "provider": "openai",
+      "size": "small",
+      "nodes": {
+        "acceptance": {
+          "kind": "agent",
+          "lane": { "harness": "claude", "provider": "anthropic" },
+          "model": "REVIEW_MODEL_ID",
+          "effort": "high"
+        },
+        "worker": {
+          "kind": "agent",
+          "model": "WORKER_MODEL_ID",
+          "sessionScope": "node_instance"
+        }
+      }
+    },
+    "source": {
+      "repository": "acme/project",
+      "branch": "main",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "submissionKey": "lane-fixture"
+  }
+}

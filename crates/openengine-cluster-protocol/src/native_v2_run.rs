@@ -358,7 +358,9 @@ pub struct ResolvedSource {
     pub revision: SourceRevisionId,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum CopilotProvider {
     Github,
@@ -376,7 +378,9 @@ pub enum RunSize {
     Large,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum CodexProvider {
     #[serde(rename = "openai")]
@@ -387,7 +391,9 @@ pub enum CodexProvider {
     Bedrock,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ClaudeProvider {
     Anthropic,
@@ -395,6 +401,63 @@ pub enum ClaudeProvider {
     OpenRouter,
     Gateway,
     Bedrock,
+}
+
+/// One harness and provider pair: the run-level default, or an agent node's override.
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,
+)]
+#[serde(deny_unknown_fields, tag = "harness", rename_all = "snake_case")]
+pub enum RuntimeLane {
+    Copilot { provider: CopilotProvider },
+    Codex { provider: CodexProvider },
+    Claude { provider: ClaudeProvider },
+}
+
+impl RuntimeLane {
+    /// Wire name of the harness, which is also the name of the executable this lane spawns.
+    #[must_use]
+    pub const fn harness_name(self) -> &'static str {
+        match self {
+            Self::Copilot { .. } => "copilot",
+            Self::Codex { .. } => "codex",
+            Self::Claude { .. } => "claude",
+        }
+    }
+
+    /// Wire name of the provider.
+    #[must_use]
+    pub const fn provider_name(self) -> &'static str {
+        match self {
+            Self::Copilot {
+                provider: CopilotProvider::Github,
+            } => "github",
+            Self::Codex { provider } => match provider {
+                CodexProvider::OpenAi => "openai",
+                CodexProvider::OpenRouter => "openrouter",
+                CodexProvider::Gateway => "gateway",
+                CodexProvider::Bedrock => "bedrock",
+            },
+            Self::Claude { provider } => match provider {
+                ClaudeProvider::Anthropic => "anthropic",
+                ClaudeProvider::OpenRouter => "openrouter",
+                ClaudeProvider::Gateway => "gateway",
+                ClaudeProvider::Bedrock => "bedrock",
+            },
+        }
+    }
+}
+
+impl fmt::Display for RuntimeLane {
+    /// Prints `harness/provider` with the wire names, for example `claude/anthropic`.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{}/{}",
+            self.harness_name(),
+            self.provider_name()
+        )
+    }
 }
 
 #[derive(

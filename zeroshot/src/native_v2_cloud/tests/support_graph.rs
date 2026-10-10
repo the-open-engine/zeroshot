@@ -8,6 +8,7 @@ pub(super) fn runtime() -> RuntimePlan {
             (
                 NodeName::new("worker").assert_value_with("node"),
                 NodeRuntimeBinding::Agent {
+                    lane: None,
                     model: crate::worker_catalog::ModelId::new("gpt-5.6")
                         .assert_value_with("model"),
                     effort: Some(ReasoningEffort::Max),
@@ -200,6 +201,7 @@ fn graph_with_nodes(mut children: Vec<Value>) -> GraphSpec {
 
 pub(super) fn complex_runtime() -> RuntimePlan {
     let binding = |session_scope| NodeRuntimeBinding::Agent {
+        lane: None,
         model: crate::worker_catalog::ModelId::new("gpt-5.6").assert_value_with("model"),
         effort: Some(ReasoningEffort::Max),
         session_scope,

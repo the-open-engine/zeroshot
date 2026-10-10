@@ -452,6 +452,12 @@ struct TemplateShowArgs {
     (execution or node_instance), and connections. Each connection key maps to the exact
     environment variable names required by that node; never put values in this file.
 
+    The run-level harness and provider are the default lane. An agent binding may add
+    "lane": {"harness": "claude", "provider": "anthropic"} to run that node on another accepted
+    pair; git_delivery bindings cannot. --uniform-runtime-config applies one lane to every agent
+    node. Named targets must advertise per-node lane support (openengine.node-runtime-lanes/v1), and
+    a local run first checks that each lane's executable (codex, claude, or copilot) is on PATH.
+
     Use `zeroshot template show TEMPLATE` to inspect node names. With --push, --pr, or --ship, omit the
     template-owned delivery binding.
 

@@ -79,6 +79,7 @@ pub(super) fn runtime_for(
 
 fn agent_binding() -> NodeRuntimeBinding {
     NodeRuntimeBinding::Agent {
+        lane: None,
         model: ModelId::new("gpt-5.6").assert_value(),
         effort: Some(ReasoningEffort::Max),
         session_scope: SessionScope::Execution,

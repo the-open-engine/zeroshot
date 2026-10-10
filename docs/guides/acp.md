@@ -14,6 +14,8 @@ The ACP preview accepts a deliberately narrow profile:
 - Every executable node has an agent runtime binding with `sessionScope` set to `node_instance`.
 - Runtime connections aren't accepted. The endpoint supports Codex and Claude through their local
   user login and configuration.
+- Agent nodes may mix Codex and Claude [lanes](../reference/runtime-plan.md#per-node-lanes). A
+  Copilot lane isn't accepted.
 
 These limits keep one ACP turn equivalent to one ordinary local run; the graph compiler, reducer,
 provider adapters, and run ledger stay unchanged.
@@ -131,6 +133,13 @@ Configure the ACP client to start this command in the canonical root of the Git 
 ```console
 zeroshot acp --profile local:acp-worker
 ```
+
+The command checks that each lane's executable, `codex` or `claude`, is on `PATH`, as a local run
+does. Each session checks when it opens, against that session's workspace, and a missing executable
+fails `session/new` with an invalid-params error that names the lane and executable. If every
+`PATH` entry is absolute, the command also checks at startup. An empty or relative entry resolves
+against the directory the harness starts in, which is known only per session, so then the startup
+check is skipped.
 
 ACP owns standard input and standard output for the lifetime of the process. Diagnostics go to
 standard error. The process accepts one active ACP session, doesn't implement session loading, and
