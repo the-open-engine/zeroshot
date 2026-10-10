@@ -41,11 +41,11 @@ Code, Codex or Copilot. It runs one of them as the worker and as the reviewers.
 Use the built-in graph or bring your own topology. Add reviewers, tests, and repair loops, then save
 the setup as a profile for the next task.
 
-## A graph sounds cool, but can’t I just write a skill?
+## Skills and review graphs
 
-Sure. A skill is advice, so the agent still decides whether to believe the reviewer it spawned and
-when it’s done. A Zeroshot graph is fixed before the run starts, so every run goes through the same
-reviews and ends when they accept or the retries run out.
+A skill is advice: the agent still decides whether to follow its reviewer's feedback and when to
+stop. A Zeroshot graph defines the required reviews and repair loop before execution; the engine
+follows it until the reviews accept or the retry limit is reached.
 
 The product site, [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot), has the FAQ.
 
