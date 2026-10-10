@@ -428,9 +428,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Target images apply current Debian Trixie package updates and install a checksum-verified upstream
   GitHub CLI. Image tests exercise GraphQL pagination with the installed CLI before publication.
   They ship one Rust toolchain baseline plus Node.js, Python and shared native build tools. They expose
-  Rust through the fixed runtime PATH without a shared writable Cargo cache;
-  explicit user toolchain settings and installations take precedence. Runtime toolchain smoke
-  tests compile native fixtures as an isolated user with a read-only root and fresh home.
+  Rust through the fixed runtime PATH without a shared writable Cargo cache; `/opt/rustup` is
+  root-owned without group/other write access. Explicit user toolchain settings and installations
+  take precedence. Runtime toolchain smoke tests inspect ownership and mode bits, then compile
+  native fixtures as an isolated user with a read-only root and fresh home.
 - Native-v2 admits concurrent writers in parallel branches and map items. Writers share the run's
   workspace owner identity; hosted session cleanup tracks an immutable supplementary group marker
   per session. Authored graphs coordinate overlapping edits. Admission rejects Git delivery that
