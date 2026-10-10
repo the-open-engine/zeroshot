@@ -45,7 +45,7 @@ the setup as a profile for the next task.
 
 A skill is advice: the agent still decides whether to follow its reviewer's feedback and when to
 stop. A Zeroshot graph defines the required reviews and repair loop before execution; the engine
-follows it until the reviews accept or the retry limit is reached.
+follows it mechanically until the reviews accept or the retry limit is reached.
 
 The product site, [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot), has the FAQ.
 
