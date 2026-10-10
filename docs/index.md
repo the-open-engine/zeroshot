@@ -46,30 +46,34 @@ charter, use `auto-research`; custom graphs follow the same protocol contracts.
 
 ## Choose where it runs
 
+<!-- prettier-ignore-start -->
+
 <div class="grid cards" markdown>
 
 - **Local**
 
-  Local mode works in the current Git worktree, keeps state on the same machine, and calls your
-  chosen harness.
+    Local mode works in the current Git worktree, keeps state on the same machine, and calls your
+    chosen harness.
 
-  [Install Zeroshot](getting-started/install.md)
+    [Install Zeroshot](getting-started/install.md)
 
 - **Self-hosted target**
 
-  The target image checks out source on infrastructure you control. Agent processes and the run
-  ledger stay there as well.
+    The target image checks out source on infrastructure you control. Agent processes and the run
+    ledger stay there as well.
 
-  [Understand targets](concepts/targets.md)
+    [Understand targets](concepts/targets.md)
 
 - **Zeroshot Cloud**
 
-  Cloud accepts the same graph and runtime plan through a managed target. Its documentation covers
-  accounts, organization policy, and queue behavior.
+    Cloud accepts the same graph and runtime plan through a managed target. Its documentation covers
+    accounts, organization policy, and queue behavior.
 
-  [Open the Cloud docs](https://cloud.zeroshot.sh/docs)
+    [Open the Cloud docs](https://cloud.zeroshot.sh/docs)
 
 </div>
+
+<!-- prettier-ignore-end -->
 
 ## Read more
 
