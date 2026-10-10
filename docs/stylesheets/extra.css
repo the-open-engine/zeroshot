@@ -430,6 +430,20 @@ body::after {
   color: var(--oe-muted);
 }
 
+/* When the page last changed: a mono label, no icon. */
+.md-source-file {
+  color: var(--oe-muted);
+  font-family: var(--oe-mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.14em;
+  margin-top: 2.4rem;
+  text-transform: uppercase;
+}
+
+.md-source-file__fact .md-icon {
+  display: none;
+}
+
 /* Footer: a hairline and mono labels, no ink bar. */
 .md-footer {
   border-top: 1px solid var(--oe-hairline);

@@ -5,9 +5,13 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
+import subprocess
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -268,6 +272,80 @@ class PublicationTests(unittest.TestCase):
             with self.subTest(version=version, commit=commit):
                 with self.assertRaisesRegex(ValueError, message):
                     versions.check_update(manifest, version, commit)
+
+    def test_last_change_is_the_newest_commit_touching_the_file(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        repository = Path(temporary.name)
+
+        def git(*arguments, when):
+            env = {**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@example.com",
+                    *arguments,
+                ],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                env=env,
+            )
+
+        git("init", "--quiet", when="2026-01-01T12:00:00+00:00")
+        page, other = repository / "page.md", repository / "other.md"
+        page.write_text("first\n", encoding="utf-8")
+        other.write_text("first\n", encoding="utf-8")
+        git("add", "page.md", "other.md", when="2026-01-01T12:00:00+00:00")
+        git("commit", "--quiet", "-m", "first", when="2026-03-04T12:00:00+00:00")
+        other.write_text("second\n", encoding="utf-8")
+        git("commit", "--quiet", "-am", "second", when="2026-05-06T12:00:00+00:00")
+
+        self.assertEqual(hook._last_change(page, repository), date(2026, 3, 4))
+        self.assertEqual(hook._last_change(other, repository), date(2026, 5, 6))
+        self.assertIsNone(hook._last_change(repository / "untracked.md", repository))
+
+        # A shallow clone sees one commit, which would date every page the same.
+        shallow = repository.parent / (repository.name + "-shallow")
+        self.addCleanup(shutil.rmtree, shallow, True)
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "--quiet",
+                "--depth",
+                "1",
+                repository.as_uri(),
+                str(shallow),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        self.assertIsNone(hook._last_change(shallow / "page.md", shallow))
+
+    def test_last_change_is_unknown_outside_a_complete_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertIsNone(
+                hook._last_change(Path(directory) / "page.md", Path(directory))
+            )
+
+    def test_page_shows_its_last_change(self):
+        page = SimpleNamespace(
+            file=SimpleNamespace(abs_src_path="docs/index.md"), meta={}
+        )
+        with patch.object(hook, "_last_change", return_value=date(2026, 10, 4)):
+            hook.on_page_markdown("text", page=page)
+        self.assertEqual(
+            page.meta["revision_date"],
+            'Last updated <time datetime="2026-10-04">4 October 2026</time>',
+        )
+        page.meta.clear()
+        with patch.object(hook, "_last_change", return_value=None):
+            self.assertEqual(hook.on_page_markdown("text", page=page), "text")
+        self.assertNotIn("revision_date", page.meta)
 
     def test_current_manifest_does_not_claim_a_release(self):
         with patch.dict(os.environ, {"ZEROSHOT_DOCS_COMMIT": COMMIT}, clear=True):

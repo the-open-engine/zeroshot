@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -111,10 +112,46 @@ def _manifest(site_dir: Path | None = None) -> dict[str, Any]:
     return manifest
 
 
+def _last_change(path: Path, root: Path = _ROOT) -> date | None:
+    """Return the day a file last changed in Git, or nothing when history cannot tell."""
+    try:
+        shallow = subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        # A shallow clone credits every file to its one visible commit.
+        if shallow.stdout.strip() != "false":
+            return None
+        logged = subprocess.run(
+            ["git", "log", "-1", "--format=%cs", "--", str(path)],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return date.fromisoformat(logged.stdout.strip())
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        return None
+
+
 def on_config(config: Any, **_: Any) -> Any:
     """Apply the current navigation policy even when rebuilding an older release."""
     config.extra["version"] = {"provider": "mike", "default": "current", "alias": False}
     return config
+
+
+def on_page_markdown(markdown: str, *, page: Any, **_: Any) -> str:
+    """Show when each page last changed, under its content."""
+    changed = _last_change(Path(page.file.abs_src_path))
+    if changed is not None:
+        page.meta["revision_date"] = (
+            f'Last updated <time datetime="{changed.isoformat()}">'
+            f"{changed.day} {changed:%B %Y}</time>"
+        )
+    return markdown
 
 
 def on_post_build(*, config: Any, **_: Any) -> None:
