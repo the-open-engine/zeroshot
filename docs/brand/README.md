@@ -85,6 +85,8 @@ the documentation theme.
 ## Workflow diagrams
 
 The workflow diagram shows both reviewers, both repair paths, and optional Git delivery.
+`zeroshot-workflow-mobile.svg` is the same drawing laid out for phones; the documentation
+overview shows it below 720px.
 Editable SVG labels and shapes live in `diagram-sources/`. Run the exporter after
 editing them:
 

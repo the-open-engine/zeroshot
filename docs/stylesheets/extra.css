@@ -238,6 +238,28 @@ body::after {
   text-transform: uppercase;
 }
 
+/* The overview graph is drawn twice, wide and tall for phones, like the
+   landing page's. */
+.md-typeset .docs-graph-wide {
+  display: block;
+}
+
+.md-typeset .docs-graph-tall {
+  display: none;
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-typeset .docs-graph-wide {
+    display: none;
+  }
+
+  .md-typeset .docs-graph-tall {
+    display: block;
+    margin-inline: auto;
+    max-width: min(100%, 24rem);
+  }
+}
+
 .md-typeset .docs-lede {
   font-size: 1.08rem;
   line-height: 1.65;

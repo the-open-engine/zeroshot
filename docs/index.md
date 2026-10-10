@@ -26,19 +26,9 @@ Three authored values determine execution:
 After validating those values, Zeroshot opens a durable ledger where it records each node result.
 Authored edges then route review, retries, and the final result.
 
-```mermaid
-flowchart LR
-  I[Goal and source] --> A[Admission]
-  A --> W[Worker]
-  W --> R1[Acceptance review]
-  W --> R2[Code review]
-  R1 --> D{Both accept?}
-  R2 --> D
-  D -- no --> F[Bounded repair]
-  F --> R1
-  F --> R2
-  D -- yes --> X[Result or delivery]
-```
+[![Zeroshot built-in workflow: implementation, parallel independent acceptance and code review, bounded repair, optional Git delivery, and delivery repair returning to both reviews.](assets/zeroshot-workflow.svg){ loading=lazy }](assets/zeroshot-workflow.svg){ .docs-graph-wide }
+
+![Zeroshot built-in workflow: implementation, parallel independent acceptance and code review, bounded repair, optional Git delivery, and delivery repair returning to both reviews.](assets/zeroshot-workflow-mobile.svg){ .docs-graph-tall loading=lazy }
 
 The built-in `software-change` template uses the route shown above. For work that does not need its
 review loop, use `single-worker`. For ten rounds of measured, reversible research against a durable
