@@ -33,10 +33,10 @@
 
 We built Zeroshot because we were tired of being gaslit by agents telling us broken code was ready.
 
-Zeroshot turns a software goal into an explicit multi-agent graph: one agent implements, independent
-agents review, failures go back to a bounded repair loop, and nothing is delivered until the graph's
-checks pass. The implementing agent never approves its own work. Zeroshot doesn't replace Claude
-Code, Codex or Copilot. It runs one of them as the worker and as the reviewers.
+Zeroshot turns a software goal into an explicit multi-agent graph. In the built-in `software-change`
+workflow, one agent implements, independent agents review, and failures go back to a bounded repair
+loop. Git delivery waits for both reviewers to accept. Zeroshot doesn't replace Claude Code, Codex
+or Copilot. It runs one of them as the worker and as the reviewers.
 
 Use the built-in graph or bring your own topology. Add reviewers, tests, and repair loops, then save
 the setup as a profile for the next task.
