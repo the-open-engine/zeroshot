@@ -6,7 +6,8 @@ test "$(id -u)" -ne 0
 test "$PATH" = /usr/local/bin:/usr/bin:/bin
 test ! -w /usr/local/bin
 # Inspect ownership and mode bits directly; a read-only mount masks writable paths.
-test -z "$(find /opt/rustup ! -type l \( ! -uid 0 -o -perm /022 \) -print -quit)"
+toolchain_permission_violation=$(find /opt/rustup ! -type l \( ! -uid 0 -o -perm /022 \) -print -quit)
+test -z "$toolchain_permission_violation"
 # Package installation in setup must not autostart host-style system services.
 test -x /usr/sbin/policy-rc.d
 if /usr/sbin/policy-rc.d; then
