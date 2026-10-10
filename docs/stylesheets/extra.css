@@ -149,7 +149,7 @@ body::after {
 
 .md-source {
   font-family: var(--oe-mono);
-  font-size: 0.58rem;
+  font-size: 0.55rem;
 }
 
 .md-header__button:hover,
@@ -190,22 +190,22 @@ body::after {
   color: var(--oe-rust);
 }
 
-/* Page text. */
-.md-typeset h1,
-.md-typeset h2 {
+/* Page text. Headings are scoped to the page so search results keep theirs. */
+.md-content .md-typeset h1,
+.md-content .md-typeset h2 {
   color: var(--oe-marker-ink);
   font-family: var(--oe-marker);
   font-weight: 400;
   letter-spacing: 0;
 }
 
-.md-typeset h1 {
+.md-content .md-typeset h1 {
   font-size: clamp(2.4rem, 5vw, 3.2rem);
   line-height: 1;
   margin-bottom: 0.45em;
 }
 
-.md-typeset h2 {
+.md-content .md-typeset h2 {
   border-top: 1px solid var(--oe-hairline);
   font-size: 2.2rem;
   line-height: 1.05;
@@ -219,7 +219,7 @@ body::after {
   letter-spacing: -0.005em;
 }
 
-.md-typeset :is(h1, h2) code {
+.md-content .md-typeset :is(h1, h2) code {
   font-size: 0.5em;
   vertical-align: 0.2em;
 }
