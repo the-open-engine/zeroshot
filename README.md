@@ -53,7 +53,11 @@ The product site, [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_mediu
 
 Questions, ideas, or a run worth showing? Join the [Zeroshot community on Discord](https://theopenengine.com/discord).
 
-## Install
+## Get started
+
+Prefer Cloud? [Cloud setup →](https://cloud.zeroshot.sh/docs)
+
+### Run locally
 
 ```bash
 npm install -g @the-open-engine-company/zeroshot
@@ -70,7 +74,7 @@ reuse the harness's existing login, including subscription-backed sessions. See 
 > **Zeroshot v8 is a hard interface cutover.** v8 replaces the Node.js runtime with a native
 > `zeroshot` binary.
 
-## Run your first task
+#### Run your first task
 
 This example uses Codex and keeps delivery local. **The worker edits the current Git worktree**,
 so start in a clean worktree intended for the task.
@@ -115,6 +119,11 @@ Visit `http://127.0.0.1:4173/ui/` and open **Runs**. Stopping the UI server leav
 running. The CLI also provides `zeroshot list`, `zeroshot status RUN_ID`, and `zeroshot logs RUN_ID`.
 
 For other harnesses and providers, see [Runtimes and connections](docs/concepts/runtimes-and-connections.md).
+
+### Run in the cloud
+
+Connect GitHub and bring your own model API keys.
+[Cloud setup guide →](https://cloud.zeroshot.sh/docs)
 
 ## What the built-in workflow does
 
