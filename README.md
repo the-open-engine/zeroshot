@@ -41,6 +41,13 @@ Code, Codex or Copilot. It runs one of them as the worker and as the reviewers.
 Use the built-in graph or bring your own topology. Add reviewers, tests, and repair loops, then save
 the setup as a profile for the next task.
 
+## Why not just spawn a reviewer?
+
+Spawning a reviewer gives your assistant feedback. Zeroshot's built-in workflow requires both the
+acceptance and code reviewers to accept before it can pass. Rejected work goes through repair and
+both reviews again, up to the configured limit. The engine follows that graph rather than asking
+the implementing agent whether it is done.
+
 The product site, [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot), has the FAQ.
 
 **[▶ Video: a single agent vs. Zeroshot](https://x.com/eivindmeyer_cv/status/2106898797771288828)** (scripted)
