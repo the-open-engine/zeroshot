@@ -47,6 +47,10 @@ A skill is advice: the agent still decides whether to follow its reviewer's feed
 stop. A Zeroshot graph defines the required reviews and repair loop before execution; the engine
 follows it mechanically until the reviews accept or the retry limit is reached.
 
+Add custom agent nodes: a security reviewer, a bugfinder that writes tests, or an agent that checks
+the app in a browser. Choose each node's model and instructions, which nodes run in parallel, and
+where rejected work goes for repair.
+
 The product site, [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot), has the FAQ.
 
 **[▶ Video: a single agent vs. Zeroshot](https://x.com/eivindmeyer_cv/status/2106898797771288828)** (scripted)
