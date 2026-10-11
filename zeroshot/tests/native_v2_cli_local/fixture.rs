@@ -69,6 +69,11 @@ impl LocalFixture {
         self
     }
 
+    pub(super) fn with_equivalent_state_root(mut self) -> Self {
+        self.state = self.state.join(".");
+        self
+    }
+
     fn command_with_inline(&self, args: &[&str], mode: &str, inline: bool) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_zeroshot"));
         command

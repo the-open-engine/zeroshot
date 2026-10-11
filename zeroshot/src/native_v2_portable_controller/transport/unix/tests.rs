@@ -28,9 +28,30 @@ fn socket_path_preserves_fitting_paths_and_shortens_at_the_native_byte_limit() {
     assert_ne!(socket, long_storage.join("controller.sock"));
     assert!(socket.as_os_str().as_encoded_bytes().len() < 104);
     assert_eq!(socket, PortableControllerPaths::new(&long_storage).socket());
+    let other = PortableControllerPaths::new(long_storage.join("other-run")).socket();
+    assert_ne!(socket, other);
     assert_ne!(
-        socket,
-        PortableControllerPaths::new(long_storage.join("other-run")).socket()
+        socket.parent(),
+        other.parent(),
+        "each run has its own temporary directory"
+    );
+    assert_ne!(
+        socket.parent().assert_value(),
+        Path::new(&format!("/tmp/zeroshot-{}", unsafe { libc::geteuid() }))
+    );
+    let decorated = PathBuf::from(format!(
+        "/./{}//./",
+        long_storage.strip_prefix("/").assert_value().display()
+    ));
+    assert_eq!(socket, PortableControllerPaths::new(decorated).socket());
+    let padded_short = PathBuf::from(format!(
+        "/{}{}//",
+        "./".repeat(capacity),
+        storage.strip_prefix("/").assert_value().display()
+    ));
+    assert_eq!(
+        PortableControllerPaths::new(padded_short).socket(),
+        storage.join("controller.sock")
     );
     assert_eq!(long.storage(), long_storage);
     assert_eq!(long.ledger(), long_storage.join("runs.sqlite3"));
@@ -73,7 +94,10 @@ async fn long_storage_socket_is_private_reconnectable_and_removed_when_listener_
     }
     drop(listener);
     assert!(!socket.exists());
+    assert!(!socket.parent().assert_value().exists());
 
+    crate::execution::platform::create_private_directory(socket.parent().assert_value())
+        .assert_value();
     let stale = std::os::unix::net::UnixListener::bind(&socket).assert_value();
     drop(stale);
     assert!(socket.exists());

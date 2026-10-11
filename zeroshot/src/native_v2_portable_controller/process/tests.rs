@@ -170,6 +170,7 @@ fn boundary_contract_path_validation_distinguishes_regular_files_directories_sym
     #[cfg(windows)]
     assert!(remove_existing_regular_file(&blocked_child).is_ok());
 
+    #[cfg(unix)]
     crate::execution::platform::private_directory(root.path()).assert_value();
     let paths = PortableControllerPaths::new(root.path());
     fs::write(paths.ready(), b"stale readiness").assert_value();

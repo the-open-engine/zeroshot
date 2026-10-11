@@ -8,6 +8,7 @@ pub(crate) struct Listener {
     inner: tokio::net::UnixListener,
     path: PathBuf,
     identity: (u64, u64),
+    temporary_directory: Option<PathBuf>,
 }
 
 pub(crate) async fn connect(path: &Path) -> io::Result<Client> {
@@ -32,6 +33,10 @@ impl Listener {
             inner,
             path: path.to_owned(),
             identity: (metadata.dev(), metadata.ino()),
+            temporary_directory: path
+                .file_name()
+                .is_some_and(|name| name == "socket")
+                .then(|| directory.to_owned()),
         };
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
         Ok(listener)
@@ -50,6 +55,9 @@ impl Drop for Listener {
             && (metadata.dev(), metadata.ino()) == self.identity
         {
             let _ = std::fs::remove_file(&self.path);
+            if let Some(directory) = &self.temporary_directory {
+                let _ = std::fs::remove_dir(directory);
+            }
         }
     }
 }

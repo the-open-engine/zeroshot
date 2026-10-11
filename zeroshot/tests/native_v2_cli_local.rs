@@ -128,6 +128,7 @@ async fn detached_local_run_reconnects_without_observer_ownership_and_force_stop
             .socket();
     assert_ne!(socket, storage.join("controller.sock"));
     assert!(socket.exists(), "long state root uses a live short socket");
+    let fixture = fixture.with_equivalent_state_root();
     let running = fixture.wait_running(&run_id).await;
     let execution = running
         .assert_key("status")

@@ -471,10 +471,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Native local CLI and in-process execution support Unix and Windows. Shared OS facilities live in
   `execution::platform`; local controller transport selects Unix sockets or private Windows named
   pipes behind one NDJSON protocol. Unix sockets retain their in-storage path when it fits the
-  platform byte limit; longer paths use `/tmp/zeroshot-<euid>/<sha256(storage)>.sock` independently
-  of `TMPDIR`. Endpoint directories are created as `0700` and validated for current-user ownership
-  and no group/other access through the existing private-file check. Sockets use `0600`; listener
-  cleanup checks device/inode identity and runs before releasing controller ownership. Durable state
+  platform byte limit; endpoint derivation normalizes redundant separators and `.` components.
+  Longer paths use `/tmp/zeroshot-<euid>-<sha256(normalized-storage)>/socket` independently of `TMPDIR`.
+  Each run gets its own endpoint directory, so reserving a UID-only directory cannot block all runs.
+  Endpoint directories are created as `0700` and validated for current-user ownership and no
+  group/other access through the existing private-file check. Sockets use `0600`; listener cleanup
+  checks device/inode identity, removes empty temporary endpoint directories, and runs before
+  releasing controller ownership. Durable state
   stays in the configured state directory. Windows state uses protected current-user/SYSTEM ACLs, rejects
   reparse points, and pins volume/file identity. Provider and delivery descendants belong to
   kill-on-close Job Objects before their first instruction. Detached controllers inherit no caller
