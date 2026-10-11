@@ -313,6 +313,7 @@ jobs:
         run: cargo check --locked --workspace --all-targets --features ui
       - name: Run macOS controller socket and workspace clone regressions
         run: >-
+          ZEROSHOT_REQUIRE_APFS_CLONE=1
           cargo test --locked --package zeroshot --lib --features ui --
           native_v2_portable_controller::transport::unix::tests
           native_v2_supervisor::checkpoints::filesystem::tests::macos_

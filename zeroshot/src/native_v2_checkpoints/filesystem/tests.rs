@@ -217,16 +217,16 @@ fn macos_volume_type(path: &Path) -> String {
 fn macos_workspace_copy_clones_independent_files_on_apfs() {
     use std::os::unix::fs::PermissionsExt;
 
+    let require_clone = std::env::var_os("ZEROSHOT_REQUIRE_APFS_CLONE").is_some();
     let root = tempfile::tempdir().assert_value();
     // Other volume types take the portable copy, which drops the xattr this test observes.
-    // CI runs on APFS, so there the clone path must stay covered rather than skipped.
     let volume = macos_volume_type(root.path());
     if volume != "apfs" {
         assert!(
-            std::env::var_os("CI").is_none(),
-            "CI temporary volume is {volume}, not apfs"
+            !require_clone,
+            "required clone probe needs apfs, not {volume}"
         );
-        eprintln!("skipping clone assertions: temporary volume is {volume}, not apfs");
+        eprintln!("APFS clone test skipped on a {volume} temporary volume");
         return;
     }
     let source = root.path().join("source");

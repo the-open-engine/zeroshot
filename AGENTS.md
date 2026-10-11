@@ -738,7 +738,8 @@ python -m mkdocs build --strict
 
 - CI has native, Python, repository-tooling, npm-package, and strict-documentation lanes plus stable
   aggregate `required`. Native changes also require macOS product and test compilation with the UI
-  feature and focused Unix controller socket regression tests. `.github/ci-path-classifier.js` owns
+  feature, focused Unix controller socket regression tests, and APFS workspace clone tests that
+  `ZEROSHOT_REQUIRE_APFS_CLONE` keeps from skipping. `.github/ci-path-classifier.js` owns
   fail-closed path routing and cross-lane
   producer/consumer dependencies. The native lane runs on Linux and Windows, including real local
   CLI subprocess tests. Windows uses
