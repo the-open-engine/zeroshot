@@ -187,6 +187,79 @@ fn workspace_copy_reads_file_contents_and_preserves_attributes() {
     );
 }
 
+#[cfg(target_os = "macos")]
+fn run_macos_tool(program: &str, arguments: &[&str], path: &Path) -> String {
+    let output = Command::new(program)
+        .args(arguments)
+        .arg(path)
+        .output()
+        .assert_value();
+    assert!(output.status.success(), "{program} {arguments:?} failed");
+    String::from_utf8(output.stdout).assert_value()
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_workspace_copy_clones_independent_files_on_apfs() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempfile::tempdir().assert_value();
+    let source = root.path().join("source");
+    let destination = root.path().join("cloned");
+    fs::write(&source, "original").assert_value();
+    // Only a clone carries extended attributes; the portable copy drops them.
+    run_macos_tool("xattr", &["-w", "dev.zeroshot.test", "cloned"], &source);
+    let mut permissions = fs::metadata(&source).assert_value().permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&source, permissions).assert_value();
+
+    crate::native_v2_capsule::provider_process::copy_workspace_entry(&source, &destination)
+        .assert_value();
+
+    assert_eq!(
+        run_macos_tool("xattr", &["-p", "dev.zeroshot.test"], &destination).trim(),
+        "cloned"
+    );
+    assert!(
+        fs::metadata(&destination)
+            .assert_value()
+            .permissions()
+            .readonly()
+    );
+    fs::set_permissions(&destination, fs::Permissions::from_mode(0o600)).assert_value();
+    fs::write(&destination, "changed").assert_value();
+    assert_eq!(fs::read_to_string(&source).assert_value(), "original");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_workspace_copy_of_locked_file_stays_removable() {
+    use std::os::macos::fs::MetadataExt;
+
+    let root = tempfile::tempdir().assert_value();
+    let source = root.path().join("locked");
+    let stage = root.path().join("stage");
+    fs::create_dir(&stage).assert_value();
+    fs::write(&source, "locked").assert_value();
+    run_macos_tool("chflags", &["uchg"], &source);
+
+    let copied = crate::native_v2_capsule::provider_process::copy_workspace_entry(
+        &source,
+        &stage.join("locked"),
+    );
+    run_macos_tool("chflags", &["nouchg"], &source);
+
+    copied.assert_value();
+    let metadata = fs::metadata(stage.join("locked")).assert_value();
+    assert_eq!(metadata.st_flags(), 0);
+    assert_eq!(
+        fs::read_to_string(stage.join("locked")).assert_value(),
+        "locked"
+    );
+    super::remove_disposable_tree(&stage).assert_value();
+    assert!(!stage.exists());
+}
+
 #[test]
 fn readonly_workspace_files_remain_readonly_through_capture_and_restore() {
     let fixture = Fixture::new();

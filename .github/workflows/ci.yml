@@ -311,10 +311,11 @@ jobs:
           npm --prefix ui run build
       - name: Check macOS product and test compilation
         run: cargo check --locked --workspace --all-targets --features ui
-      - name: Run macOS controller socket regressions
+      - name: Run macOS controller socket and workspace clone regressions
         run: >-
-          cargo test --locked --package zeroshot --lib --features ui
+          cargo test --locked --package zeroshot --lib --features ui --
           native_v2_portable_controller::transport::unix::tests
+          native_v2_supervisor::checkpoints::filesystem::tests::macos_
 
   python-check:
     name: Python SDK

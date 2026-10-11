@@ -521,6 +521,11 @@ fn copy_workspace_file(
     metadata: &fs::Metadata,
 ) -> io::Result<()> {
     let mut input = open_workspace_file(source)?;
+    #[cfg(target_os = "macos")]
+    if let Some(output) = clone_workspace_file(&input, destination, metadata) {
+        output.set_permissions(metadata.permissions())?;
+        return preserve_workspace_file_times(&output, metadata);
+    }
     let mut output = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -528,6 +533,68 @@ fn copy_workspace_file(
     io::copy(&mut input, &mut output)?;
     output.set_permissions(metadata.permissions())?;
     preserve_workspace_file_times(&output, metadata)
+}
+
+// APFS clones share data blocks until either side is written, so staging costs no data copy.
+// Clones carry BSD file flags such as `uchg`, which would block the mode update and removal of the
+// staged tree, so flagged sources take the portable copy. Any clone failure (other volume types,
+// another volume, a missing symbol) also falls back, and the copy reports real failures.
+#[cfg(target_os = "macos")]
+fn clone_workspace_file(
+    input: &fs::File,
+    destination: &Path,
+    metadata: &fs::Metadata,
+) -> Option<fs::File> {
+    use std::os::fd::AsRawFd;
+    use std::os::macos::fs::MetadataExt;
+    use std::os::unix::ffi::OsStrExt;
+
+    // libc does not export these clonefile(2) flags.
+    const CLONE_NOFOLLOW: u32 = 0x0001;
+    const CLONE_NOOWNERCOPY: u32 = 0x0002;
+
+    if metadata.st_flags() != 0 {
+        return None;
+    }
+    let fclonefileat = fclonefileat()?;
+    let name = std::ffi::CString::new(destination.as_os_str().as_bytes()).ok()?;
+    // SAFETY: input is a live descriptor and name is NUL-terminated; ACLs are not copied.
+    let cloned = unsafe {
+        fclonefileat(
+            input.as_raw_fd(),
+            libc::AT_FDCWD,
+            name.as_ptr(),
+            CLONE_NOFOLLOW | CLONE_NOOWNERCOPY,
+        )
+    } == 0;
+    if !cloned {
+        return None;
+    }
+    // The clone keeps the source mode, which may deny writing; metadata updates need no write access.
+    match open_workspace_file(destination) {
+        Ok(output) => Some(output),
+        Err(_) => {
+            let _ = fs::remove_file(destination);
+            None
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+type CloneFileAt =
+    unsafe extern "C" fn(libc::c_int, libc::c_int, *const libc::c_char, u32) -> libc::c_int;
+
+// Resolved at runtime, as std::fs::copy does, so the binary still loads where it is missing.
+#[cfg(target_os = "macos")]
+fn fclonefileat() -> Option<CloneFileAt> {
+    static SYMBOL: std::sync::OnceLock<Option<CloneFileAt>> = std::sync::OnceLock::new();
+    *SYMBOL.get_or_init(|| {
+        // SAFETY: the name is NUL-terminated and RTLD_DEFAULT searches the loaded images.
+        let symbol = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"fclonefileat".as_ptr()) };
+        // SAFETY: a non-null fclonefileat symbol has the clonefile(2) signature declared above.
+        (!symbol.is_null())
+            .then(|| unsafe { std::mem::transmute::<*mut libc::c_void, CloneFileAt>(symbol) })
+    })
 }
 
 #[cfg(not(target_os = "linux"))]
