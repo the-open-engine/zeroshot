@@ -452,11 +452,6 @@ describe('v8 hard cutover contract', () => {
     assert.match(workflow, /invalid selection value/);
   });
 
-  it('announces the breaking v8 interface at the top level', () => {
-    const readme = read('README.md');
-    assert.match(readme, /Zeroshot v8 is a hard interface cutover/);
-  });
-
   it('keeps the target data volume independent of internal protocol names', () => {
     const dockerfile = read('docker/zeroshot-target/Dockerfile');
     const targetReadme = read('docker/zeroshot-target/README.md');

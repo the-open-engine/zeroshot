@@ -17,6 +17,14 @@ const RECOVERED_COMMIT_SUMMARIES = new Map([
     '0d688ae5773febd2e6c81def59790b04c9e8fd58',
     'Update the development formatter Prettier from 3.9.6 to 3.9.8.',
   ],
+  [
+    '6da880abae8fd454c60f80d2b23d94939c194859',
+    "Clarify that Zeroshot runs the user's existing coding agent as workers and reviewers.",
+  ],
+  [
+    '101ec9d9f50d6f7a5d871e5bc655dc03bfc54a99',
+    "Clarify that the README's custom bugfinder/E2E topology is an example and only the review loop is built in.",
+  ],
 ]);
 const CATEGORIES = Object.freeze([
   ['breaking', 'Breaking changes'],
@@ -172,8 +180,7 @@ function parseReleaseCommit(commit) {
   if (!summary && PLAIN_SUMMARY_COMMIT_EXCEPTIONS.has(commit.hash)) {
     summary = plainSummaryFromBody(commit.body);
   }
-  // This already-merged Dependabot update contains upstream HTML instead of our
-  // Summary section. Recover only this immutable object; other commits stay strict.
+  // Recover summaries only for the recorded immutable objects; other commits stay strict.
   if (!summary) summary = RECOVERED_COMMIT_SUMMARIES.get(commit.hash);
   if (!summary) throw new Error(`${commit.hash} has no release summary`);
   const breakingFooter = hasBreakingFooter(commit.body);

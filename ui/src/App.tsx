@@ -12,6 +12,7 @@ import {
 } from './workflow-authoring';
 import type { WorkflowEdge } from './workflow-projection';
 import { type Bootstrap, type Summary } from './api';
+import { missingRuntimeSetting } from './runtime-readiness';
 import type { WorkspaceServices } from './workspace-services';
 import { createHostedProfile, useHostWorkspace } from './use-host-workspace';
 import { workspaceStorageKeys } from './workspace-storage';
@@ -106,6 +107,7 @@ function useAppState({ services, bootstrap, host }: AppProps) {
   const [validation, setValidation] = useState<{
       state: 'checking' | 'valid' | 'invalid';
       message?: string;
+      field?: string;
     }>({ state: 'checking' }),
     [issues, setIssues] = useState(false);
   const [modal, setModal] = useState<
@@ -391,6 +393,11 @@ function useProfileEffects(
   }, [positions, positionKey]);
   useEffect(() => {
     if (!doc) return;
+    const missing = missingRuntimeSetting(doc);
+    if (missing) {
+      setValidation({ state: 'invalid', ...missing });
+      return;
+    }
     const controller = new AbortController();
     setValidation({ state: 'checking' });
     const snapshot = { graph: doc.graph, runtime: doc.runtime };
@@ -867,6 +874,13 @@ function useProfileActions(
     try {
       await flushPendingEdits();
       if (generation !== documentGeneration.current || !current.current) return;
+      const missing = missingRuntimeSetting(current.current);
+      if (missing) {
+        setModalError(missing.message);
+        setError(missing.message);
+        setIssues(true);
+        return;
+      }
       const snapshot = snapshotProfileSave(current.current, {
         name: profileName,
         revision: asCopy ? undefined : revision,

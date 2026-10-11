@@ -4,6 +4,72 @@ use super::*;
 
 const NODE_INSTANCE: u64 = 1;
 
+#[test]
+fn loop_fact_reset_preserves_sibling_map_items_and_visit_markers() {
+    let child: NodeName = "child".parse().expect("node name");
+    let ancestor: NodeName = "ancestor".parse().expect("node name");
+    let target_error = ControlKey {
+        node: child.clone(),
+        source: ControlSource::Error,
+        field: None,
+        map_indices: vec![0],
+    };
+    let sibling_signal = ControlKey {
+        node: child.clone(),
+        source: ControlSource::Signal,
+        field: Some("verdict".to_owned()),
+        map_indices: vec![1],
+    };
+    let ancestor_group = ControlKey {
+        node: ancestor.clone(),
+        source: ControlSource::Group,
+        field: Some("terminated".to_owned()),
+        map_indices: Vec::new(),
+    };
+    let visit = visit_key(&child, &[0]);
+    let mut context = Context::new(Value::Null);
+    context
+        .controls
+        .insert(target_error.clone(), "crash".to_owned());
+    context
+        .controls
+        .insert(sibling_signal.clone(), "accepted".to_owned());
+    context
+        .controls
+        .insert(ancestor_group.clone(), "done".to_owned());
+    context.controls.insert(visit.clone(), "2".to_owned());
+    let channels = Channels {
+        output: Value::Null,
+        signals: BTreeMap::new(),
+        diagnostic: None,
+    };
+    context
+        .channels
+        .insert((child.clone(), vec![0]), channels.clone());
+    context
+        .channels
+        .insert((child.clone(), vec![1]), channels.clone());
+    context
+        .channels
+        .insert((ancestor.clone(), Vec::new()), channels);
+
+    clear_scoped_runtime_facts(&mut context, &BTreeSet::from([child.clone()]), &[0]);
+
+    assert!(!context.controls.contains_key(&target_error));
+    assert_eq!(
+        context.controls.get(&sibling_signal).map(String::as_str),
+        Some("accepted")
+    );
+    assert_eq!(
+        context.controls.get(&ancestor_group).map(String::as_str),
+        Some("done")
+    );
+    assert_eq!(context.controls.get(&visit).map(String::as_str), Some("2"));
+    assert!(!context.channels.contains_key(&(child.clone(), vec![0])));
+    assert!(context.channels.contains_key(&(child, vec![1])));
+    assert!(context.channels.contains_key(&(ancestor, Vec::new())));
+}
+
 fn execution(
     execution: u64,
     attempt: u64,

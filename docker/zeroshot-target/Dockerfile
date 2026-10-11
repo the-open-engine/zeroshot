@@ -12,7 +12,8 @@ FROM rust:1.97.0-trixie AS rust-toolchain
 RUN rustup component add rustfmt clippy \
     && mkdir -p /opt/rustup \
     && cp -a /usr/local/rustup/. /opt/rustup/ \
-    && cp -a /usr/local/cargo/bin /opt/rustup/bin
+    && cp -a /usr/local/cargo/bin /opt/rustup/bin \
+    && chmod -R go-w /opt/rustup
 
 FROM golang:1.27.1-trixie@sha256:9baa6b4187bbb98d240372a8a235ac0bb6b5ddd52bba1431dc2f7c0705862728 AS restic-builder
 ARG TARGETARCH

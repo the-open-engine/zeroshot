@@ -14,6 +14,8 @@ pub(crate) const CODEX_LOCAL_ENVIRONMENT: &[&str] = &[
 ];
 
 pub(crate) const CLAUDE_LOCAL_ENVIRONMENT: &[&str] = &[
+    // Claude's macOS Keychain login uses the invoking user's account name.
+    "USER",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "CLAUDE_CODE_OAUTH_TOKEN",

@@ -52,6 +52,21 @@ impl Drop for TestDirectory {
     }
 }
 
+fn checkpoint_cleanup_fixture(
+    root: &TestDirectory,
+) -> (PathBuf, PathBuf, PortableCheckpointCleanup) {
+    let directory = root.child("catalog");
+    let repository = root.child("repository");
+    std::fs::create_dir(&directory).assert_value();
+    std::fs::create_dir(&repository).assert_value();
+    let cleanup = PortableCheckpointCleanup {
+        inner: Arc::new(super::engine::ConfirmedCleanup),
+        directory: directory.clone(),
+        repository: repository.clone(),
+    };
+    (directory, repository, cleanup)
+}
+
 struct NeverDispatched;
 
 #[async_trait]
@@ -72,20 +87,20 @@ async fn runtime_cleanup_preserves_checkpoint_bytes_until_terminal_policy_runs()
         RunRuntimeExit::RuntimeLost,
     ] {
         let root = TestDirectory::new("checkpoint-retention");
-        let directory = root.child("catalog");
-        let repository = root.child("repository");
-        std::fs::create_dir(&directory).assert_value();
-        std::fs::create_dir(&repository).assert_value();
+        let (directory, repository, cleanup) = checkpoint_cleanup_fixture(&root);
         std::fs::create_dir_all(directory.join("staging/incomplete")).assert_value();
         std::fs::write(directory.join("point"), "catalog").assert_value();
         std::fs::write(directory.join("staging/incomplete/tree"), "temporary").assert_value();
         std::fs::write(repository.join("pack"), "bytes").assert_value();
-        let cleanup = PortableCheckpointCleanup {
-            inner: Arc::new(super::engine::ConfirmedCleanup),
-            directory: directory.clone(),
-            repository: repository.clone(),
-        };
-
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                directory.join("staging/incomplete"),
+                std::fs::Permissions::from_mode(0o555),
+            )
+            .assert_value();
+        }
         cleanup.destroy_or_confirm_absent(exit).await.assert_value();
 
         let retained = matches!(
@@ -96,6 +111,23 @@ async fn runtime_cleanup_preserves_checkpoint_bytes_until_terminal_policy_runs()
         assert_eq!(repository.exists(), retained);
         assert!(!directory.join("staging").exists());
     }
+}
+
+#[tokio::test]
+async fn checkpoint_scratch_gc_failure_does_not_reject_confirmed_runtime_cleanup() {
+    let root = TestDirectory::new("checkpoint-gc-failure");
+    let (directory, _repository, cleanup) = checkpoint_cleanup_fixture(&root);
+    // A non-directory staging path cannot be collected, but contains no live provider work.
+    std::fs::write(directory.join("staging"), "uncollectable scratch").assert_value();
+
+    cleanup
+        .destroy_or_confirm_absent(RunRuntimeExit::Completed)
+        .await
+        .assert_value();
+    assert_eq!(
+        std::fs::read_to_string(directory.join("staging")).assert_value(),
+        "uncollectable scratch"
+    );
 }
 
 fn submission(key: &str) -> RunSubmission {

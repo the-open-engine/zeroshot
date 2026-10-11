@@ -16,6 +16,23 @@ fn loop_graph(body: Value, until: Value) -> GraphSpec {
 }
 
 #[tokio::test]
+async fn input_bound_loop_requires_an_integer_initial_input_path() {
+    let mut graph = serde_json::to_value(loop_graph(
+        verifier_node("review"),
+        json!({"kind":"in","value":{"name":"review","source":"signal","field":"verdict"},"labels":["accepted"]}),
+    ))
+    .assert_value();
+    graph["root"]["children"][0]["maxIterationsInput"] = json!(["value"]);
+    assert_graph_accepted(&serde_json::from_value(graph.clone()).assert_value()).await;
+    graph["root"]["children"][0]["maxIterationsInput"] = json!(["missing"]);
+    assert_graph_rejected_with(
+        &serde_json::from_value(graph).assert_value(),
+        GraphDiagnosticCode::SchemaSafety,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn guaranteed_step_errors_can_stop_direct_sequential_and_all_parallel_rounds() {
     for body in [
         integer_step("work", false),

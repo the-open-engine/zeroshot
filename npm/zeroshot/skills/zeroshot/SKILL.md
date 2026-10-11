@@ -32,7 +32,8 @@ another run. A failed Cloud run does not authorize silently implementing the tas
 
 - Local execution omits `--target` and is the only mode that edits the invoking worktree directly.
 - Zeroshot Cloud is built in. Sign in once with `zeroshot target login cloud`, then use
-  `--target cloud` explicitly on Cloud commands.
+  `--target cloud` explicitly on Cloud commands. Cloud setup (organizations, GitHub App,
+  connections) is documented at https://cloud.zeroshot.sh/docs.
 - Do not add or set up the built-in Cloud target. Named targets store endpoints and login identity,
   not repository configuration.
 

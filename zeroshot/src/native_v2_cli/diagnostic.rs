@@ -182,6 +182,7 @@ fn environment_details(source: &RunEnvironmentError) -> Value {
 fn admission_code(source: &NativeV2AdmissionError) -> &'static str {
     match source {
         NativeV2AdmissionError::InitialInput(_) => "input.type_mismatch",
+        NativeV2AdmissionError::InvalidLoopLimit { .. } => "input.invalid_loop_limit",
         NativeV2AdmissionError::MissingRuntimeBinding { .. } => "runtime.missing_binding",
         NativeV2AdmissionError::UnexpectedRuntimeBinding { .. } => "runtime.unexpected_binding",
         NativeV2AdmissionError::MergePlanAgentGitHubToken { .. } => "runtime.invalid_environment",

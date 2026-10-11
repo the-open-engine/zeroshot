@@ -244,6 +244,11 @@ impl<T> NonEmptyVec<T> {
     }
 
     #[must_use]
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        &mut self.0
+    }
+
+    #[must_use]
     pub fn into_vec(self) -> Vec<T> {
         self.0
     }

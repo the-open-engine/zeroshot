@@ -1,6 +1,13 @@
 # Contributing
 
-Zeroshot v8 is a native Rust product with a browser UI and Python SDK.
+Want to contribute? Start in `#contributors` on
+[Discord](https://theopenengine.com/discord). The pinned post there explains how to claim
+an issue, when to talk before building, and how the Contributor role is earned. Issues
+tagged [good first issue](https://github.com/the-open-engine/zeroshot/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+and [help wanted](https://github.com/the-open-engine/zeroshot/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
+are open to claim. The rest of this file is the build and validation reference.
+
+Zeroshot is a native Rust product with a browser UI and Python SDK.
 Node.js builds the UI and runs repository tooling; Rust serves the UI.
 
 ## Prerequisites

@@ -4,8 +4,10 @@ Installer for the canonical `zeroshot` executable and agent skill. The package s
 archive for the current Node platform and architecture, verifies it against that release's
 `SHA256SUMS`, and installs the executable.
 
-Read the [Zeroshot documentation](https://the-open-engine.github.io/zeroshot/) for installation,
+Read the [Zeroshot documentation](https://zeroshot.sh/docs/) for installation,
 runtime configuration, targets, and CLI reference.
+
+The product site is [zeroshot.sh](https://zeroshot.sh/?utm_source=npm&utm_medium=readme&utm_campaign=zeroshot).
 
 The same managed skill is installed for Codex and GitHub Copilot at
 `$HOME/.agents/skills/zeroshot/SKILL.md`, and for Claude Code at

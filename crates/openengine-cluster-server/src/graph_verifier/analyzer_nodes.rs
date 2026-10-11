@@ -278,14 +278,16 @@ impl<'a> Analyzer<'a> {
         group: &LoopNode,
         context: &LocatedNodeValidationContext<'_>,
     ) -> Effects {
-        if group.max_iterations.get() > FULL_V1_MAX_LOOP_ITERATIONS {
-            emit_diagnostic!(
-                self,
-                GraphDiagnosticCode::CeilingExceeded,
-                format!("maxIterations exceeds full-v1 limit {FULL_V1_MAX_LOOP_ITERATIONS}"),
-                with_field(&context.path, "maxIterations"),
-                vec![group.name.clone()],
-            );
+        if let Some(path) = &group.max_iterations_input {
+            if path_type(&self.graph.initial_input, path) != Some(&PayloadType::Integer) {
+                emit_diagnostic!(
+                    self,
+                    GraphDiagnosticCode::SchemaSafety,
+                    "maxIterationsInput must select an integer in initialInput",
+                    with_field(&context.path, "maxIterationsInput"),
+                    vec![group.name.clone()],
+                );
+            }
         }
         let mut effects = self.validate_node(
             &group.body,

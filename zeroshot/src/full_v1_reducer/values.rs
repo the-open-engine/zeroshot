@@ -451,6 +451,22 @@ fn path_contains(parent: &FieldPath, child: &FieldPath) -> bool {
     child.segments().starts_with(parent.segments())
 }
 
+pub(super) fn clear_scoped_runtime_facts(
+    context: &mut Context,
+    names: &BTreeSet<NodeName>,
+    map_indices: &[u64],
+) {
+    context.controls.retain(|key, _| {
+        !names.contains(&key.node)
+            || !key.map_indices.starts_with(map_indices)
+            || (key.source == ControlSource::Group
+                && key.field.as_deref() == Some("__reducer_visit"))
+    });
+    context
+        .channels
+        .retain(|(name, indices), _| !names.contains(name) || !indices.starts_with(map_indices));
+}
+
 pub(super) fn merge_runtime_facts(source: &Context, target: &mut Context) {
     target.controls.extend(source.controls.clone());
     target.channels.extend(source.channels.clone());

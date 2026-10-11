@@ -133,6 +133,26 @@ worktree must have exactly one GitHub remote. `--repository` and `--branch` over
 and `--revision` selects an exact commit instead of resolving the current remote branch tip.
 Detached worktrees require explicit repository and branch values.
 
+### Image tags and remote hosts
+
+The image is published for `linux/amd64` only. Each release publishes a version tag such as
+`ghcr.io/the-open-engine/zeroshot-target:X.Y.Z` and a `sha-COMMIT` tag. `latest` moves to each newer
+release, so pin a version tag or an image digest when a host must keep the same image.
+
+To use a target on another machine, keep the published port on that host's loopback interface, as in
+the command above, and open an SSH tunnel from your workstation:
+
+```console
+ssh -N -L 8080:127.0.0.1:8080 USER@HOST
+zeroshot target add remote-target --url http://127.0.0.1:8080 --direct
+```
+
+Keep the tunnel open while you use the target. If a local target already uses port 8080, forward
+another local port and start the remote target with `--public-origin` set to that local origin,
+such as `http://127.0.0.1:18080`; the target advertises its endpoint from that origin. The
+[target image README](https://github.com/the-open-engine/zeroshot/blob/main/docker/zeroshot-target/README.md)
+covers reverse proxies, Docker access for runs, and building the image.
+
 ## Hosted target
 
 A hosted target adds discovery and user authentication around the same native contracts:
@@ -145,7 +165,7 @@ zeroshot target login production
 The hosting service owns login, source authorization, organization-scoped connections, queue policy,
 and capacity. Zeroshot's CLI and protocol do not prescribe those product policies.
 
-Follow the [Cloud documentation](https://dev.theopenengine.com/docs) for Zeroshot Cloud. Its pages
+Follow the [Cloud documentation](https://cloud.zeroshot.sh/docs) for Zeroshot Cloud. Its pages
 should link to the version of these core docs that matches the deployed target, as described in
 [Documentation versions](../project/versioning.md).
 

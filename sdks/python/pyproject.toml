@@ -35,7 +35,7 @@ dev = [
 ]
 
 [project.urls]
-Documentation = "https://the-open-engine.github.io/zeroshot/stable/guides/python-sdk/"
+Documentation = "https://zeroshot.sh/docs/stable/guides/python-sdk/"
 Repository = "https://github.com/the-open-engine/zeroshot"
 Issues = "https://github.com/the-open-engine/zeroshot/issues"
 

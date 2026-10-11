@@ -45,6 +45,23 @@ function sourceFixture(directory) {
   return { git, release, main };
 }
 
+function publisherFixture(t, name) {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), `zeroshot docs ${name}-`));
+  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+  const repository = path.join(temporary, 'source');
+  const commands = path.join(temporary, 'commands');
+  fs.mkdirSync(repository);
+  fs.mkdirSync(commands);
+  return { temporary, repository, commands, ...sourceFixture(repository) };
+}
+
+function publishStep(name) {
+  const workflow = yaml.load(
+    fs.readFileSync(path.resolve(__dirname, '../../.github/workflows/docs.yml'), 'utf8')
+  );
+  return workflow.jobs.publish.steps.find((step) => step.name === name);
+}
+
 it('migrates published documentation and guards minor updates', () => {
   const result = spawnSync('python3', ['-m', 'unittest', 'discover', '-s', 'tests/docs', '-v'], {
     cwd: path.resolve(__dirname, '../..'),
@@ -55,13 +72,7 @@ it('migrates published documentation and guards minor updates', () => {
 });
 
 it('bootstraps missing Current from main without inheriting release identity', (t) => {
-  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot docs bootstrap-'));
-  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
-  const repository = path.join(temporary, 'source');
-  const commands = path.join(temporary, 'commands');
-  fs.mkdirSync(repository);
-  fs.mkdirSync(commands);
-  const { git, release, main } = sourceFixture(repository);
+  const { temporary, repository, commands, git, release, main } = publisherFixture(t, 'bootstrap');
   for (const name of ['scripts/docs_hook.py', 'docs/project/versioning.md']) {
     const destination = path.join(repository, '.docs-publisher', name);
     fs.mkdirSync(path.dirname(destination), { recursive: true });
@@ -76,12 +87,7 @@ it('bootstraps missing Current from main without inheriting release identity', (
       '"$ZEROSHOT_DOCS_COMMIT" "$(cat source-marker)" > "$CAPTURE"\n',
     { mode: 0o755 }
   );
-  const workflow = yaml.load(
-    fs.readFileSync(path.resolve(__dirname, '../../.github/workflows/docs.yml'), 'utf8')
-  );
-  const bootstrap = workflow.jobs.publish.steps.find(
-    (step) => step.name === 'Initialize Current before a first release publication'
-  );
+  const bootstrap = publishStep('Initialize Current before a first release publication');
   const capture = path.join(temporary, 'captured-identity');
   const options = {
     cwd: repository,
@@ -110,4 +116,75 @@ it('bootstraps missing Current from main without inheriting release identity', (
   fs.unlinkSync(capture);
   execute('bash', [], options);
   assert.equal(fs.existsSync(capture), false, 'an existing Current must not be rebuilt');
+});
+
+it('rechecks minor canonicals against the Current tree it just published', (t) => {
+  const { temporary, repository, commands, git } = publisherFixture(t, 'canonical');
+  const pages = path.join(temporary, 'pages');
+  const publisher = path.join(repository, '.docs-publisher/scripts/docs_versions.py');
+  fs.mkdirSync(path.dirname(publisher), { recursive: true });
+  fs.copyFileSync(path.resolve(__dirname, '../../scripts/docs_versions.py'), publisher);
+
+  const page = (version, route, origin) => {
+    const destination = path.join(pages, version, route, 'index.html');
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(
+      destination,
+      `<html><head><link rel="canonical" href="${origin}${version}/${route}"></head></html>`
+    );
+  };
+  for (const route of ['', 'guides/acp/']) {
+    page('current', route, 'https://zeroshot.sh/docs/');
+    page('v10.2', route, 'https://zeroshot.sh/docs/');
+  }
+  fs.writeFileSync(
+    path.join(pages, 'versions.json'),
+    JSON.stringify([
+      { version: 'current', title: 'Current', aliases: ['dev'] },
+      { version: 'v10.2', title: 'v10.2', aliases: [] },
+    ])
+  );
+  const index = path.join(temporary, 'pages-index');
+  const pagesGit = (args) =>
+    execute('git', ['--work-tree', pages, ...args], {
+      cwd: repository,
+      env: { ...fixtureEnvironment, GIT_INDEX_FILE: index },
+    });
+  pagesGit(['add', '--', 'versions.json', 'current', 'v10.2']);
+  const tree = pagesGit(['write-tree']);
+  git(['update-ref', 'refs/heads/gh-pages', git(['commit-tree', tree, '-m', 'published'])]);
+
+  // The fake publication drops a Current page that v10.2 still has.
+  fs.writeFileSync(
+    path.join(commands, 'mike'),
+    '#!/bin/sh\nset -eu\n[ "$1" = deploy ] || exit 0\n' +
+      'tree="$RUNNER_TEMP/fake-mike"\n' +
+      'git worktree add --quiet "$tree" gh-pages\n' +
+      'git -C "$tree" rm --quiet current/guides/acp/index.html\n' +
+      'git -C "$tree" commit --quiet -m "docs: publish current"\n' +
+      'git worktree remove "$tree"\n',
+    { mode: 0o755 }
+  );
+  fs.writeFileSync(path.join(commands, 'python'), '#!/bin/sh\nexec python3 "$@"\n', {
+    mode: 0o755,
+  });
+  const publish = publishStep('Publish Current or minor documentation locally');
+  execute('bash', [], {
+    cwd: repository,
+    input: publish.run,
+    env: {
+      ...fixtureEnvironment,
+      PATH: `${commands}${path.delimiter}${process.env.PATH}`,
+      RUNNER_TEMP: temporary,
+      DOCS_VERSION: 'current',
+      UPDATE_STABLE: 'false',
+      SOURCE_COMMIT: 'a'.repeat(40),
+    },
+  });
+
+  const canonical = (route) =>
+    git(['show', `gh-pages:v10.2/${route}index.html`]).match(/rel="canonical" href="([^"]*)"/)[1];
+  assert.equal(canonical(''), 'https://zeroshot.sh/docs/current/');
+  assert.equal(canonical('guides/acp/'), 'https://zeroshot.sh/docs/v10.2/guides/acp/');
+  assert.equal(git(['worktree', 'list', '--porcelain']).match(/^worktree /gm).length, 1);
 });

@@ -348,6 +348,9 @@ pub struct LoopNode {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub until: Option<Guard>,
     pub max_iterations: PositiveInteger,
+    /// Optional initial-input path that replaces `max_iterations` for an admitted run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_iterations_input: Option<FieldPath>,
     pub promoted_state_paths: Vec<FieldPath>,
 }
 

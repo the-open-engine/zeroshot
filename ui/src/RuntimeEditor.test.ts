@@ -71,6 +71,22 @@ test('graph runtime configuration renders independently of the node inspector', 
     assert.match(html, /Git delivery/);
     assert.doesNotMatch(html, /Model for deliver/);
     assert.doesNotMatch(html, /role="tab"/);
+    assert.doesNotMatch(html, /aria-invalid/);
+
+    const flagged = renderToStaticMarkup(
+      createElement(RuntimeEditor, {
+        document: doc,
+        schema: {},
+        invalidField: 'runtime.nodes.worker.model',
+        edit: () => {},
+        openJson: () => {},
+      })
+    );
+    assert.equal(flagged.match(/aria-invalid="true"/g)?.length, 1);
+    assert.match(
+      flagged,
+      /aria-invalid="true"[^>]*value="custom-model"|value="custom-model"[^>]*aria-invalid="true"/
+    );
   } finally {
     await server.close();
   }

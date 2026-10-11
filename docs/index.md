@@ -26,19 +26,9 @@ Three authored values determine execution:
 After validating those values, Zeroshot opens a durable ledger where it records each node result.
 Authored edges then route review, retries, and the final result.
 
-```mermaid
-flowchart LR
-  I[Goal and source] --> A[Admission]
-  A --> W[Worker]
-  W --> R1[Acceptance review]
-  W --> R2[Code review]
-  R1 --> D{Both accept?}
-  R2 --> D
-  D -- no --> F[Bounded repair]
-  F --> R1
-  F --> R2
-  D -- yes --> X[Result or delivery]
-```
+[![Zeroshot built-in workflow: implementation, parallel independent acceptance and code review, bounded repair, optional Git delivery, and delivery repair returning to both reviews.](assets/zeroshot-workflow.svg){ loading=lazy }](assets/zeroshot-workflow.svg){ .docs-graph-wide }
+
+[![Zeroshot built-in workflow: implementation, parallel independent acceptance and code review, bounded repair, optional Git delivery, and delivery repair returning to both reviews.](assets/zeroshot-workflow-mobile.svg){ loading=lazy }](assets/zeroshot-workflow-mobile.svg){ .docs-graph-tall }
 
 The built-in `software-change` template uses the route shown above. For work that does not need its
 review loop, use `single-worker`. For ten rounds of measured, reversible research against a durable
@@ -46,30 +36,34 @@ charter, use `auto-research`; custom graphs follow the same protocol contracts.
 
 ## Choose where it runs
 
+<!-- prettier-ignore-start -->
+
 <div class="grid cards" markdown>
 
 - **Local**
 
-  Local mode works in the current Git worktree, keeps state on the same machine, and calls your
-  chosen harness.
+    Local mode works in the current Git worktree, keeps state on the same machine, and calls your
+    chosen harness.
 
-  [Install Zeroshot](getting-started/install.md)
+    [Install Zeroshot](getting-started/install.md)
 
 - **Self-hosted target**
 
-  The target image checks out source on infrastructure you control. Agent processes and the run
-  ledger stay there as well.
+    The target image checks out source on infrastructure you control. Agent processes and the run
+    ledger stay there as well.
 
-  [Understand targets](concepts/targets.md)
+    [Understand targets](concepts/targets.md)
 
 - **Zeroshot Cloud**
 
-  Cloud accepts the same graph and runtime plan through a managed target. Its documentation covers
-  accounts, organization policy, and queue behavior.
+    Cloud accepts the same graph and runtime plan through a managed target. Its documentation covers
+    accounts, organization policy, and queue behavior.
 
-  [Open the Cloud docs](https://dev.theopenengine.com/docs)
+    [Open the Cloud docs](https://cloud.zeroshot.sh/docs)
 
 </div>
+
+<!-- prettier-ignore-end -->
 
 ## Read more
 
@@ -77,9 +71,10 @@ charter, use `auto-research`; custom graphs follow the same protocol contracts.
 [Runtimes and connections](concepts/runtimes-and-connections.md) before choosing models or supplying
 credentials; [Observe and control runs](guides/observe-and-control.md) covers failed-run recovery,
 durable status, and log streams. [Use a local graph as an ACP agent](guides/acp.md) covers the
-experimental stdio endpoint.
+experimental stdio endpoint. [Build a review loop](guides/review-loop.md) builds a custom graph and
+runtime plan step by step.
 
-The reference section is built from product-owned definitions:
+These reference pages are generated from product-owned definitions:
 
 - [CLI reference](zeroshot-cli.md), generated from the Clap command tree;
 - [Python API](reference/python.md), generated from the SDK's public objects and docstrings;

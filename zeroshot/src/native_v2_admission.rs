@@ -48,6 +48,8 @@ pub enum NativeV2AdmissionError {
     InvalidEnvironment(String),
     #[error("initial input does not match GraphSpec.initialInput: {0}")]
     InitialInput(#[from] PayloadValueError),
+    #[error("loop iteration count at {path} must be a positive safe integer")]
+    InvalidLoopLimit { path: String },
     #[error("executable node {node} uses unsupported native-v2 attempt count {attempts}")]
     Attempts { node: NodeName, attempts: u64 },
     #[error("runtime plan has no binding for executable node {node}")]
@@ -237,7 +239,7 @@ fn prepare_submission(
 ) -> Result<PreparedSubmission, NativeV2AdmissionError> {
     let RunSubmissionIntent {
         title,
-        graph,
+        mut graph,
         initial_input,
         runtime,
         environment,
@@ -246,6 +248,7 @@ fn prepare_submission(
     } = intent;
     validate_run_environment(&runtime, environment.as_ref())?;
     validate_graph_input(&graph, &initial_input)?;
+    loop_limits::bind_input_limits(&mut graph.root, &initial_input)?;
     let declarations = executable_declarations(&graph.root);
     validate_executable_bindings(&declarations, &runtime, delivery_policy)?;
     validate_delivery_concurrency(&graph.root)?;
@@ -288,6 +291,7 @@ async fn verify_submission(
 }
 
 mod concurrency;
+mod loop_limits;
 mod validation;
 use concurrency::validate_delivery_concurrency;
 pub(crate) use validation::{sole_delivery_node, writer_nodes};

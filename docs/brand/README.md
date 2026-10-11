@@ -85,6 +85,8 @@ the documentation theme.
 ## Workflow diagrams
 
 The workflow diagram shows both reviewers, both repair paths, and optional Git delivery.
+`zeroshot-workflow-mobile.svg` is the same drawing laid out for phones; the documentation
+overview shows it below 720px.
 Editable SVG labels and shapes live in `diagram-sources/`. Run the exporter after
 editing them:
 
@@ -109,10 +111,10 @@ The README uses the static SVG when reduced motion is preferred.
 
 ## Social buttons
 
-`social/buttons.html` is the source for the README call-to-action and X buttons. The
-Discord button is the row's only filled rust button, so it reads as the primary
-action; the other buttons stay ink pills with rust icons. Exports are 70 px tall
-(35 px at 2×) and are displayed at `height="30"`.
+`social/buttons.html` is the source for the README call-to-action, zeroshot.sh,
+and X buttons. The Discord button is the row's only filled rust button, so it reads
+as the primary action; the other buttons stay ink pills with rust icons. Exports are
+70 px tall (35 px at 2×) and are displayed at `height="30"`.
 
 Re-render both themes with the Playwright install above:
 
@@ -129,7 +131,7 @@ const { pathToFileURL } = require('node:url');
       await page.goto(pathToFileURL(resolve('docs/brand/social/buttons.html')).href);
       await page.evaluate(t => { document.documentElement.dataset.theme = t; }, theme);
       await page.evaluate(() => document.fonts.ready);
-      for (const id of ['discord-cta', 'x']) {
+      for (const id of ['discord-cta', 'zeroshot-site', 'x']) {
         await page.locator(`#${id}`).screenshot({
           path: resolve(`docs/brand/social/${id}-${theme}.png`),
           omitBackground: true,

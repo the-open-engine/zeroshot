@@ -165,8 +165,11 @@ impl Engine<'_> {
         traversal: Traversal<'_>,
     ) -> Result<Status, ReducerError> {
         let mut local = context.clone();
+        let mut loop_names = descendant_names(&group.body);
+        loop_names.insert(group.name.clone());
         let mut position = HistoryPosition::ZERO;
         for iteration in 1..=group.max_iterations.get() {
+            clear_scoped_runtime_facts(&mut local, &loop_names, traversal.map_indices);
             // Optional outputs describe this iteration; required state still carries across rounds.
             local.local_writes.clear();
             let mut loop_iterations = traversal.loop_iterations.to_vec();
@@ -219,6 +222,9 @@ impl Engine<'_> {
             position,
             label,
         } = completion;
+        let mut loop_names = descendant_names(&group.body);
+        loop_names.insert(group.name.clone());
+        clear_scoped_runtime_facts(context, &loop_names, traversal.map_indices);
         self.set_group_control(
             &mut local,
             GroupControlUpdate {

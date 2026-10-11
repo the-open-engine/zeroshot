@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1296" viewBox="0 0 720 1296" role="img" aria-labelledby="title desc"><title id="title">Zeroshot built-in workflow: implementation, parallel independent acceptance and code review, bounded repair, optional Git delivery, and delivery repair returning to both reviews.</title><desc id="desc">Zeroshot built-in workflow: implementation, parallel independent acceptance and code review, bounded repair, optional Git delivery, and delivery repair returning to both reviews.</desc><defs><style>svg{--paper:#faf7f1;--ink:#26221c;--muted:#6f675a;--accent:#c2240c;--card:#fffdf8;--border:#6f675a}.paper{fill:var(--paper)}.ink{fill:var(--ink)}.muted{fill:var(--muted)}.accent{fill:var(--accent)}.card{fill:var(--card);stroke:var(--ink);stroke-width:1.8;stroke-linejoin:round}.note{fill:#f5e777;stroke:#b5a650;stroke-width:.7}.note-ink{fill:#26221c}.wire{fill:none;stroke:var(--ink);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.retry{fill:none;stroke:var(--accent);stroke-width:2;stroke-dasharray:7 7;stroke-linecap:round;stroke-linejoin:round}.divider{fill:none;stroke:var(--border);stroke-width:1;opacity:.35}.arrow{fill:none;stroke:var(--ink);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}.retry-arrow{fill:none;stroke:var(--accent);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}@media(prefers-color-scheme:dark){svg{--paper:#171411;--ink:#faf7f1;--muted:#b9b0a2;--accent:#ed6b55;--card:#211d18;--border:#948b7c}}</style><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L8 5 L1 9" class="arrow"/></marker><marker id="retry-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L8 5 L1 9" class="retry-arrow"/></marker></defs>
+<rect class="paper" width="720" height="1296"/>
+<text x="48" y="52" data-font="body" font-size="20" class="muted" text-anchor="start">ZEROSHOT / THE BUILT-IN WORKFLOW</text>
+<text x="46" y="118" data-font="hand" font-size="57" class="ink" text-anchor="start">one agent writes.</text>
+<text x="46" y="172" data-font="hand" font-size="57" class="ink" text-anchor="start">others check.</text>
+<path class="note" d="M409 80 L606 78 L608 166 L410 168 Z"/>
+<text x="428" y="116" data-font="hand" font-size="30" class="note-ink" text-anchor="start">10 rounds max.</text>
+<text x="428" y="149" data-font="hand" font-size="30" class="note-ink" text-anchor="start">review + repair.</text>
+<path class="divider" d="M48 200 H660"/>
+<path id="goal" class="card" d="M49 230 L606 228 L608 316 L50 318 Z"/>
+<text x="72" y="274" data-font="hand" font-size="44" class="ink" text-anchor="start">goal</text>
+<text x="72" y="303" data-font="body" font-size="22" class="muted" text-anchor="start">your task</text>
+<path class="wire" marker-end="url(#arrow)" d="M328 323 V338"/>
+<path id="worker" class="card" d="M49 352 L606 350 L608 438 L50 440 Z"/>
+<text x="72" y="396" data-font="hand" font-size="44" class="ink" text-anchor="start">implement</text>
+<text x="72" y="425" data-font="body" font-size="22" class="muted" text-anchor="start">code + tests</text>
+<path class="wire" marker-end="url(#arrow)" d="M328 445 V512 H183 V545"/>
+<path class="wire" marker-end="url(#arrow)" d="M328 512 H473 V545"/>
+<text x="328" y="541" data-font="hand" font-size="27" class="ink" text-anchor="middle">independent, in parallel</text>
+<path id="acceptance" class="card" d="M49 559 L316 557 L318 695 L50 697 Z"/>
+<text x="72" y="603" data-font="hand" font-size="42" class="ink" text-anchor="start">acceptance</text>
+<text x="72" y="645" data-font="hand" font-size="42" class="ink" text-anchor="start">review</text>
+<text x="72" y="678" data-font="body" font-size="20" class="muted" text-anchor="start">requirements met?</text>
+<path id="code" class="card" d="M339 559 L606 557 L608 695 L340 697 Z"/>
+<text x="362" y="603" data-font="hand" font-size="42" class="ink" text-anchor="start">code review</text>
+<text x="362" y="643" data-font="body" font-size="20" class="muted" text-anchor="start">correctness + safety</text>
+<path class="wire" marker-end="url(#arrow)" d="M183 702 V745"/>
+<path class="wire" d="M473 702 V724 H183"/>
+<path id="verdict" class="card" d="M49 759 L284 757 L286 865 L50 867 Z"/>
+<text x="72" y="806" data-font="hand" font-size="40" class="ink" text-anchor="start">both pass?</text>
+<text x="72" y="842" data-font="body" font-size="21" class="muted" text-anchor="start">or repair</text>
+<path id="repair" class="note" d="M363 759 L606 757 L608 865 L364 867 Z"/>
+<text x="380" y="803" data-font="hand" font-size="38" class="note-ink" text-anchor="start">repair the code</text>
+<text x="380" y="840" data-font="body" font-size="19" class="note-ink" text-anchor="start">use the review evidence</text>
+<path class="retry" marker-end="url(#retry-arrow)" d="M293 818 H350"/>
+<text x="321" y="802" data-font="hand" font-size="27" class="accent" text-anchor="middle">repair</text>
+<path class="retry" marker-end="url(#retry-arrow)" d="M610 812 H660 V478 H335"/>
+<text x="408" y="468" data-font="hand" font-size="28" class="accent" text-anchor="start">both reviews again</text>
+<path class="wire" marker-end="url(#arrow)" d="M183 872 V915"/>
+<text x="198" y="902" data-font="hand" font-size="26" class="ink" text-anchor="start">pass</text>
+<path id="delivery" class="card" d="M49 929 L606 927 L608 1045 L50 1047 Z"/>
+<text x="72" y="977" data-font="hand" font-size="44" class="ink" text-anchor="start">deliver</text>
+<text x="72" y="1010" data-font="body" font-size="20" class="muted" text-anchor="start">commit · PR · CI · merge</text>
+<text x="72" y="1034" data-font="body" font-size="18" class="muted" text-anchor="start">when delivery is enabled</text>
+<path class="wire" marker-end="url(#arrow)" d="M183 1052 V1095"/>
+<text x="198" y="1082" data-font="hand" font-size="28" class="ink" text-anchor="start">merged</text>
+<path id="done" class="card" d="M49 1109 L284 1107 L286 1205 L50 1207 Z"/>
+<text x="72" y="1156" data-font="hand" font-size="44" class="ink" text-anchor="start">done</text>
+<text x="72" y="1188" data-font="body" font-size="21" class="muted" text-anchor="start">delivery receipt</text>
+<path class="retry" marker-end="url(#retry-arrow)" d="M473 1052 V1095"/>
+<text x="488" y="1082" data-font="hand" font-size="28" class="accent" text-anchor="start">failed</text>
+<path id="delivery-repair" class="note" d="M363 1109 L606 1107 L608 1205 L364 1207 Z"/>
+<text x="380" y="1153" data-font="hand" font-size="38" class="note-ink" text-anchor="start">repair delivery</text>
+<text x="380" y="1188" data-font="body" font-size="20" class="note-ink" text-anchor="start">CI failure or conflict</text>
+<path class="retry" d="M610 1157 H660 V812"/>
+<text x="48" y="1262" data-font="body" font-size="22" class="muted" text-anchor="start">Every step is recorded in the ledger.</text>
+</svg>

@@ -95,6 +95,32 @@ impl Fixture {
     }
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn capture_removes_readonly_copied_directories_from_disposable_staging() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new();
+    let readonly = fixture.workspace.join("readonly");
+    fs::create_dir(&readonly).assert_value();
+    fs::write(readonly.join("source"), "retained").assert_value();
+    fs::set_permissions(&readonly, fs::Permissions::from_mode(0o555)).assert_value();
+
+    fixture.input_checkpoint("writer").await;
+
+    assert_eq!(
+        fs::read_dir(fixture.directory.join("staging"))
+            .assert_value()
+            .count(),
+        0
+    );
+    assert_eq!(
+        fs::metadata(&readonly).assert_value().permissions().mode() & 0o777,
+        0o555
+    );
+    fs::set_permissions(&readonly, fs::Permissions::from_mode(0o700)).assert_value();
+}
+
 #[tokio::test]
 async fn catalog_pages_exclusively_and_rejects_invalid_or_unknown_cursors() {
     let fixture = Fixture::new();

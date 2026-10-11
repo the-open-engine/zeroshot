@@ -140,6 +140,7 @@ function AppDialogs({ model }: { model: AppModel }) {
     setModal,
     openJson,
     adopt,
+    validation,
     name,
     setName,
     template,
@@ -191,6 +192,7 @@ function AppDialogs({ model }: { model: AppModel }) {
             <RuntimeEditor
               document={doc}
               schema={bootstrap?.runtimeSchema}
+              invalidField={validation.state === 'invalid' ? validation.field : undefined}
               edit={apply}
               openJson={() => openJson('runtime')}
             />
@@ -588,6 +590,31 @@ function JsonContent({ model }: { model: AppModel }) {
   );
 }
 
+function ValidationDetail({
+  validation,
+  openRuntime,
+  dismiss,
+}: {
+  validation: { message?: string; field?: string };
+  openRuntime: () => void;
+  dismiss: () => void;
+}) {
+  return (
+    <div className="validation-detail" role="alert">
+      <AlertCircle size={17} />
+      <span>{validation.message}</span>
+      {validation.field?.startsWith('runtime') && (
+        <button className="text-button" onClick={openRuntime}>
+          Open runtime settings
+        </button>
+      )}
+      <button className="icon-button" aria-label="Dismiss validation details" onClick={dismiss}>
+        <X size={16} />
+      </button>
+    </div>
+  );
+}
+
 function ProfileWorkspace({ model }: { model: AppModel }) {
   const {
     loading,
@@ -815,17 +842,11 @@ function ProfileWorkspace({ model }: { model: AppModel }) {
             </span>
           </footer>
           {issues && validation.message && (
-            <div className="validation-detail" role="alert">
-              <AlertCircle size={17} />
-              <span>{validation.message}</span>
-              <button
-                className="icon-button"
-                aria-label="Dismiss validation details"
-                onClick={() => setIssues(false)}
-              >
-                <X size={16} />
-              </button>
-            </div>
+            <ValidationDetail
+              validation={validation}
+              openRuntime={() => setModal('runtime')}
+              dismiss={() => setIssues(false)}
+            />
           )}
         </>
       ) : (

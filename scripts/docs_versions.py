@@ -9,10 +9,16 @@ import posixpath
 import re
 import shutil
 from pathlib import Path
+from urllib.parse import quote
 
 RELEASE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 MINOR = re.compile(r"^v(\d+)\.(\d+)$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
+# Keep in sync with mkdocs.yml site_url. Snapshots built before that URL
+# changed still name the GitHub Pages origin that zeroshot.sh/docs serves.
+SITE_URL = "https://zeroshot.sh/docs/"
+LEGACY_SITE_URL = "https://the-open-engine.github.io/zeroshot/"
+CANONICAL_LINK = re.compile(r'<link rel="canonical" href="([^"]*)"')
 
 
 def release_parts(version: str) -> tuple[int, ...]:
@@ -191,8 +197,60 @@ def migrate_stable(root: Path, retained: list[dict]) -> None:
             redirect_pages(root, "stable", newest_minor["version"], pages)
 
 
+def page_route(page: Path) -> str:
+    """Return a built page's URL relative to its version root, as MkDocs writes it."""
+    if page.name != "index.html":
+        return quote(page.as_posix())
+    directory = page.parent.as_posix()
+    return "" if directory == "." else quote(directory) + "/"
+
+
+def canonicalize_minor(root: Path, version: str) -> None:
+    """Credit Current for every page it still documents, and zeroshot.sh otherwise.
+
+    Only absolute canonical links on the documentation origins change. Relative
+    canonicals of redirect pages, page bodies, and other files stay untouched.
+    """
+    directory = root / version
+    for path in directory.rglob("*.html"):
+        page = path.relative_to(directory)
+        owner = "current" if (root / "current" / page).is_file() else version
+        canonical = f"{SITE_URL}{owner}/{page_route(page)}"
+        original = path.read_text(encoding="utf-8")
+        head, end, body = original.partition("</head>")
+        if not end:
+            continue
+        link = CANONICAL_LINK.search(head)
+        if link and link[1].startswith((SITE_URL, LEGACY_SITE_URL)):
+            head = head[: link.start(1)] + canonical + head[link.end(1) :]
+        updated = head.replace(LEGACY_SITE_URL, SITE_URL) + end + body
+        if updated != original:
+            path.write_text(updated, encoding="utf-8")
+    sitemap = directory / "sitemap.xml"
+    if sitemap.is_file():
+        original = sitemap.read_text(encoding="utf-8")
+        updated = original.replace(LEGACY_SITE_URL, SITE_URL)
+        if updated != original:
+            sitemap.write_text(updated, encoding="utf-8")
+            # Do not keep a compressed sitemap that still lists the old origin.
+            (directory / "sitemap.xml.gz").unlink(missing_ok=True)
+
+
+def canonicalize(root: Path) -> None:
+    """Apply the canonical policy to every minor listed in versions.json."""
+    versions_path = root / "versions.json"
+    if not versions_path.exists():
+        return
+    for entry in json.loads(versions_path.read_text(encoding="utf-8")):
+        if MINOR.fullmatch(entry["version"]):
+            canonicalize_minor(root, entry["version"])
+
+
 def migrate(root: Path) -> None:
-    """Keep the newest patch of each minor and preserve old HTML links."""
+    """Keep the newest patch of each minor and preserve old HTML links.
+
+    Minor-version canonical links then credit Current on zeroshot.sh.
+    """
     versions_path = root / "versions.json"
     if not versions_path.exists():
         return
@@ -217,13 +275,14 @@ def migrate(root: Path) -> None:
         reverse=True,
     )
     write_json(versions_path, retained)
+    canonicalize(root)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    migration = subparsers.add_parser("migrate")
-    migration.add_argument("root", type=Path)
+    for command in ("migrate", "canonicalize"):
+        subparsers.add_parser(command).add_argument("root", type=Path)
     check = subparsers.add_parser("check-update")
     check.add_argument("manifest", type=Path)
     check.add_argument("version")
@@ -231,6 +290,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "migrate":
         migrate(args.root)
+    elif args.command == "canonicalize":
+        canonicalize(args.root)
     else:
         check_update(
             json.loads(args.manifest.read_text(encoding="utf-8")),

@@ -10,8 +10,8 @@ Older minor versions remain available.
 
 ## URL contract
 
-The docs base is `https://the-open-engine.github.io/zeroshot/`. Resolve these paths against that
-base, including its `/zeroshot/` project prefix:
+The docs base is `https://zeroshot.sh/docs/`, which serves the GitHub Pages site at
+`https://the-open-engine.github.io/zeroshot/`. Resolve these paths against either base:
 
 | Relative path                                 | Meaning                                                          |
 | --------------------------------------------- | ---------------------------------------------------------------- |
@@ -25,6 +25,10 @@ base, including its `/zeroshot/` project prefix:
 
 The selector does not list legacy aliases. Existing patch links retain their page, query string,
 and fragment, but now show the minor version's newest patch. New releases do not create patch paths.
+
+Search engines should index Current. A minor version's page declares the same page in Current as
+its canonical URL, or its own `https://zeroshot.sh/docs/vX.Y/` URL when Current no longer has that
+page. The publisher reapplies this to every minor version on each publication.
 
 ## Build manifest
 
@@ -49,9 +53,12 @@ Manifest schema 2 distinguishes a docs channel from the exact product used to ge
 }
 ```
 
-The example abbreviates `routes`; builds retain the complete logical route map, including protocol
-schemas. Values are relative to the selected version root. Current uses `docsVersion: current`
+The example abbreviates `routes`; builds list every logical route their source documents,
+including protocol schemas. Values are relative to the selected version root. Current uses `docsVersion: current`
 and null product and Python SDK versions; its source commit identifies `main` at build time.
+
+A minor's manifest lists only routes its source documents; clients must treat a missing route key as
+not documented in that version.
 
 Publication tools and this version-policy page can come from a newer workflow commit than the
 product source. `publisherCommit` records that distinction. Minor pages migrated from the old site

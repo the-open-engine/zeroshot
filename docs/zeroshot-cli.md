@@ -87,7 +87,7 @@ Options:
 ```text
 Manage named targets or serve a direct target.
 
-The built-in `cloud` target points to https://api.cloud.zeroshot.sh. Run `zeroshot target login cloud` to sign in.
+The built-in `cloud` target points to https://api.cloud.zeroshot.sh. Run `zeroshot target login cloud` to sign in. See https://cloud.zeroshot.sh/docs for Cloud setup.
 
 Usage: zeroshot target <COMMAND>
 
@@ -382,7 +382,7 @@ Options:
           Possible values:
           - single-worker:   A single general-purpose worker
           - software-change: A review, validation, and optional delivery workflow for code changes
-          - auto-research:   Ten bounded research iterations with independent evidence gates
+          - auto-research:   Research with ten iterations by default and independent evidence gates
 
       --runtime-config <FILE>
 
@@ -557,7 +557,7 @@ Arguments:
           Possible values:
           - single-worker:   A single general-purpose worker
           - software-change: A review, validation, and optional delivery workflow for code changes
-          - auto-research:   Ten bounded research iterations with independent evidence gates
+          - auto-research:   Research with ten iterations by default and independent evidence gates
 
 Options:
       --delivery <MODE>
@@ -774,7 +774,7 @@ Options:
           Possible values:
           - single-worker:   A single general-purpose worker
           - software-change: A review, validation, and optional delivery workflow for code changes
-          - auto-research:   Ten bounded research iterations with independent evidence gates
+          - auto-research:   Research with ten iterations by default and independent evidence gates
 
       --input <FILE>
           Load the graph's initial input from this JSON file

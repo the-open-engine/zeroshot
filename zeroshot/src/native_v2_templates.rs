@@ -168,6 +168,7 @@ fn change_loop(
         body: Box::new(body),
         until: None,
         max_iterations: positive(CHANGE_ITERATIONS)?,
+        max_iterations_input: None,
         promoted_state_paths: feedback_paths,
     });
     sequence(
