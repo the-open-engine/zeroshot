@@ -2,12 +2,12 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/brand/zeroshot-hero-dark.png">
-  <img alt="Zeroshot: the agent that wrote the code should not be the one that says it works. Independent review and repair." src="docs/brand/zeroshot-hero-light.png" width="100%">
+  <img alt="zeroshot: the agent that wrote the code should not be the one that says it works. Independent review and repair." src="docs/brand/zeroshot-hero-light.png" width="100%">
 </picture>
 
 &nbsp;
 
-<a href="https://theopenengine.com/discord"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/discord-cta-dark.png"><img alt="Join the Zeroshot community on Discord" src="docs/brand/social/discord-cta-light.png" height="30"></picture></a>
+<a href="https://theopenengine.com/discord"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/discord-cta-dark.png"><img alt="Join the zeroshot community on Discord" src="docs/brand/social/discord-cta-light.png" height="30"></picture></a>
 <a href="https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/zeroshot-site-dark.png"><img alt="Website · zeroshot.sh" src="docs/brand/social/zeroshot-site-light.png" height="30"></picture></a>
 <a href="https://theopenengine.com/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/website-dark.png"><img alt="The Open Engine · theopenengine.com" src="docs/brand/social/website-light.png" height="30"></picture></a>
 <a href="https://x.com/OpenEngineHQ"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/x-dark.png"><img alt="X · @OpenEngineHQ" src="docs/brand/social/x-light.png" height="30"></picture></a>
@@ -27,24 +27,25 @@
 
 </div>
 
-# Zeroshot
+# zeroshot
 
 **The agent that writes the code should not be the one that decides it works.**
 
-We built Zeroshot because we were tired of being gaslit by agents telling us broken code was ready.
+We built zeroshot because we were tired of being gaslit by agents telling us broken code was ready.
 
-Zeroshot turns a software goal into an explicit multi-agent graph. In the built-in `software-change`
-workflow, one agent implements, independent agents review, and failures go back to a bounded repair
-loop. Git delivery waits for both reviewers to accept. Zeroshot doesn't replace Claude Code, Codex
-or Copilot. It runs one of them as the worker and as the reviewers.
+zeroshot runs a QA process your coding agent can't skip. You define it as a graph: which agents
+review, what must pass, where a rejection loops back. In the built-in `software-change` workflow,
+one agent implements, independent agents review, and failures go back to a bounded repair loop.
+Git delivery waits for both reviewers to accept. zeroshot doesn't replace Claude Code, Codex or
+Copilot. It runs one of them as the worker and as the reviewers.
 
-Use the built-in graph or bring your own topology. Add reviewers, tests, and repair loops, then save
-the setup as a profile for the next task.
+Use the built-in graph or draw your own: code review, your own reviewers and test agents, any model
+per node. Save the setup as a profile for the next task.
 
 ## Skills and review graphs
 
 A skill is advice: the agent still decides whether to follow its reviewer's feedback and when to
-stop. A Zeroshot graph defines the required reviews and repair loop before execution; the engine
+stop. A zeroshot graph defines the required reviews and repair loop before execution; the engine
 follows it mechanically until the reviews accept or the retry limit is reached.
 
 Add custom agent nodes: a security reviewer, a bugfinder that writes tests, or an agent that checks
@@ -53,9 +54,9 @@ where rejected work goes for repair.
 
 The product site, [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot), has the FAQ.
 
-**[▶ Video: a single agent vs. Zeroshot](https://x.com/eivindmeyer_cv/status/2106898797771288828)** (scripted)
+**[▶ Video: a single agent vs. zeroshot](https://x.com/eivindmeyer_cv/status/2106898797771288828)** (scripted)
 
-Questions, ideas, or a run worth showing? Join the [Zeroshot community on Discord](https://theopenengine.com/discord).
+Questions, ideas, or a run worth showing? Join the [zeroshot community on Discord](https://theopenengine.com/discord).
 
 ## Get started
 
@@ -68,7 +69,7 @@ npm install -g @the-open-engine-company/zeroshot
 ```
 
 The installer requires Node.js 18 or newer and installs a verified native binary for Linux
-x64/arm64, macOS x64/arm64, or Windows x64. It also installs one Zeroshot skill for Codex, GitHub
+x64/arm64, macOS x64/arm64, or Windows x64. It also installs one zeroshot skill for Codex, GitHub
 Copilot, and Claude Code at user scope.
 
 For local execution, install and sign in to Codex, Claude Code, or GitHub Copilot. Local runs can
@@ -144,7 +145,7 @@ and environment you provide.
   <picture>
     <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/zeroshot-workflow.svg">
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/zeroshot-demo-dark.gif">
-    <img src="docs/assets/zeroshot-demo.gif" alt="Animated Zeroshot workflow: implementation, parallel acceptance and code review, repair, and optional Git delivery" width="960">
+    <img src="docs/assets/zeroshot-demo.gif" alt="Animated zeroshot workflow: implementation, parallel acceptance and code review, repair, and optional Git delivery" width="960">
   </picture>
   <br>
   <em>Both reviews run again after a repair. Git delivery is optional.</em><br>
@@ -272,7 +273,7 @@ A failed run with a recoverable workspace can be
 
 ## Research graph
 
-Zeroshot also includes an `auto-research` graph for ten bounded iterations of experiments with
+zeroshot also includes an `auto-research` graph for ten bounded iterations of experiments with
 independent review of evidence, method, and progress. It keeps adopted, record-only, and aborted
 results under `.zeroshot/research`; add `--push` when each finalized iteration should be published.
 
