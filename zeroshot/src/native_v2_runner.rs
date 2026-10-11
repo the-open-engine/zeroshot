@@ -205,6 +205,19 @@ impl DriverControl {
         Ok(())
     }
 
+    /// Publishes output a driver held back until its provider stream ended. Unlike `emit`, this
+    /// still records after cancellation, through the bounded terminal lane.
+    pub async fn emit_final(&self, output: LiveOutput) -> Result<(), NodeRunnerError> {
+        self.durable_output
+            .send_terminal(
+                durable_output_event(output.clone()),
+                self.cancellation.clone(),
+            )
+            .await?;
+        let _ = self.live_output.send(output);
+        Ok(())
+    }
+
     pub async fn record_token_usage(
         &self,
         usage: Option<TokenUsageDelta>,

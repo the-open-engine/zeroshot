@@ -666,5 +666,36 @@ wait
     cancel_and_assert_reaped(handle, &workspace, child_pid).await;
 }
 
+#[tokio::test]
+async fn cancellation_records_text_held_back_before_its_block_ended() {
+    let workspace = TestDirectory::new("claude-cancel-pending");
+    workspace.write(
+        "fake-claude.sh",
+        r#"
+set -eu
+cat >/dev/null
+printf '%s%s\n' \
+  '{"type":"stream_event","event":{"type":"content_block_delta",' \
+  '"delta":{"type":"text_delta","text":"ready\npartial reply"}}}'
+exec sleep 30
+"#,
+    );
+    let mut handle = start_anthropic(&workspace, "claude-haiku-4-5", None).await;
+    let mut attach = handle.take_initial_output().assert_value();
+    assert_eq!(attach.recv_output().await.assert_value().text, "ready\n");
+
+    handle.cancel();
+    assert_eq!(handle.completion().await, Err(NodeRunnerError::Cancelled));
+    let held_back = tokio::time::timeout(Duration::from_secs(5), attach.recv_output())
+        .await
+        .assert_value()
+        .assert_value();
+    assert_eq!(
+        held_back.stream,
+        crate::native_v2_runner::LiveOutputStream::Output
+    );
+    assert_eq!(held_back.text, "partial reply");
+}
+
 #[path = "tests/failure.rs"]
 mod failure;

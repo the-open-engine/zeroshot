@@ -458,9 +458,13 @@ async fn collect_transcript(
             delivery_error = emit_claude(control, emissions).await.err();
         }
     }
+    // The transcript holds back text until a line or block ends, so the remainder can include
+    // text received before cancellation. Record it even when cancellation already started.
     let emissions = transcript.finish_stream();
-    if delivery_error.is_none() {
-        delivery_error = emit_claude(control, emissions).await.err();
+    if matches!(delivery_error, None | Some(NodeRunnerError::Cancelled)) {
+        if let Err(error) = emit_claude_final(control, emissions).await {
+            delivery_error.get_or_insert(error);
+        }
     }
     delivery_error.map_or(Ok(()), Err)
 }
@@ -469,9 +473,30 @@ async fn emit_claude(
     control: &DriverControl,
     emissions: Vec<ClaudeEmission>,
 ) -> Result<(), NodeRunnerError> {
+    let mut emissions = emissions.into_iter();
+    while let Some(emission) = emissions.next() {
+        let output = LiveOutput::new(emission.stream, emission.text)?;
+        match control.emit(output.clone()).await {
+            Ok(()) => {}
+            Err(NodeRunnerError::Cancelled) => {
+                // This batch can carry text held back before cancellation; record it once.
+                control.emit_final(output).await?;
+                emit_claude_final(control, emissions.collect()).await?;
+                return Err(NodeRunnerError::Cancelled);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+async fn emit_claude_final(
+    control: &DriverControl,
+    emissions: Vec<ClaudeEmission>,
+) -> Result<(), NodeRunnerError> {
     for emission in emissions {
         control
-            .emit(LiveOutput::new(emission.stream, emission.text)?)
+            .emit_final(LiveOutput::new(emission.stream, emission.text)?)
             .await?;
     }
     Ok(())
