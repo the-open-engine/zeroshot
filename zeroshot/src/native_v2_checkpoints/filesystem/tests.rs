@@ -199,11 +199,36 @@ fn run_macos_tool(program: &str, arguments: &[&str], path: &Path) -> String {
 }
 
 #[cfg(target_os = "macos")]
+fn macos_volume_type(path: &Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).assert_value();
+    // SAFETY: statfs writes only into the zeroed buffer, and the path is NUL-terminated.
+    let mut volume = unsafe { std::mem::zeroed::<libc::statfs>() };
+    assert_eq!(unsafe { libc::statfs(path.as_ptr(), &mut volume) }, 0);
+    // SAFETY: the kernel NUL-terminates f_fstypename within its fixed buffer.
+    unsafe { std::ffi::CStr::from_ptr(volume.f_fstypename.as_ptr()) }
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[cfg(target_os = "macos")]
 #[test]
 fn macos_workspace_copy_clones_independent_files_on_apfs() {
     use std::os::unix::fs::PermissionsExt;
 
     let root = tempfile::tempdir().assert_value();
+    // Other volume types take the portable copy, which drops the xattr this test observes.
+    // CI runs on APFS, so there the clone path must stay covered rather than skipped.
+    let volume = macos_volume_type(root.path());
+    if volume != "apfs" {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "CI temporary volume is {volume}, not apfs"
+        );
+        eprintln!("skipping clone assertions: temporary volume is {volume}, not apfs");
+        return;
+    }
     let source = root.path().join("source");
     let destination = root.path().join("cloned");
     fs::write(&source, "original").assert_value();
