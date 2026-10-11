@@ -237,8 +237,9 @@ fn prepare_bootstrap_parent(path: &Path) -> Result<(), PortableControllerError> 
 }
 
 pub struct PortableControllerServer {
-    controller: Arc<PortableRunController>,
+    // Drop the endpoint before releasing controller ownership to a successor.
     listener: super::transport::Listener,
+    controller: Arc<PortableRunController>,
 }
 
 #[derive(Default)]

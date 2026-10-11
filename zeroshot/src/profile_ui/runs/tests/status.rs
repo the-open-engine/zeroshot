@@ -423,7 +423,7 @@ mod local {
         }
         fn listen(&self, id: &RunId) -> UnixListener {
             let paths = self.paths(id);
-            std::fs::create_dir_all(paths.storage()).assert_value();
+            crate::execution::platform::private_directory(paths.storage()).assert_value();
             let listener = UnixListener::bind(paths.socket()).assert_value();
             self.ready(id, id);
             listener

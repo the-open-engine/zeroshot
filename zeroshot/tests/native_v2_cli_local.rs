@@ -119,9 +119,15 @@ async fn target_omitted_run_derives_source_and_preserves_workspace_mutation() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn detached_local_run_reconnects_without_observer_ownership_and_force_stops() {
-    let fixture = LocalFixture::new();
+    let fixture = LocalFixture::new().with_long_state_root();
     let run_id = fixture.submit_detached("block").await;
     let active_pid = fixture.ready_pid(&run_id);
+    let storage = fixture.run_storage(&run_id);
+    let socket =
+        zeroshot_engine::native_v2_portable_controller::PortableControllerPaths::new(&storage)
+            .socket();
+    assert_ne!(socket, storage.join("controller.sock"));
+    assert!(socket.exists(), "long state root uses a live short socket");
     let running = fixture.wait_running(&run_id).await;
     let execution = running
         .assert_key("status")
@@ -206,7 +212,7 @@ async fn detached_local_run_reconnects_without_observer_ownership_and_force_stop
 
 #[tokio::test(flavor = "multi_thread")]
 async fn dead_controller_reconciles_runtime_loss_and_keeps_durable_observation() {
-    let fixture = LocalFixture::new();
+    let fixture = LocalFixture::new().with_long_state_root();
     let run_id = fixture.submit_detached("block").await;
     fixture.wait_running(&run_id).await;
     let logs = fixture

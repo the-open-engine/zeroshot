@@ -235,7 +235,9 @@ async fn one_run_server_is_ready_reconnectable_and_rejects_external_submission()
         .assert_value_with("start portable controller"),
     );
     #[cfg(unix)]
-    assert_eq!(controller.paths().socket(), storage.join("controller.sock"));
+    if std::os::unix::net::SocketAddr::from_pathname(storage.join("controller.sock")).is_ok() {
+        assert_eq!(controller.paths().socket(), storage.join("controller.sock"));
+    }
     #[cfg(windows)]
     assert!(
         controller

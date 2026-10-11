@@ -60,7 +60,17 @@ impl PortableControllerPaths {
     pub fn socket(&self) -> PathBuf {
         #[cfg(unix)]
         {
-            self.storage.join("controller.sock")
+            let socket = self.storage.join("controller.sock");
+            if socket.as_os_str().as_encoded_bytes().contains(&0)
+                || std::os::unix::net::SocketAddr::from_pathname(&socket).is_ok()
+            {
+                return socket;
+            }
+            // macOS also has a long default TMPDIR; keep only the endpoint under /tmp.
+            use sha2::{Digest, Sha256};
+            let digest = Sha256::digest(self.storage.as_os_str().as_encoded_bytes());
+            let user = unsafe { libc::geteuid() };
+            PathBuf::from(format!("/tmp/zeroshot-{user}/{digest:x}.sock"))
         }
         #[cfg(windows)]
         {

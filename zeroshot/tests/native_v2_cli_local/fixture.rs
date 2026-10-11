@@ -28,7 +28,6 @@ pub(super) struct LocalFixture {
 
 impl LocalFixture {
     pub(super) fn new() -> Self {
-        // Keep the controller socket below Unix's short `sun_path` limit.
         let root = TemporaryDirectory::for_test("zv2l");
         let repository = root.path("repository");
         let state = root.path("state");
@@ -63,6 +62,11 @@ impl LocalFixture {
             runtime,
             head,
         }
+    }
+
+    pub(super) fn with_long_state_root(mut self) -> Self {
+        self.state = self.root.path("state").join("s".repeat(120));
+        self
     }
 
     fn command_with_inline(&self, args: &[&str], mode: &str, inline: bool) -> Command {
