@@ -655,6 +655,7 @@ printf '%s' "$!" > child.pid
 printf '%s%s\n' \
   '{"type":"stream_event","event":{"type":"content_block_delta",' \
   '"delta":{"type":"text_delta","text":"started"}}}'
+printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_stop","index":0}}'
 wait
 "#,
     );

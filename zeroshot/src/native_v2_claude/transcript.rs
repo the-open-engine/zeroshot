@@ -20,6 +20,8 @@ use usage::{
 };
 
 const LIVE_CHUNK_BYTES: usize = 8 * 1024;
+/// Streamed text without a line break is published once it reaches this size.
+const LIVE_LINE_BYTES: usize = 1024;
 
 pub(super) struct ClaudeResult {
     pub(super) session_id: Option<String>,
@@ -58,6 +60,13 @@ enum ClaudeTerminal {
     Failed(String),
 }
 
+/// Streamed deltas not yet published. Deltas are a few tokens each, so they are collected and
+/// published as whole lines or blocks instead of one live output record per delta.
+struct PendingText {
+    stream: LiveOutputStream,
+    text: String,
+}
+
 pub(super) struct ClaudeTranscript {
     lines: ProviderJsonLines,
     session_id: Option<String>,
@@ -71,6 +80,7 @@ pub(super) struct ClaudeTranscript {
     malformed_records: usize,
     oversized_records: usize,
     redactions: Vec<String>,
+    pending: Option<PendingText>,
 }
 
 impl ClaudeTranscript {
@@ -92,6 +102,7 @@ impl ClaudeTranscript {
             malformed_records: 0,
             oversized_records: 0,
             redactions,
+            pending: None,
         }
     }
 
@@ -109,9 +120,12 @@ impl ClaudeTranscript {
             self.lines.discard();
             return Vec::new();
         }
-        self.lines
+        let mut emissions = self
+            .lines
             .finish()
-            .map_or_else(Vec::new, |record| self.accept_records([record]))
+            .map_or_else(Vec::new, |record| self.accept_records([record]));
+        self.flush_pending(&mut emissions);
+        emissions
     }
 
     pub(super) fn token_usage(&self) -> Option<TokenUsageDelta> {
@@ -239,6 +253,9 @@ impl ClaudeTranscript {
         object: &serde_json::Map<String, Value>,
         emissions: &mut Vec<ClaudeEmission>,
     ) {
+        if event_type != "stream_event" {
+            self.flush_pending(emissions);
+        }
         match event_type {
             "system" => self.parse_system(object, emissions),
             "stream_event" => self.parse_stream_event(object, emissions),
@@ -282,11 +299,16 @@ impl ClaudeTranscript {
             return;
         };
         match inner.get("type").and_then(Value::as_str) {
-            Some("message_start") => self.parse_message_start(inner),
+            Some("message_start") => {
+                self.flush_pending(emissions);
+                self.parse_message_start(inner);
+            }
             Some("message_delta") => self.parse_message_delta(inner),
             Some("message_stop") => {
+                self.flush_pending(emissions);
                 self.active_stream_message = None;
             }
+            Some("content_block_stop") => self.flush_pending(emissions),
             Some("content_block_delta") => self.parse_content_delta(inner, emissions),
             _ => {}
         }
@@ -309,7 +331,39 @@ impl ClaudeTranscript {
             if field == "text" {
                 self.visible_text_emitted = true;
             }
-            self.emit(emissions, stream, text);
+            self.append_pending(emissions, stream, text);
+        }
+    }
+
+    fn append_pending(
+        &mut self,
+        emissions: &mut Vec<ClaudeEmission>,
+        stream: LiveOutputStream,
+        text: &str,
+    ) {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.stream != stream)
+        {
+            self.flush_pending(emissions);
+        }
+        let pending = self.pending.get_or_insert_with(|| PendingText {
+            stream,
+            text: String::new(),
+        });
+        pending.text.push_str(text);
+        let cut = publishable_prefix(&pending.text, &self.redactions);
+        if cut > 0 {
+            let ready = pending.text[..cut].to_owned();
+            pending.text.drain(..cut);
+            self.emit(emissions, stream, &ready);
+        }
+    }
+
+    fn flush_pending(&mut self, emissions: &mut Vec<ClaudeEmission>) {
+        if let Some(pending) = self.pending.take() {
+            self.emit(emissions, pending.stream, &pending.text);
         }
     }
 
@@ -467,6 +521,39 @@ impl ClaudeTranscript {
         }
         diagnostic
     }
+}
+
+/// Byte length of the leading part of `text` to publish now: whole lines, or the text up to a word
+/// break once it exceeds `LIVE_LINE_BYTES`. Redaction applies per published part, so the tail that
+/// could still begin a redacted value stays pending, and no part ends inside one.
+fn publishable_prefix(text: &str, redactions: &[String]) -> usize {
+    let holdback = redactions
+        .iter()
+        .map(|value| value.len().saturating_sub(1))
+        .max()
+        .unwrap_or(0);
+    let mut limit = text.len().saturating_sub(holdback);
+    while !text.is_char_boundary(limit) {
+        limit -= 1;
+    }
+    let candidate = &text[..limit];
+    let mut cut = match candidate.rfind('\n') {
+        Some(index) => index + 1,
+        None if limit >= LIVE_LINE_BYTES => candidate
+            .char_indices()
+            .rev()
+            .find(|(_, character)| character.is_whitespace())
+            .map_or(limit, |(index, character)| index + character.len_utf8()),
+        None => 0,
+    };
+    while let Some(start) = redactions.iter().find_map(|value| {
+        text.match_indices(value.as_str())
+            .map(|(start, _)| start)
+            .find(|&start| start < cut && cut < start + value.len())
+    }) {
+        cut = start;
+    }
+    cut
 }
 
 fn utf8_chunks(value: &str, max: usize) -> Vec<String> {

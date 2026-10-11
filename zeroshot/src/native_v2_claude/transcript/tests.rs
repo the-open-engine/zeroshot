@@ -156,6 +156,110 @@ fn redactions_are_deduplicated_and_longest_first() {
     assert!(!emission.text.contains('\0'));
 }
 
+fn delta(delta_type: &str, field: &str, text: &str) -> Value {
+    json!({
+        "type":"stream_event",
+        "event":{"type":"content_block_delta","delta":{"type":delta_type, field:text}}
+    })
+}
+
+fn block_stop() -> Value {
+    json!({"type":"stream_event","event":{"type":"content_block_stop","index":0}})
+}
+
+fn emitted(emissions: &[ClaudeEmission]) -> Vec<(LiveOutputStream, &str)> {
+    emissions
+        .iter()
+        .map(|emission| (emission.stream, emission.text.as_str()))
+        .collect()
+}
+
+#[test]
+fn streamed_text_deltas_are_published_as_whole_lines() {
+    let mut transcript = ClaudeTranscript::new(Vec::new());
+    let mut bytes = Vec::new();
+    for text in [
+        "Now let's rewrite `",
+        "runtime-controls.test",
+        ".ts`:\nNext",
+        " line",
+    ] {
+        append_event(&mut bytes, delta("text_delta", "text", text));
+    }
+    let emissions = transcript.push(&bytes);
+    assert_eq!(
+        emitted(&emissions),
+        [(
+            LiveOutputStream::Output,
+            "Now let's rewrite `runtime-controls.test.ts`:\n"
+        )]
+    );
+
+    let mut bytes = Vec::new();
+    append_event(&mut bytes, block_stop());
+    let emissions = transcript.push(&bytes);
+    assert_eq!(
+        emitted(&emissions),
+        [(LiveOutputStream::Output, "Next line")]
+    );
+}
+
+#[test]
+fn long_streamed_text_without_a_line_break_is_published_at_a_word_break() {
+    let mut transcript = ClaudeTranscript::new(Vec::new());
+    let word = "wordé ";
+    let text = word.repeat(LIVE_LINE_BYTES / word.len() + 1);
+    let mut bytes = Vec::new();
+    append_event(&mut bytes, delta("text_delta", "text", &text));
+    append_event(&mut bytes, delta("text_delta", "text", "tail"));
+
+    let emissions = transcript.push(&bytes);
+    assert_eq!(emissions.len(), 1);
+    assert_eq!(emissions[0].text, text);
+    let emissions = transcript.finish_stream();
+    assert_eq!(emitted(&emissions), [(LiveOutputStream::Output, "tail")]);
+}
+
+#[test]
+fn pending_text_keeps_stream_order_and_is_published_before_terminal_events() {
+    let mut transcript = ClaudeTranscript::new(Vec::new());
+    let mut bytes = Vec::new();
+    for event in [
+        delta("thinking_delta", "thinking", "consider"),
+        delta("thinking_delta", "thinking", "ing"),
+        delta("text_delta", "text", "answer"),
+        json!({"type":"system","subtype":"api_retry","attempt":1,"max_retries":3}),
+        delta("text_delta", "text", "after retry"),
+        success(json!("done"), "session-1"),
+    ] {
+        append_event(&mut bytes, event);
+    }
+
+    let emissions = transcript.push(&bytes);
+    assert_eq!(
+        emitted(&emissions),
+        [
+            (LiveOutputStream::System, "considering"),
+            (LiveOutputStream::Output, "answer"),
+            (LiveOutputStream::System, "Claude API retry 1/3: unknown"),
+            (LiveOutputStream::Output, "after retry"),
+        ]
+    );
+    assert!(transcript.finish_stream().is_empty());
+}
+
+#[test]
+fn pending_text_is_published_when_output_ends_without_a_result() {
+    let mut transcript = ClaudeTranscript::new(Vec::new());
+    let mut bytes = Vec::new();
+    append_event(&mut bytes, delta("text_delta", "text", "partial"));
+    bytes.extend_from_slice(br#"{"type":"stream_event","event":{"type":"content_block_delta","#);
+
+    assert!(transcript.push(&bytes).is_empty());
+    let emissions = transcript.finish_stream();
+    assert_eq!(emitted(&emissions), [(LiveOutputStream::Output, "partial")]);
+}
+
 #[test]
 fn streaming_events_are_semantic_bounded_and_do_not_duplicate_assistant_text() {
     let mut transcript = ClaudeTranscript::new(Vec::new());
