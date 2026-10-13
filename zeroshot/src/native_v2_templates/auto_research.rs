@@ -101,7 +101,7 @@ fn bootstrap() -> Result<GraphNode, BuiltinTemplateError> {
          'artifacts.json'. A successful auditor \
          appends 'audit.json' with continue or stop and any stop counterproposal. Keep reversible backups under \
          'scratch/' and add that directory to the research '.gitignore'. Initialize 'state.json' \
-         with schema version 1, the next iteration number, the retained workspace identity, its \
+         with schema version 1, nextIterationNumber, the retained workspace identity, its \
          artifact hashes, invariant status, and open invariant violations, any task-specific adopted \
          measures, and the last finalized disposition. The charter defines the research question, \
          boundaries, protected material, evidence standard, resource limits, and stopping rules from \
@@ -126,10 +126,7 @@ fn bootstrap() -> Result<GraphNode, BuiltinTemplateError> {
          with a different value. Return exactly three ordered scout roles (explorer, synthesizer, \
          challenger), exactly three ordered judge roles (evidence, method, progress), exactly one \
          experiment work item, and empty continuationItems, proposals, reviews, and \
-         verdicts arrays. \
-             The graph validates role and work-item coverage before \
-         dependent work. The planner excludes invalid scout outputs and preserves \
-         independent valid directions without inventing missing map outputs.",
+         verdicts arrays.",
         )?),
         input: research_task_input_type()?,
         output: bootstrap_output_type()?,
@@ -213,8 +210,8 @@ fn topology_validation() -> Result<GraphNode, BuiltinTemplateError> {
              including cardinality, uniqueness, and order. Reject every other value with an actionable \
              diagnostic. Confirm state.json iterationLimit equals ten when options.iterations \
              is absent or the exact authored value otherwise. This preflight gates the \
-             iteration loop. Reject any prior iteration without audit.json, draft, or unfinished \
-             scratch backup. Explain in the diagnostic that the operator should list the failed \
+             iteration loop. Reject an unaudited prior iteration or any unfinished draft or scratch \
+             backup. Explain in the diagnostic that the operator should list the failed \
              run's checkpoints and resume from one before the unfinished work or audit; a fresh \
              graph must not scout past it. Do not edit files.",
         )?),
@@ -312,11 +309,13 @@ fn scout() -> Result<GraphNode, BuiltinTemplateError> {
             "Act only in the assigned role. Explorer searches for a distinct, high-information direction \
              that the ledger has not tried. Synthesizer combines supported findings and targets the most \
              consequential open gap. Challenger develops a rival explanation, counterexample, boundary \
-             case, or cheap discriminating test. Read the task, charter, ledger, current workspace, and \
-             available evidence and the candidate archive. Tag the proposal with the current state.json \
-             next iteration number. Do not edit anything. Return one bounded proposal with its question or \
+             case, or cheap discriminating test. Start with the task, charter, state, summary, backlog, and current \
+             workspace; inspect cited records and archive files relevant to your proposal. Tag the \
+             proposal with state.json nextIterationNumber. Do not edit anything. Return one bounded \
+             proposal with its question or \
              hypothesis, expected knowledge or artifact change, exact scope, procedure, evidence needed, \
-             risks, falsification condition, and relation to prior attempts. It must fit in one iteration. \
+             risks, falsification condition, and relation to prior attempts. It must fit in one \
+             iteration; cite prior evidence instead of repeating it. \
              Do not use Git commands; inspect files and observable outputs. Disclose any procedure \
              mistake in the proposal so the planner can exclude unsupported claims.",
         )?),
@@ -554,41 +553,40 @@ fn planner() -> Result<GraphNode, BuiltinTemplateError> {
              verified directions in the durable backlog, restorable archive, or incumbent. Do not \
              rely on an excluded scout's claims. Abort if workspace or evidence integrity cannot be \
              established, no trustworthy basis supports work or stop, or a charter-required complete \
-             handoff is missing. Read the task, charter, state, summary, backlog, \
-             immutable candidate archive, finalized records, including the latest audit.json, \
-             and current incumbent. Consider refinement of the incumbent, the strongest live \
-             archived branch, and fresh directions when warranted; \
-             do not force a fixed schema of alternatives. Compare expected progress and information \
-             gain against cost, uncertainty, risk, and diminishing returns. When the two most \
-             recent audited iterations did not adopt a candidate, explicitly compare a new \
-             mechanism, a restorable archived branch, and a bounded measurement or discriminating \
-             test. Weigh expected gain and information against cost, risk, and observed noise; \
-             explain when a category has no affordable concrete option. Record this comparison in \
-             the selection. This trigger does not require a parent switch or impose an exploration \
-             quota. Choose one falsifiable experiment that fits this iteration; sustained work on \
-             the best direction is valid when its expected value remains highest. Do not impose a \
-             novelty quota or repeat a failed direction without new evidence. Choose both a proposal \
-             and its starting artifact. \
+             handoff is missing. Start with the task, charter, state, summary, backlog, latest audit.json, \
+             and current incumbent. Inspect cited finalized records and archive entries needed \
+             for this decision; verify that a chosen archived parent is restorable. Consider incumbent \
+             refinement, restorable archived branches, and fresh \
+             directions when useful. Choose the bounded experiment with the strongest expected \
+             progress or information value relative to cost, uncertainty, risk, and diminishing \
+             returns. After two consecutive audited non-adoptions, explicitly compare a new \
+             mechanism, a restorable archived branch, and a bounded measurement or discriminating test; explain any \
+             option without an affordable concrete test. This comparison is not an exploration \
+             quota or required parent switch. Continued refinement is valid when it has the \
+             highest expected value; repeat a failed direction only with new evidence. Choose \
+             both a proposal and its starting artifact. \
              Set parentArtifactId to incumbent or an immutable restorable archive ID; never select \
              a nonrestorable idea as a parent. Do not change workspace artifacts, the backlog, or \
-             finalized records. Read the next iteration number from state.json and write only \
+             finalized records. Read state.json nextIterationNumber and write only \
              .zeroshot/research/scratch/NNNNNN/selection.json. For work, name parentArtifactId, \
              selected proposal, and reason to use that parent; signal work only after writing a \
-             complete selection. For stop, explain why the strongest concrete affordable scout or \
-             archived alternative fails charter cost and risk limits; signal stop only after writing \
-             the stop selection. Do not treat missing scouts as proof that work is exhausted. \
-             Record all available scout outputs, missing or excluded slots and reasons, other \
-             considered alternatives, evidence references, expected value, costs, and why the \
-             selected direction wins now. Include the chosen question, expected learning or artifact \
-             change, falsification condition, protected paths or data, procedure, observations \
-             or sources to collect, comparison or reference checks when \
-             useful, evaluation rules, resource limits, and disposition conditions. Predeclare \
+             complete selection. For stop, explain why continuing with the strongest concrete viable \
+             direction is unwarranted under the task's goals, evidence, and limits; \
+             signal stop only after writing the stop selection. Do not treat missing scouts as proof \
+             that work is exhausted. \
+             Record current scout outputs once, with missing or excluded slots and reasons. \
+             Briefly compare the selected direction with considered alternatives using evidence \
+             references, expected value and cost, and why it wins now. Specify its question, \
+             bounded procedure, falsification, protected material, resource limits, observations \
+             or sources, comparisons when useful, and disposition conditions; cite prior records \
+             instead of repeating their narrative. Predeclare \
              evidence collection and evaluation order when observations may be noisy or order-dependent; \
              use charter-defined controls, repetitions, and thresholds rather than choosing them after \
              seeing results. Before work, state what evidence would make the candidate a better \
-             retained default than the incumbent under the charter, and what would instead warrant \
-             record_only. Ground those conditions in the task's intended use and priorities, considering \
-             benefit magnitude and coverage, costs, regressions, complexity, and uncertainty where \
+             retained default and what would warrant record_only. Tie every adoption veto to a \
+             task goal, hard constraint, or uncertainty material to that decision. A predeclared \
+             control is diagnostic unless its result could change the retained-default choice; \
+             explain any veto. Consider benefits, costs, regressions, and uncertainty where \
              relevant. A valid finding can merit archiving without displacing the incumbent. Do not \
              invent a universal score or fixed adoption threshold. Do not let an optional progress \
              threshold reject a verified repair when \
@@ -698,21 +696,24 @@ fn judge() -> Result<GraphNode, BuiltinTemplateError> {
         diagnostic: diagnostic_type()?,
         instructions: Some(instructions(
             "Act only as the assigned judge. Return abort for invalid staging or missing or \
-             incomplete experiment output. Read the \
-                current iteration's selection, draft, task, charter, \
-             ledger, and workspace. Review independently and do not edit files. Evidence checks whether \
-             observations support the main claims and repeats the decisive computation, source check, or \
-             comparison when possible. Method audits design, controls, provenance, reproducibility, scope, \
-             protected material, backups, and restoration. Progress decides whether the candidate should \
-             replace the retained incumbent as the default for the next iteration under the charter. \
-             Compare benefit magnitude and coverage of intended use with costs, regressions, complexity, \
-             and confidence from relevant controls and counterexamples, as applicable to the task. Check \
-             the planner's predeclared disposition conditions against the results, allowing a different \
-             conclusion when new evidence supports it; do not invent a universal score or fixed adoption \
-             threshold. Evidence and method return adopt when their own checks support retaining the \
-             candidate. Progress returns adopt only when the candidate is a defensibly better default. \
+             incomplete experiment output. Read the current selection, draft, task, charter, and workspace; follow \
+             cited ledger and archive evidence needed for your assigned review. Review independently and \
+             do not edit files. Evidence checks whether observations support the main claims and repeats the \
+             decisive computation, source check, or comparison when possible. Method checks design, \
+             controls, provenance, reproducibility, scope, protected material, backups, and restoration. \
+             Progress decides whether a valid candidate should replace the retained incumbent \
+             under the charter. \
+             Progress weighs task-relevant benefits, coverage, costs, regressions, complexity, \
+             and confidence. Evidence and Method consider these only where they affect their assigned \
+             checks. Honor charter-defined requirements. Check the planner's predeclared conditions \
+             against the results, but predeclaration alone does not make a planner-added veto binding. \
+             Challenge a planner-added veto without a supported \
+             link to a task goal, hard constraint, or uncertainty material to the retained-default \
+             decision; explain your conclusion within your assigned role. Do not invent a universal \
+             score or threshold. Evidence and Method vote on their own claim-support and procedure \
+             checks; Progress votes on whether a valid candidate is a defensibly better default. \
              Record_only preserves a valid negative, inconclusive, or promising finding while restoring \
-             the incumbent; a narrow gain alone does not require replacing it. Abort means the evidence \
+             the incumbent; a gain may still be insufficient under the task's priorities. Abort means the evidence \
              or method is invalid, incomplete, unsafe, or cannot support a defensible finding. When prior \
              evidence already proves that the retained workspace violates \
              a non-negotiable charter invariant, a verified repair merits adopt even if it does not improve \
@@ -720,7 +721,8 @@ fn judge() -> Result<GraphNode, BuiltinTemplateError> {
              threshold: restoring the known-invalid predecessor would violate the charter. Avoid \
              resource-heavy checks unless assigned evidence or the task cannot be judged otherwise; the \
              evidence role owns independent reproduction of the main measured claim. Return only the \
-             assigned role's review and one of adopt, record_only, or abort.",
+             assigned role's review and one of adopt, record_only, or abort. \
+             Do not use Git commands.",
         )?),
     }))
 }
@@ -870,25 +872,23 @@ fn decision_worker(disposition: ResearchDisposition) -> Result<GraphNode, Builti
          planner selection and considered alternatives into proposal.json. Preserve the \
          changed-path manifest, selected parent ID and hashes, pre-iteration incumbent, \
          reviewed-candidate, and final-current hashes in 'artifacts.json' so restoration or \
-         retention remains independently auditable. For adopt, archive the displaced incumbent \
-         if it remains a credible alternative; for record_only, retain a restorable reviewed \
-         candidate only when its complete files and revisit reason are documented. Never overwrite \
-         an archive entry. Put actual candidate files under archive/<id>/files and reference an \
-         immutable manifest from the backlog; mark incomplete or oversize candidates \
-         nonrestorable. Only declared candidate files belong in the restorable archive. Keep \
-         generated files outside it and remove incidental files left by inspection. Reconcile \
-         'state.json', 'summary.md', and 'backlog.json' so they separately identify the retained \
-         workspace, its known invariant status and open violations, and the best supported historical \
-         findings, including findings from restored artifacts. Describe the finalized disposition \
+         retention remains independently auditable. For adopt, archive the displaced incumbent if \
+         credible; for record_only, archive \
+         the reviewed candidate only with complete source bytes and a reason to revisit. \
+         Never overwrite an archive entry. Archive only declared candidate files under \
+         archive/<id>/files with an immutable manifest; mark incomplete or oversize candidates \
+         nonrestorable. Remove incidental generated files outside candidate scope. Reconcile \
+         'state.json', 'summary.md', and 'backlog.json' so they distinguish \
+         the retained workspace, its invariant status and adopted measures, from the best supported \
+         historical findings with their provenance. Do not assign historical measures to the \
+         retained workspace without matching hashes or provenance. Describe the finalized disposition \
          in summary.md without asserting the current audit outcome or leaving a pending-audit \
          claim that will become stale. An iteration's audit.json alone determines its audit status. \
          Preserve all available scout outputs, mark missing or excluded slots and reasons in \
          proposal.json, and index actionable unresolved directions in the backlog with evidence and \
          useful next tests. Preserve promising branches even when another experiment was chosen. \
-         Never attribute a historical finding or measure to the retained workspace unless \
-         hashes or provenance match. Update the retained \
-         workspace identity, hashes, invariant status, open violations, and accepted measures only for \
-         an adopted result. Advance the next iteration number and remove scratch only after any required \
+         Update retained identity, hashes, invariant status, open violations, and adopted measures \
+         only for an adopted result. Advance the next iteration number and remove scratch only after any required \
          restoration is proven. Before returning, resolve every evidence reference newly written \
          in the five current records and mutable state, backlog, and summary, including file paths \
          and JSON fragment anchors, against the post-cleanup ledger. Replace links to removed drafts \
@@ -1033,13 +1033,14 @@ fn decision_auditor(name: &str) -> Result<GraphNode, BuiltinTemplateError> {
         "Inspect exactly the current unaudited iteration, not an older audited directory. \
          Derive its number as the successor of the latest audited iteration, starting at one. \
          Require that new directory to contain all five current records, have no prior audit.json, \
-         and match state.json nextIteration minus one; older records cannot substitute for it. \
+         and match state.json nextIterationNumber minus one; older records cannot substitute for it. \
          A settled recorder or recovery worker error does not invalidate complete, independently \
          proven files; incomplete or inconsistent files require rejection. Inspect read-only \
          before writing an audit or rejection feedback. Recompute the required disposition from \
          the path that actually ran. A planner stop \
          requires disposition stop, no experiment or judge claims, an unchanged incumbent, \
-         and a concrete challenge of affordable alternatives. A failed plan, staging, experiment, \
+         and a concrete challenge of viable alternatives under the task's goals and limits. A failed \
+         plan, staging, experiment, \
          or judge requires abort and no fabricated evaluations. For three valid judge verdicts, \
          any abort requires abort, three adopts require adopt, and every other combination requires \
          record_only. Reject duplicate, extra, stale, or inconsistent evaluations. Confirm the \
@@ -1070,8 +1071,9 @@ fn decision_auditor(name: &str) -> Result<GraphNode, BuiltinTemplateError> {
          record_only, require byte-for-byte equality with the pre-iteration incumbent, \
          restored deleted paths, and no candidate-created paths. For adopt, require current \
          hashes to match the reviewed candidate and retained identity to advance consistently. \
-         If valid, challenge a proposed stop against the strongest affordable alternative and \
-         append iterations/NNNNNN/audit.json with continue or stop, rationale, and any counterproposal. \
+         If valid, challenge a proposed stop against the strongest viable alternative under \
+         the task's goals, evidence, and limits, then append iterations/NNNNNN/audit.json with continue \
+         or stop, rationale, and any counterproposal. \
          If invalid, return rejected with an actionable diagnostic and write \
          scratch/NNNNNN/audit-feedback.json naming the exact issues and safe repair scope. \
          Write the audit or feedback once. If the harness asks only for a corrected structured \

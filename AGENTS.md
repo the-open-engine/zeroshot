@@ -360,19 +360,26 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   no current provisional iteration; the loop creates one only after preflight. Three independent scout reviewers
   (explorer, synthesizer, challenger) propose bounded directions. One planner reads their
   available outputs, the incumbent, and the durable archive; it selects an experiment and a
-  restorable `parentArtifactId`, or proposes stop when no affordable direction remains. All
+  restorable `parentArtifactId`, or proposes stop when another iteration is unwarranted. All
   three scouts are invoked, but the planner excludes and records invalid, stale, or missing
   proposals and can use independent valid proposals or verified durable directions unless the
   charter requires a complete handoff. A map worker error leaves the promoted proposal collection
   unchanged; the planner never invents partial outputs and aborts if workspace integrity or the
   basis for a choice cannot be established. The planner emits `work`, `stop`, or `abort` directly
-  and writes its selection under ignored scratch. It weighs expected progress and information gain against
-  cost, risk, and diminishing returns without a fixed exploration quota or mandatory alternative
-  schema. After two consecutive audited non-adoptions, it explicitly compares a new mechanism,
+  and writes its selection under ignored scratch. Scouts and planner use summary and backlog
+  as indexes; judges follow evidence relevant to their review. They inspect cited records and
+  archived bytes as needed; staging and audit still verify the relevant files and provenance.
+  The planner weighs expected progress and information gain against cost, risk, and diminishing
+  returns without a fixed exploration quota or mandatory alternative schema. After two
+  consecutive audited non-adoptions, it explicitly compares a new mechanism,
   a restorable archived branch, and a bounded measurement or discriminating test, explaining
   unavailable options without forcing a parent switch. Before work, the planner states what
   charter-grounded evidence would make the candidate a better default than the incumbent, and
-  what would instead warrant recording only. No separate plan reviewer runs.
+  what would instead warrant recording only. Charter requirements remain binding. A planner-added
+  diagnostic becomes a veto only when its result could change whether a task goal or hard
+  constraint is met, or resolve material uncertainty in that decision. Stop is justified against
+  the strongest viable direction under task goals, evidence, and limits. No separate plan reviewer
+  runs.
   The staging agent backs up the incumbent, checks the declared archived source files and mutable
   scope, cleans only clearly incidental generated files outside that scope, and restores the
   chosen parent. The experiment independently checks the staged source, backup, and protected
@@ -383,9 +390,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   unprovable candidates are nonrestorable. Agents own archive and restoration through files and
   prompts; there is no snapshot, restore, or search operation.
   Evidence, method, and progress judges independently return `adopt`, `record_only`, or
-  `abort`. The progress judge compares candidate and incumbent as the next default under
-  the task charter, weighing relevant benefit, coverage, costs, regressions, and confidence;
-  valid findings can be archived without replacing the incumbent. Graph guards route any
+  `abort`. Evidence judges claims, method judges procedure, and progress judges whether a valid
+  candidate is a better retained default; each challenges vetoes lacking a supported task link.
+  The progress judge weighs relevant benefit, coverage, costs, regressions, and confidence under
+  the task charter; valid findings can be archived without replacing the incumbent. Graph guards
+  route any
   abort, unanimous adoption, and the remaining record-only
   consensus to separate finalizers. Record-only may archive a viable candidate before restoring
   the incumbent; abort restores it without promoting invalid evidence; adopt retains the reviewed
@@ -399,8 +408,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   record but does not itself terminate the campaign.
   After every iteration path, one disposition auditor recomputes the verdict and checks the
   ledger, archive, hashes, and retained or restored filesystem. It emits `continue`, `stop`,
-  or `rejected` and challenges a proposed stop against affordable alternatives. A valid
-  decision appends `audit.json`. On rejection, it writes actionable feedback to ignored
+  or `rejected` and challenges a proposed stop against viable alternatives under task goals
+  and limits. A valid decision appends `audit.json`. On rejection, it writes actionable feedback
+  to ignored
   scratch. One conditional repair agent may correct bookkeeping and provenance in the current
   unaudited iteration, mutable state, backlog, and incidental generated files, then an
   independent auditor rechecks once. Measurements, experiment observations, planner selection,
