@@ -37,6 +37,31 @@ pub(crate) const CLAUDE_LOCAL_ENVIRONMENT: &[&str] = &[
     "CLAUDE_CODE_USE_FOUNDRY",
 ];
 
+/// Pi provider credentials, endpoint settings, and process controls.
+///
+/// The lane decides which of these it accepts; the harness only forwards names a caller may have
+/// set in their invoking shell. Pi resolves credentials from its own agent directory first, so a
+/// native-local lane reuses a stored login while every other lane drops these values.
+pub(crate) const PI_LOCAL_ENVIRONMENT: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_OAUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_BEDROCK_BASE_URL",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENAI_API_BASE",
+    "OPENROUTER_API_KEY",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "PI_CODING_AGENT_DIR",
+    "PI_CODING_AGENT_SESSION_DIR",
+    "PI_OFFLINE",
+    "PI_SKIP_VERSION_CHECK",
+    "PI_TELEMETRY",
+];
+
 pub(crate) const COPILOT_LOCAL_ENVIRONMENT: &[&str] = &[
     "COPILOT_GITHUB_TOKEN",
     "GH_TOKEN",

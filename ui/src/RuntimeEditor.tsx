@@ -9,6 +9,7 @@ const harnessLabels = new Map([
   ['codex', 'Codex'],
   ['claude', 'Claude Code'],
   ['copilot', 'GitHub Copilot'],
+  ['pi', 'Pi'],
 ]);
 
 export function RuntimeEditor(p: {

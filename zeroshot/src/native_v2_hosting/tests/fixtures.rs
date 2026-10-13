@@ -16,6 +16,7 @@ use crate::execution::process::HostedProcessPool;
 use crate::native_v2_candidate::test_support::{TestDirectory, full_graph, success_node};
 use crate::native_v2_capsule::CapsuleFilesystem;
 use crate::native_v2_claude::ClaudeProcessEnvironment;
+use crate::native_v2_pi::PiProcessEnvironment;
 use crate::native_v2_cloud::CapsuleAllocationUnavailable;
 use crate::native_v2_contract::{
     ClaudeProvider, CodexProvider, EnvironmentVariableName, NodeRuntimeBinding, RunSubmission,
@@ -79,6 +80,9 @@ pub(super) fn hosting_config(storage_root: PathBuf) -> ProductionHostingConfig {
         claude_executable: "/usr/bin/false".to_owned(),
         claude_prefix_arguments: Vec::new(),
         claude_process_environment: ClaudeProcessEnvironment::default(),
+        pi_executable: "/usr/bin/false".to_owned(),
+        pi_prefix_arguments: Vec::new(),
+        pi_process_environment: PiProcessEnvironment::default(),
         executable_search_path: "/usr/bin:/bin".to_owned(),
         git_program: PathBuf::from("/usr/bin/git"),
         gh_program: PathBuf::from("/usr/bin/false"),
@@ -96,6 +100,9 @@ pub(super) fn capsule_config(storage_root: PathBuf) -> ProductionCapsuleConfig {
         claude_executable: config.claude_executable,
         claude_prefix_arguments: config.claude_prefix_arguments,
         claude_process_environment: config.claude_process_environment,
+        pi_executable: config.pi_executable,
+        pi_prefix_arguments: config.pi_prefix_arguments,
+        pi_process_environment: config.pi_process_environment,
         executable_search_path: config.executable_search_path,
         git_program: config.git_program,
         gh_program: config.gh_program,

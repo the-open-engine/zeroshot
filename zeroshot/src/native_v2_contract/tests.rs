@@ -100,6 +100,39 @@ fn unsupported_harness_provider_pair_is_rejected_by_shape() {
         .assert_value_with("runtime provider exists") = json!("anthropic");
 
     assert!(serde_json::from_value::<RunSubmission>(fixture).is_err());
+
+    // A provider that belongs to another harness is equally unparseable: the tagged enum, not a
+    // compatibility table, is what rejects the pair.
+    let mut pi_fixture = canonical_submission();
+    *pi_fixture.pointer_mut("/runtime/harness").assert_value() = json!("pi");
+    *pi_fixture.pointer_mut("/runtime/provider").assert_value() = json!("github");
+    assert!(serde_json::from_value::<RunSubmission>(pi_fixture).is_err());
+}
+
+#[test]
+fn every_pi_lane_round_trips() {
+    for (provider, model) in [
+        ("anthropic", "claude-sonnet-5"),
+        ("openai", "gpt-5.6-sol"),
+        ("openrouter", "anthropic/claude-sonnet-5"),
+        ("bedrock", "global.anthropic.claude-sonnet-5"),
+        ("gateway", "provider-owned-model"),
+    ] {
+        let mut expected = canonical_submission();
+        *expected.pointer_mut("/runtime/harness").assert_value() = json!("pi");
+        *expected.pointer_mut("/runtime/provider").assert_value() = json!(provider);
+        *expected
+            .pointer_mut("/runtime/nodes/worker/model")
+            .assert_value() = json!(model);
+
+        let submission: RunSubmission =
+            serde_json::from_value(expected.clone()).assert_value_with("pi lane decodes");
+        assert_eq!(
+            serde_json::to_value(submission).assert_value(),
+            expected,
+            "pi/{provider} re-encodes unchanged"
+        );
+    }
 }
 
 #[test]

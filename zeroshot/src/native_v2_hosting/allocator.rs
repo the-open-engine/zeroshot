@@ -32,6 +32,7 @@ use crate::native_v2_cloud::{
     RetainedAllocationUnavailable,
 };
 use crate::native_v2_contract::AdmittedRun;
+use crate::native_v2_pi::PiProcessEnvironment;
 use crate::native_v2_delivery::{
     DeliveryLineage, GhCliAuthorityConfig, GhCliDeliveryAuthority, NativeV2DeliveryConfig,
 };
@@ -59,6 +60,9 @@ pub(super) struct ProductionCapsuleConfig {
     pub claude_executable: String,
     pub claude_prefix_arguments: Vec<String>,
     pub claude_process_environment: ClaudeProcessEnvironment,
+    pub pi_executable: String,
+    pub pi_prefix_arguments: Vec<String>,
+    pub pi_process_environment: PiProcessEnvironment,
     pub executable_search_path: String,
     pub git_program: PathBuf,
     pub gh_program: PathBuf,
@@ -174,6 +178,7 @@ impl ProductionCapsuleAllocator {
         if config.copilot_executable.as_os_str().is_empty()
             || config.codex_executable.as_os_str().is_empty()
             || config.claude_executable.is_empty()
+            || config.pi_executable.is_empty()
             || config.git_program.as_os_str().is_empty()
             || config.gh_program.as_os_str().is_empty()
         {

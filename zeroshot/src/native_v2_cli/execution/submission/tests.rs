@@ -56,6 +56,12 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
         (UniformHarness::Claude, UniformProvider::Gateway, true),
         (UniformHarness::Claude, UniformProvider::Bedrock, true),
         (UniformHarness::Claude, UniformProvider::OpenAi, false),
+        (UniformHarness::Pi, UniformProvider::Anthropic, true),
+        (UniformHarness::Pi, UniformProvider::OpenAi, true),
+        (UniformHarness::Pi, UniformProvider::OpenRouter, true),
+        (UniformHarness::Pi, UniformProvider::Gateway, true),
+        (UniformHarness::Pi, UniformProvider::Bedrock, true),
+        (UniformHarness::Pi, UniformProvider::Github, false),
     ] {
         assert_eq!(
             uniform(harness, provider)

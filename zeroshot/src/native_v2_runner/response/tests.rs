@@ -45,6 +45,148 @@ fn workspace_and_verifier_guidance_are_runtime_owned() {
 }
 
 #[test]
+fn schema_rendering_shows_the_provider_schema_and_never_the_contract() {
+    let instructions = NodeInstructions::new("Change the workspace.").assert_value();
+    let input = json!({"task":"change the workspace"});
+    let contract = worker_contract();
+    let schema = contract.provider_schema(ProviderSchemaDialect::Standard);
+    let schema_json = serde_json::to_string(&schema).assert_value();
+
+    let prompt = render_agent_prompt_with_schema(
+        &instructions,
+        &input,
+        &contract,
+        ProviderSchemaDialect::Standard,
+    )
+    .assert_value();
+    assert!(prompt.contains(instructions.as_str()));
+    assert!(prompt.contains(&input.to_string()));
+    assert!(prompt.contains("Runtime-owned response schema:"));
+    assert!(prompt.contains(&schema_json));
+    assert!(!prompt.contains("Runtime-owned response contract:"));
+    assert!(!prompt.contains("\"kind\":\"worker\""));
+    assert!(prompt.contains("never return the schema itself"));
+
+    let error = NodeResponseError::new("output is not an integer".to_owned());
+    let correction =
+        render_agent_correction_with_schema(&contract, &error, ProviderSchemaDialect::Standard)
+            .assert_value();
+    assert!(correction.contains("output is not an integer"));
+    assert!(correction.contains("Response schema:"));
+    assert!(correction.contains(&schema_json));
+    assert!(!correction.contains("Response contract:"));
+    assert!(!correction.contains("\"kind\":\"worker\""));
+}
+
+#[test]
+fn schema_rendering_reflects_the_selected_dialect() {
+    let instructions = NodeInstructions::new("Change the workspace.").assert_value();
+    // An optional integer field distinguishes the dialects: strict mode requires the field and
+    // admits an explicit null, while the neutral dialect leaves it optional.
+    let contract = NodeResponseContract::Worker {
+        output: serde_json::from_value(json!({
+            "kind": "record",
+            "fields": {
+                "answer": { "type": { "kind": "integer" }, "required": true },
+                "note": { "type": { "kind": "integer" }, "required": false }
+            }
+        }))
+        .assert_value(),
+    };
+    let strict = render_agent_prompt_with_schema(
+        &instructions,
+        &Value::Null,
+        &contract,
+        ProviderSchemaDialect::OpenAiStrict,
+    )
+    .assert_value();
+    let neutral = render_agent_prompt_with_schema(
+        &instructions,
+        &Value::Null,
+        &contract,
+        ProviderSchemaDialect::Standard,
+    )
+    .assert_value();
+    assert_ne!(strict, neutral);
+    assert!(
+        strict.contains(
+            &serde_json::to_string(&contract.provider_schema(ProviderSchemaDialect::OpenAiStrict))
+                .assert_value()
+        )
+    );
+    assert!(
+        neutral.contains(
+            &serde_json::to_string(&contract.provider_schema(ProviderSchemaDialect::Standard))
+                .assert_value()
+        )
+    );
+}
+
+#[test]
+fn schema_resolution_correction_carries_the_schema_instead_of_the_contract() {
+    let contract = worker_contract();
+    let response =
+        resolve_agent_response_with_schema(&contract, "not json", ProviderSchemaDialect::Standard)
+            .assert_value();
+    match response {
+        AgentResponse::Correction { prompt, .. } => {
+            assert!(prompt.contains("Response schema:"));
+            assert!(!prompt.contains("\"kind\":\"worker\""));
+        }
+        AgentResponse::Complete(_) => panic!("malformed JSON must request a correction"),
+    }
+}
+
+#[test]
+fn dialect_resolution_keeps_the_contract_correction_for_native_schema_lanes() {
+    let contract = worker_contract();
+    let response = resolve_agent_response_with_dialect(
+        &contract,
+        "not json",
+        ProviderSchemaDialect::OpenAiStrict,
+    )
+    .assert_value();
+    match response {
+        AgentResponse::Correction { prompt, .. } => {
+            assert!(prompt.contains("Response contract:"));
+            assert!(prompt.contains("\"kind\":\"worker\""));
+        }
+        AgentResponse::Complete(_) => panic!("malformed JSON must request a correction"),
+    }
+}
+
+#[test]
+fn native_schema_lanes_keep_the_contract_prompt_byte_for_byte() {
+    // `render_agent_prompt` is the shared renderer for Claude, Codex and Copilot (including the
+    // GitHub lane). The Pi schema renderer is additive, so this captured full prompt must stay
+    // byte-identical; any drift in the shared renderer fails this exact comparison rather than a
+    // substring probe.
+    let instructions = NodeInstructions::new("Change the workspace.").assert_value();
+    let input = json!({"task":"change the workspace"});
+    let contract = worker_contract();
+    let prompt = render_agent_prompt(&instructions, &input, &contract).assert_value();
+    let expected = concat!(
+        "Execute this graph node using the shared workspace.\n",
+        "Authored instructions:\n",
+        "Change the workspace.\n",
+        "Runtime-owned workspace setup guidance:\n",
+        "Before returning, follow repository setup and install manifest/lockfile dependencies in the checkout; do not use an ad hoc unpinned list. Wait for setup to finish and check exit status. Leave ignored dependencies there. Put standalone tools under an executable user path: use `$ZEROSHOT_TOOLS/bin` when provided (shared by all nodes), otherwise `$HOME/.local/bin`. Do not install tools in `/tmp` (possibly `noexec`).\n",
+        "Input JSON:\n",
+        "{\"task\":\"change the workspace\"}\n",
+        "Runtime-owned response contract:\n",
+        "{\"kind\":\"worker\",\"output\":{\"kind\":\"record\",\"fields\":{\"answer\":{\"type\":{\"kind\":\"integer\"},\"required\":true}}}}\n",
+        "The response contract describes the required type; never return the contract itself. ",
+        "Return only JSON with no Markdown or commentary. The provider response must be exactly ",
+        "an object with one field named response. For a worker, response contains the output ",
+        "value; an output contract of {\"kind\":\"null\"} requires the literal null inside ",
+        "{\"response\":null}. For a verifier, response contains exactly an object with output, ",
+        "signals, and diagnostic; every signal must use one of its declared labels."
+    );
+    assert_eq!(prompt, expected);
+    assert!(!prompt.contains("Runtime-owned response schema:"));
+}
+
+#[test]
 fn agent_response_reports_mechanical_json_and_payload_errors() {
     let contract = worker_contract();
     let malformed = contract

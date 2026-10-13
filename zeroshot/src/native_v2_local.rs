@@ -27,6 +27,7 @@ use crate::native_v2_cli::PreparedRunRequest;
 use crate::native_v2_codex::{NativeV2CodexConfig, NativeV2CodexUser};
 use crate::native_v2_contract::AdmittedRun;
 use crate::native_v2_copilot::{CopilotConfig, CopilotLocalUser};
+use crate::native_v2_pi::{PiAdapterConfigError, PiConfig, PiProcessEnvironment};
 use crate::native_v2_capsule::provider_process::{COPILOT_LOCAL_ENVIRONMENT, LocalHarnessEnvironment};
 use crate::native_v2_delivery::{
     DeliveryTarget, GhCliAuthorityConfig, GhCliDeliveryAuthority, NativeV2DeliveryConfig,
@@ -67,6 +68,8 @@ pub enum LocalCompositionError {
     },
     #[error(transparent)]
     Claude(#[from] ClaudeAdapterConfigError),
+    #[error(transparent)]
+    Pi(#[from] PiAdapterConfigError),
     #[error(transparent)]
     Candidate(#[from] NativeV2CandidateError),
 }
@@ -149,11 +152,24 @@ pub(crate) fn capture_local_native_environment(
     let mut environment = LocalHarnessEnvironment::new(
         crate::native_v2_capsule::provider_process::current_process_environment(),
     );
+    resolve_relative_home_overrides(&mut environment, invoking_directory)?;
+    Ok(environment.into_values())
+}
+
+/// Resolves every harness home override that the invoking shell may have set relatively against
+/// the invoking directory, before the controller detaches. The variable is forwarded to the
+/// harness child, whose working directory differs, so leaving it relative would change what it
+/// points at.
+fn resolve_relative_home_overrides(
+    environment: &mut LocalHarnessEnvironment,
+    invoking_directory: &Path,
+) -> Result<(), LocalCompositionError> {
     for name in [
         "CODEX_HOME",
         "CLAUDE_CONFIG_DIR",
         "COPILOT_HOME",
         "COPILOT_PROVIDERS_CONFIG",
+        "PI_CODING_AGENT_DIR",
     ] {
         let Some(value) = environment.get_mut(name) else {
             continue;
@@ -167,7 +183,7 @@ pub(crate) fn capture_local_native_environment(
                 .map_err(|_| LocalCompositionError::NativeEnvironment)?;
         }
     }
-    Ok(environment.into_values())
+    Ok(())
 }
 
 pub(crate) fn local_resolved_source(
@@ -423,6 +439,20 @@ fn local_lane(
             local_user_home: local_home.clone(),
             native_environment: native_environment.clone(),
             base_environment: local_claude_environment(search_path, native_environment)?,
+            process_pool,
+        }),
+        RuntimeLane::Pi { provider } => NativeV2HarnessConfig::Pi(PiConfig {
+            provider,
+            executable: "pi".to_owned(),
+            prefix_arguments: Vec::new(),
+            workspace: workspace.to_owned(),
+            runtime_home: runtime_home.to_owned(),
+            local_user_home: local_home.clone(),
+            native_environment: native_environment.clone(),
+            base_environment: PiProcessEnvironment::new(BTreeMap::from([(
+                "PATH".to_owned(),
+                search_path.clone(),
+            )]))?,
             process_pool,
         }),
     };

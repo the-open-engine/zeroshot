@@ -11,7 +11,7 @@ rule.
 
 Each agent node uses:
 
-1. a **harness**, `codex`, `claude`, or `copilot`;
+1. a **harness**, `codex`, `claude`, `copilot`, or `pi`;
 2. a **provider** supported by that harness;
 3. an opaque provider-owned **model** identifier;
 4. zero or more named **connections**, each declaring exact environment field names.
@@ -24,8 +24,9 @@ runs on its own lane's CLI. Model and connections are always chosen per node.
 
 The [RuntimePlan reference](../reference/runtime-plan.md#harness-and-provider) lists the accepted
 harness/provider pairs, which apply to the default lane and to every node's lane. Admission rejects
-known-incompatible pairs, such as `codex` with `anthropic` and `claude` with `openai`. Zeroshot does
-not check current provider availability, and model names remain provider-owned.
+known-incompatible pairs, such as `codex` with `anthropic`, `claude` with `openai`, and `pi` with
+`github`. Zeroshot does not check current provider availability, and model names remain
+provider-owned.
 
 ## Uniform and exact plans
 
@@ -67,9 +68,9 @@ them out of the graph, runtime JSON, run ledger, and observation records.
 
 When `connections` is omitted, Zeroshot materializes provider access for each node from its
 effective lane and the selected execution placement. On a local run, nodes on the `codex`/`openai`,
-`claude`/`anthropic`, and `copilot`/`github` lanes reuse the harness's native login and
-configuration without inventing a connection. On a contained target, or on any non-native provider
-lane, a node receives these canonical requirements:
+`claude`/`anthropic`, `copilot`/`github`, `pi`/`anthropic`, and `pi`/`openai` lanes reuse the
+harness's native login and configuration without inventing a connection. On a contained target, or
+on any non-native provider lane, a node receives these canonical requirements:
 
 | Provider     | Connection key | Fields                                   |
 | ------------ | -------------- | ---------------------------------------- |
@@ -79,6 +80,10 @@ lane, a node receives these canonical requirements:
 | `gateway`    | `gateway`      | `GATEWAY_BASE_URL`, `GATEWAY_API_KEY`    |
 | `bedrock`    | `bedrock`      | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_REGION` |
 | `github`     | `github`       | `COPILOT_GITHUB_TOKEN`                   |
+
+A `pi` gateway run additionally requires `GATEWAY_API`, which names the wire protocol
+(`openai-responses`, `openai-completions`, or `anthropic-messages`). The Codex and Claude gateway
+lanes do not use it.
 
 A run's connection requirements are the union over its nodes. A contained run with a Codex/OpenAI
 worker and Claude/Anthropic reviewers can therefore require both `OPENAI_API_KEY` and
@@ -110,7 +115,7 @@ kinds depend on the target; Zeroshot consumes only the resolved fields declared 
 
 ## Gateways
 
-Use `provider: "gateway"` with `codex` or `claude` and the gateway's model identifier:
+Use `provider: "gateway"` with `codex`, `claude`, or `pi` and the gateway's model identifier:
 
 ```json
 { "harness": "codex", "provider": "gateway", "model": "PROVIDER_MODEL_ID" }
@@ -124,7 +129,9 @@ zeroshot connection set gateway --field GATEWAY_BASE_URL --field GATEWAY_API_KEY
 
 Codex requires the OpenAI **Responses API**, including streaming and tool calls; Chat Completions
 alone is insufficient. It sends the key as a bearer token. Claude requires the Anthropic **Messages
-API** and sends the key in `x-api-key`. The selected gateway/model must support the harness's
+API** and sends the key in `x-api-key`. The `pi` gateway lane lets the caller name the wire protocol
+in `GATEWAY_API` and reaches any endpoint Pi implements without probing it; an unrecognized value
+fails before launch. The selected gateway/model must support the harness's
 requests, including structured output. Zeroshot does not probe capabilities or translate protocols.
 
 Supply the base URL expected by the selected harness, including any gateway path prefix. Zeroshot

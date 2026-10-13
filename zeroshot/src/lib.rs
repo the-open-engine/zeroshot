@@ -14,6 +14,7 @@ pub mod native_v2_delivery;
 pub mod native_v2_hosting;
 pub mod native_v2_local;
 pub mod native_v2_observability;
+pub mod native_v2_pi;
 pub mod native_v2_portable_controller;
 pub mod native_v2_runner;
 pub mod native_v2_supervisor;

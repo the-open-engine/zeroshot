@@ -28,7 +28,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   profile UI. The UI is served by Rust and never needs a production Node server.
 - Canonical releases are explicit `vX.Y.Z` tags with major version 8 or newer.
 - The npm package is `@the-open-engine-company/zeroshot`.
-- That package owns one canonical skill and installs managed copies for Codex, GitHub Copilot, and
+- That package owns one canonical skill and installs managed copies for Codex, GitHub Copilot, Pi, and
   Claude Code at their user scopes. Do not fork the skill by host.
 - The target image is `ghcr.io/the-open-engine/zeroshot-target`.
 - The Python distribution is `the-open-engine-zeroshot`; its import package remains `zeroshot`.
@@ -97,15 +97,21 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   OpenAI-compatible proxies. Preserve declared `OPENAI_API_KEY` for custom provider authentication
   while supplying the native `CODEX_API_KEY` alias. Hosted runs and explicit OpenRouter/Bedrock/gateway
   selections retain adapter-owned provider setup.
+- The Pi lane forwards its own ambient allowlist into the local child the way the Claude and Codex
+  lanes do, merging those values only into names the adapter and the declared connections left
+  unset, and merging them before credential validation so a key belonging to another lane is refused
+  rather than smuggled into the selected provider. Pi resolves credentials from its agent directory
+  before the process environment, so a stored login wins and a declared value suppresses an ambient
+  one.
 - Local runs preserve shell endpoint settings, Claude configuration directories and permission controls;
   declared connection values take precedence. Hosted adapters do not inherit ambient settings.
   Endpoint and Claude control variables in declared connections are passed to the harness; active
   transport selectors cannot contradict an explicitly selected OpenRouter, Bedrock, or gateway lane.
 - Provider access defaults are materialized from the authored runtime at the execution-placement
   boundary. Omitted connections remain omitted in author-owned local profiles. Local Codex/OpenAI,
-  Claude/Anthropic, and Copilot/GitHub lanes reuse native login state without inventing a
-  connection requirement; contained placements and non-native lanes add only their canonical
-  missing requirements. Explicit
+  Claude/Anthropic, Copilot/GitHub, Pi/Anthropic, and Pi/OpenAI lanes reuse native login state
+  without inventing a connection requirement; contained placements and non-native lanes add only
+  their canonical missing requirements. Explicit
   compatible authored fields always win. Remote profiles materialize contained requirements before
   storage, and the effective runtime drives the existing connection resolver and recovery contracts.
   The local CLI captures the invoking shell in its private one-shot bootstrap, consumes and deletes
@@ -126,7 +132,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   separate ten-second/4 MiB budget, never send a
   model prompt, suppress Claude hooks/auth helpers, and require confirmed process cleanup before the
   model turn. They do not rewrite settings files; normal native startup state may still be updated.
-  Verifier nodes use the same permission handling as workers across all harnesses. The shared prompt
+  Verifier nodes use the same permission handling as workers across all harnesses. Pi exposes no
+  permission control at all, so the Pi lane appends no bypass argument and runs no configuration
+  probe: its disposable capsule is the boundary, and a contained Pi run additionally pins the
+  default tool set and refuses project-local resources. The shared prompt
   renderer tells workers to use repository-declared setup, await terminal command status, and keep
   standalone executable tools in the run's `ZEROSHOT_TOOLS/bin` when provided. All workers and
   verifiers share the prepared workspace and can write files. Review instructions prohibit repairs
@@ -158,6 +167,43 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Provider continuation is bounded: Claude continues once after `system/api_retry`; Codex continues
   once after a terminal execution error. Both send literal `Continue` in the same session when one
   exists. Structured output receives at most two correction turns before `malformed`.
+- Pi drives one `pi --mode json` process per turn, with the node prompt on stdin so a large input
+  payload can never exceed the platform argument limit. Model identifiers stay caller-owned and Pi
+  owns their resolution. Its provider lanes are `anthropic`, `openai`, `openrouter`, `bedrock`, and
+  `gateway`; the gateway lane synthesizes a private `models.json` that registers its own Pi provider
+  against the caller's base URL and references the declared key by interpolation, so no secret enters
+  the file and no Zeroshot-owned model catalog exists. It registers its own provider rather than
+  retargeting a built-in one because Pi honors `api`, `apiKey`, and `baseUrl` on a registered
+  provider while ignoring the first two on a built-in one; that is what lets a declared `GATEWAY_API`
+  name the wire protocol (`openai-responses`, `openai-completions`, or `anthropic-messages`) and
+  reach any endpoint Pi implements without probing it. The registered model entry carries the
+  caller's identifier, the chosen protocol, and a `reasoning` flag mirroring the binding's authored
+  effort; context window, output limit, and cost stay Pi-owned defaults. The same file is Pi's only
+  caller-owned-endpoint mechanism, which is why it also backs a declared or ambient
+  `ANTHROPIC_BASE_URL` on the `anthropic` lane and `OPENAI_BASE_URL`/`OPENAI_API_BASE` on the
+  `openai` lane: those overrides retarget the endpoint and keep each built-in provider's own
+  protocol, mirroring the `ANTHROPIC_BASE_URL` escape hatch Claude Code already offers and the
+  endpoint variables the Codex lane inherits. A
+  stored `auth.json` credential outranks a `models.json` `apiKey` on any provider, so the declared
+  key must still reach the child through the environment, and a declared endpoint or a declared lane
+  credential ends native-login reuse so a stored credential is never sent to a caller-owned host and
+  never outranks the declared one. An endpoint override interpolates the lane's key field only when
+  the connection supplies it; the anthropic override omits `apiKey` when `ANTHROPIC_API_KEY` is
+  absent so Pi's own `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_OAUTH_TOKEN` environment auth still resolves.
+  A native-local lane reuses
+  the user's stored Pi login from its agent directory; every other lane receives a private agent
+  directory so no ambient configuration, catalog, or credential is inherited. Session identity is a
+  bounded SHA-256 of the node-instance or execution identity, because Pi accepts
+  `[A-Za-z0-9._-]` with an alphanumeric first and last character and imposes no other bound. Pi reports a failed or aborted model response in its event
+  stream while still exiting successfully, so the terminal event's stop reason decides provider
+  success and exit status alone is insufficient. Pi exposes no response-schema flag, so the Pi lane
+  carries the machine-readable provider schema in the prompt rather than the `NodeResponseContract`
+  object, and correction turns restate that same schema so the retries converge. The schema dialect
+  follows the lane's wire protocol: the `anthropic` and `bedrock` lanes and a gateway
+  `anthropic-messages` protocol use the neutral schema, while the `openai` and `openrouter` lanes
+  and the gateway `openai-responses`/`openai-completions` protocols use OpenAI strict mode; a
+  gateway lane must name its protocol through `GATEWAY_API`. Local validation remains authoritative
+  and corrections stay bounded to two turns.
 - Copilot uses the pinned CLI's headless JSON-RPC protocol 3, with provider `github` and
   caller-owned model IDs. Structured output and corrections share one session; node-instance
   revisits resume from the current user's `COPILOT_HOME` locally and a private home when contained.

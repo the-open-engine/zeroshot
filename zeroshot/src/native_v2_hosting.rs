@@ -29,6 +29,7 @@ use crate::native_v2_admission::DeliveryPolicy;
 use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
 use crate::native_v2_claude::ClaudeProcessEnvironment;
 use crate::native_v2_cloud::{NativeV2CloudController, NativeV2CloudError};
+use crate::native_v2_pi::PiProcessEnvironment;
 use crate::native_v2_cloud::submission_digest;
 use crate::native_v2_target_authority::{
     NativeV2TargetAuthority, OperatorDiagnosticOutput, OperatorDiagnosticStore,
@@ -66,6 +67,9 @@ pub struct ProductionHostingConfig {
     pub claude_executable: String,
     pub claude_prefix_arguments: Vec<String>,
     pub claude_process_environment: ClaudeProcessEnvironment,
+    pub pi_executable: String,
+    pub pi_prefix_arguments: Vec<String>,
+    pub pi_process_environment: PiProcessEnvironment,
     pub executable_search_path: String,
     pub git_program: PathBuf,
     pub gh_program: PathBuf,
@@ -119,6 +123,9 @@ impl ProductionTargetControllerFactory {
             copilot_executable: self.config.copilot_executable.clone(),
             codex_executable: self.config.codex_executable.clone(),
             claude_executable: self.config.claude_executable.clone(),
+            pi_executable: self.config.pi_executable.clone(),
+            pi_prefix_arguments: self.config.pi_prefix_arguments.clone(),
+            pi_process_environment: self.config.pi_process_environment.clone(),
             claude_prefix_arguments: self.config.claude_prefix_arguments.clone(),
             claude_process_environment: self.config.claude_process_environment.clone(),
             executable_search_path: self.config.executable_search_path.clone(),
@@ -338,6 +345,9 @@ impl Default for ProductionHostingConfig {
             claude_executable: "/usr/local/bin/claude".to_owned(),
             claude_prefix_arguments: Vec::new(),
             claude_process_environment: ClaudeProcessEnvironment::default(),
+            pi_executable: "/usr/local/bin/pi".to_owned(),
+            pi_prefix_arguments: Vec::new(),
+            pi_process_environment: PiProcessEnvironment::default(),
             executable_search_path: "/usr/local/bin:/usr/bin:/bin".to_owned(),
             git_program: PathBuf::from("/usr/bin/git"),
             gh_program: PathBuf::from("/usr/bin/gh"),

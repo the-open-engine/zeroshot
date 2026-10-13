@@ -388,6 +388,11 @@ pub(crate) fn live_hosting_config(root: &TempRoot, lane: LiveLane) -> Production
         claude_executable,
         claude_prefix_arguments,
         claude_process_environment: ClaudeProcessEnvironment::default(),
+        pi_executable: std::env::var("ZEROSHOT_NATIVE_V2_PI_EXECUTABLE")
+            .unwrap_or_else(|_| "/usr/local/bin/pi".to_owned()),
+        // The default executable is the installed CLI, so it takes no package-runner arguments.
+        pi_prefix_arguments: Vec::new(),
+        pi_process_environment: PiProcessEnvironment::default(),
         executable_search_path: std::env::var("ZEROSHOT_NATIVE_V2_LIVE_PATH")
             .unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_owned()),
         git_program: PathBuf::from("/usr/bin/git"),

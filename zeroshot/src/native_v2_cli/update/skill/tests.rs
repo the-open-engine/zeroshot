@@ -119,7 +119,7 @@ fn refuses_unmanaged_or_tampered_skills_and_updates_the_other_managed_copy() {
 
     let second = prepare(SECOND.as_bytes().to_vec()).unwrap();
     let error = second.install_for(&home, None).unwrap_err().to_string();
-    assert!(error.contains("Codex/GitHub Copilot"));
+    assert!(error.contains("Codex/GitHub Copilot/Pi"));
     assert_reported_path(&error, &agents);
     assert!(error.contains("existing skill is not an unmodified Zeroshot-managed copy"));
     assert_eq!(fs::read(&agents).unwrap(), b"user-owned\n");

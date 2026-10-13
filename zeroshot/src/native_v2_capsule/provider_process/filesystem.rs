@@ -174,6 +174,51 @@ impl ProviderExecutionFiles {
         self.home.path()
     }
 
+    /// Gives one file the private home's own owner.
+    ///
+    /// The home belongs to the provider identity, so an artifact the controller writes into it
+    /// afterwards would otherwise stay owned by the controller and be unreadable to the hosted
+    /// child that needs it. An owner-to-owner change is permitted without privilege, and a local run
+    /// owns both paths already, so this is a no-op there.
+    pub(crate) fn own_provider_file(&self, path: &Path) -> io::Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::MetadataExt;
+
+            let owner = fs::symlink_metadata(self.home.path())?;
+            std::os::unix::fs::lchown(path, Some(owner.uid()), Some(owner.gid()))?;
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = path;
+        Ok(())
+    }
+
+    /// Files for tests that only read the home and workspace paths, without launching a process.
+    ///
+    /// Only the Unix-gated adapter tests use this, so it is compiled for the same platforms.
+    #[cfg(all(test, unix))]
+    pub(crate) fn for_test(
+        root: &Path,
+        scope: crate::execution::process::HostedProcessScope,
+    ) -> Result<Self, ProcessRunnerError> {
+        let (runner, home) = ProviderProcessRunners::Local.turn_process(root, scope)?;
+        // The scratch and execution directories live beside the session home, which turn_process
+        // already created, so a test never has to invent a second naming scheme.
+        let scratch = home.join("scratch");
+        let execution = home.join("execution");
+        create_private_directory(&scratch)
+            .map_err(|error| ProcessRunnerError::Launch(error.to_string()))?;
+        create_private_directory(&execution)
+            .map_err(|error| ProcessRunnerError::Launch(error.to_string()))?;
+        Ok(Self {
+            runner,
+            workspace: root.to_path_buf(),
+            scratch,
+            home: Arc::new(PrivateDirectory::retained(home)),
+            root: PrivateDirectory::retained(execution),
+        })
+    }
+
     pub(crate) fn scratch_text(&self) -> Result<String, ProcessRunnerError> {
         self.scratch.to_str().map(str::to_owned).ok_or_else(|| {
             ProcessRunnerError::InvalidCommand(

@@ -1,7 +1,8 @@
 # Zeroshot target image
 
 `ghcr.io/the-open-engine/zeroshot-target` is the canonical self-hosted target server image. It
-contains the native `zeroshot` executable plus pinned Codex, Claude, and GitHub Copilot harness CLIs.
+contains the native `zeroshot` executable plus pinned Codex, Claude, GitHub Copilot, and Pi
+harness CLIs.
 The image uses Debian Trixie with package updates applied at build time. GitHub CLI is pinned
 separately to an upstream release, verified by checksum, and tested for delivery API pagination
 before publication.

@@ -27,6 +27,7 @@ pub(crate) use zeroshot_engine::native_v2_cloud::{
 pub(crate) use zeroshot_engine::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
 pub(crate) use zeroshot_engine::native_v2_cli::TargetRunIntent;
 pub(crate) use zeroshot_engine::native_v2_claude::ClaudeProcessEnvironment;
+pub(crate) use zeroshot_engine::native_v2_pi::PiProcessEnvironment;
 pub(crate) use zeroshot_engine::native_v2_contract::{NodeInvocation, NodeRuntimeBinding, RuntimePlan};
 pub(crate) use zeroshot_engine::native_v2_delivery::{
     DeliveryPollPolicy, DeliveryTarget, GitHubAuthorityError, GitHubChecks, GitHubCredential,

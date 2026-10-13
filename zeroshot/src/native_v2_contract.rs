@@ -14,10 +14,10 @@ use openengine_cluster_protocol::{
 };
 pub use openengine_cluster_protocol::{
     ClaudeProvider, CodexProvider, CopilotProvider, ConnectionKey, DeclaredConnections,
-    DeclaredEnvironment, EnvironmentVariableName, ModelId, NodeRuntimeBinding, PullRequestFeedback,
-    ReasoningEffort, ResolvedSource, RunSize, RunSubmission, RunTitle, RuntimeLane, RuntimePlan,
-    SessionScope, SourceBranchId, SourceRepositoryId, SourceRevisionId, MAX_DECLARED_CONNECTIONS,
-    MAX_DECLARED_ENVIRONMENT_NAMES,
+    DeclaredEnvironment, EnvironmentVariableName, ModelId, NodeRuntimeBinding, PiProvider,
+    PullRequestFeedback, ReasoningEffort, ResolvedSource, RunSize, RunSubmission, RunTitle,
+    RuntimeLane, RuntimePlan, SessionScope, SourceBranchId, SourceRepositoryId, SourceRevisionId,
+    MAX_DECLARED_CONNECTIONS, MAX_DECLARED_ENVIRONMENT_NAMES,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

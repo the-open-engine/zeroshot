@@ -22,7 +22,8 @@ use crate::worker_catalog::ReasoningEffort;
 mod environment;
 pub(crate) use environment::{
     CLAUDE_LOCAL_ENVIRONMENT, CODEX_LOCAL_ENVIRONMENT, COPILOT_LOCAL_ENVIRONMENT,
-    LocalHarnessEnvironment, current_process_environment, provider_redactions,
+    PI_LOCAL_ENVIRONMENT, LocalHarnessEnvironment, current_process_environment,
+    provider_redactions,
 };
 mod configuration;
 pub(crate) use configuration::{ConfigurationRequest, PermissionPolicy, inspect_configuration};
