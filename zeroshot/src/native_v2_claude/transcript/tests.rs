@@ -721,3 +721,70 @@ fn held_back_text_is_cut_on_character_boundaries() {
         ]
     );
 }
+
+#[test]
+fn rate_limit_events_are_normalized_for_display() {
+    let mut bytes = Vec::new();
+    append_event(
+        &mut bytes,
+        json!({
+            "type":"rate_limit_event",
+            "session_id":"session-1",
+            "rate_limit_info":{
+                "status":"allowed_warning",
+                "resetsAt":1780000000,
+                "rateLimitType":"five_hour",
+                "utilization":0.825
+            }
+        }),
+    );
+    append_event(&mut bytes, success(json!("done"), "session-1"));
+
+    let decoded = decode(&bytes, 11, None);
+    assert_eq!(decoded.emissions.len(), 1);
+    let emission = decoded.emissions.first().assert_value();
+    assert_eq!(emission.stream, LiveOutputStream::System);
+    assert_eq!(
+        emission.text,
+        "Claude rate limit: status=allowed_warning, utilization=82.5%, type=five_hour, resetsAt=2026-05-28T20:26:40Z"
+    );
+    assert_eq!(
+        decoded.usage.map(|usage| usage.input_tokens.get()),
+        Some(11)
+    );
+}
+
+#[test]
+fn rate_limit_reset_milliseconds_are_normalized_for_display() {
+    let mut bytes = Vec::new();
+    append_event(
+        &mut bytes,
+        json!({
+            "type":"rate_limit_event",
+            "session_id":"session-2",
+            "rate_limit_info":{
+                "resetsAt":1780000000000_i64
+            }
+        }),
+    );
+    append_event(&mut bytes, success(json!("done"), "session-2"));
+
+    let decoded = decode(&bytes, 7, None);
+    assert_eq!(decoded.emissions.len(), 1);
+    let emission = decoded.emissions.first().assert_value();
+    assert_eq!(emission.stream, LiveOutputStream::System);
+    assert_eq!(
+        emission.text,
+        "Claude rate limit: resetsAt=2026-05-28T20:26:40Z"
+    );
+}
+
+#[test]
+fn transcripts_without_rate_limit_events_keep_their_existing_output_behavior() {
+    let mut bytes = Vec::new();
+    append_event(&mut bytes, success(json!("done"), "session-1"));
+
+    let decoded = decode(&bytes, 17, None);
+    assert!(decoded.emissions.is_empty());
+    assert_eq!(completed_response(decoded.attempt), json!("done"));
+}
