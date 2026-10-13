@@ -47,6 +47,7 @@ const browserGlobals = [
   'Node',
   'requestAnimationFrame',
   'cancelAnimationFrame',
+  'getComputedStyle',
   'ResizeObserver',
 ] as const;
 
@@ -73,6 +74,7 @@ function installBrowser(t: TestContext) {
     Node: dom.window.Node,
     requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
     cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
+    getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
     ResizeObserver: ResizeObserverStub,
   };
   for (const name of browserGlobals)

@@ -16,6 +16,7 @@ import { missingRuntimeSetting } from './runtime-readiness';
 import type { WorkspaceServices } from './workspace-services';
 import { createHostedProfile, useHostWorkspace } from './use-host-workspace';
 import { workspaceStorageKeys } from './workspace-storage';
+import { documentModels, recentModels, rememberModels } from './models';
 import { acknowledgeProfileSave, snapshotProfileSave } from './profile-save';
 import { createNumericDrafts } from './numeric-drafts';
 import {
@@ -32,6 +33,7 @@ import {
   type Document,
   type GraphNode,
   type Positions,
+  type Runtime,
 } from './domain';
 import { createReviewLoop } from './review-loop';
 import {
@@ -43,6 +45,7 @@ import {
 const stringify = (v: unknown) => JSON.stringify(v);
 const content = (v: Document): Document => ({ name: v.name, graph: v.graph, runtime: v.runtime });
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const runtimeText = (runtime: Runtime) => JSON.stringify(runtime, null, 2);
 function loadDraft(key: string) {
   try {
     const saved = JSON.parse(sessionStorage.getItem(key) ?? 'null');
@@ -129,6 +132,10 @@ function useAppState({ services, bootstrap, host }: AppProps) {
     [jsonTarget, setJsonTarget] = useState(''),
     [modalError, setModalError] = useState(''),
     [copy, setCopy] = useState(false);
+  // The Runtime dialog edits a draft shared by its Form and JSON views until it is applied.
+  const [runtimeView, setRuntimeView] = useState<'form' | 'json'>('form'),
+    [runtimeDraft, setRuntimeDraft] = useState<Runtime>(),
+    [runtimeInitial, setRuntimeInitial] = useState<Runtime>();
   const [bodyParent, setBodyParent] = useState(''),
     [bodyKind, setBodyKind] = useState('step');
   const [confirm, setConfirm] = useState<{
@@ -158,10 +165,18 @@ function useAppState({ services, bootstrap, host }: AppProps) {
     }
   }, [base?.name, storage.lastProfile]);
   const pendingEdits = usePendingEdits();
-  const jsonDirty = modal === 'json' && json !== jsonInitial;
-  usePendingText(jsonDirty);
+  const runtimeDirty =
+    modal === 'runtime' &&
+    !!runtimeInitial &&
+    (runtimeView === 'json'
+      ? json !== runtimeText(runtimeInitial)
+      : stringify(runtimeDraft) !== stringify(runtimeInitial));
+  const modalDirty = (modal === 'json' && json !== jsonInitial) || runtimeDirty;
+  usePendingText(modalDirty);
   const refresh = () => services.profiles.list().then((r) => setProfiles(r.profiles));
   const positionKey = doc?.name ? storage.layout(doc.name) : '';
+  const savedModels = (harness: string, provider: string) =>
+    recentModels(storage.recentModels(harness, provider));
   const apply = useCallback((next: Document, key = '') => {
     try {
       assertDocument(next);
@@ -199,6 +214,9 @@ function useAppState({ services, bootstrap, host }: AppProps) {
     setNotice('');
     setIssues(false);
     setSidebar(false);
+    // Runtime and JSON drafts were taken from the previous document; never apply them to this one.
+    setModal((active) => (active === 'runtime' || active === 'json' ? null : active));
+    setModalError('');
     let stored = layout ?? {};
     if (!layout && next.name)
       try {
@@ -270,6 +288,12 @@ function useAppState({ services, bootstrap, host }: AppProps) {
     setJsonTarget,
     modalError,
     setModalError,
+    runtimeView,
+    setRuntimeView,
+    runtimeDraft,
+    setRuntimeDraft,
+    setRuntimeInitial,
+    runtimeDirty,
     copy,
     setCopy,
     bodyParent,
@@ -286,8 +310,9 @@ function useAppState({ services, bootstrap, host }: AppProps) {
     editTime,
     dirty,
     pendingEdits,
-    jsonDirty,
+    modalDirty,
     refresh,
+    savedModels,
     positionKey,
     apply,
     adopt,
@@ -312,7 +337,7 @@ function useProfileEffects(
     dirty,
     positionKey,
     setValidation,
-    jsonDirty,
+    modalDirty,
     numericDrafts,
     selected,
     setSelected,
@@ -418,14 +443,14 @@ function useProfileEffects(
   }, [doc?.graph, doc?.runtime]);
   useEffect(() => {
     const guard = (e: BeforeUnloadEvent) => {
-      if (dirty || jsonDirty || hasPendingEdits()) {
+      if (dirty || modalDirty || hasPendingEdits()) {
         e.preventDefault();
         e.returnValue = '';
       }
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [dirty, jsonDirty]);
+  }, [dirty, modalDirty]);
   useEffect(() => {
     if (!doc) return;
     numericDrafts.prune(doc.graph.root);
@@ -445,8 +470,14 @@ function createWorkflowEditor(
     setJsonTarget,
     setModalError,
     setModal,
+    modal,
     busy,
-    jsonDirty,
+    modalDirty,
+    runtimeView,
+    setRuntimeView,
+    runtimeDraft,
+    setRuntimeDraft,
+    setRuntimeInitial,
     setConfirm,
     jsonTarget,
     json,
@@ -471,14 +502,49 @@ function createWorkflowEditor(
     current,
     setBodyParent,
   } = state;
-  function openJson(target: string) {
+  function openRuntime(view: 'form' | 'json' = 'form') {
     if (!doc || loading) return;
-    const value =
-      target === 'graph'
-        ? doc.graph
-        : target === 'runtime'
-          ? doc.runtime
-          : findNode(doc.graph.root, target);
+    setRuntimeInitial(doc.runtime);
+    setRuntimeDraft(clone(doc.runtime));
+    setRuntimeView(view);
+    if (view === 'json') setJson(runtimeText(doc.runtime));
+    setModalError('');
+    setModal('runtime');
+  }
+  function parseRuntime(text: string): Runtime {
+    const value = JSON.parse(text);
+    if (!value || typeof value !== 'object' || Array.isArray(value) || !value.nodes)
+      throw new Error('Runtime JSON must be an object containing node bindings.');
+    if (doc) assertDocument({ ...doc, runtime: value });
+    return value;
+  }
+  function switchRuntimeView(view: 'form' | 'json') {
+    if (view === runtimeView || !runtimeDraft) return;
+    try {
+      if (view === 'json') setJson(runtimeText(runtimeDraft));
+      else setRuntimeDraft(parseRuntime(json));
+      setModalError('');
+      setRuntimeView(view);
+    } catch (e) {
+      setModalError(message(e));
+    }
+  }
+  function applyRuntime() {
+    if (!doc || !runtimeDraft) return;
+    try {
+      const runtime = runtimeView === 'json' ? parseRuntime(json) : runtimeDraft;
+      const next = { ...clone(doc), runtime: clone(runtime) };
+      assertDocument(next);
+      apply(next);
+      setModal(null);
+    } catch (e) {
+      setModalError(message(e));
+    }
+  }
+  function openJson(target: string) {
+    if (target === 'runtime') return openRuntime('json');
+    if (!doc || loading) return;
+    const value = target === 'graph' ? doc.graph : findNode(doc.graph.root, target);
     const text = JSON.stringify(value, null, 2);
     setJson(text);
     setJsonInitial(text);
@@ -488,10 +554,13 @@ function createWorkflowEditor(
   }
   function closeModal() {
     if (busy) return;
-    if (jsonDirty)
+    if (modalDirty)
       setConfirm({
-        title: 'Discard JSON changes?',
-        body: 'Changes in this JSON editor have not been applied.',
+        title: modal === 'runtime' ? 'Discard runtime changes?' : 'Discard JSON changes?',
+        body:
+          modal === 'runtime'
+            ? 'Changes in Runtime settings have not been applied.'
+            : 'Changes in this JSON editor have not been applied.',
         action: () => setModal(null),
       });
     else setModal(null);
@@ -505,17 +574,13 @@ function createWorkflowEditor(
         if (!value || typeof value !== 'object' || Array.isArray(value) || !value.root)
           throw new Error('Graph JSON must be an object containing a root node.');
         next.graph = value;
-      } else if (jsonTarget === 'runtime') {
-        if (!value || typeof value !== 'object' || Array.isArray(value) || !value.nodes)
-          throw new Error('Runtime JSON must be an object containing node bindings.');
-        next.runtime = value;
       } else {
         next = replaceNode(doc, jsonTarget, value);
         setSelected(value.name);
       }
       assertDocument(next);
       if (jsonTarget === 'graph') numericDrafts.clear();
-      else if (jsonTarget !== 'runtime') {
+      else {
         const replaced = findNode(doc.graph.root, jsonTarget);
         if (replaced) allNodes(replaced).forEach((node) => numericDrafts.clear(node.name));
       }
@@ -667,6 +732,9 @@ function createWorkflowEditor(
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   return {
+    openRuntime,
+    switchRuntimeView,
+    applyRuntime,
     openJson,
     closeModal,
     applyJson,
@@ -716,7 +784,7 @@ function useProfileActions(
     editTime,
     dirty,
     pendingEdits,
-    jsonDirty,
+    modalDirty,
     validation,
     setModal,
     modal,
@@ -745,7 +813,7 @@ function useProfileActions(
       return documentGeneration.current;
     },
     dirty,
-    pending: pendingEdits || jsonDirty,
+    pending: pendingEdits || modalDirty,
     busy,
     loading,
     validation,
@@ -769,6 +837,12 @@ function useProfileActions(
     },
   });
   function acceptSaved(acknowledged: NonNullable<ReturnType<typeof acknowledgeProfileSave>>) {
+    // Local and hosted saves both land here, so both feed model suggestions.
+    const { runtime } = acknowledged.base;
+    rememberModels(
+      storage.recentModels(runtime.harness, runtime.provider),
+      documentModels(runtime)
+    );
     current.current = acknowledged.document;
     currentRevision.current = acknowledged.revision;
     setDoc(acknowledged.document);
@@ -885,7 +959,7 @@ function useProfileActions(
         name: profileName,
         revision: asCopy ? undefined : revision,
         generation,
-        pending: hasPendingEdits() || jsonDirty,
+        pending: hasPendingEdits() || modalDirty,
       });
       const result = await services.profiles.save(snapshot.request);
       if (!current.current) return;

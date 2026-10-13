@@ -1,37 +1,49 @@
-// Optional UI suggestions, verified 2026-09-14. Never used for admission, inference,
-// or availability checks. Custom values and existing selections remain unchanged.
-// Sources: developers.openai.com/api/docs/models/gpt-5.6-sol,
-// platform.claude.com/docs/en/models/overview, openrouter.ai/openai/gpt-5.6-sol,
-// openrouter.ai/anthropic/claude-sonnet-5,
-// docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-56-sol.html,
-// docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5.html.
-// Astra/Fable additions: developers.openai.com/api/docs/models/gpt-6-astra,
-// platform.claude.com/docs/en/models/fable-5-1/overview,
-// openrouter.ai/openai/gpt-6-astra, openrouter.ai/anthropic/claude-fable-5.1,
-// docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-astra.html,
-// docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-fable-5-1.html.
-const suggestions: Record<string, Record<string, string[]>> = {
-  codex: {
-    openai: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'],
-    openrouter: ['openai/gpt-6-astra', 'openai/gpt-5.6-sol', 'openai/gpt-5.6-terra'],
-    // Codex's built-in Bedrock provider uses the mantle endpoint (AWS web-search docs).
-    bedrock: ['openai.gpt-6-astra', 'openai.gpt-5.6-sol', 'openai.gpt-5.6-terra'],
-  },
-  claude: {
-    anthropic: ['claude-fable-5-1', 'claude-sonnet-5', 'claude-opus-5'],
-    openrouter: [
-      'anthropic/claude-fable-5.1',
-      'anthropic/claude-sonnet-5',
-      'anthropic/claude-opus-5',
-    ],
-    bedrock: [
-      'global.anthropic.claude-fable-5-1',
-      'global.anthropic.claude-sonnet-5',
-      'global.anthropic.claude-opus-5',
-    ],
-  },
-};
-export function suggestedModels(harness: string, provider: string): string[] {
-  const entry = Object.hasOwn(suggestions, harness) ? suggestions[harness] : undefined;
-  return entry && Object.hasOwn(entry, provider) ? entry[provider] : [];
+import type { Runtime } from './domain';
+
+// Model IDs are opaque. Suggestions only repeat IDs the user already chose, in this document or in
+// profiles they saved earlier; they are never a catalog, an inference, or an availability check.
+export type ModelGroup = { label: string; models: string[] };
+
+const RECENT_LIMIT = 10;
+
+/** Distinct non-empty model IDs bound in `runtime`, in binding order. */
+export function documentModels(runtime: Runtime): string[] {
+  const models = new Set<string>();
+  for (const binding of Object.values(runtime.nodes ?? {})) {
+    const model = binding?.model;
+    if (typeof model === 'string' && model.trim()) models.add(model);
+  }
+  return [...models];
+}
+
+/** Suggestions for a field showing `value`: models bound in the document, then recent choices. */
+export function modelGroups(runtime: Runtime, recent: string[], value: string): ModelGroup[] {
+  const used = documentModels(runtime);
+  return [
+    { label: 'In this profile', models: used.filter((model) => model !== value) },
+    {
+      label: 'Recently used',
+      models: recent.filter((model) => model !== value && !used.includes(model)),
+    },
+  ].filter((group) => group.models.length);
+}
+
+export function recentModels(key: string): string[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) ?? '[]');
+    return Array.isArray(saved) ? saved.filter((v) => typeof v === 'string' && v.trim()) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Moves `models` to the front of the recent list stored under `key`. */
+export function rememberModels(key: string, models: string[]) {
+  if (!models.length) return;
+  const next = [...new Set([...models, ...recentModels(key)])].slice(0, RECENT_LIMIT);
+  try {
+    localStorage.setItem(key, JSON.stringify(next));
+  } catch {
+    // Suggestions are a convenience; a full or blocked storage only loses them.
+  }
 }

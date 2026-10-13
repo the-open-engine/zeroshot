@@ -9,7 +9,6 @@ import {
   renameField,
   typeSummary,
 } from './schema';
-import { suggestedModels } from './models';
 const fixture = () => ({
   kind: 'record',
   metadata: { future: true },
@@ -85,10 +84,4 @@ test('node summaries handle unknown and malformed schemas without recursive rend
     typeSummary({ kind: 'record', fields: { x: { type: { kind: 'string' }, required: false } } }),
     'x?: string'
   );
-});
-test('model suggestions depend on both harness and provider, accepting no inferred fallback', () => {
-  assert.ok(suggestedModels('codex', 'openai').includes('gpt-5.6-sol'));
-  assert.ok(suggestedModels('claude', 'openrouter').includes('anthropic/claude-sonnet-5'));
-  assert.deepEqual(suggestedModels('claude', 'openai'), []);
-  assert.deepEqual(suggestedModels('__proto__', 'constructor'), []);
 });

@@ -10,5 +10,8 @@ export function workspaceStorageKeys(mount: URL, workspace: WorkspaceIdentity) {
     environmentDraft: `${prefix}.environment-draft`,
     lastProfile: `${prefix}.last-profile`,
     layout: (name: string) => `${prefix}.layout.${encodeURIComponent(name)}`,
+    // Model IDs only make sense for the harness and provider they were saved with.
+    recentModels: (harness: string, provider: string) =>
+      `${prefix}.recent-models.${encodeURIComponent(JSON.stringify([harness, provider]))}`,
   };
 }

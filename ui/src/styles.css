@@ -403,6 +403,89 @@ h2 {
 .text-button:hover {
   text-decoration: underline;
 }
+.model-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.model-combobox {
+  position: relative;
+}
+.model-combobox > input {
+  width: 100%;
+  padding-right: 34px;
+}
+.model-toggle {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: 32px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  border-radius: 0 4px 4px 0;
+}
+.model-toggle:hover {
+  color: var(--ink);
+}
+.model-options {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--card-border);
+  border-radius: 5px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px var(--shadow-popover);
+}
+.model-options ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.model-group-label {
+  padding: 8px 8px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.model-options [role='option'] {
+  padding: 7px 8px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.model-options [role='option'].active {
+  background: var(--hover);
+}
+.model-options [role='option'][aria-selected='true'] {
+  color: var(--rust-text);
+}
+.model-heading {
+  align-items: baseline;
+}
+.model-heading .text-button {
+  font-size: 13px;
+}
+.model-shared {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 19px;
+}
+.model-shared > small {
+  font-size: 12px;
+}
 .model-runtime-hint {
   margin: 6px 0 0;
   color: var(--secondary);
@@ -852,6 +935,31 @@ h2 {
   font-family: var(--font-display);
   font-size: 25px;
 }
+.view-toggle {
+  display: inline-flex;
+  margin-left: auto;
+  padding: 2px;
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  background: var(--canvas);
+}
+.view-toggle + .icon-button {
+  margin-left: -8px;
+}
+.view-toggle button {
+  padding: 4px 12px;
+  border-radius: 3px;
+  color: var(--secondary);
+  font-size: 13px;
+}
+.view-toggle button:hover {
+  color: var(--ink);
+}
+.view-toggle button[aria-pressed='true'] {
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--hairline);
+}
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -1157,4 +1265,35 @@ h2 {
 }
 .environment-fields:disabled {
   opacity: 0.8;
+}
+.schema-editor {
+  border-top: 1px solid var(--hairline);
+}
+.schema-editor:last-of-type {
+  border-bottom: 1px solid var(--hairline);
+}
+.schema-editor > summary {
+  cursor: pointer;
+  padding: 13px 0;
+  font-size: 13px;
+}
+.schema-editor > summary > span:first-child {
+  margin-left: 4px;
+}
+.body-description {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--secondary);
+  margin-bottom: 20px;
+}
+.choice-branches {
+  margin: 14px 0;
+}
+.choice-branches .group-open {
+  font-size: 12px;
+}
+.choice-branches .group-open span {
+  max-width: 65%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

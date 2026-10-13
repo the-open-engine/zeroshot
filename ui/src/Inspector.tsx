@@ -19,6 +19,7 @@ import type { WorkerOption } from './workers';
 import { GuardEditor } from './GuardEditor';
 import { reviewSources } from './simple-controls';
 import { ModelPicker } from './ModelPicker';
+import { modelGroups } from './models';
 import { usePendingText } from './pending-edits';
 import { NodeDataEditor } from './NodeDataEditor';
 import { OutcomeSettings } from './OutcomeSettings';
@@ -32,6 +33,8 @@ export type InspectorProps = {
   updateNode: (n: GraphNode) => void;
   openJson: (target: string) => void;
   openRuntime: () => void;
+  /** Model IDs saved earlier with a harness and provider, offered as suggestions. */
+  recentModels?: (harness: string, provider: string) => string[];
   move: (offset: number) => void;
   remove: () => void;
   close: () => void;
@@ -366,6 +369,11 @@ function ActivitySettings({
                 label="Model"
                 harness={doc.runtime.harness}
                 provider={doc.runtime.provider}
+                suggestions={modelGroups(
+                  doc.runtime,
+                  p.recentModels?.(doc.runtime.harness, doc.runtime.provider) ?? [],
+                  binding.model ?? ''
+                )}
                 value={binding.model ?? ''}
                 onChange={(value) => bindingChange('model', value)}
                 openRuntime={p.openRuntime}

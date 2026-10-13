@@ -63,12 +63,16 @@ test('graph runtime configuration renders independently of the node inspector', 
         document: doc,
         schema: {},
         edit: () => {},
-        openJson: () => {},
       })
     );
     assert.match(html, /Applies to the whole graph/);
-    assert.match(html, /custom-model/);
-    assert.match(html, /Git delivery/);
+    assert.match(html, /<label for="[^"]+" class="visually-hidden">Model for worker<\/label>/);
+    assert.match(html, /value="custom-model"/);
+    assert.doesNotMatch(
+      html,
+      /Git delivery/,
+      'delivery needs no model, so it stays out of the way'
+    );
     assert.doesNotMatch(html, /Model for deliver/);
     assert.doesNotMatch(html, /role="tab"/);
     assert.doesNotMatch(html, /aria-invalid/);
@@ -79,14 +83,40 @@ test('graph runtime configuration renders independently of the node inspector', 
         schema: {},
         invalidField: 'runtime.nodes.worker.model',
         edit: () => {},
-        openJson: () => {},
       })
     );
     assert.equal(flagged.match(/aria-invalid="true"/g)?.length, 1);
-    assert.match(
-      flagged,
-      /aria-invalid="true"[^>]*value="custom-model"|value="custom-model"[^>]*aria-invalid="true"/
+    assert.match(flagged, /<input[^>]*aria-invalid="true"[^>]*value="custom-model"/);
+
+    for (const [invalidField, validated] of [
+      ['runtime.nodes.worker.model', { ...doc.runtime, nodes: { worker: { kind: 'agent' } } }],
+      ['runtime.harness', { ...doc.runtime, harness: '' }],
+    ] as const) {
+      const draft = renderToStaticMarkup(
+        createElement(RuntimeEditor, {
+          document: doc,
+          schema: {},
+          invalidField,
+          validated,
+          edit: () => {},
+        })
+      );
+      assert.doesNotMatch(
+        draft,
+        /aria-invalid/,
+        `a draft edit clears the stale ${invalidField} flag`
+      );
+    }
+    const unchanged = renderToStaticMarkup(
+      createElement(RuntimeEditor, {
+        document: doc,
+        schema: {},
+        invalidField: 'runtime.harness',
+        validated: doc.runtime,
+        edit: () => {},
+      })
     );
+    assert.equal(unchanged.match(/aria-invalid="true"/g)?.length, 1);
   } finally {
     await server.close();
   }
@@ -140,7 +170,6 @@ test('harness labels and provider choices follow the native schema, including fu
           },
           schema,
           edit: () => {},
-          openJson: () => {},
         })
       );
       const selects = [...html.matchAll(/<select[^>]*>(.*?)<\/select>/g)].map((match) => match[1]);

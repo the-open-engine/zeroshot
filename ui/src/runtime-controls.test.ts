@@ -12,6 +12,16 @@ function elements(value: ReactNode): ReactElement<any>[] {
   return [value, ...elements(value.props.children)];
 }
 
+/** Renders `view` inside React's hook context and hands its element tree to `inspect`. */
+function within(view: () => ReactNode, inspect: (tree: ReactElement<any>[]) => void) {
+  function Probe() {
+    const tree = view();
+    inspect(elements(tree));
+    return tree;
+  }
+  renderToStaticMarkup(createElement(Probe));
+}
+
 function document(harness: string, provider: string): Document {
   return {
     name: 'runtime-review',
@@ -24,6 +34,7 @@ function document(harness: string, provider: string): Document {
         name: 'run',
         children: [
           { kind: 'step', name: 'worker', worker: 'agent.worker@1' },
+          { kind: 'step', name: 'reviewer', worker: 'agent.worker@1' },
           { kind: 'verifier', name: 'delivery', worker: 'builtin.git-delivery.pr@1' },
         ],
       },
@@ -39,61 +50,94 @@ function document(harness: string, provider: string): Document {
           effort: 'high',
           connections: { tools: ['TOKEN'] },
         },
+        reviewer: { kind: 'agent', model: 'reviewer-model' },
         delivery: { kind: 'git_delivery', connections: { github: ['GH_TOKEN'] } },
       },
     },
   };
 }
 
-test('each new preset selection reaches the runtime binding through the rendered picker callback', () => {
-  for (const [harness, provider, model] of [
-    ['codex', 'openai', 'gpt-6-astra'],
-    ['codex', 'openrouter', 'openai/gpt-6-astra'],
-    ['codex', 'bedrock', 'openai.gpt-6-astra'],
-    ['claude', 'anthropic', 'claude-fable-5-1'],
-    ['claude', 'openrouter', 'anthropic/claude-fable-5.1'],
-    ['claude', 'bedrock', 'global.anthropic.claude-fable-5-1'],
-  ]) {
-    const doc = document(harness, provider);
-    const before = structuredClone(doc);
-    const edits: Document[] = [];
-    const view = RuntimeEditor({
-      document: doc,
-      schema: {},
-      edit: (next) => edits.push(next),
-      openJson: () => {},
-    });
-    const pickers = elements(view).filter((element) => element.type === ModelPicker);
-    assert.equal(pickers.length, 1, 'delivery must not have a model picker');
-
-    // Render establishes React's hook context; exercise the actual select callback and its
-    // RuntimeEditor parent callback without a browser, network, or model invocation.
-    function SelectPreset() {
-      const picker = ModelPicker(pickers[0].props);
-      const controls = elements(picker);
-      assert.ok(
-        controls.some((element) => element.type === 'option' && element.props.value === model)
+test('a model chosen for one agent reaches only that runtime binding', () => {
+  const doc = document('future-harness', 'private-provider');
+  const before = structuredClone(doc);
+  const edits: Document[] = [];
+  let worker: ReactElement<any> | undefined;
+  within(
+    () => RuntimeEditor({ document: doc, schema: {}, edit: (next) => edits.push(next) }),
+    (tree) => {
+      const pickers = tree.filter((element) => element.type === ModelPicker);
+      worker = pickers.find((picker) => picker.props.label === 'Model for worker');
+      assert.equal(
+        pickers.some((picker) => picker.props.label === 'Model for all agents'),
+        false,
+        'agents with different models start with per-agent choices'
       );
-      const select = controls.find((element) => element.type === 'select')!;
-      select.props.onChange({ target: { value: model } });
-      return picker;
+      assert.equal(
+        pickers.some((picker) => picker.props.label === 'Model for delivery'),
+        false,
+        'delivery must not have a model picker'
+      );
     }
-    renderToStaticMarkup(createElement(SelectPreset));
-    assert.equal(edits.length, 1);
-    assert.equal(edits[0].runtime.nodes.worker.model, model);
-    assert.deepEqual(
-      edits[0].runtime.nodes.worker.connections,
-      before.runtime.nodes.worker.connections
+  );
+  assert.ok(worker);
+  assert.deepEqual(worker.props.suggestions, [
+    { label: 'In this profile', models: ['reviewer-model'] },
+  ]);
+  worker.props.onChange('reviewer-model');
+  assert.equal(edits.length, 1);
+  assert.equal(edits[0].runtime.nodes.worker.model, 'reviewer-model');
+  assert.deepEqual(
+    edits[0].runtime.nodes.worker.connections,
+    before.runtime.nodes.worker.connections
+  );
+  assert.equal(edits[0].runtime.nodes.worker.effort, 'high');
+  assert.deepEqual(edits[0].runtime.nodes.reviewer, before.runtime.nodes.reviewer);
+  assert.deepEqual(edits[0].runtime.nodes.delivery, before.runtime.nodes.delivery);
+  assert.deepEqual(doc, before);
+});
+
+test('agents sharing a model get one field that sets every agent at once', () => {
+  for (const model of ['shared-model', '']) {
+    const doc = document('codex', 'openai');
+    doc.runtime.nodes.worker.model = model;
+    doc.runtime.nodes.reviewer.model = model;
+    const edits: Document[] = [];
+    let labels: string[] = [];
+    let shared: ReactElement<any> | undefined;
+    within(
+      () =>
+        RuntimeEditor({
+          document: doc,
+          schema: {},
+          recentModels: (harness, provider) => {
+            assert.deepEqual([harness, provider], ['codex', 'openai']);
+            return ['recent-model'];
+          },
+          edit: (next) => edits.push(next),
+        }),
+      (tree) => {
+        const pickers = tree.filter((element) => element.type === ModelPicker);
+        labels = pickers.map((picker) => picker.props.label);
+        shared = pickers[0];
+      }
     );
+    assert.deepEqual(labels, ['Model for all agents'], 'a new or uniform profile hides the rest');
+    assert.equal(shared!.props.value, model);
+    assert.deepEqual(shared!.props.suggestions, [
+      { label: 'Recently used', models: ['recent-model'] },
+    ]);
+    shared!.props.onChange('model-next');
+    assert.equal(edits[0].runtime.nodes.worker.model, 'model-next');
+    assert.equal(edits[0].runtime.nodes.reviewer.model, 'model-next');
     assert.equal(edits[0].runtime.nodes.worker.effort, 'high');
-    assert.deepEqual(edits[0].runtime.nodes.delivery, before.runtime.nodes.delivery);
-    assert.deepEqual(doc, before);
+    assert.deepEqual(edits[0].runtime.nodes.delivery, doc.runtime.nodes.delivery);
   }
 });
 
 test('runtime model editing does not offer implicit conversion of unknown or missing bindings', () => {
   for (const missing of [false, true]) {
     const doc = document('codex', 'openai');
+    delete doc.runtime.nodes.reviewer;
     if (missing) delete doc.runtime.nodes.worker;
     else
       doc.runtime.nodes.worker = {
@@ -103,8 +147,10 @@ test('runtime model editing does not offer implicit conversion of unknown or mis
       };
     assertDocument(doc);
     const before = structuredClone(doc);
-    const view = RuntimeEditor({ document: doc, schema: {}, edit: () => {}, openJson: () => {} });
-    assert.equal(elements(view).filter((element) => element.type === ModelPicker).length, 0);
+    within(
+      () => RuntimeEditor({ document: doc, schema: {}, edit: () => {} }),
+      (tree) => assert.equal(tree.filter((element) => element.type === ModelPicker).length, 0)
+    );
     assert.deepEqual(doc, before);
   }
 });

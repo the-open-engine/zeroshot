@@ -134,13 +134,11 @@ function AppDialogs({ model }: { model: AppModel }) {
     jsonTarget,
     closeModal,
     bootstrap,
-    doc,
     modalError,
-    apply,
     setModal,
-    openJson,
     adopt,
-    validation,
+    runtimeView,
+    switchRuntimeView,
     name,
     setName,
     template,
@@ -181,22 +179,34 @@ function AppDialogs({ model }: { model: AppModel }) {
                             : 'Save profile'
                           : modal === 'import'
                             ? 'Import profile'
-                            : `${jsonTarget === 'graph' ? 'Graph' : jsonTarget === 'runtime' ? 'Runtime' : jsonTarget} JSON`
+                            : `${jsonTarget === 'graph' ? 'Graph' : jsonTarget} JSON`
           }
           close={closeModal}
-          wide={modal === 'json' || modal === 'import'}
+          headingExtra={
+            modal === 'runtime' && (
+              <div className="view-toggle" role="group" aria-label="Runtime editor view">
+                {(['form', 'json'] as const).map((view) => (
+                  <button
+                    key={view}
+                    type="button"
+                    aria-pressed={runtimeView === view}
+                    onClick={() => switchRuntimeView(view)}
+                  >
+                    {view === 'form' ? 'Form' : 'JSON'}
+                  </button>
+                ))}
+              </div>
+            )
+          }
+          wide={
+            modal === 'json' ||
+            modal === 'import' ||
+            (modal === 'runtime' && runtimeView === 'json')
+          }
         >
           <WorkflowActionContent model={model} />
           <OutcomeContent model={model} />
-          {modal === 'runtime' && doc && (
-            <RuntimeEditor
-              document={doc}
-              schema={bootstrap?.runtimeSchema}
-              invalidField={validation.state === 'invalid' ? validation.field : undefined}
-              edit={apply}
-              openJson={() => openJson('runtime')}
-            />
-          )}
+          <RuntimeContent model={model} />
           <BodyContent model={model} />
           {modal === 'new' && (
             <form
@@ -533,6 +543,60 @@ function BodyContent({ model }: { model: AppModel }) {
   );
 }
 
+function RuntimeContent({ model }: { model: AppModel }) {
+  const {
+    modal,
+    doc,
+    bootstrap,
+    validation,
+    runtimeView,
+    runtimeDraft,
+    setRuntimeDraft,
+    json,
+    setJson,
+    modalError,
+    closeModal,
+    applyRuntime,
+    savedModels,
+  } = model;
+  if (modal !== 'runtime' || !doc || !runtimeDraft) return null;
+  return (
+    <>
+      {runtimeView === 'form' ? (
+        <RuntimeEditor
+          document={{ ...doc, runtime: runtimeDraft }}
+          schema={bootstrap?.runtimeSchema}
+          recentModels={savedModels}
+          invalidField={validation.state === 'invalid' ? validation.field : undefined}
+          validated={doc.runtime}
+          edit={(next) => setRuntimeDraft(next.runtime)}
+        />
+      ) : (
+        <textarea
+          spellCheck={false}
+          className="json-editor"
+          aria-label="JSON source"
+          value={json}
+          onChange={(e) => setJson(e.target.value)}
+        />
+      )}
+      {modalError && (
+        <p className="modal-error" role="alert">
+          {modalError}
+        </p>
+      )}
+      <div className="modal-actions">
+        <button type="button" className="button" onClick={closeModal}>
+          Cancel
+        </button>
+        <button type="button" className="button primary" onClick={applyRuntime}>
+          Apply changes
+        </button>
+      </div>
+    </>
+  );
+}
+
 function JsonContent({ model }: { model: AppModel }) {
   const { modal, setJson, setModalError, json, modalError, closeModal, importJson, applyJson } =
     model;
@@ -644,6 +708,8 @@ function ProfileWorkspace({ model }: { model: AppModel }) {
     attempt,
     apply,
     openJson,
+    openRuntime,
+    savedModels,
     setInspector,
     documentGeneration,
     inspectorReset,
@@ -753,7 +819,7 @@ function ProfileWorkspace({ model }: { model: AppModel }) {
                     apply(connectAfter(doc, sourceParent.name, source, target));
                   })
                 }
-                runtime={() => setModal('runtime')}
+                runtime={() => openRuntime()}
                 json={() => openJson('graph')}
                 info={() => {
                   if (host) hosted.navigate('defaults');
@@ -772,7 +838,8 @@ function ProfileWorkspace({ model }: { model: AppModel }) {
                 edit={apply}
                 updateNode={editNode}
                 openJson={openJson}
-                openRuntime={() => setModal('runtime')}
+                openRuntime={() => openRuntime()}
+                recentModels={savedModels}
                 move={(offset) =>
                   attempt(() => {
                     if (parent && node) apply(reorder(doc, parent.name, node.name, offset));
@@ -844,7 +911,7 @@ function ProfileWorkspace({ model }: { model: AppModel }) {
           {issues && validation.message && (
             <ValidationDetail
               validation={validation}
-              openRuntime={() => setModal('runtime')}
+              openRuntime={() => openRuntime()}
               dismiss={() => setIssues(false)}
             />
           )}
@@ -962,11 +1029,13 @@ function Modal({
   title,
   close,
   children,
+  headingExtra,
   wide = false,
 }: {
   title: string;
   close: () => void;
   children: React.ReactNode;
+  headingExtra?: React.ReactNode;
   wide?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -997,6 +1066,7 @@ function Modal({
     >
       <div className="modal-heading">
         <h2>{title}</h2>
+        {headingExtra}
         <button className="icon-button" aria-label="Close dialog" onClick={close}>
           <X size={18} />
         </button>
