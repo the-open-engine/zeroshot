@@ -54,7 +54,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `protocol/openengine-cluster/v1/` must be regenerated through the Rust testkit, not hand-edited.
 - Initial input remains caller-owned and is validated unchanged. A root group may add required
   state fields only when their payload types have deterministic implicit empty values; verification
-  proves this and reduction materializes missing null, string, and recursively empty record values.
+  proves this and reduction materializes missing null, string, array, and recursively empty record values.
 - Map reduction collects a promoted field only when every item wrote it in that item scope. A worker
   error leaves an incomplete collection unchanged while its controls remain available to authored
   guards; never substitute inherited arrays, null placeholders, or shorter partial collections.
@@ -354,6 +354,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   explicitly transient failures and bounded visibility races; an ordinary statusless failure or HTTP
   403 is not presumed transient. Only typed CI/feedback/conflict outcomes, Git command failures, or
   verified repository/workspace reconciliation may request an agent repair.
+- The built-in `software-change` graph has one `worker` inside its ten-round loop for initial
+  implementation, review repairs, and Git/CI repairs. Graph-owned `phase.after` identifies the
+  latest feedback source; the empty initial phase and continuation array are implicit state, not
+  caller input. Empty maps continue a rejected round without another agent execution. Every repair
+  returns through both existing reviewers before delivery. CLI uniform runtimes without an explicit
+  session scope and new UI templates use `node_instance` for this worker and `execution` for
+  reviewers; exact runtime plans and explicit session scopes remain caller-owned. Saved graphs are
+  unchanged. The final rejected round fails without starting an unreviewable extra repair.
 - Delivery-enabled software-change templates make the acceptance verifier the sole author of the
   current change title and description after every review pass. Git delivery uses that manifest for
   commits and reviews, refreshes only its marker-delimited body section while preserving surrounding

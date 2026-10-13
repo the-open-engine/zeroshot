@@ -36,9 +36,7 @@ fn software_change_runtime() -> RuntimePlan {
         "nodes":{
             "worker":{"kind":"agent","model":"gpt-5.6-sol","effort":"max"},
             "acceptance":{"kind":"agent","model":"gpt-5.6-sol","effort":"max"},
-            "code":{"kind":"agent","model":"gpt-5.6-sol","effort":"max"},
-            "review_repair":{"kind":"agent","model":"gpt-5.6-sol","effort":"max"},
-            "delivery_repair":{"kind":"agent","model":"gpt-5.6-sol","effort":"max"}
+            "code":{"kind":"agent","model":"gpt-5.6-sol","effort":"max"}
         }
     }))
     .assert_value()

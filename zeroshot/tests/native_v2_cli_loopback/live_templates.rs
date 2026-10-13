@@ -94,7 +94,7 @@ async fn shipped_cli_repairs_unseen_ci_policy_then_reviews_and_merges() {
     );
     let (stdout, stderr) = run_live_software_change(&root, lane, &runtime, &input).await;
     assert_terminal_success(&stdout, &stderr);
-    assert!(stdout.contains("\"node\":\"delivery_repair\""));
+    assert!(stdout.contains("\"after\":\"ci_failed\""));
     assert!(stdout.contains("\"outcome\":\"merged\""));
 }
 
@@ -166,12 +166,12 @@ fn template_runtime(lane: LiveLane, template: &str) -> serde_json::Value {
     } else {
         "execution"
     };
-    let agent = || {
+    let agent = |scope: &str| {
         json!({
             "kind":"agent",
             "model":lane.model(),
             "effort":effort,
-            "sessionScope":session_scope,
+            "sessionScope":scope,
             "connections": if template == "single-worker" {
                 json!({})
             } else {
@@ -180,13 +180,11 @@ fn template_runtime(lane: LiveLane, template: &str) -> serde_json::Value {
         })
     };
     let nodes = match template {
-        "single-worker" => json!({"worker":agent()}),
+        "single-worker" => json!({"worker":agent(session_scope)}),
         "software-change" => json!({
-            "worker":agent(),
-            "acceptance":agent(),
-            "code":agent(),
-            "review_repair":agent(),
-            "delivery_repair":agent()
+            "worker":agent(session_scope),
+            "acceptance":agent("execution"),
+            "code":agent("execution")
         }),
         _ => None::<serde_json::Value>.assert_value_with("live template name is closed"),
     };

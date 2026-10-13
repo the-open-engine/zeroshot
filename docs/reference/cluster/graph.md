@@ -69,6 +69,10 @@ that bindings can construct through non-empty field paths. Scalar, enum, and arr
 valid elsewhere in the closed algebra and as nested record fields; they are not implicitly copied
 or defaulted at a payload root.
 
+A root group can add required state fields with deterministic empty values: `null`, `""`, `[]`,
+and records composed of such fields. Initial input is validated unchanged; these defaults belong
+to graph state. Optional fields stay absent, and supplied values are preserved.
+
 Control guards use a separate AST and cannot contain `DataSelector`:
 
 | `kind`       | Fields                                                         |

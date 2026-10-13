@@ -155,7 +155,10 @@ pub(super) fn settled_worker() -> DurableExecution {
         node_instance: 1,
         node: "worker",
         settled_at: 1,
-        input: json!({"task":"repair checkout"}),
+        input: json!({
+            "task":"repair checkout", "phase":{},
+            "acceptanceFeedback":"", "codeFeedback":"", "deliveryFeedback":""
+        }),
     })
 }
 

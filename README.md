@@ -201,16 +201,16 @@ Each step can use its own model. Pass `--runtime-config` with one binding per no
   "provider": "anthropic",
   "size": "medium",
   "nodes": {
-    "worker": { "kind": "agent", "model": "WORKER_MODEL_ID", "effort": "high" },
+    "worker": { "kind": "agent", "model": "WORKER_MODEL_ID", "effort": "high", "sessionScope": "node_instance" },
     "acceptance": { "kind": "agent", "model": "REVIEW_MODEL_ID", "effort": "high" },
-    "code": { "kind": "agent", "model": "REVIEW_MODEL_ID", "effort": "max" },
-    "review_repair": { "kind": "agent", "model": "WORKER_MODEL_ID", "effort": "high" }
+    "code": { "kind": "agent", "model": "REVIEW_MODEL_ID", "effort": "max" }
   }
 }
 ```
 
-Runs with delivery enabled also need a `delivery_repair` binding. Run
-`zeroshot template show software-change` to list the node names. See the
+The same worker handles implementation, review repairs, and delivery repairs in one session.
+Both reviewers start fresh on every pass. Run `zeroshot template show software-change` to list
+the node names. See the
 [RuntimePlan reference](docs/reference/runtime-plan.md) for every field.
 
 A profile stores a graph and its runtime settings. Use **Profiles** in the browser UI to edit and

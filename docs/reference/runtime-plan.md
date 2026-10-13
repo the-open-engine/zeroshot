@@ -30,7 +30,7 @@ status; the hosting target decides what resources each class receives.
 
 `nodes` keys are graph node names: 1 to 128 bytes matching `[A-Za-z_][A-Za-z0-9_.-]*`.
 
-This plan binds the four agent nodes of the built-in `software-change` template:
+This plan binds the three agent nodes of the built-in `software-change` template:
 
 ```json
 {
@@ -40,8 +40,7 @@ This plan binds the four agent nodes of the built-in `software-change` template:
   "nodes": {
     "worker": { "kind": "agent", "model": "PROVIDER_MODEL_ID", "sessionScope": "node_instance" },
     "acceptance": { "kind": "agent", "model": "PROVIDER_MODEL_ID", "effort": "high" },
-    "code": { "kind": "agent", "model": "PROVIDER_MODEL_ID", "effort": "high" },
-    "review_repair": { "kind": "agent", "model": "PROVIDER_MODEL_ID" }
+    "code": { "kind": "agent", "model": "PROVIDER_MODEL_ID", "effort": "high" }
   }
 }
 ```
@@ -124,8 +123,8 @@ A lane is one harness and provider pair. The plan's `harness` and `provider` are
 for every agent node, and an `agent` binding can carry its own `lane`. A node's effective lane is
 its `lane`, or the default lane when it has none. `size` stays run-level.
 
-This plan binds the same four nodes as the [first example](#document-fields). `worker` and
-`review_repair` run on the default `codex`/`openai` lane, and both reviewers run on Claude Code:
+This plan binds the same three nodes as the [first example](#document-fields). `worker` runs
+on the default `codex`/`openai` lane, and both reviewers run on Claude Code:
 
 ```json
 {
@@ -145,14 +144,13 @@ This plan binds the same four nodes as the [first example](#document-fields). `w
       "lane": { "harness": "claude", "provider": "anthropic" },
       "model": "PROVIDER_MODEL_ID",
       "effort": "high"
-    },
-    "review_repair": { "kind": "agent", "model": "PROVIDER_MODEL_ID" }
+    }
   }
 }
 ```
 
-Each `model` goes to the provider of its node's effective lane, so here `worker` and
-`review_repair` need OpenAI model identifiers and the reviewers need Anthropic ones.
+Each `model` goes to the provider of its node's effective lane, so here `worker` needs an OpenAI
+model identifier and the reviewers need Anthropic ones.
 
 - `lane` accepts the same pairs as the run level, listed in
   [Harness and provider](#harness-and-provider). An invalid pair is rejected when the plan is read.
@@ -272,6 +270,14 @@ the fields of several providers.
 Every executable node gets an `agent` binding with these values, except nodes that use a delivery
 worker. Those get a `git_delivery` binding that declares `{"github": ["GH_TOKEN"]}`.
 
+When selecting the built-in `software-change` template, omitted `sessionScope` defaults to
+`node_instance` for `worker` and `execution` for its reviewers. The worker retains its session
+through implementation and every repair; reviewers start fresh each pass. An explicit uniform
+`sessionScope` still applies to every agent. Exact runtime plans and saved graphs retain their
+authored scopes; use `node_instance` on `worker` in an exact plan to retain its session.
+When using the updated template with an older exact runtime config, remove its `review_repair`
+and `delivery_repair` bindings. Existing saved profiles keep their stored graph and bindings.
+
 A uniform configuration applies one lane to every agent node. Neither `--uniform-runtime-config` nor
 the Python SDK's `UniformRuntime` can express [per-node lanes](#per-node-lanes); use an exact
 `--runtime-config` or an opaque `RuntimePlan` instead.
@@ -279,7 +285,7 @@ the Python SDK's `UniformRuntime` can express [per-node lanes](#per-node-lanes);
 ## Template delivery bindings
 
 Built-in templates own their delivery nodes. With `software-change`, `--push`, `--pr`, and `--ship`
-add a delivery verifier named `deliver` and a `delivery_repair` step. With `auto-research`, `--push`
+add a delivery verifier named `deliver`. The existing `worker` handles delivery repairs. With `auto-research`, `--push`
 adds `checkpoint_delivery` plus the agent nodes `checkpoint_manifest` and `checkpoint_audit`.
 `single-worker` has no delivery modes.
 
@@ -287,9 +293,9 @@ The CLI inserts the template-owned `git_delivery` binding for the delivery node,
 `{"github": ["GH_TOKEN"]}`. `--no-pr-feedback` (requires `--pr` or `--ship`) sets its
 `pullRequestFeedback` to `ignore`.
 
-A uniform configuration binds the added agent nodes too. An exact `--runtime-config` must bind them
-as `agent` nodes itself, such as `delivery_repair` for `software-change --pr`. It may omit the
-delivery node; if it includes it, the binding must be `git_delivery`. List the executable nodes
+A uniform configuration binds the added agent nodes too. An exact `--runtime-config` must bind
+all agent nodes itself. Software-change uses `worker`, `acceptance`, and `code` with every delivery
+mode. It may omit the delivery node; if it includes it, the binding must be `git_delivery`. List the executable nodes
 with `zeroshot template show TEMPLATE` plus the same delivery flag.
 
 Custom graphs author delivery in both the graph and the plan.

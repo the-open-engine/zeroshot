@@ -13,7 +13,7 @@ fn uniform(harness: UniformHarness, provider: UniformProvider) -> UniformRuntime
         size: RunSize::Small,
         model: ModelId::new("provider-owned-model").assert_value(),
         effort: None,
-        session_scope: SessionScope::Execution,
+        session_scope: None,
         connections: None,
     }
 }
@@ -25,7 +25,11 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
         .assert_value();
     assert_eq!(graph.profile, GraphProfile::Full);
     let runtime = uniform(UniformHarness::Codex, UniformProvider::OpenAi)
-        .materialize(&graph, PullRequestFeedback::Ignore)
+        .materialize(
+            &graph,
+            PullRequestFeedback::Ignore,
+            Some(BuiltinGraphTemplate::SoftwareChange),
+        )
         .assert_value();
     let RuntimePlan::Codex { nodes, .. } = &runtime else {
         panic!("expected Codex runtime")
@@ -109,6 +113,50 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
             .assert_value(),
         runtime
     );
+}
+
+#[test]
+fn software_change_session_defaults_preserve_explicit_runtime_choices() {
+    let graph = BuiltinGraphTemplate::SoftwareChange
+        .materialize(TemplateDelivery::None)
+        .assert_value();
+    for (template, scope, worker_scope, reviewer_scope) in [
+        (
+            Some(BuiltinGraphTemplate::SoftwareChange),
+            None,
+            SessionScope::NodeInstance,
+            SessionScope::Execution,
+        ),
+        (None, None, SessionScope::Execution, SessionScope::Execution),
+        (
+            Some(BuiltinGraphTemplate::SoftwareChange),
+            Some(SessionScope::Execution),
+            SessionScope::Execution,
+            SessionScope::Execution,
+        ),
+        (
+            Some(BuiltinGraphTemplate::SoftwareChange),
+            Some(SessionScope::NodeInstance),
+            SessionScope::NodeInstance,
+            SessionScope::NodeInstance,
+        ),
+    ] {
+        let mut uniform = uniform(UniformHarness::Codex, UniformProvider::OpenAi);
+        uniform.session_scope = scope;
+        let runtime = uniform
+            .materialize(&graph, PullRequestFeedback::Consider, template)
+            .assert_value();
+        for (name, expected) in [
+            ("worker", worker_scope),
+            ("acceptance", reviewer_scope),
+            ("code", reviewer_scope),
+        ] {
+            assert!(
+                matches!(runtime.nodes().get(&NodeName::new(name).assert_value()),
+                Some(NodeRuntimeBinding::Agent { session_scope, .. }) if *session_scope == expected)
+            );
+        }
+    }
 }
 
 #[test]

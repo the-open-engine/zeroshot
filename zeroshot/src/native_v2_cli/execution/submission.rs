@@ -385,7 +385,11 @@ fn materialize_runtime(
         RunRuntime::Exact(path) => path,
         RunRuntime::Uniform(path) => {
             let uniform = read_json::<UniformRuntimePlan>("uniform runtime config", path)?;
-            return uniform.materialize(graph, feedback);
+            let template = match selection {
+                RunGraph::Template { template, .. } => Some(*template),
+                _ => None,
+            };
+            return uniform.materialize(graph, feedback, template);
         }
     };
     let runtime = read_json::<RuntimePlan>("runtime config", path)?;
@@ -457,7 +461,7 @@ struct UniformRuntimePlan {
     #[serde(default)]
     effort: Option<ReasoningEffort>,
     #[serde(default)]
-    session_scope: SessionScope,
+    session_scope: Option<SessionScope>,
     #[serde(default)]
     connections: Option<DeclaredConnections>,
 }
@@ -471,26 +475,21 @@ impl UniformRuntimePlan {
         self,
         graph: &GraphSpec,
         pull_request_feedback: crate::native_v2_contract::PullRequestFeedback,
+        template: Option<BuiltinGraphTemplate>,
     ) -> Result<RuntimePlan, NativeV2CliError> {
         let harness = self.harness;
-        let connections = self
-            .connections
-            .clone()
-            .unwrap_or_else(DeclaredConnections::empty);
         let mut nodes = BTreeMap::new();
         for (name, delivery) in executable_runtime_roles(&graph.root) {
-            nodes.insert(
-                name,
-                self.binding(delivery, &connections, pull_request_feedback)?,
-            );
+            let binding = self.binding((&name, delivery), template, pull_request_feedback)?;
+            nodes.insert(name, binding);
         }
         self.into_runtime_plan(harness, nodes)
     }
 
     fn binding(
         &self,
-        delivery: bool,
-        connections: &DeclaredConnections,
+        (name, delivery): (&NodeName, bool),
+        template: Option<BuiltinGraphTemplate>,
         pull_request_feedback: crate::native_v2_contract::PullRequestFeedback,
     ) -> Result<NodeRuntimeBinding, NativeV2CliError> {
         if delivery {
@@ -500,8 +499,15 @@ impl UniformRuntimePlan {
             lane: None,
             model: self.model.clone(),
             effort: self.effort,
-            session_scope: self.session_scope,
-            connections: connections.clone(),
+            session_scope: self.session_scope.unwrap_or_else(|| {
+                template.map_or(SessionScope::Execution, |template| {
+                    template.default_session_scope(name.as_str())
+                })
+            }),
+            connections: self
+                .connections
+                .clone()
+                .unwrap_or_else(DeclaredConnections::empty),
         })
     }
 

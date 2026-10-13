@@ -1,6 +1,6 @@
 //! Public built-in template selection and local materialization seams.
 
-use openengine_cluster_protocol::{GraphSpec, NodeName};
+use openengine_cluster_protocol::{GraphSpec, NodeName, SessionScope};
 use thiserror::Error;
 
 use crate::native_v2_contract::{
@@ -47,6 +47,14 @@ impl BuiltinGraphTemplate {
             "software-change" => Some(Self::SoftwareChange),
             "auto-research" => Some(Self::AutoResearch),
             _ => None,
+        }
+    }
+
+    pub(crate) fn default_session_scope(self, node: &str) -> SessionScope {
+        if self == Self::SoftwareChange && node == "worker" {
+            SessionScope::NodeInstance
+        } else {
+            SessionScope::Execution
         }
     }
 

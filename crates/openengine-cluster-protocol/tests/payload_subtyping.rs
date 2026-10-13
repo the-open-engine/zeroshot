@@ -144,6 +144,35 @@ fn required_empty_root_state_fields_are_materializable() {
 }
 
 #[test]
+fn required_array_state_defaults_preserve_caller_input_and_optional_absence() {
+    let array = PayloadType::Array {
+        items: Box::new(PayloadType::Integer),
+    };
+    let input = record(&[("items", array.clone(), false)]);
+    let state = record(&[
+        ("items", array.clone(), true),
+        ("optionalItems", array.clone(), false),
+        ("nested", record(&[("items", array, true)]), true),
+    ]);
+    let effective = input.materialized_subtype_of(&state).assert_value();
+    for authored in [json!({}), json!({"items":[1, 2]})] {
+        input.validate_value(&authored).assert_value();
+        let mut materialized = authored.clone();
+        state.materialize_missing_fields(&mut materialized);
+        assert_eq!(
+            materialized["items"],
+            authored.get("items").cloned().unwrap_or(json!([]))
+        );
+        assert_eq!(materialized["nested"], json!({"items":[]}));
+        assert!(materialized.get("optionalItems").is_none());
+        effective.validate_value(&materialized).assert_value();
+    }
+    let mut invalid = json!({"items":"not an array"});
+    state.materialize_missing_fields(&mut invalid);
+    assert!(state.validate_value(&invalid).is_err());
+}
+
+#[test]
 fn optional_record_defaults_do_not_require_source_only_descendants() {
     let input = record(&[(
         "config",

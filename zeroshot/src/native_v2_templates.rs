@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use openengine_cluster_protocol::{
-    ChoiceBranch, ChoiceNode, ControlSelector, ControlSource, EnumLabel, FieldName, FieldPath,
-    GraphNode, GraphSpec, Guard, Join, LoopNode, MapNode, NodeInstructions, NodeName,
+    ChoiceBranch, ChoiceNode, ControlSelector, ControlSource, DataSelector, EnumLabel, FieldName,
+    FieldPath, GraphNode, GraphSpec, Guard, Join, LoopNode, MapNode, NodeInstructions, NodeName,
     NonEmptyEnumSet, NonEmptyVec, ParNode, PayloadType, PositiveInteger, StepNode, SucceedNode,
     VerifierNode, WorkerErrorCode, WorkerRef, WriteBinding,
 };
@@ -41,6 +41,8 @@ const TASK_FIELD: &str = "task";
 const ACCEPTANCE_FEEDBACK_FIELD: &str = "acceptanceFeedback";
 const CODE_FEEDBACK_FIELD: &str = "codeFeedback";
 const DELIVERY_FEEDBACK_FIELD: &str = "deliveryFeedback";
+const PHASE_FIELD: &str = "phase";
+const CONTINUE_ITEMS_FIELD: &str = "continueItems";
 const TITLE_FIELD: &str = "title";
 const DESCRIPTION_FIELD: &str = "description";
 const ISSUE_NUMBER_FIELD: &str = "issueNumber";
@@ -73,33 +75,68 @@ fn single_worker_graph() -> Result<GraphSpec, BuiltinTemplateError> {
 }
 
 fn software_change_graph(delivery: TemplateDelivery) -> Result<GraphSpec, BuiltinTemplateError> {
-    let state = software_state(delivery)?;
-    let worker = task_worker(
-        "builtin.agent.software-worker@1",
-        "Implement the requested software change fully in the shared workspace. Follow the \
-         repository's guidance, keep the change focused, and run relevant checks. Delivery runs \
-         `git add --all`; do not leave unrelated unignored files in the repository checkout.",
-    )?;
-    let worker_route = initial_worker_route(state.clone(), delivery)?;
     graph(
         software_input_type(delivery)?,
-        sequence("run", state, vec![worker, worker_route], Vec::new())?,
+        change_loop(software_state(delivery)?, delivery)?,
     )
 }
 
-fn initial_worker_route(
+fn software_worker(delivery: TemplateDelivery) -> Result<GraphNode, BuiltinTemplateError> {
+    Ok(GraphNode::Step(StepNode {
+        name: node_name("worker")?,
+        worker: worker_ref("builtin.agent.software-worker@1")?,
+        instructions: Some(instructions(
+            "Implement the requested software change fully in the shared workspace. Follow the \
+             repository's guidance, keep the change focused, and run relevant checks. Delivery runs \
+             `git add --all`; do not leave unrelated unignored files in the repository checkout. \
+             Use current input on every visit. An empty phase means implementation; phase.after \
+             accepted or rejected means repair the latest acceptanceFeedback and codeFeedback; \
+             ci_failed, conflict, or repair_required means repair deliveryFeedback. Other feedback \
+             is historical. Resolve Git/CI issues without weakening the task; preserve integrated \
+             upstream changes. sourceRevision is original provenance, reviewBaseRevision the \
+             captured target. Do not restore files merely to match sourceRevision. Run relevant \
+             checks after repairs.",
+        )?),
+        input: software_worker_input_type(delivery)?,
+        output: PayloadType::Null,
+        input_bindings: [
+            TASK_FIELD,
+            PHASE_FIELD,
+            ACCEPTANCE_FEEDBACK_FIELD,
+            CODE_FEEDBACK_FIELD,
+            DELIVERY_FEEDBACK_FIELD,
+        ]
+        .into_iter()
+        .map(|field| state_input(field, field))
+        .collect::<Result<_, _>>()?,
+        write_bindings: Vec::new(),
+        timeout_ms: None,
+        attempts: positive(1)?,
+    }))
+}
+
+fn worker_route(
     state: PayloadType,
     delivery: TemplateDelivery,
 ) -> Result<GraphNode, BuiltinTemplateError> {
-    choice(
-        "worker_result",
-        state.clone(),
-        vec![ChoiceBranch {
+    Ok(GraphNode::Choice(ChoiceNode {
+        name: node_name("worker_result")?,
+        state: state.clone(),
+        branches: non_empty(vec![ChoiceBranch {
             when: executable_error_guard("worker")?,
             node: fail("worker_failed", "worker_failed")?,
-        }],
-        Some(change_loop(state, delivery)?),
-    )
+        }])?,
+        otherwise: Some(Box::new(sequence(
+            "reviews",
+            state.clone(),
+            vec![
+                parallel_reviewers(state.clone(), delivery)?,
+                review_route(state, delivery)?,
+            ],
+            feedback_paths()?,
+        )?)),
+        promoted_state_paths: feedback_paths()?,
+    }))
 }
 
 fn task_worker(
@@ -153,13 +190,13 @@ fn change_loop(
     state: PayloadType,
     delivery: TemplateDelivery,
 ) -> Result<GraphNode, BuiltinTemplateError> {
-    let parallel = parallel_reviewers(state.clone(), delivery)?;
-    let route = review_route(state.clone(), delivery)?;
+    let worker = software_worker(delivery)?;
+    let route = worker_route(state.clone(), delivery)?;
     let feedback_paths = feedback_paths()?;
     let body = sequence(
         "change_iteration",
         state.clone(),
-        vec![parallel, route],
+        vec![worker, route],
         feedback_paths.clone(),
     )?;
     let loop_node = GraphNode::Loop(LoopNode {
@@ -172,7 +209,7 @@ fn change_loop(
         promoted_state_paths: feedback_paths,
     });
     sequence(
-        "changes",
+        "run",
         state,
         vec![
             loop_node,
@@ -213,14 +250,7 @@ fn parallel_reviewers(
         } else {
             PayloadType::Null
         },
-        write_bindings: if delivery_metadata {
-            vec![
-                output_write("acceptance", TITLE_FIELD, TITLE_FIELD)?,
-                output_write("acceptance", DESCRIPTION_FIELD, DESCRIPTION_FIELD)?,
-            ]
-        } else {
-            Vec::new()
-        },
+        write_bindings: acceptance_write_bindings(delivery_metadata)?,
     })?;
     let code = review_verifier(ReviewVerifierSpec {
         name: "code",
@@ -240,6 +270,21 @@ fn parallel_reviewers(
         promoted_state_paths: review_promoted_paths(delivery)?,
         join: Join::All {},
     }))
+}
+
+fn acceptance_write_bindings(
+    delivery_metadata: bool,
+) -> Result<Vec<WriteBinding>, BuiltinTemplateError> {
+    let mut bindings = vec![phase_write("acceptance", VERDICT_FIELD)?];
+    if delivery_metadata {
+        bindings.push(output_write("acceptance", TITLE_FIELD, TITLE_FIELD)?);
+        bindings.push(output_write(
+            "acceptance",
+            DESCRIPTION_FIELD,
+            DESCRIPTION_FIELD,
+        )?);
+    }
+    Ok(bindings)
 }
 
 struct ReviewVerifierSpec<'a> {
@@ -287,35 +332,29 @@ fn review_route(
             },
             ChoiceBranch {
                 when: accepted_reviews_guard()?,
-                node: accepted_change(state, delivery)?,
+                node: accepted_change(state.clone(), delivery)?,
             },
         ])?,
-        otherwise: Some(Box::new(review_repair()?)),
-        promoted_state_paths: vec![field_path(DELIVERY_FEEDBACK_FIELD)?],
+        otherwise: Some(Box::new(next_iteration("review_retry", state)?)),
+        promoted_state_paths: vec![
+            field_path(DELIVERY_FEEDBACK_FIELD)?,
+            field_path(PHASE_FIELD)?,
+        ],
     }))
 }
 
-fn review_repair() -> Result<GraphNode, BuiltinTemplateError> {
-    Ok(GraphNode::Step(StepNode {
-        name: node_name("review_repair")?,
-        worker: worker_ref("builtin.agent.review-repair@1")?,
-        instructions: Some(delivery_feedback_instructions(
-            "Address both verifier diagnostics in the shared workspace without weakening the \
-             requested behavior. Account for any delivery feedback and run the relevant checks \
-             before returning. Delivery runs `git add --all`; do not leave unrelated unignored \
-             files in the repository checkout.",
-        )?),
-        input: review_repair_input_type()?,
-        output: PayloadType::Null,
-        input_bindings: vec![
-            state_input(TASK_FIELD, TASK_FIELD)?,
-            state_input(ACCEPTANCE_FEEDBACK_FIELD, ACCEPTANCE_FEEDBACK_FIELD)?,
-            state_input(CODE_FEEDBACK_FIELD, CODE_FEEDBACK_FIELD)?,
-            state_input(DELIVERY_FEEDBACK_FIELD, DELIVERY_FEEDBACK_FIELD)?,
-        ],
-        write_bindings: Vec::new(),
-        timeout_ms: None,
-        attempts: positive(1)?,
+fn next_iteration(name: &str, state: PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
+    // Root-owned state initializes this array to []; no node writes it. An empty map
+    // completes the round without a model call or an additional repair worker.
+    Ok(GraphNode::Map(MapNode {
+        name: node_name(name)?,
+        state,
+        over: DataSelector::State {
+            path: field_path(CONTINUE_ITEMS_FIELD)?,
+        },
+        body: Box::new(fail(&format!("{name}_invalid"), "invalid_retry_state")?),
+        max_items: positive(1)?,
+        promoted_state_paths: Vec::new(),
     }))
 }
 
@@ -370,7 +409,7 @@ fn delivery_with_repair(
             },
             ChoiceBranch {
                 when: delivery_signal_guard(&labels)?,
-                node: delivery_repair(mode)?,
+                node: next_iteration("delivery_retry", state.clone())?,
             },
         ],
         Some(delivery_success("done", mode)?),
@@ -379,43 +418,30 @@ fn delivery_with_repair(
         name,
         state,
         vec![delivery_node(mode)?, route],
-        vec![field_path(DELIVERY_FEEDBACK_FIELD)?],
+        vec![
+            field_path(DELIVERY_FEEDBACK_FIELD)?,
+            field_path(PHASE_FIELD)?,
+        ],
     )
 }
 
-fn delivery_repair(mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError> {
-    named_delivery_repair("delivery_repair", mode)
-}
-
-fn named_delivery_repair(
-    name: &str,
-    mode: DeliveryMode,
-) -> Result<GraphNode, BuiltinTemplateError> {
-    Ok(GraphNode::Step(StepNode {
-        name: node_name(name)?,
-        worker: worker_ref("builtin.agent.delivery-repair@1")?,
-        instructions: Some(delivery_feedback_instructions(
-            "Diagnose the reported Git, delivery, CI failure, or merge conflict using the original \
-             diagnostics. Repair the shared workspace when needed and run relevant checks, \
-             preserving the requested behavior and verifier-approved change. Delivery will retry \
-             with the updated workspace. Delivery runs `git add --all`; do not leave unrelated \
-             unignored files in the repository checkout.",
-        )?),
-        input: delivery_repair_input_type(mode)?,
-        output: PayloadType::Null,
-        input_bindings: vec![
-            state_input(TASK_FIELD, TASK_FIELD)?,
-            state_input("outcome", "outcome")?,
-            state_input(DELIVERY_FEEDBACK_FIELD, DELIVERY_FEEDBACK_FIELD)?,
-        ],
-        write_bindings: Vec::new(),
-        timeout_ms: None,
-        attempts: positive(1)?,
-    }))
-}
-
 fn delivery_node(mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError> {
-    named_delivery_node(DELIVERY_NODE, mode)
+    let mut node = named_delivery_node(DELIVERY_NODE, mode)?;
+    if let GraphNode::Verifier(verifier) = &mut node {
+        verifier
+            .write_bindings
+            .push(phase_write(DELIVERY_NODE, DELIVERY_SIGNAL_FIELD)?);
+    }
+    Ok(node)
+}
+
+fn phase_write(node: &str, signal: &str) -> Result<WriteBinding, BuiltinTemplateError> {
+    let mut binding = signal_write(node, signal, PHASE_FIELD)?;
+    binding.target = static_value(FieldPath::new(vec![
+        field_name(PHASE_FIELD)?,
+        field_name("after")?,
+    ]))?;
+    Ok(binding)
 }
 
 fn named_delivery_node(name: &str, mode: DeliveryMode) -> Result<GraphNode, BuiltinTemplateError> {
@@ -558,6 +584,7 @@ fn review_feedback_paths() -> Result<Vec<FieldPath>, BuiltinTemplateError> {
     Ok(vec![
         field_path(ACCEPTANCE_FEEDBACK_FIELD)?,
         field_path(CODE_FEEDBACK_FIELD)?,
+        field_path(PHASE_FIELD)?,
     ])
 }
 

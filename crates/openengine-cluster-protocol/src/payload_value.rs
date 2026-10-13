@@ -20,7 +20,7 @@ impl PayloadType {
         materialized_source_type(self, target).filter(|source| source.is_subtype_of(target))
     }
 
-    /// Adds deterministic empty values for missing required null, string, and record fields.
+    /// Adds deterministic empty values for missing required null, string, array, and record fields.
     pub fn materialize_missing_fields(&self, value: &mut Value) {
         let (Self::Record { fields }, Value::Object(object)) = (self, value) else {
             return;
@@ -99,6 +99,7 @@ fn implicit_empty_value(payload: &PayloadType) -> Option<Value> {
     match payload {
         PayloadType::Null => Some(Value::Null),
         PayloadType::String => Some(Value::String(String::new())),
+        PayloadType::Array { .. } => Some(Value::Array(Vec::new())),
         PayloadType::Record { fields } => {
             let mut object = serde_json::Map::new();
             for (name, field) in fields {
@@ -114,7 +115,6 @@ fn implicit_empty_value(payload: &PayloadType) -> Option<Value> {
         PayloadType::Boolean
         | PayloadType::Integer
         | PayloadType::Number
-        | PayloadType::Array { .. }
         | PayloadType::Enum { .. } => None,
     }
 }

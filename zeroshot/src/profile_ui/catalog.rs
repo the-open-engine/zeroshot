@@ -1,6 +1,6 @@
 //! Editor metadata for implementations supported by the native host. Contracts and delivery
 //! bindings are materialized by the existing template factories, not authored by the browser.
-use openengine_cluster_protocol::{GraphNode, GraphSpec};
+use openengine_cluster_protocol::{GraphNode, GraphSpec, SessionScope};
 use openengine_cluster_server::graph_verifier::graph_node_children;
 use serde_json::{json, Value};
 
@@ -29,16 +29,7 @@ pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
         };
         for delivery in deliveries {
             let graph = materialize(*template, *delivery)?;
-            let mut bindings = serde_json::Map::new();
-            if let Some((name, binding)) = template
-                .delivery_runtime_binding(*delivery)
-                .map_err(internal)?
-            {
-                bindings.insert(
-                    name.to_string(),
-                    serde_json::to_value(binding).map_err(internal)?,
-                );
-            }
+            let bindings = template_bindings(*template, *delivery)?;
             result.push(json!({
                 "id":format!("{}:{}", template.name(), delivery.name()),
                 "name":template.name(),
@@ -50,6 +41,30 @@ pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
         }
     }
     Ok(result)
+}
+
+fn template_bindings(
+    template: BuiltinGraphTemplate,
+    delivery: TemplateDelivery,
+) -> Result<serde_json::Map<String, Value>, ApiError> {
+    let mut bindings = serde_json::Map::new();
+    let scope = template.default_session_scope("worker");
+    if scope != SessionScope::Execution {
+        bindings.insert(
+            "worker".into(),
+            json!({"kind":"agent", "model":"", "sessionScope":scope}),
+        );
+    }
+    if let Some((name, binding)) = template
+        .delivery_runtime_binding(delivery)
+        .map_err(internal)?
+    {
+        bindings.insert(
+            name.to_string(),
+            serde_json::to_value(binding).map_err(internal)?,
+        );
+    }
+    Ok(bindings)
 }
 
 pub(super) fn workers() -> Result<Vec<Value>, ApiError> {

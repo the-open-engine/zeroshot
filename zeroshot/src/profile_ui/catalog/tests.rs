@@ -81,9 +81,12 @@ async fn template_variants_keep_exact_factory_graphs_and_admit_with_factory_bind
         let mut pending = vec![&graph.root];
         while let Some(node) = pending.pop() {
             if matches!(node, GraphNode::Step(_) | GraphNode::Verifier(_)) {
-                bindings
+                let binding = bindings
                     .entry(node.name().to_string())
-                    .or_insert_with(|| json!({"kind":"agent","model":"opaque-model"}));
+                    .or_insert_with(|| json!({"kind":"agent","model":""}));
+                if binding["kind"] == "agent" {
+                    binding["model"] = json!("opaque-model");
+                }
             }
             pending.extend(graph_node_children(node));
         }
@@ -94,5 +97,19 @@ async fn template_variants_keep_exact_factory_graphs_and_admit_with_factory_bind
         super::super::validate_profile(&graph, &runtime)
             .await
             .assert_value();
+    }
+}
+
+#[test]
+fn software_templates_keep_one_worker_session_and_fresh_reviewers() {
+    for template in templates()
+        .assert_value()
+        .iter()
+        .filter(|value| value["name"] == "software-change")
+    {
+        let bindings = &template["runtimeBindings"];
+        assert_eq!(bindings["worker"]["sessionScope"], "node_instance");
+        assert!(bindings["acceptance"].is_null());
+        assert!(bindings["code"].is_null());
     }
 }

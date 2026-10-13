@@ -18,6 +18,9 @@ use super::*;
 mod support;
 use support::*;
 
+#[path = "tests/continuity.rs"]
+mod continuity;
+
 #[test]
 fn catalog_and_template_inputs_are_closed() {
     assert_eq!(
@@ -116,43 +119,22 @@ async fn every_supported_materialization_is_admissible() {
         (
             BuiltinGraphTemplate::SoftwareChange,
             TemplateDelivery::None,
-            vec!["acceptance", "code", "review_repair", "worker"],
+            vec!["acceptance", "code", "worker"],
         ),
         (
             BuiltinGraphTemplate::SoftwareChange,
             TemplateDelivery::Push,
-            vec![
-                "acceptance",
-                "code",
-                "deliver",
-                "delivery_repair",
-                "review_repair",
-                "worker",
-            ],
+            vec!["acceptance", "code", "deliver", "worker"],
         ),
         (
             BuiltinGraphTemplate::SoftwareChange,
             TemplateDelivery::PullRequest,
-            vec![
-                "acceptance",
-                "code",
-                "deliver",
-                "delivery_repair",
-                "review_repair",
-                "worker",
-            ],
+            vec!["acceptance", "code", "deliver", "worker"],
         ),
         (
             BuiltinGraphTemplate::SoftwareChange,
             TemplateDelivery::Merge,
-            vec![
-                "acceptance",
-                "code",
-                "deliver",
-                "delivery_repair",
-                "review_repair",
-                "worker",
-            ],
+            vec!["acceptance", "code", "deliver", "worker"],
         ),
         (
             BuiltinGraphTemplate::AutoResearch,
@@ -896,9 +878,10 @@ async fn rejected_parallel_reviews_dispatch_repair_with_both_diagnostics() {
     assert!(reduction.decisions.iter().any(|decision| matches!(
         decision,
         Decision::Dispatch { occurrence, input, .. }
-            if occurrence.node.as_str() == "review_repair"
+            if occurrence.node.as_str() == "worker"
                 && input == &json!({
                     "task":"repair checkout",
+                    "phase":{"after":"rejected"},
                     "acceptanceFeedback":"missing requested behavior",
                     "codeFeedback":"unsafe error handling",
                     "deliveryFeedback":""
@@ -966,9 +949,10 @@ async fn crashed_parallel_review_retries_only_the_failed_verifier() {
     recovered.attempt = PositiveInteger::new(MAX_AGENT_VERIFIER_ATTEMPTS).assert_value();
     history.push(recovered);
     let reviewed = reduce(&verified, &initial_input, &history);
-    assert_dispatched_together(&reviewed, &["review_repair"]);
+    assert_dispatched_together(&reviewed, &["worker"]);
     let repair_input = json!({
         "task":"repair checkout",
+        "phase":{"after":"rejected"},
         "acceptanceFeedback":"missing requested behavior",
         "codeFeedback":"implementation sound",
         "deliveryFeedback":""
@@ -978,8 +962,8 @@ async fn crashed_parallel_review_retries_only_the_failed_verifier() {
     )));
     history.push(settled_agent(SettledExecutionSpec {
         execution: 5,
-        node_instance: 4,
-        node: "review_repair",
+        node_instance: 1,
+        node: "worker",
         settled_at: 6,
         input: repair_input,
     }));
@@ -1026,11 +1010,12 @@ async fn accepted_second_review_round_ignores_stale_sibling_verdicts() {
         settled_review(3, "code", REJECTED_LABEL, "unsafe error handling"),
         settled_agent(SettledExecutionSpec {
             execution: 4,
-            node_instance: 4,
-            node: "review_repair",
+            node_instance: 1,
+            node: "worker",
             settled_at: 4,
             input: json!({
                 "task":"repair checkout",
+                "phase":{"after":"accepted"},
                 "acceptanceFeedback":"requirements met",
                 "codeFeedback":"unsafe error handling",
                 "deliveryFeedback":""
@@ -1160,7 +1145,7 @@ async fn delivery_infrastructure_failure_never_dispatches_code_repair() {
     assert!(reduction.decisions.iter().all(|decision| !matches!(
         decision,
         Decision::Dispatch { occurrence, .. }
-            if occurrence.node.as_str() == "delivery_repair"
+            if occurrence.node.as_str() == "worker"
     )));
 }
 
@@ -1174,7 +1159,9 @@ async fn assert_recoverable_delivery(recoverable: &str) {
     let mut history = accepted_review_history(TemplateDelivery::Merge);
     let repair_input = json!({
         "task":"repair checkout",
-        "outcome":recoverable,
+        "phase":{"after":recoverable},
+        "acceptanceFeedback":"requirements met",
+        "codeFeedback":"implementation sound",
         "deliveryFeedback":delivery_feedback
     });
     history.push(settled_delivery_with_diagnostic(
@@ -1191,13 +1178,13 @@ async fn assert_recoverable_delivery(recoverable: &str) {
     ));
     assert_dispatch(
         &reduce(&verified, &initial_input, &history),
-        "delivery_repair",
+        "worker",
         &repair_input,
     );
     history.push(settled_agent(SettledExecutionSpec {
         execution: 5,
-        node_instance: 5,
-        node: "delivery_repair",
+        node_instance: 1,
+        node: "worker",
         settled_at: 5,
         input: repair_input,
     }));
@@ -1247,19 +1234,20 @@ fn assert_review_repair_preserves_delivery_feedback(
     ]);
     let repair_input = json!({
         "task":"repair checkout",
+        "phase":{"after":"accepted"},
         "acceptanceFeedback":"requirements met after integration",
         "codeFeedback":"repair an integration defect",
         "deliveryFeedback":delivery_feedback,
     });
     assert_dispatch(
         &reduce(verified, initial_input, history),
-        "review_repair",
+        "worker",
         &repair_input,
     );
     history.push(settled_agent(SettledExecutionSpec {
         execution: 8,
-        node_instance: 6,
-        node: "review_repair",
+        node_instance: 1,
+        node: "worker",
         settled_at: 8,
         input: repair_input,
     }));
@@ -1489,9 +1477,11 @@ async fn pull_request_delivery_routes_a_pre_review_git_failure_to_repair() {
     ));
     assert_dispatch(
         &reduce(&verified, &initial_input, &history),
-        "delivery_repair",
+        "worker",
         &json!({
-            "task":"repair checkout", "outcome":"repair_required",
+            "task":"repair checkout", "phase":{"after":"repair_required"},
+            "acceptanceFeedback":"requirements met",
+            "codeFeedback":"implementation sound",
             "deliveryFeedback":"git push: unfamiliar failure"
         }),
     );

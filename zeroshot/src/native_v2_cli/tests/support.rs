@@ -363,8 +363,6 @@ fn merge_plan_profile() -> RunProfile {
                 "worker":{"kind":"agent","model":"gpt-5.6-sol"},
                 "acceptance":{"kind":"agent","model":"gpt-5.6-sol"},
                 "code":{"kind":"agent","model":"gpt-5.6-sol"},
-                "review_repair":{"kind":"agent","model":"gpt-5.6-sol"},
-                "delivery_repair":{"kind":"agent","model":"gpt-5.6-sol"},
                 "deliver":{"kind":"git_delivery","connections":{"github":["GH_TOKEN"]}}
             }
         }"#,

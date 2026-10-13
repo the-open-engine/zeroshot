@@ -15,7 +15,7 @@ use super::{
     delivery_mode, enum_label, field_name, field_path, node_name, non_empty, static_value,
     BuiltinTemplateError, TemplateDelivery, ACCEPTANCE_FEEDBACK_FIELD, CODE_FEEDBACK_FIELD,
     DELIVERY_FEEDBACK_FIELD, DESCRIPTION_FIELD, DIAGNOSTIC_MESSAGE_FIELD, ISSUE_NUMBER_FIELD,
-    TASK_FIELD, TITLE_FIELD,
+    TASK_FIELD, TITLE_FIELD, PHASE_FIELD, CONTINUE_ITEMS_FIELD, verdict_labels,
 };
 
 pub(super) fn graph(
@@ -86,8 +86,11 @@ pub(super) fn diagnostic_type() -> Result<PayloadType, BuiltinTemplateError> {
     record_type(vec![(DIAGNOSTIC_MESSAGE_FIELD, PayloadType::String, true)])
 }
 
-pub(super) fn review_repair_input_type() -> Result<PayloadType, BuiltinTemplateError> {
+pub(super) fn software_worker_input_type(
+    delivery: TemplateDelivery,
+) -> Result<PayloadType, BuiltinTemplateError> {
     record_type(vec![
+        (PHASE_FIELD, phase_type(delivery)?, true),
         (TASK_FIELD, PayloadType::String, true),
         (ACCEPTANCE_FEEDBACK_FIELD, PayloadType::String, true),
         (CODE_FEEDBACK_FIELD, PayloadType::String, true),
@@ -127,20 +130,24 @@ pub(super) fn review_input_type() -> Result<PayloadType, BuiltinTemplateError> {
     ])
 }
 
-pub(super) fn delivery_repair_input_type(
-    mode: DeliveryMode,
-) -> Result<PayloadType, BuiltinTemplateError> {
-    record_type(vec![
-        (TASK_FIELD, PayloadType::String, true),
-        (
-            "outcome",
-            PayloadType::Enum {
-                values: static_value(delivery_signal_labels(mode))?,
-            },
-            true,
-        ),
-        (DELIVERY_FEEDBACK_FIELD, PayloadType::String, true),
-    ])
+fn phase_type(delivery: TemplateDelivery) -> Result<PayloadType, BuiltinTemplateError> {
+    let mut labels = verdict_labels()?.values().to_vec();
+    if let Some(mode) = delivery_mode(delivery) {
+        labels.extend(
+            static_value(delivery_signal_labels(mode))?
+                .values()
+                .iter()
+                .cloned(),
+        );
+    }
+    // The required record starts as {} without changing caller-owned initial input.
+    record_type(vec![(
+        "after",
+        PayloadType::Enum {
+            values: static_value(super::NonEmptyEnumSet::new(labels))?,
+        },
+        false,
+    )])
 }
 
 pub(super) fn software_state(
@@ -148,6 +155,13 @@ pub(super) fn software_state(
 ) -> Result<PayloadType, BuiltinTemplateError> {
     let mut fields = BTreeMap::from([
         (field_name(TASK_FIELD)?, required(PayloadType::String)),
+        (field_name(PHASE_FIELD)?, required(phase_type(delivery)?)),
+        (
+            field_name(CONTINUE_ITEMS_FIELD)?,
+            required(PayloadType::Array {
+                items: Box::new(PayloadType::Null),
+            }),
+        ),
         (
             field_name(ACCEPTANCE_FEEDBACK_FIELD)?,
             required(PayloadType::String),

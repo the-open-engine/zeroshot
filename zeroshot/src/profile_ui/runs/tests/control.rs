@@ -22,7 +22,7 @@ async fn software_fixture() -> Fixture {
     let runtime = crate::native_v2_contract::RuntimePlan::Codex {
         provider: crate::native_v2_contract::CodexProvider::OpenAi,
         size: RunSize::Small,
-        nodes: ["worker", "acceptance", "code", "review_repair"]
+        nodes: ["worker", "acceptance", "code"]
             .into_iter()
             .map(|name| {
                 (
@@ -244,7 +244,7 @@ async fn repeated_reviews_keep_distinct_choice_visits_and_sse_reconnect_matches_
         .collect::<Vec<_>>();
     let repair_visit = routes
         .iter()
-        .find(|record| record["branch"] == "review_repair")
+        .find(|record| record["branch"] == "review_retry")
         .assert_value();
     let done_visit = routes
         .iter()
