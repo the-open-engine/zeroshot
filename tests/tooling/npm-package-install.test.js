@@ -35,7 +35,7 @@ function stagePackedPackage(temporary) {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   fs.writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, version }, null, 2)}\n`);
 
-  const [packed] = JSON.parse(
+  const packResults = JSON.parse(
     runNpm([
       'pack',
       stagedPackage,
@@ -45,6 +45,14 @@ function stagePackedPackage(temporary) {
       packedDirectory,
     ])
   );
+  // npm <= 11 prints an array of results; npm 12 prints an object keyed by package name.
+  const packedResults = Array.isArray(packResults) ? packResults : Object.values(packResults);
+  assert.equal(
+    packedResults.length,
+    1,
+    `expected one npm pack result: ${JSON.stringify(packResults)}`
+  );
+  const [packed] = packedResults;
   const packedFiles = new Set(packed.files.map(({ path: filename }) => filename));
   for (const filename of [
     'README.md',
