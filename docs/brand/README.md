@@ -1,6 +1,7 @@
 # Zeroshot README banners
 
-Editable HTML/CSS sources and rendered light/dark PNGs for the repository README.
+Editable HTML/CSS sources and rendered light/dark desktop PNGs, plus a portrait
+mobile PNG, for the repository README.
 The design follows [The Open Engine](https://theopenengine.com) and
 [Zeroshot](https://zeroshot.sh), inspected on October 2, 2026: warm paper,
 handwritten headings and diagrams, yellow notes, and the company mascot.
@@ -11,6 +12,10 @@ handwritten headings and diagrams, yellow notes, and the company mascot.
 - `hero.css`: shared layout and theme tokens.
 - `zeroshot-hero-light.png` and `zeroshot-hero-dark.png`: 2560 × 800 exports
   from a 1280 × 400 canvas at 2× scale.
+- `zeroshot-hero-mobile.png`: 1122 × 1402 portrait banner selected by the README
+  below 641px viewport width, before the desktop theme sources. It uses the same
+  warm-paper design in both themes, larger text and diagram labels, and omits the
+  duplicate sticky note. This is a raster asset, separate from the HTML exports.
 - `social/starred-by.html`: the "Starred by engineers at" strip under the README badges. Its
   companies come from the self-reported GitHub company field of zeroshot stargazers, each profile
   checked by hand, so the copy says "engineers at", never "used by". Marks are Simple Icons (CC0);
@@ -66,6 +71,11 @@ JS
 Review both exports at full resolution and README display width before committing.
 
 ## Asset provenance
+
+- `zeroshot-hero-mobile.png`: generated with the built-in imagegen tool on October 13,
+  2026, using the existing light banner as the edit target. Direction: reflow into a
+  4:5 mobile portrait; preserve the exact main sentence, company mark, handwritten
+  style and review loop; enlarge all text; remove the duplicate sticky note.
 
 - `assets/oec-mascot.png`: unchanged copy of
   `company/content/brand/logos/open-engine-mascot-website.png`, originally from

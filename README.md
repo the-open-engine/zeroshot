@@ -1,6 +1,7 @@
 <div align="center">
 
 <picture>
+  <source media="(max-width: 640px)" srcset="docs/brand/zeroshot-hero-mobile.png">
   <source media="(prefers-color-scheme: dark)" srcset="docs/brand/zeroshot-hero-dark.png">
   <img alt="zeroshot: the agent that wrote the code should not be the one that says it works. Independent review and repair." src="docs/brand/zeroshot-hero-light.png" width="100%">
 </picture>
