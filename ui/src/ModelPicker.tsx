@@ -63,7 +63,14 @@ export function ModelPicker({
       if (!all.length) return;
       if (!expanded) show();
       const step = e.key === 'ArrowDown' ? 1 : -1;
-      setActive((index) => (expanded ? (index + step + all.length) % all.length : 0));
+      // With nothing highlighted yet, ArrowDown starts at the first option and ArrowUp at the last.
+      setActive((index) =>
+        expanded && index >= 0
+          ? (index + step + all.length) % all.length
+          : step === 1
+            ? 0
+            : all.length - 1
+      );
     } else if (e.key === 'Enter' && expanded && active >= 0) {
       e.preventDefault();
       choose(options[active]);

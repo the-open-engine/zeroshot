@@ -504,6 +504,11 @@ test('opening another profile closes the Runtime draft, and saves feed model sug
     await act(async () => root.unmount());
     container.remove();
   };
+  const key = workspaceStorageKeys(services.mount, bootstrap.workspace).recentModels(
+    'codex',
+    'openai'
+  );
+  localStorage.setItem(key, JSON.stringify(['model-old']));
   const settle = () => act(async () => new Promise<void>((resolve) => setImmediate(resolve)));
   await act(async () => root.render(createElement(App, { services, bootstrap })));
   await settle();
@@ -549,11 +554,7 @@ test('opening another profile closes the Runtime draft, and saves feed model sug
   await click(button('Save profile'));
   await until(/Profile saved/);
   assert.equal(stored.second.runtime.nodes.plan.model, 'model-new');
-  const key = workspaceStorageKeys(services.mount, bootstrap.workspace).recentModels(
-    'codex',
-    'openai'
-  );
-  assert.deepEqual(JSON.parse(localStorage.getItem(key)!), ['model-new']);
+  assert.deepEqual(JSON.parse(localStorage.getItem(key)!), ['model-new', 'model-old']);
 
   await click(button('first'));
   await openRuntime();
@@ -563,7 +564,17 @@ test('opening another profile closes the Runtime draft, and saves feed model sug
       group.getAttribute('aria-label'),
       [...group.querySelectorAll('[role="option"]')].map((option) => option.textContent),
     ]),
-    [['Recently used', ['model-new']]]
+    [['Recently used', ['model-new', 'model-old']]]
+  );
+  await act(async () => {
+    field().dispatchEvent(
+      new browser.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
+    );
+  });
+  assert.equal(
+    field().getAttribute('aria-activedescendant'),
+    [...dialog()!.querySelectorAll('[role="option"]')].at(-1)!.id,
+    'ArrowUp from an unhighlighted list starts at the last option'
   );
   await unmount();
   unmount = undefined;
