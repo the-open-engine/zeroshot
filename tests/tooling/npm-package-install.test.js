@@ -21,6 +21,17 @@ function runNpm(args) {
   return result.stdout;
 }
 
+function singlePackResult(packResults) {
+  // npm <= 11 prints an array of results; npm 12 prints an object keyed by package name.
+  const packedResults = Array.isArray(packResults) ? packResults : Object.values(packResults);
+  assert.equal(
+    packedResults.length,
+    1,
+    `expected one npm pack result: ${JSON.stringify(packResults)}`
+  );
+  return packedResults[0];
+}
+
 function stagePackedPackage(temporary) {
   const stagedPackage = path.join(temporary, 'package');
   const packedDirectory = path.join(temporary, 'packed');
@@ -35,24 +46,18 @@ function stagePackedPackage(temporary) {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   fs.writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, version }, null, 2)}\n`);
 
-  const packResults = JSON.parse(
-    runNpm([
-      'pack',
-      stagedPackage,
-      '--json',
-      '--ignore-scripts',
-      '--pack-destination',
-      packedDirectory,
-    ])
+  const packed = singlePackResult(
+    JSON.parse(
+      runNpm([
+        'pack',
+        stagedPackage,
+        '--json',
+        '--ignore-scripts',
+        '--pack-destination',
+        packedDirectory,
+      ])
+    )
   );
-  // npm <= 11 prints an array of results; npm 12 prints an object keyed by package name.
-  const packedResults = Array.isArray(packResults) ? packResults : Object.values(packResults);
-  assert.equal(
-    packedResults.length,
-    1,
-    `expected one npm pack result: ${JSON.stringify(packResults)}`
-  );
-  const [packed] = packedResults;
   const packedFiles = new Set(packed.files.map(({ path: filename }) => filename));
   for (const filename of [
     'README.md',
@@ -90,6 +95,14 @@ function stagePackedPackage(temporary) {
   );
   return { homeDirectory, packageRoot, version };
 }
+
+it('reads one npm pack result from npm 11 and npm 12 output', () => {
+  const packed = { filename: 'zeroshot-8.0.0.tgz', files: [] };
+  assert.equal(singlePackResult([packed]), packed);
+  assert.equal(singlePackResult({ '@the-open-engine-company/zeroshot': packed }), packed);
+  assert.throws(() => singlePackResult([]), /expected one npm pack result/);
+  assert.throws(() => singlePackResult({ a: packed, b: packed }), /expected one npm pack result/);
+});
 
 it('packs and installs the published npm surface on the current host', async (t) => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-npm-package-'));
