@@ -187,6 +187,12 @@ describe('historical release metadata recovery', () => {
   it('recovers only the recorded README summaries', () => {
     for (const historical of [
       {
+        hash: 'e6faeb5a9c41061da7e820e2e6bc394a0c8ca606',
+        subject: 'docs(readme): write the name as zeroshot and open with the QA process (#1232)',
+        summary:
+          'Write the README name as zeroshot and introduce its customizable QA graph with existing coding agents.',
+      },
+      {
         hash: '6da880abae8fd454c60f80d2b23d94939c194859',
         subject: "docs: say Zeroshot runs the user's existing coding agent (#1191)",
         summary:

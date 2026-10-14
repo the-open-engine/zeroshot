@@ -14,6 +14,10 @@ const RELEASE_SUBJECT =
 const PLAIN_SUMMARY_COMMIT_EXCEPTIONS = new Set(['78b7baa2d88dcd6a7640d8cf06d6fbce94d91f42']);
 const RECOVERED_COMMIT_SUMMARIES = new Map([
   [
+    'e6faeb5a9c41061da7e820e2e6bc394a0c8ca606',
+    'Write the README name as zeroshot and introduce its customizable QA graph with existing coding agents.',
+  ],
+  [
     '0d688ae5773febd2e6c81def59790b04c9e8fd58',
     'Update the development formatter Prettier from 3.9.6 to 3.9.8.',
   ],
