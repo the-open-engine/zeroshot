@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use openengine_cluster_protocol::RunSubmitParams;
+use openengine_cluster_protocol::{NativeV2RunValueError, RunSubmitParams, RuntimePlan};
 use thiserror::Error;
 
 use crate::execution::process::HostedProcessPool;
@@ -41,6 +41,17 @@ use crate::native_v2_supervisor::RunEnvironment;
 
 use allocator::{ProductionCapsuleAllocator, ProductionCapsuleConfig};
 pub(crate) use connections::build_connection_resolver;
+
+/// Adds missing provider connection requirements for each agent's effective lane.
+///
+/// Hosts call this before storing remote profiles or resolving run credentials.
+/// Compatible authored connection fields are preserved; repeated calls are idempotent.
+/// This updates declarations only and never reads or resolves credential values.
+pub fn materialize_contained_provider_access(
+    runtime: &mut RuntimePlan,
+) -> Result<(), NativeV2RunValueError> {
+    materialize_provider_access(runtime, ProviderAccessPlacement::Contained)
+}
 
 /// Composes the production target around exact sourceful run requests.
 pub async fn build_production_target_authority(
@@ -167,7 +178,7 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
             connection_resolver,
             github_token,
         } = request;
-        materialize_provider_access(&mut submission.runtime, ProviderAccessPlacement::Contained)
+        materialize_contained_provider_access(&mut submission.runtime)
             .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
         let digest = submission_digest(&submission)
             .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;

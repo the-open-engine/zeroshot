@@ -106,8 +106,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Claude/Anthropic, and Copilot/GitHub lanes reuse native login state without inventing a
   connection requirement; contained placements and non-native lanes add only their canonical
   missing requirements. Explicit
-  compatible authored fields always win. Remote profiles materialize contained requirements before
-  storage, and the effective runtime drives the existing connection resolver and recovery contracts.
+  compatible authored fields always win. Hosts use
+  `native_v2_hosting::materialize_contained_provider_access` before remote profile storage or
+  credential resolution. The effective runtime drives the existing connection resolver and
+  recovery contracts.
   The local CLI captures the invoking shell in its private one-shot bootstrap, consumes and deletes
   that file before controller effects, and keeps the detached controller's OS environment minimal.
   A later local CLI startup scavenges orphaned bootstrap files after the bounded controller handoff

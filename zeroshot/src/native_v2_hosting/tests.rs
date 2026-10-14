@@ -13,7 +13,7 @@ use openengine_cluster_protocol::{
     RunSize, RuntimePlan, StaticConnectionValues, WorkerRef,
 };
 use openengine_cluster_server::admission::VerificationError;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::*;
 use crate::native_v2_candidate::test_support::{TestDirectory, admit, environment_name};
@@ -31,6 +31,63 @@ mod checkout;
 mod fixtures;
 
 use fixtures::*;
+
+#[test]
+fn contained_provider_access_preserves_mixed_lanes_and_authored_oauth() {
+    for (reviewer_connections, reviewer_requirements) in [
+        (json!({}), json!({"anthropic": ["ANTHROPIC_API_KEY"]})),
+        (
+            json!({"claude-subscription": ["CLAUDE_CODE_OAUTH_TOKEN"]}),
+            json!({"claude-subscription": ["CLAUDE_CODE_OAUTH_TOKEN"]}),
+        ),
+    ] {
+        let original = json!({
+            "harness": "codex",
+            "provider": "openai",
+            "size": "medium",
+            "nodes": {
+                "worker": {
+                    "kind": "agent",
+                    "model": "anthropic/opaque-model:next"
+                },
+                "reviewer": {
+                    "kind": "agent",
+                    "lane": {"harness": "claude", "provider": "anthropic"},
+                    "model": "openai/private-review-model",
+                    "connections": reviewer_connections
+                },
+                "router": {
+                    "kind": "agent",
+                    "lane": {"harness": "claude", "provider": "openrouter"},
+                    "model": "vendor:opaque/model"
+                }
+            }
+        });
+        let mut runtime: RuntimePlan = serde_json::from_value(original).assert_value();
+        let mut expected = serde_json::to_value(&runtime).assert_value();
+        expected["nodes"]["worker"]["connections"] = json!({"openai": ["OPENAI_API_KEY"]});
+        expected["nodes"]["reviewer"]["connections"] = reviewer_requirements.clone();
+        expected["nodes"]["router"]["connections"] = json!({"openrouter": ["OPENROUTER_API_KEY"]});
+
+        materialize_contained_provider_access(&mut runtime).assert_value();
+        assert_eq!(serde_json::to_value(&runtime).assert_value(), expected);
+        let mut expected_union = json!({
+            "openai": ["OPENAI_API_KEY"],
+            "openrouter": ["OPENROUTER_API_KEY"]
+        });
+        expected_union
+            .as_object_mut()
+            .assert_value()
+            .extend(reviewer_requirements.as_object().assert_value().clone());
+        assert_eq!(
+            serde_json::to_value(runtime.connection_requirements()).assert_value(),
+            expected_union
+        );
+        let materialized = runtime.clone();
+        materialize_contained_provider_access(&mut runtime).assert_value();
+        assert_eq!(runtime, materialized);
+    }
+}
 
 #[test]
 fn run_environment_is_exact_and_request_debug_is_redacted() {
