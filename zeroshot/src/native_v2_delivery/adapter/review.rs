@@ -119,6 +119,7 @@ impl NativeV2DeliveryAdapter {
         request: &SourceReviewRequest,
         pending: &SourceReviewReceipt,
     ) -> Result<(), DeliveryStop> {
+        let mut completed_attempts = 0usize;
         loop {
             match self
                 .validate_candidate(
@@ -136,6 +137,17 @@ impl NativeV2DeliveryAdapter {
                     return Err(recovery::repair(reason).with_review(pending));
                 }
                 DeliveryValidationDecision::Pending => {
+                    completed_attempts = completed_attempts.saturating_add(1);
+                    if !self.config.poll.has_next(completed_attempts) {
+                        emit(
+                            preparation.control,
+                            "delivery: trusted publication validation timed out",
+                        )
+                        .await?;
+                        return Err(DeliveryStop::Outcome(WorkerOutcome::declared_failure(
+                            WorkerErrorCode::Timeout,
+                        )));
+                    }
                     emit(
                         preparation.control,
                         "delivery: waiting for trusted publication validation",

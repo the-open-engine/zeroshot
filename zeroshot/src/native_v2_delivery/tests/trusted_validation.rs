@@ -12,6 +12,14 @@ struct ValidationHarness {
 
 impl ValidationHarness {
     fn new(script: Script, body: &str) -> Self {
+        Self::with_poll(
+            script,
+            body,
+            DeliveryPollPolicy::new(100, Duration::from_millis(2)).unwrap(),
+        )
+    }
+
+    fn with_poll(script: Script, body: &str, poll: DeliveryPollPolicy) -> Self {
         let repo = TempRepo::delivery();
         let private = tempfile::tempdir().unwrap();
         let executable = write_executable(
@@ -26,7 +34,7 @@ impl ValidationHarness {
         let adapter = retained_adapter(
             &repo,
             authority.clone(),
-            DeliveryPollPolicy::new(100, Duration::from_millis(2)).unwrap(),
+            poll,
             DeliveryLineage::original("trusted-validation"),
         );
         let adapter = Arc::new(
@@ -387,4 +395,49 @@ printf '{"verdict":"accepted"}'"#,
             "terminal observation must bypass the hook and any late feedback query"
         );
     }
+}
+
+#[tokio::test]
+async fn pending_publication_validation_honors_the_callers_finite_poll_policy() {
+    let harness = ValidationHarness::with_poll(
+        Script::NoCi,
+        r#"printf '{"verdict":"pending"}'"#,
+        DeliveryPollPolicy::new(3, Duration::from_millis(2)).unwrap(),
+    );
+    let mut handle = harness.start(DeliveryMode::MergeV3).await;
+    let completed = tokio::time::timeout(Duration::from_secs(10), handle.completion()).await;
+    if completed.is_err() {
+        handle.cancel();
+        let stopped = tokio::time::timeout(Duration::from_secs(10), handle.completion())
+            .await
+            .expect("pending-publication cleanup did not settle");
+        assert!(
+            matches!(stopped, Err(NodeRunnerError::Cancelled)),
+            "{stopped:?}"
+        );
+    }
+    let completion = completed
+        .expect("pending publication ignored the finite poll policy")
+        .unwrap();
+    assert_eq!(
+        completion.outcome,
+        WorkerOutcome::declared_failure(WorkerErrorCode::Timeout)
+    );
+    harness.assert_no_publication();
+    let requests = harness.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(requests.iter().all(|request| request["stage"] == "publish"));
+    let mut output = handle.take_initial_output().unwrap();
+    let mut timed_out = false;
+    while let Ok(event) = output.recv().await {
+        if let crate::native_v2_runner::DurableNodeEvent::Output { output, .. } = event {
+            timed_out |= output
+                .text
+                .contains("trusted publication validation timed out");
+        }
+    }
+    assert!(
+        timed_out,
+        "missing publication validation timeout diagnostic"
+    );
 }
