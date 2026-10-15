@@ -374,7 +374,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   cursor; PR observation and queues do not require direct-method discovery. Incomplete rule reads and
   empty method intersections stop merge submission with policy diagnostics. Merge queues choose their
   own method. Queue admission uses explicit `enqueuePullRequest` with the validated PR node ID and
-  exact `expectedHeadOid`; enabling auto-merge alone is not enqueue confirmation. Before a merge
+  exact `expectedHeadOid`; enabling auto-merge alone is not enqueue confirmation. Completed transient
+  submissions retry after fresh exact-head policy checks; retries retain earlier uncertainty so an
+  empty snapshot cannot authorize repair. Before a merge
   delivery returns repair, refusal, error, or cancellation, trusted authority confirms withdrawal
   of queued/auto-merge effects or the exact already-merged revision. Failed withdrawal never
   authorizes agent repair. Authorities that schedule deferred merges must override

@@ -423,3 +423,73 @@ async fn changing_auto_merge_across_policy_pages_cannot_authorize_withdrawal() {
         .assert_error();
     assert!(!root.path().join("mutations").exists());
 }
+
+#[tokio::test]
+async fn completed_transient_enqueues_retry_without_discarding_withdrawal_uncertainty() {
+    for (message, accepted) in [
+        ("HTTP 503: Unavailable", true),
+        ("error connecting to api.github.com", true),
+        ("error connecting to api.github.com", false),
+    ] {
+        let root = tempfile::tempdir().assert_value();
+        let recovered = if accepted {
+            response(&enqueue_response())
+        } else {
+            "printf 'HTTP 403: Resource not accessible\\n' >&2; exit 1".to_owned()
+        };
+        let action = format!(
+            "if [ ! -f \"$HOME/attempted\" ]; then printf seen > \"$HOME/attempted\"; printf '%s\\n' {} >&2; exit 1; fi; {recovered}",
+            shell_literal(message)
+        );
+        let states = if accepted {
+            vec![
+                queued(false, false),
+                queued(false, false),
+                queued(false, false),
+                queued(false, false),
+                queued(true, false),
+                queued(false, false),
+            ]
+        } else {
+            vec![queued(false, false)]
+        };
+        let provider = queue_authority(
+            root.path(),
+            &states,
+            &[
+                ("enqueuePullRequest", &action),
+                ("dequeuePullRequest", "printf '{}'"),
+            ],
+        );
+        assert!(
+            provider
+                .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+                .await
+                .assert_error()
+                .retryable_operation()
+        );
+        let retried = provider
+            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .await;
+        if accepted {
+            assert_eq!(retried.assert_value(), SourceMergeRequestOutcome::Accepted);
+        } else {
+            assert_eq!(retried.assert_error().api_status(), Some(403));
+        }
+        let error = provider
+            .withdraw_merge_request(&review(), SourceDeliveryCredential::token("test-token"))
+            .await
+            .assert_error();
+        assert!(error.to_string().contains("submission remains unconfirmed"));
+        if accepted {
+            assert_withdrawn(&provider).await;
+            assert_eq!(
+                std::fs::read_to_string(root.path().join("reads")).assert_value(),
+                "6"
+            );
+        }
+        let args = std::fs::read_to_string(root.path().join("mutations")).assert_value();
+        assert_eq!(args.matches("expectedHeadOid=").count(), 2);
+        assert_eq!(args.contains("dequeuePullRequest"), accepted);
+    }
+}

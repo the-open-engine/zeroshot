@@ -24,6 +24,7 @@ fn passed_ci_without_the_approval_exception_is_mergeable() {
     ));
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn physical_cleanup_failure_cannot_be_overridden_by_a_merge_or_withdrawal_result() {
     use crate::native_v2_delivery::tests::github_fixture::{FakeGitHub, Script};

@@ -12,12 +12,15 @@ pub(super) struct QueueEffects(Arc<tokio::sync::Mutex<BTreeMap<QueueIdentity, Qu
 struct QueueEffect {
     task: Option<tokio::task::JoinHandle<Submission>>,
     settled: Option<Submission>,
+    uncertain: bool,
 }
 
 impl QueueEffect {
     async fn settle(&mut self) -> Submission {
         if let Some(task) = self.task.as_mut() {
-            self.settled = Some(task.await.unwrap_or_else(|_| Err(submission_panicked())));
+            let result = task.await.unwrap_or_else(|_| Err(submission_panicked()));
+            self.uncertain |= matches!(&result, Err(error) if uncertain_submission(error));
+            self.settled = Some(result);
             self.task = None;
         }
         self.settled
@@ -57,15 +60,16 @@ pub(super) async fn enqueue(
     let key = identity(review);
     if let Some(effect) = effects.get_mut(&key) {
         if effect.task.is_some()
-            || effect
-                .settled
-                .as_ref()
-                .is_some_and(|result| matches!(result, Err(error) if uncertain_submission(error)))
+            || effect.settled.as_ref().is_some_and(|result| {
+                matches!(result, Err(error) if error.cleanup_unconfirmed()
+                    || uncertain_submission(error) && !error.retryable_operation())
+            })
         {
             return effect.settle().await;
         }
     }
     {
+        let uncertain = effects.get(&key).is_some_and(|effect| effect.uncertain);
         let mut command = mutation(authority, ENQUEUE, node_id, credential)?;
         command.args(["-f", &format!("expectedHeadOid={}", review.head_revision)]);
         let token = credential.expose().to_owned();
@@ -83,6 +87,7 @@ pub(super) async fn enqueue(
             QueueEffect {
                 task: Some(task),
                 settled: None,
+                uncertain,
             },
         );
     }
@@ -130,8 +135,7 @@ pub(super) async fn withdraw(
     let uncertain = match effects.get_mut(&key) {
         Some(effect) => match effect.settle().await {
             Err(error) if error.cleanup_unconfirmed() => return Err(error),
-            Err(error) => uncertain_submission(&error),
-            Ok(()) => false,
+            _ => effect.uncertain,
         },
         None => false,
     };
