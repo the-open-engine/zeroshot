@@ -618,3 +618,135 @@ fn selected_local_cwd_discovers_a_registered_contributed_forge() {
         .assert_value();
     }
 }
+
+#[test]
+fn local_git_source_uses_remote_upstream_and_rejects_ambiguous_or_stale_selection() {
+    let repo = crate::native_v2_candidate::test_support::TestGitRepository::delivery();
+    git(&repo.workspace, &["branch", "--unset-upstream"]);
+    git(
+        &repo.workspace,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "https://forge.example/team/primary.git",
+        ],
+    );
+    let mirror = "ssh://git@forge.example/team/mirror.git";
+    git(&repo.workspace, &["remote", "add", "mirror", mirror]);
+    assert!(matches!(
+        resolved_git_source(&repo.workspace, Path::new("git"), None),
+        Err(LocalCompositionError::AmbiguousRemote)
+    ));
+    assert!(
+        local_resolved_source(&repo.workspace, Path::new("git"))
+            .assert_value()
+            .1
+            .is_none()
+    );
+
+    git(&repo.workspace, &["config", "branch.main.remote", "mirror"]);
+    git(
+        &repo.workspace,
+        &["config", "branch.main.merge", "refs/heads/release"],
+    );
+    let connection = openengine_cluster_protocol::ConnectionKey::new("source-only").assert_value();
+    let source = resolved_git_source(&repo.workspace, Path::new("git"), Some(connection.clone()))
+        .assert_value();
+    assert_eq!(source.repository.as_str(), mirror);
+    assert_eq!(source.branch.as_str(), "release");
+    assert_eq!(source.revision.as_str(), repo.base);
+    let remote = source.remote.assert_value();
+    assert_eq!(remote.url.as_str(), mirror);
+    assert_eq!(remote.connection, Some(connection));
+    assert!(remote.forge.is_none());
+
+    git(&repo.workspace, &["config", "branch.main.remote", "gone"]);
+    assert!(matches!(
+        resolved_git_source(&repo.workspace, Path::new("git"), None),
+        Err(LocalCompositionError::RepositoryIdentity)
+    ));
+    assert!(
+        local_resolved_source(&repo.workspace, Path::new("git"))
+            .assert_value()
+            .1
+            .is_none()
+    );
+    git(&repo.workspace, &["config", "branch.main.remote", "."]);
+    assert!(matches!(
+        resolved_git_source(&repo.workspace, Path::new("git"), None),
+        Err(LocalCompositionError::AmbiguousRemote)
+    ));
+    git(&repo.workspace, &["remote", "remove", "origin"]);
+    let source = resolved_git_source(&repo.workspace, Path::new("git"), None).assert_value();
+    assert_eq!(source.branch.as_str(), "main");
+    assert_eq!(source.remote.assert_value().url.as_str(), mirror);
+
+    git(&repo.workspace, &["config", "branch.main.remote", "mirror"]);
+    git(
+        &repo.workspace,
+        &["config", "branch.main.merge", "refs/tags/release"],
+    );
+    let source = resolved_git_source(&repo.workspace, Path::new("git"), None).assert_value();
+    assert_eq!(source.branch.as_str(), "main");
+}
+
+#[test]
+fn local_git_source_keeps_long_transport_identity_stable_without_losing_locator() {
+    let repo = crate::native_v2_candidate::test_support::TestGitRepository::delivery();
+    let remote = format!("https://forge.example/{}/project.git", "nested/".repeat(50));
+    git(&repo.workspace, &["remote", "set-url", "origin", &remote]);
+    let source = resolved_git_source(&repo.workspace, Path::new("git"), None).assert_value();
+    assert!(source.repository.as_str().len() <= 255);
+    assert_eq!(source.remote.as_ref().assert_value().url.as_str(), remote);
+    let repeated = resolved_git_source(&repo.workspace, Path::new("git"), None).assert_value();
+    assert_eq!(source.repository, repeated.repository);
+    let other = format!("https://forge.example/{}/other.git", "nested/".repeat(50));
+    git(&repo.workspace, &["remote", "set-url", "origin", &other]);
+    let changed = resolved_git_source(&repo.workspace, Path::new("git"), None).assert_value();
+    assert_ne!(source.repository, changed.repository);
+    assert_eq!(changed.remote.assert_value().url.as_str(), other);
+}
+
+#[cfg(unix)]
+#[test]
+fn local_git_metadata_rejects_invalid_records_and_bounds_untrusted_output() {
+    let root = TestDirectory::new("bounded-local-git-output");
+    let program = root.child("git-metadata-fixture");
+    for script in [
+        "printf ignored; exit 1",
+        "printf '\\377'",
+        "head -c 16385 /dev/zero",
+    ] {
+        openengine_cluster_testkit::fixture::write_executable(
+            &program,
+            format!("#!/bin/sh\n{script}\n"),
+            0o700,
+        )
+        .assert_value();
+        assert!(git_output(&program, root.path(), &[]).is_err());
+    }
+    for script in [
+        "printf ''",
+        "printf 'first\\nsecond\\n'",
+        "printf 'first\\000second'",
+    ] {
+        openengine_cluster_testkit::fixture::write_executable(
+            &program,
+            format!("#!/bin/sh\n{script}\n"),
+            0o700,
+        )
+        .assert_value();
+        assert!(git_line(&program, root.path(), &[]).is_err());
+    }
+    openengine_cluster_testkit::fixture::write_executable(
+        &program,
+        "#!/bin/sh\nprintf 'valid-metadata\\r\\n'\n",
+        0o700,
+    )
+    .assert_value();
+    assert_eq!(
+        git_line(&program, root.path(), &[]).assert_value(),
+        "valid-metadata"
+    );
+}
