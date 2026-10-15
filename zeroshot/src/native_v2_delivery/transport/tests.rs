@@ -398,6 +398,8 @@ fn http_response_fixture(response: Vec<u8>) -> (String, std::thread::JoinHandle<
                 Err(error) => panic!("HTTP credential fixture could not accept Git: {error}"),
             }
         };
+        // Windows sockets inherit the listener's nonblocking mode.
+        stream.set_nonblocking(false).assert_value();
         let mut request = Vec::new();
         while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
             stream
