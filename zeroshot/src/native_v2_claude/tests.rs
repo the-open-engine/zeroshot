@@ -12,6 +12,8 @@ mod environment;
 mod limits;
 #[path = "tests/local_identity.rs"]
 mod local_identity;
+#[path = "tests/redaction.rs"]
+mod redaction;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

@@ -5,6 +5,8 @@ use super::*;
 
 #[path = "tests/limits.rs"]
 mod limit_tests;
+#[path = "tests/redaction.rs"]
+mod redaction_tests;
 #[path = "tests/usage.rs"]
 mod usage_tests;
 

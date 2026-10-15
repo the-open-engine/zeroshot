@@ -458,8 +458,9 @@ async fn collect_transcript(
             delivery_error = emit_claude(control, emissions).await.err();
         }
     }
-    // The transcript holds back text until a line or block ends, so the remainder can include
-    // text received before cancellation. Record it even when cancellation already started.
+    // The transcript holds back text until a line or block ends, or while it could begin a redacted
+    // value, so the remainder can include text received before cancellation. Record it even when
+    // cancellation already started.
     let emissions = transcript.finish_stream();
     if matches!(delivery_error, None | Some(NodeRunnerError::Cancelled)) {
         if let Err(error) = emit_claude_final(control, emissions).await {
