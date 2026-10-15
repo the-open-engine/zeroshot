@@ -598,3 +598,510 @@ async fn ambiguous_registered_forge_stops_source_selection_before_credentials() 
         );
     }
 }
+
+#[tokio::test]
+async fn named_source_uses_remote_upstream_tip_and_preserves_dirty_selected_workspace() {
+    let source = initialized_repository("remote-tip-source");
+    let remote_revision = commit_empty(&source.0, "remote source");
+    output(&source.0, &["branch", "-M", "release"]);
+    let client = initialized_repository("remote-tip-client");
+    let local_revision = commit_empty(&client.0, "different local work");
+    output(&client.0, &["branch", "-M", "feature"]);
+    add_remote(
+        &client.0,
+        "origin",
+        "https://forge.example/team/project.git",
+    );
+    output(
+        &client.0,
+        &[
+            "fetch",
+            source.0.to_str().assert_value(),
+            "release:refs/remotes/origin/release",
+        ],
+    );
+    output(
+        &client.0,
+        &["branch", "--set-upstream-to", "origin/release", "feature"],
+    );
+    let remote = "https://forge.example/team/project.git";
+    configure_local_mirror(&client.0, remote, &source.0);
+    let nested = client.0.join("nested");
+    std::fs::create_dir(&nested).assert_value();
+    std::fs::write(nested.join("caller-owned.txt"), "uncommitted work\n").assert_value();
+    let config_before = std::fs::read(client.0.join(".git/config")).assert_value();
+    let mut command = private_source_command(
+        &nested,
+        RunRepository::Git(GitRemoteUrl::new(remote).assert_value()),
+    );
+    command.branch = None;
+    command.revision = None;
+    command.source_connection = None;
+
+    let selected = resolve(
+        NamedSourceRequest {
+            run: &command,
+            token: None,
+            provided: &RunConnectionValues::new(),
+            required_capabilities: &[crate::source_code_provider::SourceCapability::Push],
+        },
+        &|name| panic!("public source must not request credential field {name}"),
+    )
+    .await
+    .assert_value()
+    .assert_value();
+
+    assert_public_git_source(&selected, remote, "release", remote_revision.trim());
+    assert!(selected.source.dirty);
+    assert_eq!(output(&client.0, &["rev-parse", "HEAD"]), local_revision);
+    assert_eq!(
+        std::fs::read_to_string(nested.join("caller-owned.txt")).assert_value(),
+        "uncommitted work\n"
+    );
+    assert_eq!(
+        std::fs::read(client.0.join(".git/config")).assert_value(),
+        config_before
+    );
+}
+
+#[tokio::test]
+async fn github_shorthand_fallback_resolves_remote_tip_and_distinguishes_missing_refs() {
+    let source = initialized_repository("github-fallback-source");
+    let revision = commit_empty(&source.0, "fallback source");
+    output(&source.0, &["branch", "-M", "release"]);
+    let client = initialized_repository("github-fallback-client");
+    configure_local_mirror(&client.0, "https://github.com/owner/project.git", &source.0);
+    let mut command = private_source_command(
+        &client.0,
+        RunRepository::GitHub(SourceRepositoryId::new("owner/project").assert_value()),
+    );
+    command.branch = Some(SourceBranchId::new("release").assert_value());
+    command.revision = None;
+    command.source_connection = None;
+    let provided = RunConnectionValues::new();
+    let request = |run| NamedSourceRequest {
+        run,
+        token: None,
+        provided: &provided,
+        required_capabilities: &[],
+    };
+    let unavailable = |name: &str| panic!("GitHub shorthand read source field {name}");
+
+    let selected = resolve(request(&command), &unavailable)
+        .await
+        .assert_value()
+        .assert_value();
+    assert_eq!(
+        selected.source.resolved.repository.as_str(),
+        "owner/project"
+    );
+    assert_eq!(selected.source.resolved.revision.as_str(), revision.trim());
+    assert!(selected.source.resolved.remote.is_none());
+    assert!(selected.git_credentials.is_none());
+
+    let mut missing_command = command.clone();
+    missing_command.branch = Some(SourceBranchId::new("missing").assert_value());
+    let missing = resolve(request(&missing_command), &unavailable)
+        .await
+        .err()
+        .expect("an absent remote branch must not use local HEAD");
+    assert!(
+        missing
+            .to_string()
+            .contains("selected remote branch does not exist")
+    );
+
+    drop(source);
+    let inaccessible = resolve(request(&missing_command), &unavailable)
+        .await
+        .err()
+        .expect("an unavailable remote must not be mistaken for an absent ref");
+    assert!(
+        inaccessible
+            .to_string()
+            .contains("could not resolve the remote branch tip")
+    );
+}
+
+#[tokio::test]
+async fn detached_named_sources_require_both_repository_and_branch_before_credentials() {
+    let root = initialized_repository("detached-source");
+    commit_empty(&root.0, "detached source");
+    output(&root.0, &["checkout", "--detach"]);
+    let repository = RunRepository::Git(
+        GitRemoteUrl::new("ssh://git@forge.example/team/project.git").assert_value(),
+    );
+    let mut command = private_source_command(&root.0, repository.clone());
+    command.source_connection = None;
+    let provided = RunConnectionValues::new();
+    let unavailable = |name: &str| panic!("detached source read credential field {name}");
+    for (repository, branch) in [
+        (None, None),
+        (Some(repository.clone()), None),
+        (None, Some(SourceBranchId::new("main").assert_value())),
+    ] {
+        command.repository = repository;
+        command.branch = branch;
+        let error = resolve(
+            NamedSourceRequest {
+                run: &command,
+                token: None,
+                provided: &provided,
+                required_capabilities: &[],
+            },
+            &unavailable,
+        )
+        .await
+        .err()
+        .expect("detached provenance must be explicit");
+        assert!(
+            error
+                .to_string()
+                .contains("detached worktrees require both")
+        );
+    }
+    command.repository = Some(repository);
+    command.branch = Some(SourceBranchId::new("main").assert_value());
+    let selected = resolve(
+        NamedSourceRequest {
+            run: &command,
+            token: None,
+            provided: &provided,
+            required_capabilities: &[],
+        },
+        &unavailable,
+    )
+    .await
+    .assert_value()
+    .assert_value();
+    assert_eq!(
+        Some(&selected.source.resolved.revision),
+        command.revision.as_ref()
+    );
+    assert!(!selected.source.dirty);
+
+    let plain = TestDirectory::new("plain-named-source");
+    command.cwd = Some(plain.0.clone());
+    assert!(
+        inspect_worktree(&command)
+            .await
+            .err()
+            .expect("named source inspection needs a Git worktree")
+            .to_string()
+            .contains("run from a Git worktree")
+    );
+    assert!(
+        worktree_is_dirty(&plain.0)
+            .await
+            .assert_error()
+            .to_string()
+            .contains("could not inspect worktree status")
+    );
+}
+
+#[tokio::test]
+async fn repository_inference_ignores_ineligible_remotes_and_local_only_upstream() {
+    let root = initialized_repository("ineligible-remotes");
+    commit_empty(&root.0, "local upstream");
+    let branch = output(&root.0, &["branch", "--show-current"]);
+    output(
+        &root.0,
+        &["config", &format!("branch.{}.remote", branch.trim()), "."],
+    );
+    output(
+        &root.0,
+        &[
+            "config",
+            &format!("branch.{}.merge", branch.trim()),
+            "refs/heads/local",
+        ],
+    );
+    assert!(
+        upstream(&root.0, branch.trim())
+            .await
+            .assert_value()
+            .is_none()
+    );
+    add_remote(&root.0, "filesystem", root.0.to_str().assert_value());
+    add_remote(&root.0, "unsupported", "http://forge.example/project.git");
+    add_remote(
+        &root.0,
+        "credentialed",
+        "https://user:private-value@forge.example/project.git",
+    );
+    let remote = "ssh://git@forge.example/nested/team/project.git";
+    add_remote(&root.0, "eligible", remote);
+
+    let (repository, selected) = select_repository(&root.0, Some("stale"))
+        .await
+        .assert_value();
+    assert_eq!(repository.as_str(), remote);
+    assert_eq!(selected.as_deref(), Some("eligible"));
+    let (repository, selected) = select_repository(&root.0, Some("filesystem"))
+        .await
+        .assert_value();
+    assert_eq!(repository.as_str(), remote);
+    assert_eq!(selected.as_deref(), Some("eligible"));
+    assert!(
+        select_repository(&root.0.join("absent"), None)
+            .await
+            .assert_error()
+            .to_string()
+            .contains("could not list Git remotes")
+    );
+}
+
+#[test]
+fn long_remote_identities_remain_bounded_stable_and_distinct() {
+    let first = format!("https://forge.example/{}/project.git", "nested/".repeat(50));
+    let second = format!("https://forge.example/{}/other.git", "nested/".repeat(50));
+    let identity = remote_repository(&first).assert_value();
+    assert_eq!(identity, remote_repository(&first).assert_value());
+    assert_ne!(identity, remote_repository(&second).assert_value());
+    assert!(identity.as_str().len() <= 255);
+    assert!(GitRemoteUrl::new(first).is_ok());
+    assert!(
+        remote_repository("https://user:private-value@forge.example/project.git")
+            .assert_error()
+            .to_string()
+            .contains("credential-free HTTPS or SSH")
+    );
+}
+
+#[tokio::test]
+async fn github_remote_matching_preserves_legacy_and_explicit_source_authority() {
+    let root = initialized_repository("github-source-authority");
+    add_remote(&root.0, "a-invalid", root.0.to_str().assert_value());
+    add_remote(&root.0, "b-unrelated", "https://github.com/owner/other.git");
+    let remote_url = "git@github.com:owner/project.git";
+    add_remote(&root.0, "c-source", remote_url);
+    let mut command = private_source_command(
+        &root.0,
+        RunRepository::GitHub(SourceRepositoryId::new("owner/project").assert_value()),
+    );
+    let key = command.source_connection.clone().assert_value();
+    command.source_connection = None;
+    let provided = RunConnectionValues::new();
+    let public = resolve(
+        NamedSourceRequest {
+            run: &command,
+            token: None,
+            provided: &provided,
+            required_capabilities: &[crate::source_code_provider::SourceCapability::PullRequest],
+        },
+        &|name| panic!("legacy GitHub source read a transport field: {name}"),
+    )
+    .await
+    .assert_value()
+    .assert_value();
+    assert_eq!(public.source.resolved.repository.as_str(), "owner/project");
+    assert!(public.source.resolved.remote.is_none());
+    assert!(public.git_credentials.is_none());
+
+    let credentials = GitTransportCredentials::Ssh {
+        private_key: "source-only-private-key".to_owned(),
+        known_hosts: "source-only-known-hosts".to_owned(),
+    };
+    let provided =
+        RunConnectionValues::from([(key.clone(), credentials.connection_values().assert_value())]);
+    command.source_connection = Some(key.clone());
+    let private = resolve(
+        NamedSourceRequest {
+            run: &command,
+            token: None,
+            provided: &provided,
+            required_capabilities: &[crate::source_code_provider::SourceCapability::PullRequest],
+        },
+        &|name| panic!("captured SSH transport field was read again: {name}"),
+    )
+    .await
+    .assert_value()
+    .assert_value();
+    let metadata = private.source.resolved.remote.as_ref().assert_value();
+    assert_eq!(metadata.url.as_str(), remote_url);
+    assert_eq!(metadata.connection.as_ref(), Some(&key));
+    assert_eq!(private.git_credentials, Some(credentials));
+    let provenance = serde_json::to_string(&private.source.resolved).assert_value();
+    assert!(!provenance.contains("source-only-private-key"));
+    assert!(!provenance.contains("source-only-known-hosts"));
+}
+
+#[test]
+fn source_connections_scope_native_reads_and_prefer_captured_values() {
+    use openengine_cluster_protocol::{ConnectionKey, EnvironmentVariableName, StaticConnectionValues};
+
+    let key = ConnectionKey::new("source").assert_value();
+    let values = StaticConnectionValues::new(std::collections::BTreeMap::from([
+        (
+            EnvironmentVariableName::new("GIT_USERNAME").assert_value(),
+            "captured-user".to_owned(),
+        ),
+        (
+            EnvironmentVariableName::new("GH_TOKEN").assert_value(),
+            "unrelated-private-value".to_owned(),
+        ),
+    ]))
+    .assert_value();
+    let provided = RunConnectionValues::from([(key.clone(), values)]);
+    let mut remote = ResolvedGitRemote {
+        url: GitRemoteUrl::new("https://forge.example/project.git").assert_value(),
+        forge: None,
+        connection: Some(key),
+    };
+    let selected = source_credentials(Some(&remote), &provided, &|name| {
+        assert_eq!(
+            name, "GIT_PASSWORD",
+            "only an uncaptured authorized field may be read"
+        );
+        Some(OsString::from("native-password"))
+    })
+    .assert_value();
+    assert_eq!(
+        selected,
+        Some(GitTransportCredentials::Https {
+            username: "captured-user".to_owned(),
+            password: "native-password".to_owned(),
+        })
+    );
+    let missing = source_credentials(Some(&remote), &provided, &|_| None).assert_error();
+    assert!(
+        missing
+            .to_string()
+            .contains("exactly one complete HTTPS or SSH credential shape")
+    );
+    assert!(!missing.to_string().contains("unrelated-private-value"));
+
+    remote.url = GitRemoteUrl::new("git@forge.example:team/project.git").assert_value();
+    assert_eq!(
+        source_credentials(Some(&remote), &provided, &|name| match name {
+            "GIT_SSH_PRIVATE_KEY" => Some(OsString::from("private-key")),
+            "GIT_SSH_KNOWN_HOSTS" => Some(OsString::from("known-hosts")),
+            _ => panic!("SSH source read an unauthorized field: {name}"),
+        })
+        .assert_value(),
+        Some(GitTransportCredentials::Ssh {
+            private_key: "private-key".to_owned(),
+            known_hosts: "known-hosts".to_owned(),
+        })
+    );
+    remote.connection = None;
+    let unavailable = |name: &str| panic!("source without a connection read {name}");
+    assert!(
+        source_credentials(Some(&remote), &provided, &unavailable)
+            .assert_value()
+            .is_none()
+    );
+    assert!(
+        source_credentials(None, &provided, &unavailable)
+            .assert_value()
+            .is_none()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn inferred_named_remote_resolves_local_branch_through_native_ssh_configuration() {
+    let source = initialized_repository("native-ssh-source");
+    let revision = commit_empty(&source.0, "native SSH source");
+    output(&source.0, &["branch", "-M", "release"]);
+    let client = initialized_repository("native-ssh-client");
+    commit_empty(&client.0, "different local SSH client");
+    output(&client.0, &["branch", "-M", "release"]);
+    let remote = "ssh://git@forge.example/team/project.git";
+    add_remote(&client.0, "origin", remote);
+    let helper = client.0.join(".git/native-ssh");
+    let quoted_source = source.0.to_string_lossy().replace('\'', "'\\''");
+    openengine_cluster_testkit::fixture::write_executable(
+        &helper,
+        format!("#!/bin/sh\nexec git upload-pack '{quoted_source}'\n"),
+        0o700,
+    )
+    .assert_value();
+    let quoted_helper = helper.to_string_lossy().replace('\'', "'\\''");
+    output(
+        &client.0,
+        &[
+            "config",
+            "core.sshCommand",
+            &format!("sh '{quoted_helper}'"),
+        ],
+    );
+    output(&client.0, &["config", "ssh.variant", "simple"]);
+    let mut command = test_run_command();
+    command.target = Some("prod".to_owned());
+    command.cwd = Some(client.0.clone());
+
+    let selected = resolve(
+        NamedSourceRequest {
+            run: &command,
+            token: None,
+            provided: &RunConnectionValues::new(),
+            required_capabilities: &[],
+        },
+        &|name| panic!("native SSH configuration requested an undeclared source field: {name}"),
+    )
+    .await
+    .assert_value()
+    .assert_value();
+
+    assert_public_git_source(&selected, remote, "release", revision.trim());
+    assert!(!selected.source.dirty);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn git_metadata_rejects_failed_non_utf8_and_oversized_command_output() {
+    for script in [
+        "printf ignored; exit 1",
+        "printf '\\377'",
+        "head -c 1048577 /dev/zero",
+    ] {
+        assert!(
+            super::run(Command::new("sh").args(["-c", script]))
+                .await
+                .is_err()
+        );
+    }
+}
+
+fn commit_empty(root: &Path, message: &str) -> String {
+    output(
+        root,
+        &[
+            "-c",
+            "user.name=Zeroshot Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--allow-empty",
+            "-m",
+            message,
+        ],
+    );
+    output(root, &["rev-parse", "HEAD"])
+}
+
+fn configure_local_mirror(root: &Path, remote: &str, mirror: &Path) {
+    let mirror = url::Url::from_directory_path(mirror).expect("absolute mirror directory");
+    output(
+        root,
+        &["config", &format!("url.{mirror}.insteadOf"), remote],
+    );
+}
+
+fn assert_public_git_source(
+    selected: &NamedSourceResolution,
+    remote: &str,
+    branch: &str,
+    revision: &str,
+) {
+    let source = &selected.source.resolved;
+    assert_eq!(source.repository.as_str(), remote);
+    assert_eq!(source.branch.as_str(), branch);
+    assert_eq!(source.revision.as_str(), revision);
+    let metadata = source.remote.as_ref().assert_value();
+    assert_eq!(metadata.url.as_str(), remote);
+    assert!(metadata.forge.is_none());
+    assert!(metadata.connection.is_none());
+    assert!(selected.git_credentials.is_none());
+}
