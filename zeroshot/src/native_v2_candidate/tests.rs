@@ -674,7 +674,7 @@ async fn submit_through_cli(
     let context = CliExecutionContext::new(&backend, &available);
     let mut output = Vec::new();
     let outcome = execute_native_v2_cli_with_context(
-        NativeV2CliCommand::Run(RunCommand {
+        NativeV2CliCommand::Run(Box::new(RunCommand {
             cwd: None,
             source_connection: None,
 
@@ -698,7 +698,7 @@ async fn submit_through_cli(
             submission_key: Some(
                 IdempotencyKey::new("candidate-e2e").assert_value_with("submission key"),
             ),
-        }),
+        })),
         &context,
         &mut NeverDetach,
         &mut output,

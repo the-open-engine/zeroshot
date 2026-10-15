@@ -321,7 +321,7 @@ impl RunArgs {
             uniform: self.uniform_runtime_config,
             delivery: self.delivery.selection(),
         })?;
-        Ok(NativeV2CliCommand::Run(RunCommand {
+        Ok(NativeV2CliCommand::Run(Box::new(RunCommand {
             target: route.target,
             cwd: self.cwd,
             source_connection: self
@@ -345,7 +345,7 @@ impl RunArgs {
             detach: self.detach,
             validate_only: self.validate_only,
             submission_key: submission_key(self.submission_key)?,
-        }))
+        })))
     }
 }
 

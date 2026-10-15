@@ -594,7 +594,7 @@ fn parser_exposes_the_builtin_templates_and_closed_delivery_choice() {
 
 fn run_command(command: NativeV2CliCommand) -> RunCommand {
     match command {
-        NativeV2CliCommand::Run(run) => Some(run),
+        NativeV2CliCommand::Run(run) => Some(*run),
         _ => None,
     }
     .assert_value_with("run command")

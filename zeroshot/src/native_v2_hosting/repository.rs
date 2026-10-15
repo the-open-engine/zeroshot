@@ -10,7 +10,7 @@ use crate::execution::process::{HostedProcessPool, HostedProcessScope};
 use crate::native_v2_delivery::{DeliveryTarget, DeliveryMode, SourceDeliveryError, source_target};
 use crate::source_code_provider::SourceMaterializationDestination;
 use crate::native_v2_delivery::command::GitCommandFailure;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use crate::native_v2_delivery::command::GitCommandOutput;
 use crate::native_v2_delivery::transport::{
     GitTransport, GitTransportConfig, GitMaterializationTarget, source_credential,
@@ -215,7 +215,7 @@ impl GitProcess<'_> {
         ))
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     async fn run(
         &self,
         workspace: Option<&Path>,
@@ -224,7 +224,7 @@ impl GitProcess<'_> {
         self.capture_at(workspace, arguments).await.map(|_| ())
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     async fn capture(
         &self,
         workspace: &Path,
@@ -235,7 +235,7 @@ impl GitProcess<'_> {
             .map(|output| output.stdout().to_owned())
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     async fn capture_at(
         &self,
         workspace: Option<&Path>,

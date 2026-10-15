@@ -328,7 +328,7 @@ pub enum NativeV2CliCommand {
     PlanStatus(MergePlanSelector),
     PlanWatch(MergePlanSelector),
     PlanForceStop(MergePlanSelector),
-    Run(RunCommand),
+    Run(Box<RunCommand>),
     List {
         target: Option<String>,
     },
