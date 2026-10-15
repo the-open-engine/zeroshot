@@ -11,6 +11,32 @@ use fixture::*;
 
 const TITLE: &str = "Local no-delivery acceptance";
 
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread")]
+async fn runtime_failure_cause_survives_cli_log_replay() {
+    let fixture = LocalFixture::new();
+    fs::write(fixture.repository.join(".gitignore"), "dev-server.sock\n")
+        .assert_value_with("ignore the development server socket");
+    git(&fixture.repository, &["add", ".gitignore"]);
+    git(
+        &fixture.repository,
+        &["commit", "-m", "ignore the development server socket"],
+    );
+    let _socket =
+        std::os::unix::net::UnixListener::bind(fixture.repository.join("dev-server.sock"))
+            .assert_value_with("bind leftover development server socket");
+
+    let run_id = fixture.submit_detached("finish").await;
+    wait_for_exit(fixture.ready_pid(&run_id)).await;
+    // Logs emit JSONL; require the complete serialized cause in durable replay.
+    let expected = serde_json::to_string(
+        "Runtime failed: workspace checkpoint is unavailable: candidate contains an \
+         unsupported filesystem entry \"dev-server.sock\"",
+    )
+    .assert_value_with("serialize the complete cause");
+    fixture.assert_replay("logs", &run_id, &expected).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn local_connection_crud_supplies_declared_fields_only() {
     let fixture = LocalFixture::new();
