@@ -16,8 +16,8 @@ class LocalTarget:
     """Execute against the local Zeroshot controller.
 
     Args:
-        workspace: Git workspace used in place by new runs. None captures the current directory
-            when the client opens.
+        workspace: Default working folder, used in place. None captures the current folder when
+            the client opens; per-run cwd is relative to this folder.
         state_dir: Optional native controller state directory. Reuse it to observe local runs from
             later client instances; None uses the native package-owned default.
     """
@@ -114,7 +114,7 @@ class UniformRuntime:
             live session when that graph node instance runs again.
         connections: Connection keys mapped to the exact environment field names their agent nodes
             need. None selects the executable-owned provider defaults; an empty mapping declares no
-            connections. Values are read only from Client.environment.
+            connections.
     """
 
     harness: str

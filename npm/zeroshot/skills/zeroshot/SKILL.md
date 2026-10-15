@@ -30,9 +30,9 @@ another run. A failed Cloud run does not authorize silently implementing the tas
 
 ## Choose the target
 
-- Local execution omits `--target`; `--cwd DIR` selects an existing folder and defaults to the invoking
-  folder. Runs without Git delivery need no repository. File arguments remain relative to the
-  invoking folder. Keep the workspace disjoint from active Zeroshot state; use an external
+- Local execution omits `--target`. `--cwd DIR` selects a folder (default: invoking folder);
+  Git worktrees use their root. File arguments stay relative to the invoking folder. Runs without
+  Git delivery need no repository. Keep workspace and active Zeroshot state disjoint; use an external
   `ZEROSHOT_STATE_DIR` when necessary.
 - Zeroshot Cloud is built in. Sign in once with `zeroshot target login cloud`, then use
   `--target cloud` explicitly on Cloud commands. Cloud setup (organizations, GitHub App,
@@ -105,7 +105,7 @@ must return exactly one required string named `response`. The runtime must use C
 every node, and every executable node must have an agent binding with `sessionScope: node_instance`.
 Maps, delivery, runtime connections, MCP servers, and session reload are unsupported.
 
-Each ACP prompt is a separate durable local run. The outer ACP session keeps the Git workspace and
+Each ACP prompt is a separate durable local run. The outer ACP session keeps the workspace and
 node provider sessions alive across prompts. Inspect the returned run ID with `zeroshot status` or
 `zeroshot logs`; `zeroshot ui` includes the run in local history.
 
@@ -140,7 +140,7 @@ GitHub is maintained today. `--source-connection KEY` authorizes source-only HTT
 (`GIT_USERNAME`, `GIT_PASSWORD`) or pinned SSH (`GIT_SSH_PRIVATE_KEY`, `GIT_SSH_KNOWN_HOSTS`)
 credentials. Generic forms require the target's `openengine.git-transport/v1` capability.
 
-Cloud receives the remote revision, not uncommitted files. Check relevant dirty or unpushed work and
+Named targets receive the remote revision, not uncommitted files. Check dirty or unpushed work and
 never push or omit it without authorization. Confirm the exact repository, branch, revision, target,
 profile, and delivery intent reported for the run.
 

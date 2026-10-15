@@ -20,7 +20,7 @@ class RunRequest:
         graph: Opaque GraphSpec passed to Zeroshot without changes.
         initial_input: Closed JSON input that Zeroshot validates against the graph.
         runtime: Opaque RuntimePlan passed to Zeroshot without changes.
-        cwd: Working folder for this submission; None uses the client launcher folder.
+        cwd: Working folder relative to the captured client workspace; None uses that workspace.
         repository: Source override as a Git clone URL or GitHub owner/name shorthand.
         source_connection: Explicit source-only named connection key.
         branch: Named-target source branch override.
@@ -84,7 +84,7 @@ class RunStatus:
     Args:
         run_id: Public durable run identity.
         title: Immutable persisted title.
-        source: Immutable resolved source snapshot, or None for an ordinary local folder.
+        source: Immutable Git source snapshot, or None when unavailable for a local run.
         size: Native run size.
         cursor: Opaque durable status cursor.
         phase: admitted, running, stopping, or finished.
@@ -109,7 +109,7 @@ class RunSummary:
     Args:
         run_id: Public durable run identity.
         title: Immutable persisted title.
-        source: Immutable resolved source snapshot, or None for an ordinary local folder.
+        source: Immutable Git source snapshot, or None when unavailable for a local run.
         size: Native run size.
         cursor: Opaque durable status cursor.
         phase: admitted, running, stopping, or finished.

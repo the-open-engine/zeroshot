@@ -130,7 +130,7 @@ it from the success node:
 
 ## Start the endpoint
 
-Configure the ACP client to start this command in the canonical root of the Git worktree:
+Configure the ACP client to launch the saved profile:
 
 ```console
 zeroshot acp --profile local:acp-worker

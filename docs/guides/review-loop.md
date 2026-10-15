@@ -10,19 +10,18 @@ yourself when you want to change the reviewers, their instructions, or the bound
 ## Before you start
 
 This guide assumes you have completed [Run a first task](../getting-started/first-run.md): Zeroshot
-is installed, the Codex CLI is signed in, and you have a Git repository with an HTTP service to
+is installed, the Codex CLI is signed in, and you have a folder with an HTTP service to
 change.
 
-!!! warning "The worker edits the current worktree"
+!!! warning "The worker edits the selected folder"
 
-    Commit or stash work you want to protect, and run the commands from the repository you intend to
-    change.
+    Back up work you want to protect, or commit or stash it in a Git checkout.
 
 ## Files
 
 The example has three files, plus an optional runtime plan for
 [cross-vendor review](#cross-vendor-review). Download them or copy them from the sections below, and
-keep them outside the repository you are changing, for example in `~/review-loop/`, so they stay out
+keep them outside the folder you are changing, for example in `~/review-loop/`, so they stay out
 of the change.
 
 | File                                                                                                   | Purpose                                       |
@@ -195,7 +194,7 @@ The input supplies only the task:
 --8<-- "assets/review-loop/input.json"
 ```
 
-From the repository you want to change, check all three files without starting a run. Validation covers JSON shape, graph data flow, loop
+From the folder you want to change (or with `--cwd FOLDER`), check all three files without starting a run. Validation covers JSON shape, graph data flow, loop
 termination, runtime coverage, and the initial input:
 
 ```console
@@ -223,8 +222,8 @@ zeroshot run \
 
 The same files run on a target with `--target cloud` (see
 [Connect Zeroshot Cloud](../getting-started/install.md#connect-zeroshot-cloud)) or the name of a
-[direct target](../concepts/targets.md#direct-target). A target checks out the worktree's pushed
-upstream branch, not local uncommitted changes, and resolves `OPENAI_API_KEY` from the submission
+[direct target](../concepts/targets.md#direct-target). A target requires an exact Git source selected from
+the checkout or [source overrides](../concepts/targets.md#direct-target), and resolves `OPENAI_API_KEY` from the submission
 environment or its connection store. The graph has no delivery node, so a target run does not push
 the accepted change. Add a Git delivery verifier after the loop, or use the `software-change` template with
 `--push`, `--pr`, or `--ship`, when the result must leave the target.

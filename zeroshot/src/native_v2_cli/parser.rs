@@ -83,12 +83,14 @@ enum CliCommand {
 
     /// Submit a graph run locally or to a named target.
     ///
-    /// When --target is omitted, the run uses the selected local folder. A foreground run
-    /// follows NDJSON events until completion. --detach returns after submission. Ctrl-C before
-    /// the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the
+    /// Local runs use --cwd or the invoking folder; Git worktrees use their root. Local Git delivery
+    /// requires an attached, committed branch and an HTTPS/SSH remote. PR/merge also require a
+    /// supported forge. Named targets require a committed Git source. Local workspaces must not
+    /// overlap Zeroshot state.
+    ///
+    /// A foreground run follows NDJSON events until completion. --detach returns after submission.
+    /// Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the
     /// receipt and then detaches. During observation, Ctrl-C detaches without stopping the run.
-    /// Named-target runs send GH_TOKEN, when set, for source checkout and Git delivery; providers
-    /// receive it only when the runtime declares GH_TOKEN.
     Run(Box<RunArgs>),
 
     #[command(flatten)]
@@ -135,8 +137,7 @@ enum UtilityCommand {
     ///
     /// By default, restart the original graph using its latest retained workspace.
     /// Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`.
-    /// The successor resolves credentials again. Export GH_TOKEN before resuming a named-target
-    /// run that needs it for private source checkout or Git delivery.
+    /// The successor resolves its original connection requirements again; make those credentials available.
     ///
     /// Target runs reuse the saved environment definition: setup runs before workspace restore,
     /// then startup runs before the graph. Startup must tolerate existing workspace files.
@@ -387,8 +388,6 @@ struct DeliveryArgs {
     pr: bool,
 
     /// Materialize merge delivery for the software-change template.
-    ///
-    /// Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
     #[arg(long)]
     ship: bool,
 
@@ -535,18 +534,17 @@ struct RunArgs {
     #[arg(long, value_name = "[SCOPE:]NAME")]
     profile: Option<String>,
 
-    /// Run on this named target; if omitted, run locally. Named targets receive GH_TOKEN when set.
-    ///
-    /// The token is used for source checkout and Git delivery. A provider receives it only when
-    /// the runtime configuration explicitly declares GH_TOKEN.
+    /// Run on this named target; if omitted, run locally.
     #[arg(long, value_name = "NAME")]
     target: Option<String>,
 
-    /// Working folder for this run. Defaults to the invoking folder; input files stay relative to it.
+    /// Working folder (default: invoking folder). File arguments stay relative to the invoking folder.
     #[arg(long, value_name = "FOLDER")]
     cwd: Option<PathBuf>,
 
-    /// Named connection used only for Git checkout and delivery.
+    /// Named connection for Git checkout and push.
+    ///
+    /// HTTPS uses GIT_USERNAME and GIT_PASSWORD; SSH uses GIT_SSH_PRIVATE_KEY and GIT_SSH_KNOWN_HOSTS.
     #[arg(long, value_name = "KEY")]
     source_connection: Option<String>,
 

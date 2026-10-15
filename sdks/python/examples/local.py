@@ -1,4 +1,4 @@
-"""Run one software-change task in the current Git workspace."""
+"""Run one software-change task in the current folder without Git delivery."""
 
 import asyncio
 

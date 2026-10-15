@@ -1,12 +1,11 @@
 # Run a first task
 
-This example runs the built-in `software-change` graph in the current Git worktree, with pull-request
-and merge delivery disabled.
+This example runs the built-in `software-change` graph in a local folder, with Git delivery disabled.
+Git is optional. Add `--cwd FOLDER` to select another folder; input files stay relative to the invoking folder.
 
-!!! warning "The worker edits the current worktree"
+!!! warning "The worker edits the selected folder"
 
-    Commit or stash work you want to protect, and run the command from the repository you intend to
-    change.
+    Back up work you want to protect, or commit or stash it in a Git checkout.
 
 ## 1. Write the input
 

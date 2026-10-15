@@ -44,17 +44,18 @@ force-stop control.
 
 ## Local, direct, and hosted targets
 
-Local execution uses the current Git workspace by default. Agents mutate that workspace in place:
+Local runs use the folder captured when the client opens. Set `LocalTarget.workspace` or per-run
+`cwd=` to select another folder; relative `cwd` paths use that captured workspace. Agents write in
+place. Without Git delivery, plain folders work; push needs committed Git and a remote, while PR
+and merge need a supported forge (GitHub today).
 
 ```python
-from zeroshot import Client, LocalTarget, UniformRuntime
+from zeroshot import Client, UniformRuntime
 
 
 async def run_local(runtime: UniformRuntime) -> None:
-    async with Client(
-        target=LocalTarget("/path/to/repository"), runtime=runtime
-    ) as client:
-        result = await client.run("Update the parser.")
+    async with Client(runtime=runtime) as client:
+        result = await client.run("Update the parser.", cwd="/path/to/folder")
 
     result.raise_for_failure()
 ```
@@ -75,7 +76,9 @@ async def run_direct(runtime: UniformRuntime) -> None:
     result.raise_for_failure()
 ```
 
-Docker is a deployment of `DirectTarget`, not a separate client or target type.
+Docker/direct and hosted targets require a committed Git source. Per-run `repository=` accepts a
+credential-free HTTPS/SSH Git URL or GitHub `owner/name`; `branch=` and `revision=` override source
+selection. `source_connection=` selects a named connection used only for checkout and delivery.
 
 `HostedTarget` reuses a named target and login from the CLI. Merge plans are immutable DAGs over one
 repository, branch, and hosted profile. That profile must contain exactly one
@@ -163,10 +166,10 @@ millisecond captured at the producer and preserved unchanged by durable replay.
 
 ## Environment values
 
-With `environment=None`, declared values are read from `os.environ` at submission. An explicit
-mapping is the complete credential source, apart from ordinary process variables needed to start
-the sidecar. Runtime documents contain names only; Zeroshot selects and forwards only the names
-declared by the effective runtime. Uniform provider defaults are owned by the executable.
+With `environment=None`, submission values come from `os.environ`. An explicit mapping replaces
+ambient credential variables; native saved connections and local harness login still apply.
+Zeroshot selects declared runtime and source-connection fields; transport credentials stay outside
+agent environments unless independently declared by a node. The executable owns provider defaults.
 
 ## Packaging and versions
 

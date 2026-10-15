@@ -197,7 +197,7 @@ should link to the version of these core docs that matches the deployed target, 
 
 ## Source and delivery credentials
 
-Git checkout and push use shared HTTPS or SSH transport. A local push needs a committed checkout
+Git checkout and push use shared HTTPS or SSH transport. A local push needs an attached, committed branch
 and an eligible remote; it uses the invoking user's native Git configuration and authentication when
 no source connection is selected. Push does not require GitHub or its CLI. PR and merge additionally
 require a registered forge adapter; GitHub is the maintained forge today. Other Git hosts can already

@@ -46,8 +46,8 @@ transport errors, authentication refusal, provider policy/schema errors, and can
 Review creation may allocate a new opaque ID. Merge receipts record the observed integrated revision;
 requests cannot predict it.
 
-Source credentials never belong in source records, receipts, profiles, history, or agent tool
-environments. Shared transport owns bounded capture, redaction, private SSH files, cancellation, and
+Source credential values stay out of source records, receipts, profiles, and history.
+Shared transport owns bounded capture, redaction, private SSH files, cancellation, and
 process cleanup. Recovery preserves the original delivery branch and review identity while obtaining
 fresh authorized values.
 

@@ -403,9 +403,7 @@ Options:
           Materialize pull-request delivery for the software-change template
 
       --ship
-          Materialize merge delivery for the software-change template.
-
-          Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
+          Materialize merge delivery for the software-change template
 
       --no-pr-feedback
           Do not route visible pull-request feedback through the autonomous repair loop
@@ -570,9 +568,7 @@ Options:
           Materialize pull-request delivery for the software-change template
 
       --ship
-          Materialize merge delivery for the software-change template.
-
-          Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
+          Materialize merge delivery for the software-change template
 
       --no-pr-feedback
           Do not route visible pull-request feedback through the autonomous repair loop
@@ -757,7 +753,9 @@ Commands:
 ```text
 Submit a graph run locally or to a named target.
 
-When --target is omitted, the run uses the selected local folder. A foreground run follows NDJSON events until completion. --detach returns after submission. Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the receipt and then detaches. During observation, Ctrl-C detaches without stopping the run. Named-target runs send GH_TOKEN, when set, for source checkout and Git delivery; providers receive it only when the runtime declares GH_TOKEN.
+Local runs use --cwd or the invoking folder; Git worktrees use their root. Local Git delivery requires an attached, committed branch and an HTTPS/SSH remote. PR/merge also require a supported forge. Named targets require a committed Git source. Local workspaces must not overlap Zeroshot state.
+
+A foreground run follows NDJSON events until completion. --detach returns after submission. Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the receipt and then detaches. During observation, Ctrl-C detaches without stopping the run.
 
 Usage: zeroshot run [OPTIONS] --title <TITLE> --input <FILE>
 
@@ -797,15 +795,15 @@ Options:
           When no profile or inline graph/runtime is supplied, scoped defaults are checked.
 
       --target <NAME>
-          Run on this named target; if omitted, run locally. Named targets receive GH_TOKEN when set.
-
-          The token is used for source checkout and Git delivery. A provider receives it only when the runtime configuration explicitly declares GH_TOKEN.
+          Run on this named target; if omitted, run locally
 
       --cwd <FOLDER>
-          Working folder for this run. Defaults to the invoking folder; input files stay relative to it
+          Working folder (default: invoking folder). File arguments stay relative to the invoking folder
 
       --source-connection <KEY>
-          Named connection used only for Git checkout and delivery
+          Named connection for Git checkout and push.
+
+          HTTPS uses GIT_USERNAME and GIT_PASSWORD; SSH uses GIT_SSH_PRIVATE_KEY and GIT_SSH_KNOWN_HOSTS.
 
       --repository <REPOSITORY>
           Repository in GitHub owner/name form or a credential-free HTTPS/SSH Git URL. Requires --target
@@ -837,9 +835,7 @@ Options:
           Materialize pull-request delivery for the software-change template
 
       --ship
-          Materialize merge delivery for the software-change template.
-
-          Named-target runs forward GH_TOKEN for the generated GitHub merge operation.
+          Materialize merge delivery for the software-change template
 
       --no-pr-feedback
           Do not route visible pull-request feedback through the autonomous repair loop
@@ -1066,7 +1062,7 @@ Options:
 ```text
 Start a new attempt from a failed run's retained workspace or a saved checkpoint.
 
-By default, restart the original graph using its latest retained workspace. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. The successor resolves credentials again. Export GH_TOKEN before resuming a named-target run that needs it for private source checkout or Git delivery.
+By default, restart the original graph using its latest retained workspace. Use --from-checkpoint to continue from a checkpoint listed by `zeroshot checkpoints`. The successor resolves its original connection requirements again; make those credentials available.
 
 Target runs reuse the saved environment definition: setup runs before workspace restore, then startup runs before the graph. Startup must tolerate existing workspace files. Services, Docker state, and agent conversations are not restored.
 

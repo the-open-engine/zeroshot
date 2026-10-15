@@ -88,8 +88,9 @@ class Client:
         target: Local target by default, an unauthenticated direct target, or a named hosted target.
         preset: Default executable-owned graph preset. None selects software-change.
         runtime: Default runtime. None requires a runtime on each string submission.
-        environment: Source for runtime-declared environment values. None reads the ambient
-            environment at submission time. An explicit mapping is the complete value source.
+        environment: Submission environment values. None reads the ambient environment; an
+            explicit mapping replaces ambient credential variables. Native saved connections and
+            local harness login still apply.
 
     The SDK never guesses a harness, provider, or model. Closing the client detaches observation
     and never stops runs.

@@ -268,7 +268,7 @@ the fields of several providers.
 | `connections`  | No       | Applied to every agent node           |
 
 Every executable node gets an `agent` binding with these values, except nodes that use a delivery
-worker. Those get a `git_delivery` binding that declares `{"github": ["GH_TOKEN"]}`.
+worker. Those get a `git_delivery` binding as described below.
 
 When selecting the built-in `software-change` template, omitted `sessionScope` defaults to
 `node_instance` for `worker` and `execution` for its reviewers. The worker retains its session
@@ -289,9 +289,10 @@ add a delivery verifier named `deliver`. The existing `worker` handles delivery 
 adds `checkpoint_delivery` plus the agent nodes `checkpoint_manifest` and `checkpoint_audit`.
 `single-worker` has no delivery modes.
 
-The CLI inserts the template-owned `git_delivery` binding for the delivery node, declaring
-`{"github": ["GH_TOKEN"]}`. `--no-pr-feedback` (requires `--pr` or `--ship`) sets its
-`pullRequestFeedback` to `ignore`.
+The CLI inserts a `git_delivery` binding with no forge connection for push, or
+`{"github": ["GH_TOKEN"]}` for PR and merge. Git transport uses the selected
+[source credentials](../concepts/targets.md#source-and-delivery-credentials).
+`--no-pr-feedback` (requires `--pr` or `--ship`) sets `pullRequestFeedback` to `ignore`.
 
 A uniform configuration binds the added agent nodes too. An exact `--runtime-config` must bind
 all agent nodes itself. Software-change uses `worker`, `acceptance`, and `code` with every delivery

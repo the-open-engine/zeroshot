@@ -163,7 +163,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   credential resolution or workspace mutation. Pure remote identification uses each registered
   provider's `repository_from_remote` hook; CLI source selection has no separate forge catalog and
   rejects ambiguous matches and unsupported provider versions.
-- Named targets store only endpoint, access mode, and login identity. Named runs resolve repository, branch, exact remote revision, and worktree dirtiness client-side from the invoking Git worktree plus per-run overrides; target records never bind repositories.
+- Named targets store only endpoint, access mode, and login identity. Named runs resolve repository, branch, exact remote revision, and worktree dirtiness client-side from the selected Git worktree plus per-run overrides; target records never bind repositories.
 - Hosted HTTP authority clones share one bounded in-memory OAuth access-token slot across all
   hosted operations, including merge-plan discovery routes. Reuse requires the same target, login,
   OAuth endpoints/client, and audience with more than thirty seconds of token lifetime remaining.

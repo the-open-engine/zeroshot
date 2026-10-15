@@ -27,6 +27,7 @@ async def main() -> None:
     async with Client(runtime=runtime) as client:
         result = await client.run(
             "Add JSON status output and cover it with focused tests.",
+            cwd="/path/to/folder",
             wait_timeout=21_600,
         )
 
@@ -37,9 +38,11 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-`Client()` uses the current worktree and the `software-change` preset unless told otherwise. You must
-still choose the harness, provider, and model. `run()` submits once and waits, whereas `submit()`
-returns a durable `Run` handle immediately.
+Opening a client captures the current folder; the default preset is `Preset("software-change", delivery="none")`.
+Per-run `cwd=` paths resolve from that captured folder, or `LocalTarget.workspace` when supplied.
+Local graphs without Git delivery accept plain folders. Push needs committed Git and a remote;
+PR and merge need a supported forge (GitHub today). Choose the harness, provider, and model.
+`run()` submits once and waits; `submit()` returns a durable `Run` handle immediately.
 
 ## Watch a submitted run
 
@@ -60,8 +63,10 @@ the same way. Neither action stops native work; only `await run.force_stop()` ch
 
 ## Run on a direct target
 
-Local execution uses `LocalTarget`. A direct target, including the Docker image, needs its origin;
-source is selected from the invoking Git worktree or per-run overrides:
+Local execution uses `LocalTarget`. Docker/direct and hosted targets require a committed Git
+source, selected from the client workspace or per-run `repository=`, `branch=`, and `revision=`.
+`repository=` accepts a credential-free HTTPS/SSH Git URL or GitHub `owner/name` shorthand;
+`source_connection=` selects a named connection used only for Git checkout and delivery:
 
 ```python
 from zeroshot import Client, DirectTarget, UniformRuntime

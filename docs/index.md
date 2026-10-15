@@ -42,8 +42,8 @@ charter, use `auto-research`; custom graphs follow the same protocol contracts.
 
 - **Local**
 
-    Local mode works in the current Git worktree, keeps state on the same machine, and calls your
-    chosen harness.
+    Local mode works in any folder (`--cwd FOLDER`), keeps state on the same machine, and calls your
+    chosen harness. Git is optional without delivery.
 
     [Install Zeroshot](getting-started/install.md)
 

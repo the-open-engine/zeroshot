@@ -33,11 +33,11 @@ class ResolvedGitRemote:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ResolvedSource:
-    """Immutable source snapshot selected for a named run.
+    """Immutable committed Git source snapshot.
 
     Args:
         repository: Native repository identity.
-        branch: Attached source branch.
+        branch: Selected source branch.
         revision: Exact forty- or sixty-four-character Git object ID.
         remote: Generic transport metadata; None preserves a legacy GitHub source.
     """

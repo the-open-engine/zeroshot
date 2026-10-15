@@ -86,10 +86,10 @@ reuse the harness's existing login, including subscription-backed sessions. See 
 
 #### Run your first task
 
-This example uses Codex and keeps delivery local. **The worker edits the current Git worktree**,
-so start in a clean worktree intended for the task.
+This example uses Codex and keeps delivery local. **The worker edits the selected folder**;
+Git is optional. Add `--cwd FOLDER` to select another folder; input files stay relative to the invoking folder.
 
-Create `input.json`, replacing the example task with a change appropriate for your repository:
+Create `input.json`, replacing the example task with a change appropriate for your project:
 
 ```json
 {
@@ -243,8 +243,9 @@ Keep the first result local, then enable the delivery mode that fits your proces
 PR and ship runs address visible pull request review feedback by default; pass `--no-pr-feedback` to
 ignore it.
 
-Graphs can execute locally or on a self-hosted target. Each environment needs its own tools and
-authentication setup.
+Push needs a committed Git checkout and an HTTPS or SSH remote. PR and ship additionally need a
+forge adapter; GitHub is maintained today. Docker and cloud runs require an exact Git source.
+See [targets and source credentials](docs/concepts/targets.md) for setup.
 
 ### Self-hosted: run the Docker target
 
