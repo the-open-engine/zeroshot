@@ -492,7 +492,7 @@ fn token_file_bootstrap_keeps_credentials_out_of_submission_and_consumes_private
         workspace.clone(),
         storage,
     );
-    let token_path = root.child("private-token");
+    let token_path = root.0.canonicalize().unwrap().join("private-token");
     prepared.github_token_file = Some(
         crate::native_v2_delivery::TrustedGitHubTokenFile::new(token_path.clone(), &workspace)
             .unwrap(),

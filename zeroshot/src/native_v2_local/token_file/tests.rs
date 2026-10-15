@@ -19,7 +19,10 @@ fn token_file_capture_resolves_invoking_directory_and_removes_provider_controls(
     let (token, file) =
         take_github_authority(&mut environment, None, root.path(), &workspace).unwrap();
     assert!(token.is_none());
-    assert_eq!(file.unwrap().path(), root.path().join("renewed-token"));
+    assert_eq!(
+        file.unwrap().path(),
+        root.path().canonicalize().unwrap().join("renewed-token")
+    );
     assert!(environment.is_empty());
 }
 
