@@ -689,3 +689,7 @@ fn write_json(path: &Path, value: &Value) {
 
 #[path = "harness_environment.rs"]
 mod harness_environment;
+
+#[cfg(target_os = "linux")]
+#[path = "agent_tmpdir.rs"]
+mod agent_tmpdir;

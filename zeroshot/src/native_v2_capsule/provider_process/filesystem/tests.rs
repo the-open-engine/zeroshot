@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::time::Duration;
 
 use openengine_cluster_testkit::assertions::AssertValue;
@@ -69,6 +69,7 @@ fn boundary_contract_execution_files_expose_utf8_scratch_and_return_to_idle_afte
         runner: LocalProcessRunner::new(),
         workspace: fixture.candidate.clone(),
         scratch: PathBuf::from(std::ffi::OsString::from_vec(vec![0xff])),
+        scratch_link: None,
         home: Arc::new(PrivateDirectory::retained(
             fixture.runtime.join("invalid-home"),
         )),
@@ -140,11 +141,60 @@ fn unconfirmed_process_cleanup_retains_files_and_rejects_another_provider_launch
     let files = fixture.prepare(1);
     let execution = files.root.path.clone();
     let home = files.home.path.clone();
+    let link = PathBuf::from(files.scratch_text().assert_value());
     files.begin_process();
     assert!(files.ensure_idle().is_err());
     drop(files);
     assert!(execution.exists());
     assert!(home.exists());
+    assert_eq!(fs::read_link(&link).assert_value(), execution.join("tmp"));
+    fs::remove_file(link).assert_value();
+}
+
+#[test]
+fn scratch_link_fits_project_unix_sockets_and_leaves_with_the_execution() {
+    let fixture = Fixture::new();
+    let files = fixture.prepare(1);
+    let link = PathBuf::from(files.scratch_text().assert_value());
+    assert_eq!(link.parent(), Some(Path::new("/tmp")));
+    assert_eq!(link.as_os_str().len(), "/tmp/zs-".len() + 16);
+    assert_eq!(fs::read_link(&link).assert_value(), files.scratch);
+    // Go's `t.TempDir()` layout from the report overflows `sun_path` below a state directory.
+    let project = Path::new("TestListenOnUnixSocketFreshPath371951039/001");
+    fs::create_dir_all(link.join(project)).assert_value();
+    let socket = link.join(project).join("sidecar-ipc");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).assert_value();
+    let _client = std::os::unix::net::UnixStream::connect(&socket).assert_value();
+    listener.accept().assert_value();
+    assert!(
+        fs::symlink_metadata(files.scratch.join(project).join("sidecar-ipc"))
+            .assert_value()
+            .file_type()
+            .is_socket()
+    );
+    let other = fixture.prepare(2);
+    assert_ne!(
+        other.scratch_text().assert_value(),
+        link.to_str().assert_value()
+    );
+    let execution = files.root.path.clone();
+    drop(files);
+    assert!(fs::symlink_metadata(&link).is_err());
+    assert!(!execution.exists());
+}
+
+#[test]
+fn replaced_scratch_link_and_relative_scratch_are_left_alone() {
+    let fixture = Fixture::new();
+    let files = fixture.prepare(1);
+    let link = PathBuf::from(files.scratch_text().assert_value());
+    fs::remove_file(&link).assert_value();
+    std::os::unix::fs::symlink(&fixture.candidate, &link).assert_value();
+    drop(files);
+    assert_eq!(fs::read_link(&link).assert_value(), fixture.candidate);
+    fs::remove_file(link).assert_value();
+    // A relative link target would resolve against the link directory instead.
+    assert!(link_scratch(Path::new("runtime/execution-1/tmp"), false).is_none());
 }
 
 fn command(files: &ProviderExecutionFiles, script: &str) -> ProcessSessionCommand {
@@ -360,6 +410,48 @@ async fn root_workers_and_reviewers_share_files_and_cleanup_independently() {
         fs::read_to_string(fixture.candidate.join("shared/right")).assert_value(),
         "right"
     );
+}
+
+#[tokio::test]
+async fn root_hosted_identity_uses_but_cannot_replace_the_supervisor_scratch_link() {
+    // SAFETY: geteuid only inspects the current process identity.
+    if unsafe { libc::geteuid() } != 0 {
+        eprintln!("root-only hosted scratch link gate skipped outside the capsule identity");
+        return;
+    }
+    let fixture = Fixture::new();
+    let pool = HostedProcessPool::new(93_002, 93_002, 94_000).assert_value();
+    crate::native_v2_capsule::prepare_capsule_filesystem(
+        crate::native_v2_capsule::CapsuleFilesystemSpec {
+            workspace: &fixture.candidate,
+            runtime_home: &fixture.runtime,
+            process_pool: pool,
+        },
+    )
+    .assert_value();
+    let files = shared_writer_files(&fixture, pool, 1);
+    let link = PathBuf::from(files.scratch_text().assert_value());
+    assert_eq!(fs::read_link(&link).assert_value(), files.scratch);
+    assert_eq!(fs::symlink_metadata(&link).assert_value().uid(), 0);
+    let script = "set -eu\n\
+        printf hosted > \"$TMPDIR/probe\"\n\
+        if rm -f \"$TMPDIR\" 2>/dev/null; then exit 3; fi";
+    let mut process = open(
+        files.clone(),
+        command(&files, script),
+        &fixture.cancellation,
+    )
+    .await;
+    let output = process.wait().await.assert_value();
+    assert_eq!(output.exit_code, Some(0));
+    assert!(output.cleanup.proves_tree_empty());
+    drop(process);
+    assert_eq!(
+        fs::read_to_string(files.scratch.join("probe")).assert_value(),
+        "hosted"
+    );
+    drop(files);
+    assert!(fs::symlink_metadata(&link).is_err());
 }
 
 fn shared_writer_files(

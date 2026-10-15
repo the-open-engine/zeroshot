@@ -142,6 +142,8 @@ pub(crate) struct ProviderExecutionFiles {
     pub(crate) runner: LocalProcessRunner,
     pub(crate) workspace: PathBuf,
     scratch: PathBuf,
+    // The provider-visible `TMPDIR` for `scratch`, when a short link could be trusted.
+    scratch_link: Option<PathBuf>,
     home: Arc<PrivateDirectory>,
     root: PrivateDirectory,
 }
@@ -164,6 +166,7 @@ impl ProviderExecutionFiles {
         Ok(Self {
             runner: specification.runner,
             workspace,
+            scratch_link: link_scratch(&scratch, specification.identity.is_some()),
             scratch,
             home: specification.home,
             root,
@@ -175,7 +178,8 @@ impl ProviderExecutionFiles {
     }
 
     pub(crate) fn scratch_text(&self) -> Result<String, ProcessRunnerError> {
-        self.scratch.to_str().map(str::to_owned).ok_or_else(|| {
+        let scratch = self.scratch_link.as_deref().unwrap_or(&self.scratch);
+        scratch.to_str().map(str::to_owned).ok_or_else(|| {
             ProcessRunnerError::InvalidCommand(
                 "provider scratch path is not valid UTF-8".to_owned(),
             )
@@ -200,6 +204,68 @@ impl ProviderExecutionFiles {
         }
         Ok(())
     }
+}
+
+impl Drop for ProviderExecutionFiles {
+    fn drop(&mut self) {
+        // Like the execution root, the link remains while an unproven process may still use it.
+        if self.root.processes.load(Ordering::Acquire) == 0
+            && let Some(link) = &self.scratch_link
+            && fs::read_link(link).is_ok_and(|target| target == self.scratch)
+        {
+            let _ = fs::remove_file(link);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+const SCRATCH_LINK_DIRECTORY: &str = "/tmp";
+
+/// Linux limits Unix socket paths to 107 bytes, and scratch below a state or storage directory can
+/// use most of them, so providers get a short `/tmp/zs-<random>` link to it as `TMPDIR`. Scratch
+/// files stay in the execution root under whole-run cleanup; only the link is outside it. The
+/// supervisor keeps owning the link, so a hosted provider can neither remove nor redirect it. An
+/// untrusted directory or any link failure keeps the full scratch path.
+#[cfg(target_os = "linux")]
+fn link_scratch(scratch: &Path, hosted: bool) -> Option<PathBuf> {
+    let mut random = [0_u8; 8];
+    if !scratch.is_absolute()
+        || !trusted_link_directory(hosted)
+        || getrandom::fill(&mut random).is_err()
+    {
+        return None;
+    }
+    // An unpredictable name cannot be claimed in advance, and symlink(2) never replaces an entry.
+    let link =
+        Path::new(SCRATCH_LINK_DIRECTORY).join(format!("zs-{:016x}", u64::from_ne_bytes(random)));
+    std::os::unix::fs::symlink(scratch, &link)
+        .ok()
+        .map(|()| link)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn link_scratch(_scratch: &Path, _hosted: bool) -> Option<PathBuf> {
+    None
+}
+
+// No other user may replace the link: the directory is owned by root or this user and is sticky
+// or not group/other-writable. Hosted identities also need search access, and
+// `fs.protected_symlinks` lets them follow the link in a sticky world-writable directory only when
+// the directory and the link have the same owner.
+#[cfg(target_os = "linux")]
+fn trusted_link_directory(hosted: bool) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    let Ok(metadata) = fs::symlink_metadata(SCRATCH_LINK_DIRECTORY) else {
+        return false;
+    };
+    // SAFETY: geteuid only observes process identity.
+    let user = unsafe { libc::geteuid() };
+    let (owner, mode) = (metadata.uid(), metadata.mode());
+    metadata.is_dir()
+        && (owner == 0 || owner == user)
+        && (mode & libc::S_ISVTX != 0 || mode & 0o022 == 0)
+        && (!hosted || (owner == user && mode & 0o001 != 0))
 }
 
 fn create_private_directory(path: &Path) -> io::Result<()> {

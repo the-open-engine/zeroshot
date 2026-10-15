@@ -277,6 +277,15 @@ async fn dead_controller_reconciles_runtime_loss_and_keeps_durable_observation()
     fixture
         .assert_replay("logs", &run_id, "Codex turn started")
         .await;
+
+    // Like its retained scratch, the killed run keeps its provider's short Linux `TMPDIR` link.
+    let storage = fixture.run_storage(&run_id);
+    for entry in fs::read_dir("/tmp").assert_value_with("list /tmp") {
+        let link = entry.assert_value_with("read /tmp entry").path();
+        if fs::read_link(&link).is_ok_and(|target| target.starts_with(&storage)) {
+            fs::remove_file(link).assert_value_with("remove the killed run's scratch link");
+        }
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
