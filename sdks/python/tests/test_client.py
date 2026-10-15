@@ -43,6 +43,44 @@ def test_uniform_runtime_requires_an_explicit_harness() -> None:
         UniformRuntime(provider="openrouter", model="gpt-5.6-luna")  # type: ignore[call-arg]
 
 
+@pytest.mark.parametrize(
+    ("target_kind", "workspace_override"),
+    [("local", False), ("local", True), ("direct", False), ("direct", True), ("hosted", False)],
+)
+def test_submission_keeps_opening_folder_after_chdir(
+    target_kind: str,
+    workspace_override: bool,
+    fake_native: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launcher = tmp_path / "launcher"
+    changed = tmp_path / "changed"
+    override = tmp_path / "workspace"
+    for directory in (launcher, changed, override):
+        (directory / "project").mkdir(parents=True)
+    workspace = override if workspace_override else None
+    target = {
+        "local": LocalTarget(workspace),
+        "direct": DirectTarget("http://127.0.0.1:8080", workspace=workspace),
+        "hosted": HostedTarget("cloud"),
+    }[target_kind]
+    monkeypatch.chdir(launcher)
+
+    async def exercise() -> None:
+        async with Client(target=target, runtime=runtime()) as client:
+            monkeypatch.chdir(changed)
+            await client.submit("inspect it", cwd="project")
+
+    asyncio.run(exercise())
+    invocations = read_invocations(fake_native)
+    assert all(item["cwd"] == str(workspace or launcher) for item in invocations)
+    runs = [item["args"] for item in invocations if item["args"][0] == "run"]
+    assert len(runs) == 2
+    for arguments in runs:
+        assert arguments[arguments.index("--cwd") + 1] == "project"
+
+
 def test_one_client_can_select_distinct_folders_per_submission(
     fake_native: Path, tmp_path: Path
 ) -> None:

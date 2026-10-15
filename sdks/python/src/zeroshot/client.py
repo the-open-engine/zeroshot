@@ -116,7 +116,7 @@ class Client:
         self._direct_lock = asyncio.Lock()
 
     async def __aenter__(self) -> Client:
-        """Open the client and capture a default local workspace.
+        """Open the client and capture a default working folder.
 
         Returns:
             This client.
@@ -441,13 +441,12 @@ class Client:
             raise ClientClosedError("the Zeroshot client is closed")
         if self._opened:
             return
+        workspace = None
         if isinstance(self.target, (LocalTarget, DirectTarget)):
             workspace = self.target.workspace
-            self._workspace = (
-                Path.cwd().resolve()
-                if workspace is None
-                else Path(workspace).expanduser().resolve()
-            )
+        self._workspace = (
+            Path.cwd().resolve() if workspace is None else Path(workspace).expanduser().resolve()
+        )
         self._opened = True
 
     def _native(self, *, static: bool = False) -> NativeProcess:
