@@ -145,11 +145,26 @@ impl<'a> CopilotRpc<'a> {
         validate_session_identity(&created, &self.session_id)?;
         *session.id.lock().await = Some(self.session_id.clone());
         let outcome = self.run_response().await?;
+        self.detach().await?;
+        Ok(outcome)
+    }
+
+    /// Detaching only releases a session whose answer is already accepted. Older protocol-3 CLIs
+    /// such as 1.0.70 lack the method, so a provider failure is reported and the outcome is kept.
+    async fn detach(&mut self) -> Result<(), NodeRunnerError> {
         let detached = self
             .request("session.detach", json!({"sessionId":self.session_id}))
-            .await?;
-        validate_detach(&detached)?;
-        Ok(outcome)
+            .await
+            .and_then(|detached| validate_detach(&detached));
+        match detached {
+            Err(NodeRunnerError::DriverDetail(detail)) => {
+                let error = failure(format!(
+                    "session detach failed after the accepted answer: {detail}"
+                ));
+                report_provider_error("Copilot", &error, &self.redactions, self.control).await
+            }
+            result => result,
+        }
     }
 
     async fn connect(&mut self) -> Result<(), NodeRunnerError> {

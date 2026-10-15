@@ -792,6 +792,28 @@ async fn fails_closed_on_protocol_identity_and_provider_errors() {
 }
 
 #[tokio::test]
+async fn failed_detach_keeps_the_accepted_answer() {
+    for (mode, detail) in [
+        (
+            "detach_unhandled",
+            "Copilot RPC failed: Unhandled method session.detach",
+        ),
+        ("detach_refused", "Copilot session could not be detached"),
+    ] {
+        let fixture = Fixture::new(mode).await;
+        let (events, outcome) = complete(fixture.start(1).await).await;
+        verified(outcome);
+        assert_eq!(
+            error_output(&events),
+            [format!(
+                "Copilot provider failure: session detach failed after the accepted answer: \
+                 {detail}"
+            )]
+        );
+    }
+}
+
+#[tokio::test]
 async fn validation_errors_keep_the_explanation_and_redact_credentials() {
     for mode in ["validation_secret", "validation_secret_long"] {
         let fixture = Fixture::new(mode).await;

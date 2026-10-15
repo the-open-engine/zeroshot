@@ -239,7 +239,11 @@ while (message := read()) is not None:
         event("assistant.message", {"content": json.dumps(response)})
         result = {"messageId": "message"}
     elif method == "session.detach":
-        result = {"success": True}
+        if mode == "detach_unhandled":
+            send({"id": message["id"], "error": {
+                "code": -32601, "message": "Unhandled method session.detach"}})
+            continue
+        result = {"success": mode != "detach_refused"}
     else:
         raise AssertionError(method)
     send({"id": message["id"], "result": result})

@@ -213,6 +213,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   must retain more than one hour. Present but empty or malformed declared credentials fail closed
   instead of falling back to native login.
   Copilot RPC bounds each message to 64 MiB and bounds pending requests and output queues.
+  A provider failure of `session.detach` after an accepted answer is logged and keeps the outcome.
 - Provider JSONL readers do not cap cumulative output. They share only the 64 MiB unfinished-record
   guard, accept a complete final record without a newline, ignore unknown future event types before
   validating provider-owned fields, and continue draining after the first valid terminal event.
