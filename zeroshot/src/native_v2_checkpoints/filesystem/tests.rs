@@ -609,7 +609,8 @@ fn main_checkout_restore_does_not_rewind_linked_peers_or_shared_branches() {
     git(&peer, &["commit", "-am", "peer later"]);
     let peer_head = git(&peer, &["rev-parse", "HEAD"]);
 
-    restore(&fixture.snapshots, &id, &fixture.workspace).assert_value();
+    restore(&fixture.snapshots, &id, &fixture.workspace)
+        .unwrap_or_else(|error| panic!("checkpoint restore failed: {error:?}"));
     assert_eq!(git(&fixture.workspace, &["rev-parse", "HEAD"]), head);
     assert_eq!(git(&fixture.workspace, &["rev-parse", "main"]), main_branch);
     assert_eq!(git(&peer, &["rev-parse", "HEAD"]), peer_head);
@@ -770,7 +771,8 @@ fn stale_private_git_locks_are_captured_and_replaced_without_blocking_repair() {
 fn gitfile_cannot_redirect_snapshot_authority_to_an_unrelated_repository() {
     let fixture = Fixture::new();
     fixture.initialize_git();
-    let selected = capture(&fixture.workspace, &fixture.snapshots, &()).assert_value();
+    let selected = capture(&fixture.workspace, &fixture.snapshots, &())
+        .unwrap_or_else(|error| panic!("checkpoint capture failed: {error:?}"));
     fs::rename(
         fixture.workspace.join(".git"),
         fixture._root.path().join("original-admin"),
