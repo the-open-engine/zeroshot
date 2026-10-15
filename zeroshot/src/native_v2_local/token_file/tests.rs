@@ -14,16 +14,22 @@ fn fixture() -> (
 }
 
 #[test]
-fn token_file_capture_resolves_invoking_directory_and_removes_provider_controls() {
-    let (root, workspace, mut environment) = fixture();
-    let (token, file) =
-        take_github_authority(&mut environment, None, root.path(), &workspace).unwrap();
-    assert!(token.is_none());
-    assert_eq!(
-        file.unwrap().path(),
-        root.path().canonicalize().unwrap().join("renewed-token")
-    );
-    assert!(environment.is_empty());
+fn token_file_capture_resolves_caller_paths_and_removes_provider_controls() {
+    for absolute in [false, true] {
+        let (root, workspace, mut environment) = fixture();
+        let expected = root.path().canonicalize().unwrap().join("renewed-token");
+        if absolute {
+            environment.insert(
+                GITHUB_TOKEN_FILE_ENV.to_owned(),
+                expected.to_str().unwrap().to_owned(),
+            );
+        }
+        let (token, file) =
+            take_github_authority(&mut environment, None, root.path(), &workspace).unwrap();
+        assert!(token.is_none());
+        assert_eq!(file.unwrap().path(), expected);
+        assert!(environment.is_empty());
+    }
 }
 
 #[test]
@@ -172,4 +178,40 @@ fn provider_context_excludes_delivery_controls_without_creating_capabilities() {
         3,
         "the caller snapshot remains owned by the caller"
     );
+}
+
+#[test]
+fn caller_validation_checks_explicit_credentials_before_file_mode_capture() {
+    for (token, accepted) in [
+        ("explicit-token", true),
+        ("", false),
+        ("bad token", false),
+        ("line\nbreak", false),
+    ] {
+        let caller = BTreeMap::from([
+            (GITHUB_TOKEN_FILE_ENV, OsString::from("/private/token")),
+            ("GH_TOKEN", OsString::from(token)),
+        ]);
+        assert_eq!(
+            validate_caller_authority(|name| caller.get(name).cloned()).is_ok(),
+            accepted
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        let caller = BTreeMap::from([
+            (GITHUB_TOKEN_FILE_ENV, OsString::from("/private/token")),
+            ("GH_TOKEN", OsString::from_vec(vec![0xff])),
+        ]);
+        assert!(validate_caller_authority(|name| caller.get(name).cloned()).is_err());
+    }
+}
+
+#[test]
+fn empty_file_control_fails_closed_without_leaking_to_provider_context() {
+    let (root, workspace, mut environment) = fixture();
+    environment.insert(GITHUB_TOKEN_FILE_ENV.to_owned(), String::new());
+    assert!(take_github_authority(&mut environment, None, root.path(), &workspace).is_err());
+    assert!(environment.is_empty());
 }

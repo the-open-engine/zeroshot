@@ -94,6 +94,39 @@ mod subprocess {
     }
 
     #[tokio::test]
+    async fn pre_cancelled_validation_never_launches_the_private_executable() {
+        let (root, validator) = fixture("printf launched > \"$0.started\"");
+        let (signal, cancel) = cancellation();
+        signal.send(true).unwrap();
+        assert!(matches!(
+            validator.validate(request(), cancel).await,
+            Err(NodeRunnerError::Cancelled)
+        ));
+        validator.drain().await.unwrap();
+        assert!(!root.path().join("validator.sh.started").exists());
+    }
+
+    #[tokio::test]
+    async fn missing_interpreter_is_a_definite_launch_failure_without_private_path_output() {
+        let (_root, validator) = fixture("exit 0");
+        write_executable(
+            validator.path(),
+            "#!/zeroshot-test-missing-interpreter\n",
+            0o700,
+        )
+        .unwrap();
+        let error = run(&validator).await.unwrap_err();
+        assert!(matches!(error, NodeRunnerError::DriverDetail(_)));
+        assert!(error.to_string().contains("could not be started"));
+        assert!(
+            !error
+                .to_string()
+                .contains(validator.path().to_str().unwrap())
+        );
+        validator.drain().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn private_executable_gets_candidate_facts_without_ambient_credentials() {
         let (root, validator) = fixture(
             "/bin/cat > \"$0.request\"\n/usr/bin/env > \"$0.environment\"\nprintf '{\"verdict\":\"accepted\"}'",

@@ -493,3 +493,61 @@ async fn completed_transient_enqueues_retry_without_discarding_withdrawal_uncert
         assert_eq!(args.contains("dequeuePullRequest"), accepted);
     }
 }
+
+#[tokio::test]
+async fn malformed_or_truncated_queue_output_is_redacted_and_never_resubmitted() {
+    for (action, diagnostic) in [
+        ("printf 'not-json test-token'", "invalid JSON"),
+        (
+            "/bin/dd if=/dev/zero bs=65536 count=32 2>/dev/null",
+            "byte bound",
+        ),
+    ] {
+        let root = tempfile::tempdir().assert_value();
+        let provider = admission(root.path(), action);
+        for _ in 0..2 {
+            let error = provider
+                .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+                .await
+                .assert_error();
+            assert!(error.to_string().contains(diagnostic), "{error}");
+            assert!(!error.to_string().contains("test-token"));
+            assert!(!error.retryable_operation());
+        }
+        let args = std::fs::read_to_string(root.path().join("mutations")).assert_value();
+        assert_eq!(args.matches("expectedHeadOid=").count(), 1);
+        provider
+            .withdraw_merge_request(&review(), SourceDeliveryCredential::token("test-token"))
+            .await
+            .assert_error();
+    }
+}
+
+#[tokio::test]
+async fn rejected_dequeue_keeps_the_live_candidate_under_delivery_authority() {
+    for status in [401, 403] {
+        let root = tempfile::tempdir().assert_value();
+        let refusal = format!("printf 'HTTP {status}: queue withdrawal refused\\n' >&2; exit 1");
+        let provider = queue_authority(
+            root.path(),
+            &[queued(true, false)],
+            &[("dequeuePullRequest", &refusal)],
+        );
+        let error = provider
+            .withdraw_merge_request(&review(), SourceDeliveryCredential::token("test-token"))
+            .await
+            .assert_error();
+        assert_eq!(
+            (
+                error.api_status(),
+                error.authentication_failed(),
+                error.retryable_operation()
+            ),
+            (Some(status), status == 401, false)
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("reads")).assert_value(),
+            "2"
+        );
+    }
+}

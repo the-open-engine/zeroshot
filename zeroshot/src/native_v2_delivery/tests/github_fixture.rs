@@ -16,6 +16,8 @@ pub(in crate::native_v2_delivery) enum Script {
     QueuedFeedbackWithdrawalFails,
     QueuedMergeRace,
     QueuedWithdrawalCleanup,
+    QueuedWithdrawalCredentialExpires,
+    QueuedInvalidMergeRevision,
     Feedback,
     FeedbackReadTransient,
     FeedbackTooLarge,
@@ -73,9 +75,9 @@ pub(in crate::native_v2_delivery) struct FakeGitHub {
     pub(super) pushed: AtomicBool,
     merge_requested: AtomicBool,
     pub(super) merge_requests: AtomicUsize,
-    pub(super) queue_live: AtomicBool,
+    pub(in crate::native_v2_delivery) queue_live: AtomicBool,
     pub(super) withdrawal_allowed: AtomicBool,
-    pub(super) withdrawn_reviews: Mutex<Vec<SourceReviewReceipt>>,
+    pub(in crate::native_v2_delivery) withdrawn_reviews: Mutex<Vec<SourceReviewReceipt>>,
     pub(super) head_updates: AtomicUsize,
     pub(super) head_sync_attempts: AtomicUsize,
     pub(super) inspections: AtomicUsize,
@@ -121,6 +123,8 @@ impl FakeGitHub {
             | Script::QueuedWithdrawalFails
             | Script::QueuedMergeRace
             | Script::QueuedWithdrawalCleanup
+            | Script::QueuedWithdrawalCredentialExpires
+            | Script::QueuedInvalidMergeRevision
             | Script::Feedback
             | Script::FeedbackReadTransient
             | Script::FeedbackTooLarge
@@ -181,6 +185,8 @@ impl FakeGitHub {
                 | Script::QueuedFeedbackWithdrawalFails
                 | Script::QueuedMergeRace
                 | Script::QueuedWithdrawalCleanup
+                | Script::QueuedWithdrawalCredentialExpires
+                | Script::QueuedInvalidMergeRevision
         )
     }
 
@@ -685,11 +691,16 @@ impl SourceDeliveryAuthority for FakeGitHub {
     async fn withdraw_merge_request(
         &self,
         review: &SourceReviewReceipt,
-        _credential: SourceDeliveryCredential<'_>,
+        credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceMergeWithdrawal, SourceDeliveryError> {
         self.withdrawn_reviews.lock().unwrap().push(review.clone());
         if !self.queue_live.load(Ordering::SeqCst) {
             return Ok(SourceMergeWithdrawal::Withdrawn);
+        }
+        if matches!(self.script, Script::QueuedWithdrawalCredentialExpires)
+            && credential.expose() != "refreshed-token"
+        {
+            return Err(SourceDeliveryError::api(Some(401), "expired test-token"));
         }
         if !self.withdrawal_allowed.load(Ordering::SeqCst) {
             return Err(SourceDeliveryError::api(
@@ -713,9 +724,16 @@ impl SourceDeliveryAuthority for FakeGitHub {
             })));
         }
         self.queue_live.store(false, Ordering::SeqCst);
-        if matches!(self.script, Script::QueuedMergeRace) {
+        if matches!(
+            self.script,
+            Script::QueuedMergeRace | Script::QueuedInvalidMergeRevision
+        ) {
             return Ok(SourceMergeWithdrawal::Merged {
-                merge_revision: "c".repeat(40),
+                merge_revision: if matches!(self.script, Script::QueuedInvalidMergeRevision) {
+                    "invalid-remote-revision".to_owned()
+                } else {
+                    "c".repeat(40)
+                },
             });
         }
         Ok(SourceMergeWithdrawal::Withdrawn)
