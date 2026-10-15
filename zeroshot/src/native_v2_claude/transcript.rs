@@ -75,6 +75,9 @@ struct PendingText {
 
 impl PendingText {
     fn push(&mut self, stream: LiveOutputStream, text: &str) {
+        if text.is_empty() {
+            return;
+        }
         self.text.push_str(text);
         match self.parts.last_mut() {
             Some((last, end)) if self.open && *last == stream => *end = self.text.len(),

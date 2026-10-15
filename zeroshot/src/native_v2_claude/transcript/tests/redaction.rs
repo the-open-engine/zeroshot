@@ -178,3 +178,59 @@ fn held_text_is_published_when_the_turn_ends() {
         [(LiveOutputStream::Output, "token sk-test-")]
     );
 }
+
+#[test]
+fn empty_streamed_blocks_do_not_accumulate_held_parts() {
+    let mut transcript = redacting();
+    assert!(push_events(&mut transcript, vec![text("token sk-test-"), block_stop()]).is_empty());
+    for _ in 0..1_024 {
+        assert!(
+            push_events(
+                &mut transcript,
+                vec![text(""), block_stop(), thinking(""), block_stop()],
+            )
+            .is_empty()
+        );
+    }
+    assert_eq!(transcript.pending.text, "token sk-test-");
+    assert_eq!(transcript.pending.parts.len(), 1);
+    let emissions = push_events(
+        &mut transcript,
+        vec![text("0123456789abcdef ok"), block_stop()],
+    );
+    assert_eq!(
+        emitted(&emissions),
+        [
+            (LiveOutputStream::Output, "token "),
+            (LiveOutputStream::Output, "[REDACTED] ok"),
+        ]
+    );
+}
+
+#[test]
+fn empty_assistant_blocks_do_not_accumulate_held_parts() {
+    let mut content = vec![json!({"type":"text","text":"token sk-test-"})];
+    content.extend((0..1_024).map(|_| json!({"type":"text","text":""})));
+    let mut transcript = redacting();
+    let event = json!({"type":"assistant","message":{"content":content}});
+    assert!(push_events(&mut transcript, vec![event]).is_empty());
+    assert_eq!(transcript.pending.text, "token sk-test-");
+    assert_eq!(transcript.pending.parts.len(), 1);
+    assert_eq!(
+        emitted(&transcript.finish_stream()),
+        [(LiveOutputStream::Output, "token sk-test-")]
+    );
+
+    content.push(json!({"type":"text","text":"0123456789abcdef ok"}));
+    let emissions = push_events(
+        &mut redacting(),
+        vec![json!({"type":"assistant","message":{"content":content}})],
+    );
+    assert_eq!(
+        emitted(&emissions),
+        [
+            (LiveOutputStream::Output, "token "),
+            (LiveOutputStream::Output, "[REDACTED] ok"),
+        ]
+    );
+}
