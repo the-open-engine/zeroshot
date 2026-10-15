@@ -183,8 +183,8 @@ fn help_explains_delivery_authentication_and_local_run_safety() {
     assert_prose(
         &run,
         &[
-            "when --target is omitted",
-            "selected local folder",
+            "local runs use --cwd or the invoking folder",
+            "local workspaces must not overlap zeroshot state",
             "--cwd",
             "--source-connection",
             "credential-free https/ssh git url",
@@ -196,9 +196,11 @@ fn help_explains_delivery_authentication_and_local_run_safety() {
             "during observation, ctrl-c detaches without stopping the run",
             "--ship",
             "materialize merge delivery for the software-change template",
-            "named-target runs send gh_token",
-            "source checkout and git delivery",
-            "providers receive it only when the runtime declares gh_token",
+            "named targets require a committed git source",
+            "pr/merge also require a supported forge",
+            "named connection for git checkout and push",
+            "https uses git_username and git_password",
+            "ssh uses git_ssh_private_key and git_ssh_known_hosts",
         ],
     );
 
@@ -208,7 +210,8 @@ fn help_explains_delivery_authentication_and_local_run_safety() {
         &[
             "--target",
             "if omitted, run locally",
-            "named targets receive gh_token when set",
+            "--cwd",
+            "--source-connection",
         ],
     );
 
