@@ -814,6 +814,75 @@ async fn failed_detach_keeps_the_accepted_answer() {
 }
 
 #[tokio::test]
+async fn closed_input_after_an_accepted_answer_keeps_the_outcome() {
+    for mode in ["closed_input", "closed_input_exit"] {
+        let fixture = Fixture::new(mode).await;
+        let (events, outcome) = complete(fixture.start(1).await).await;
+        verified(outcome);
+        let errors = error_output(&events);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("session detach failed after the accepted answer"));
+        assert_eq!(
+            fixture
+                .capture()
+                .iter()
+                .filter(|message| message["method"] == "session.send")
+                .count(),
+            1
+        );
+    }
+}
+
+#[tokio::test]
+async fn detach_keeps_response_validation_and_protocol_failures_fatal() {
+    for (mode, expected) in [
+        ("closed_input_invalid", "Copilot process failed"),
+        ("closed_input_truncated", "stream ended inside a message"),
+        (
+            "detach_invalid_version",
+            "Copilot JSON-RPC version is invalid",
+        ),
+        (
+            "detach_invalid_id",
+            "Copilot RPC response identity is unexpected",
+        ),
+        (
+            "detach_missing_result",
+            "Copilot RPC response must contain exactly one result or error",
+        ),
+        (
+            "detach_missing_success",
+            "Copilot session detach result is invalid",
+        ),
+        (
+            "detach_invalid_success",
+            "Copilot session detach result is invalid",
+        ),
+        ("detach_invalid_error", "Copilot RPC error is invalid"),
+        ("detach_invalid_error_code", "Copilot RPC error is invalid"),
+        (
+            "detach_result_and_error",
+            "Copilot RPC response must contain exactly one result or error",
+        ),
+        (
+            "detach_invalid_event_session",
+            "Copilot event session identity is unexpected",
+        ),
+        (
+            "detach_invalid_usage",
+            "Copilot token usage is invalid or out of range",
+        ),
+    ] {
+        let fixture = Fixture::new(mode).await;
+        let (_, outcome) = complete(fixture.start(1).await).await;
+        assert!(
+            matches!(&outcome, Err(NodeRunnerError::DriverDetail(detail)) if detail.contains(expected)),
+            "{outcome:?}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn validation_errors_keep_the_explanation_and_redact_credentials() {
     for mode in ["validation_secret", "validation_secret_long"] {
         let fixture = Fixture::new(mode).await;

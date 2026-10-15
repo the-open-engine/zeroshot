@@ -228,7 +228,7 @@ while (message := read()) is not None:
         if mode == "duplex":
             for _ in range(80):
                 event("future.event", {"padding": "x" * 1048576})
-        answer = "invalid" if mode == "malformed" or (mode == "correction" and turn == 1) else 42
+        answer = "invalid" if mode in ("malformed", "closed_input_invalid") or (mode == "correction" and turn == 1) else 42
         response = {"response": {"answer": answer}}
         if mode in ("validation_secret", "validation_secret_long"):
             padding = ""
@@ -239,6 +239,24 @@ while (message := read()) is not None:
         event("assistant.message", {"content": json.dumps(response)})
         result = {"messageId": "message"}
     elif method == "session.detach":
+        invalid = {
+            "detach_invalid_version": {"jsonrpc": "1.0", "id": message["id"], "result": {"success": True}},
+            "detach_invalid_id": {"id": 9999, "result": {"success": True}},
+            "detach_missing_result": {"id": message["id"]},
+            "detach_missing_success": {"id": message["id"], "result": {}},
+            "detach_invalid_success": {"id": message["id"], "result": {"success": "true"}},
+            "detach_invalid_error": {"id": message["id"], "error": {"code": -32601}},
+            "detach_invalid_error_code": {"id": message["id"], "error": {"code": "-32601", "message": "refused"}},
+            "detach_result_and_error": {"id": message["id"], "result": {"success": True},
+                "error": {"code": -32601, "message": "refused"}},
+            "detach_invalid_event_session": {"method": "session.event", "params": {"sessionId": "wrong",
+                "event": {"type": "assistant.usage", "data": {"inputTokens": 1, "outputTokens": 1}}}},
+            "detach_invalid_usage": {"method": "session.event", "params": {"sessionId": session,
+                "event": {"type": "assistant.usage", "data": {"inputTokens": "invalid", "outputTokens": 1}}}},
+        }
+        if mode in invalid:
+            send(invalid[mode])
+            continue
         if mode == "detach_unhandled":
             send({"id": message["id"], "error": {
                 "code": -32601, "message": "Unhandled method session.detach"}})
@@ -246,4 +264,18 @@ while (message := read()) is not None:
         result = {"success": mode != "detach_refused"}
     else:
         raise AssertionError(method)
+    if method == "session.send" and mode.startswith("closed_input"):
+        # Closing before the acknowledgement makes the next write fail deterministically.
+        # The complete response remains valid and can be accepted without reading stdin again.
+        os.close(sys.stdin.fileno())
+        reply = {"id": message["id"], "result": result}
+        if mode == "closed_input_truncated":
+            sys.stdout.buffer.write(frame(reply) + b"Content-Length: 20\r\n\r\n{")
+            sys.stdout.buffer.flush()
+        else:
+            send(reply)
+        if mode == "closed_input_exit":
+            break
+        time.sleep(60)
+        continue
     send({"id": message["id"], "result": result})

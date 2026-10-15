@@ -28,7 +28,7 @@ fn coverage_contract_rpc_request_ids_are_bounded_and_never_reused_after_overflow
 }
 
 #[test]
-fn coverage_contract_rpc_responses_validate_identity_error_precedence_and_result_presence() {
+fn coverage_contract_rpc_responses_validate_identity_error_shape_and_result_presence() {
     let mut pending = BTreeSet::from([1, 2, 3]);
     assert!(resolve_response_message(&mut pending, &json!({}), 1).is_err());
     assert!(resolve_response_message(&mut pending, &json!({"id": 9, "result": {}}), 1).is_err());
@@ -40,7 +40,7 @@ fn coverage_contract_rpc_responses_validate_identity_error_precedence_and_result
         )
         .assert_error()
         .to_string()
-        .contains("refused")
+        .contains("exactly one result or error")
     );
     assert!(resolve_response_message(&mut pending, &json!({"id": 2}), 2).is_err());
     assert_eq!(
@@ -54,8 +54,22 @@ fn coverage_contract_rpc_responses_validate_identity_error_precedence_and_result
     assert_eq!(
         resolve_response_message(&mut expected, &json!({"id": 7, "result": {"ok": true}}), 7,)
             .assert_value(),
-        Some(json!({"ok": true}))
+        Some(RpcReply::Result(json!({"ok": true})))
     );
+
+    let mut refused = BTreeSet::from([8]);
+    assert_eq!(
+        resolve_response_message(
+            &mut refused,
+            &json!({"id": 8, "error": {"code": -32601, "message": "refused"}}),
+            8,
+        )
+        .assert_value(),
+        Some(RpcReply::Error("refused".to_owned()))
+    );
+    for error in [json!({"message": "refused"}), json!({"code": -32601})] {
+        assert!(response_payload(&json!({"error": error})).is_err());
+    }
 }
 
 #[test]
@@ -114,8 +128,11 @@ fn coverage_contract_rpc_protocol_session_and_dispatch_decisions_fail_closed() {
     validate_session_identity(&json!({"sessionId": "expected"}), "expected").assert_value();
     assert!(validate_session_identity(&json!({}), "expected").is_err());
     assert!(validate_session_identity(&json!({"sessionId": "other"}), "expected").is_err());
-    validate_detach(&json!({"success": true})).assert_value();
-    assert!(validate_detach(&json!({"success": false})).is_err());
+    assert!(validate_detach(&json!({"success": true})).assert_value());
+    assert!(!validate_detach(&json!({"success": false})).assert_value());
+    for result in [json!({}), json!({"success": "true"}), json!(null)] {
+        assert!(validate_detach(&result).is_err());
+    }
 
     for (message, expected) in [
         (json!({"method": "session.event"}), DispatchAction::Event),

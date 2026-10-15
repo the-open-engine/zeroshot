@@ -23,6 +23,23 @@ pub(super) fn process_error(error: ProcessRunnerError) -> NodeRunnerError {
     failure(format!("Copilot process failed: {error}"))
 }
 
+#[derive(Debug, PartialEq)]
+enum RpcReply {
+    Result(Value),
+    Error(String),
+    Ended,
+}
+
+impl RpcReply {
+    fn into_value(self, method: &str) -> Result<Value, NodeRunnerError> {
+        match self {
+            Self::Result(value) => Ok(value),
+            Self::Error(message) => Err(failure(format!("Copilot RPC failed: {message}"))),
+            Self::Ended => Err(request_ended(method)),
+        }
+    }
+}
+
 pub(super) async fn write_messages(
     process: &ProviderProcess,
     mut receiver: mpsc::Receiver<Value>,
@@ -33,17 +50,26 @@ pub(super) async fn write_messages(
         if body.len() > super::framing::MAX_BODY {
             return Err(failure("Copilot RPC request exceeds 64 MiB"));
         }
-        let header = format!("Content-Length: {}\r\n\r\n", body.len());
-        process
-            .send(ProcessFrame::new(header.into_bytes()).map_err(process_error)?)
-            .await
-            .map_err(process_error)?;
-        for chunk in body.chunks(MAX_PROCESS_MESSAGE_BYTES) {
-            process
-                .send(ProcessFrame::new(chunk.to_vec()).map_err(process_error)?)
-                .await
-                .map_err(process_error)?;
+        let written = write_body(process, &body).await;
+        match written {
+            Err(ProcessRunnerError::Io(_)) if message["method"] == "session.detach" => {
+                // Detach is queued only after acceptance. ProcessSession owns pipe-failure
+                // cleanup; let RPC observe EOF and report the non-fatal detach failure.
+                return Ok(());
+            }
+            result => result.map_err(process_error)?,
         }
+    }
+    Ok(())
+}
+
+async fn write_body(process: &ProviderProcess, body: &[u8]) -> Result<(), ProcessRunnerError> {
+    let header = format!("Content-Length: {}\r\n\r\n", body.len());
+    process
+        .send(ProcessFrame::new(header.into_bytes())?)
+        .await?;
+    for chunk in body.chunks(MAX_PROCESS_MESSAGE_BYTES) {
+        process.send(ProcessFrame::new(chunk.to_vec())?).await?;
     }
     Ok(())
 }
@@ -152,19 +178,23 @@ impl<'a> CopilotRpc<'a> {
     /// Detaching only releases a session whose answer is already accepted. Older protocol-3 CLIs
     /// such as 1.0.70 lack the method, so a provider failure is reported and the outcome is kept.
     async fn detach(&mut self) -> Result<(), NodeRunnerError> {
-        let detached = self
-            .request("session.detach", json!({"sessionId":self.session_id}))
-            .await
-            .and_then(|detached| validate_detach(&detached));
-        match detached {
-            Err(NodeRunnerError::DriverDetail(detail)) => {
-                let error = failure(format!(
-                    "session detach failed after the accepted answer: {detail}"
-                ));
-                report_provider_error("Copilot", &error, &self.redactions, self.control).await
+        let reply = self
+            .request_reply("session.detach", json!({"sessionId":self.session_id}))
+            .await?;
+        let detail = match reply {
+            RpcReply::Result(detached) => {
+                if validate_detach(&detached)? {
+                    return Ok(());
+                }
+                "Copilot session could not be detached".to_owned()
             }
-            result => result,
-        }
+            RpcReply::Error(message) => format!("Copilot RPC failed: {message}"),
+            RpcReply::Ended => "Copilot exited before replying to session.detach".to_owned(),
+        };
+        let error = failure(format!(
+            "session detach failed after the accepted answer: {detail}"
+        ));
+        report_provider_error("Copilot", &error, &self.redactions, self.control).await
     }
 
     async fn connect(&mut self) -> Result<(), NodeRunnerError> {
@@ -239,23 +269,25 @@ impl<'a> CopilotRpc<'a> {
     }
 
     async fn request(&mut self, method: &str, params: Value) -> Result<Value, NodeRunnerError> {
+        self.request_reply(method, params).await?.into_value(method)
+    }
+
+    async fn request_reply(
+        &mut self,
+        method: &str,
+        params: Value,
+    ) -> Result<RpcReply, NodeRunnerError> {
         let expected = self.send_request(method, params)?;
         while let Some(message) = self.next().await? {
             if message.get("method").is_some() {
                 self.dispatch(&message).await?;
-            } else if let Some(result) = self.response_message(&message, expected)? {
-                return Ok(result);
+            } else if let Some(reply) =
+                resolve_response_message(&mut self.pending, &message, expected)?
+            {
+                return Ok(reply);
             }
         }
-        Err(request_ended(method))
-    }
-
-    fn response_message(
-        &mut self,
-        message: &Value,
-        expected: u64,
-    ) -> Result<Option<Value>, NodeRunnerError> {
-        resolve_response_message(&mut self.pending, message, expected)
+        Ok(RpcReply::Ended)
     }
 
     async fn dispatch(&mut self, message: &Value) -> Result<(), NodeRunnerError> {
@@ -371,10 +403,10 @@ fn validate_session_identity(created: &Value, expected: &str) -> Result<(), Node
         .ok_or_else(|| failure("Copilot returned a different session identity"))
 }
 
-fn validate_detach(detached: &Value) -> Result<(), NodeRunnerError> {
-    (detached["success"].as_bool() == Some(true))
-        .then_some(())
-        .ok_or_else(|| failure("Copilot session could not be detached"))
+fn validate_detach(detached: &Value) -> Result<bool, NodeRunnerError> {
+    detached["success"]
+        .as_bool()
+        .ok_or_else(|| failure("Copilot session detach result is invalid"))
 }
 
 fn request_ended(method: &str) -> NodeRunnerError {
@@ -403,23 +435,32 @@ fn resolve_response_message(
     pending: &mut BTreeSet<u64>,
     message: &Value,
     expected: u64,
-) -> Result<Option<Value>, NodeRunnerError> {
+) -> Result<Option<RpcReply>, NodeRunnerError> {
     let id = message["id"]
         .as_u64()
         .ok_or_else(|| failure("Copilot RPC response has no valid identity"))?;
     if !pending.remove(&id) {
         return Err(failure("Copilot RPC response identity is unexpected"));
     }
-    if let Some(error) = message.get("error") {
-        return Err(failure(format!(
-            "Copilot RPC failed: {}",
-            error["message"].as_str().unwrap_or("unknown error")
-        )));
+    let reply = response_payload(message)?;
+    if id == expected {
+        return Ok(Some(reply));
     }
-    let result = message
-        .get("result")
-        .ok_or_else(|| failure("Copilot RPC response has no result"))?;
-    Ok((id == expected).then(|| result.clone()))
+    reply.into_value("outstanding request")?;
+    Ok(None)
+}
+
+fn response_payload(message: &Value) -> Result<RpcReply, NodeRunnerError> {
+    match (message.get("result"), message.get("error")) {
+        (Some(result), None) => Ok(RpcReply::Result(result.clone())),
+        (None, Some(error)) => match (error["code"].as_i64(), error["message"].as_str()) {
+            (Some(_), Some(message)) => Ok(RpcReply::Error(message.to_owned())),
+            _ => Err(failure("Copilot RPC error is invalid")),
+        },
+        _ => Err(failure(
+            "Copilot RPC response must contain exactly one result or error",
+        )),
+    }
 }
 
 fn append_stderr_detail(
