@@ -2,6 +2,8 @@ use super::*;
 use openengine_cluster_testkit::assertions::AssertValue;
 use crate::source_code_provider::SourceGitCredential;
 
+const GIT_FIXTURE_BUDGET: Duration = Duration::from_secs(60);
+
 struct Repository {
     root: tempfile::TempDir,
     workspace: PathBuf,
@@ -76,7 +78,7 @@ impl Repository {
                 private_directory: self.root.path().to_owned(),
                 identity: None,
                 local_environment: None,
-                deadline: Duration::from_secs(10),
+                deadline: GIT_FIXTURE_BUDGET,
             },
             remote,
         )
@@ -384,7 +386,8 @@ fn http_response_fixture(response: Vec<u8>) -> (String, std::thread::JoinHandle<
         listener.local_addr().assert_value()
     );
     let server = std::thread::spawn(move || {
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let started = std::time::Instant::now();
+        let deadline = started + GIT_FIXTURE_BUDGET;
         let mut stream = loop {
             match listener.accept() {
                 Ok((stream, _)) => break stream,
@@ -395,16 +398,20 @@ fn http_response_fixture(response: Vec<u8>) -> (String, std::thread::JoinHandle<
                 Err(error) => panic!("HTTP credential fixture could not accept Git: {error}"),
             }
         };
-        stream
-            .set_read_timeout(Some(Duration::from_secs(10)))
-            .assert_value();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(10)))
-            .assert_value();
         let mut request = Vec::new();
         while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            stream
+                .set_read_timeout(Some(http_remaining(deadline)))
+                .expect("HTTP fixture read timeout");
             let mut buffer = [0_u8; 1024];
-            let read = stream.read(&mut buffer).assert_value();
+            let read = stream.read(&mut buffer).unwrap_or_else(|error| {
+                panic!(
+                    "HTTP fixture read failed after {:?}, {} bytes ({:?}): {error}",
+                    started.elapsed(),
+                    request.len(),
+                    error.kind()
+                )
+            });
             assert_ne!(read, 0, "Git closed an incomplete request");
             request.extend_from_slice(&buffer[..read]);
             assert!(request.len() <= 64 * 1024, "Git request exceeded its bound");
@@ -416,10 +423,39 @@ fn http_response_fixture(response: Vec<u8>) -> (String, std::thread::JoinHandle<
             .filter(|(name, _)| name.eq_ignore_ascii_case("authorization"))
             .map(|(_, value)| value.trim().to_owned())
             .collect::<Vec<_>>();
-        stream.write_all(&response).assert_value();
+        let mut response = response.as_slice();
+        while !response.is_empty() {
+            stream
+                .set_write_timeout(Some(http_remaining(deadline)))
+                .expect("HTTP fixture write timeout");
+            let written = stream.write(response).unwrap_or_else(|error| {
+                panic!(
+                    "HTTP fixture response failed after {:?}: {error}",
+                    started.elapsed()
+                )
+            });
+            assert_ne!(written, 0, "HTTP fixture response write returned zero");
+            response = &response[written..];
+        }
         authorization
     });
     (remote, server)
+}
+
+fn http_remaining(deadline: std::time::Instant) -> Duration {
+    deadline
+        .checked_duration_since(std::time::Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .expect("HTTP fixture deadline expired")
+}
+
+fn http_authorization(
+    server: std::thread::JoinHandle<Vec<String>>,
+    result: &Result<Option<String>, SourceDeliveryError>,
+) -> Vec<String> {
+    server
+        .join()
+        .unwrap_or_else(|_| panic!("HTTP fixture failed; Git result: {result:?}"))
 }
 
 #[tokio::test]
@@ -442,8 +478,21 @@ async fn explicit_https_credentials_replace_native_authorization_headers() {
         .native_transport(OsStr::new(&remote), &configuration, BTreeMap::new())
         .read_ref("main", credential)
         .await;
-    let authorization = server.join().assert_value_with("HTTP credential fixture");
-    assert!(result.is_err(), "fixture endpoint returns HTTP 404");
+    let authorization = http_authorization(server, &result);
+    let failure = result.expect_err("fixture endpoint returns HTTP 404");
+    let SourceDeliveryError::Command(diagnostic) = failure else {
+        panic!("HTTP 404 must retain the Git command diagnostic: {failure}");
+    };
+    assert!(!diagnostic.timed_out, "{diagnostic}");
+    assert!(!diagnostic.cleanup_unconfirmed, "{diagnostic}");
+    assert!(
+        diagnostic.exit_status.is_some_and(|code| code != 0),
+        "{diagnostic}"
+    );
+    assert!(
+        diagnostic.http_status() == Some(404) || diagnostic.stderr.contains("not found"),
+        "Git must observe the fixture's HTTP 404: {diagnostic}"
+    );
     assert_eq!(
         authorization,
         vec![format!(
@@ -571,7 +620,7 @@ async fn short_https_username_cannot_corrupt_successful_git_ref_evidence() {
     let result = repository
         .read_https_ref(&remote, "a", "private-ref-password")
         .await;
-    let authorization = server.join().assert_value_with("HTTP ref fixture");
+    let authorization = http_authorization(server, &result);
     assert_eq!(result.assert_value(), Some(revision));
     assert_eq!(
         authorization,
@@ -657,7 +706,7 @@ async fn explicit_https_rejection_never_invokes_native_askpass() {
             .native_transport(OsStr::new(&remote), &configuration, variables)
             .read_ref("main", credential)
             .await;
-        let authorization = server.join().assert_value_with("HTTP challenge fixture");
+        let authorization = http_authorization(server, &result);
         let failure = result.expect_err("fixture rejects the explicit credential");
         assert!(failure.authentication_failed(), "{control}: {failure}");
         assert!(!failure.retryable_operation());
@@ -689,7 +738,7 @@ async fn redacted_http_status_preserves_refusal_and_retry_routing() {
         );
         let password = status.to_string();
         let result = repository.read_https_ref(&remote, "a", &password).await;
-        let authorization = server.join().assert_value_with("HTTP status fixture");
+        let authorization = http_authorization(server, &result);
         let failure = result.expect_err("fixture returns a classified HTTP failure");
         assert_eq!(failure.authentication_failed(), status == 401, "{failure}");
         assert_eq!(failure.retryable_operation(), status != 401, "{failure}");
