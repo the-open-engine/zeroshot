@@ -19,6 +19,18 @@ impl ValidationHarness {
         )
     }
 
+    fn at_stage(stage: &str, response: &str) -> Self {
+        Self::new(
+            Script::NoCi,
+            &format!(
+                r#"case "$request" in
+    *'"stage":"{stage}"'*) printf '%s' '{response}' ;;
+    *) printf '%s' '{{"verdict":"accepted"}}' ;;
+esac"#,
+            ),
+        )
+    }
+
     fn with_poll(script: Script, body: &str, poll: DeliveryPollPolicy) -> Self {
         let repo = TempRepo::delivery();
         let private = tempfile::tempdir().unwrap();
@@ -85,6 +97,14 @@ impl ValidationHarness {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    fn assert_published_without_merge(&self) -> SourceReviewRequest {
+        let mut published = self.authority.review_requests();
+        assert_eq!(published.len(), 1);
+        assert!(self.authority.pushed.load(Ordering::SeqCst));
+        assert_eq!(self.authority.merge_requests.load(Ordering::SeqCst), 0);
+        published.remove(0)
     }
 
     fn assert_no_publication(&self) {
@@ -213,9 +233,7 @@ printf '{"verdict":"accepted"}'"#,
         outcome,
         WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
     );
-    assert!(harness.authority.pushed.load(Ordering::SeqCst));
-    assert_eq!(harness.authority.review_requests().len(), 1);
-    assert_eq!(harness.authority.merge_requests.load(Ordering::SeqCst), 0);
+    harness.assert_published_without_merge();
     let receipt: Value = serde_json::from_slice(&fs::read(harness.sidecar(".published")).unwrap())
         .expect("published callback must run before the unavailable policy read");
     assert_eq!(receipt["reviewId"], "17");
@@ -440,4 +458,162 @@ async fn pending_publication_validation_honors_the_callers_finite_poll_policy() 
         timed_out,
         "missing publication validation timeout diagnostic"
     );
+}
+
+#[tokio::test]
+async fn trusted_post_publication_repair_retains_the_published_receipt_without_merging() {
+    for stage in ["published", "review", "merge"] {
+        let harness = ValidationHarness::at_stage(
+            stage,
+            r#"{"verdict":"repair","reason":"Recheck the current regression evidence"}"#,
+        );
+        let outcome = harness.run().await.unwrap();
+        let receipt = assert_delivery_signal(&outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+        assert!(outcome_diagnostic(&outcome).contains("Recheck the current regression evidence"));
+        let published = harness.assert_published_without_merge();
+        assert_eq!(receipt["pullRequestId"], "17");
+        assert_eq!(receipt["repository"], published.target.repository);
+        assert_eq!(receipt["targetBranch"], published.target.target_branch);
+        assert_eq!(receipt["headRevision"], published.head_revision);
+        assert_eq!(receipt["mergeRevision"], "");
+        let requests = harness.requests();
+        let rejected = requests.last().unwrap();
+        assert_eq!(rejected["stage"], stage);
+        assert_eq!(rejected["reviewId"], "17");
+        assert_eq!(rejected["headRevision"], receipt["headRevision"]);
+        assert_eq!(rejected["tree"], requests[0]["tree"]);
+        harness.assert_private_exchange();
+    }
+}
+
+#[tokio::test]
+async fn trusted_post_publication_refusal_stops_without_agent_repair_or_merge() {
+    for stage in ["published", "review", "merge"] {
+        let harness = ValidationHarness::at_stage(
+            stage,
+            r#"{"verdict":"refused","reason":"Backlog evidence no longer authorizes this fix"}"#,
+        );
+        let outcome = harness.run().await;
+        assert!(
+            matches!(outcome, Err(NodeRunnerError::DriverDetail(ref reason))
+                if reason.contains("Backlog evidence no longer authorizes this fix")),
+            "stage {stage}: {outcome:?}"
+        );
+        harness.assert_published_without_merge();
+        let requests = harness.requests();
+        let refused = requests.last().unwrap();
+        assert_eq!(refused["stage"], stage);
+        assert_eq!(refused["reviewId"], "17");
+        assert_eq!(refused["headRevision"], requests[0]["headRevision"]);
+        harness.assert_private_exchange();
+    }
+}
+
+async fn queued_validation(
+    script: Script,
+    response: &str,
+) -> (ValidationHarness, Result<WorkerOutcome, NodeRunnerError>) {
+    let harness = ValidationHarness::new(
+        script,
+        &format!(
+            r#"if [ -f "$0.reject" ]; then printf '%s' '{response}'; else printf '{{"verdict":"accepted"}}'; fi"#
+        ),
+    );
+    let mut handle = harness.start(DeliveryMode::MergeV3).await;
+    wait_for_live_queue(&harness).await;
+    fs::write(harness.sidecar(".reject"), "reject").unwrap();
+    let outcome = handle
+        .completion()
+        .await
+        .map(|completion| completion.outcome);
+    (harness, outcome)
+}
+
+async fn wait_for_live_queue(harness: &ValidationHarness) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !harness.authority.queue_live.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("delivery never queued the candidate");
+}
+
+const QUEUED_REPAIR: &str = r#"{"verdict":"repair","reason":"Queued evidence needs another pass"}"#;
+
+#[tokio::test]
+async fn queued_host_repair_and_refusal_withdraw_before_handoff() {
+    for response in [
+        QUEUED_REPAIR,
+        r#"{"verdict":"refused","reason":"Claim no longer authorizes the queued fix"}"#,
+    ] {
+        let (harness, outcome) = queued_validation(Script::Queued, response).await;
+        if response == QUEUED_REPAIR {
+            let receipt =
+                assert_delivery_signal(&outcome.unwrap(), DELIVERY_REPAIR_REQUIRED_LABEL).clone();
+            assert_eq!(receipt["pullRequestId"], "17");
+        } else {
+            assert!(
+                matches!(outcome, Err(NodeRunnerError::DriverDetail(ref reason)) if reason.contains("Claim no longer authorizes"))
+            );
+        }
+        assert!(!harness.authority.queue_live.load(Ordering::SeqCst));
+        assert_eq!(harness.authority.withdrawn_reviews.lock().unwrap().len(), 1);
+        assert_eq!(harness.authority.merge_requests.load(Ordering::SeqCst), 1);
+        harness.assert_private_exchange();
+    }
+}
+
+#[tokio::test]
+async fn queued_feedback_is_replayed_after_failed_withdrawal_then_safely_handed_to_repair() {
+    let harness = ValidationHarness::new(
+        Script::QueuedFeedbackWithdrawalFails,
+        r#"printf '{"verdict":"accepted"}'"#,
+    );
+    let first = harness.run().await;
+    assert!(
+        matches!(first, Err(NodeRunnerError::DriverDetail(ref reason)) if reason.contains("Cannot confirm safe merge withdrawal") && reason.contains("acme/project#17") && !reason.contains("test-token"))
+    );
+    assert!(harness.authority.queue_live.load(Ordering::SeqCst));
+    harness
+        .authority
+        .withdrawal_allowed
+        .store(true, Ordering::SeqCst);
+    let repaired = harness.run().await.unwrap();
+    assert_delivery_signal(&repaired, DELIVERY_REPAIR_REQUIRED_LABEL);
+    assert!(outcome_diagnostic(&repaired).contains("Handle the empty input"));
+    assert!(!harness.authority.queue_live.load(Ordering::SeqCst));
+    assert_eq!(harness.authority.merge_requests.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn refused_queue_withdrawal_never_authorizes_a_fixer() {
+    let (harness, outcome) = queued_validation(Script::QueuedWithdrawalFails, QUEUED_REPAIR).await;
+    assert!(
+        matches!(outcome, Err(NodeRunnerError::DriverDetail(ref reason)) if reason.contains("No repair handoff is authorized") && reason.contains("Queued evidence needs another pass"))
+    );
+    assert!(harness.authority.queue_live.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn an_exact_merge_during_withdrawal_wins_over_a_late_repair() {
+    let (harness, outcome) = queued_validation(Script::QueuedMergeRace, QUEUED_REPAIR).await;
+    let outcome = outcome.unwrap();
+    let receipt = assert_delivery_signal(&outcome, DELIVERY_MERGED_LABEL);
+    assert_eq!(receipt["mergeRevision"], "c".repeat(40));
+    assert!(!harness.authority.queue_live.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn cancellation_withdraws_a_live_queue_before_releasing_the_run() {
+    let harness = ValidationHarness::new(Script::Queued, r#"printf '{"verdict":"accepted"}'"#);
+    let mut handle = harness.start(DeliveryMode::MergeV3).await;
+    wait_for_live_queue(&harness).await;
+    handle.cancel();
+    assert!(matches!(
+        handle.completion().await,
+        Err(NodeRunnerError::Cancelled)
+    ));
+    assert!(!harness.authority.queue_live.load(Ordering::SeqCst));
+    assert_eq!(harness.authority.withdrawn_reviews.lock().unwrap().len(), 1);
 }

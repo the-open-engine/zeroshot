@@ -16,9 +16,10 @@ use crate::native_v2_delivery::{
     SourceReconciliationOutcome, SourceDeliveryError, SourceChecks, SourceConflictMaterialization,
     SourceConflictOutcome, SourceConflictRequest, SourceDeliveryCredential,
     SourceDeliveryAuthority, SourceHeadSynchronization, SourceHeadUpdateOutcome,
-    SourceMergeRequestOutcome, SourcePushRequest, SourceReviewObservation, SourceReviewReceipt,
-    SourceReviewRequest, SourceReviewFeedback, SourceReviewFeedbackItem, SourceReviewState,
-    SourceTargetIntegration, SourceTargetReconciliation, valid_head_update, valid_revision,
+    SourceMergeRequestOutcome, SourceMergeWithdrawal, SourcePushRequest, SourceReviewObservation,
+    SourceReviewReceipt, SourceReviewRequest, SourceReviewFeedback, SourceReviewFeedbackItem,
+    SourceReviewState, SourceTargetIntegration, SourceTargetReconciliation, valid_head_update,
+    valid_revision,
 };
 
 mod api;
@@ -27,6 +28,7 @@ mod feedback;
 mod metadata;
 mod observation;
 mod push;
+mod queue;
 mod target;
 
 #[cfg(all(test, target_os = "linux"))]
@@ -65,6 +67,7 @@ pub struct GhCliDeliveryAuthority {
     config: GhCliAuthorityConfig,
     operator_diagnostics: Option<OperatorDiagnosticReporter>,
     transport: Option<crate::native_v2_delivery::transport::GitTransport>,
+    queue_effects: queue::QueueEffects,
 }
 
 #[derive(Clone, Debug)]
@@ -80,6 +83,7 @@ impl GhCliDeliveryAuthority {
             config,
             operator_diagnostics: None,
             transport: None,
+            queue_effects: queue::QueueEffects::default(),
         }
     }
 
@@ -298,12 +302,39 @@ impl GhCliDeliveryAuthority {
         merge_policy::classify(value, review)
     }
 
+    async fn submit_merge(
+        &self,
+        review: &SourceReviewReceipt,
+        selected: (merge_policy::MergeMethod, &str),
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<(), SourceDeliveryError> {
+        let (merge_method, pull_request_id) = selected;
+        if merge_method == merge_policy::MergeMethod::Queue {
+            return queue::enqueue(self, review, pull_request_id, credential).await;
+        }
+        let mut command = clean_command(&self.config, &self.config.gh_program, credential);
+        command.args([
+            "pr",
+            "merge",
+            &review.review_id,
+            "--repo",
+            &review.repository,
+            "--match-head-commit",
+            &review.head_revision,
+        ]);
+        command.args(merge_method_argument(merge_method));
+        api::command_status(command, self.config.api_deadline, credential).await
+    }
+
     async fn classify_rejected_merge(
         &self,
         review: &SourceReviewReceipt,
         credential: SourceDeliveryCredential<'_>,
         failure: &SourceDeliveryError,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
+        if failure.cleanup_unconfirmed() {
+            return Err(failure.clone());
+        }
         let snapshot = self.policy_snapshot(review, credential).await?;
         let permanent_response = !failure.retryable_operation();
         match snapshot.state {
@@ -408,23 +439,16 @@ impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
         let snapshot = self.policy_snapshot(review, credential).await?;
+        let pull_request_id = snapshot.pull_request_id.clone();
         let queued = match merge_action(snapshot)? {
             MergeAction::Complete(outcome) => return Ok(outcome),
             MergeAction::Submit { queued } => queued,
         };
         let merge_method = self.merge_method(review, credential, queued).await?;
-        let mut command = clean_command(&self.config, &self.config.gh_program, credential);
-        command.args([
-            "pr",
-            "merge",
-            &review.review_id,
-            "--repo",
-            &review.repository,
-            "--match-head-commit",
-            &review.head_revision,
-        ]);
-        command.args(merge_method_argument(merge_method));
-        match api::command_status(command, self.config.api_deadline, credential).await {
+        let submitted = self
+            .submit_merge(review, (merge_method, &pull_request_id), credential)
+            .await;
+        match submitted {
             Ok(()) => Ok(SourceMergeRequestOutcome::Accepted),
             Err(error) => match self
                 .classify_rejected_merge(review, credential, &error)
@@ -438,6 +462,14 @@ impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
                 ))),
             },
         }
+    }
+
+    async fn withdraw_merge_request(
+        &self,
+        review: &SourceReviewReceipt,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceMergeWithdrawal, SourceDeliveryError> {
+        queue::withdraw(self, review, credential).await
     }
 
     async fn update_review_head(

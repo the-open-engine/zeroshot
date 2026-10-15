@@ -60,7 +60,6 @@ async fn merge_commands_use_the_selected_method_and_exact_head_without_bypass() 
         ("MERGE", Some("--merge")),
         ("SQUASH", Some("--squash")),
         ("REBASE", Some("--rebase")),
-        ("QUEUE", None),
     ] {
         let root = tempfile::tempdir().assert_value();
         let mut page = policy_page_with_merge_capabilities(true, true, true);
@@ -264,7 +263,19 @@ async fn review_observation_and_queue_submission_do_not_read_direct_merge_policy
             .assert_value()
             .remove("branchProtectionRule");
         page["data"]["repository"]["pullRequest"]["isMergeQueueEnabled"] = json!(queued);
-        let authority = merge_authority(root.path(), &page, &page, "exit 0");
+        let response = format!(
+            "printf '%s' {}",
+            shell_literal(&super::queue_tests::enqueue_response().to_string())
+        );
+        let authority = if queued {
+            super::queue_tests::queue_authority(
+                root.path(),
+                std::slice::from_ref(&page),
+                &[("enqueuePullRequest", &response)],
+            )
+        } else {
+            merge_authority(root.path(), &page, &page, "exit 0")
+        };
         let observation = authority
             .inspect_review(&review(), SourceDeliveryCredential::token("test-token"))
             .await

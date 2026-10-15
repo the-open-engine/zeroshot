@@ -36,7 +36,7 @@ use crate::v2_run_ledger::fake::FakeRunLedger;
 use crate::v2_run_ledger::{CreateRun, RunLedger};
 
 #[path = "tests/github_fixture.rs"]
-mod github_fixture;
+pub(super) mod github_fixture;
 #[path = "tests/head_update.rs"]
 mod head_update;
 #[path = "tests/review_sync.rs"]

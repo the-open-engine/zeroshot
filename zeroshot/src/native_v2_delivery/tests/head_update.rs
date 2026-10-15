@@ -178,3 +178,27 @@ async fn a_permanent_head_update_failure_keeps_redacted_details_in_run_logs() {
     assert!(!errors[0].contains("test-token"));
     assert!(!errors[0].contains(&git_auth::encode_basic_credential("test-token")));
 }
+
+#[tokio::test]
+async fn withdrawal_uses_the_authorized_head_when_local_adoption_has_not_settled() {
+    let (repo, authority) = delivery_harness(Script::HeadAdoptionAfterRepair);
+    let outcome = run_delivery(&repo, authority.clone(), 3, DeliveryMode::MergeV3).await;
+    assert_eq!(
+        outcome,
+        WorkerOutcome::declared_failure(WorkerErrorCode::Crash)
+    );
+    let withdrawn = authority.withdrawn_reviews.lock().unwrap();
+    assert_eq!(withdrawn.len(), 1);
+    let remote = git_output(
+        &repo.remote,
+        &[
+            "rev-parse",
+            &format!("refs/heads/{}", withdrawn[0].head_branch),
+        ],
+    );
+    assert_eq!(withdrawn[0].head_revision, remote);
+    assert_ne!(
+        withdrawn[0].head_revision,
+        git_output(&repo.workspace, &["rev-parse", "HEAD"])
+    );
+}

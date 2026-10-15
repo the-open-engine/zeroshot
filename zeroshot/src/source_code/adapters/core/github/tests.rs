@@ -11,6 +11,10 @@ use crate::native_v2_delivery::SourceChecks;
 #[path = "merge_tests.rs"]
 mod merge_tests;
 
+#[cfg(unix)]
+#[path = "queue/tests.rs"]
+mod queue_tests;
+
 pub(super) fn review() -> SourceReviewReceipt {
     SourceReviewReceipt {
         review_id: "17".to_owned(),
@@ -826,6 +830,9 @@ fn oversized_failure_summary_marks_omitted_text() {
 #[test]
 fn merge_actions_preserve_terminal_authority_and_queue_ownership() {
     let snapshot = |state, queued| PolicySnapshot {
+        pull_request_id: "PR_node_17".to_owned(),
+        is_in_merge_queue: false,
+        auto_merge_enabled: false,
         state,
         failed_job_ids: Vec::new(),
         is_merge_queue_enabled: queued,

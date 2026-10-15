@@ -367,6 +367,9 @@ exec /bin/cat "$HOME/payload"
         .assert_value();
     assert_eq!(output, expected);
     let mut snapshot = PolicySnapshot {
+        pull_request_id: "PR_node_17".to_owned(),
+        is_in_merge_queue: false,
+        auto_merge_enabled: false,
         state: SourceReviewState::Open {
             checks: SourceChecks::Failed {
                 diagnostic: "Required CI checks failed".to_owned(),

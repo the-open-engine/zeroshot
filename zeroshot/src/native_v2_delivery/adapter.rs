@@ -173,10 +173,11 @@ impl NativeV2DeliveryAdapter {
             };
         ensure_active(&control)?;
         let mut cancellation = control.cancellation();
-        let result = tokio::select! {
+        let feedback_versions = self.delivery_state().feedback_versions;
+        let mut result = tokio::select! {
             biased;
-            _ = cancellation.cancelled() => return Err(NodeRunnerError::Cancelled),
-            result = async {
+            _ = cancellation.cancelled() => Err(DeliveryStop::Runner(NodeRunnerError::Cancelled)),
+            result = std::panic::AssertUnwindSafe(async {
                 self.initialize_file_credentials(&mut credentials, &control).await?;
                 let review = self.prepare_review(mode, DeliveryPreparation {
                     invocation: &invocation, session, credentials: &mut credentials, control: &control,
@@ -200,9 +201,17 @@ impl NativeV2DeliveryAdapter {
                 };
                 self.validate_review(&drive, DeliveryValidationStage::Published).await?;
                 self.drive_review(drive).await
-            } => result,
+            }).catch_unwind() => match result {
+                Ok(result) => result,
+                Err(_) => Err(DeliveryStop::Runner(NodeRunnerError::DriverDetail("Git delivery panicked".to_owned()))),
+            },
         };
-        match result {
+        if let Some(validator) = &self.trusted_delivery_validator {
+            if let Err(error) = validator.drain().await {
+                result = Err(DeliveryStop::Runner(error));
+            }
+        }
+        let outcome = match result {
             Ok(outcome) => Ok(outcome),
             Err(DeliveryStop::Repair(failure)) => {
                 let feedback = recovery::DeliveryFeedback {
@@ -216,7 +225,17 @@ impl NativeV2DeliveryAdapter {
                 self.repair_outcome(&feedback, mode, failure).await
             }
             Err(stop) => stop.result(),
+        };
+        let outcome = self
+            .finish_merge_handoff((mode, &invocation.response), &mut credentials, outcome)
+            .await;
+        if outcome.is_err() {
+            self.state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .feedback_versions = feedback_versions;
         }
+        outcome
     }
 }
 

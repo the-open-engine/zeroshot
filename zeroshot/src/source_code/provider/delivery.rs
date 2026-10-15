@@ -283,6 +283,17 @@ pub trait SourceDeliveryAuthority: Send + Sync {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError>;
 
+    /// Confirms that no deferred merge can race a repair/error handoff, or reports an exact merge.
+    /// The default is valid only for authorities that never leave autonomous merge effects.
+    /// Authorities with queues or deferred auto-merge must override and confirm withdrawal.
+    async fn withdraw_merge_request(
+        &self,
+        _review: &SourceReviewReceipt,
+        _credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceMergeWithdrawal, SourceDeliveryError> {
+        Ok(SourceMergeWithdrawal::Withdrawn)
+    }
+
     /// Advances a stale non-queue review head through one provider-authorized CAS transition.
     async fn update_review_head(
         &self,
@@ -352,6 +363,12 @@ pub enum SourceMergeRequestOutcome {
     Pending,
     HeadUpdateRequired,
     Conflict,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SourceMergeWithdrawal {
+    Withdrawn,
+    Merged { merge_revision: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

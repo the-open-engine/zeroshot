@@ -241,3 +241,109 @@ impl NativeV2DeliveryAdapter {
         Ok(decision)
     }
 }
+
+// A failed/cancelled merge delivery cannot hand a live autonomous merge to an agent.
+impl NativeV2DeliveryAdapter {
+    pub(super) async fn finish_merge_handoff(
+        &self,
+        contract: (DeliveryMode, &NodeResponseContract),
+        credentials: &mut DeliveryCredentials<'_>,
+        outcome: Result<WorkerOutcome, NodeRunnerError>,
+    ) -> Result<WorkerOutcome, NodeRunnerError> {
+        let (mode, response) = contract;
+        let state = self.delivery_state();
+        let latest = state
+            .pending_head
+            .and_then(|pending| pending.updated)
+            .or(state.published);
+        let Some(review) = handoff_review(mode, &outcome, latest) else {
+            return outcome;
+        };
+        let withdrawn = self.withdraw_owned_merge(&review, credentials).await;
+        if matches!(&outcome, Err(NodeRunnerError::CleanupUnconfirmed)) {
+            return Err(NodeRunnerError::CleanupUnconfirmed);
+        }
+        match withdrawn {
+            Ok(SourceMergeWithdrawal::Withdrawn) => outcome,
+            Ok(SourceMergeWithdrawal::Merged { merge_revision })
+                if valid_revision(&merge_revision) =>
+            {
+                validate_delivery_contract(mode, response)?;
+                delivery_outcome(
+                    DeliveryResult {
+                        mode,
+                        outcome: DELIVERY_MERGED_LABEL,
+                        review: &review,
+                        merge_revision: Some(&merge_revision),
+                    },
+                    "forge confirmed the exact candidate merged before queue withdrawal",
+                )
+            }
+            other => Err(self.withdrawal_error((&review, credentials), other.err(), outcome)),
+        }
+    }
+
+    async fn withdraw_owned_merge(
+        &self,
+        review: &SourceReviewReceipt,
+        credentials: &mut DeliveryCredentials<'_>,
+    ) -> Result<SourceMergeWithdrawal, SourceDeliveryError> {
+        let result = self
+            .authority
+            .withdraw_merge_request(review, credentials.current())
+            .await;
+        if matches!(&result, Err(error) if error.authentication_failed())
+            && credentials.can_refresh()
+            && credentials.try_refresh().await.is_ok()
+        {
+            return self
+                .authority
+                .withdraw_merge_request(review, credentials.current())
+                .await;
+        }
+        result
+    }
+
+    fn withdrawal_error(
+        &self,
+        context: (&SourceReviewReceipt, &DeliveryCredentials<'_>),
+        cause: Option<SourceDeliveryError>,
+        original: Result<WorkerOutcome, NodeRunnerError>,
+    ) -> NodeRunnerError {
+        if cause
+            .as_ref()
+            .is_some_and(SourceDeliveryError::cleanup_unconfirmed)
+        {
+            return NodeRunnerError::CleanupUnconfirmed;
+        }
+        let (review, credentials) = context;
+        let cause = cause.map_or_else(
+            || "invalid authoritative merged revision".to_owned(),
+            |error| error.to_string(),
+        );
+        let original = match original {
+            Err(error) => error.to_string(),
+            Ok(WorkerOutcome::Verifier { diagnostic, .. }) => diagnostic.to_string(),
+            Ok(value) => format!("{value:?}"),
+        };
+        NodeRunnerError::DriverDetail(self.redact_feedback(credentials, format!(
+            "Cannot confirm safe merge withdrawal for {}#{} into {} at {}. No repair handoff is authorized.\n{cause}\nOriginal delivery result: {original}",
+            review.repository, review.review_id, review.target_branch, review.head_revision,
+        )))
+    }
+}
+
+fn handoff_review(
+    mode: DeliveryMode,
+    outcome: &Result<WorkerOutcome, NodeRunnerError>,
+    published: Option<SourceReviewReceipt>,
+) -> Option<SourceReviewReceipt> {
+    if !matches!(
+        mode,
+        DeliveryMode::MergeV1 | DeliveryMode::Merge | DeliveryMode::MergeV3
+    ) || matches!(outcome, Ok(WorkerOutcome::Verifier { output, .. }) if output.get("outcome").and_then(Value::as_str) == Some(DELIVERY_MERGED_LABEL))
+    {
+        return None;
+    }
+    published.filter(|review| !review.review_id.is_empty())
+}

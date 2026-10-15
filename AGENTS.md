@@ -373,7 +373,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   overrides a stricter restriction. Direct merge submission reads all rule pages with an independent
   cursor; PR observation and queues do not require direct-method discovery. Incomplete rule reads and
   empty method intersections stop merge submission with policy diagnostics. Merge queues choose their
-  own method. Merge commands retain contained process cleanup and use the GitHub API error boundary,
+  own method. Queue admission uses explicit `enqueuePullRequest` with the validated PR node ID and
+  exact `expectedHeadOid`; enabling auto-merge alone is not enqueue confirmation. Before a merge
+  delivery returns repair, refusal, error, or cancellation, trusted authority confirms withdrawal
+  of queued/auto-merge effects or the exact already-merged revision. Failed withdrawal never
+  authorizes agent repair. Authorities that schedule deferred merges must override
+  `withdraw_merge_request`; its default is valid only when no autonomous merge effects exist. Merge commands retain contained process cleanup and use the GitHub API error boundary,
   never Git repair; changed gates cannot mask a permanent rejection. Configured
   branch-protection contexts remain pending until they appear on the exact PR head, preventing a
   newly opened PR from looking ready before its required workflow registers. Missing or stale human

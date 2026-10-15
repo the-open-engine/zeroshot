@@ -25,6 +25,7 @@ query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
       isDraft
       isInMergeQueue
       isMergeQueueEnabled
+      autoMergeRequest { enabledAt }
       baseRefName
       baseRef {
         name
@@ -77,6 +78,9 @@ const MAX_FAILURE_DIAGNOSTIC_CHARS: usize = 8 * 1_024;
 const MAX_FAILURE_FEEDBACK_CHARS: usize = 64 * 1_024;
 
 pub(super) struct PolicySnapshot {
+    pub(super) pull_request_id: String,
+    pub(super) is_in_merge_queue: bool,
+    pub(super) auto_merge_enabled: bool,
     pub(super) state: SourceReviewState,
     pub(super) failed_job_ids: Vec<u64>,
     pub(super) is_merge_queue_enabled: bool,
@@ -101,6 +105,7 @@ struct PullRequestPolicyWire {
     is_draft: bool,
     is_in_merge_queue: bool,
     is_merge_queue_enabled: bool,
+    auto_merge_request: Option<Value>,
     base_ref_name: String,
     base_ref: RefWire,
     head_ref_name: String,
@@ -319,7 +324,8 @@ fn require_identity<'a>(
         .pull_request
         .as_ref()
         .ok_or(SourceDeliveryError::Rejected)?;
-    let valid = repository.name_with_owner == review.repository
+    let valid = !pull_request.id.trim().is_empty()
+        && repository.name_with_owner == review.repository
         && pull_request.number.to_string() == review.review_id
         && pull_request.base_ref_name == review.target_branch
         && pull_request.base_ref.name == review.target_branch
@@ -343,7 +349,7 @@ fn same_policy(left: &PullRequestPolicyWire, right: &PullRequestPolicyWire) -> b
         left.is_draft,
         left.is_in_merge_queue,
         left.is_merge_queue_enabled,
-        &left.base_ref,
+        (&left.base_ref, &left.auto_merge_request),
     ) == (
         &right.id,
         right.number,
@@ -356,7 +362,7 @@ fn same_policy(left: &PullRequestPolicyWire, right: &PullRequestPolicyWire) -> b
         right.is_draft,
         right.is_in_merge_queue,
         right.is_merge_queue_enabled,
-        &right.base_ref,
+        (&right.base_ref, &right.auto_merge_request),
     )
 }
 
@@ -383,6 +389,9 @@ fn classify_snapshot(
     }
     if !evidence.failures.is_empty() {
         return PolicySnapshot {
+            pull_request_id: pull_request.id.clone(),
+            is_in_merge_queue: pull_request.is_in_merge_queue,
+            auto_merge_enabled: pull_request.auto_merge_request.is_some(),
             state: SourceReviewState::Open {
                 checks: SourceChecks::Failed {
                     diagnostic: failure_diagnostic(evidence.failures),
@@ -403,6 +412,9 @@ fn classify_snapshot(
     let pull_request_ready =
         !matches!(evidence.checks, RequiredChecks::Pending) && pull_request_ready(pull_request);
     PolicySnapshot {
+        pull_request_id: pull_request.id.clone(),
+        is_in_merge_queue: pull_request.is_in_merge_queue,
+        auto_merge_enabled: pull_request.auto_merge_request.is_some(),
         state: SourceReviewState::Open { checks },
         failed_job_ids: Vec::new(),
         is_merge_queue_enabled: pull_request.is_merge_queue_enabled,
@@ -468,6 +480,9 @@ fn terminal_snapshot(
         _ => return Err(SourceDeliveryError::Rejected),
     };
     Ok(state.map(|state| PolicySnapshot {
+        pull_request_id: pull_request.id.clone(),
+        is_in_merge_queue: pull_request.is_in_merge_queue,
+        auto_merge_enabled: pull_request.auto_merge_request.is_some(),
         state,
         failed_job_ids: Vec::new(),
         is_merge_queue_enabled: false,
@@ -487,6 +502,9 @@ fn merged_snapshot(
         .ok_or(SourceDeliveryError::Rejected)?;
     (pull_request.state == "MERGED")
         .then_some(PolicySnapshot {
+            pull_request_id: pull_request.id.clone(),
+            is_in_merge_queue: pull_request.is_in_merge_queue,
+            auto_merge_enabled: pull_request.auto_merge_request.is_some(),
             state: SourceReviewState::Merged { merge_revision },
             failed_job_ids: Vec::new(),
             is_merge_queue_enabled: false,
@@ -520,6 +538,9 @@ fn approval_handoff_policy_ready(base_ref: &RefWire) -> bool {
 
 fn waiting_snapshot() -> PolicySnapshot {
     PolicySnapshot {
+        pull_request_id: String::new(),
+        is_in_merge_queue: false,
+        auto_merge_enabled: false,
         state: SourceReviewState::Open {
             checks: SourceChecks::Pending,
         },

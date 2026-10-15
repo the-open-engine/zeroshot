@@ -141,21 +141,54 @@ pub(super) async fn command_status(
         .await
         .and_then(|output| output.require_success())
         .map(|_| ())
-        .map_err(|failure| {
-            // Capture owns the process tree; only a completed command supplies an HTTP status.
-            let response = failure
-                .exit_status
-                .filter(|_| !failure.stderr_truncated)
-                .map(|_| github_api_error(failure.stderr.as_bytes()));
-            let status = response.as_ref().and_then(SourceDeliveryError::api_status);
-            let retryable = failure.retryable_transport()
-                || response
-                    .as_ref()
-                    .is_some_and(SourceDeliveryError::retryable_operation)
-                || status.is_none() && github_transport_error(&failure.stderr);
-            let error = redacted_api_error(status, failure.to_string(), credential);
-            if retryable { error.temporary() } else { error }
-        })
+        .map_err(|failure| command_failure(failure, credential))
+}
+
+pub(super) async fn command_json(
+    mut command: Command,
+    deadline: Duration,
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<Value, SourceDeliveryError> {
+    let output = crate::native_v2_delivery::command::capture_sensitive(&mut command, deadline, &[])
+        .await
+        .and_then(|output| output.require_success())
+        .map_err(|failure| command_failure(failure, credential))?;
+    if output.stdout_truncated() {
+        return Err(redacted_api_error(
+            None,
+            "GitHub command response exceeded its byte bound",
+            credential,
+        ));
+    }
+    serde_json::from_str(output.stdout()).map_err(|error| {
+        redacted_api_error(
+            None,
+            format!("GitHub returned invalid JSON: {error}\n{output}"),
+            credential,
+        )
+    })
+}
+
+fn command_failure(
+    failure: crate::native_v2_delivery::command::GitCommandFailure,
+    credential: SourceDeliveryCredential<'_>,
+) -> SourceDeliveryError {
+    if failure.cleanup_unconfirmed {
+        return SourceDeliveryError::Command(Box::new(failure));
+    }
+    // Capture owns the process tree; only a completed command supplies an HTTP status.
+    let response = failure
+        .exit_status
+        .filter(|_| !failure.stderr_truncated)
+        .map(|_| github_api_error(failure.stderr.as_bytes()));
+    let status = response.as_ref().and_then(SourceDeliveryError::api_status);
+    let retryable = failure.retryable_transport()
+        || response
+            .as_ref()
+            .is_some_and(SourceDeliveryError::retryable_operation)
+        || status.is_none() && github_transport_error(&failure.stderr);
+    let error = redacted_api_error(status, failure.to_string(), credential);
+    if retryable { error.temporary() } else { error }
 }
 
 async fn bounded_output(

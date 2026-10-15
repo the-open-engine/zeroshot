@@ -9,8 +9,13 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use super::*;
 
 #[derive(Clone, Copy, Debug)]
-pub(super) enum Script {
+pub(in crate::native_v2_delivery) enum Script {
     NoCi,
+    Queued,
+    QueuedWithdrawalFails,
+    QueuedFeedbackWithdrawalFails,
+    QueuedMergeRace,
+    QueuedWithdrawalCleanup,
     Feedback,
     FeedbackReadTransient,
     FeedbackTooLarge,
@@ -62,12 +67,15 @@ pub(super) enum Script {
     ReviewSyncCredentialExpires,
 }
 
-pub(super) struct FakeGitHub {
+pub(in crate::native_v2_delivery) struct FakeGitHub {
     remote: PathBuf,
     script: Script,
     pub(super) pushed: AtomicBool,
     merge_requested: AtomicBool,
     pub(super) merge_requests: AtomicUsize,
+    pub(super) queue_live: AtomicBool,
+    pub(super) withdrawal_allowed: AtomicBool,
+    pub(super) withdrawn_reviews: Mutex<Vec<SourceReviewReceipt>>,
     pub(super) head_updates: AtomicUsize,
     pub(super) head_sync_attempts: AtomicUsize,
     pub(super) inspections: AtomicUsize,
@@ -80,13 +88,19 @@ pub(super) struct FakeGitHub {
 }
 
 impl FakeGitHub {
-    pub(super) fn new(remote: PathBuf, script: Script) -> Self {
+    pub(in crate::native_v2_delivery) fn new(remote: PathBuf, script: Script) -> Self {
         Self {
             remote,
             script,
             pushed: AtomicBool::new(false),
             merge_requested: AtomicBool::new(false),
             merge_requests: AtomicUsize::new(0),
+            queue_live: AtomicBool::new(false),
+            withdrawal_allowed: AtomicBool::new(!matches!(
+                script,
+                Script::QueuedWithdrawalFails | Script::QueuedFeedbackWithdrawalFails
+            )),
+            withdrawn_reviews: Mutex::new(Vec::new()),
             head_updates: AtomicUsize::new(0),
             head_sync_attempts: AtomicUsize::new(0),
             inspections: AtomicUsize::new(0),
@@ -102,6 +116,11 @@ impl FakeGitHub {
     fn review_state(&self, inspection: usize) -> SourceReviewState {
         match self.script {
             Script::NoCi
+            | Script::Queued
+            | Script::QueuedFeedbackWithdrawalFails
+            | Script::QueuedWithdrawalFails
+            | Script::QueuedMergeRace
+            | Script::QueuedWithdrawalCleanup
             | Script::Feedback
             | Script::FeedbackReadTransient
             | Script::FeedbackTooLarge
@@ -154,7 +173,25 @@ impl FakeGitHub {
         }
     }
 
+    fn queues_merge(&self) -> bool {
+        matches!(
+            self.script,
+            Script::Queued
+                | Script::QueuedWithdrawalFails
+                | Script::QueuedFeedbackWithdrawalFails
+                | Script::QueuedMergeRace
+                | Script::QueuedWithdrawalCleanup
+        )
+    }
+
     fn no_ci_state(&self) -> SourceReviewState {
+        if self.queues_merge() {
+            return open_review(if self.queue_live.load(Ordering::SeqCst) {
+                SourceChecks::Pending
+            } else {
+                SourceChecks::NotRequired
+            });
+        }
         if self.merge_requested.load(Ordering::SeqCst) {
             merged_review()
         } else {
@@ -588,20 +625,23 @@ impl SourceDeliveryAuthority for FakeGitHub {
         if matches!(self.script, Script::FeedbackReadTransient) && read == 0 {
             return Err(SourceDeliveryError::Unavailable);
         }
-        let items = matches!(self.script, Script::Feedback | Script::FeedbackTooLarge)
-            .then(|| SourceReviewFeedbackItem {
-                key: "review_comment:41".to_owned(),
-                version: "v1".to_owned(),
-                author: "review-bot".to_owned(),
-                location: Some("path=src/lib.rs line=7".to_owned()),
-                body: if matches!(self.script, Script::FeedbackTooLarge) {
-                    "x".repeat(4 * 1024 * 1024 + 1)
-                } else {
-                    "Handle the empty input before returning.".to_owned()
-                },
-            })
-            .into_iter()
-            .collect();
+        let late_feedback = matches!(self.script, Script::QueuedFeedbackWithdrawalFails)
+            && self.queue_live.load(Ordering::SeqCst);
+        let items = (late_feedback
+            || matches!(self.script, Script::Feedback | Script::FeedbackTooLarge))
+        .then(|| SourceReviewFeedbackItem {
+            key: "review_comment:41".to_owned(),
+            version: "v1".to_owned(),
+            author: "review-bot".to_owned(),
+            location: Some("path=src/lib.rs line=7".to_owned()),
+            body: if matches!(self.script, Script::FeedbackTooLarge) {
+                "x".repeat(4 * 1024 * 1024 + 1)
+            } else {
+                "Handle the empty input before returning.".to_owned()
+            },
+        })
+        .into_iter()
+        .collect();
         Ok(SourceReviewFeedback { items })
     }
 
@@ -636,7 +676,49 @@ impl SourceDeliveryAuthority for FakeGitHub {
             return Ok(SourceMergeRequestOutcome::Pending);
         }
         self.merge_requested.store(true, Ordering::SeqCst);
+        if self.queues_merge() {
+            self.queue_live.store(true, Ordering::SeqCst);
+        }
         Ok(SourceMergeRequestOutcome::Accepted)
+    }
+
+    async fn withdraw_merge_request(
+        &self,
+        review: &SourceReviewReceipt,
+        _credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceMergeWithdrawal, SourceDeliveryError> {
+        self.withdrawn_reviews.lock().unwrap().push(review.clone());
+        if !self.queue_live.load(Ordering::SeqCst) {
+            return Ok(SourceMergeWithdrawal::Withdrawn);
+        }
+        if !self.withdrawal_allowed.load(Ordering::SeqCst) {
+            return Err(SourceDeliveryError::api(
+                Some(403),
+                "Queue withdrawal rejected for test-token",
+            ));
+        }
+        if matches!(self.script, Script::QueuedWithdrawalCleanup) {
+            return Err(SourceDeliveryError::Command(Box::new(GitCommandFailure {
+                command: "queue withdrawal".into(),
+                working_directory: "private".into(),
+                exit_status: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                stdout_truncated: false,
+                stderr_truncated: false,
+                context: "process cleanup is unconfirmed".into(),
+                timed_out: false,
+                cleanup_unconfirmed: true,
+                classification: None,
+            })));
+        }
+        self.queue_live.store(false, Ordering::SeqCst);
+        if matches!(self.script, Script::QueuedMergeRace) {
+            return Ok(SourceMergeWithdrawal::Merged {
+                merge_revision: "c".repeat(40),
+            });
+        }
+        Ok(SourceMergeWithdrawal::Withdrawn)
     }
 
     async fn update_review_head(
