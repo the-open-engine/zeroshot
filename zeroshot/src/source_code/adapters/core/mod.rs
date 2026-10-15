@@ -266,7 +266,10 @@ pub fn github_repository_reference(value: &str) -> Option<String> {
     let value = remote.as_str();
     let path = if value.contains("://") {
         let url = url::Url::parse(value).ok()?;
-        if url.host_str()? != "github.com" {
+        if !matches!(
+            (url.scheme(), url.host_str(), url.port()),
+            (_, Some("github.com"), _) | ("ssh", Some("ssh.github.com"), Some(443))
+        ) {
             return None;
         }
         url.path().trim_start_matches('/').to_owned()
@@ -347,6 +350,27 @@ mod tests {
                 "ACME/Project",
                 true,
             ),
+            (
+                "ssh://git@ssh.github.com:443/acme/project.git",
+                "acme/project",
+                true,
+            ),
+            (
+                "https://ssh.github.com/acme/project.git",
+                "acme/project",
+                false,
+            ),
+            (
+                "ssh://git@ssh.github.com:22/acme/project.git",
+                "acme/project",
+                false,
+            ),
+            (
+                "ssh://git@ssh.github.com/acme/project.git",
+                "acme/project",
+                false,
+            ),
+            ("git@ssh.github.com:acme/project.git", "acme/project", false),
             ("https://gitlab.com/acme/project.git", "acme/project", false),
             ("git@github.com:other/project.git", "acme/project", false),
         ] {
@@ -358,6 +382,16 @@ mod tests {
                 }}
             }))
             .assert_value();
+            let detected =
+                forge_identity(&source.remote.as_ref().assert_value().url).assert_value();
+            assert_eq!(
+                detected.is_some_and(|forge| forge
+                    .repository
+                    .as_str()
+                    .eq_ignore_ascii_case(repository)),
+                valid,
+                "remote identification: {url} / {repository}"
+            );
             for capability in [SourceCapability::PullRequest, SourceCapability::Merge] {
                 assert_eq!(
                     validate_delivery_source(&source, &[capability]).is_ok(),
