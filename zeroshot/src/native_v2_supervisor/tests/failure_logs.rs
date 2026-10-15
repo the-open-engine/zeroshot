@@ -224,9 +224,19 @@ async fn fatal_runtime_failure_logs_each_active_node_before_its_completion() {
             .assert_value()
             .is_empty()
     );
-    harness.supervisor.fail_runtime(|| {}).await.assert_value();
+    harness
+        .supervisor
+        .fail_runtime("supervisor task panicked", || {})
+        .await
+        .assert_value();
     let errors = public_errors(&harness).await;
-    assert_eq!(errors.len(), 3);
+    assert_eq!(errors.len(), 4);
+    // The run-wide cause precedes every completion and the terminal it explains.
+    assert!(errors[0].execution.is_none());
+    assert_eq!(
+        errors[0].record.message.as_str(),
+        "Runtime failed: supervisor task panicked"
+    );
     for name in ["left", "right"] {
         assert!(errors.iter().any(|record| record.execution.is_some()
             && record.record.message.as_str()

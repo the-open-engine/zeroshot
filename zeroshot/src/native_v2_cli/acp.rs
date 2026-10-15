@@ -772,7 +772,7 @@ async fn drive_supervisor(
     match supervisor.drive().await {
         Ok(terminal) => Ok(terminal),
         Err(error) => {
-            let _ = supervisor.fail_runtime(|| {}).await;
+            let _ = supervisor.fail_runtime(&error.to_string(), || {}).await;
             Err(error.into())
         }
     }

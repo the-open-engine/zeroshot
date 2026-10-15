@@ -54,6 +54,10 @@ pub(super) fn node_failure_log(
     Ok(None)
 }
 
+pub(super) fn runtime_failure_log(cause: &str) -> Result<RunEvent, RunLedgerError> {
+    error_log(None, format!("Runtime failed: {cause}"))
+}
+
 pub(super) fn terminal_events(result: TerminalResult) -> Result<Vec<RunEvent>, RunLedgerError> {
     let mut events = Vec::new();
     if let TerminalResult::Failed { reason } = &result {

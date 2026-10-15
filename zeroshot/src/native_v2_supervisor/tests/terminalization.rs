@@ -93,6 +93,51 @@ impl RunRuntimeCleanup for RejectedRuntimeCleanup {
 }
 
 #[tokio::test]
+async fn runtime_failure_cause_stays_public_when_cleanup_is_unconfirmed() {
+    let mut harness = harness(
+        graph(
+            sequence(vec![step("worker", 1_000), succeed("done")], null_type()),
+            null_type(),
+        ),
+        Value::Null,
+        FakeDriver::default(),
+    )
+    .await;
+    harness.supervisor.runtime_cleanup = Some(Arc::new(RejectedRuntimeCleanup));
+    let stopped = AtomicBool::new(false);
+    let result = harness
+        .supervisor
+        .fail_runtime(
+            "durable run state is inconsistent with the active supervisor",
+            || {
+                stopped.store(true, Ordering::SeqCst);
+            },
+        )
+        .await;
+    assert!(matches!(
+        result,
+        Err(NativeV2SupervisorError::RuntimeCleanup(_))
+    ));
+    assert!(!stopped.load(Ordering::SeqCst));
+    assert!(
+        stored_run(&harness.ledger)
+            .await
+            .snapshot
+            .terminal
+            .is_none()
+    );
+    let mut logs = super::failure_logs::public_subscription(&harness).await;
+    let records = logs.read_available().await.assert_value();
+    assert_eq!(
+        records
+            .iter()
+            .map(|record| record.record.message.as_str())
+            .collect::<Vec<_>>(),
+        ["Runtime failed: durable run state is inconsistent with the active supervisor"]
+    );
+}
+
+#[tokio::test]
 async fn runtime_cleanup_failure_retains_actual_node_errors_without_settling_them() {
     for force in [false, true] {
         let (mut harness, mut active) =

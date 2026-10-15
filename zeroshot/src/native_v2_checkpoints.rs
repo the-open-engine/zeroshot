@@ -31,7 +31,7 @@ use crate::full_v1_reducer::{DurableExecution, DurableExecutionState, ExecutionB
 use filesystem::SnapshotId;
 
 #[derive(Debug, Error)]
-#[error("workspace checkpoint is unavailable")]
+#[error("workspace checkpoint is unavailable: {0}")]
 pub struct CheckpointError(#[from] pub std::io::Error);
 
 /// The supervisor calls this port only at an engine-defined boundary with no live executions.

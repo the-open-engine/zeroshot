@@ -27,7 +27,7 @@ impl NativeV2Supervisor {
         result
     }
 
-    async fn record_failure_logs(&self, logs: Vec<RunEvent>) {
+    pub(super) async fn record_failure_logs(&self, logs: Vec<RunEvent>) {
         if !logs.is_empty() {
             let _ = tokio::time::timeout(
                 Duration::from_secs(1),

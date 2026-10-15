@@ -102,7 +102,7 @@ impl PortableRunEngine {
                     let recovery = task_result(
                         tokio::spawn(async move {
                             supervisor
-                                .fail_runtime(|| {
+                                .fail_runtime(&cause, || {
                                     failed_observability.runtime_failed(&failed_run_id)
                                 })
                                 .await

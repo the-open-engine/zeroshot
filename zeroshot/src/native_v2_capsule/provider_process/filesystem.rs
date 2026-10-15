@@ -350,9 +350,10 @@ fn copy_contents(
         return copy_directory(source, destination, metadata, specification);
     }
     if !metadata.is_file() {
-        return Err(io::Error::other(
-            "candidate contains an unsupported filesystem entry",
-        ));
+        return Err(io::Error::other(format!(
+            "candidate contains an unsupported filesystem entry {:?}",
+            destination.file_name().unwrap_or_default()
+        )));
     }
     copy_file(source, destination, specification.cancellation)?;
     fs::set_permissions(destination, metadata.permissions())
@@ -493,9 +494,10 @@ pub(crate) fn copy_workspace_entry(source: &Path, destination: &Path) -> io::Res
         return copy_workspace_directory(source, destination, &metadata);
     }
     if !metadata.is_file() {
-        return Err(io::Error::other(
-            "workspace contains an unsupported filesystem entry",
-        ));
+        return Err(io::Error::other(format!(
+            "workspace contains an unsupported filesystem entry {:?}",
+            source.file_name().unwrap_or_default()
+        )));
     }
     copy_workspace_file(source, destination, &metadata)
 }

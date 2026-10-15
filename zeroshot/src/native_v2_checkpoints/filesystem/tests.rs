@@ -637,6 +637,7 @@ fn refuses_external_git_objects() {
 #[cfg(target_os = "linux")]
 #[test]
 fn unsupported_fifo_is_rejected_without_opening_or_publishing_it() {
+    use openengine_cluster_testkit::assertions::AssertError;
     use std::os::unix::ffi::OsStrExt;
 
     let fixture = Fixture::new();
@@ -644,7 +645,11 @@ fn unsupported_fifo_is_rejected_without_opening_or_publishing_it() {
     let path = std::ffi::CString::new(fifo.as_os_str().as_bytes()).assert_value();
     // SAFETY: path is a live NUL-terminated filename in this test's private directory.
     assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
-    assert!(capture(&fixture.workspace, &fixture.snapshots, &()).is_err());
+    let error = capture(&fixture.workspace, &fixture.snapshots, &()).assert_error();
+    assert_eq!(
+        error.to_string(),
+        "candidate contains an unsupported filesystem entry \"pipe\""
+    );
     assert_eq!(fs::read_dir(&fixture.snapshots).assert_value().count(), 0);
 }
 

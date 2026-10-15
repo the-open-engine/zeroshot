@@ -400,12 +400,17 @@ impl NativeV2Supervisor {
     }
 
     /// Publishes stopped-runtime failure after confirmed cleanup, before attempting persistence.
-    /// The driving turn remains owned through both publication and the durable append.
+    /// The driving turn remains owned through both publication and the durable append. The fatal
+    /// cause is logged first, so unconfirmed cleanup or a lost terminal append cannot erase it.
     pub(crate) async fn fail_runtime(
         &self,
+        cause: &str,
         on_stopped: impl FnOnce(),
     ) -> Result<(), NativeV2SupervisorError> {
         let _turn = self.drive_turn.lock().await;
+        if let Ok(log) = logging::runtime_failure_log(cause) {
+            self.record_failure_logs(vec![log]).await;
+        }
         self.runner.close_run(&self.run_id).await;
         self.cleanup_runtime(RunRuntimeExit::RuntimeLost).await?;
         on_stopped();

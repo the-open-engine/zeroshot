@@ -150,7 +150,7 @@ async fn allocator_defaults_are_explicit_fail_closed_and_side_effect_free() {
         .expect_err("default allocator must reject workspace checkpoints");
     assert_eq!(
         checkpoint_error.to_string(),
-        "workspace checkpoint is unavailable"
+        "workspace checkpoint is unavailable: workspace checkpoints are unavailable"
     );
     assert!(!allocator.discard_workspace(&run_id).await.assert_value());
 

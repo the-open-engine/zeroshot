@@ -192,6 +192,61 @@ fn entry_boundary(name: &str, attempt: u64) -> ExecutionBoundary {
     }
 }
 
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn first_checkpoint_rejection_names_the_entry_in_public_run_logs() {
+    use openengine_cluster_testkit::assertions::AssertError;
+
+    let root = tempfile::tempdir().assert_value();
+    let workspace = root.path().join("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    let _socket = std::os::unix::net::UnixListener::bind(workspace.join("dev-server.sock"))
+        .assert_value_with("bind leftover development server socket");
+    let harness = harness(
+        graph(
+            sequence(vec![step("first", 1_000), succeed("done")], null_type()),
+            null_type(),
+        ),
+        Value::Null,
+        FakeDriver::default(),
+    )
+    .await;
+    let supervisor = harness.supervisor.clone().with_checkpoints(Some(Arc::new(
+        crate::native_v2_supervisor::checkpoints::fake_checkpoint_store(
+            root.path(),
+            root.path().join("catalog"),
+            workspace,
+            BTreeSet::from([NodeName::new("first").assert_value()]),
+        ),
+    )));
+    let error = supervisor.drive().await.assert_error();
+    assert!(matches!(error, NativeV2SupervisorError::Checkpoint(_)));
+    supervisor
+        .fail_runtime(&error.to_string(), || {})
+        .await
+        .assert_value();
+    assert!(
+        stored_run(&harness.ledger)
+            .await
+            .snapshot
+            .executions
+            .is_empty()
+    );
+    let mut logs = super::failure_logs::public_subscription(&harness).await;
+    let records = logs.read_available().await.assert_value();
+    assert_eq!(
+        records
+            .iter()
+            .map(|record| record.record.message.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "Runtime failed: workspace checkpoint is unavailable: candidate contains an \
+             unsupported filesystem entry \"dev-server.sock\"",
+            "Run failed: runtime_failed",
+        ]
+    );
+}
+
 #[tokio::test]
 async fn repeated_group_entry_keeps_one_catalog_point_and_its_original_workspace() {
     let root = tempfile::tempdir().assert_value();

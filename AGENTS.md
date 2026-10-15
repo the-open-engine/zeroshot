@@ -289,6 +289,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and returned error context; provider adapters redact credentials before returning details. Runtime failure,
   runtime loss/restart reconciliation, and force-stop use the same completion/log transaction for
   every active node. Failed runs also retain a run-wide error log, including before graph dispatch.
+  A fatal supervisor error logs its typed cause, never a panic payload, before runtime cleanup, so
+  unconfirmed cleanup or a lost terminal append keeps it.
   An actual node error remains logged if a parallel winner voids that execution; intentional
   cancellation is not presented as a new crash. Unconfirmed cleanup preserves a bounded best-effort
   error log without completing the still-active execution or masking the primary failure.
