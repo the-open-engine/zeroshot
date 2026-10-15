@@ -112,6 +112,24 @@ impl Fixture {
                 command.env(name, value);
             }
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+
+            // Exercise the real CLI and re-exec controller with the Windows stack budget.
+            unsafe {
+                command.pre_exec(|| {
+                    let limit = libc::rlimit {
+                        rlim_cur: 1024 * 1024,
+                        rlim_max: 1024 * 1024,
+                    };
+                    if libc::setrlimit(libc::RLIMIT_STACK, &limit) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
         command
     }
 

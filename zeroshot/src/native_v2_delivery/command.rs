@@ -222,7 +222,8 @@ fn command_secrets(command: &Command) -> Vec<String> {
 }
 
 async fn drain(mut reader: impl AsyncRead + Unpin, captured: &mut CapturedBytes, retain: usize) {
-    let mut buffer = [0_u8; 8 * 1024];
+    // Keep pipe storage out of the nested admission and delivery futures.
+    let mut buffer = vec![0_u8; 8 * 1024];
     loop {
         let read = match reader.read(&mut buffer).await {
             Ok(0) => break,
