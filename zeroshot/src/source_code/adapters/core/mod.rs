@@ -44,6 +44,8 @@ pub enum SourceDeliveryFactoryError {
     ForgeRequired,
     #[error("GitHub repository identity must have the form owner/name")]
     GitHubRepository,
+    #[error("GitHub forge identity must match its Git remote")]
+    GitHubRemoteIdentity,
     #[error(transparent)]
     Registry(#[from] SourceRegistryError),
     #[error(transparent)]
@@ -113,6 +115,13 @@ fn provider_ref_parts(
             .map_or(repository, |forge| forge.repository.as_str());
         if !valid_github_repository(repository) {
             return Err(SourceDeliveryFactoryError::GitHubRepository);
+        }
+        if let Some(remote) = remote {
+            let matches = github_repository_reference(remote.url.as_str())
+                .is_some_and(|identified| identified.eq_ignore_ascii_case(repository));
+            if !matches {
+                return Err(SourceDeliveryFactoryError::GitHubRemoteIdentity);
+            }
         }
     }
     Ok(SourceProviderRef::new(SourceProviderId::new(id)?, 1)?)
@@ -320,4 +329,63 @@ pub(crate) async fn materialize_source(
         SourceRevisionId::new(source.revision.as_str())?,
     )?;
     Ok(registry.materialize(&request, destination).await?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openengine_cluster_testkit::assertions::AssertValue;
+    use serde_json::json;
+
+    #[test]
+    fn github_delivery_requires_a_matching_remote_identity() {
+        for (url, repository, valid) in [
+            ("https://github.com/acme/project.git", "acme/project", true),
+            ("git@github.com:acme/project.git", "acme/project", true),
+            (
+                "ssh://git@github.com/acme/project.git",
+                "ACME/Project",
+                true,
+            ),
+            ("https://gitlab.com/acme/project.git", "acme/project", false),
+            ("git@github.com:other/project.git", "acme/project", false),
+        ] {
+            let source: ResolvedSource = serde_json::from_value(json!({
+                "repository": "caller/opaque/source-label", "branch": "main",
+                "revision": "a".repeat(40),
+                "remote": {"url": url, "forge": {
+                    "provider": GITHUB_PROVIDER_ID, "repository": repository
+                }}
+            }))
+            .assert_value();
+            for capability in [SourceCapability::PullRequest, SourceCapability::Merge] {
+                assert_eq!(
+                    validate_delivery_source(&source, &[capability]).is_ok(),
+                    valid,
+                    "{url} / {repository} / {capability:?}"
+                );
+                assert_eq!(
+                    validate_delivery_repository(
+                        source.repository.as_str(),
+                        source.remote.as_ref(),
+                        &[capability]
+                    )
+                    .is_ok(),
+                    valid,
+                    "repository preflight: {url} / {repository} / {capability:?}"
+                );
+            }
+            validate_delivery_source(&source, &[SourceCapability::Read, SourceCapability::Push])
+                .assert_value();
+        }
+        let legacy: ResolvedSource = serde_json::from_value(json!({
+            "repository": "acme/project", "branch": "main", "revision": "a".repeat(40)
+        }))
+        .assert_value();
+        validate_delivery_source(
+            &legacy,
+            &[SourceCapability::PullRequest, SourceCapability::Merge],
+        )
+        .assert_value();
+    }
 }

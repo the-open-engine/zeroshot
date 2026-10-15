@@ -159,8 +159,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Maintained implementations live in `source_code/adapters/core`; contributed implementations
   live in `source_code/adapters/contributed`. Git is shared transport; forge adapters supply review,
   checks, and merge behavior through the existing delivery nodes and opaque repository/review IDs.
-  GitHub remains the maintained forge. Capability admission rejects unsupported operations before
-  credential resolution or workspace mutation. Pure remote identification uses each registered
+  GitHub remains the maintained forge; its review and merge identity must match the Git remote.
+  Capability admission rejects unsupported operations before credential resolution or workspace
+  mutation. Pure remote identification uses each registered
   provider's `repository_from_remote` hook; CLI source selection has no separate forge catalog and
   rejects ambiguous matches and unsupported provider versions.
 - Named targets store only endpoint, access mode, and login identity. Named runs resolve repository, branch, exact remote revision, and worktree dirtiness client-side from the selected Git worktree plus per-run overrides; target records never bind repositories.
