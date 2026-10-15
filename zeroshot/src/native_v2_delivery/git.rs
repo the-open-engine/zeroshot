@@ -149,6 +149,21 @@ impl SystemGit {
         ))
     }
 
+    pub(crate) async fn revision_tree(
+        &self,
+        workspace: &Path,
+        revision: &str,
+    ) -> Result<String, GitError> {
+        let tree = self
+            .require_success(workspace, &["rev-parse", &format!("{revision}^{{tree}}")])
+            .await?;
+        let value = tree.stdout.trim().to_owned();
+        if tree.stdout_truncated || !valid_revision(&value) {
+            return Err(GitError::InvalidRevision);
+        }
+        Ok(value)
+    }
+
     async fn commit_pending(&self, workspace: &Path) -> Result<bool, GitError> {
         let staged = self
             .execute(workspace, &["diff", "--cached", "--quiet", "--exit-code"])

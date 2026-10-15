@@ -19,6 +19,7 @@ pub mod transport;
 #[cfg(all(test, unix))]
 #[path = "native_v2_delivery/tests/transport_http.rs"]
 mod transport_http;
+pub mod validation;
 
 pub use command::GitCommandFailure;
 pub use crate::source_code_provider::*;
@@ -272,6 +273,9 @@ impl NativeV2DeliveryConfig {
 }
 
 pub use adapter::NativeV2DeliveryAdapter;
+mod token_file;
+pub use token_file::TrustedGitHubTokenFile;
+pub(crate) use token_file::{GITHUB_TOKEN_FILE_ENV, validate_token as validate_github_delivery_token};
 
 fn forge_credential<'a>(environment: &'a ResolvedEnvironment, field: &str) -> Option<&'a str> {
     let name = EnvironmentVariableName::new(field).ok()?;

@@ -19,6 +19,7 @@ const MAX_FEEDBACK_DIAGNOSTIC_BYTES: usize = 4 * 1024 * 1024;
 mod ownership_tests;
 use input::delivery_input;
 use review::{review_completion, ReviewProgress, ReviewStep};
+use super::validation::DeliveryValidationStage;
 
 #[derive(Clone)]
 pub struct NativeV2DeliveryAdapter {
@@ -26,6 +27,8 @@ pub struct NativeV2DeliveryAdapter {
     authority: Arc<dyn SourceDeliveryAuthority>,
     git: SystemGit,
     trusted_github_token: Option<Arc<str>>,
+    trusted_github_token_file: Option<TrustedGitHubTokenFile>,
+    trusted_delivery_validator: Option<super::validation::TrustedDeliveryValidator>,
     trusted_git_credentials: Option<openengine_cluster_protocol::GitTransportCredentials>,
     state: Arc<std::sync::Mutex<preflight::DeliveryState>>,
 }
@@ -42,6 +45,8 @@ impl NativeV2DeliveryAdapter {
             authority,
             git,
             trusted_github_token: None,
+            trusted_github_token_file: None,
+            trusted_delivery_validator: None,
             trusted_git_credentials: None,
             state: Arc::new(std::sync::Mutex::new(preflight::DeliveryState::default())),
         }
@@ -54,6 +59,23 @@ impl NativeV2DeliveryAdapter {
         credentials: Option<openengine_cluster_protocol::GitTransportCredentials>,
     ) -> Self {
         self.trusted_git_credentials = credentials;
+        self
+    }
+
+    /// Supplies renewable local delivery authority without exposing its path to providers.
+    #[must_use]
+    pub fn with_trusted_github_token_file(mut self, file: Option<TrustedGitHubTokenFile>) -> Self {
+        self.trusted_github_token_file = file;
+        self
+    }
+
+    /// Adds a caller-owned check before publication and before requesting merge.
+    #[must_use]
+    pub fn with_trusted_delivery_validator(
+        mut self,
+        validator: Option<super::validation::TrustedDeliveryValidator>,
+    ) -> Self {
+        self.trusted_delivery_validator = validator;
         self
     }
 
@@ -119,6 +141,9 @@ impl NodeDriver for NativeV2DeliveryAdapter {
         let result = std::panic::AssertUnwindSafe(self.run_delivery(invocation, control.clone()))
             .catch_unwind()
             .await;
+        if let Some(validator) = &self.trusted_delivery_validator {
+            validator.drain().await?;
+        }
         // A cancelled or panicking Git future drops its process-group guard first. Reap any
         // detached helpers before the graph can hand this workspace UID to another writer.
         if let Some(identity) = self.config.git_identity {
@@ -152,6 +177,7 @@ impl NativeV2DeliveryAdapter {
             biased;
             _ = cancellation.cancelled() => return Err(NodeRunnerError::Cancelled),
             result = async {
+                self.initialize_file_credentials(&mut credentials, &control).await?;
                 let review = self.prepare_review(mode, DeliveryPreparation {
                     invocation: &invocation, session, credentials: &mut credentials, control: &control,
                 }).await?;
@@ -168,10 +194,12 @@ impl NativeV2DeliveryAdapter {
                         diagnostic,
                     ).map_err(DeliveryStop::Runner);
                 }
-                self.drive_review(ReviewDrive {
+                let drive = ReviewDrive {
                     adapter: self, mode, response: &invocation.response, review, credentials: &mut credentials,
-                    pull_request_feedback, control: &mut control,
-                }).await
+                    pull_request_feedback, manifest: &invocation.node.input, control: &mut control,
+                };
+                self.validate_review(&drive, DeliveryValidationStage::Published).await?;
+                self.drive_review(drive).await
             } => result,
         };
         match result {
@@ -231,11 +259,13 @@ struct ReviewDrive<'a, 'environment> {
     review: SourceReviewReceipt,
     credentials: &'a mut DeliveryCredentials<'environment>,
     pull_request_feedback: PullRequestFeedback,
+    manifest: &'a Value,
     control: &'a mut DriverControl,
 }
 
 struct DeliveryCredentials<'a> {
     environment: Option<&'a ResolvedEnvironment>,
+    token_file: Option<&'a TrustedGitHubTokenFile>,
     token: String,
     git: Option<openengine_cluster_protocol::GitTransportCredentials>,
     forge_field: Option<&'static str>,
@@ -250,13 +280,21 @@ impl<'a> DeliveryCredentials<'a> {
     }
 
     fn can_refresh(&self) -> bool {
-        self.environment
-            .is_some_and(ResolvedEnvironment::can_refresh)
+        self.token_file.is_some()
+            || self
+                .environment
+                .is_some_and(ResolvedEnvironment::can_refresh)
     }
 
     async fn try_refresh(
         &mut self,
     ) -> Result<(), crate::native_v2_runner::EnvironmentRefreshError> {
+        if let Some(file) = self.token_file {
+            let token = file.read_rotated(&self.github_git_token)?;
+            self.github_git_token.clone_from(&token);
+            self.token = token;
+            return Ok(());
+        }
         let Some(environment) = self.environment else {
             return Ok(());
         };
@@ -353,6 +391,7 @@ impl NativeV2DeliveryAdapter {
         invocation: &'a DriverInvocation,
     ) -> Result<DeliveryCredentials<'a>, DeliveryStop> {
         let forge_field = self.authority.forge_credential_field();
+        let token_file = self.file_credential(&invocation.environment, forge_field)?;
         let declared =
             forge_field.and_then(|field| forge_credential(&invocation.environment, field));
         let trusted = (forge_field == Some(GITHUB_TOKEN_ENV))
@@ -361,6 +400,7 @@ impl NativeV2DeliveryAdapter {
         let token = match forge_field {
             Some(_) => declared
                 .or(trusted)
+                .or_else(|| token_file.map(|_| ""))
                 .ok_or_else(|| DeliveryStop::Outcome(WorkerOutcome::authentication_refusal()))?
                 .to_owned(),
             None => String::new(),
@@ -380,12 +420,71 @@ impl NativeV2DeliveryAdapter {
         };
         Ok(DeliveryCredentials {
             environment: Some(&invocation.environment),
+            token_file,
             token,
             git,
             forge_field,
             github_git_token,
             token_from_environment: declared.is_some(),
         })
+    }
+
+    fn file_credential<'a>(
+        &'a self,
+        environment: &ResolvedEnvironment,
+        forge_field: Option<&str>,
+    ) -> Result<Option<&'a TrustedGitHubTokenFile>, DeliveryStop> {
+        let name = EnvironmentVariableName::new(GITHUB_TOKEN_ENV)
+            .map_err(|_| DeliveryStop::Outcome(WorkerOutcome::malformed()))?;
+        match (
+            environment
+                .get(&name)
+                .or(self.trusted_github_token.as_deref()),
+            forge_field,
+        ) {
+            (Some(token), _) => {
+                validate_github_delivery_token(token).map_err(refresh_failure)?;
+                Ok(None)
+            }
+            (None, Some(GITHUB_TOKEN_ENV)) => Ok(self.trusted_github_token_file.as_ref()),
+            _ => Ok(None),
+        }
+    }
+
+    async fn initialize_file_credentials(
+        &self,
+        credentials: &mut DeliveryCredentials<'_>,
+        control: &DriverControl,
+    ) -> Result<(), DeliveryStop> {
+        let Some(file) = credentials.token_file else {
+            return Ok(());
+        };
+        let mut attempts = 0usize;
+        loop {
+            ensure_active(control)?;
+            match file.read() {
+                Ok(token) => {
+                    credentials.github_git_token.clone_from(&token);
+                    credentials.token = token;
+                    return Ok(());
+                }
+                Err(crate::native_v2_runner::EnvironmentRefreshError::Unavailable) => {
+                    attempts = attempts.saturating_add(1);
+                    if !self.config.poll.has_next(attempts) {
+                        return Err(DeliveryStop::Outcome(WorkerOutcome::declared_failure(
+                            WorkerErrorCode::Timeout,
+                        )));
+                    }
+                    emit(
+                        control,
+                        "delivery: trusted GitHub credential unavailable; retrying",
+                    )
+                    .await?;
+                    wait_for_poll(control, self.retry_interval(attempts)).await?;
+                }
+                Err(error) => return Err(refresh_failure(error)),
+            }
+        }
     }
 
     async fn prepare_review(
@@ -417,6 +516,8 @@ impl NativeV2DeliveryAdapter {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .intended_push = Some(review_request.head_revision.clone());
+        self.validate_before_publication(&preparation, &review_request, &pending)
+            .await?;
         self.publish_review_head(&mut preparation, &review_request, &pending)
             .await?;
         if !mode.creates_review() {
@@ -544,28 +645,34 @@ impl NativeV2DeliveryAdapter {
         drive: &mut ReviewDrive<'_, '_>,
     ) -> Result<Option<WorkerOutcome>, DeliveryStop> {
         ensure_active(drive.control)?;
+        let progress = self
+            .observe_review(drive)
+            .await
+            .map_err(|stop| stop.with_review(&drive.review))?;
+        // A completed remote effect is authoritative. Late feedback or a caller hook must not
+        // turn an already merged result into repair or hide a closed review.
+        if progress.is_terminal() {
+            return self
+                .advance_review(drive, progress)
+                .await
+                .map(ReviewStep::completion)
+                .map_err(|stop| stop.with_review(&drive.review));
+        }
+        // The observer hook may record the published receipt and approved review replies.
+        // Pending observation never hides CI or new feedback; the merge-stage gate is strict.
+        self.validate_review(drive, DeliveryValidationStage::Review)
+            .await?;
         if let Some(step) = self
             .review_feedback_step(drive)
             .await
             .map_err(|stop| stop.with_review(&drive.review))?
         {
-            return match step {
-                ReviewStep::Continue => Ok(None),
-                ReviewStep::Complete(outcome) => Ok(Some(outcome)),
-            };
+            return Ok(step.completion());
         }
-        let progress = self
-            .observe_review(drive)
+        self.advance_review(drive, progress)
             .await
-            .map_err(|stop| stop.with_review(&drive.review))?;
-        match self
-            .advance_review(drive, progress)
-            .await
-            .map_err(|stop| stop.with_review(&drive.review))?
-        {
-            ReviewStep::Continue => Ok(None),
-            ReviewStep::Complete(outcome) => Ok(Some(outcome)),
-        }
+            .map(ReviewStep::completion)
+            .map_err(|stop| stop.with_review(&drive.review))
     }
 
     async fn review_feedback_step(
@@ -763,6 +870,12 @@ impl NativeV2DeliveryAdapter {
         &self,
         drive: &mut ReviewDrive<'_, '_>,
     ) -> Result<ReviewStep, DeliveryStop> {
+        if !self
+            .validate_review(drive, DeliveryValidationStage::Merge)
+            .await?
+        {
+            return Ok(ReviewStep::Continue);
+        }
         match self.request_merge(drive).await? {
             SourceMergeRequestOutcome::Accepted => {
                 emit(

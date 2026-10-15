@@ -22,8 +22,10 @@ use crate::native_v2_copilot::{CopilotAdapter, CopilotConfig};
 use crate::native_v2_contract::{
     AdmittedRun, CopilotProvider, NodeInvocation, NodeRuntimeBinding, RuntimeLane,
 };
+use crate::native_v2_delivery::validation::TrustedDeliveryValidator;
 use crate::native_v2_delivery::{
     SourceDeliveryAuthority, NativeV2DeliveryAdapter, NativeV2DeliveryConfig,
+    TrustedGitHubTokenFile,
 };
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, NativeNodeRunner, NodeDriver, NodeRunnerError, NodeSession,
@@ -124,7 +126,12 @@ pub fn build_native_v2_candidate(
     admitted: &AdmittedRun,
     config: NativeV2CandidateConfig,
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
-    build_candidate(admitted, config, CandidatePlacement::Capsule, None)
+    build_candidate(
+        admitted,
+        config,
+        CandidatePlacement::Capsule,
+        TrustedDeliveryCapabilities::default(),
+    )
 }
 
 /// Hosted candidate with a trusted Git credential visible only to checkout and delivery.
@@ -133,7 +140,15 @@ pub fn build_native_v2_candidate_with_github_token(
     config: NativeV2CandidateConfig,
     github_token: Option<Arc<str>>,
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
-    build_candidate(admitted, config, CandidatePlacement::Capsule, github_token)
+    build_candidate(
+        admitted,
+        config,
+        CandidatePlacement::Capsule,
+        TrustedDeliveryCapabilities {
+            token: github_token,
+            ..Default::default()
+        },
+    )
 }
 
 /// Builds the same candidate with child processes running as the invoking local user.
@@ -145,7 +160,7 @@ pub fn build_local_native_v2_candidate(
         admitted,
         config,
         CandidatePlacement::Local(SessionBoundary::Run),
-        None,
+        TrustedDeliveryCapabilities::default(),
     )
 }
 
@@ -159,7 +174,10 @@ pub fn build_local_native_v2_candidate_with_github_token(
         admitted,
         config,
         CandidatePlacement::Local(SessionBoundary::Run),
-        github_token,
+        TrustedDeliveryCapabilities {
+            token: github_token,
+            ..Default::default()
+        },
     )
 }
 
@@ -172,7 +190,27 @@ pub(crate) fn build_local_owner_native_v2_candidate(
         admitted,
         config,
         CandidatePlacement::Local(SessionBoundary::Owner),
-        None,
+        TrustedDeliveryCapabilities::default(),
+    )
+}
+
+#[derive(Default)]
+pub(crate) struct TrustedDeliveryCapabilities {
+    pub(crate) token: Option<Arc<str>>,
+    pub(crate) token_file: Option<TrustedGitHubTokenFile>,
+    pub(crate) validator: Option<TrustedDeliveryValidator>,
+}
+
+pub(crate) fn build_local_native_v2_candidate_with_authority(
+    admitted: &AdmittedRun,
+    config: NativeV2CandidateConfig,
+    authority: TrustedDeliveryCapabilities,
+) -> Result<NativeNodeRunner, NativeV2CandidateError> {
+    build_candidate(
+        admitted,
+        config,
+        CandidatePlacement::Local(SessionBoundary::Run),
+        authority,
     )
 }
 
@@ -180,7 +218,7 @@ fn build_candidate(
     admitted: &AdmittedRun,
     config: NativeV2CandidateConfig,
     placement: CandidatePlacement,
-    github_token: Option<Arc<str>>,
+    trusted: TrustedDeliveryCapabilities,
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
     validate_config(admitted, &config)?;
     let NativeV2CandidateConfig {
@@ -189,7 +227,9 @@ fn build_candidate(
     let delivery = delivery.map(|delivery| {
         Arc::new(
             NativeV2DeliveryAdapter::new(delivery.config, delivery.authority)
-                .with_trusted_github_token(github_token)
+                .with_trusted_github_token(trusted.token)
+                .with_trusted_github_token_file(trusted.token_file)
+                .with_trusted_delivery_validator(trusted.validator)
                 .with_git_credentials(delivery.git_credentials),
         )
     });

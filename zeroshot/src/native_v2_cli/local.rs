@@ -296,6 +296,8 @@ impl LocalCliBackend {
             environment: prepared.environment,
             native_environment: prepared.native_environment,
             github_token: prepared.github_token,
+            github_token_file: prepared.github_token_file,
+            delivery_validator: prepared.delivery_validator,
             git_credentials: prepared.git_credentials,
             workspace: prepared.workspace,
             workspace_lease,

@@ -124,6 +124,8 @@ fn prepared_local_run(
         .assert_value(),
         submission,
         github_token: None,
+        github_token_file: None,
+        delivery_validator: None,
         workspace,
         native_environment: BTreeMap::new(),
     }

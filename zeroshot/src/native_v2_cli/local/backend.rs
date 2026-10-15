@@ -91,18 +91,32 @@ impl LocalCliBackend {
         let environment = LocalConnectionStore::new(self.state_root.clone())
             .resolve_submission(&recovery.submission, &params.connections)?;
         let git_credentials = environment.resolve_git_source().await?;
+        let mut native_environment =
+            crate::native_v2_local::capture_local_native_environment(&self.current_directory)
+                .map_err(local_error)?;
+        let (github_token, github_token_file) = crate::native_v2_local::take_github_authority(
+            &mut native_environment,
+            params.github_token.clone(),
+            &self.current_directory,
+            &recovery.workspace,
+        )
+        .map_err(local_error)?;
+        let delivery_validator = crate::native_v2_local::take_delivery_validator(
+            &mut native_environment,
+            &recovery.workspace,
+        )
+        .map_err(local_error)?;
         Ok(PreparedLocalRun {
             run_id: params.successor_run_id.clone(),
             delivery_run_id: self.delivery_run_id(&params.run_id, recovery)?,
             submission: recovery.submission.clone(),
             environment,
-            github_token: params.github_token.clone(),
+            github_token,
+            github_token_file,
+            delivery_validator,
             git_credentials,
             workspace: recovery.workspace.clone(),
-            native_environment: crate::native_v2_local::capture_local_native_environment(
-                &self.current_directory,
-            )
-            .map_err(local_error)?,
+            native_environment,
         })
     }
 }

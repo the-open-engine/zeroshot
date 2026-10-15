@@ -373,7 +373,7 @@ impl NativeV2DeliveryAdapter {
         )))
     }
 
-    fn retry_interval(&self, attempt: usize) -> Duration {
+    pub(super) fn retry_interval(&self, attempt: usize) -> Duration {
         self.config
             .poll
             .interval

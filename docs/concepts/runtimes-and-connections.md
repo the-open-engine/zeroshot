@@ -136,3 +136,30 @@ JSON and run history. Exact plans declare these fields under any chosen connecti
 Docker runtimes can prepare shared tools, project dependencies, and services with setup and
 startup hooks. See [Prepare a runtime environment](../guides/runtime-environments.md) for the
 installation conventions, resume behavior, and direct-target ownership boundary.
+
+## Renewable local GitHub delivery credentials
+
+A trusted local host can set `ZEROSHOT_GITHUB_TOKEN_FILE` to a private token file outside the
+checkout. Use a delivery binding with `"connections": {}`: the controller receives the credential
+without adding it to agent bindings. The file contains one token, optionally followed by a newline.
+It must be a regular file owned by the controller user with no access for other users.
+
+The host obtains short-lived tokens and renews them by atomically replacing the file. Mount its
+parent directory if the host writes outside a container. Zeroshot reopens the path on each delivery
+visit and after authentication rejection; an unchanged rejected token waits for host renewal.
+Explicit `GH_TOKEN` takes precedence, including failing on an empty or malformed value.
+
+The file setting and credential stay out of provider environments, profiles, run history, and
+recovery metadata. Resume selects the caller's current setting again and retains the delivery
+branch identity. This keeps credentials out of agent environments; it does not isolate a trusted
+controller from other processes running as the same OS user. Named targets continue to use their
+existing credential resolver.
+
+## Trusted local delivery validation
+
+Set `ZEROSHOT_DELIVERY_CHECK_COMMAND` to one absolute executable path outside the checkout to
+validate publication and merge candidates. It must be private to the controller user and executable;
+this setting accepts no command arguments or shell expression. The controller owns its process and
+passes candidate facts through the [delivery validation protocol](delivery-validation.md). The caller selects this capability outside graph and runtime
+input. The setting stays out of provider context and run/recovery history, and
+resume selects the caller's current executable again.

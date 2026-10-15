@@ -43,6 +43,10 @@ struct PortableBootstrapDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     github_token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    github_token_file: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    delivery_validator: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     git_credentials: Option<GitTransportCredentials>,
     workspace: PathBuf,
     workspace_lease: PathBuf,
@@ -60,6 +64,23 @@ impl PortableBootstrapDocument {
             &self.storage,
         )?;
         let environment = RunEnvironment::exact_for_submission(&self.submission, self.connections)?;
+        let github_token_file = self
+            .github_token_file
+            .map(|path| {
+                crate::native_v2_delivery::TrustedGitHubTokenFile::new(path, &self.workspace)
+            })
+            .transpose()
+            .map_err(|_| PortableControllerError::Bootstrap)?;
+        let delivery_validator = self
+            .delivery_validator
+            .map(|path| {
+                crate::native_v2_delivery::validation::TrustedDeliveryValidator::new(
+                    path,
+                    &self.workspace,
+                )
+            })
+            .transpose()
+            .map_err(|_| PortableControllerError::Bootstrap)?;
         Ok(PortableControllerBootstrap {
             checkpoint: self.checkpoint,
             run_id: self.run_id,
@@ -69,6 +90,8 @@ impl PortableBootstrapDocument {
             environment,
             native_environment: self.native_environment,
             github_token: self.github_token,
+            github_token_file,
+            delivery_validator,
             git_credentials: self.git_credentials,
             workspace: self.workspace,
             workspace_lease: self.workspace_lease,
@@ -142,6 +165,8 @@ pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), Portabl
     let delivery_run_id = bootstrap.delivery_run_id.clone();
     let adopt_existing_delivery = bootstrap.adopt_existing_delivery;
     let github_token = bootstrap.github_token.clone();
+    let github_token_file = bootstrap.github_token_file.clone();
+    let delivery_validator = bootstrap.delivery_validator.clone();
     let git_credentials = bootstrap.git_credentials.clone();
     let native_environment = bootstrap.native_environment.clone();
     let controller = Arc::new(
@@ -154,6 +179,8 @@ pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), Portabl
                     workspace: &workspace,
                     storage: &storage,
                     github_token,
+                    github_token_file,
+                    delivery_validator,
                     git_credentials,
                     native_environment: &native_environment,
                 },
@@ -208,6 +235,14 @@ fn encode_bootstrap(
         connections: environment.bootstrap_values(),
         native_environment: bootstrap.native_environment.clone(),
         github_token: bootstrap.github_token.clone(),
+        github_token_file: bootstrap
+            .github_token_file
+            .as_ref()
+            .map(|file| file.path().to_owned()),
+        delivery_validator: bootstrap
+            .delivery_validator
+            .as_ref()
+            .map(|validator| validator.path().to_owned()),
         git_credentials: bootstrap.git_credentials.clone(),
         workspace: bootstrap.workspace.clone(),
         workspace_lease: bootstrap.workspace_lease.clone(),

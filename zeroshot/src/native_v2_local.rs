@@ -17,8 +17,8 @@ use thiserror::Error;
 use crate::execution::process::HostedProcessPool;
 use crate::native_v2_candidate::{
     NativeV2CandidateConfig, NativeV2CandidateDelivery, NativeV2CandidateError,
-    NativeV2HarnessConfig, build_local_native_v2_candidate_with_github_token,
-    build_local_owner_native_v2_candidate,
+    NativeV2HarnessConfig, TrustedDeliveryCapabilities,
+    build_local_native_v2_candidate_with_authority, build_local_owner_native_v2_candidate,
 };
 use crate::native_v2_claude::{ClaudeAdapterConfig, ClaudeAdapterConfigError, ClaudeProcessEnvironment};
 use crate::native_v2_cli::PreparedRunRequest;
@@ -26,7 +26,10 @@ use crate::native_v2_codex::{NativeV2CodexConfig, NativeV2CodexUser};
 use crate::native_v2_contract::AdmittedRun;
 use crate::native_v2_copilot::{CopilotConfig, CopilotLocalUser};
 use crate::native_v2_capsule::provider_process::{COPILOT_LOCAL_ENVIRONMENT, LocalHarnessEnvironment};
-use crate::native_v2_delivery::NativeV2DeliveryConfig;
+use crate::native_v2_delivery::{NativeV2DeliveryConfig, TrustedGitHubTokenFile};
+use crate::native_v2_delivery::validation::TrustedDeliveryValidator;
+mod token_file;
+pub(crate) use token_file::{take_github_authority, take_delivery_validator};
 use crate::source_code_provider::adapters::core::{SourceDeliveryFactoryRequest, delivery_authority};
 use crate::native_v2_runner::{NativeNodeRunner, NodeRunner};
 use crate::native_v2_supervisor::{RunEnvironment, RunEnvironmentError};
@@ -71,6 +74,10 @@ pub enum LocalCompositionError {
     RunEnvironment(#[from] RunEnvironmentError),
     #[error("local controller storage could not be prepared")]
     Storage,
+    #[error("trusted local delivery validator configuration is invalid")]
+    DeliveryValidator,
+    #[error("trusted local GitHub credential configuration is invalid")]
+    GitHubTokenFile,
     #[error("local harness environment could not be represented")]
     NativeEnvironment,
     #[error("lane {lane} needs the `{executable}` executable on PATH")]
@@ -91,6 +98,8 @@ pub struct PreparedLocalRun {
     pub submission: RunSubmission,
     pub environment: RunEnvironment,
     pub github_token: Option<String>,
+    pub github_token_file: Option<TrustedGitHubTokenFile>,
+    pub delivery_validator: Option<TrustedDeliveryValidator>,
     pub git_credentials: Option<GitTransportCredentials>,
     pub workspace: PathBuf,
     pub native_environment: BTreeMap<String, String>,
@@ -103,6 +112,8 @@ pub struct LocalProcessCandidateRequest<'a> {
     pub workspace: &'a Path,
     pub storage: &'a Path,
     pub github_token: Option<String>,
+    pub github_token_file: Option<TrustedGitHubTokenFile>,
+    pub delivery_validator: Option<TrustedDeliveryValidator>,
     pub git_credentials: Option<GitTransportCredentials>,
     pub native_environment: &'a BTreeMap<String, String>,
 }
@@ -117,13 +128,22 @@ pub fn prepare_local_run(
     let (workspace, source) = prepare_local_source(&request, current_directory, git_program)?;
     let submission = local_submission(&request.intent, source);
     let environment = RunEnvironment::exact_for_submission(&submission, request.connections)?;
-    let native_environment = capture_local_native_environment(current_directory)?;
+    let mut native_environment = capture_local_native_environment(current_directory)?;
+    let (github_token, github_token_file) = take_github_authority(
+        &mut native_environment,
+        request.github_token,
+        current_directory,
+        &workspace,
+    )?;
+    let delivery_validator = take_delivery_validator(&mut native_environment, &workspace)?;
     Ok(PreparedLocalRun {
         delivery_run_id: request.run_id.clone(),
         run_id: request.run_id,
         submission,
         environment,
-        github_token: request.github_token,
+        github_token,
+        github_token_file,
+        delivery_validator,
         git_credentials: request.git_credentials,
         workspace,
         native_environment,
@@ -189,6 +209,7 @@ pub(crate) fn validate_local_environment(
 pub(crate) fn capture_local_native_environment(
     invoking_directory: &Path,
 ) -> Result<BTreeMap<String, String>, LocalCompositionError> {
+    token_file::validate_caller_authority(|name| std::env::var_os(name))?;
     let mut environment = LocalHarnessEnvironment::new(
         crate::native_v2_capsule::provider_process::current_process_environment(),
     );
@@ -285,6 +306,8 @@ fn build_local_candidate_config(
         workspace,
         storage,
         github_token,
+        github_token_file,
+        delivery_validator,
         git_credentials,
         native_environment,
     } = request;
@@ -339,10 +362,14 @@ fn build_local_candidate_config(
     if owner_scoped {
         build_local_owner_native_v2_candidate(admitted, config).map_err(Into::into)
     } else {
-        build_local_native_v2_candidate_with_github_token(
+        build_local_native_v2_candidate_with_authority(
             admitted,
             config,
-            github_token.map(Arc::<str>::from),
+            TrustedDeliveryCapabilities {
+                token: github_token.map(Arc::<str>::from),
+                token_file: github_token_file,
+                validator: delivery_validator,
+            },
         )
         .map_err(Into::into)
     }
@@ -364,7 +391,8 @@ fn local_lanes(
     runtime_home: &Path,
     native_environment: &BTreeMap<String, String>,
 ) -> Result<Vec<NativeV2HarnessConfig>, LocalCompositionError> {
-    let native_environment = LocalHarnessEnvironment::new(native_environment.clone());
+    let native_environment =
+        LocalHarnessEnvironment::new(token_file::provider_environment(native_environment));
     let inputs = LocalLaneInputs {
         workspace,
         runtime_home,

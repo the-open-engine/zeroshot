@@ -47,6 +47,10 @@ mod routing;
 mod target_base;
 #[path = "tests/target_retry.rs"]
 mod target_retry;
+#[path = "tests/token_file.rs"]
+mod token_file;
+#[path = "tests/trusted_validation.rs"]
+mod trusted_validation;
 
 use github_fixture::{
     FakeGitHub, GH_MISMATCH_SCRIPT, GH_SCRIPT, GIT_SCRIPT, Script, argument_lines,
@@ -1017,7 +1021,42 @@ async fn run_with_adapter_feedback(
     adapter: Arc<NativeV2DeliveryAdapter>,
     pull_request_feedback: PullRequestFeedback,
 ) -> DeliveryExecution {
-    let admitted = admitted_with_feedback(request.repo, request.mode, pull_request_feedback).await;
+    run_with_adapter_token(request, adapter, pull_request_feedback, Some("test-token")).await
+}
+
+async fn run_with_adapter_token(
+    request: DeliveryRunRequest<'_>,
+    adapter: Arc<NativeV2DeliveryAdapter>,
+    pull_request_feedback: PullRequestFeedback,
+    token: Option<&str>,
+) -> DeliveryExecution {
+    let mut handle = start_with_adapter_token(request, adapter, pull_request_feedback, token).await;
+    let mut durable = handle.take_initial_output().assert_value();
+    let outcome = handle.completion().await.assert_value().outcome;
+    let mut output = Vec::new();
+    while let Ok(event) = durable.recv().await {
+        if let crate::native_v2_runner::DurableNodeEvent::Output { output: event, .. } = event {
+            output.push(event);
+        }
+    }
+    DeliveryExecution { outcome, output }
+}
+
+async fn start_with_adapter_token(
+    request: DeliveryRunRequest<'_>,
+    adapter: Arc<NativeV2DeliveryAdapter>,
+    pull_request_feedback: PullRequestFeedback,
+    token: Option<&str>,
+) -> crate::native_v2_runner::NodeHandle {
+    let mut admitted =
+        admitted_with_feedback(request.repo, request.mode, pull_request_feedback).await;
+    if token.is_none() {
+        for binding in admitted.runtime.nodes_mut().values_mut() {
+            if let NodeRuntimeBinding::GitDelivery { connections, .. } = binding {
+                *connections = DeclaredConnections::empty();
+            }
+        }
+    }
     let runner = NativeNodeRunner::new(&admitted, adapter.clone(), adapter).assert_value();
     let binding = admitted
         .runtime
@@ -1027,16 +1066,20 @@ async fn run_with_adapter_feedback(
         .clone();
     let mut environment = ResolvedEnvironment::exact(
         &binding,
-        BTreeMap::from([(
-            EnvironmentVariableName::new(GITHUB_TOKEN_ENV).assert_value(),
-            "test-token".to_owned(),
-        )]),
+        token
+            .map(|value| {
+                BTreeMap::from([(
+                    EnvironmentVariableName::new(GITHUB_TOKEN_ENV).assert_value(),
+                    value.to_owned(),
+                )])
+            })
+            .unwrap_or_default(),
     )
     .assert_value();
     if let Some(refresh) = request.refresh {
         environment = crate::native_v2_runner::with_environment_refresh(environment, refresh);
     }
-    let mut handle = runner
+    runner
         .start(NodeRunRequest {
             invocation: NodeInvocation {
                 reference: ExecutionRef {
@@ -1053,16 +1096,7 @@ async fn run_with_adapter_feedback(
             environment,
         })
         .await
-        .assert_value();
-    let mut durable = handle.take_initial_output().assert_value();
-    let outcome = handle.completion().await.assert_value().outcome;
-    let mut output = Vec::new();
-    while let Ok(event) = durable.recv().await {
-        if let crate::native_v2_runner::DurableNodeEvent::Output { output: event, .. } = event {
-            output.push(event);
-        }
-    }
-    DeliveryExecution { outcome, output }
+        .assert_value()
 }
 
 async fn admitted(repo: &TempRepo, mode: DeliveryMode) -> crate::native_v2_contract::AdmittedRun {

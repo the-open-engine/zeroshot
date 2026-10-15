@@ -553,6 +553,8 @@ impl AcpSession {
             workspace: &prepared.workspace,
             storage: prepared.resources._runtime.path(),
             github_token: None,
+            github_token_file: None,
+            delivery_validator: None,
             git_credentials: None,
             native_environment: &native_environment,
         })?;

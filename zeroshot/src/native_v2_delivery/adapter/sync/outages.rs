@@ -145,6 +145,7 @@ impl NodeDriver for SyncProbe {
         self.starts.fetch_add(1, Ordering::SeqCst);
         let mut credentials = DeliveryCredentials {
             environment: Some(&self.environment),
+            token_file: None,
             token: "test-token".to_owned(),
             git: None,
             forge_field: Some(GITHUB_TOKEN_ENV),
