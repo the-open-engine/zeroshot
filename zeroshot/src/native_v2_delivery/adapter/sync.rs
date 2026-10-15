@@ -5,14 +5,14 @@ use crate::execution::driver::DriverCancellation;
 use crate::native_v2_runner::EnvironmentRefreshError;
 
 struct ReviewSyncInvocation<'a> {
-    request: &'a GitHubReviewRequest,
-    credential: GitHubCredential<'a>,
+    request: &'a SourceReviewRequest,
+    credential: SourceDeliveryCredential<'a>,
     control: &'a DriverControl,
     remaining: Duration,
 }
 
 struct ReviewSyncState<'a, 'environment> {
-    request: &'a GitHubReviewRequest,
+    request: &'a SourceReviewRequest,
     credentials: &'a mut DeliveryCredentials<'environment>,
     control: &'a DriverControl,
     deadline: tokio::time::Instant,
@@ -40,7 +40,7 @@ impl ReviewSyncState<'_, '_> {
     }
 
     async fn refresh_credential(&mut self) -> Result<CredentialRefreshProgress, DeliveryStop> {
-        emit(self.control, "delivery: refreshing GitHub credential").await?;
+        emit(self.control, "delivery: refreshing forge credential").await?;
         let mut interval = REVIEW_SYNC_INTERVAL;
         loop {
             let progress = self.refresh_attempt().await?;
@@ -54,7 +54,7 @@ impl ReviewSyncState<'_, '_> {
             }
             emit(
                 self.control,
-                "delivery: GitHub credential refresh temporarily unavailable; retrying",
+                "delivery: forge credential refresh temporarily unavailable; retrying",
             )
             .await?;
             if !wait_for_review_sync(self.control, self.deadline, interval).await? {
@@ -79,8 +79,8 @@ impl ReviewSyncState<'_, '_> {
 }
 
 enum ReviewSyncProgress {
-    Complete(GitHubReviewReceipt),
-    Failed(GitHubAuthorityError),
+    Complete(SourceReviewReceipt),
+    Failed(SourceDeliveryError),
     TimedOut,
 }
 
@@ -93,7 +93,7 @@ enum CredentialRefreshProgress {
 struct ReviewSyncFailure<'a> {
     control: &'a DriverControl,
     attempt: usize,
-    error: GitHubAuthorityError,
+    error: SourceDeliveryError,
     deadline: tokio::time::Instant,
     retry_interval: Duration,
 }
@@ -107,10 +107,10 @@ enum ReviewSyncDisposition {
 impl NativeV2DeliveryAdapter {
     pub(super) async fn synchronize_review(
         &self,
-        request: &GitHubReviewRequest,
+        request: &SourceReviewRequest,
         credentials: &mut DeliveryCredentials<'_>,
         control: &DriverControl,
-    ) -> Result<GitHubReviewReceipt, DeliveryStop> {
+    ) -> Result<SourceReviewReceipt, DeliveryStop> {
         let mut retry = preflight::OperationRetry::default();
         loop {
             let error = match self
@@ -134,10 +134,10 @@ impl NativeV2DeliveryAdapter {
 
     async fn synchronize_review_batch(
         &self,
-        request: &GitHubReviewRequest,
+        request: &SourceReviewRequest,
         credentials: &mut DeliveryCredentials<'_>,
         control: &DriverControl,
-    ) -> Result<GitHubReviewReceipt, DeliveryStop> {
+    ) -> Result<SourceReviewReceipt, DeliveryStop> {
         let deadline = tokio::time::Instant::now() + REVIEW_SYNC_DEADLINE;
         let mut retry_interval = REVIEW_SYNC_INTERVAL;
         let mut last_failure = None;
@@ -158,10 +158,10 @@ impl NativeV2DeliveryAdapter {
                 }
                 ReviewSyncProgress::TimedOut => {
                     return Err(last_failure.map_or_else(
-                        || temporary_sync_failure("GitHub review synchronization timed out").into(),
-                        |error: GitHubAuthorityError| {
+                        || temporary_sync_failure("forge review synchronization timed out").into(),
+                        |error: SourceDeliveryError| {
                             error
-                                .with_context("GitHub review synchronization timed out")
+                                .with_context("forge review synchronization timed out")
                                 .into()
                         },
                     ));
@@ -180,7 +180,7 @@ impl NativeV2DeliveryAdapter {
                 ReviewSyncDisposition::Stop => return Err(error.into()),
                 ReviewSyncDisposition::TimedOut => {
                     return Err(error
-                        .with_context("GitHub review synchronization timed out")
+                        .with_context("forge review synchronization timed out")
                         .into());
                 }
             }
@@ -189,7 +189,7 @@ impl NativeV2DeliveryAdapter {
                 .min(REVIEW_SYNC_MAX_INTERVAL);
         }
         Err(last_failure.map_or_else(
-            || temporary_sync_failure("GitHub review synchronization batch exhausted").into(),
+            || temporary_sync_failure("forge review synchronization batch exhausted").into(),
             DeliveryStop::from,
         ))
     }
@@ -206,7 +206,7 @@ impl NativeV2DeliveryAdapter {
                 }
                 CredentialRefreshProgress::TimedOut | CredentialRefreshProgress::Unavailable => {
                     ReviewSyncProgress::Failed(temporary_sync_failure(
-                        "GitHub credential refresh remained unavailable through the synchronization deadline",
+                        "forge credential refresh remained unavailable through the synchronization deadline",
                     ))
                 }
             };
@@ -237,14 +237,14 @@ impl NativeV2DeliveryAdapter {
             Ok(Ok(review)) => ReviewSyncProgress::Complete(review),
             Ok(Err(error)) => ReviewSyncProgress::Failed(error),
             Err(_) => ReviewSyncProgress::Failed(temporary_sync_failure(
-                "GitHub review synchronization request timed out",
+                "forge review synchronization request timed out",
             )),
         })
     }
 }
 
-fn temporary_sync_failure(message: &str) -> GitHubAuthorityError {
-    GitHubAuthorityError::Unavailable.with_context(message)
+fn temporary_sync_failure(message: &str) -> SourceDeliveryError {
+    SourceDeliveryError::Unavailable.with_context(message)
 }
 
 async fn refresh_within_deadline<F>(
@@ -294,12 +294,12 @@ async fn handle_review_sync_failure(
     let retry = failure.attempt < REVIEW_SYNC_ATTEMPTS && failure.error.retryable_review_sync();
     let diagnostic = if retry {
         format!(
-            "delivery: GitHub review synchronization attempt {} failed: {}; retrying",
+            "delivery: forge review synchronization attempt {} failed: {}; retrying",
             failure.attempt, failure.error
         )
     } else {
         format!(
-            "delivery: GitHub review synchronization failed after {} attempt(s): {}",
+            "delivery: forge review synchronization failed after {} attempt(s): {}",
             failure.attempt, failure.error
         )
     };

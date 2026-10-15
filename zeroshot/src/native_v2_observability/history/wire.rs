@@ -165,7 +165,8 @@ pub struct RunDefinition {
     pub graph: GraphSpec,
     pub runtime: RuntimePlan,
     pub initial_input: Value,
-    pub source: ResolvedSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ResolvedSource>,
     /// Accepts pre-v1 archives that embedded the unbounded accumulated snapshot. New producers
     /// omit it, and serialization strips it so one large run cannot expand the detail response.
     #[doc(hidden)]

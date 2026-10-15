@@ -11,13 +11,7 @@ async fn fetch_waits_for_automatic_maintenance() {
         "git-trace",
         "#!/bin/sh\nexport GIT_TRACE2_EVENT=\"$0.trace\"\nexec /usr/bin/git \"$@\"\n",
     );
-    let git = GitProcess {
-        program: &program,
-        token: None,
-        uid: unsafe { libc::geteuid() },
-        gid: unsafe { libc::getegid() },
-        deadline: Instant::now() + GIT_TIMEOUT,
-    };
+    let git = git_process(&program, Instant::now() + GIT_TIMEOUT);
     let seed = root.child("seed");
     let workspace = root.child("workspace");
     git.run(None, &["init".into(), seed.as_os_str().to_owned()])
@@ -62,18 +56,24 @@ async fn fetch_waits_for_automatic_maintenance() {
         .await
         .assert_value_with("resolve branch");
     let source = ResolvedSource {
+        remote: None,
         repository: openengine_cluster_protocol::SourceRepositoryId::new("owner/repository")
             .assert_value(),
         branch: openengine_cluster_protocol::SourceBranchId::new(branch.trim()).assert_value(),
         revision: openengine_cluster_protocol::SourceRevisionId::new(revision.trim())
             .assert_value(),
     };
-    fetch_source(&git, &workspace, &source)
+    git.transport(&workspace)
+        .assert_value()
+        .fetch_exact(source.revision.as_str(), source_credential("", None))
         .await
-        .assert_value_with("fetch source branch and revision");
-    checkout_revision(&git, &workspace, revision.trim())
-        .await
-        .assert_value_with("checkout revision");
+        .assert_value_with("fetch source exact revision");
+    git.run(
+        Some(&workspace),
+        &["checkout".into(), "--detach".into(), revision.trim().into()],
+    )
+    .await
+    .assert_value_with("checkout revision");
     assert_eq!(
         git.capture(&workspace, &["rev-parse".into(), "HEAD".into()])
             .await
@@ -132,13 +132,7 @@ async fn checkout_commands_share_one_deadline_and_retain_timeout_output() {
         "#!/bin/sh\n/usr/bin/printf 'checkout progress\n' >&2\n/usr/bin/sleep 0.2\n",
     );
     let deadline = Instant::now() + Duration::from_secs(1);
-    let git = GitProcess {
-        program: &program,
-        token: None,
-        uid: unsafe { libc::geteuid() },
-        gid: unsafe { libc::getegid() },
-        deadline,
-    };
+    let git = git_process(&program, deadline);
     git.run(None, &[]).await.assert_value();
     tokio::time::sleep_until(deadline - Duration::from_millis(100)).await;
     let error = git.run(None, &[]).await.assert_error();
@@ -174,15 +168,9 @@ async fn cancelling_checkout_kills_git_and_its_helper_processes() {
     );
     let pid_path = root.child("git-hanging.pid");
     let capture = tokio::spawn(async move {
-        GitProcess {
-            program: &program,
-            token: None,
-            uid: unsafe { libc::geteuid() },
-            gid: unsafe { libc::getegid() },
-            deadline: Instant::now() + GIT_TIMEOUT,
-        }
-        .run(None, &[])
-        .await
+        git_process(&program, Instant::now() + GIT_TIMEOUT)
+            .run(None, &[])
+            .await
     });
     let pid: u32 = poll_until(|| std::fs::read_to_string(&pid_path).ok()?.parse().ok()).await;
     capture.abort();
@@ -233,4 +221,16 @@ fn cleanup_stops_at_the_original_deadline() {
             .is_some()
     );
     assert!(identity.is_current(&workspace));
+}
+
+fn git_process(program: &Path, deadline: Instant) -> GitProcess<'_> {
+    GitProcess {
+        program,
+        token: None,
+        identity: None,
+        git_credentials: None,
+        private_directory: Path::new("/tmp"),
+        remote: OsStr::new("origin"),
+        deadline,
+    }
 }

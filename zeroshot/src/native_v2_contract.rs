@@ -14,10 +14,11 @@ use openengine_cluster_protocol::{
 };
 pub use openengine_cluster_protocol::{
     ClaudeProvider, CodexProvider, CopilotProvider, ConnectionKey, DeclaredConnections,
-    DeclaredEnvironment, EnvironmentVariableName, ModelId, NodeRuntimeBinding, PullRequestFeedback,
-    ReasoningEffort, ResolvedSource, RunSize, RunSubmission, RunTitle, RuntimeLane, RuntimePlan,
-    SessionScope, SourceBranchId, SourceRepositoryId, SourceRevisionId, MAX_DECLARED_CONNECTIONS,
-    MAX_DECLARED_ENVIRONMENT_NAMES,
+    DeclaredEnvironment, EnvironmentVariableName, GitRemoteUrl, GitTransportCredentials, ModelId,
+    NodeRuntimeBinding, PullRequestFeedback, ReasoningEffort, ResolvedGitRemote, ResolvedSource,
+    RunSize, RunSubmission, RunTitle, RuntimeLane, RuntimePlan, SessionScope, SourceBranchId,
+    SourceForgeIdentity, SourceForgeProviderId, SourceRepositoryId, SourceRevisionId,
+    MAX_DECLARED_CONNECTIONS, MAX_DECLARED_ENVIRONMENT_NAMES,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -78,7 +79,25 @@ pub struct AdmittedRun {
     pub runtime: RuntimePlan,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
-    pub source: ResolvedSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ResolvedSource>,
+}
+
+impl AdmittedRun {
+    /// Immutable requirements retained for recovery, including private source transport access.
+    #[must_use]
+    pub fn connection_requirements(
+        &self,
+    ) -> std::collections::BTreeMap<
+        ConnectionKey,
+        std::collections::BTreeSet<EnvironmentVariableName>,
+    > {
+        openengine_cluster_protocol::run_connection_requirements_with_source(
+            &self.runtime,
+            self.environment.as_ref(),
+            self.source.as_ref(),
+        )
+    }
 }
 
 impl RunSubmissionIntent {

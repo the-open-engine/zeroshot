@@ -35,11 +35,21 @@ if [ -n "$GIT_CONFIG_COUNT" ]; then
     test -n "$git_fixture_workspace" || exit 2
     git_fixture_origin=$(/usr/bin/git -C "$git_fixture_workspace" \
         config --local --get zeroshotTest.httpOrigin) || exit 2
-    GIT_CONFIG_KEY_1="http.$git_fixture_origin/.extraheader"
-    GIT_CONFIG_COUNT=3
-    GIT_CONFIG_KEY_2="url.$git_fixture_origin.insteadOf"
-    GIT_CONFIG_VALUE_2='https://github.com/acme/project.git'
-    export GIT_CONFIG_KEY_1 GIT_CONFIG_COUNT GIT_CONFIG_KEY_2 GIT_CONFIG_VALUE_2
+    git_fixture_count=$GIT_CONFIG_COUNT
+    git_fixture_index=0
+    while [ "$git_fixture_index" -lt "$git_fixture_count" ]; do
+        eval "git_fixture_key=\${GIT_CONFIG_KEY_$git_fixture_index-}"
+        case "$git_fixture_key" in
+            http.*.extraheader)
+                export "GIT_CONFIG_KEY_$git_fixture_index=http.$git_fixture_origin/.extraheader"
+                ;;
+        esac
+        git_fixture_index=$((git_fixture_index + 1))
+    done
+    export "GIT_CONFIG_KEY_$git_fixture_count=url.$git_fixture_origin.insteadOf"
+    export "GIT_CONFIG_VALUE_$git_fixture_count=https://github.com/acme/project.git"
+    GIT_CONFIG_COUNT=$((git_fixture_count + 1))
+    export GIT_CONFIG_COUNT
 fi
 
 exec /usr/bin/git "$@"

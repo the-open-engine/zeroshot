@@ -95,7 +95,8 @@ exec /usr/bin/git "$@"
     }
 
     async fn allocate(&self) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
-        self.allocator
+        let result = self
+            .allocator
             .allocate(
                 crate::native_v2_candidate::test_support::allocation_request(
                     &self.run_id,
@@ -103,7 +104,14 @@ exec /usr/bin/git "$@"
                     Some(CHECKOUT_TOKEN),
                 ),
             )
-            .await
+            .await;
+        if result.is_err() {
+            eprintln!(
+                "checkout diagnostics: {:?}",
+                self.diagnostics.snapshot(&self.run_id)
+            );
+        }
+        result
     }
 
     async fn retain_untracked_workspace(&self) -> PathBuf {
@@ -126,6 +134,7 @@ exec /usr/bin/git "$@"
         selection: CheckpointRestoreSelection,
     ) -> RetainedAllocationRequest<'a> {
         RetainedAllocationRequest {
+            git_credentials: None,
             selection,
             source_run_id,
             run_id,
@@ -197,7 +206,13 @@ esac"#,
     assert!(head.status.success());
     assert_eq!(
         String::from_utf8(head.stdout).assert_value().trim(),
-        fixture.admitted.source.revision.as_str()
+        fixture
+            .admitted
+            .source
+            .as_ref()
+            .assert_value()
+            .revision
+            .as_str()
     );
     assert_eq!(fixture.root.read("git-script.attempts"), "xx");
     assert!(!workspace.join("partial").exists());
@@ -222,15 +237,15 @@ esac"#,
 
 #[tokio::test]
 async fn exhausted_checkout_preserves_redacted_operator_diagnostics() {
-    let mut fixture = CheckoutFixture::new(
+    let mut fixture = CheckoutFixture::new(&format!(
         r#"case " $* " in
   *" fetch "*)
     /usr/bin/printf 'upstream status body\n'
     /usr/bin/printf '%05000d\n' 0
-    /usr/bin/printf 'unfamiliar fetch failure: %s\n%s\n' "$GH_TOKEN" "$*" >&2
+    /usr/bin/printf 'unfamiliar fetch failure: %s\n%s\n' '{CHECKOUT_TOKEN}' "$*" >&2
     exit 42 ;;
-esac"#,
-    )
+esac"#
+    ))
     .await;
     assert!(matches!(
         fixture.allocate().await,
@@ -290,9 +305,15 @@ esac"#,
     let diagnostics = fixture.diagnostics.snapshot(&fixture.run_id).diagnostics;
     assert!(diagnostics[0].stderr.contains("checkout revision mismatch"));
     assert!(
-        diagnostics[0]
-            .stderr
-            .contains(fixture.admitted.source.revision.as_str())
+        diagnostics[0].stderr.contains(
+            fixture
+                .admitted
+                .source
+                .as_ref()
+                .assert_value()
+                .revision
+                .as_str()
+        )
     );
     assert!(!fixture.allocator.run_path(&fixture.run_id).exists());
 }
@@ -691,6 +712,7 @@ async fn checkpoint_restore_survives_workspace_move_and_discard_removes_lineage_
     let resumed = fixture
         .allocator
         .allocate_from_retained(RetainedAllocationRequest {
+            git_credentials: None,
             selection: CheckpointRestoreSelection::Checkpoint {
                 checkpoint_id: checkpoint_id.clone(),
             },

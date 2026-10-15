@@ -612,7 +612,7 @@ fn summary(snapshot: &RunSnapshot, runtime_failure: Option<RuntimeFailure>) -> R
         },
         cursor: Some(snapshot.cursor.clone()),
         terminal,
-        source: Some(snapshot.source.clone()),
+        source: snapshot.source.clone(),
         created_at: created_at(&snapshot.run_id),
         history_available: true,
         runtime_failure,

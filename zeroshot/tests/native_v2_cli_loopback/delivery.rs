@@ -1,7 +1,7 @@
 use super::*;
 use zeroshot_engine::native_v2_delivery::{
-    GitHubDeliveryRead, GitHubDeliverySnapshot, GitHubHeadReconciliation,
-    GitHubReconciliationOutcome, GitHubTargetIntegration, GitHubTargetReconciliation,
+    SourceDeliveryRead, SourceDeliverySnapshot, SourceHeadReconciliation,
+    SourceReconciliationOutcome, SourceTargetIntegration, SourceTargetReconciliation,
 };
 
 #[derive(Clone, Copy)]
@@ -108,14 +108,16 @@ impl DeliveryAuthority {
     }
 }
 
-fn require_test_credential(credential: GitHubCredential<'_>) -> Result<(), GitHubAuthorityError> {
+fn require_test_credential(
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<(), SourceDeliveryError> {
     (credential.expose() == "test-token")
         .then_some(())
-        .ok_or(GitHubAuthorityError::Rejected)
+        .ok_or(SourceDeliveryError::Rejected)
 }
 
-fn review_receipt(request: &GitHubReviewRequest, review_id: String) -> GitHubReviewReceipt {
-    GitHubReviewReceipt {
+fn review_receipt(request: &SourceReviewRequest, review_id: String) -> SourceReviewReceipt {
+    SourceReviewReceipt {
         review_id,
         repository: request.target.repository.clone(),
         target_branch: request.target.target_branch.clone(),
@@ -125,10 +127,10 @@ fn review_receipt(request: &GitHubReviewRequest, review_id: String) -> GitHubRev
 }
 
 fn review_observation(
-    review: &GitHubReviewReceipt,
-    state: GitHubReviewState,
-) -> GitHubReviewObservation {
-    GitHubReviewObservation {
+    review: &SourceReviewReceipt,
+    state: SourceReviewState,
+) -> SourceReviewObservation {
+    SourceReviewObservation {
         state,
         pull_request_ready: false,
         head_update_required: false,
@@ -141,28 +143,32 @@ fn review_observation(
 }
 
 #[async_trait]
-impl GitHubDeliveryAuthority for DeliveryAuthority {
+impl SourceDeliveryAuthority for DeliveryAuthority {
+    fn forge_credential_field(&self) -> Option<&'static str> {
+        Some(GITHUB_TOKEN_ENV)
+    }
+
     async fn observe_delivery(
         &self,
-        request: GitHubDeliveryRead<'_>,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError> {
+        request: SourceDeliveryRead<'_>,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceDeliverySnapshot, SourceDeliveryError> {
         require_test_credential(credential)?;
         let output = git_command(&self.remote)
             .args(["rev-parse", "--verify", "--quiet"])
             .arg(format!("refs/heads/{}", request.head_branch))
             .output()
-            .map_err(|_| GitHubAuthorityError::Unavailable)?;
+            .map_err(|_| SourceDeliveryError::Unavailable)?;
         let head_revision = match output.status.code() {
             Some(0) => Some(String::from_utf8_lossy(&output.stdout).trim().to_owned()),
             Some(1) => None,
-            _ => return Err(GitHubAuthorityError::Rejected),
+            _ => return Err(SourceDeliveryError::Rejected),
         };
         let review = match request.known_review {
             Some(known) => Some(self.inspect_review(known, credential).await?),
             None => None,
         };
-        Ok(GitHubDeliverySnapshot {
+        Ok(SourceDeliverySnapshot {
             review,
             head_revision,
         })
@@ -170,9 +176,9 @@ impl GitHubDeliveryAuthority for DeliveryAuthority {
 
     async fn reconcile_delivery_target(
         &self,
-        request: GitHubTargetReconciliation<'_>,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubTargetIntegration, GitHubAuthorityError> {
+        request: SourceTargetReconciliation<'_>,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceTargetIntegration, SourceDeliveryError> {
         require_test_credential(credential)?;
         let target_revision = git_output(
             &self.remote,
@@ -187,17 +193,17 @@ impl GitHubDeliveryAuthority for DeliveryAuthority {
             request.workspace,
             &["merge-base", "--is-ancestor", &target_revision, "HEAD"],
         );
-        Ok(GitHubTargetIntegration {
+        Ok(SourceTargetIntegration {
             target_revision,
-            outcome: GitHubReconciliationOutcome::Unchanged,
+            outcome: SourceReconciliationOutcome::Unchanged,
         })
     }
 
     async fn reconcile_delivery_head(
         &self,
-        request: GitHubHeadReconciliation<'_>,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubReconciliationOutcome, GitHubAuthorityError> {
+        request: SourceHeadReconciliation<'_>,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceReconciliationOutcome, SourceDeliveryError> {
         require_test_credential(credential)?;
         // This fixture models CI repair without remote branch edits.
         assert_eq!(request.published, request.observed);
@@ -213,14 +219,14 @@ impl GitHubDeliveryAuthority for DeliveryAuthority {
                 .assert_value()
                 .success()
         );
-        Ok(GitHubReconciliationOutcome::Unchanged)
+        Ok(SourceReconciliationOutcome::Unchanged)
     }
 
     async fn push_branch(
         &self,
-        request: &GitHubPushRequest,
-        credential: GitHubCredential<'_>,
-    ) -> Result<(), GitHubAuthorityError> {
+        request: &SourcePushRequest,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<(), SourceDeliveryError> {
         require_test_credential(credential)?;
         let mut push = tokio::process::Command::new("/usr/bin/git");
         push.arg("-C")
@@ -229,16 +235,16 @@ impl GitHubDeliveryAuthority for DeliveryAuthority {
             .arg(format!("HEAD:refs/heads/{}", request.head_branch));
         match push.status().await {
             Ok(status) if status.success() => Ok(()),
-            Ok(_) => Err(GitHubAuthorityError::Rejected),
-            Err(_) => Err(GitHubAuthorityError::Unavailable),
+            Ok(_) => Err(SourceDeliveryError::Rejected),
+            Err(_) => Err(SourceDeliveryError::Unavailable),
         }
     }
 
     async fn open_or_update_review(
         &self,
-        request: &GitHubReviewRequest,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubReviewReceipt, GitHubAuthorityError> {
+        request: &SourceReviewRequest,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceReviewReceipt, SourceDeliveryError> {
         require_test_credential(credential)?;
         let review_id = (self.reviews.fetch_add(1, Ordering::SeqCst) + 1).to_string();
         Ok(review_receipt(request, review_id))
@@ -246,9 +252,9 @@ impl GitHubDeliveryAuthority for DeliveryAuthority {
 
     async fn inspect_review(
         &self,
-        review: &GitHubReviewReceipt,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubReviewObservation, GitHubAuthorityError> {
+        review: &SourceReviewReceipt,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceReviewObservation, SourceDeliveryError> {
         require_test_credential(credential)?;
         self.inspections.fetch_add(1, Ordering::SeqCst);
         let merged = self
@@ -257,21 +263,21 @@ impl GitHubDeliveryAuthority for DeliveryAuthority {
             .assert_value()
             .contains(&review.review_id);
         let state = if merged {
-            GitHubReviewState::Merged {
+            SourceReviewState::Merged {
                 merge_revision: review.head_revision.clone(),
             }
         } else if matches!(self.scenario, DeliveryScenario::CiFailureThenMerge)
             && review.review_id == "1"
         {
-            GitHubReviewState::Open {
-                checks: GitHubChecks::Failed {
+            SourceReviewState::Open {
+                checks: SourceChecks::Failed {
                     diagnostic: "Required CI checks failed:\n- realistic CI fixture failed"
                         .to_owned(),
                 },
             }
         } else {
-            GitHubReviewState::Open {
-                checks: GitHubChecks::NotRequired,
+            SourceReviewState::Open {
+                checks: SourceChecks::NotRequired,
             }
         };
         Ok(review_observation(review, state))
@@ -279,14 +285,14 @@ impl GitHubDeliveryAuthority for DeliveryAuthority {
 
     async fn request_merge(
         &self,
-        review: &GitHubReviewReceipt,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubMergeRequestOutcome, GitHubAuthorityError> {
+        review: &SourceReviewReceipt,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
         require_test_credential(credential)?;
         self.merge_requests.fetch_add(1, Ordering::SeqCst);
         let mut merged = self.merged_reviews.lock().assert_value();
         merged.insert(review.review_id.clone());
-        Ok(GitHubMergeRequestOutcome::Accepted)
+        Ok(SourceMergeRequestOutcome::Accepted)
     }
 }
 
@@ -362,6 +368,10 @@ impl CapsuleAllocator for DeliveryAllocator {
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         let run_id = request.run_id;
         let admitted = request.admitted;
+        let source = admitted
+            .source
+            .as_ref()
+            .ok_or(CapsuleAllocationUnavailable::Runtime)?;
         let delivery = NativeV2DeliveryAdapter::new(
             NativeV2DeliveryConfig {
                 delivery_run_id: run_id.clone(),
@@ -370,9 +380,9 @@ impl CapsuleAllocator for DeliveryAllocator {
                 workspace: self.fixture.workspace.clone(),
                 git_program: PathBuf::from("/usr/bin/git"),
                 target: DeliveryTarget::new(
-                    admitted.source.repository.as_str(),
-                    admitted.source.branch.as_str(),
-                    admitted.source.revision.as_str(),
+                    source.repository.as_str(),
+                    source.branch.as_str(),
+                    source.revision.as_str(),
                 )
                 .map_err(|_| CapsuleAllocationUnavailable::Runtime)?,
                 poll: DeliveryPollPolicy::new(3, Duration::ZERO)

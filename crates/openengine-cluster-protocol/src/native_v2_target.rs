@@ -229,9 +229,19 @@ pub struct TargetRunRequest {
     pub submission: RunSubmission,
     pub connections: RunConnectionValues,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_credentials: Option<crate::GitTransportCredentials>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_resolver: Option<TargetConnectionResolver>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,
+}
+
+impl TargetRunRequest {
+    /// New metadata or private credential forms require explicit target support before upload.
+    #[must_use]
+    pub fn requires_git_transport(&self) -> bool {
+        self.submission.requires_git_transport() || self.git_credentials.is_some()
+    }
 }
 
 impl fmt::Debug for TargetRunRequest {
@@ -244,6 +254,7 @@ impl fmt::Debug for TargetRunRequest {
             .field("connection_values", &"[REDACTED]")
             .field("connection_resolver", &self.connection_resolver)
             .field("github_token", &redacted(&self.github_token))
+            .field("git_credentials", &self.git_credentials)
             .finish()
     }
 }
@@ -454,6 +465,15 @@ pub struct TargetNodeRuntimeLanesDiscovery {
     pub kind: String,
 }
 
+pub const GIT_TRANSPORT_KIND: &str = "openengine.git-transport/v1";
+
+/// Frozen at `{"kind": ...}`; generic source and credential envelopes require this marker.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetGitTransportDiscovery {
+    pub kind: String,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct TargetDiscoveryExtensions {
@@ -475,6 +495,8 @@ pub struct TargetDiscoveryExtensions {
     pub hosted_workspace_recovery: Option<TargetHostedWorkspaceRecoveryDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub node_runtime_lanes: Option<TargetNodeRuntimeLanesDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_transport: Option<TargetGitTransportDiscovery>,
 }
 
 /// One discovery document for direct Docker targets and OAuth-hosted targets.
@@ -509,6 +531,7 @@ impl TargetDiscoveryExtensions {
             && self.workspace_checkpoints.is_none()
             && self.hosted_workspace_recovery.is_none()
             && self.node_runtime_lanes.is_none()
+            && self.git_transport.is_none()
     }
 }
 
@@ -560,6 +583,15 @@ impl TargetDiscoveryDocument {
     pub fn with_node_runtime_lanes(mut self) -> Self {
         self.extensions.node_runtime_lanes = Some(TargetNodeRuntimeLanesDiscovery {
             kind: NODE_RUNTIME_LANES_KIND.to_owned(),
+        });
+        self
+    }
+
+    /// Advertises generic Git source metadata and private transport credential envelopes.
+    #[must_use]
+    pub fn with_git_transport(mut self) -> Self {
+        self.extensions.git_transport = Some(TargetGitTransportDiscovery {
+            kind: GIT_TRANSPORT_KIND.to_owned(),
         });
         self
     }

@@ -139,6 +139,30 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   configured, and unavailable inspection results. Codex browser/computer access controls and explicit
   approval-review features count as authored policy.
 - The local target registry initializes `cloud` at `https://api.cloud.zeroshot.sh` with a persistent hosted device identity.
+- Local runs select an optional `--cwd` workspace, defaulting to the invoking folder. File arguments
+  stay relative to the invoking folder. A Git checkout uses its canonical root; plain, unborn, and
+  detached folders are allowed when the graph has no Git delivery. Workspace and active Zeroshot
+  state roots must be disjoint, including symlink aliases and missing state suffixes. Recovery
+  reuses the stored workspace; local idempotency cannot return a run from a different folder.
+  Workspace leases hold shared ancestor locks and an exclusive selected-root lock, so overlapping
+  folders exclude each other while sibling folders remain concurrent. Lease guards explicitly
+  unlock on drop so fork-before-exec children cannot retain released ownership. Git metadata and
+  transport commands discard ambient repository-selection variables before inspecting the selected folder.
+- Git checkout and push use credential-free HTTPS or SSH locators independently of a forge.
+  The target image includes OpenSSH and a fixed root-owned libnss_wrapper for pinned SSH
+  transport. Contained SSH Git uses private per-command user/group records for allocated numeric
+  identities; local Git keeps native identity lookup. Contained runs still require an
+  exact committed Git source. Explicit source connections
+  authorize only transport fields; these values never enter agent environments or durable source
+  records. Source-less local candidates construct no delivery adapter.
+- `source_code_provider` owns effect-free source and delivery contracts and one provider registry.
+  Maintained implementations live in `source_code/adapters/core`; contributed implementations
+  live in `source_code/adapters/contributed`. Git is shared transport; forge adapters supply review,
+  checks, and merge behavior through the existing delivery nodes and opaque repository/review IDs.
+  GitHub remains the maintained forge. Capability admission rejects unsupported operations before
+  credential resolution or workspace mutation. Pure remote identification uses each registered
+  provider's `repository_from_remote` hook; CLI source selection has no separate forge catalog and
+  rejects ambiguous matches and unsupported provider versions.
 - Named targets store only endpoint, access mode, and login identity. Named runs resolve repository, branch, exact remote revision, and worktree dirtiness client-side from the invoking Git worktree plus per-run overrides; target records never bind repositories.
 - Hosted HTTP authority clones share one bounded in-memory OAuth access-token slot across all
   hosted operations, including merge-plan discovery routes. Reuse requires the same target, login,
@@ -320,7 +344,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   resolution retries with backoff; confirmed refusal and malformed responses stop. Initial
   resolution belongs to each supervised execution, so it observes the authored deadline and does
   not block parallel dispatch. Pending authorized head adoption survives repair.
-- Git diagnostics retain bounded, credential-redacted command/status/stdout/stderr details;
+- Git diagnostics retain bounded, credential-redacted command/status/stdout/stderr details.
+  Private Git protocol stdout stays separate from printable diagnostics; parsing and failure
+  classification must preserve raw evidence before credential redaction. Final delivery feedback
+  also redacts the invocation's source credentials and its current refreshed issuance;
   unfamiliar failures use the existing optional `repair_required` signal. Only successful receipts
   require complete remote identity. Live output splits large UTF-8 diagnostics into bounded records.
   Delivery checks unresolved index entries before `git add --all` and completes resolved merges even

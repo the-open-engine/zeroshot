@@ -57,28 +57,21 @@ class _Submission:
     graph: _Graph
     initial_input: JsonValue
     runtime: _Runtime
+    cwd: str | Path | None
     repository: str | None
+    source_connection: str | None
     branch: str | None
     revision: str | None
     submission_key: str
-
-
-@dataclass(frozen=True, slots=True)
-class _Overrides:
-    title: str | None
-    preset: Preset | None
-    runtime: _Runtime | None
-    repository: str | None
-    branch: str | None
-    revision: str | None
-    submission_key: str | None
 
 
 class _SubmitOptions(TypedDict, total=False):
     title: str | None
     preset: Preset | None
     runtime: _Runtime | None
+    cwd: str | Path | None
     repository: str | None
+    source_connection: str | None
     branch: str | None
     revision: str | None
     submission_key: str | None
@@ -176,9 +169,10 @@ class Client:
 
         Args:
             task: Task text for a built-in preset, or a complete RunRequest.
-            options: Typed keyword options. title, preset, runtime, repository, branch, revision,
-                and submission_key apply to string submissions. wait_timeout is a non-negative
-                observation deadline in seconds; omit it to wait indefinitely.
+            options: Typed keyword options. title, preset, runtime, cwd, repository,
+                source_connection, branch, revision, and submission_key apply to string submissions.
+                wait_timeout is a non-negative observation deadline in seconds; omit it to wait
+                indefinitely.
 
         Returns:
             The terminal result. Graph failure remains data until raise_for_failure() is called.
@@ -215,7 +209,7 @@ class Client:
         Args:
             task: Task text for a built-in preset, or a complete RunRequest.
             options: Typed keyword options for string submissions: title, preset, runtime,
-                repository, branch, revision, and submission_key.
+                cwd, repository, source_connection, branch, revision, and submission_key.
 
         Returns:
             A durable run handle bound to this client's target.
@@ -282,7 +276,7 @@ class Client:
         self._require_hosted_target()
         return MergePlan(self, plan_id)
 
-    async def _submit(self, request: str | RunRequest, overrides: _Overrides) -> Run:
+    async def _submit(self, request: str | RunRequest, overrides: _SubmitOptions) -> Run:
         self._ensure_open()
         selected = self._submission(request, overrides)
         with tempfile.TemporaryDirectory(prefix="zeroshot-python-run-") as directory:
@@ -349,31 +343,31 @@ class Client:
             raise ProtocolError("Zeroshot returned a malformed GraphSpec")
         return GraphSpec.from_dict(value)
 
-    def _submission(self, request: str | RunRequest, overrides: _Overrides) -> _Submission:
+    def _submission(self, request: str | RunRequest, overrides: _SubmitOptions) -> _Submission:
         if isinstance(request, RunRequest):
             return _exact_submission(request, overrides)
-        selected_preset = overrides.preset or self.preset
+        selected_preset = overrides.get("preset") or self.preset
         if selected_preset is None:
             raise InvalidRequestError("a preset is required", code="template.required")
-        selected_runtime = overrides.runtime or self.runtime
+        selected_runtime = overrides.get("runtime") or self.runtime
         if selected_runtime is None:
             raise InvalidRequestError(
                 "a runtime is required; configure Client.runtime or pass runtime=",
                 code="runtime.required",
             )
+        title = overrides.get("title")
+        submission_key = overrides.get("submission_key")
         return _Submission(
-            title=overrides.title if overrides.title is not None else "Zeroshot run",
+            title=title if title is not None else "Zeroshot run",
             graph=selected_preset,
             initial_input={"task": request},
             runtime=selected_runtime,
-            repository=overrides.repository,
-            branch=overrides.branch,
-            revision=overrides.revision,
-            submission_key=(
-                overrides.submission_key
-                if overrides.submission_key is not None
-                else _submission_key()
-            ),
+            cwd=overrides.get("cwd"),
+            repository=overrides.get("repository"),
+            source_connection=overrides.get("source_connection"),
+            branch=overrides.get("branch"),
+            revision=overrides.get("revision"),
+            submission_key=(submission_key if submission_key is not None else _submission_key()),
         )
 
     def _submission_arguments(self, submission: _Submission, root: Path) -> list[str]:
@@ -381,6 +375,10 @@ class Client:
         arguments = ["run", "--title", submission.title, "--input", str(input_path)]
         self._append_graph(arguments, submission.graph, root)
         self._append_runtime(arguments, submission.runtime, root)
+        if submission.cwd is not None:
+            arguments.extend(["--cwd", str(submission.cwd)])
+        if submission.source_connection is not None:
+            arguments.extend(["--source-connection", submission.source_connection])
         if submission.repository is not None:
             arguments.extend(["--repository", submission.repository])
         if submission.branch is not None:
@@ -761,32 +759,26 @@ def _submission_key() -> str:
     return f"python-{uuid.uuid4().hex}"
 
 
-def _overrides(options: _SubmitOptions, allowed: Mapping[str, object]) -> _Overrides:
+def _overrides(options: _SubmitOptions, allowed: Mapping[str, object]) -> _SubmitOptions:
     unknown = options.keys() - allowed.keys()
     if unknown:
         raise TypeError(f"unexpected keyword argument: {sorted(unknown)[0]}")
-    return _Overrides(
-        options.get("title"),
-        options.get("preset"),
-        options.get("runtime"),
-        options.get("repository"),
-        options.get("branch"),
-        options.get("revision"),
-        options.get("submission_key"),
-    )
+    return options
 
 
-def _exact_submission(request: RunRequest, overrides: _Overrides) -> _Submission:
+def _exact_submission(request: RunRequest, overrides: _SubmitOptions) -> _Submission:
     if any(
         value is not None
         for value in (
-            overrides.title,
-            overrides.preset,
-            overrides.runtime,
-            overrides.repository,
-            overrides.branch,
-            overrides.revision,
-            overrides.submission_key,
+            overrides.get("title"),
+            overrides.get("preset"),
+            overrides.get("runtime"),
+            overrides.get("cwd"),
+            overrides.get("repository"),
+            overrides.get("source_connection"),
+            overrides.get("branch"),
+            overrides.get("revision"),
+            overrides.get("submission_key"),
         )
     ):
         raise TypeError("RunRequest cannot be combined with string-submission overrides")
@@ -795,7 +787,9 @@ def _exact_submission(request: RunRequest, overrides: _Overrides) -> _Submission
         graph=request.graph,
         initial_input=request.initial_input,
         runtime=request.runtime,
+        cwd=request.cwd,
         repository=request.repository,
+        source_connection=request.source_connection,
         branch=request.branch,
         revision=request.revision,
         submission_key=(

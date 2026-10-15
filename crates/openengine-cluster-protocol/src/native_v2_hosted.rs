@@ -60,7 +60,9 @@ impl From<RunStatus> for HostedRunStatus {
 pub struct HostedRunStatusResult {
     pub run_id: RunId,
     pub title: RunTitle,
-    pub source: ResolvedSource,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<ResolvedSource>,
     pub size: RunSize,
     pub at_cursor: Cursor,
     pub status: HostedRunStatus,
@@ -119,7 +121,9 @@ pub struct HostedRunWatchEventNotification {
     pub subscription_id: SubscriptionId,
     pub run_id: RunId,
     pub title: RunTitle,
-    pub source: ResolvedSource,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<ResolvedSource>,
     pub size: RunSize,
     pub cursor: Cursor,
     pub status: HostedRunStatus,

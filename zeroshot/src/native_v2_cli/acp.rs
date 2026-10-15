@@ -441,7 +441,7 @@ impl SessionState {
 
 struct PreparedSession {
     workspace: PathBuf,
-    source: openengine_cluster_protocol::ResolvedSource,
+    source: Option<openengine_cluster_protocol::ResolvedSource>,
     resources: SessionResources,
 }
 
@@ -553,6 +553,7 @@ impl AcpSession {
             workspace: &prepared.workspace,
             storage: prepared.resources._runtime.path(),
             github_token: None,
+            git_credentials: None,
             native_environment: &native_environment,
         })?;
         let session = Arc::new(Self {
@@ -733,11 +734,7 @@ fn prepare_session(
     let requested_workspace =
         std::fs::canonicalize(&requested_workspace).map_err(AcpServeError::Storage)?;
     let (workspace, source) = local_resolved_source(&requested_workspace, Path::new("git"))?;
-    if requested_workspace != workspace {
-        return Err(AcpServeError::Request(
-            "session cwd must be the canonical Git workspace root",
-        ));
-    }
+    crate::native_v2_local::validate_workspace_state(&workspace, state_root)?;
     let resources = prepare_session_resources(state_root, &workspace)?;
     Ok(PreparedSession {
         workspace,
@@ -751,9 +748,8 @@ fn prepare_session_resources(
     workspace: &Path,
 ) -> Result<SessionResources, AcpServeError> {
     let identity = WorkspaceIdentity::capture(workspace)?;
-    let workspace_lease = Arc::new(ControllerLease::acquire(local_workspace_lease_path(
-        state_root, workspace,
-    )?)?);
+    let lease_path = local_workspace_lease_path(state_root, workspace)?;
+    let workspace_lease = Arc::new(ControllerLease::acquire_workspace(&lease_path, workspace)?);
     if !identity.is_current(workspace) {
         return Err(AcpServeError::Portable(PortableControllerError::Workspace));
     }
@@ -855,7 +851,7 @@ fn new_run_id() -> RunId {
 
 fn submission(
     profile: &RunProfile,
-    source: &openengine_cluster_protocol::ResolvedSource,
+    source: &Option<openengine_cluster_protocol::ResolvedSource>,
     task: &str,
     identity: &str,
 ) -> Result<RunSubmission, AcpServeError> {

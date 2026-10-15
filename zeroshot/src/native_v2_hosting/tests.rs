@@ -33,6 +33,18 @@ mod fixtures;
 use fixtures::*;
 
 #[test]
+fn contained_submissions_reject_source_absence_before_materializing_provider_access() {
+    let mut request = submission(runtime(BTreeSet::new()), &"a".repeat(40), "local-folder");
+    request.source = None;
+    let original_runtime = request.runtime.clone();
+    let error = prepare_contained_submission(&mut request)
+        .assert_error_with("contained runs need reproducible Git provenance");
+    assert_eq!(error.kind(), TargetAuthorityErrorKind::Invalid);
+    assert!(error.message().contains("resolved Git source"));
+    assert_eq!(request.runtime, original_runtime);
+}
+
+#[test]
 fn contained_provider_access_preserves_mixed_lanes_and_authored_oauth() {
     for (reviewer_connections, reviewer_requirements) in [
         (json!({}), json!({"anthropic": ["ANTHROPIC_API_KEY"]})),
@@ -121,6 +133,7 @@ fn run_environment_is_exact_and_request_debug_is_redacted() {
         ),
         connections: supplied,
         connection_resolver: None,
+        git_credentials: None,
         github_token: Some("github-secret".to_owned()),
     };
     let debug = format!("{request:?}");
@@ -454,6 +467,7 @@ async fn invalid_submission_fails_before_run_allocation() {
                 submission: sourceful,
                 connections: BTreeMap::new(),
                 connection_resolver: None,
+                git_credentials: None,
                 github_token: None,
             },
         )
@@ -494,6 +508,7 @@ async fn invalid_run_environment_fails_before_allocation() {
                 submission: sourceful,
                 connections: BTreeMap::new(),
                 connection_resolver: None,
+                git_credentials: None,
                 github_token: None,
             },
         )
@@ -516,6 +531,7 @@ async fn repository_resolution_and_installation_preserve_the_exact_revision() {
     let pool = test_process_pool();
     let source = path_source(&repository.remote);
     let feature = openengine_cluster_protocol::ResolvedSource {
+        remote: None,
         repository: openengine_cluster_protocol::SourceRepositoryId::new("acme/project")
             .assert_value_with("repository"),
         branch: openengine_cluster_protocol::SourceBranchId::new("feature")
@@ -528,6 +544,8 @@ async fn repository_resolution_and_installation_preserve_the_exact_revision() {
     let workspace = root.path().join("workspace");
     writable_directory(&workspace);
     let installed = install_repository(RepositoryInstall {
+        git_credentials: None,
+        private_directory: root.path(),
         git_program: Path::new("/usr/bin/git"),
         source: &source,
         resolved: &feature,
@@ -536,7 +554,7 @@ async fn repository_resolution_and_installation_preserve_the_exact_revision() {
         github_token: None,
     })
     .await
-    .assert_value_with("install exact resolved revision");
+    .unwrap_or_else(|error| panic!("install exact resolved revision: {error:?}"));
     assert_eq!(installed.target_branch, "feature");
     assert_eq!(installed.base_revision, repository.feature_revision);
 }

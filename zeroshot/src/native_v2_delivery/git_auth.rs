@@ -1,5 +1,5 @@
 pub fn encode_basic_credential(token: &str) -> String {
-    encode_base64(format!("x-access-token:{token}").as_bytes())
+    encode_user_password("x-access-token", token)
 }
 
 fn encode_base64(bytes: &[u8]) -> String {
@@ -33,3 +33,7 @@ fn encode_base64(bytes: &[u8]) -> String {
 #[cfg(test)]
 #[path = "git_auth/tests.rs"]
 mod tests;
+
+pub fn encode_user_password(username: &str, password: &str) -> String {
+    encode_base64(format!("{username}:{password}").as_bytes())
+}

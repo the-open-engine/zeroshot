@@ -708,7 +708,9 @@ fn parser_exposes_named_run_source_overrides() {
     .assert_value();
     let run = run_command(command);
     assert_eq!(
-        run.repository.as_ref().map(SourceRepositoryId::as_str),
+        run.repository
+            .as_ref()
+            .map(crate::native_v2_cli::RunRepository::as_str),
         Some("open/engine")
     );
     assert_eq!(
@@ -903,4 +905,50 @@ fn target_serve_diagnostic_json_is_opt_in() {
         };
         assert_eq!(target.operator_diagnostics_json, enabled);
     }
+}
+
+#[test]
+fn repository_overrides_use_transport_bounds_and_reject_credential_bearing_locators() {
+    let parse = |repository: &str| {
+        parse_native_v2_args(args(&[
+            "run",
+            "--target",
+            "prod",
+            "--title",
+            "Git URL bounds",
+            "--graph",
+            "graph.json",
+            "--runtime-config",
+            "runtime.json",
+            "--input",
+            "input.json",
+            "--repository",
+            repository,
+        ]))
+    };
+    let prefix = "https://forge.example/";
+    for length in [256, 2048] {
+        let remote = format!("{prefix}{}", "r".repeat(length - prefix.len()));
+        let run = run_command(parse(&remote).assert_value());
+        assert!(matches!(
+            run.repository,
+            Some(crate::native_v2_cli::RunRepository::Git(_))
+        ));
+        assert_eq!(
+            run.repository
+                .as_ref()
+                .map(crate::native_v2_cli::RunRepository::as_str),
+            Some(remote.as_str())
+        );
+    }
+    for remote in [
+        "https://user:canary@forge.example/repo",
+        "https://forge.example/repo?access_token=canary",
+        "ext::helper",
+        "/local/path",
+    ] {
+        let error = parse(remote).assert_error().to_string();
+        assert!(!error.contains("canary"));
+    }
+    assert!(parse(&format!("{prefix}{}", "r".repeat(2049 - prefix.len()))).is_err());
 }

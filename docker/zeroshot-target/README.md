@@ -4,7 +4,9 @@
 contains the native `zeroshot` executable plus pinned Codex, Claude, and GitHub Copilot harness CLIs.
 The image uses Debian Trixie with package updates applied at build time. GitHub CLI is pinned
 separately to an upstream release, verified by checksum, and tested for delivery API pagination
-before publication.
+before publication. Git checkout and push support HTTPS and SSH. OpenSSH and libnss_wrapper
+provide private user/group records for the target's allocated numeric identities; Git commands
+keep their assigned UID/GID without editing the image's user database.
 
 Coding tools include Node.js 24 and npm, Python 3.12 with pip, venv and extension headers,
 Rust 1.97 with Cargo, rustfmt and Clippy, and C/C++ compilers, make, pkgconf, OpenSSL and

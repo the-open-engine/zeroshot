@@ -1,10 +1,15 @@
 use super::*;
 
+pub(super) struct DeliveryFeedback<'a, 'environment> {
+    pub(super) invocation: &'a DriverInvocation,
+    pub(super) credentials: &'a DeliveryCredentials<'environment>,
+}
+
 pub(super) struct RepairFailure {
     pub(super) diagnostic: String,
     pub(super) retryable: bool,
-    review: Option<Box<GitHubReviewReceipt>>,
-    authority: Option<GitHubAuthorityError>,
+    review: Option<Box<SourceReviewReceipt>>,
+    authority: Option<SourceDeliveryError>,
 }
 
 pub(super) fn repair(diagnostic: impl Into<String>) -> DeliveryStop {
@@ -16,7 +21,7 @@ pub(super) fn repair(diagnostic: impl Into<String>) -> DeliveryStop {
     })
 }
 
-pub(super) fn uncertain_authority(error: GitHubAuthorityError) -> DeliveryStop {
+pub(super) fn uncertain_authority(error: SourceDeliveryError) -> DeliveryStop {
     DeliveryStop::Repair(RepairFailure {
         diagnostic: error.to_string(),
         retryable: error.retryable_operation(),
@@ -32,9 +37,11 @@ pub(super) fn finish_uncertain_authority(mut failure: RepairFailure) -> Delivery
     }
 }
 
-impl From<GitHubAuthorityError> for DeliveryStop {
-    fn from(error: GitHubAuthorityError) -> Self {
-        if matches!(error, GitHubAuthorityError::Identity(_)) {
+impl From<SourceDeliveryError> for DeliveryStop {
+    fn from(error: SourceDeliveryError) -> Self {
+        if error.cleanup_unconfirmed() {
+            Self::Runner(NodeRunnerError::CleanupUnconfirmed)
+        } else if matches!(error, SourceDeliveryError::Identity(_)) {
             Self::Outcome(WorkerOutcome::declared_failure(WorkerErrorCode::Refusal))
         } else if error.authentication_failed() {
             Self::Outcome(WorkerOutcome::authentication_refusal())
@@ -42,7 +49,7 @@ impl From<GitHubAuthorityError> for DeliveryStop {
             Self::Retry(error)
         } else if matches!(
             error,
-            GitHubAuthorityError::Repairable(_) | GitHubAuthorityError::Command(_)
+            SourceDeliveryError::Repairable(_) | SourceDeliveryError::Command(_)
         ) {
             repair(error.to_string())
         } else {
@@ -52,7 +59,7 @@ impl From<GitHubAuthorityError> for DeliveryStop {
 }
 
 impl DeliveryStop {
-    pub(super) fn with_review(mut self, review: &GitHubReviewReceipt) -> Self {
+    pub(super) fn with_review(mut self, review: &SourceReviewReceipt) -> Self {
         if let Self::Repair(failure) = &mut self {
             failure.review = Some(Box::new(review.clone()));
         }
@@ -63,17 +70,17 @@ impl DeliveryStop {
 impl NativeV2DeliveryAdapter {
     pub(super) async fn repair_outcome(
         &self,
-        invocation: &DriverInvocation,
+        feedback: &DeliveryFeedback<'_, '_>,
         mode: DeliveryMode,
         failure: RepairFailure,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
-        if !contract::supports_repair(&invocation.response) {
+        if !contract::supports_repair(&feedback.invocation.response) {
             return Ok(WorkerOutcome::declared_failure(WorkerErrorCode::Crash));
         }
         let review = failure
             .review
             .map(|review| *review)
-            .unwrap_or_else(|| GitHubReviewReceipt {
+            .unwrap_or_else(|| SourceReviewReceipt {
                 review_id: String::new(),
                 repository: self.config.target.repository.clone(),
                 target_branch: self.config.target.target_branch.clone(),
@@ -90,7 +97,8 @@ impl NativeV2DeliveryAdapter {
             review.review_id,
             failure.diagnostic,
         );
-        let diagnostic = self.redact_feedback(invocation, self.review_context(&diagnostic));
+        let diagnostic =
+            self.redact_feedback(feedback.credentials, self.review_context(&diagnostic));
         delivery_outcome(
             DeliveryResult {
                 mode,
@@ -124,18 +132,81 @@ impl NativeV2DeliveryAdapter {
 
     pub(super) fn redact_feedback(
         &self,
-        invocation: &DriverInvocation,
-        mut diagnostic: String,
+        credentials: &DeliveryCredentials<'_>,
+        diagnostic: impl AsRef<str>,
     ) -> String {
-        let tokens = [
-            self.trusted_github_token.as_deref(),
-            github_credential(&invocation.environment).map(GitHubCredential::expose),
-        ];
-        for token in tokens.into_iter().flatten() {
-            diagnostic = diagnostic
-                .replace(token, "[REDACTED]")
-                .replace(&git_auth::encode_basic_credential(token), "[REDACTED]");
+        let mut secrets = credentials.feedback_secrets();
+        for token in [self.trusted_github_token.as_deref()].into_iter().flatten() {
+            secrets.extend([token.to_owned(), git_auth::encode_basic_credential(token)]);
         }
-        diagnostic
+        for credentials in [self.trusted_git_credentials.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            source_secrets(credentials, &mut secrets);
+        }
+        super::super::command::redact(diagnostic.as_ref(), &secrets)
+    }
+}
+
+impl DeliveryCredentials<'_> {
+    fn feedback_secrets(&self) -> Vec<String> {
+        let mut secrets = Vec::new();
+        for token in [&self.token, &self.github_git_token] {
+            secrets.extend([token.clone(), git_auth::encode_basic_credential(token)]);
+        }
+        if let Some(git) = &self.git {
+            source_secrets(git, &mut secrets);
+        }
+        if let Some(environment) = self.environment {
+            for field in [self.forge_field, Some(GITHUB_TOKEN_ENV)]
+                .into_iter()
+                .flatten()
+            {
+                if let Some(token) = forge_credential(environment, field) {
+                    secrets.extend([token.to_owned(), git_auth::encode_basic_credential(token)]);
+                }
+            }
+            for git in [
+                environment.source_git_credentials().cloned(),
+                git_credentials(environment).ok().flatten(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                source_secrets(&git, &mut secrets);
+            }
+        }
+        secrets
+    }
+}
+
+fn source_secrets(
+    credentials: &openengine_cluster_protocol::GitTransportCredentials,
+    secrets: &mut Vec<String>,
+) {
+    use openengine_cluster_protocol::GitTransportCredentials;
+    match credentials {
+        GitTransportCredentials::Https { username, password } => secrets.extend([
+            username.clone(),
+            password.clone(),
+            git_auth::encode_user_password(username, password),
+        ]),
+        GitTransportCredentials::Ssh {
+            private_key,
+            known_hosts,
+        } => {
+            secrets.extend([private_key.clone(), known_hosts.clone()]);
+            secrets.extend(private_key.lines().map(str::to_owned));
+        }
+    }
+}
+
+pub(super) fn git_failure(error: super::super::git::GitError) -> DeliveryStop {
+    match error {
+        super::super::git::GitError::Command(failure) if failure.cleanup_unconfirmed => {
+            DeliveryStop::Runner(NodeRunnerError::CleanupUnconfirmed)
+        }
+        error => repair(error.to_string()),
     }
 }

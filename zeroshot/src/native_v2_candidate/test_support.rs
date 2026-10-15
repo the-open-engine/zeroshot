@@ -267,8 +267,8 @@ impl TestGitRepository {
 pub(crate) fn local_delivery_authority(
     workspace: &Path,
     remote: &Path,
-) -> crate::native_v2_delivery::GhCliDeliveryAuthority {
-    use crate::native_v2_delivery::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
+) -> crate::source_code_provider::adapters::core::GhCliDeliveryAuthority {
+    use crate::source_code_provider::adapters::core::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
 
     git(
         workspace,
@@ -326,6 +326,8 @@ pub(crate) fn allocation_request<'a>(
     github_token: Option<&'a str>,
 ) -> crate::native_v2_cloud::CapsuleAllocationRequest<'a> {
     crate::native_v2_cloud::CapsuleAllocationRequest {
+        git_credentials: None,
+
         run_id,
         admitted,
         github_token,

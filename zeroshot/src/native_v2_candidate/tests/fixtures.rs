@@ -194,12 +194,14 @@ pub(super) async fn admitted(kind: RuntimePlanKind) -> AdmittedRun {
             graph: shipping_graph(kind),
             initial_input: json!({}),
             runtime: runtime(kind),
-            source: ResolvedSource {
+            source: Some(ResolvedSource {
+                remote: None,
+
                 repository: SourceRepositoryId::new("acme/project").assert_value_with("repository"),
                 branch: SourceBranchId::new("main").assert_value_with("target branch"),
                 revision: SourceRevisionId::new("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
                     .assert_value_with("base revision"),
-            },
+            }),
             submission_key: IdempotencyKey::new("candidate-config").assert_value_with("key"),
         })
         .await
@@ -217,17 +219,21 @@ pub(super) fn candidate_config(
             .into_iter()
             .map(|lane| harness_config(lane, repository))
             .collect(),
-        delivery: NativeV2DeliveryConfig {
-            delivery_run_id: RunId::new("candidate-fixture"),
-            adopt_existing_delivery: false,
-            git_identity: None,
-            workspace: repository.workspace.clone(),
-            git_program: PathBuf::from("/usr/bin/git"),
-            target: DeliveryTarget::new("acme/project", "main", repository.base.clone())
-                .assert_value_with("target"),
-            poll: DeliveryPollPolicy::new(2, Duration::ZERO).assert_value_with("poll"),
-        },
-        github,
+        workspace: repository.workspace.clone(),
+        delivery: Some(NativeV2CandidateDelivery {
+            config: NativeV2DeliveryConfig {
+                delivery_run_id: RunId::new("candidate-fixture"),
+                adopt_existing_delivery: false,
+                git_identity: None,
+                workspace: repository.workspace.clone(),
+                git_program: PathBuf::from("/usr/bin/git"),
+                target: DeliveryTarget::new("acme/project", "main", repository.base.clone())
+                    .assert_value_with("target"),
+                poll: DeliveryPollPolicy::new(2, Duration::ZERO).assert_value_with("poll"),
+            },
+            authority: github,
+            git_credentials: None,
+        }),
     }
 }
 

@@ -21,6 +21,14 @@ work=$(mktemp -d "$HOME/toolchain-proof.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 cd "$work"
 
+# OpenSSH resolves the contained numeric identity without changing the image's user database.
+printf 'zeroshot:x:%s:%s:Zeroshot:/nonexistent:/bin/sh\n' "$(id -u)" "$(id -g)" >passwd
+printf 'zeroshot:x:%s:\n' "$(id -g)" >group
+env LD_PRELOAD=/usr/local/lib/zeroshot/libnss_wrapper.so \
+    NSS_WRAPPER_PASSWD="$work/passwd" NSS_WRAPPER_GROUP="$work/group" \
+    ssh -G -F /dev/null -o BatchMode=yes git@example.invalid >ssh-config
+grep '^user git$' ssh-config
+
 mkdir native
 cat >native/probe.c <<'C'
 #include <ffi.h>

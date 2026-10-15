@@ -7,7 +7,14 @@ from typing import Literal, TypeAlias, cast
 
 from .errors import ProtocolError
 from .plans import MergePlanRunStatus, MergePlanStatus
-from .runs import ActiveExecution, LogEvent, ResolvedSource, RunResult, RunStatus, RunSummary
+from .runs import (
+    ActiveExecution,
+    LogEvent,
+    RunResult,
+    RunStatus,
+    RunSummary,
+)
+from .source import ResolvedGitRemote, ResolvedSource, SourceForgeIdentity
 from .values import JsonValue
 
 _Size: TypeAlias = Literal["small", "medium", "large"]
@@ -97,12 +104,37 @@ def _log_event(value: object) -> LogEvent:
     )
 
 
-def _source(value: object) -> ResolvedSource:
+def _source(value: object) -> ResolvedSource | None:
+    if value is None:
+        return None
     source = _mapping(value, "run status.source")
     return ResolvedSource(
         repository=_string(source, "repository", "run status.source"),
         branch=_string(source, "branch", "run status.source"),
         revision=_string(source, "revision", "run status.source"),
+        remote=_remote(source.get("remote")),
+    )
+
+
+def _remote(value: object) -> ResolvedGitRemote | None:
+    if value is None:
+        return None
+    remote = _mapping(value, "run status.source.remote")
+    forge_value = remote.get("forge")
+    forge = None
+    if forge_value is not None:
+        identity = _mapping(forge_value, "run status.source.remote.forge")
+        forge = SourceForgeIdentity(
+            provider=_string(identity, "provider", "run status.source.remote.forge"),
+            repository=_string(identity, "repository", "run status.source.remote.forge"),
+        )
+    connection = remote.get("connection")
+    if connection is not None and not isinstance(connection, str):
+        raise ProtocolError("Zeroshot emitted malformed run status.source.remote.connection")
+    return ResolvedGitRemote(
+        url=_string(remote, "url", "run status.source.remote"),
+        forge=forge,
+        connection=connection,
     )
 
 

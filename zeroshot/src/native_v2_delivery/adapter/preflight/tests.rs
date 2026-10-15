@@ -6,8 +6,8 @@ const OBSERVED_HEAD: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const PUBLISHED_HEAD: &str = "cccccccccccccccccccccccccccccccccccccccc";
 const INTENDED_HEAD: &str = "dddddddddddddddddddddddddddddddddddddddd";
 
-fn receipt(head_revision: &str) -> GitHubReviewReceipt {
-    GitHubReviewReceipt {
+fn receipt(head_revision: &str) -> SourceReviewReceipt {
+    SourceReviewReceipt {
         review_id: "17".to_owned(),
         repository: "acme/project".to_owned(),
         target_branch: "main".to_owned(),
@@ -25,15 +25,15 @@ fn target() -> DeliveryTarget {
     .assert_value()
 }
 
-fn observation() -> GitHubReviewObservation {
-    GitHubReviewObservation {
+fn observation() -> SourceReviewObservation {
+    SourceReviewObservation {
         review_id: "17".to_owned(),
         repository: "acme/project".to_owned(),
         target_branch: "main".to_owned(),
         head_branch: "zeroshot/v2-test".to_owned(),
         head_revision: OBSERVED_HEAD.to_owned(),
-        state: GitHubReviewState::Open {
-            checks: GitHubChecks::Pending,
+        state: SourceReviewState::Open {
+            checks: SourceChecks::Pending,
         },
         pull_request_ready: false,
         head_update_required: false,
@@ -67,7 +67,7 @@ fn reconciliation_anchor_requires_proof_and_uses_the_strongest_owned_revision() 
         observed
     );
     let error = reconciliation_anchor(&DeliveryState::default(), &observed, false).assert_error();
-    assert!(matches!(error, GitHubAuthorityError::Identity(_)));
+    assert!(matches!(error, SourceDeliveryError::Identity(_)));
     assert!(error.to_string().contains(OBSERVED_HEAD));
 }
 
@@ -76,7 +76,7 @@ fn observed_receipt_requires_a_branch_ref_and_preserves_review_identity() {
     let target = target();
     assert_eq!(
         observed_receipt(
-            GitHubDeliverySnapshot {
+            SourceDeliverySnapshot {
                 review: Some(observation()),
                 head_revision: None,
             },
@@ -87,7 +87,7 @@ fn observed_receipt_requires_a_branch_ref_and_preserves_review_identity() {
     );
 
     let reviewed = observed_receipt(
-        GitHubDeliverySnapshot {
+        SourceDeliverySnapshot {
             review: Some(observation()),
             head_revision: Some(OBSERVED_HEAD.to_owned()),
         },
@@ -98,7 +98,7 @@ fn observed_receipt_requires_a_branch_ref_and_preserves_review_identity() {
     assert_eq!(reviewed, receipt_from_observation(&observation()));
 
     let branch_only = observed_receipt(
-        GitHubDeliverySnapshot {
+        SourceDeliverySnapshot {
             review: None,
             head_revision: Some(OBSERVED_HEAD.to_owned()),
         },

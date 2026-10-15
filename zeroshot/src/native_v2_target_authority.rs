@@ -103,6 +103,11 @@ pub trait TargetControllerFactory: Send + Sync {
         false
     }
 
+    /// Reports support for generic source metadata and private HTTPS/SSH authority.
+    fn supports_git_transport(&self) -> bool {
+        false
+    }
+
     async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError>;
 
     async fn submit(
@@ -176,6 +181,10 @@ impl NativeV2TargetAuthority {
 
     fn supports_workspace_checkpoints(&self) -> bool {
         self.factory.supports_workspace_checkpoints()
+    }
+
+    fn supports_git_transport(&self) -> bool {
+        self.factory.supports_git_transport()
     }
 
     /// Reads only an existing controller. History must never trigger reconciliation or recovery.

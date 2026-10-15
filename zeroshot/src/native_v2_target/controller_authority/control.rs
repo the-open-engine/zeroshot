@@ -97,7 +97,7 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         request: &TargetRunRequest,
     ) -> Result<RunSubmitResult, TargetAuthorityError> {
         let (controller, access) = self
-            .controller_access_for_runtime(target, &request.submission.runtime)
+            .controller_access_for_submission(target, request)
             .await?;
         let response = self
             .with_access(

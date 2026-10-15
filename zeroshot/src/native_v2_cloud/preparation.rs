@@ -175,7 +175,7 @@ impl NativeV2CloudController {
             .log("Preparing execution environment")
             .await
             .map_err(|error| PreparationFailure::unavailable(error.failure_code()))?;
-        let github_token = source_github_token(&start.secrets)
+        let credentials = source_credentials(&start.secrets)
             .await
             .map_err(|_| PreparationFailure::unavailable("runtime_unavailable"))?;
         let preparation = CapsulePreparation {
@@ -188,7 +188,8 @@ impl NativeV2CloudController {
                 .allocate_from_retained(RetainedAllocationRequest {
                     run_id,
                     admitted: &start.stored.admitted,
-                    github_token: github_token.as_deref(),
+                    github_token: credentials.github_token.as_deref(),
+                    git_credentials: credentials.git_credentials.as_ref(),
                     preparation,
                     selection: resume.selection.clone(),
                     source_run_id: &resume.source_run_id,
@@ -207,7 +208,8 @@ impl NativeV2CloudController {
                 .allocate(CapsuleAllocationRequest {
                     run_id,
                     admitted: &start.stored.admitted,
-                    github_token: github_token.as_deref(),
+                    github_token: credentials.github_token.as_deref(),
+                    git_credentials: credentials.git_credentials.as_ref(),
                     preparation,
                 })
                 .await

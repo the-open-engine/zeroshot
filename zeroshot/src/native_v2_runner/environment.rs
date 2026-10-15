@@ -5,6 +5,7 @@ use super::*;
 pub struct ResolvedEnvironment {
     values: Arc<BTreeMap<EnvironmentVariableName, String>>,
     refresh: Option<Arc<dyn RuntimeEnvironmentRefresh>>,
+    source_git_credentials: Option<openengine_cluster_protocol::GitTransportCredentials>,
 }
 
 #[async_trait]
@@ -44,6 +45,7 @@ impl ResolvedEnvironment {
         Ok(Self {
             values: Arc::new(values),
             refresh: None,
+            source_git_credentials: None,
         })
     }
 
@@ -61,6 +63,21 @@ impl ResolvedEnvironment {
     #[must_use]
     pub fn get(&self, name: &EnvironmentVariableName) -> Option<&str> {
         self.values.get(name).map(String::as_str)
+    }
+
+    /// Private Git authority; this is excluded from provider/tool environment iteration.
+    pub(crate) fn source_git_credentials(
+        &self,
+    ) -> Option<&openengine_cluster_protocol::GitTransportCredentials> {
+        self.source_git_credentials.as_ref()
+    }
+
+    pub(crate) fn with_source_git_credentials(
+        mut self,
+        credentials: Option<openengine_cluster_protocol::GitTransportCredentials>,
+    ) -> Self {
+        self.source_git_credentials = credentials;
+        self
     }
 
     pub(crate) fn can_refresh(&self) -> bool {

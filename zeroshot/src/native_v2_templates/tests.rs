@@ -284,7 +284,7 @@ async fn admit_research_input(
                 initial_input,
                 runtime,
                 environment: None,
-                source: resolved_source(),
+                source: Some(resolved_source()),
                 submission_key: IdempotencyKey::new("research-iteration-count").assert_value(),
             },
             if delivery == TemplateDelivery::Push {
@@ -1383,7 +1383,7 @@ async fn verified_software_template(
             graph,
             initial_input: initial_input.clone(),
             runtime,
-            source: resolved_source(),
+            source: Some(resolved_source()),
             submission_key: IdempotencyKey::new(format!("template-behavior-{}", delivery.name()))
                 .assert_value(),
         })

@@ -56,7 +56,7 @@ fn status(phase: RunStatus, at: u64) -> RunStatusResult {
     RunStatusResult {
         run_id: run_id(),
         title: title(),
-        source: native_v2_source_fixture(),
+        source: Some(native_v2_source_fixture()),
         size: RunSize::Small,
         at_cursor: cursor(at),
         status: phase,
@@ -139,7 +139,7 @@ impl ClusterBackend for FakeBackend {
                     subscription_id,
                     run_id: run_id(),
                     title: title(),
-                    source: native_v2_source_fixture(),
+                    source: Some(native_v2_source_fixture()),
                     size: RunSize::Small,
                     cursor: cursor(3),
                     status: RunStatus::Running {
@@ -153,7 +153,7 @@ impl ClusterBackend for FakeBackend {
                     subscription_id: SubscriptionId::new("watch-1"),
                     run_id: run_id(),
                     title: title(),
-                    source: native_v2_source_fixture(),
+                    source: Some(native_v2_source_fixture()),
                     size: RunSize::Small,
                     cursor: cursor(99),
                     status: RunStatus::Running {

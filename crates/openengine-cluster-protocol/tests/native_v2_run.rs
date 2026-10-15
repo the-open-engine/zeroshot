@@ -123,19 +123,16 @@ fn resolved_source_identifiers_enforce_git_and_host_boundaries() {
         SourceRepositoryId::new(format!("{}/{}", "a".repeat(100), "b".repeat(100))).assert_value();
     assert_eq!(repository.as_str().len(), 201);
     assert_eq!(repository.to_string(), repository.as_str());
-    for invalid in [
-        "owner",
-        "/name",
-        "owner/",
-        "owner/name/extra",
-        "owner name/repository",
-    ] {
+    for valid in ["opaque:id", "nested/team/project", "owner name/repository"] {
+        assert!(SourceRepositoryId::new(valid).is_ok());
+    }
+    for invalid in ["", "repository\n", "repository\u{85}"] {
         assert!(
             SourceRepositoryId::new(invalid).is_err(),
             "accepted repository {invalid:?}"
         );
     }
-    assert!(SourceRepositoryId::new(format!("{}/name", "a".repeat(101))).is_err());
+    assert!(SourceRepositoryId::new("a".repeat(256)).is_err());
 
     let branch = SourceBranchId::new("feature/coverage-v2").assert_value();
     assert_eq!(branch.as_str(), "feature/coverage-v2");
@@ -159,6 +156,8 @@ fn resolved_source_identifiers_enforce_git_and_host_boundaries() {
 
     let revision = SourceRevisionId::new("0123456789abcdef0123456789abcdef01234567").assert_value();
     assert_eq!(revision.as_str().len(), 40);
+    assert!(SourceRevisionId::new("a".repeat(64)).is_ok());
+    assert!(SourceRevisionId::new("a".repeat(63)).is_err());
     assert!(SourceRevisionId::new("A".repeat(40)).is_err());
     assert!(SourceRevisionId::new("a".repeat(39)).is_err());
 }
@@ -220,12 +219,7 @@ fn submit_and_list_results_expose_only_public_run_identity_and_status() {
         runs: vec![RunStatusResult {
             run_id,
             title: RunTitle::new("Protocol contract").assert_value(),
-            source: ResolvedSource {
-                repository: SourceRepositoryId::new("open-engine/zeroshot").assert_value(),
-                branch: SourceBranchId::new("main").assert_value(),
-                revision: SourceRevisionId::new("0123456789abcdef0123456789abcdef01234567")
-                    .assert_value(),
-            },
+            source: Some(openengine_cluster_testkit::native_v2_source_fixture()),
             size: RunSize::Small,
             at_cursor: openengine_cluster_protocol::Cursor::new("v2:1"),
             status: RunStatus::Admitted {},

@@ -20,6 +20,7 @@ pub mod native_v2_supervisor;
 pub mod native_v2_target_authority;
 pub mod product_errors;
 mod provider_value;
+#[path = "source_code/mod.rs"]
 pub mod source_code_provider;
 pub mod v2_run_ledger;
 pub mod worker_catalog;

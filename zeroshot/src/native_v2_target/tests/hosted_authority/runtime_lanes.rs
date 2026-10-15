@@ -144,6 +144,46 @@ fn stored_profile(body: &str) -> String {
     .to_string()
 }
 
+#[derive(Clone, Copy)]
+enum HostedCapability {
+    Lanes(bool),
+    Git(Option<&'static str>),
+}
+
+async fn hosted_authority_with(
+    capability: HostedCapability,
+) -> (
+    super::super::fixtures::TempRoot,
+    RecordingTarget,
+    crate::native_v2_target::TargetRecord,
+    crate::native_v2_target::TargetHttpControlAuthority,
+) {
+    let root = temp_root();
+    let target = RecordingTarget::spawn(move |request, origin, tokens| match capability {
+        HostedCapability::Lanes(advertised) => hosted_response(request, origin, tokens, advertised),
+        HostedCapability::Git(marker) => git_hosted_response(request, origin, tokens, marker),
+    })
+    .await;
+    let (record, authority) = authenticated_authority(&root, &target.origin).await;
+    (root, target, record, authority)
+}
+
+async fn authenticated_authority(
+    root: &super::super::fixtures::TempRoot,
+    origin: &str,
+) -> (
+    crate::native_v2_target::TargetRecord,
+    crate::native_v2_target::TargetHttpControlAuthority,
+) {
+    let (credentials, authority) = test_authority(root);
+    let record = hosted_target("prod", origin.to_owned());
+    credentials
+        .set(&record.id, "refresh-0")
+        .await
+        .assert_value();
+    (record, authority)
+}
+
 fn lane_binding() -> Value {
     json!({
         "kind": "agent",
@@ -242,17 +282,8 @@ async fn direct_target_without_the_marker_accepts_a_plan_without_lanes() {
 
 #[tokio::test]
 async fn hosted_target_without_the_marker_refuses_a_lane_submission_before_the_token() {
-    let root = temp_root();
-    let target = RecordingTarget::spawn(|request, origin, tokens| {
-        hosted_response(request, origin, tokens, false)
-    })
-    .await;
-    let (credentials, authority) = test_authority(&root);
-    let record = hosted_target("prod", target.origin.clone());
-    credentials
-        .set(&record.id, "refresh-0")
-        .await
-        .assert_value();
+    let (_root, target, record, authority) =
+        hosted_authority_with(HostedCapability::Lanes(false)).await;
     let authority: &dyn TargetControlAuthority = &authority;
 
     let error = authority
@@ -266,17 +297,8 @@ async fn hosted_target_without_the_marker_refuses_a_lane_submission_before_the_t
 
 #[tokio::test]
 async fn hosted_target_without_the_marker_refuses_a_lane_profile_before_the_token() {
-    let root = temp_root();
-    let target = RecordingTarget::spawn(|request, origin, tokens| {
-        hosted_response(request, origin, tokens, false)
-    })
-    .await;
-    let (credentials, authority) = test_authority(&root);
-    let record = hosted_target("prod", target.origin.clone());
-    credentials
-        .set(&record.id, "refresh-0")
-        .await
-        .assert_value();
+    let (_root, target, record, authority) =
+        hosted_authority_with(HostedCapability::Lanes(false)).await;
     let authority: &dyn TargetControlAuthority = &authority;
 
     let error = authority
@@ -290,17 +312,8 @@ async fn hosted_target_without_the_marker_refuses_a_lane_profile_before_the_toke
 
 #[tokio::test]
 async fn hosted_target_with_the_marker_accepts_a_lane_submission_and_profile() {
-    let root = temp_root();
-    let target = RecordingTarget::spawn(|request, origin, tokens| {
-        hosted_response(request, origin, tokens, true)
-    })
-    .await;
-    let (credentials, authority) = test_authority(&root);
-    let record = hosted_target("prod", target.origin.clone());
-    credentials
-        .set(&record.id, "refresh-0")
-        .await
-        .assert_value();
+    let (_root, target, record, authority) =
+        hosted_authority_with(HostedCapability::Lanes(true)).await;
     let authority: &dyn TargetControlAuthority = &authority;
 
     authority
@@ -335,4 +348,199 @@ async fn hosted_target_with_the_marker_accepts_a_lane_submission_and_profile() {
     );
     let profile = requests.last().assert_value();
     assert_eq!(sent_lane(&profile.body, "/runtime/nodes/worker/lane"), lane);
+}
+
+fn generic_git_request(remote: bool, credentials: bool) -> TargetRunRequest {
+    let mut request = run_request(lane_free_binding());
+    if remote {
+        request.submission.source = Some(
+            serde_json::from_value(json!({
+                "repository":"nested/team/project:42", "branch":"main", "revision":"a".repeat(64),
+                "remote":{"url":"git@git.example:nested/team/project.git"}
+            }))
+            .assert_value(),
+        );
+    }
+    if credentials {
+        request.git_credentials = Some(
+            openengine_cluster_protocol::GitTransportCredentials::Https {
+                username: "private-user".to_owned(),
+                password: "transport-secret".to_owned(),
+            },
+        );
+    }
+    request
+}
+
+fn git_hosted_response(
+    request: &CapturedHttpRequest,
+    origin: &str,
+    tokens: &mut u8,
+    marker: Option<&str>,
+) -> (&'static str, String) {
+    if (request.method.as_str(), request.path.as_str()) == DISCOVERY {
+        let mut wire: Value =
+            serde_json::from_str(&hosted_lane_discovery(origin, true)).assert_value();
+        if let Some(kind) = marker {
+            wire["extensions"]["git_transport"] = json!({"kind":kind});
+        }
+        return ("200 OK", wire.to_string());
+    }
+    hosted_response(request, origin, tokens, true)
+}
+
+#[tokio::test]
+async fn old_direct_target_refuses_generic_source_or_credentials_after_only_discovery() {
+    for (remote, credentials) in [(true, false), (false, true)] {
+        let root = temp_root();
+        let target = RecordingTarget::spawn(direct_without_marker).await;
+        let authority = test_http_authority(root.path("refresh-locks"));
+        let error = authority
+            .submit(
+                &direct_target(target.origin.clone()),
+                &generic_git_request(remote, credentials),
+            )
+            .await
+            .assert_error();
+        assert_eq!(
+            error.to_string(),
+            "target does not support generic Git transport (openengine.git-transport/v1)"
+        );
+        let requests = target.stop();
+        assert_eq!(routes(&requests), [DISCOVERY]);
+        assert!(requests.iter().all(|request| request.body.is_empty()));
+    }
+}
+
+#[tokio::test]
+async fn new_direct_target_transmits_authored_ssh_remote_and_exact_sha256_source() {
+    let root = temp_root();
+    let target = RecordingTarget::spawn(|request, _, _| {
+        match (request.method.as_str(), request.path.as_str()) {
+            DISCOVERY => (
+                "200 OK",
+                serde_json::to_string(
+                    &TargetDiscoveryDocument::direct(TargetAuthentication::None)
+                        .with_git_transport(),
+                )
+                .assert_value(),
+            ),
+            RUN => ("200 OK", RUN_RECEIPT.to_owned()),
+            _ => unexpected(),
+        }
+    })
+    .await;
+    let authority = test_http_authority(root.path("refresh-locks"));
+    let request = generic_git_request(true, false);
+    authority
+        .submit(&direct_target(target.origin.clone()), &request)
+        .await
+        .assert_value();
+    let requests = target.stop();
+    assert_eq!(routes(&requests), [DISCOVERY, RUN]);
+    let body: Value = serde_json::from_str(&requests.last().assert_value().body).assert_value();
+    assert_eq!(
+        body["submission"]["source"]["remote"]["url"],
+        "git@git.example:nested/team/project.git"
+    );
+    assert_eq!(body["submission"]["source"]["revision"], "a".repeat(64));
+    assert!(body.get("gitCredentials").is_none());
+}
+
+#[tokio::test]
+async fn old_hosted_target_rejects_new_git_forms_before_access_token_or_body() {
+    for (remote, credentials) in [(true, false), (false, true)] {
+        let (_root, target, record, authority) =
+            hosted_authority_with(HostedCapability::Git(None)).await;
+        let error = authority
+            .submit(&record, &generic_git_request(remote, credentials))
+            .await
+            .assert_error();
+        assert_eq!(
+            error.to_string(),
+            "target does not support generic Git transport (openengine.git-transport/v1)"
+        );
+        assert_eq!(routes(&target.stop()), [DISCOVERY, OAUTH_METADATA]);
+    }
+}
+
+#[tokio::test]
+async fn another_git_marker_kind_does_not_authorize_the_new_wire_shape() {
+    let (_root, target, record, authority) =
+        hosted_authority_with(HostedCapability::Git(Some("openengine.git-transport/v2"))).await;
+    authority
+        .submit(&record, &generic_git_request(true, false))
+        .await
+        .assert_error();
+    assert_eq!(routes(&target.stop()), [DISCOVERY, OAUTH_METADATA]);
+}
+
+#[tokio::test]
+async fn old_hosted_target_refuses_profile_git_source_and_resume_credentials_before_auth() {
+    let (_root, target, record, authority) =
+        hosted_authority_with(HostedCapability::Git(None)).await;
+    let request = generic_git_request(true, false);
+    let profile = openengine_cluster_protocol::RunProfileRunRequest {
+        run_id: request.run_id,
+        profile: openengine_cluster_protocol::RunProfileSelector {
+            scope: RunProfileScope::User,
+            name: RunProfileName::new("generic").assert_value(),
+        },
+        title: request.submission.title,
+        initial_input: request.submission.initial_input,
+        source: request.submission.source.assert_value(),
+        submission_key: request.submission.submission_key,
+        environment: None,
+        connections: request.connections,
+        github_token: None,
+        git_credentials: None,
+    };
+    authority
+        .profile_run(&record, &profile)
+        .await
+        .assert_error();
+    let resume: openengine_cluster_protocol::RunResumeParams = serde_json::from_value(json!({
+        "runId":"018f5e78-7f95-7c22-8d98-3f15af20c991",
+        "successorRunId":"018f5e78-7f95-7c22-8d98-3f15af20c992",
+        "gitCredentials":{"kind":"ssh","privateKey":"private-key-secret","knownHosts":"known-host-secret"}
+    })).assert_value();
+    authority
+        .hosted_run_resume(&record, resume)
+        .await
+        .assert_error();
+    assert_eq!(
+        routes(&target.stop()),
+        [DISCOVERY, OAUTH_METADATA, DISCOVERY, OAUTH_METADATA]
+    );
+}
+
+#[tokio::test]
+async fn supported_hosted_target_transmits_private_credentials_only_in_the_envelope() {
+    let (_root, target, record, authority) = hosted_authority_with(HostedCapability::Git(Some(
+        openengine_cluster_protocol::GIT_TRANSPORT_KIND,
+    )))
+    .await;
+    let mut request = generic_git_request(true, true);
+    request
+        .submission
+        .source
+        .as_mut()
+        .assert_value()
+        .remote
+        .as_mut()
+        .assert_value()
+        .url = openengine_cluster_protocol::GitRemoteUrl::new(
+        "https://git.example/nested/team/project.git",
+    )
+    .assert_value();
+    authority.submit(&record, &request).await.assert_value();
+    let requests = target.stop();
+    assert_eq!(
+        routes(&requests),
+        [DISCOVERY, OAUTH_METADATA, TOKEN, SESSION, RUN]
+    );
+    let body: Value = serde_json::from_str(&requests.last().assert_value().body).assert_value();
+    assert_eq!(body["gitCredentials"]["password"], "transport-secret");
+    assert!(!body["submission"].to_string().contains("transport-secret"));
+    assert!(!body["submission"].to_string().contains("private-user"));
 }

@@ -11,6 +11,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use openengine_cluster_testkit::assertions::AssertValue;
+use crate::native_v2_candidate::test_support::{git, TestGitRepository as TempRepo};
 
 #[derive(Default)]
 pub(super) struct TransportFaults {
@@ -34,7 +35,7 @@ pub(super) struct HttpGit {
 
 impl HttpGit {
     pub(super) fn start(remote: &Path) -> Self {
-        super::git(remote, &["config", "http.receivepack", "true"]);
+        git(remote, &["config", "http.receivepack", "true"]);
         let listener = TcpListener::bind("127.0.0.1:0").assert_value();
         let address = listener.local_addr().assert_value();
         listener.set_nonblocking(true).assert_value();
@@ -49,8 +50,8 @@ impl HttpGit {
         }
     }
 
-    pub(super) fn git_program(&self, repository: &super::TempRepo) -> PathBuf {
-        super::git(
+    pub(super) fn git_program(&self, repository: &TempRepo) -> PathBuf {
+        git(
             &repository.workspace,
             &["config", "--local", "zeroshotTest.httpOrigin", &self.url],
         );

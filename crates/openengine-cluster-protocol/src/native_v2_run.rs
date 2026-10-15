@@ -143,7 +143,7 @@ fn validate_title(value: &str) -> Result<(), NativeV2RunValueError> {
     )
 }
 
-fn validate_repository(value: &str) -> Result<(), NativeV2RunValueError> {
+fn validate_legacy_repository(value: &str) -> Result<(), NativeV2RunValueError> {
     let Some((owner, name)) = value.split_once('/') else {
         return Err(NativeV2RunValueError(
             "source repository must have the form owner/name",
@@ -159,6 +159,14 @@ fn validate_repository(value: &str) -> Result<(), NativeV2RunValueError> {
         ));
     }
     Ok(())
+}
+
+fn validate_repository(value: &str) -> Result<(), NativeV2RunValueError> {
+    validate_non_control_bytes(
+        value,
+        255,
+        "source repository ID must be 1..=255 non-control bytes",
+    )
 }
 
 fn valid_repository_part(value: &str) -> bool {
@@ -192,7 +200,7 @@ fn validate_branch(value: &str) -> Result<(), NativeV2RunValueError> {
 }
 
 fn validate_revision(value: &str) -> Result<(), NativeV2RunValueError> {
-    if value.len() == 40
+    if matches!(value.len(), 40 | 64)
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
@@ -200,7 +208,7 @@ fn validate_revision(value: &str) -> Result<(), NativeV2RunValueError> {
         Ok(())
     } else {
         Err(NativeV2RunValueError(
-            "source base revision must be exactly 40 lowercase hexadecimal characters",
+            "source base revision must be exactly 40 or 64 lowercase hexadecimal characters",
         ))
     }
 }
@@ -293,9 +301,9 @@ native_v2_string_kind!(
     validate_repository,
     json_schema!({
         "type": "string",
-        "minLength": 3,
+        "minLength": 1,
         "maxLength": 255,
-        "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+        "pattern": r"^[^\u0000-\u001f\u007f-\u009f]+$"
     })
 );
 native_v2_string_kind!(
@@ -308,7 +316,7 @@ native_v2_string_kind!(
     SourceRevisionIdKind,
     SourceRevisionId,
     validate_revision,
-    json_schema!({ "type": "string", "pattern": "^[0-9a-f]{40}$" })
+    json_schema!({ "type": "string", "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$" })
 );
 native_v2_string_kind!(
     ModelIdKind,
@@ -350,13 +358,68 @@ native_v2_string_kind!(
     })
 );
 
-#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(try_from = "ResolvedSourceWire", rename_all = "camelCase")]
 pub struct ResolvedSource {
     pub repository: SourceRepositoryId,
     pub branch: SourceBranchId,
     pub revision: SourceRevisionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<ResolvedGitRemote>,
 }
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct ResolvedSourceWire {
+    repository: SourceRepositoryId,
+    branch: SourceBranchId,
+    revision: SourceRevisionId,
+    #[serde(default)]
+    remote: Option<ResolvedGitRemote>,
+}
+
+impl TryFrom<ResolvedSourceWire> for ResolvedSource {
+    type Error = NativeV2RunValueError;
+
+    fn try_from(wire: ResolvedSourceWire) -> Result<Self, Self::Error> {
+        if wire.remote.is_none() {
+            validate_legacy_repository(wire.repository.as_str())?;
+        }
+        Ok(Self {
+            repository: wire.repository,
+            branch: wire.branch,
+            revision: wire.revision,
+            remote: wire.remote,
+        })
+    }
+}
+
+impl JsonSchema for ResolvedSource {
+    fn schema_name() -> Cow<'static, str> {
+        "ResolvedSource".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let wire = generator.subschema_for::<ResolvedSourceWire>();
+        json_schema!({"allOf": [wire, {
+            "if": {"required": ["remote"], "properties": {"remote": {"type": "object"}}},
+            "else": {"properties": {"repository": {
+                "pattern": "^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"
+            }}}
+        }]})
+    }
+}
+
+impl ResolvedSource {
+    /// Legacy GitHub source records retain their original wire shape and compatibility.
+    #[must_use]
+    pub fn requires_git_transport(&self) -> bool {
+        self.remote.is_some() || self.revision.as_str().len() == 64
+    }
+}
+
+mod source;
+pub use source::*;
 
 #[derive(
     Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,
@@ -503,7 +566,7 @@ mod wire;
 pub use wire::{
     RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunListParams, RunListResult,
     RunResumeParams, RunResumeResult, RunSubmission, RunSubmitParams, RunSubmitResult, RuntimePlan,
-    run_connection_requirements,
+    run_connection_requirements, run_connection_requirements_with_source,
 };
 
 #[cfg(test)]

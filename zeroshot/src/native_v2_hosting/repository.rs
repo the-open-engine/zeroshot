@@ -4,15 +4,19 @@ use std::time::Duration;
 
 use openengine_cluster_protocol::RunId;
 
-use tokio::process::Command;
 use tokio::time::Instant;
 
 use crate::execution::process::{HostedProcessPool, HostedProcessScope};
-use crate::native_v2_delivery::DeliveryTarget;
-use crate::native_v2_delivery::command::{GitCommandFailure, capture, local_git_command};
+use crate::native_v2_delivery::{DeliveryTarget, DeliveryMode, SourceDeliveryError, source_target};
+use crate::source_code_provider::SourceMaterializationDestination;
+use crate::native_v2_delivery::command::GitCommandFailure;
+#[cfg(test)]
+use crate::native_v2_delivery::command::GitCommandOutput;
+use crate::native_v2_delivery::transport::{
+    GitTransport, GitTransportConfig, GitMaterializationTarget, source_credential,
+};
 use crate::native_v2_portable_controller::WorkspaceIdentity;
 use crate::native_v2_target_authority::{NewOperatorDiagnostic, OperatorDiagnosticStore};
-use crate::native_v2_delivery::git_auth::encode_basic_credential;
 use crate::native_v2_contract::ResolvedSource;
 
 #[cfg(all(test, unix))]
@@ -29,6 +33,8 @@ pub(super) struct RepositoryInstall<'a> {
     pub workspace: &'a Path,
     pub process_pool: HostedProcessPool,
     pub github_token: Option<&'a str>,
+    pub git_credentials: Option<&'a openengine_cluster_protocol::GitTransportCredentials>,
+    pub private_directory: &'a Path,
 }
 
 pub(super) async fn install_repository(
@@ -50,8 +56,10 @@ async fn install_before_deadline(
     let git = GitProcess {
         program: request.git_program,
         token: request.github_token,
-        uid: writer.uid(),
-        gid: writer.gid(),
+        identity: Some(writer),
+        git_credentials: request.git_credentials,
+        private_directory: request.private_directory,
+        remote: request.source,
         deadline,
     };
     let mut previous_failure = None;
@@ -89,27 +97,33 @@ async fn install_once(
     git: &GitProcess<'_>,
     request: &RepositoryInstall<'_>,
 ) -> Result<DeliveryTarget, RepositoryInstallError> {
-    initialize_repository(git, request).await?;
-    fetch_source(git, request.workspace, request.resolved).await?;
-    checkout_revision(git, request.workspace, request.resolved.revision.as_str()).await?;
-    let revision = git
-        .capture(
-            request.workspace,
-            &[OsString::from("rev-parse"), OsString::from("HEAD")],
-        )
-        .await?;
-    if revision.trim() != request.resolved.revision.as_str() {
-        return Err(RepositoryInstallError::RevisionMismatch {
-            expected: request.resolved.revision.as_str().to_owned(),
-            observed: revision.trim().to_owned(),
+    let transport = git.transport(request.workspace)?;
+    let remote = crate::source_code_provider::adapters::core::source_remote(request.resolved);
+    let target = GitMaterializationTarget::new(
+        &transport,
+        (
+            &remote,
+            request.resolved.branch.as_str(),
+            request.resolved.revision.as_str(),
+        ),
+        source_credential(git.token.unwrap_or(""), git.git_credentials),
+        git.deadline,
+    );
+    let result = crate::source_code_provider::adapters::core::materialize_source(
+        request.resolved,
+        SourceMaterializationDestination::new(&target),
+    )
+    .await;
+    if result.is_err() {
+        return Err(match target.take_failure() {
+            Some(SourceDeliveryError::Command(failure)) => RepositoryInstallError::Git(failure),
+            _ if Instant::now() >= git.deadline => RepositoryInstallError::Deadline,
+            Some(error) => RepositoryInstallError::Source(error),
+            None => RepositoryInstallError::Workspace("source provider materialization failed"),
         });
     }
-    DeliveryTarget::new(
-        request.resolved.repository.as_str(),
-        request.resolved.branch.as_str(),
-        revision.trim(),
-    )
-    .map_err(|_| RepositoryInstallError::Workspace("resolved delivery target is invalid"))
+    source_target(request.resolved, DeliveryMode::Push)
+        .map_err(|_| RepositoryInstallError::Workspace("resolved delivery target is invalid"))
 }
 
 fn pristine_workspace(workspace: &Path) -> Result<WorkspaceIdentity, RepositoryInstallError> {
@@ -159,79 +173,49 @@ fn check_deadline(deadline: Instant) -> Result<(), RepositoryInstallError> {
     }
 }
 
-async fn initialize_repository(
-    git: &GitProcess<'_>,
-    request: &RepositoryInstall<'_>,
-) -> Result<(), RepositoryInstallError> {
-    git.run(
-        None,
-        &[
-            OsString::from("init"),
-            OsString::from("--quiet"),
-            request.workspace.as_os_str().to_owned(),
-        ],
-    )
-    .await?;
-    let arguments = [
-        OsString::from("remote"),
-        OsString::from("add"),
-        OsString::from("origin"),
-        request.source.to_owned(),
-    ];
-    git.run(Some(request.workspace), &arguments).await
-}
-
-async fn fetch_source(
-    git: &GitProcess<'_>,
-    workspace: &Path,
-    source: &ResolvedSource,
-) -> Result<(), RepositoryInstallError> {
-    git.run(
-        Some(workspace),
-        &[
-            OsString::from("fetch"),
-            OsString::from("--no-tags"),
-            OsString::from("origin"),
-            OsString::from(format!("refs/heads/{}", source.branch.as_str())),
-            OsString::from(source.revision.as_str()),
-        ],
-    )
-    .await
-}
-
-async fn checkout_revision(
-    git: &GitProcess<'_>,
-    workspace: &Path,
-    revision: &str,
-) -> Result<(), RepositoryInstallError> {
-    git.run(
-        Some(workspace),
-        &[
-            OsString::from("checkout"),
-            OsString::from("--detach"),
-            OsString::from(revision),
-        ],
-    )
-    .await
-}
-
-fn github_source(repository: &str) -> OsString {
-    OsString::from(format!("https://github.com/{repository}.git"))
-}
-
-pub(super) fn production_source(repository: &str) -> OsString {
-    github_source(repository)
+pub(super) fn production_source(source: &ResolvedSource) -> OsString {
+    crate::source_code_provider::adapters::core::source_remote(source).into()
 }
 
 struct GitProcess<'a> {
     program: &'a Path,
     token: Option<&'a str>,
-    uid: u32,
-    gid: u32,
+    identity: Option<crate::execution::process::HostedProcessIdentity>,
+    git_credentials: Option<&'a openengine_cluster_protocol::GitTransportCredentials>,
+    private_directory: &'a Path,
+    remote: &'a OsStr,
     deadline: Instant,
 }
 
 impl GitProcess<'_> {
+    fn transport(&self, workspace: &Path) -> Result<GitTransport, RepositoryInstallError> {
+        let remaining = self.deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(RepositoryInstallError::Deadline);
+        }
+        // Portable checkout fixtures run under the test runner's UID. Production retains the
+        // allocated writer identity; root tests continue to exercise their distinct worker UID.
+        #[cfg(all(test, unix))]
+        let identity = self
+            .identity
+            .filter(|writer| writer.uid() != unsafe { libc::geteuid() });
+        #[cfg(not(all(test, unix)))]
+        let identity = self.identity;
+        Ok(GitTransport::new(
+            GitTransportConfig {
+                git_program: self.program.to_owned(),
+                workspace: workspace.to_owned(),
+                home_directory: self.private_directory.to_owned(),
+                private_directory: self.private_directory.to_owned(),
+                identity,
+                local_environment: None,
+                deadline: remaining,
+            },
+            self.remote,
+        ))
+    }
+
+    #[cfg(test)]
     async fn run(
         &self,
         workspace: Option<&Path>,
@@ -240,6 +224,7 @@ impl GitProcess<'_> {
         self.capture_at(workspace, arguments).await.map(|_| ())
     }
 
+    #[cfg(test)]
     async fn capture(
         &self,
         workspace: &Path,
@@ -247,51 +232,27 @@ impl GitProcess<'_> {
     ) -> Result<String, RepositoryInstallError> {
         self.capture_at(Some(workspace), arguments)
             .await
-            .map(|output| output.stdout)
+            .map(|output| output.stdout().to_owned())
     }
 
+    #[cfg(test)]
     async fn capture_at(
         &self,
         workspace: Option<&Path>,
         arguments: &[OsString],
-    ) -> Result<GitCommandFailure, RepositoryInstallError> {
-        let remaining = self.deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err(RepositoryInstallError::Deadline);
-        }
-        let mut command = self.command(workspace, arguments);
-        capture(&mut command, remaining)
+    ) -> Result<GitCommandOutput, RepositoryInstallError> {
+        let transport = self.transport(workspace.unwrap_or(Path::new("/")))?;
+        transport
+            .execute(
+                arguments,
+                source_credential(self.token.unwrap_or(""), self.git_credentials),
+                transport.config().deadline,
+            )
             .await
-            .and_then(GitCommandFailure::require_success)
+            .and_then(GitCommandOutput::require_success)
             .map_err(|error| RepositoryInstallError::Git(Box::new(error)))
     }
-
-    fn command(&self, workspace: Option<&Path>, arguments: &[OsString]) -> Command {
-        let mut command = local_git_command(self.program, workspace.unwrap_or(Path::new("/")));
-        // Hosted identities cannot inherit a launcher cwd they cannot traverse.
-        command.current_dir("/");
-        if let Some(token) = self.token {
-            // This environment exists only for trusted checkout and the shared redactor.
-            command.env("GH_TOKEN", token).arg("-c").arg(format!(
-                "http.https://github.com/.extraheader=AUTHORIZATION: basic {}",
-                encode_basic_credential(token)
-            ));
-        }
-        command.args(arguments);
-        configure_identity(&mut command, self.uid, self.gid);
-        command
-    }
 }
-
-#[cfg(target_os = "linux")]
-fn configure_identity(command: &mut Command, uid: u32, gid: u32) {
-    use std::os::unix::process::CommandExt as _;
-
-    command.as_std_mut().uid(uid).gid(gid);
-}
-
-#[cfg(not(target_os = "linux"))]
-fn configure_identity(_command: &mut Command, _uid: u32, _gid: u32) {}
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum RepositoryInstallError {
@@ -301,8 +262,8 @@ pub(super) enum RepositoryInstallError {
     Workspace(&'static str),
     #[error("checkout workspace could not be prepared: {0}")]
     Filesystem(#[from] std::io::Error),
-    #[error("checkout revision mismatch: expected {expected}, observed {observed}")]
-    RevisionMismatch { expected: String, observed: String },
+    #[error(transparent)]
+    Source(SourceDeliveryError),
     #[error("repository checkout exceeded its total deadline")]
     Deadline,
     #[error("{failure}\nCheckout recovery failed: {message}")]
@@ -311,7 +272,9 @@ pub(super) enum RepositoryInstallError {
 
 impl RepositoryInstallError {
     fn permits_retry(&self, attempt: u32, remaining: Duration, delay: Duration) -> bool {
-        attempt < MAX_CHECKOUT_ATTEMPTS && matches!(self, Self::Git(_)) && remaining > delay
+        attempt < MAX_CHECKOUT_ATTEMPTS
+            && matches!(self, Self::Git(failure) if !failure.cleanup_unconfirmed)
+            && remaining > delay
     }
 
     fn git_failure(&self) -> Option<&GitCommandFailure> {

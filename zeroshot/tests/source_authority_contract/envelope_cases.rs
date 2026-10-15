@@ -250,24 +250,33 @@ async fn invalid_direct_success_still_performs_authoritative_inspection() {
         review: review("review-other"),
         ..MergeRequestInput::exact()
     });
-    let provider = Arc::new(AuthorityFake::new(
-        vec![
-            SourceOperationInspection::Unobserved,
-            SourceOperationInspection::Applied(Box::new(exact)),
-        ],
-        Ok(receipt(&mismatched_request)),
-    ));
-    let registry = registry_with(provider.clone()).await;
-    let mut workspace = ContractWorkspace::new(request.workspace().clone());
-    assert!(matches!(
-        registry.operate(&request, workspace.capability()).await,
-        Err(SourceCallError::PostEffectInvalidEvidence {
-            outcome: SourceInvocationOutcome::ReturnedReceipt,
-            ..
-        })
-    ));
-    assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
-    assert_eq!(provider.inspection_calls.load(Ordering::SeqCst), 2);
+    let unconfirmed_merge = SourceOperationReceipt::Merge(
+        SourceMergeReceipt::new(
+            request.clone(),
+            SourceRevisionId::new("different-unconfirmed-merge").assert_value(),
+        )
+        .assert_value(),
+    );
+    for direct in [receipt(&mismatched_request), unconfirmed_merge] {
+        let provider = Arc::new(AuthorityFake::new(
+            vec![
+                SourceOperationInspection::Unobserved,
+                SourceOperationInspection::Applied(Box::new(exact.clone())),
+            ],
+            Ok(direct),
+        ));
+        let registry = registry_with(provider.clone()).await;
+        let mut workspace = ContractWorkspace::new(request.workspace().clone());
+        assert!(matches!(
+            registry.operate(&request, workspace.capability()).await,
+            Err(SourceCallError::PostEffectInvalidEvidence {
+                outcome: SourceInvocationOutcome::ReturnedReceipt,
+                ..
+            })
+        ));
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(provider.inspection_calls.load(Ordering::SeqCst), 2);
+    }
 }
 
 #[tokio::test]

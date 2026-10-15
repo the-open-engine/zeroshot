@@ -145,7 +145,7 @@ async fn exact_source_revision_participates_in_retry_identity() {
     assert_eq!(exact.run_id, first.run_id);
 
     let mut changed_submission = request.submission.clone();
-    changed_submission.source.revision =
+    changed_submission.source.as_mut().assert_value().revision =
         SourceRevisionId::new("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
             .assert_value_with("changed revision");
     let changed = submission_digest(&changed_submission).assert_value_with("changed digest");

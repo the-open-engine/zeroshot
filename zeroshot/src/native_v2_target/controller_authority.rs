@@ -65,6 +65,12 @@ pub struct TargetHttpControlAuthority {
     hosted_access: Arc<tokio::sync::Mutex<Option<CachedHostedAccess>>>,
 }
 
+#[derive(Clone, Copy, Default)]
+struct RequestCapabilities<'a> {
+    runtime: Option<&'a RuntimePlan>,
+    git_transport: bool,
+}
+
 impl TargetHttpControlAuthority {
     pub fn production() -> Result<Self, TargetAuthorityError> {
         let registry_path = default_target_registry_path()
@@ -367,47 +373,64 @@ impl TargetHttpControlAuthority {
         &self,
         target: &TargetRecord,
     ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
-        self.controller_access_inner(target, TargetSessionPurpose::General, None)
-            .await
+        self.controller_access_inner(
+            target,
+            TargetSessionPurpose::General,
+            RequestCapabilities::default(),
+        )
+        .await
     }
 
-    async fn controller_access_for_runtime(
+    async fn controller_access_for_submission(
         &self,
         target: &TargetRecord,
-        runtime: &RuntimePlan,
+        request: &openengine_cluster_protocol::TargetRunRequest,
     ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
-        self.controller_access_inner(target, TargetSessionPurpose::General, Some(runtime))
-            .await
+        self.controller_access_inner(
+            target,
+            TargetSessionPurpose::General,
+            RequestCapabilities {
+                runtime: Some(&request.submission.runtime),
+                git_transport: request.requires_git_transport(),
+            },
+        )
+        .await
     }
 
     async fn workspace_recovery_controller_access(
         &self,
         target: &TargetRecord,
     ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
-        self.controller_access_inner(target, TargetSessionPurpose::WorkspaceRecovery, None)
-            .await
+        self.controller_access_inner(
+            target,
+            TargetSessionPurpose::WorkspaceRecovery,
+            RequestCapabilities::default(),
+        )
+        .await
     }
 
     async fn workspace_checkpoints_controller_access(
         &self,
         target: &TargetRecord,
     ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
-        self.controller_access_inner(target, TargetSessionPurpose::WorkspaceCheckpoints, None)
-            .await
+        self.controller_access_inner(
+            target,
+            TargetSessionPurpose::WorkspaceCheckpoints,
+            RequestCapabilities::default(),
+        )
+        .await
     }
 
     async fn controller_access_inner(
         &self,
         target: &TargetRecord,
         purpose: TargetSessionPurpose,
-        runtime: Option<&RuntimePlan>,
+        capabilities: RequestCapabilities<'_>,
     ) -> Result<(ControllerDescriptor, Option<AccessToken>), TargetAuthorityError> {
         match &target.access {
             TargetAccess::Hosted { .. } => {
                 let (auth, controller) = self.descriptors_inner(target, purpose).await?;
-                if let Some(runtime) = runtime {
-                    require_node_runtime_lanes(&controller, runtime)?;
-                }
+                require_request_capabilities(&controller, capabilities)?;
                 let access = self
                     .access_token(target, &auth, &controller.audience)
                     .await?;
@@ -416,9 +439,7 @@ impl TargetHttpControlAuthority {
             TargetAccess::Direct => {
                 let controller = self.controller_descriptor(target).await?;
                 require_session_capability(&controller, purpose)?;
-                if let Some(runtime) = runtime {
-                    require_node_runtime_lanes(&controller, runtime)?;
-                }
+                require_request_capabilities(&controller, capabilities)?;
                 Ok((controller, None))
             }
         }
@@ -483,6 +504,28 @@ fn require_session_capability(
 }
 
 /// Checked before any access token is requested, so a refused plan sends no request body.
+fn require_request_capabilities(
+    controller: &ControllerDescriptor,
+    capabilities: RequestCapabilities<'_>,
+) -> Result<(), TargetAuthorityError> {
+    if let Some(runtime) = capabilities.runtime {
+        require_node_runtime_lanes(controller, runtime)?;
+    }
+    require_git_transport(controller, capabilities.git_transport)
+}
+
+fn require_git_transport(
+    controller: &ControllerDescriptor,
+    required: bool,
+) -> Result<(), TargetAuthorityError> {
+    if required && !controller.git_transport {
+        return Err(authority_error(
+            "target does not support generic Git transport (openengine.git-transport/v1)",
+        ));
+    }
+    Ok(())
+}
+
 fn require_node_runtime_lanes(
     controller: &ControllerDescriptor,
     runtime: &RuntimePlan,

@@ -10,12 +10,11 @@ fn mismatched_receipt(
             review,
             checked_revision,
             policy,
-            integrated_revision,
             ..
-        } => Some((review, checked_revision, policy, integrated_revision)),
+        } => Some((review, checked_revision, policy)),
         _ => None,
     };
-    let (review, checked_revision, policy, integrated_revision) =
+    let (review, checked_revision, policy) =
         merge.assert_value_with("test request must be a merge");
     let mismatched_request = SourceOperationRequest::new(
         request.repository().clone(),
@@ -27,12 +26,15 @@ fn mismatched_receipt(
             expected_head: receipt_head,
             checked_revision: checked_revision.clone(),
             policy: policy.clone(),
-            integrated_revision: integrated_revision.clone(),
         },
     )
     .assert_value();
     SourceOperationReceipt::Merge(
-        SourceMergeReceipt::new(mismatched_request, integrated_revision.clone()).assert_value(),
+        SourceMergeReceipt::new(
+            mismatched_request,
+            SourceRevisionId::new("integrated-sha").assert_value(),
+        )
+        .assert_value(),
     )
 }
 

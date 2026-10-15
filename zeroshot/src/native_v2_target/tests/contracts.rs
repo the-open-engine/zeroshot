@@ -42,6 +42,7 @@ fn profile_operations() -> (
         submission_key: prepared.intent.submission_key,
         connections: prepared.connections,
         github_token: prepared.github_token,
+        git_credentials: prepared.git_credentials,
     };
     (target, selector, set, run)
 }
@@ -413,4 +414,106 @@ fn connector_errors_hide_transport_details_but_preserve_typed_failures() {
         NativeV2CliError::Target(message)
             if message == TargetConnectorError::InvalidBearerToken.to_string()
     ));
+}
+
+fn source_authorization() -> RecoveryConnectionAuthorization {
+    let key = ConnectionKey::new("source-access").assert_value();
+    let fields: Vec<_> = ["GIT_PASSWORD", "GIT_USERNAME"]
+        .into_iter()
+        .map(|name| EnvironmentVariableName::new(name).assert_value())
+        .collect();
+    let requirements = std::collections::BTreeMap::from([(key, fields)]);
+    RecoveryConnectionAuthorization {
+        connections: requirements.clone(),
+        source_connections: requirements,
+    }
+}
+
+#[test]
+fn typed_resume_git_authority_requires_the_original_source_role_and_exact_values() {
+    let credentials = openengine_cluster_protocol::GitTransportCredentials::Https {
+        username: "private-user".to_owned(),
+        password: "private-password".to_owned(),
+    };
+    let values = std::collections::BTreeMap::from([(
+        ConnectionKey::new("source-access").assert_value(),
+        credentials.connection_values().assert_value(),
+    )]);
+    let mut authorization = source_authorization();
+    assert!(git_credentials_match_source_authority(
+        Some(&credentials),
+        &values,
+        &authorization
+    ));
+    authorization.source_connections.clear();
+    assert!(!git_credentials_match_source_authority(
+        Some(&credentials),
+        &values,
+        &authorization
+    ));
+    assert!(!git_credentials_match_source_authority(
+        Some(&credentials),
+        &Default::default(),
+        &source_authorization()
+    ));
+    let changed = openengine_cluster_protocol::GitTransportCredentials::Https {
+        username: "private-user".to_owned(),
+        password: "different-password".to_owned(),
+    };
+    assert!(!git_credentials_match_source_authority(
+        Some(&changed),
+        &values,
+        &source_authorization()
+    ));
+}
+
+#[test]
+fn recovery_source_metadata_is_atomic_immutable_and_legacy_records_remain_readable() {
+    let root = super::fixtures::temp_root();
+    let registry = FileTargetRegistry::new(root.path("targets.json"));
+    let target = direct_target("http://127.0.0.1:8080");
+    let run = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c991");
+    let authorization = source_authorization();
+    registry
+        .record_recovery_authorization_with_source(&target.id, &run, &authorization)
+        .assert_value();
+    assert_eq!(
+        registry
+            .recovery_authorization_with_source(&target.id, &run)
+            .assert_value(),
+        authorization
+    );
+    let legacy = RecoveryConnectionAuthorization {
+        connections: authorization.connections.clone(),
+        source_connections: Default::default(),
+    };
+    assert!(
+        registry
+            .record_recovery_authorization_with_source(&target.id, &run, &legacy)
+            .is_err()
+    );
+    let legacy_run = RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c992");
+    registry
+        .record_recovery_authorization(&target.id, &legacy_run, &authorization.connections)
+        .assert_value();
+    assert_eq!(
+        registry
+            .recovery_authorization_with_source(&target.id, &legacy_run)
+            .assert_value(),
+        legacy
+    );
+    assert!(
+        registry
+            .record_recovery_authorization_with_source(&target.id, &legacy_run, &authorization)
+            .is_err()
+    );
+    let stored = std::fs::read_to_string(
+        root.path("targets.recovery")
+            .join(&target.id)
+            .join(format!("{}.json", run.as_str())),
+    )
+    .assert_value();
+    assert!(stored.contains("sourceConnections"));
+    assert!(!stored.contains("private-password"));
+    assert!(!stored.contains("private-user"));
 }

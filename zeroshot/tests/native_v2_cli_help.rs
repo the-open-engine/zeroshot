@@ -184,7 +184,10 @@ fn help_explains_delivery_authentication_and_local_run_safety() {
         &run,
         &[
             "when --target is omitted",
-            "current local repository",
+            "selected local folder",
+            "--cwd",
+            "--source-connection",
+            "credential-free https/ssh git url",
             "foreground run follows ndjson events until completion",
             "-d, --detach",
             "return after submission",

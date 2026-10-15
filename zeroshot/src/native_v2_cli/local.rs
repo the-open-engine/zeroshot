@@ -35,6 +35,7 @@ use crate::execution::platform::{ControllerChild as Child, FileAccess, private_f
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
 use crate::native_v2_cloud::submission_digest;
 use crate::native_v2_local::{PreparedLocalRun, prepare_local_run};
+use crate::native_v2_supervisor::RunEnvironment;
 use crate::native_v2_portable_controller::{
     ControllerLease, ControllerLeaseError, PortableControllerBootstrap, PortableControllerError,
     PortableControllerPaths, PortableControllerServer, PortableRunController, read_ready,
@@ -196,30 +197,54 @@ impl LocalCliBackend {
 
     async fn start_controller(
         &self,
-        mut request: PreparedRunRequest,
+        request: PreparedRunRequest,
     ) -> Result<openengine_cluster_protocol::RunId, NativeV2CliError> {
         NativeV2Admission
             .validate_intent(&request.intent, DeliveryPolicy::Optional)
             .await
             .map_err(NativeV2CliError::InvalidRun)?;
-        request.connections = LocalConnectionStore::new(self.state_root.clone())
-            .resolve(
-                &request.intent.runtime,
-                request.intent.environment.as_ref(),
-                &request.connections,
-            )?
-            .bootstrap_values();
-        let prepared = prepare_local_run(request, &self.current_directory, &self.git_program)
-            .map_err(local_error)?;
+        let prepared = self.prepare_run(request).await?;
         let digest = submission_digest(&prepared.submission).map_err(local_error)?;
         let _submission_lock = self.acquire_submission_lock().await?;
         if let Some(run_id) = self
-            .existing_submission(&prepared.submission.submission_key, &digest)
+            .existing_submission(
+                &prepared.submission.submission_key,
+                &digest,
+                &prepared.workspace,
+            )
             .await?
         {
             return Ok(run_id);
         }
         self.start_prepared_controller(prepared).await
+    }
+
+    async fn prepare_run(
+        &self,
+        mut request: PreparedRunRequest,
+    ) -> Result<PreparedLocalRun, NativeV2CliError> {
+        let (workspace, source) = crate::native_v2_local::prepare_local_source(
+            &request,
+            &self.current_directory,
+            &self.git_program,
+        )
+        .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+        crate::native_v2_local::validate_workspace_state(&workspace, &self.state_root)
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+        let submission = crate::native_v2_local::local_submission(&request.intent, source.clone());
+        request.connections = LocalConnectionStore::new(self.state_root.clone())
+            .resolve_submission(&submission, &request.connections)?
+            .bootstrap_values();
+        request.git_credentials =
+            RunEnvironment::exact_for_submission(&submission, request.connections.clone())?
+                .resolve_git_source()
+                .await?;
+        request.cwd = Some(workspace);
+        request.source = source.map(|resolved| super::NamedRunSource {
+            resolved,
+            dirty: false,
+        });
+        prepare_local_run(request, &self.current_directory, &self.git_program).map_err(local_error)
     }
 
     async fn start_prepared_controller(
@@ -271,6 +296,7 @@ impl LocalCliBackend {
             environment: prepared.environment,
             native_environment: prepared.native_environment,
             github_token: prepared.github_token,
+            git_credentials: prepared.git_credentials,
             workspace: prepared.workspace,
             workspace_lease,
             checkpoint_repository,
@@ -310,12 +336,19 @@ impl LocalCliBackend {
         &self,
         submission_key: &IdempotencyKey,
         submission_digest: &Sha256Digest,
+        workspace: &Path,
     ) -> Result<Option<RunId>, NativeV2CliError> {
         for run_id in self.local_run_ids()? {
             if let Some(existing) = self
                 .matching_submission(run_id, submission_key, submission_digest)
                 .await?
             {
+                let recovery = self.read_recovery_document(&existing)?;
+                if recovery.workspace != workspace {
+                    return Err(NativeV2CliError::SubmissionConflict {
+                        existing_run_id: existing.as_str().to_owned(),
+                    });
+                }
                 return Ok(Some(existing));
             }
         }
@@ -771,8 +804,9 @@ pub(crate) fn local_workspace_lease_path(
 ) -> Result<PathBuf, NativeV2CliError> {
     let root = state_root.join("workspaces");
     prepare_private_directory(&root)?;
-    let digest = Sha256::digest(workspace.as_os_str().as_encoded_bytes());
-    Ok(root.join(format!("{digest:x}.lock")))
+    Ok(crate::native_v2_portable_controller::workspace_lease_path(
+        &root, workspace,
+    ))
 }
 
 pub(crate) fn create_local_run_storage(

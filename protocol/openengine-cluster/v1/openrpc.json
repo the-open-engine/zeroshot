@@ -884,6 +884,21 @@
               "null"
             ]
           }
+        },
+        {
+          "name": "gitCredentials",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/GitTransportCredentials"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fresh generic Git authority, excluded from immutable source and submission identity."
+          }
         }
       ],
       "result": {

@@ -345,7 +345,7 @@ fn source_operations_inspections_and_receipts_round_trip() {
             pre_effect: SourceStateDigest::new(digest('4')).assert_value(),
         },
         SourceOperation::PullRequest {
-            review: review.clone(),
+            review: review.clone().into(),
             expected_base: SourceRevisionId::new("base").assert_value(),
             expected_head: SourceRevisionId::new("head").assert_value(),
             checked_revision: SourceRevisionId::new("head").assert_value(),
@@ -378,7 +378,6 @@ fn source_operations_inspections_and_receipts_round_trip() {
             expected_head: SourceRevisionId::new("head").assert_value(),
             checked_revision: SourceRevisionId::new("head").assert_value(),
             policy,
-            integrated_revision: SourceRevisionId::new("merge").assert_value(),
         },
     ];
     for (index, operation) in operations.into_iter().enumerate() {

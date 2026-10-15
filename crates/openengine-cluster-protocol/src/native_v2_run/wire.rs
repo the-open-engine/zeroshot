@@ -134,17 +134,30 @@ pub struct RunSubmission {
     pub runtime: RuntimePlan,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<super::RuntimeEnvironment>,
-    pub source: ResolvedSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ResolvedSource>,
     pub submission_key: IdempotencyKey,
 }
 
 impl RunSubmission {
-    /// Exact fields required by all nodes and the accepted preparation definition.
+    /// Whether the immutable source needs the generic Git transport discovery marker.
+    #[must_use]
+    pub fn requires_git_transport(&self) -> bool {
+        self.source
+            .as_ref()
+            .is_some_and(|source| source.requires_git_transport())
+    }
+
+    /// Exact fields required by nodes, preparation, and the admitted source transport.
     #[must_use]
     pub fn connection_requirements(
         &self,
     ) -> BTreeMap<ConnectionKey, BTreeSet<EnvironmentVariableName>> {
-        run_connection_requirements(&self.runtime, self.environment.as_ref())
+        run_connection_requirements_with_source(
+            &self.runtime,
+            self.environment.as_ref(),
+            self.source.as_ref(),
+        )
     }
 }
 
@@ -161,6 +174,22 @@ pub fn run_connection_requirements(
                 .entry(key.clone())
                 .or_default()
                 .extend(fields.iter().cloned());
+        }
+    }
+    requirements
+}
+
+/// Combine all immutable requirements without resolving or forwarding credentials.
+#[must_use]
+pub fn run_connection_requirements_with_source(
+    runtime: &RuntimePlan,
+    environment: Option<&super::RuntimeEnvironment>,
+    source: Option<&ResolvedSource>,
+) -> BTreeMap<ConnectionKey, BTreeSet<EnvironmentVariableName>> {
+    let mut requirements = run_connection_requirements(runtime, environment);
+    if let Some(remote) = source.and_then(|source| source.remote.as_ref()) {
+        for (key, fields) in remote.connection_requirements() {
+            requirements.entry(key).or_default().extend(fields);
         }
     }
     requirements
@@ -199,6 +228,9 @@ pub struct RunResumeParams {
     /// Fresh GitHub credential for private source checkout or Git delivery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,
+    /// Fresh generic Git authority, excluded from immutable source and submission identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_credentials: Option<super::GitTransportCredentials>,
 }
 
 impl std::fmt::Debug for RunResumeParams {
@@ -214,6 +246,7 @@ impl std::fmt::Debug for RunResumeParams {
                 "github_token",
                 &self.github_token.as_ref().map(|_| "[REDACTED]"),
             )
+            .field("git_credentials", &self.git_credentials)
             .finish()
     }
 }

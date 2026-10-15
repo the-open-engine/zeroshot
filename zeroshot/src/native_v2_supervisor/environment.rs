@@ -6,10 +6,11 @@ use async_trait::async_trait;
 use openengine_cluster_protocol::{
     ConnectionKey, EnvironmentVariableName, RunConnectionRequirements, RunConnectionValues,
     RuntimePlan, RuntimeEnvironment, StaticConnectionValues, run_connection_requirements,
+    GitTransportCredentials, ResolvedSource, RunSubmission,
 };
 use thiserror::Error;
 
-use crate::native_v2_contract::NodeRuntimeBinding;
+use crate::native_v2_contract::{AdmittedRun, NodeRuntimeBinding};
 use crate::native_v2_runner::{
     EnvironmentRefreshError, ResolvedEnvironment, RuntimeEnvironmentRefresh,
     with_environment_refresh,
@@ -36,6 +37,7 @@ pub(crate) enum ConnectionResolutionError {
     InvalidResponse,
 }
 
+#[derive(Clone)]
 pub(crate) struct DynamicConnectionPlan {
     pub resolver: Arc<dyn RunConnectionResolver>,
     pub keys: BTreeSet<ConnectionKey>,
@@ -46,12 +48,15 @@ pub(crate) struct DynamicConnectionPlan {
 ///
 /// Static values never enter admission, the ledger, observations, or debug output. Dynamic values
 /// are fetched only for the connection keys and fields declared by the node that is starting.
+/// Source-only fields stay private unless a node or preparation hook also explicitly declares them.
 #[derive(Clone)]
 pub struct RunEnvironment {
     values: Arc<RunConnectionValues>,
     variables: Arc<BTreeMap<EnvironmentVariableName, String>>,
     dynamic_keys: Arc<BTreeSet<ConnectionKey>>,
     source_connection: Option<ConnectionKey>,
+    source_authorization: Arc<SourceAuthorization>,
+    requirements: Arc<ConnectionRequirements>,
     resolver: Option<Arc<dyn RunConnectionResolver>>,
 }
 
@@ -61,37 +66,93 @@ impl RunEnvironment {
         definition: Option<&RuntimeEnvironment>,
         values: RunConnectionValues,
     ) -> Result<Self, RunEnvironmentError> {
-        validate_bootstrap(runtime, definition, &values, &BTreeSet::new())?;
-        Ok(Self {
-            values: Arc::new(values),
-            variables: runtime_variables(definition),
-            dynamic_keys: Arc::new(BTreeSet::new()),
-            source_connection: None,
-            resolver: None,
-        })
+        Self::from_admission(EnvironmentAdmission::new(runtime, definition), values, None)
     }
 
+    /// Bind source authority without automatically adding source fields to agent bindings.
+    pub fn exact_for_submission(
+        submission: &RunSubmission,
+        values: RunConnectionValues,
+    ) -> Result<Self, RunEnvironmentError> {
+        Self::from_admission(
+            EnvironmentAdmission::for_submission(submission),
+            values,
+            None,
+        )
+    }
+
+    pub fn exact_for_admitted(
+        admitted: &AdmittedRun,
+        values: RunConnectionValues,
+    ) -> Result<Self, RunEnvironmentError> {
+        Self::from_admission(EnvironmentAdmission::for_admitted(admitted), values, None)
+    }
+
+    #[cfg(test)]
     pub(crate) fn with_resolver(
         runtime: &RuntimePlan,
         definition: Option<&RuntimeEnvironment>,
         values: RunConnectionValues,
         dynamic: DynamicConnectionPlan,
     ) -> Result<Self, RunEnvironmentError> {
-        if dynamic.keys.is_empty()
-            || dynamic
-                .source_connection
-                .as_ref()
-                .is_some_and(|key| !dynamic.keys.contains(key))
-        {
-            return Err(RunEnvironmentError::InvalidPlan);
-        }
-        validate_bootstrap(runtime, definition, &values, &dynamic.keys)?;
+        Self::from_admission(
+            EnvironmentAdmission::new(runtime, definition),
+            values,
+            Some(dynamic),
+        )
+    }
+
+    pub(crate) fn with_resolver_for_submission(
+        submission: &RunSubmission,
+        values: RunConnectionValues,
+        dynamic: DynamicConnectionPlan,
+    ) -> Result<Self, RunEnvironmentError> {
+        Self::from_admission(
+            EnvironmentAdmission::for_submission(submission),
+            values,
+            Some(dynamic),
+        )
+    }
+
+    pub(crate) fn with_resolver_for_admitted(
+        admitted: &AdmittedRun,
+        values: RunConnectionValues,
+        dynamic: DynamicConnectionPlan,
+    ) -> Result<Self, RunEnvironmentError> {
+        Self::from_admission(
+            EnvironmentAdmission::for_admitted(admitted),
+            values,
+            Some(dynamic),
+        )
+    }
+
+    fn from_admission(
+        admission: EnvironmentAdmission,
+        values: RunConnectionValues,
+        dynamic: Option<DynamicConnectionPlan>,
+    ) -> Result<Self, RunEnvironmentError> {
+        let (keys, source, resolver) = match dynamic {
+            Some(dynamic) => {
+                validate_dynamic_plan(&dynamic)?;
+                (
+                    dynamic.keys,
+                    dynamic.source_connection,
+                    Some(dynamic.resolver),
+                )
+            }
+            None => (BTreeSet::new(), None, None),
+        };
+        admission.source.validate_resolver(&keys, source.as_ref())?;
+        validate_bootstrap(&admission.requirements, &values, &keys)?;
+        let source_connection = admission.source.connection(source);
         Ok(Self {
             values: Arc::new(values),
-            variables: runtime_variables(definition),
-            dynamic_keys: Arc::new(dynamic.keys),
-            source_connection: dynamic.source_connection,
-            resolver: Some(dynamic.resolver),
+            variables: admission.variables,
+            dynamic_keys: Arc::new(keys),
+            source_connection,
+            source_authorization: Arc::new(admission.source),
+            requirements: Arc::new(admission.requirements),
+            resolver,
         })
     }
 
@@ -119,16 +180,55 @@ impl RunEnvironment {
         runtime: &RuntimePlan,
         definition: Option<&RuntimeEnvironment>,
     ) -> Result<Self, RunEnvironmentError> {
-        validate_bootstrap(
-            runtime,
-            definition,
-            self.values.as_ref(),
-            self.dynamic_keys.as_ref(),
-        )?;
-        Ok(Self {
-            variables: runtime_variables(definition),
-            ..self.clone()
-        })
+        let admission = EnvironmentAdmission::new(runtime, definition)
+            .with_authorization(self.source_authorization.as_ref().clone());
+        self.rebind(admission)
+    }
+
+    /// Verify the original source authorization against the immutable admitted run.
+    pub fn for_admitted(&self, admitted: &AdmittedRun) -> Result<Self, RunEnvironmentError> {
+        let admission = EnvironmentAdmission::for_admitted(admitted);
+        if admission.source.requirements() != self.source_authorization.requirements() {
+            return Err(RunEnvironmentError::InvalidPlan);
+        }
+        self.rebind(admission)
+    }
+
+    fn rebind(&self, admission: EnvironmentAdmission) -> Result<Self, RunEnvironmentError> {
+        let dynamic = self
+            .resolver
+            .as_ref()
+            .map(|resolver| DynamicConnectionPlan {
+                resolver: resolver.clone(),
+                keys: self.dynamic_keys.as_ref().clone(),
+                source_connection: self
+                    .source_connection
+                    .clone()
+                    .filter(|key| self.dynamic_keys.contains(key)),
+            });
+        Self::from_admission(admission, self.values.as_ref().clone(), dynamic)
+    }
+
+    /// Refresh only the declared generic source authority; native/public sources return None.
+    pub(crate) async fn resolve_git_source(
+        &self,
+    ) -> Result<Option<GitTransportCredentials>, RunEnvironmentError> {
+        let SourceAuthorization::Git { fields, .. } = self.source_authorization.as_ref() else {
+            return Ok(None);
+        };
+        let values = self
+            .resolve_source(fields.clone())
+            .await?
+            .ok_or(RunEnvironmentError::InvalidPlan)?;
+        GitTransportCredentials::from_connection_values(&values)
+            .map_err(|_| RunEnvironmentError::InvalidPlan)
+    }
+
+    pub(crate) fn has_git_source_connection(&self) -> bool {
+        matches!(
+            self.source_authorization.as_ref(),
+            SourceAuthorization::Git { .. }
+        )
     }
 
     /// Resolve only the explicitly selected hook connection fields; never inherit node credentials.
@@ -162,6 +262,7 @@ impl RunEnvironment {
         &self,
         fields: BTreeSet<EnvironmentVariableName>,
     ) -> Result<Option<StaticConnectionValues>, RunEnvironmentError> {
+        self.source_authorization.validate_source_fields(&fields)?;
         let Some(key) = self.source_connection.clone() else {
             return Ok(None);
         };
@@ -179,10 +280,7 @@ impl RunEnvironment {
         binding: &NodeRuntimeBinding,
     ) -> Result<ResolvedEnvironment, RunEnvironmentError> {
         let resolved = self.resolve_snapshot(binding).await?;
-        let dynamic = binding
-            .declared_connections()
-            .iter()
-            .any(|(key, _)| self.dynamic_keys.contains(key));
+        let dynamic = self.requires_refresh(binding);
         if !dynamic {
             return Ok(resolved);
         }
@@ -193,6 +291,19 @@ impl RunEnvironment {
                 binding: binding.clone(),
             }),
         ))
+    }
+
+    fn requires_refresh(&self, binding: &NodeRuntimeBinding) -> bool {
+        let dynamic_node = binding
+            .declared_connections()
+            .iter()
+            .any(|(key, _)| self.dynamic_keys.contains(key));
+        let dynamic_source = matches!(binding, NodeRuntimeBinding::GitDelivery { .. })
+            && self
+                .source_connection
+                .as_ref()
+                .is_some_and(|key| self.dynamic_keys.contains(key));
+        dynamic_node || dynamic_source
     }
 
     async fn resolve_snapshot(
@@ -218,13 +329,19 @@ impl RunEnvironment {
         }
         let resolved = ResolvedEnvironment::exact(binding, values)
             .map_err(|_| RunEnvironmentError::InvalidPlan)?;
-        Ok(resolved.with_variables(self.variables.as_ref()))
+        let resolved = resolved.with_variables(self.variables.as_ref());
+        if matches!(binding, NodeRuntimeBinding::GitDelivery { .. }) {
+            Ok(resolved.with_source_git_credentials(self.resolve_git_source().await?))
+        } else {
+            Ok(resolved)
+        }
     }
 
     async fn resolve_requirements(
         &self,
         requirements: BTreeMap<ConnectionKey, BTreeSet<EnvironmentVariableName>>,
     ) -> Result<RunConnectionValues, RunEnvironmentError> {
+        validate_requested_fields(self.requirements.as_ref(), &requirements)?;
         let mut selected = RunConnectionValues::new();
         let mut dynamic = RunConnectionRequirements::new();
         for (key, fields) in requirements {
@@ -236,21 +353,167 @@ impl RunEnvironment {
                 return Err(RunEnvironmentError::MissingConnection(key));
             }
         }
-        if !dynamic.is_empty() {
-            let resolver = self
-                .resolver
-                .as_ref()
-                .ok_or(RunEnvironmentError::InvalidPlan)?;
-            let resolved = resolver
-                .resolve(dynamic.clone())
-                .await
-                .map_err(RunEnvironmentError::from)?;
-            validate_resolution(&dynamic, &resolved)?;
-            selected.extend(resolved);
-        }
+        selected.extend(self.resolve_dynamic_values(dynamic).await?);
         validate_size(&selected)?;
         Ok(selected)
     }
+
+    async fn resolve_dynamic_values(
+        &self,
+        requirements: RunConnectionRequirements,
+    ) -> Result<RunConnectionValues, RunEnvironmentError> {
+        if requirements.is_empty() {
+            return Ok(RunConnectionValues::new());
+        }
+        let resolver = self
+            .resolver
+            .as_ref()
+            .ok_or(RunEnvironmentError::InvalidPlan)?;
+        let resolved = resolver
+            .resolve(requirements.clone())
+            .await
+            .map_err(RunEnvironmentError::from)?;
+        validate_resolution(&requirements, &resolved)?;
+        Ok(resolved)
+    }
+}
+
+type ConnectionRequirements = BTreeMap<ConnectionKey, BTreeSet<EnvironmentVariableName>>;
+
+#[derive(Clone)]
+enum SourceAuthorization {
+    Legacy,
+    None,
+    Git {
+        key: ConnectionKey,
+        fields: BTreeSet<EnvironmentVariableName>,
+    },
+}
+
+impl SourceAuthorization {
+    fn from_source(source: Option<&ResolvedSource>) -> Self {
+        let Some(source) = source else {
+            return Self::None;
+        };
+        let Some(remote) = &source.remote else {
+            return Self::Legacy;
+        };
+        let Some((key, fields)) = remote.connection_requirements().into_iter().next() else {
+            return Self::None;
+        };
+        Self::Git { key, fields }
+    }
+
+    fn requirements(&self) -> ConnectionRequirements {
+        match self {
+            Self::Git { key, fields } => BTreeMap::from([(key.clone(), fields.clone())]),
+            Self::Legacy | Self::None => BTreeMap::new(),
+        }
+    }
+
+    fn connection(&self, legacy: Option<ConnectionKey>) -> Option<ConnectionKey> {
+        match self {
+            Self::Legacy => legacy,
+            Self::None => None,
+            Self::Git { key, .. } => Some(key.clone()),
+        }
+    }
+
+    fn validate_resolver(
+        &self,
+        dynamic_keys: &BTreeSet<ConnectionKey>,
+        source_connection: Option<&ConnectionKey>,
+    ) -> Result<(), RunEnvironmentError> {
+        let expected = match self {
+            Self::Legacy => return Ok(()),
+            Self::None => None,
+            Self::Git { key, .. } => dynamic_keys.contains(key).then_some(key),
+        };
+        if source_connection != expected {
+            return Err(RunEnvironmentError::InvalidPlan);
+        }
+        Ok(())
+    }
+
+    fn validate_source_fields(
+        &self,
+        requested: &BTreeSet<EnvironmentVariableName>,
+    ) -> Result<(), RunEnvironmentError> {
+        if let Self::Git { fields, .. } = self {
+            if fields != requested {
+                return Err(RunEnvironmentError::InvalidPlan);
+            }
+        }
+        Ok(())
+    }
+}
+
+struct EnvironmentAdmission {
+    requirements: ConnectionRequirements,
+    variables: Arc<BTreeMap<EnvironmentVariableName, String>>,
+    source: SourceAuthorization,
+}
+
+impl EnvironmentAdmission {
+    fn new(runtime: &RuntimePlan, definition: Option<&RuntimeEnvironment>) -> Self {
+        Self {
+            requirements: run_connection_requirements(runtime, definition),
+            variables: runtime_variables(definition),
+            source: SourceAuthorization::Legacy,
+        }
+    }
+
+    fn for_submission(submission: &RunSubmission) -> Self {
+        Self::new(&submission.runtime, submission.environment.as_ref())
+            .with_source(submission.source.as_ref())
+    }
+
+    fn for_admitted(admitted: &AdmittedRun) -> Self {
+        Self::new(&admitted.runtime, admitted.environment.as_ref())
+            .with_source(admitted.source.as_ref())
+    }
+
+    fn with_source(self, source: Option<&ResolvedSource>) -> Self {
+        self.with_authorization(SourceAuthorization::from_source(source))
+    }
+
+    fn with_authorization(mut self, authorization: SourceAuthorization) -> Self {
+        self.source = authorization;
+        for (key, fields) in self.source.requirements() {
+            self.requirements.entry(key).or_default().extend(fields);
+        }
+        self
+    }
+}
+
+fn validate_dynamic_plan(dynamic: &DynamicConnectionPlan) -> Result<(), RunEnvironmentError> {
+    if dynamic.keys.is_empty()
+        || dynamic
+            .source_connection
+            .as_ref()
+            .is_some_and(|key| !dynamic.keys.contains(key))
+    {
+        return Err(RunEnvironmentError::InvalidPlan);
+    }
+    Ok(())
+}
+
+fn validate_requested_fields(
+    authorized: &ConnectionRequirements,
+    requested: &ConnectionRequirements,
+) -> Result<(), RunEnvironmentError> {
+    for (key, fields) in requested {
+        let permitted = authorized
+            .get(key)
+            .ok_or_else(|| RunEnvironmentError::UndeclaredConnection(key.clone()))?;
+        if let Some(field) = fields.iter().find(|field| !permitted.contains(*field)) {
+            return Err(RunEnvironmentError::UndeclaredField(
+                key.clone(),
+                field.clone(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn runtime_variables(
@@ -291,12 +554,10 @@ impl RuntimeEnvironmentRefresh for NodeEnvironmentRefresh {
 }
 
 fn validate_bootstrap(
-    runtime: &RuntimePlan,
-    definition: Option<&RuntimeEnvironment>,
+    declared: &ConnectionRequirements,
     values: &RunConnectionValues,
     dynamic_keys: &BTreeSet<ConnectionKey>,
 ) -> Result<(), RunEnvironmentError> {
-    let declared = run_connection_requirements(runtime, definition);
     if let Some(key) = declared
         .keys()
         .find(|key| !values.contains_key(*key) && !dynamic_keys.contains(*key))

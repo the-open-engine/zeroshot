@@ -7,7 +7,7 @@ use openengine_cluster_protocol::{
     ConnectionScope, EnvironmentVariableName, ExecutionRef, MergePlanId, RunAttachParams,
     RunDiscardWorkspaceParams, RunForceParams, RunListParams, RunLogsParams, RunProfileName,
     RunProfileScope, RunResumeParams, RunStatusParams, RunTitle, RunWatchParams, RuntimePlan,
-    SourceBranchId, SourceRepositoryId, SourceRevisionId, StaticConnectionValues,
+    SourceBranchId, SourceRevisionId, StaticConnectionValues,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{json, Value};
@@ -416,6 +416,8 @@ async fn wave5_cli_contract_default_backend_bounds_recovery_and_redacts_requests
             .is_err()
     );
     let resume = RunResumeParams {
+        git_credentials: None,
+
         run_id: run_id.clone(),
         successor_run_id: RunId::new("run-successor"),
         from: None,
@@ -437,6 +439,11 @@ async fn wave5_cli_contract_default_backend_bounds_recovery_and_redacts_requests
     );
 
     let request = PreparedRunRequest {
+        git_credentials: None,
+
+        cwd: None,
+        source_connection: None,
+
         run_id,
         intent: TargetRunIntent {
             environment: None,

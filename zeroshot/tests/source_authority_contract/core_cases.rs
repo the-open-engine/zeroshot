@@ -102,14 +102,6 @@ fn typed_receipts_reject_same_operation_contradictions() {
         SourceMergeQueueReceipt::new(find(SourceCapability::MergeQueue), review("review-other"),)
             .is_err()
     );
-    assert!(
-        SourceMergeReceipt::new(
-            find(SourceCapability::Merge),
-            SourceRevisionId::new("wrong-integrated").assert_value(),
-        )
-        .is_err()
-    );
-
     let failed_merge = merge_request(MergeRequestInput {
         policy: policy('2', SourceCheckConclusion::Failed),
         ..MergeRequestInput::exact()
@@ -164,7 +156,7 @@ async fn workspace_mismatch_and_cross_workspace_replay_fail_before_effect() {
 }
 
 #[test]
-fn review_base_head_policy_conclusion_and_integrated_revision_are_exact() {
+fn review_base_head_policy_and_conclusion_are_exact() {
     let exact = merge_request(MergeRequestInput::exact());
     let receipt = receipt(&exact);
     for mismatch in [
@@ -190,10 +182,6 @@ fn review_base_head_policy_conclusion_and_integrated_revision_are_exact() {
         }),
         merge_request(MergeRequestInput {
             policy: policy('2', SourceCheckConclusion::Failed),
-            ..MergeRequestInput::exact()
-        }),
-        merge_request(MergeRequestInput {
-            integrated: "integrated-other",
             ..MergeRequestInput::exact()
         }),
     ] {

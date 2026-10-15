@@ -376,12 +376,16 @@ pub(super) fn run_intent() -> TargetRunIntent {
 
 pub(super) fn run_request() -> PreparedRunRequest {
     PreparedRunRequest {
+        cwd: None,
+        source_connection: None,
+        git_credentials: None,
         run_id: RunId::new("018f5e78-7f95-7c22-8d98-3f15af20c991"),
         intent: run_intent(),
         connections: BTreeMap::new(),
         github_token: None,
         source: Some(zeroshot_engine::native_v2_cli::NamedRunSource {
             resolved: ResolvedSource {
+                remote: None,
                 repository: SourceRepositoryId::new("open-engine/zeroshot").assert_value(),
                 branch: SourceBranchId::new("feature").assert_value(),
                 revision: SourceRevisionId::new("0123456789abcdef0123456789abcdef01234567")
@@ -403,16 +407,18 @@ pub(super) fn exact_run_request() -> TargetRunRequest {
             graph: request.intent.graph,
             initial_input: request.intent.initial_input,
             runtime: request.intent.runtime,
-            source: ResolvedSource {
+            source: Some(ResolvedSource {
                 repository: SourceRepositoryId::new("open-engine/zeroshot").assert_value(),
                 branch: SourceBranchId::new("feature").assert_value(),
                 revision: SourceRevisionId::new("0123456789abcdef0123456789abcdef01234567")
                     .assert_value(),
-            },
+                remote: None,
+            }),
             submission_key: request.intent.submission_key,
         },
         connections: request.connections,
         connection_resolver: None,
         github_token: request.github_token,
+        git_credentials: request.git_credentials,
     }
 }

@@ -20,8 +20,7 @@ fn provider_contracts_remain_provider_neutral_and_effect_free() {
     let contracts = rust_sources(&[
         "src/issue_provider.rs",
         "src/issue_provider",
-        "src/source_code_provider.rs",
-        "src/source_code_provider",
+        "src/source_code/provider",
     ]);
     assert!(
         read(&product.join("src/lib.rs")).contains("mod provider_value;"),

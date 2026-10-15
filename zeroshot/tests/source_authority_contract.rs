@@ -85,7 +85,6 @@ struct MergeRequestInput {
     head: &'static str,
     checked: &'static str,
     policy: SourceRequiredPolicy,
-    integrated: &'static str,
 }
 
 impl MergeRequestInput {
@@ -96,7 +95,6 @@ impl MergeRequestInput {
             head: "head-sha",
             checked: "head-sha",
             policy: policy('2', SourceCheckConclusion::Satisfied),
-            integrated: "integrated-sha",
         }
     }
 }
@@ -110,7 +108,6 @@ fn merge_request(input: MergeRequestInput) -> SourceOperationRequest {
             expected_head: SourceRevisionId::new(input.head).assert_value(),
             checked_revision: SourceRevisionId::new(input.checked).assert_value(),
             policy: input.policy,
-            integrated_revision: SourceRevisionId::new(input.integrated).assert_value(),
         },
     )
 }
@@ -151,7 +148,7 @@ fn all_requests() -> Vec<SourceOperationRequest> {
         request(
             "pull-request-758",
             SourceOperation::PullRequest {
-                review: exact_review.clone(),
+                review: exact_review.clone().into(),
                 expected_base: SourceRevisionId::new("base-sha").assert_value(),
                 expected_head: SourceRevisionId::new("head-sha").assert_value(),
                 checked_revision: SourceRevisionId::new("head-sha").assert_value(),
@@ -214,7 +211,19 @@ fn receipt(request: &SourceOperationRequest) -> SourceOperationReceipt {
             SourcePushReceipt::new(request.clone(), revision.clone()).assert_value(),
         ),
         SourceOperation::PullRequest { review, .. } => SourceOperationReceipt::PullRequest(
-            SourcePullRequestReceipt::new(request.clone(), review.clone()).assert_value(),
+            SourcePullRequestReceipt::new(
+                request.clone(),
+                SourceReviewIdentity::new(
+                    review
+                        .existing_review()
+                        .cloned()
+                        .unwrap_or_else(|| SourceReviewId::new("allocated-review").assert_value()),
+                    review.base_branch().clone(),
+                    review.head_branch().clone(),
+                )
+                .assert_value(),
+            )
+            .assert_value(),
         ),
         SourceOperation::Checks { policy, .. } => SourceOperationReceipt::Checks(
             SourceChecksReceipt::new(request.clone(), policy.clone()).assert_value(),
@@ -225,11 +234,12 @@ fn receipt(request: &SourceOperationRequest) -> SourceOperationReceipt {
         SourceOperation::MergeQueue { review, .. } => SourceOperationReceipt::MergeQueue(
             SourceMergeQueueReceipt::new(request.clone(), review.clone()).assert_value(),
         ),
-        SourceOperation::Merge {
-            integrated_revision,
-            ..
-        } => SourceOperationReceipt::Merge(
-            SourceMergeReceipt::new(request.clone(), integrated_revision.clone()).assert_value(),
+        SourceOperation::Merge { .. } => SourceOperationReceipt::Merge(
+            SourceMergeReceipt::new(
+                request.clone(),
+                SourceRevisionId::new("integrated-sha").assert_value(),
+            )
+            .assert_value(),
         ),
     }
 }
@@ -345,3 +355,46 @@ async fn registry_with(provider: Arc<AuthorityFake>) -> SourceCodeProviderRegist
 mod core_cases;
 #[path = "source_authority_contract/envelope_cases.rs"]
 mod envelope_cases;
+
+#[test]
+fn create_review_intent_allows_a_newly_allocated_opaque_id() {
+    let target = SourceReviewTarget::new(
+        SourceBranchId::new("main").assert_value(),
+        SourceBranchId::new("run/branch").assert_value(),
+        None,
+    )
+    .assert_value();
+    let intent = request(
+        "create-review",
+        SourceOperation::PullRequest {
+            review: target,
+            expected_base: SourceRevisionId::new("base").assert_value(),
+            expected_head: SourceRevisionId::new("head").assert_value(),
+            checked_revision: SourceRevisionId::new("head").assert_value(),
+            policy: policy('2', SourceCheckConclusion::Satisfied),
+        },
+    );
+    let allocated = SourceReviewIdentity::new(
+        SourceReviewId::new("opaque/reviews:alloc-917").assert_value(),
+        SourceBranchId::new("main").assert_value(),
+        SourceBranchId::new("run/branch").assert_value(),
+    )
+    .assert_value();
+    assert!(SourcePullRequestReceipt::new(intent, allocated).is_ok());
+}
+
+#[test]
+fn merge_intent_does_not_predict_the_provider_resulting_revision() {
+    let intent = merge_request(MergeRequestInput::exact());
+    let encoded = serde_json::to_value(&intent).assert_value();
+    assert!(encoded["operation"].get("integratedRevision").is_none());
+    let receipt = SourceMergeReceipt::new(
+        intent,
+        SourceRevisionId::new("allocated-merge-revision").assert_value(),
+    )
+    .assert_value();
+    assert_eq!(
+        receipt.integrated_revision().as_str(),
+        "allocated-merge-revision"
+    );
+}

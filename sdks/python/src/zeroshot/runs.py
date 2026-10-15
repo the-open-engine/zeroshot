@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from .runtime import GraphSpec, RuntimePlan
+from .source import ResolvedSource
 from .values import JsonValue
 
 
@@ -18,7 +20,9 @@ class RunRequest:
         graph: Opaque GraphSpec passed to Zeroshot without changes.
         initial_input: Closed JSON input that Zeroshot validates against the graph.
         runtime: Opaque RuntimePlan passed to Zeroshot without changes.
-        repository: Named-target GitHub repository override in owner/name form.
+        cwd: Working folder for this submission; None uses the client launcher folder.
+        repository: Source override as a Git clone URL or GitHub owner/name shorthand.
+        source_connection: Explicit source-only named connection key.
         branch: Named-target source branch override.
         revision: Named-target exact source commit override.
         submission_key: Stable idempotency key; None generates one before native preflight.
@@ -28,25 +32,12 @@ class RunRequest:
     graph: GraphSpec
     initial_input: JsonValue
     runtime: RuntimePlan
+    cwd: str | Path | None = None
     repository: str | None = None
+    source_connection: str | None = None
     branch: str | None = None
     revision: str | None = None
     submission_key: str | None = None
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ResolvedSource:
-    """Immutable source snapshot selected for a named run.
-
-    Args:
-        repository: Native repository identity.
-        branch: Attached source branch.
-        revision: Exact forty-character Git revision.
-    """
-
-    repository: str
-    branch: str
-    revision: str
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -93,7 +84,7 @@ class RunStatus:
     Args:
         run_id: Public durable run identity.
         title: Immutable persisted title.
-        source: Immutable resolved source snapshot.
+        source: Immutable resolved source snapshot, or None for an ordinary local folder.
         size: Native run size.
         cursor: Opaque durable status cursor.
         phase: admitted, running, stopping, or finished.
@@ -103,7 +94,7 @@ class RunStatus:
 
     run_id: str
     title: str
-    source: ResolvedSource
+    source: ResolvedSource | None
     size: Literal["small", "medium", "large"]
     cursor: str
     phase: Literal["admitted", "running", "stopping", "finished"]
@@ -118,7 +109,7 @@ class RunSummary:
     Args:
         run_id: Public durable run identity.
         title: Immutable persisted title.
-        source: Immutable resolved source snapshot.
+        source: Immutable resolved source snapshot, or None for an ordinary local folder.
         size: Native run size.
         cursor: Opaque durable status cursor.
         phase: admitted, running, stopping, or finished.
@@ -127,7 +118,7 @@ class RunSummary:
 
     run_id: str
     title: str
-    source: ResolvedSource
+    source: ResolvedSource | None
     size: Literal["small", "medium", "large"]
     cursor: str
     phase: Literal["admitted", "running", "stopping", "finished"]

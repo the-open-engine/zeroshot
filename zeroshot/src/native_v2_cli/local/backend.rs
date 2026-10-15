@@ -1,5 +1,4 @@
 use super::*;
-use crate::native_v2_supervisor::RunEnvironment;
 
 impl LocalCliBackend {
     async fn resume_local(
@@ -60,34 +59,10 @@ impl LocalCliBackend {
         params: openengine_cluster_protocol::RunResumeParams,
         mut recovery: LocalRecoveryDocument,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
-        let connections = LocalConnectionStore::new(self.state_root.clone())
-            .resolve(
-                &recovery.submission.runtime,
-                recovery.submission.environment.as_ref(),
-                &params.connections,
-            )?
-            .bootstrap_values();
-        let environment = RunEnvironment::exact(
-            &recovery.submission.runtime,
-            recovery.submission.environment.as_ref(),
-            connections,
-        )
-        .map_err(local_error)?;
+        let prepared = self.prepare_successor(&params, &recovery).await?;
         let checkpoint = self.checkpoint_selection(&params)?;
         recovery.successor_run_id = Some(params.successor_run_id.clone());
         self.write_recovery_document(&params.run_id, &recovery)?;
-        let prepared = PreparedLocalRun {
-            run_id: params.successor_run_id.clone(),
-            delivery_run_id: self.delivery_run_id(&params.run_id, &recovery)?,
-            submission: recovery.submission,
-            environment,
-            github_token: params.github_token,
-            workspace: recovery.workspace,
-            native_environment: crate::native_v2_local::capture_local_native_environment(
-                &self.current_directory,
-            )
-            .map_err(local_error)?,
-        };
         if let Err(error) = self
             .start_prepared_controller_with_lineage(
                 prepared,
@@ -104,6 +79,30 @@ impl LocalCliBackend {
         Ok(openengine_cluster_protocol::RunResumeResult {
             run_id: params.successor_run_id,
             resumed_from: params.run_id,
+        })
+    }
+    async fn prepare_successor(
+        &self,
+        params: &openengine_cluster_protocol::RunResumeParams,
+        recovery: &LocalRecoveryDocument,
+    ) -> Result<PreparedLocalRun, NativeV2CliError> {
+        crate::native_v2_local::validate_workspace_state(&recovery.workspace, &self.state_root)
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+        let environment = LocalConnectionStore::new(self.state_root.clone())
+            .resolve_submission(&recovery.submission, &params.connections)?;
+        let git_credentials = environment.resolve_git_source().await?;
+        Ok(PreparedLocalRun {
+            run_id: params.successor_run_id.clone(),
+            delivery_run_id: self.delivery_run_id(&params.run_id, recovery)?,
+            submission: recovery.submission.clone(),
+            environment,
+            github_token: params.github_token.clone(),
+            git_credentials,
+            workspace: recovery.workspace.clone(),
+            native_environment: crate::native_v2_local::capture_local_native_environment(
+                &self.current_directory,
+            )
+            .map_err(local_error)?,
         })
     }
 }

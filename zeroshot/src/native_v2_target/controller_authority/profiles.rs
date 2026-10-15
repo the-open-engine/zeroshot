@@ -6,7 +6,7 @@ use openengine_cluster_protocol::{
 use reqwest::header::{ACCEPT, CACHE_CONTROL};
 
 use super::contract::{RunProfilesDescriptor, authority_error};
-use super::{TargetHttpControlAuthority, require_node_runtime_lanes};
+use super::{TargetHttpControlAuthority, require_node_runtime_lanes, require_git_transport};
 use super::access::AccessToken;
 use crate::native_v2_target::{TargetAccess, TargetAuthorityError, TargetRecord};
 
@@ -47,12 +47,20 @@ trait ProfileBody: serde::Serialize + Sync {
     fn stored_runtime(&self) -> Option<&RuntimePlan> {
         None
     }
+
+    fn requires_git_transport(&self) -> bool {
+        false
+    }
 }
 
 impl ProfileBody for RunProfileListRequest {}
 impl ProfileBody for RunProfileSelector {}
 impl ProfileBody for RunProfileDefaultRequest {}
-impl ProfileBody for RunProfileRunRequest {}
+impl ProfileBody for RunProfileRunRequest {
+    fn requires_git_transport(&self) -> bool {
+        self.source.requires_git_transport() || self.git_credentials.is_some()
+    }
+}
 
 impl ProfileBody for RunProfileSetRequest {
     fn stored_runtime(&self) -> Option<&RuntimePlan> {
@@ -64,7 +72,7 @@ impl TargetHttpControlAuthority {
     async fn profile_access(
         &self,
         target: &TargetRecord,
-        stored_runtime: Option<&RuntimePlan>,
+        input: &impl ProfileBody,
     ) -> Result<(RunProfilesDescriptor, AccessToken), TargetAuthorityError> {
         if matches!(target.access, TargetAccess::Direct) {
             return Err(authority_error(
@@ -75,9 +83,10 @@ impl TargetHttpControlAuthority {
         let routes = auth.run_profiles.clone().ok_or_else(|| {
             authority_error("hosted target does not advertise profile management")
         })?;
-        if let Some(runtime) = stored_runtime {
+        if let Some(runtime) = input.stored_runtime() {
             require_node_runtime_lanes(&controller, runtime)?;
         }
+        require_git_transport(&controller, input.requires_git_transport())?;
         let access = self
             .access_token(target, &auth, &controller.audience)
             .await?;
@@ -94,7 +103,7 @@ impl TargetHttpControlAuthority {
         I: ProfileBody,
         O: serde::de::DeserializeOwned,
     {
-        let (routes, access) = self.profile_access(target, input.stored_runtime()).await?;
+        let (routes, access) = self.profile_access(target, input).await?;
         let url = operation.route(&routes).clone();
         let builder = self
             .authorized(self.client.post(url.clone()), &access)?

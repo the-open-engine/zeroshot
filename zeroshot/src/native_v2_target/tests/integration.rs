@@ -341,10 +341,25 @@ async fn connector_preserves_add_login_and_target_scoped_connect() {
     assert_eq!(record, added);
     assert_eq!(request.run_id, run_request().run_id);
     assert_eq!(
-        request.submission.source.repository.as_str(),
+        request
+            .submission
+            .source
+            .as_ref()
+            .assert_value()
+            .repository
+            .as_str(),
         "open-engine/zeroshot"
     );
-    assert_eq!(request.submission.source.branch.as_str(), "feature");
+    assert_eq!(
+        request
+            .submission
+            .source
+            .as_ref()
+            .assert_value()
+            .branch
+            .as_str(),
+        "feature"
+    );
     assert!(matches!(
         calls.assert_at(3),
         AuthorityCall::Session(record, session)
@@ -459,6 +474,7 @@ async fn direct_connector_constrains_resume_values_and_propagates_authorization(
         connections: BTreeMap::from([(fixture.key.clone(), untrusted_values)]),
         connection_resolver: None,
         github_token: None,
+        git_credentials: None,
         from: None,
     };
     assert!(
@@ -483,6 +499,7 @@ async fn direct_connector_constrains_resume_values_and_propagates_authorization(
             source_connection: None,
         }),
         github_token: None,
+        git_credentials: None,
         from: None,
     };
     assert!(
@@ -564,6 +581,7 @@ async fn named_target_recovery_and_checkpoints_require_advertisement_before_dial
                     connections: BTreeMap::new(),
                     connection_resolver: None,
                     github_token: None,
+                    git_credentials: None,
                     from: None,
                 },
             )

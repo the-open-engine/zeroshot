@@ -2,20 +2,20 @@ use super::*;
 
 #[derive(Clone)]
 pub(super) struct PendingHead {
-    pub(super) previous: GitHubReviewReceipt,
-    pub(super) updated: Option<GitHubReviewReceipt>,
+    pub(super) previous: SourceReviewReceipt,
+    pub(super) updated: Option<SourceReviewReceipt>,
 }
 
 struct RecoveredHead {
-    observed: GitHubReviewReceipt,
+    observed: SourceReviewReceipt,
     failure: recovery::RepairFailure,
-    outcome: GitHubReconciliationOutcome,
+    outcome: SourceReconciliationOutcome,
 }
 
 impl NativeV2DeliveryAdapter {
     pub(super) async fn advance_review_head(
         &self,
-        drive: &mut ReviewDrive<'_>,
+        drive: &mut ReviewDrive<'_, '_>,
     ) -> Result<ReviewStep, DeliveryStop> {
         emit(drive.control, "delivery: updating pull request branch").await?;
         let outcome = match self.request_head_update(drive).await {
@@ -26,10 +26,10 @@ impl NativeV2DeliveryAdapter {
             Err(stop) => return Err(stop),
         };
         match outcome {
-            GitHubHeadUpdateOutcome::Updated(updated) => {
+            SourceHeadUpdateOutcome::Updated(updated) => {
                 self.adopt_updated_head(drive, updated).await
             }
-            GitHubHeadUpdateOutcome::Pending => {
+            SourceHeadUpdateOutcome::Pending => {
                 emit(
                     drive.control,
                     "delivery: pull request update is not yet available",
@@ -37,10 +37,10 @@ impl NativeV2DeliveryAdapter {
                 .await?;
                 Ok(ReviewStep::Continue)
             }
-            GitHubHeadUpdateOutcome::Conflict => {
+            SourceHeadUpdateOutcome::Conflict => {
                 self.complete_conflict(
                     drive,
-                    "GitHub authoritatively rejected branch update due to conflict",
+                    "forge authoritatively rejected branch update due to conflict",
                 )
                 .await
             }
@@ -49,8 +49,8 @@ impl NativeV2DeliveryAdapter {
 
     async fn adopt_updated_head(
         &self,
-        drive: &mut ReviewDrive<'_>,
-        updated: GitHubReviewReceipt,
+        drive: &mut ReviewDrive<'_, '_>,
+        updated: SourceReviewReceipt,
     ) -> Result<ReviewStep, DeliveryStop> {
         if !valid_head_update(&drive.review, &updated) {
             return Err(DeliveryStop::Outcome(WorkerOutcome::malformed()));
@@ -67,15 +67,11 @@ impl NativeV2DeliveryAdapter {
         });
         emit(
             drive.control,
-            "delivery: GitHub authorized updated pull request head",
+            "delivery: forge authorized updated pull request head",
         )
         .await?;
-        self.resume_pending_head(
-            &mut drive.credentials,
-            drive.control,
-            &drive.review.head_branch,
-        )
-        .await?;
+        self.resume_pending_head(drive.credentials, drive.control, &drive.review.head_branch)
+            .await?;
         emit(drive.control, "delivery: adopted updated pull request head").await?;
         Ok(ReviewStep::Continue)
     }
@@ -100,7 +96,7 @@ impl NativeV2DeliveryAdapter {
         let mut refreshed = preflight::OperationRetry::default();
         loop {
             ensure_active(control)?;
-            let request = GitHubHeadSynchronization {
+            let request = SourceHeadSynchronization {
                 workspace: &self.config.workspace,
                 previous: &pending.previous,
                 updated,
@@ -131,8 +127,8 @@ impl NativeV2DeliveryAdapter {
 
     async fn request_head_update(
         &self,
-        drive: &mut ReviewDrive<'_>,
-    ) -> Result<GitHubHeadUpdateOutcome, DeliveryStop> {
+        drive: &mut ReviewDrive<'_, '_>,
+    ) -> Result<SourceHeadUpdateOutcome, DeliveryStop> {
         self.state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -158,8 +154,13 @@ impl NativeV2DeliveryAdapter {
                     return Err(recovery::uncertain_authority(error));
                 }
                 Err(error) => {
-                    self.retry_operation(error, drive.operation_context(&mut refreshed))
-                        .await?
+                    self.retry_operation(
+                        error,
+                        drive
+                            .credentials
+                            .operation_context(drive.control, &mut refreshed),
+                    )
+                    .await?
                 }
             }
         }
@@ -167,12 +168,12 @@ impl NativeV2DeliveryAdapter {
 
     async fn observe_updated_head(
         &self,
-        drive: &mut ReviewDrive<'_>,
-    ) -> Result<GitHubDeliverySnapshot, DeliveryStop> {
+        drive: &mut ReviewDrive<'_, '_>,
+    ) -> Result<SourceDeliverySnapshot, DeliveryStop> {
         let mut retry = preflight::OperationRetry::default();
         loop {
             ensure_active(drive.control)?;
-            let request = GitHubDeliveryRead {
+            let request = SourceDeliveryRead {
                 target: &self.config.target,
                 head_branch: &drive.review.head_branch,
                 known_review: Some(&drive.review),
@@ -185,8 +186,13 @@ impl NativeV2DeliveryAdapter {
             {
                 Ok(snapshot) => return Ok(snapshot),
                 Err(error) => {
-                    self.retry_operation(error, drive.operation_context(&mut retry))
-                        .await?
+                    self.retry_operation(
+                        error,
+                        drive
+                            .credentials
+                            .operation_context(drive.control, &mut retry),
+                    )
+                    .await?
                 }
             }
         }
@@ -194,17 +200,17 @@ impl NativeV2DeliveryAdapter {
 
     async fn reconcile_updated_head(
         &self,
-        drive: &mut ReviewDrive<'_>,
-        observed: &GitHubReviewReceipt,
-    ) -> Result<GitHubReconciliationOutcome, DeliveryStop> {
+        drive: &mut ReviewDrive<'_, '_>,
+        observed: &SourceReviewReceipt,
+    ) -> Result<SourceReconciliationOutcome, DeliveryStop> {
         let mut retry = preflight::OperationRetry::default();
         loop {
             ensure_active(drive.control)?;
-            let request = GitHubHeadReconciliation {
+            let request = SourceHeadReconciliation {
                 workspace: &self.config.workspace,
                 published: &drive.review,
                 observed,
-                commit_message: "Preserve work before GitHub head reconciliation",
+                commit_message: "Preserve work before forge head reconciliation",
                 authorized_update: false,
                 adopting_existing: false,
             };
@@ -213,7 +219,12 @@ impl NativeV2DeliveryAdapter {
                 .reconcile_delivery_head(request, drive.credentials.current())
                 .await;
             if let Some(value) = self
-                .operation_result(result, drive.operation_context(&mut retry))
+                .operation_result(
+                    result,
+                    drive
+                        .credentials
+                        .operation_context(drive.control, &mut retry),
+                )
                 .await?
             {
                 return Ok(value);
@@ -223,7 +234,7 @@ impl NativeV2DeliveryAdapter {
 
     pub(super) async fn recover_head_update(
         &self,
-        drive: &mut ReviewDrive<'_>,
+        drive: &mut ReviewDrive<'_, '_>,
         failure: recovery::RepairFailure,
     ) -> Result<ReviewStep, DeliveryStop> {
         let snapshot = self.observe_updated_head(drive).await?;
@@ -235,12 +246,12 @@ impl NativeV2DeliveryAdapter {
             .await);
         };
         match &review.state {
-            GitHubReviewState::Merged { .. }
+            SourceReviewState::Merged { .. }
                 if review.head_revision == drive.review.head_revision =>
             {
                 return Ok(ReviewStep::Continue);
             }
-            GitHubReviewState::Open { .. } if snapshot.head_revision.is_some() => {}
+            SourceReviewState::Open { .. } if snapshot.head_revision.is_some() => {}
             _ => {
                 self.refuse_delivery(
                     drive.control,
@@ -273,7 +284,7 @@ impl NativeV2DeliveryAdapter {
 
     async fn complete_head_recovery(
         &self,
-        drive: &mut ReviewDrive<'_>,
+        drive: &mut ReviewDrive<'_, '_>,
         recovery: RecoveredHead,
     ) -> Result<ReviewStep, DeliveryStop> {
         let RecoveredHead {
@@ -281,19 +292,25 @@ impl NativeV2DeliveryAdapter {
             failure,
             outcome,
         } = recovery;
+        let mut failure = failure;
+        failure.diagnostic = self.redact_feedback(drive.credentials, &failure.diagnostic);
         match outcome {
-            GitHubReconciliationOutcome::NeedsWork(diagnostic) => {
+            SourceReconciliationOutcome::NeedsWork(diagnostic) => {
                 self.record_published(observed.clone());
                 Err(
                     recovery::repair(format!("{}\n{diagnostic}", failure.diagnostic))
                         .with_review(&observed),
                 )
             }
-            GitHubReconciliationOutcome::Refused(diagnostic) => {
-                self.refuse_delivery(drive.control, &diagnostic).await?;
+            SourceReconciliationOutcome::Refused(diagnostic) => {
+                self.refuse_delivery(
+                    drive.control,
+                    &self.redact_feedback(drive.credentials, &diagnostic),
+                )
+                .await?;
                 unreachable!("refused delivery always stops")
             }
-            GitHubReconciliationOutcome::Unchanged if failure.retryable => {
+            SourceReconciliationOutcome::Unchanged if failure.retryable => {
                 emit(drive.control, &failure.diagnostic).await?;
                 wait_for_poll(drive.control, self.config.poll.interval).await?;
                 Ok(ReviewStep::Continue)
@@ -318,15 +335,15 @@ impl NativeV2DeliveryAdapter {
 }
 
 fn recovered_outcome(
-    outcome: GitHubReconciliationOutcome,
+    outcome: SourceReconciliationOutcome,
     head_changed: bool,
-) -> GitHubReconciliationOutcome {
+) -> SourceReconciliationOutcome {
     match outcome {
-        GitHubReconciliationOutcome::Adopted => GitHubReconciliationOutcome::NeedsWork(
+        SourceReconciliationOutcome::Adopted => SourceReconciliationOutcome::NeedsWork(
             "delivery recovered a remote transition without its mutation receipt; \
              inspect the current workspace".to_owned(),
         ),
-        GitHubReconciliationOutcome::Unchanged if head_changed => GitHubReconciliationOutcome::NeedsWork(
+        SourceReconciliationOutcome::Unchanged if head_changed => SourceReconciliationOutcome::NeedsWork(
             "delivery observed a changed remote head already present locally; inspect the current workspace".to_owned(),
         ),
         other => other,
@@ -334,7 +351,7 @@ fn recovered_outcome(
 }
 
 async fn identity_failure(control: &DriverControl, diagnostic: &str) -> DeliveryStop {
-    let error = GitHubAuthorityError::identity(diagnostic);
+    let error = SourceDeliveryError::identity(diagnostic);
     match emit(control, &format!("delivery: {error}")).await {
         Ok(()) => error.into(),
         Err(error) => DeliveryStop::Runner(error),

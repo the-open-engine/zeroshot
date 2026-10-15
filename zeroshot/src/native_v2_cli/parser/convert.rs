@@ -15,9 +15,9 @@ use super::{
 use crate::native_v2_cli::{
     BuiltinGraphTemplate, ConnectionInput, ConnectionRoute, ConnectionSetCommand,
     MergePlanSelector, MergePlanSubmitCommand, NativeV2CliCommand, NativeV2CliError,
-    ProfileQualifier, ProfileReference, RunCommand, RunGraph, RunLogsCommand, RunRuntime,
-    RunSelection, RunSelector, RunResumeCommand, RunCheckpointsCommand, RunWatchCommand, TargetAdd,
-    TargetServe, TemplateDelivery,
+    ProfileQualifier, ProfileReference, RunCommand, RunGraph, RunLogsCommand, RunRepository,
+    RunRuntime, RunSelection, RunSelector, RunResumeCommand, RunCheckpointsCommand,
+    RunWatchCommand, TargetAdd, TargetServe, TemplateDelivery,
 };
 
 #[path = "convert/profile_commands.rs"]
@@ -323,6 +323,12 @@ impl RunArgs {
         })?;
         Ok(NativeV2CliCommand::Run(RunCommand {
             target: route.target,
+            cwd: self.cwd,
+            source_connection: self
+                .source_connection
+                .map(openengine_cluster_protocol::ConnectionKey::new)
+                .transpose()
+                .map_err(|error| usage(format!("invalid --source-connection: {error}")))?,
             title: RunTitle::new(self.title)
                 .map_err(|error| usage(format!("invalid --title: {error}")))?,
             input: self.input,
@@ -433,7 +439,7 @@ fn run_runtime(
 
 struct ParsedRunRoute {
     target: Option<String>,
-    repository: Option<SourceRepositoryId>,
+    repository: Option<RunRepository>,
     branch: Option<SourceBranchId>,
     revision: Option<SourceRevisionId>,
 }
@@ -450,10 +456,7 @@ fn run_route(
             "--repository, --branch, and --revision require --target",
         ));
     }
-    let repository = repository
-        .map(SourceRepositoryId::new)
-        .transpose()
-        .map_err(|error| usage(format!("invalid --repository: {error}")))?;
+    let repository = repository.map(parse_repository).transpose()?;
     let branch = optional_branch(branch)?;
     let revision = revision
         .map(SourceRevisionId::new)
@@ -465,6 +468,25 @@ fn run_route(
         branch,
         revision,
     })
+}
+
+fn parse_repository(value: String) -> Result<RunRepository, NativeV2CliError> {
+    if let Ok(remote) = openengine_cluster_protocol::GitRemoteUrl::new(&value) {
+        return Ok(RunRepository::Git(remote));
+    }
+    let github = crate::source_code_provider::adapters::core::github_repository_reference(
+        &format!("https://github.com/{value}.git"),
+    )
+    .as_deref()
+        == Some(value.as_str());
+    if !github {
+        return Err(usage(
+            "--repository must be GitHub owner/name or a credential-free HTTPS/SSH Git URL",
+        ));
+    }
+    SourceRepositoryId::new(value)
+        .map(RunRepository::GitHub)
+        .map_err(|error| usage(format!("invalid --repository: {error}")))
 }
 
 fn run_graph(

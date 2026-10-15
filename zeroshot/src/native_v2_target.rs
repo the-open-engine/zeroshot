@@ -41,7 +41,10 @@ mod serve;
 
 use contract::{prepare_target, validate_bearer_token, validate_target_name};
 pub use oecp::{TargetOecpDialer, TargetOecpWebSocketDialer};
-pub use registry::{FileTargetRegistry, TargetRegistry, default_target_registry_path};
+pub use registry::{
+    FileTargetRegistry, TargetRegistry, RecoveryConnectionAuthorization,
+    default_target_registry_path,
+};
 pub use controller_authority::TargetHttpControlAuthority;
 #[cfg(feature = "ui")]
 pub use controller_authority::TargetRunHistoryTransport;
@@ -366,6 +369,7 @@ where
                         submission_key: request.intent.submission_key,
                         connections: request.connections,
                         github_token: request.github_token,
+                        git_credentials: request.git_credentials,
                     },
                 )
                 .await
@@ -382,12 +386,13 @@ where
                             initial_input: request.intent.initial_input,
                             runtime: request.intent.runtime,
                             environment: request.intent.environment,
-                            source,
+                            source: Some(source),
                             submission_key: request.intent.submission_key,
                         },
                         connections: request.connections,
                         connection_resolver: None,
                         github_token: request.github_token,
+                        git_credentials: request.git_credentials,
                     },
                 )
                 .await
@@ -463,17 +468,26 @@ where
         let target = self.direct_recovery_target(name)?;
         let trusted = self
             .registry
-            .recovery_authorization(&target.id, &params.run_id)
+            .recovery_authorization_with_source(&target.id, &params.run_id)
             .map_err(cli_target_error)?;
         if params.connection_resolver.is_some()
-            || !connection_values_match_requirements(&params.connections, &trusted)
+            || !connection_values_match_requirements(&params.connections, &trusted.connections)
+            || !git_credentials_match_source_authority(
+                params.git_credentials.as_ref(),
+                &params.connections,
+                &trusted,
+            )
         {
             return Err(cli_target_error(
                 TargetConnectorError::RecoveryAuthorizationMismatch,
             ));
         }
         self.registry
-            .record_recovery_authorization(&target.id, &params.successor_run_id, &trusted)
+            .record_recovery_authorization_with_source(
+                &target.id,
+                &params.successor_run_id,
+                &trusted,
+            )
             .map_err(cli_target_error)
     }
 
@@ -665,13 +679,22 @@ where
         &self,
         target: &TargetRecord,
         request: &PreparedRunRequest,
-    ) -> Result<Option<RunConnectionRequirements>, NativeV2CliError> {
+    ) -> Result<Option<RecoveryConnectionAuthorization>, NativeV2CliError> {
         if !matches!(target.access, TargetAccess::Direct) {
             return Ok(None);
         }
-        let requirements = request.intent.connection_requirements();
+        let requirements = prepared_recovery_authorization(request);
+        if !git_credentials_match_source_authority(
+            request.git_credentials.as_ref(),
+            &request.connections,
+            &requirements,
+        ) {
+            return Err(cli_target_error(
+                TargetConnectorError::RecoveryAuthorizationMismatch,
+            ));
+        }
         self.registry
-            .record_recovery_authorization(&target.id, &request.run_id, &requirements)
+            .record_recovery_authorization_with_source(&target.id, &request.run_id, &requirements)
             .map_err(cli_target_error)?;
         Ok(Some(requirements))
     }
@@ -680,13 +703,13 @@ where
         &self,
         target: &TargetRecord,
         run_id: &openengine_cluster_protocol::RunId,
-        requirements: Option<&RunConnectionRequirements>,
+        requirements: Option<&RecoveryConnectionAuthorization>,
     ) -> Result<(), NativeV2CliError> {
         let Some(requirements) = requirements else {
             return Ok(());
         };
         self.registry
-            .record_recovery_authorization(&target.id, run_id, requirements)
+            .record_recovery_authorization_with_source(&target.id, run_id, requirements)
             .map_err(cli_target_error)
     }
 
@@ -704,6 +727,59 @@ where
         }
         Ok(target)
     }
+}
+
+fn prepared_recovery_authorization(
+    request: &PreparedRunRequest,
+) -> RecoveryConnectionAuthorization {
+    let source_connections: RunConnectionRequirements = request
+        .source
+        .as_ref()
+        .and_then(|source| source.resolved.remote.as_ref())
+        .map(|remote| {
+            remote
+                .connection_requirements()
+                .into_iter()
+                .map(|(key, fields)| (key, fields.into_iter().collect()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let connections = openengine_cluster_protocol::run_connection_requirements_with_source(
+        &request.intent.runtime,
+        request.intent.environment.as_ref(),
+        request.source.as_ref().map(|source| &source.resolved),
+    )
+    .into_iter()
+    .map(|(key, fields)| (key, fields.into_iter().collect()))
+    .collect();
+    RecoveryConnectionAuthorization {
+        connections,
+        source_connections,
+    }
+}
+
+fn git_credentials_match_source_authority(
+    credentials: Option<&openengine_cluster_protocol::GitTransportCredentials>,
+    connections: &openengine_cluster_protocol::RunConnectionValues,
+    authorization: &RecoveryConnectionAuthorization,
+) -> bool {
+    let Some(credentials) = credentials else {
+        return true;
+    };
+    let Ok(values) = credentials.connection_values() else {
+        return false;
+    };
+    authorization
+        .source_connections
+        .iter()
+        .any(|(key, fields)| {
+            values.field_names() == *fields
+                && connections.get(key).is_some_and(|supplied| {
+                    fields
+                        .iter()
+                        .all(|field| supplied.as_map().get(field) == values.as_map().get(field))
+                })
+        })
 }
 
 fn connection_values_match_requirements(

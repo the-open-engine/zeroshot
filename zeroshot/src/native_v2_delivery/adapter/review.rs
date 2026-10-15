@@ -18,32 +18,32 @@ pub(super) enum ReviewStep {
 
 impl ReviewProgress {
     pub(super) fn from_observation(
-        observation: GitHubReviewObservation,
+        observation: SourceReviewObservation,
     ) -> Result<Self, DeliveryStop> {
         match observation.state {
-            GitHubReviewState::Merged { merge_revision } if valid_revision(&merge_revision) => {
+            SourceReviewState::Merged { merge_revision } if valid_revision(&merge_revision) => {
                 Ok(Self::Merged(merge_revision))
             }
-            GitHubReviewState::Merged { .. } => {
+            SourceReviewState::Merged { .. } => {
                 Err(DeliveryStop::Outcome(WorkerOutcome::malformed()))
             }
-            GitHubReviewState::Open { checks } => Ok(Self::from_open(
+            SourceReviewState::Open { checks } => Ok(Self::from_open(
                 checks,
                 observation.pull_request_ready,
                 observation.head_update_required,
             )),
-            GitHubReviewState::Conflict => Ok(Self::Conflict),
-            GitHubReviewState::Closed => Ok(Self::Closed),
+            SourceReviewState::Conflict => Ok(Self::Conflict),
+            SourceReviewState::Closed => Ok(Self::Closed),
         }
     }
 
-    fn from_open(checks: GitHubChecks, ready: bool, behind: bool) -> Self {
+    fn from_open(checks: SourceChecks, ready: bool, behind: bool) -> Self {
         match checks {
-            GitHubChecks::Failed { diagnostic } => Self::CiFailed(diagnostic),
-            GitHubChecks::Pending => Self::Pending,
-            GitHubChecks::NotRequired | GitHubChecks::Passed if behind => Self::Behind,
-            GitHubChecks::NotRequired | GitHubChecks::Passed if ready => Self::PullRequestReady,
-            GitHubChecks::NotRequired | GitHubChecks::Passed => Self::Mergeable,
+            SourceChecks::Failed { diagnostic } => Self::CiFailed(diagnostic),
+            SourceChecks::Pending => Self::Pending,
+            SourceChecks::NotRequired | SourceChecks::Passed if behind => Self::Behind,
+            SourceChecks::NotRequired | SourceChecks::Passed if ready => Self::PullRequestReady,
+            SourceChecks::NotRequired | SourceChecks::Passed => Self::Mergeable,
         }
     }
 }
@@ -62,12 +62,14 @@ pub(super) fn crash_outcome() -> DeliveryStop {
 }
 
 pub(super) async fn review_completion(
-    drive: &ReviewDrive<'_>,
+    drive: &ReviewDrive<'_, '_>,
     label: &'static str,
     diagnostic: &str,
     merge_revision: Option<&str>,
 ) -> Result<ReviewStep, DeliveryStop> {
-    let diagnostic = drive.adapter.review_context(diagnostic);
+    let diagnostic = drive
+        .adapter
+        .redact_feedback(drive.credentials, drive.adapter.review_context(diagnostic));
     emit(drive.control, &diagnostic).await?;
     validate_delivery_contract(drive.mode, drive.response).map_err(DeliveryStop::Runner)?;
     delivery_outcome(

@@ -29,43 +29,81 @@ fn assert_research_planner(iteration_nodes: &[&GraphNode]) {
     let planner = find_verifier(iteration_nodes, "plan_experiment");
     assert_eq!(planner.worker.as_str(), "builtin.agent.research-planner@1");
     assert!(planner.instructions.as_ref().is_some_and(|value| {
-        value.as_str().contains("retained workspace violates a charter invariant")
-            && value.as_str().contains("expected progress or information value")
+        value
+            .as_str()
+            .contains("retained workspace violates a charter invariant")
+            && value
+                .as_str()
+                .contains("expected progress or information value")
             && value.as_str().contains("considered alternatives")
             && value.as_str().contains("parentArtifactId")
-            && value.as_str().contains("one invalid scout does not invalidate")
-            && value.as_str().contains("never infer or fabricate partial outputs")
-            && value.as_str().contains("verified directions in the durable")
+            && value
+                .as_str()
+                .contains("one invalid scout does not invalidate")
+            && value
+                .as_str()
+                .contains("never infer or fabricate partial outputs")
+            && value
+                .as_str()
+                .contains("verified directions in the durable")
             && value.as_str().contains("Tie every adoption veto")
-            && value.as_str().contains("continuing with the strongest concrete viable")
+            && value
+                .as_str()
+                .contains("continuing with the strongest concrete viable")
             && value.as_str().contains("nextIterationNumber")
     }));
     assert_eq!(
-        planner.signals.get(&field_name(VERDICT_FIELD).assert_value()),
+        planner
+            .signals
+            .get(&field_name(VERDICT_FIELD).assert_value()),
         Some(&enum_labels(&["work", "stop", "abort"]).assert_value())
     );
-    assert!(iteration_nodes.iter().all(|node| node.name().as_str() != "plan_review"));
+    assert!(
+        iteration_nodes
+            .iter()
+            .all(|node| node.name().as_str() != "plan_review")
+    );
     let selection = find_choice(iteration_nodes, "research_route");
-    assert_eq!(selection.branches.as_slice()[1].node.name().as_str(), "record_stop");
-    assert_eq!(selection.branches.as_slice()[2].node.name().as_str(), "work_phase");
+    assert_eq!(
+        selection.branches.as_slice()[1].node.name().as_str(),
+        "record_stop"
+    );
+    assert_eq!(
+        selection.branches.as_slice()[2].node.name().as_str(),
+        "work_phase"
+    );
     let staging = find_choice(iteration_nodes, "staging_result");
     assert_eq!(staging.branches.as_slice().len(), 1);
-    assert_eq!(staging.branches.as_slice()[0].node.name().as_str(), "abort_staging");
+    assert_eq!(
+        staging.branches.as_slice()[0].node.name().as_str(),
+        "abort_staging"
+    );
     assert_eq!(
         staging.otherwise.as_ref().map(|node| node.name().as_str()),
         Some("experiment_stage")
     );
     let experiment = find_choice(iteration_nodes, "experiment_result");
-    assert_eq!(experiment.branches.as_slice()[0].node.name().as_str(), "abort_experiment");
     assert_eq!(
-        experiment.otherwise.as_ref().map(|node| node.name().as_str()),
+        experiment.branches.as_slice()[0].node.name().as_str(),
+        "abort_experiment"
+    );
+    assert_eq!(
+        experiment
+            .otherwise
+            .as_ref()
+            .map(|node| node.name().as_str()),
         Some("judge_phase")
     );
-    assert!(iteration_nodes
-        .iter()
-        .all(|node| node.name().as_str() != "staging_review"));
+    assert!(
+        iteration_nodes
+            .iter()
+            .all(|node| node.name().as_str() != "staging_review")
+    );
     let exit_route = find_choice(iteration_nodes, "exit_route");
-    assert_eq!(exit_route.branches.as_slice()[0].node.name().as_str(), "done_early");
+    assert_eq!(
+        exit_route.branches.as_slice()[0].node.name().as_str(),
+        "done_early"
+    );
     assert_eq!(
         exit_route.branches.as_slice()[1].node.name().as_str(),
         "iteration_continues"
@@ -160,7 +198,7 @@ async fn verified_research_probe(
             initial_input: input.clone(),
             runtime,
             environment: None,
-            source: resolved_source(),
+            source: Some(resolved_source()),
             submission_key: IdempotencyKey::new(key).assert_value(),
         })
         .await
@@ -200,7 +238,13 @@ fn rejected_audit_recheck(
 async fn rejected_research_audit_repairs_then_rechecks_before_continuing() {
     let authored = super::auto_research::audit_probe_graph().assert_value();
     let input = audit_probe_input();
-    let verified = verified_research_probe(authored, &input, "Audit repair routing", "audit-repair-routing").await;
+    let verified = verified_research_probe(
+        authored,
+        &input,
+        "Audit repair routing",
+        "audit-repair-routing",
+    )
+    .await;
 
     let first = reduce(&verified, &input, &[]);
     assert_research_dispatch(&first, "audit_disposition");
@@ -249,7 +293,8 @@ async fn rejected_research_audit_repairs_then_rechecks_before_continuing() {
 async fn current_audit_stop_overrides_a_prior_iteration_recheck() {
     let authored = super::auto_research::audit_loop_probe_graph().assert_value();
     let input = audit_probe_input();
-    let verified = verified_research_probe(authored, &input, "Audit loop routing", "audit-loop-routing").await;
+    let verified =
+        verified_research_probe(authored, &input, "Audit loop routing", "audit-loop-routing").await;
 
     let first = reduce(&verified, &input, &[]);
     assert_research_dispatch(&first, "audit_disposition");
@@ -332,7 +377,13 @@ async fn recorder_error_reaches_independent_audit() {
         "title": "",
         "description": ""
     });
-    let verified = verified_research_probe(authored, &input, "Recorder audit routing", "recorder-audit-routing").await;
+    let verified = verified_research_probe(
+        authored,
+        &input,
+        "Recorder audit routing",
+        "recorder-audit-routing",
+    )
+    .await;
 
     let first = reduce(&verified, &input, &[]);
     assert_research_dispatch(&first, "record_stop");
@@ -352,7 +403,13 @@ async fn recorder_error_reaches_independent_audit() {
 async fn auditor_crash_fails_without_retrying_a_written_audit() {
     let authored = super::auto_research::audit_probe_graph().assert_value();
     let input = audit_probe_input();
-    let verified = verified_research_probe(authored, &input, "Auditor crash routing", "auditor-crash-routing").await;
+    let verified = verified_research_probe(
+        authored,
+        &input,
+        "Auditor crash routing",
+        "auditor-crash-routing",
+    )
+    .await;
     let first = reduce(&verified, &input, &[]);
     let history = vec![settle_audit_dispatch(
         &first,
@@ -374,7 +431,6 @@ async fn auditor_crash_fails_without_retrying_a_written_audit() {
         Decision::Dispatch { occurrence, .. } if occurrence.node.as_str() == "audit_disposition"
     )));
 }
-
 
 fn scout_handoff_history(first: &Reduction, malformed_middle_scout: bool) -> Vec<DurableExecution> {
     use crate::full_v1_reducer::{DurableExecutionState, HistoryPosition};
@@ -401,35 +457,37 @@ fn scout_handoff_history(first: &Reduction, malformed_middle_scout: bool) -> Vec
     scouts
         .into_iter()
         .enumerate()
-        .map(|(index, (node_instance, execution, occurrence, attempt, input))| {
-            let outcome = if index == 1 && malformed_middle_scout {
-                WorkerOutcome::declared_failure(WorkerErrorCode::Malformed)
-            } else {
-                let proposal = if index == 1 {
-                    "iteration 1 synthesizer: self-reported invalid procedure"
+        .map(
+            |(index, (node_instance, execution, occurrence, attempt, input))| {
+                let outcome = if index == 1 && malformed_middle_scout {
+                    WorkerOutcome::declared_failure(WorkerErrorCode::Malformed)
                 } else {
-                    "iteration 1: bounded valid direction"
+                    let proposal = if index == 1 {
+                        "iteration 1 synthesizer: self-reported invalid procedure"
+                    } else {
+                        "iteration 1: bounded valid direction"
+                    };
+                    WorkerOutcome::Verifier {
+                        output: json!({"proposal": proposal}),
+                        signals: Default::default(),
+                        diagnostic: Value::Null,
+                        artifacts: Vec::new(),
+                    }
                 };
-                WorkerOutcome::Verifier {
-                    output: json!({"proposal": proposal}),
-                    signals: Default::default(),
-                    diagnostic: Value::Null,
-                    artifacts: Vec::new(),
+                DurableExecution {
+                    dispatch_position: HistoryPosition::new(index as u64 * 2).assert_value(),
+                    node_instance,
+                    execution,
+                    occurrence: occurrence.clone(),
+                    attempt,
+                    input: input.clone(),
+                    state: DurableExecutionState::Settled {
+                        position: HistoryPosition::new(index as u64 * 2 + 1).assert_value(),
+                        outcome,
+                    },
                 }
-            };
-            DurableExecution {
-                dispatch_position: HistoryPosition::new(index as u64 * 2).assert_value(),
-                node_instance,
-                execution,
-                occurrence: occurrence.clone(),
-                attempt,
-                input: input.clone(),
-                state: DurableExecutionState::Settled {
-                    position: HistoryPosition::new(index as u64 * 2 + 1).assert_value(),
-                    outcome,
-                },
-            }
-        })
+            },
+        )
         .collect()
 }
 
@@ -438,8 +496,9 @@ fn dispatched_planner_input(reduction: &Reduction) -> &Value {
         .decisions
         .iter()
         .find_map(|decision| match decision {
-            Decision::Dispatch { occurrence, input, .. }
-                if occurrence.node.as_str() == "plan_experiment" => Some(input),
+            Decision::Dispatch {
+                occurrence, input, ..
+            } if occurrence.node.as_str() == "plan_experiment" => Some(input),
             _ => None,
         })
         .assert_value_with("planner dispatch")
@@ -469,10 +528,12 @@ async fn failed_scout_map_preserves_no_partial_proposals_and_dispatches_planner(
     let semantic = reduce(&verified, &input, &scout_handoff_history(&first, false));
     let semantic_input = dispatched_planner_input(&semantic);
     assert_eq!(semantic_input["proposals"].as_array().unwrap().len(), 3);
-    assert!(semantic_input["proposals"][1]
-        .as_str()
-        .unwrap()
-        .contains("self-reported invalid procedure"));
+    assert!(
+        semantic_input["proposals"][1]
+            .as_str()
+            .unwrap()
+            .contains("self-reported invalid procedure")
+    );
 
     let mut failed_history = scout_handoff_history(&first, true);
     let failed = reduce(&verified, &input, &failed_history);

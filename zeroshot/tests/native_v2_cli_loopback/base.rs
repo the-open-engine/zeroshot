@@ -29,10 +29,10 @@ pub(crate) use zeroshot_engine::native_v2_cli::TargetRunIntent;
 pub(crate) use zeroshot_engine::native_v2_claude::ClaudeProcessEnvironment;
 pub(crate) use zeroshot_engine::native_v2_contract::{NodeInvocation, NodeRuntimeBinding, RuntimePlan};
 pub(crate) use zeroshot_engine::native_v2_delivery::{
-    DeliveryPollPolicy, DeliveryTarget, GitHubAuthorityError, GitHubChecks, GitHubCredential,
-    GitHubDeliveryAuthority, GitHubMergeRequestOutcome, GitHubPushRequest, GitHubReviewObservation,
-    GitHubReviewReceipt, GitHubReviewRequest, GitHubReviewState, NativeV2DeliveryAdapter,
-    NativeV2DeliveryConfig, GITHUB_TOKEN_ENV,
+    DeliveryPollPolicy, DeliveryTarget, SourceDeliveryError, SourceChecks,
+    SourceDeliveryCredential, SourceDeliveryAuthority, SourceMergeRequestOutcome,
+    SourcePushRequest, SourceReviewObservation, SourceReviewReceipt, SourceReviewRequest,
+    SourceReviewState, NativeV2DeliveryAdapter, NativeV2DeliveryConfig, GITHUB_TOKEN_ENV,
 };
 pub(crate) use zeroshot_engine::native_v2_hosting::{
     ProductionHostingConfig, ProductionTargetControllerFactory,
@@ -261,7 +261,9 @@ pub(crate) async fn submit_test_run(
         connections,
         connection_resolver: _,
         github_token,
+        git_credentials,
     } = request;
+    assert!(git_credentials.is_none(), "legacy GitHub loopback fixture");
     let exact_environment = RunEnvironment::exact(
         &submission.runtime,
         submission.environment.as_ref(),

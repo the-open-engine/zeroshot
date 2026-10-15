@@ -108,7 +108,6 @@ fn source_operation(repository: CanonicalRepository) -> SourceOperationRequest {
             expected_head: SourceRevisionId::new("head-sha").assert_value(),
             checked_revision: SourceRevisionId::new("head-sha").assert_value(),
             policy: satisfied_policy(),
-            integrated_revision: SourceRevisionId::new("integrated-sha").assert_value(),
         },
     )
     .assert_value()
@@ -144,16 +143,12 @@ impl FakeSourceProvider {
     }
 
     fn merge_receipt(&self, request: &SourceOperationRequest) -> SourceMergeReceipt {
-        let integrated_revision = match request.operation() {
-            SourceOperation::Merge {
-                integrated_revision,
-                ..
-            } => Some(integrated_revision),
-            _ => None,
-        };
-        let integrated_revision =
-            integrated_revision.assert_value_with("fake expected merge request");
-        SourceMergeReceipt::new(request.clone(), integrated_revision.clone()).assert_value()
+        assert!(matches!(request.operation(), SourceOperation::Merge { .. }));
+        SourceMergeReceipt::new(
+            request.clone(),
+            SourceRevisionId::new("integrated-sha").assert_value(),
+        )
+        .assert_value()
     }
 }
 

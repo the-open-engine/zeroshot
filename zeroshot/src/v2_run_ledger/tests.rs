@@ -3,9 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use openengine_cluster_protocol::{
     ArtifactRef, CompiledGraphIr, Cursor, IdempotencyKey, MAX_SAFE_GENERATION, NodeName, Phase,
-    PositiveInteger, RunId, Sha256Digest, RunSize, RunTitle, SourceBranchId, SourceRepositoryId,
-    SourceRevisionId, ResolvedSource, TerminalResult, TokenCount, TokenUsage, UnixTimestampMillis,
-    WorkerOutcome,
+    PositiveInteger, RunId, Sha256Digest, RunSize, RunTitle, ResolvedSource, TerminalResult,
+    TokenCount, TokenUsage, UnixTimestampMillis, WorkerOutcome,
 };
 use serde_json::{Value, json};
 
@@ -37,12 +36,7 @@ fn admitted_run() -> AdmittedRun {
             size: RunSize::Medium,
             nodes: Default::default(),
         },
-        source: ResolvedSource {
-            repository: SourceRepositoryId::new("open-engine/zeroshot").assert_value(),
-            branch: SourceBranchId::new("main").assert_value(),
-            revision: SourceRevisionId::new("0123456789abcdef0123456789abcdef01234567")
-                .assert_value(),
-        },
+        source: Some(openengine_cluster_testkit::native_v2_source_fixture()),
     }
 }
 
@@ -735,3 +729,54 @@ async fn prerequisites_are_replayable_but_never_counted_as_new_work() {
 
 #[path = "tests/checkpoint_bytes.rs"]
 mod checkpoint_bytes;
+
+#[tokio::test]
+async fn sqlite_reopens_legacy_generic_and_absent_source_without_fabricated_provenance() {
+    let path = unique_database_path();
+    let legacy = admitted_run().source;
+    let generic: ResolvedSource = serde_json::from_value(json!({
+        "repository": "nested/team/project:42", "branch": "main", "revision": "a".repeat(64),
+        "remote": {"url": "https://git.example/nested/team/project.git", "connection": "source-access"}
+    }))
+    .assert_value();
+    let expected = [None, legacy, Some(generic)];
+    {
+        let ledger = SqliteRunLedger::open(&path).assert_value();
+        for (index, source) in expected.iter().enumerate() {
+            let id = format!("source-{index}");
+            let mut request = create(&id, &id, 'a');
+            request.admitted.source = source.clone();
+            let stored = ledger.create_or_get(request).await.assert_value();
+            assert_eq!(stored.stored().snapshot.source, *source);
+            ledger
+                .append(
+                    &RunId::new(id),
+                    vec![
+                        RunEvent::RunStarted,
+                        RunEvent::Terminal {
+                            result: TerminalResult::Succeeded {
+                                output: Value::Null,
+                            },
+                        },
+                    ],
+                )
+                .await
+                .assert_value();
+        }
+    }
+    let reopened = SqliteRunLedger::open(&path).assert_value();
+    for (index, source) in expected.iter().enumerate() {
+        let stored = reopened
+            .get(&RunId::new(format!("source-{index}")))
+            .await
+            .assert_value()
+            .assert_value();
+        assert_eq!(stored.admitted.source, *source);
+        assert_eq!(stored.snapshot.source, *source);
+        assert_eq!(stored.snapshot.replay_seed().source, *source);
+        assert_eq!(super::RunSummary::from(&stored.snapshot).source, *source);
+        assert!(matches!(stored.snapshot.phase, RunPhase::Finished));
+    }
+    drop(reopened);
+    std::fs::remove_file(path).assert_value();
+}

@@ -1,0 +1,260 @@
+use std::path::{Component, Path};
+use tokio::process::Command;
+
+use super::*;
+
+const MAX_CONFLICT_PATH_OUTPUT_BYTES: usize = 6 * 1_024;
+
+#[derive(Clone, Copy)]
+struct ConflictContext<'a> {
+    authority: &'a GhCliDeliveryAuthority,
+    request: &'a SourceConflictRequest,
+    credential: SourceDeliveryCredential<'a>,
+}
+
+pub(super) async fn materialize(
+    authority: &GhCliDeliveryAuthority,
+    request: &SourceConflictRequest,
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<SourceConflictOutcome, SourceDeliveryError> {
+    let context = ConflictContext {
+        authority,
+        request,
+        credential,
+    };
+    require_clean_review_head(context).await?;
+    let target_revision = authority
+        .target_revision(&request.review, credential)
+        .await?;
+    fetch_target(context, &target_revision).await?;
+    require_commit(context, &target_revision).await?;
+    let merge_status = merge_target(context, &target_revision).await?;
+    let conflicted_paths = conflicted_paths(context).await?;
+    if observation_changed(merge_status, &conflicted_paths) {
+        restore_clean_review_head(context).await?;
+        return Ok(SourceConflictOutcome::ObservationChanged);
+    }
+    require_materialized_state(context, &target_revision, merge_status, &conflicted_paths).await?;
+    Ok(SourceConflictOutcome::Materialized(
+        SourceConflictMaterialization {
+            target_revision,
+            conflicted_paths,
+        },
+    ))
+}
+
+fn observation_changed(merge_status: i32, conflicted_paths: &[String]) -> bool {
+    merge_status == 0 && conflicted_paths.is_empty()
+}
+
+async fn require_clean_review_head(
+    context: ConflictContext<'_>,
+) -> Result<(), SourceDeliveryError> {
+    let head = workspace_head(context).await?;
+    let status = bounded_git_output(
+        local_git_command(&context.authority.config, &context.request.workspace).args([
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+        ]),
+        context.authority.config.api_deadline,
+        1,
+    )
+    .await?;
+    (head.trim() == context.request.review.head_revision && status.is_empty())
+        .then_some(())
+        .ok_or(SourceDeliveryError::Rejected)
+}
+
+async fn fetch_target(
+    context: ConflictContext<'_>,
+    target_revision: &str,
+) -> Result<(), SourceDeliveryError> {
+    context
+        .authority
+        .git_transport(
+            &context.request.workspace,
+            &context.request.review.repository,
+        )
+        .fetch_exact(
+            target_revision,
+            context
+                .credential
+                .with_github_git_token(context.credential.expose()),
+        )
+        .await
+}
+
+async fn require_commit(
+    context: ConflictContext<'_>,
+    target_revision: &str,
+) -> Result<(), SourceDeliveryError> {
+    let mut command = local_git_command(&context.authority.config, &context.request.workspace);
+    command.args(["cat-file", "-e", &format!("{target_revision}^{{commit}}")]);
+    bounded_status(command, context.authority.config.api_deadline).await
+}
+
+async fn merge_target(
+    context: ConflictContext<'_>,
+    target_revision: &str,
+) -> Result<i32, SourceDeliveryError> {
+    configure_delivery_identity(&context.authority.config, &context.request.workspace).await?;
+    let mut command = local_git_command(&context.authority.config, &context.request.workspace);
+    command.args([
+        "-c",
+        "rerere.enabled=false",
+        "-c",
+        "user.name=Zeroshot",
+        "-c",
+        "user.email=delivery@zeroshot.invalid",
+        "merge",
+        "--no-commit",
+        "--no-ff",
+        "--no-edit",
+        target_revision,
+    ]);
+    bounded_exit_code(command, context.authority.config.api_deadline).await
+}
+
+async fn conflicted_paths(
+    context: ConflictContext<'_>,
+) -> Result<Vec<String>, SourceDeliveryError> {
+    let output = bounded_git_output(
+        local_git_command(&context.authority.config, &context.request.workspace).args([
+            "diff",
+            "--name-only",
+            "--diff-filter=U",
+            "-z",
+        ]),
+        context.authority.config.api_deadline,
+        MAX_CONFLICT_PATH_OUTPUT_BYTES,
+    )
+    .await?;
+    if !output.is_empty() && !output.ends_with('\0') {
+        return Err(SourceDeliveryError::repairable(
+            "Git conflict path inspection returned malformed output after merge materialization",
+        ));
+    }
+    output
+        .split_terminator('\0')
+        .map(|path| {
+            let valid = !path.is_empty()
+                && !Path::new(path).is_absolute()
+                && Path::new(path)
+                    .components()
+                    .all(|component| matches!(component, Component::Normal(_)));
+            valid
+                .then(|| path.to_owned())
+                .ok_or_else(|| {
+                    SourceDeliveryError::repairable(
+                        "Git conflict path inspection returned an unsafe path after merge materialization",
+                    )
+                })
+        })
+        .collect()
+}
+
+async fn require_materialized_state(
+    context: ConflictContext<'_>,
+    target_revision: &str,
+    merge_status: i32,
+    conflicted_paths: &[String],
+) -> Result<(), SourceDeliveryError> {
+    require_merge_result(merge_status, conflicted_paths)?;
+    require_unchanged_head(context).await?;
+    require_merge_head(context, target_revision).await
+}
+
+fn require_merge_result(
+    merge_status: i32,
+    conflicted_paths: &[String],
+) -> Result<(), SourceDeliveryError> {
+    if merge_status != 1 || conflicted_paths.is_empty() {
+        return Err(SourceDeliveryError::repairable(
+            "Git merge did not leave the exact expected conflict state",
+        ));
+    }
+    Ok(())
+}
+
+async fn require_unchanged_head(context: ConflictContext<'_>) -> Result<(), SourceDeliveryError> {
+    let head = workspace_head(context).await?;
+    if head.trim() != context.request.review.head_revision {
+        return Err(SourceDeliveryError::repairable(
+            "Git merge changed the reviewed HEAD while materializing a conflict",
+        ));
+    }
+    Ok(())
+}
+
+async fn restore_clean_review_head(
+    context: ConflictContext<'_>,
+) -> Result<(), SourceDeliveryError> {
+    if merge_in_progress(context).await? {
+        let mut command = local_git_command(&context.authority.config, &context.request.workspace);
+        command.args(["merge", "--abort"]);
+        bounded_status(command, context.authority.config.api_deadline).await?;
+    }
+    require_clean_review_head(context).await
+}
+
+async fn merge_in_progress(context: ConflictContext<'_>) -> Result<bool, SourceDeliveryError> {
+    let mut command = local_git_command(&context.authority.config, &context.request.workspace);
+    command.args(["rev-parse", "-q", "--verify", "MERGE_HEAD"]);
+    match bounded_exit_code(command, context.authority.config.api_deadline).await? {
+        0 => Ok(true),
+        1 => Ok(false),
+        _ => Err(SourceDeliveryError::Rejected),
+    }
+}
+
+async fn require_merge_head(
+    context: ConflictContext<'_>,
+    target_revision: &str,
+) -> Result<(), SourceDeliveryError> {
+    let merge_head = bounded_git_output(
+        local_git_command(&context.authority.config, &context.request.workspace).args([
+            "rev-parse",
+            "-q",
+            "--verify",
+            "MERGE_HEAD",
+        ]),
+        context.authority.config.api_deadline,
+        128,
+    )
+    .await;
+    merge_head
+        .ok()
+        .filter(|merge_head| merge_head.trim() == target_revision)
+        .map(|_| ())
+        .ok_or_else(|| {
+            SourceDeliveryError::repairable(
+                "Git merge did not retain the expected target revision in MERGE_HEAD",
+            )
+        })
+}
+
+async fn workspace_head(context: ConflictContext<'_>) -> Result<String, SourceDeliveryError> {
+    bounded_git_output(
+        local_git_command(&context.authority.config, &context.request.workspace)
+            .args(["rev-parse", "HEAD"]),
+        context.authority.config.api_deadline,
+        128,
+    )
+    .await
+}
+
+async fn bounded_exit_code(
+    mut command: Command,
+    deadline: Duration,
+) -> Result<i32, SourceDeliveryError> {
+    let output = capture(&mut command, deadline).await?;
+    match output.exit_status {
+        Some(code @ (0 | 1)) => Ok(code),
+        _ => Err(output.into()),
+    }
+}
+
+#[cfg(all(test, unix))]
+#[path = "conflict/tests.rs"]
+mod tests;

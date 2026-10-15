@@ -5,11 +5,23 @@ run state and resolves connections. The graph protocol stays the same when the t
 
 ## Local controller
 
-Omit `--target` to work in the current Git worktree. Zeroshot starts a detached controller and keeps
-the run ledger under the local state directory, where later CLI invocations can list, watch, or stop
-the run.
+Omit `--target` to work in an existing local folder. `--cwd FOLDER` selects the folder for one run;
+the default is the invoking folder. Input, graph, runtime, and environment file arguments remain
+relative to the invoking folder. A folder inside a Git checkout resolves to its canonical checkout
+root. Resume uses the original stored workspace.
 
-Local execution is the only mode that mutates the caller's existing worktree; each selected
+A run without Git delivery also accepts plain folders, remoteless repositories, detached checkouts,
+and unborn repositories. Zeroshot starts a detached controller and keeps the ledger under the local
+state directory, where later CLI invocations can list, watch, or stop the run. It does not initialize
+Git to run in a plain folder.
+
+The workspace and active Zeroshot state directory must be disjoint, including symlink aliases.
+If either contains the other, select another folder or set `ZEROSHOT_STATE_DIR` outside the workspace.
+Existing inactive state folders do not impose a separate admission rule. Disjoint workspaces can
+run concurrently. Aliases share one lease; a folder and its subtree cannot run at the same time. Reusing a submission key for
+another folder returns a conflict rather than a run from the first folder.
+
+Local execution is the only mode that mutates the caller's existing folder; each selected
 installed harness runs as the current user. A plan with
 [per-node lanes](../reference/runtime-plan.md#per-node-lanes) needs every lane's CLI installed. The
 native `codex`/`openai`, `claude`/`anthropic`, and `copilot`/`github` lanes also need that CLI
@@ -135,11 +147,17 @@ use a proxy, set `--public-origin` to the exact browser origin.
     Keep the published port on loopback or a trusted private network. Put an authenticated reverse
     proxy with WebSocket forwarding in front of it before broader exposure.
 
-Use `--target local-target` on run and observation commands to select it. Each named run selects
-its repository and branch from the invoking worktree's attached upstream. Without an upstream, the
-worktree must have exactly one GitHub remote. `--repository` and `--branch` override that selection,
-and `--revision` selects an exact commit instead of resolving the current remote branch tip.
-Detached worktrees require explicit repository and branch values.
+Use `--target local-target` on run and observation commands to select it. Docker and hosted targets
+require a Git source with an exact committed revision. `--cwd` selects the client checkout inspected
+for source selection; targets receive the remote revision, not that local folder or its uncommitted
+files. The attached upstream takes precedence; otherwise select the unique eligible HTTPS or SSH
+remote. Ambiguous remotes require an upstream or an explicit `--repository` selection.
+
+`--repository` accepts a credential-free HTTPS/SSH clone URL or the existing GitHub `owner/name`
+shorthand. `--branch` overrides the branch, and `--revision` supplies an exact commit instead of
+resolving the remote branch tip. Detached worktrees require repository and branch overrides.
+Generic transport and credentials require a target advertising `openengine.git-transport/v1`;
+the CLI rejects an older target before submitting the request or acquiring an access token.
 
 ### Image tags and remote hosts
 
@@ -179,8 +197,23 @@ should link to the version of these core docs that matches the deployed target, 
 
 ## Source and delivery credentials
 
-For named-target runs, the CLI can send `GH_TOKEN` for source checkout and generated GitHub delivery.
-A provider receives that value only if its runtime binding declares `GH_TOKEN`. After the target
-accepts a submission, the CLI reports the target, exact `owner/repository@branch#revision`, and
-whether the invoking worktree is dirty before emitting the run receipt. Uncommitted files remain
-local and are never committed or pushed automatically.
+Git checkout and push use shared HTTPS or SSH transport. A local push needs a committed checkout
+and an eligible remote; it uses the invoking user's native Git configuration and authentication when
+no source connection is selected. Push does not require GitHub or its CLI. PR and merge additionally
+require a registered forge adapter; GitHub is the maintained forge today. Other Git hosts can already
+use checkout and push.
+
+`--source-connection KEY` selects private transport authority without granting it to agent nodes.
+HTTPS connections declare `GIT_USERNAME` and `GIT_PASSWORD`; SSH connections declare
+`GIT_SSH_PRIVATE_KEY` and `GIT_SSH_KNOWN_HOSTS`. Explicit SSH authentication uses those pinned hosts
+and its private key. Contained runs inherit no host Git login state.
+
+Named GitHub runs retain `GH_TOKEN` checkout and delivery support. That token is not automatically
+applied to another Git host. A model provider receives a connection field only when its own runtime
+binding declares it. Transport values stay out of source records, ledgers, observations, and
+checkpoint snapshots. Direct-target resume reuses the original source connection authorization and
+resolves fresh values.
+
+After admission, the CLI reports the target, repository, branch, exact revision, and whether the
+client checkout is dirty before emitting the receipt. Uncommitted files stay on the client.
+See [Source-code adapters](../project/source-code-adapters.md) for the contribution boundary.

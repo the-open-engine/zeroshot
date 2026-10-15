@@ -13,6 +13,7 @@ use openengine_cluster_server::admission::VerifiedGraph;
 use serde_json::{json, Value};
 
 use super::*;
+use crate::source_code_provider::adapters::core::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
 use crate::full_v1_reducer::{
     Decision, DurableExecution, DurableExecutionState, FullV1Reducer, HistoryPosition,
     ReductionInput, StructuralOccurrence,
@@ -54,6 +55,77 @@ use github_fixture::{
 use routing::assert_ci_failure_routes_an_authored_worker_loop;
 
 type TempRepo = TestGitRepository;
+
+#[tokio::test]
+async fn repository_filter_failures_redact_source_credentials_before_repair_and_logs() {
+    use openengine_cluster_protocol::GitTransportCredentials;
+    for credential in [
+        GitTransportCredentials::Https {
+            username: "transport-user".to_owned(),
+            password: "transport-user-private-secret".to_owned(),
+        },
+        GitTransportCredentials::Ssh {
+            private_key: concat!(
+                "-----BEGIN OPENSSH PRIVATE KEY-----\n",
+                "transport-user-private-secret\n",
+                "-----END OPENSSH PRIVATE KEY-----\n",
+            )
+            .to_owned(),
+            known_hosts: "forge.example ssh-ed25519 private-known-host".to_owned(),
+        },
+    ] {
+        let repo = TempRepo::candidate();
+        git(
+            &repo.workspace,
+            &[
+                "config",
+                "filter.source-secret.clean",
+                "printf 'transport-user-private-secret\\n' >&2; exit 1",
+            ],
+        );
+        git(
+            &repo.workspace,
+            &["config", "filter.source-secret.required", "true"],
+        );
+        fs::write(
+            repo.workspace.join(".gitattributes"),
+            "*.guard filter=source-secret\n",
+        )
+        .assert_value();
+        fs::write(repo.workspace.join("candidate.guard"), "candidate work\n").assert_value();
+        let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::NoCi));
+        let adapter = retained_adapter(
+            &repo,
+            authority,
+            DeliveryPollPolicy::new(1, Duration::ZERO).assert_value(),
+            DeliveryLineage::original("source-credential-repair"),
+        );
+        let adapter = Arc::new((*adapter).clone().with_git_credentials(Some(credential)));
+        let execution = run_with_adapter(
+            DeliveryRunRequest {
+                repo: &repo,
+                attempts: 1,
+                mode: DeliveryMode::Push,
+                run_id: "source-credential-repair",
+                refresh: None,
+            },
+            adapter,
+        )
+        .await;
+        assert_delivery_signal(&execution.outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+        let diagnostic = outcome_diagnostic(&execution.outcome);
+        let output = format!("{:?}", execution.output);
+        for text in [diagnostic, output.as_str()] {
+            assert!(text.contains("[REDACTED]"), "{text}");
+            assert!(!text.contains("transport-user-private-secret"), "{text}");
+            assert!(!text.contains("private-secret"), "{text}");
+        }
+        assert_eq!(
+            fs::read_to_string(repo.workspace.join("candidate.guard")).assert_value(),
+            "candidate work\n"
+        );
+    }
+}
 
 #[tokio::test]
 async fn pr_mode_completes_only_after_authoritative_open_observation() {
@@ -885,7 +957,7 @@ impl<'a> DeliveryLineage<'a> {
 
 fn retained_adapter(
     repo: &TempRepo,
-    authority: Arc<dyn GitHubDeliveryAuthority>,
+    authority: Arc<dyn SourceDeliveryAuthority>,
     poll: DeliveryPollPolicy,
     lineage: DeliveryLineage<'_>,
 ) -> Arc<NativeV2DeliveryAdapter> {
@@ -1020,21 +1092,21 @@ async fn admitted_with_feedback(
             title: RunTitle::new("Delivery test").assert_value(),
             graph,
             initial_input: Value::Null,
-            runtime: RuntimePlan::Codex {
-                provider: CodexProvider::OpenAi,
-                size: RunSize::Medium,
-                nodes: BTreeMap::from([(NodeName::new("deliver").assert_value(), binding)]),
-            },
-            source: ResolvedSource {
-                repository: SourceRepositoryId::new("acme/project").assert_value(),
-                branch: SourceBranchId::new("main").assert_value(),
-                revision: SourceRevisionId::new(repo.base.clone()).assert_value(),
-            },
+            runtime: delivery_runtime(binding),
+            source: source_for_revision(&repo.base),
             submission_key: IdempotencyKey::new(format!("delivery-{}-{}", repo.base, mode.label()))
                 .assert_value(),
         })
         .await
         .assert_value()
+}
+
+fn delivery_runtime(binding: NodeRuntimeBinding) -> RuntimePlan {
+    RuntimePlan::Codex {
+        provider: CodexProvider::OpenAi,
+        size: RunSize::Medium,
+        nodes: BTreeMap::from([(NodeName::new("deliver").assert_value(), binding)]),
+    }
 }
 
 fn target(repo: &TempRepo) -> DeliveryTarget {
@@ -1046,7 +1118,7 @@ fn delivery_node(mode: DeliveryMode) -> Value {
     json!({
         "kind":"verifier","name":"deliver","worker":mode.worker_ref(),
         "input":{"kind":"null"},"output":delivery_result_schema(mode).assert_value(),
-        "inputBindings":[],"writeBindings":[],"timeoutMs":1000,"attempts":1,
+        "inputBindings":[],"writeBindings":[],"attempts":1,
         "signals":{"delivery":labels},"diagnostic":delivery_diagnostic_schema().assert_value()
     })
 }
@@ -1095,3 +1167,15 @@ fn assert_receipt_match(output: &Value, mode: DeliveryMode, repo: &TempRepo, exp
 use openengine_cluster_testkit::assertions::{AssertValue};
 
 mod transport_matrix;
+
+#[path = "../source_code/adapters/contributed/delivery_tests.rs"]
+mod contributed_delivery;
+
+fn source_for_revision(revision: &str) -> Option<ResolvedSource> {
+    Some(ResolvedSource {
+        remote: None,
+        repository: SourceRepositoryId::new("acme/project").assert_value(),
+        branch: SourceBranchId::new("main").assert_value(),
+        revision: SourceRevisionId::new(revision).assert_value(),
+    })
+}

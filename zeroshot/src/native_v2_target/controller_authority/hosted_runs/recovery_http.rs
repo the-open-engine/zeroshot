@@ -14,7 +14,9 @@ impl TargetHttpControlAuthority {
         target: &TargetRecord,
         params: RunResumeParams,
     ) -> Result<RunResumeResult, TargetAuthorityError> {
-        let (routes, access) = self.require_hosted_run_access(target).await?;
+        let (routes, access) = self
+            .require_hosted_run_access_for(target, params.git_credentials.is_some())
+            .await?;
         let url = routes.resume_url(&params.run_id)?;
         self.hosted_recovery_json((url, &access), params, "hosted workspace resume")
             .await

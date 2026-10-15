@@ -22,7 +22,7 @@ fn accepts_manifest_with_optional_canonical_issue_number() {
     .assert_value();
     assert_eq!(
         with_issue.source_issue,
-        Some(GitHubSourceIssue { number: 208 })
+        Some(SourceDeliveryIssue { number: 208 })
     );
     assert_eq!(
         delivery_input(&json!({
@@ -46,7 +46,7 @@ fn accepts_legacy_null_and_issue_only_inputs() {
         delivery_input(&json!({"issueNumber":"208"}))
             .assert_value()
             .source_issue,
-        Some(GitHubSourceIssue { number: 208 })
+        Some(SourceDeliveryIssue { number: 208 })
     );
 }
 

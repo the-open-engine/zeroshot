@@ -293,7 +293,10 @@ where
         });
     }
     let workspace_identity = WorkspaceIdentity::capture(&bootstrap.workspace)?;
-    let workspace_lease = Arc::new(ControllerLease::acquire(&bootstrap.workspace_lease)?);
+    let workspace_lease = Arc::new(ControllerLease::acquire_workspace(
+        &bootstrap.workspace_lease,
+        &bootstrap.workspace,
+    )?);
     if !workspace_identity.is_current(&bootstrap.workspace) {
         return Err(PortableControllerError::Workspace);
     }

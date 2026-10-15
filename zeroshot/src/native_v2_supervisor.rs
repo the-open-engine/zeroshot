@@ -28,7 +28,7 @@ use crate::full_v1_reducer::{
 };
 use crate::native_v2_admission::{DeliveryPolicy, sole_delivery_node, writer_nodes};
 use crate::native_v2_contract::{AdmittedRun, ExecutionRef, NodeCompletion, NodeInvocation};
-use crate::native_v2_delivery::{DeliveryTarget, is_matching_success_receipt};
+use crate::native_v2_delivery::is_matching_success_receipt;
 use crate::native_v2_runner::{
     DurableNodeEvent, LiveOutputSource, LiveOutputStream, NodeHandle, NodeRunRequest, NodeRunner,
     NodeRunnerError,
@@ -474,11 +474,10 @@ fn has_required_delivery_receipt(
     let Some((node, mode)) = sole_delivery_node(admitted) else {
         return false;
     };
-    let Ok(target) = DeliveryTarget::new(
-        admitted.source.repository.as_str(),
-        admitted.source.branch.as_str(),
-        admitted.source.revision.as_str(),
-    ) else {
+    let Some(source) = &admitted.source else {
+        return false;
+    };
+    let Ok(target) = crate::native_v2_delivery::source_target(source, mode) else {
         return false;
     };
     let writers = writer_nodes(admitted);

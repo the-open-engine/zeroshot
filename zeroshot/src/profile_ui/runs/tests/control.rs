@@ -43,11 +43,7 @@ async fn software_fixture() -> Fixture {
             graph,
             initial_input: initial_input.clone(),
             runtime,
-            source: ResolvedSource {
-                repository: SourceRepositoryId::new("open-engine/test-matrix").assert_value(),
-                branch: SourceBranchId::new("main").assert_value(),
-                revision: SourceRevisionId::new("a".repeat(40)).assert_value(),
-            },
+            source: Some(repository_source()),
             submission_key: IdempotencyKey::new("structural-history").assert_value(),
         })
         .await

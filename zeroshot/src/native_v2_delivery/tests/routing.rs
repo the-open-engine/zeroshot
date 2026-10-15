@@ -354,11 +354,7 @@ async fn admitted_routing_graph(base_revision: &str) -> crate::native_v2_contrac
                     (NodeName::new("repair").assert_value(), repair),
                 ]),
             },
-            source: ResolvedSource {
-                repository: SourceRepositoryId::new("acme/project").assert_value(),
-                branch: SourceBranchId::new("main").assert_value(),
-                revision: SourceRevisionId::new(base_revision).assert_value(),
-            },
+            source: source_for_revision(base_revision),
             submission_key: IdempotencyKey::new("delivery-routing").assert_value(),
         })
         .await
@@ -403,7 +399,7 @@ fn routing_graph() -> GraphSpec {
         "kind":"step","name":"repair","worker":"agent.repair@1",
         "instructions":"Repair the failed delivery.",
         "input":{"kind":"null"},"output":{"kind":"null"},
-        "inputBindings":[],"writeBindings":[],"timeoutMs":1000,"attempts":1
+        "inputBindings":[],"writeBindings":[],"attempts":1
     });
     let delivery_route = json!({
         "kind":"choice","name":"delivery_route","state":state.clone(),

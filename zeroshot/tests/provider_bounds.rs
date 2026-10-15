@@ -87,7 +87,6 @@ fn merge_request() -> SourceOperationRequest {
             expected_head: SourceRevisionId::new("head-sha").assert_value(),
             checked_revision: SourceRevisionId::new("head-sha").assert_value(),
             policy: source_policy(),
-            integrated_revision: SourceRevisionId::new("merge-sha").assert_value(),
         },
     )
     .assert_value()

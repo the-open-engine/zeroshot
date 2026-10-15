@@ -53,9 +53,6 @@ from .runs import (
     LogEvent as LogEvent,
 )
 from .runs import (
-    ResolvedSource as ResolvedSource,
-)
-from .runs import (
     RunRequest as RunRequest,
 )
 from .runs import (
@@ -90,5 +87,14 @@ from .runtime import (
 )
 from .runtime import (
     UniformRuntime as UniformRuntime,
+)
+from .source import (
+    ResolvedGitRemote as ResolvedGitRemote,
+)
+from .source import (
+    ResolvedSource as ResolvedSource,
+)
+from .source import (
+    SourceForgeIdentity as SourceForgeIdentity,
 )
 from .values import JsonValue as JsonValue

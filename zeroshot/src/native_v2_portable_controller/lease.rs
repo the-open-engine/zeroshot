@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -21,11 +22,33 @@ pub struct ControllerLease {
     file: File,
     path: PathBuf,
     identity: FileIdentity,
+    ancestors: Vec<Self>,
 }
 
 impl ControllerLease {
     pub fn acquire(path: impl Into<PathBuf>) -> Result<Self, ControllerLeaseError> {
-        let path = path.into();
+        Self::acquire_mode(path.into(), true)
+    }
+
+    pub(crate) fn acquire_workspace(
+        path: &Path,
+        workspace: &Path,
+    ) -> Result<Self, ControllerLeaseError> {
+        let root = path.parent().ok_or(ControllerLeaseError::StateDirectory)?;
+        let mut ancestors = Vec::new();
+        let parents: Vec<_> = workspace.ancestors().skip(1).collect();
+        for parent in parents.into_iter().rev() {
+            ancestors.push(Self::acquire_mode(
+                workspace_lease_path(root, parent),
+                false,
+            )?);
+        }
+        let mut lease = Self::acquire(path)?;
+        lease.ancestors = ancestors;
+        Ok(lease)
+    }
+
+    fn acquire_mode(path: PathBuf, exclusive: bool) -> Result<Self, ControllerLeaseError> {
         let parent = path.parent().ok_or(ControllerLeaseError::StateDirectory)?;
         prepare_state_directory(parent)?;
         reject_non_file(&path)?;
@@ -37,13 +60,18 @@ impl ControllerLease {
         if !metadata.is_file() {
             return Err(ControllerLeaseError::InvalidPath);
         }
-        file.try_lock_exclusive()
-            .map_err(|_| ControllerLeaseError::Held)?;
+        if exclusive {
+            file.try_lock_exclusive()
+        } else {
+            FileExt::try_lock_shared(&file)
+        }
+        .map_err(|_| ControllerLeaseError::Held)?;
         Ok(Self {
             identity: platform::file_identity(&file)
                 .map_err(|_| ControllerLeaseError::InvalidPath)?,
             file,
             path,
+            ancestors: Vec::new(),
         })
     }
 
@@ -54,6 +82,9 @@ impl ControllerLease {
 
     #[must_use]
     pub fn is_intact(&self) -> bool {
+        if !self.ancestors.iter().all(Self::is_intact) {
+            return false;
+        }
         let Ok(path_metadata) = std::fs::symlink_metadata(&self.path) else {
             return false;
         };
@@ -115,6 +146,13 @@ fn windows_lock_probe_accepts_only_contention_errors() {
     )));
 }
 
+impl Drop for ControllerLease {
+    fn drop(&mut self) {
+        // A fork-before-exec child can temporarily retain the same open file description.
+        let _ = FileExt::unlock(&self.file);
+    }
+}
+
 impl std::fmt::Debug for ControllerLease {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -122,6 +160,11 @@ impl std::fmt::Debug for ControllerLease {
             .field("path", &self.path)
             .finish_non_exhaustive()
     }
+}
+
+pub(crate) fn workspace_lease_path(root: &Path, workspace: &Path) -> PathBuf {
+    let digest = Sha256::digest(workspace.as_os_str().as_encoded_bytes());
+    root.join(format!("{digest:x}.lock"))
 }
 
 fn prepare_state_directory(path: &Path) -> Result<(), ControllerLeaseError> {
@@ -137,6 +180,6 @@ fn reject_non_file(path: &Path) -> Result<(), ControllerLeaseError> {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 #[path = "lease/tests.rs"]
 mod tests;

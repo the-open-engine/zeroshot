@@ -9,29 +9,25 @@ mod adapter;
 mod authority_error;
 pub(crate) mod command;
 pub(crate) mod contract;
-mod git;
+pub(crate) mod git;
 #[doc(hidden)]
 pub mod git_auth;
-mod github;
 mod review_head;
 #[cfg(test)]
 mod tests;
+pub mod transport;
+#[cfg(all(test, unix))]
+#[path = "native_v2_delivery/tests/transport_http.rs"]
+mod transport_http;
 
 pub use command::GitCommandFailure;
-pub use authority_error::{GitHubApiFailure, GitHubAuthorityError};
-pub use github::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
-pub use review_head::{
-    GitHubDeliveryRead, GitHubDeliverySnapshot, GitHubHeadReconciliation,
-    GitHubHeadSynchronization, GitHubHeadUpdateOutcome, GitHubMergeRequestOutcome,
-    GitHubReconciliationOutcome, GitHubTargetIntegration, GitHubTargetReconciliation,
-};
+pub use crate::source_code_provider::*;
 pub use contract::{is_matching_success_receipt, validate_delivery_contract};
 #[cfg(test)]
 pub(crate) use contract::{delivery_diagnostic_schema, delivery_result_schema, delivery_signal_labels};
 
 use std::any::Any;
 use std::collections::BTreeMap;
-use std::fmt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -54,7 +50,11 @@ use crate::native_v2_runner::{
 };
 
 use self::git::SystemGit;
-use self::review_head::valid_head_update;
+pub(crate) use self::review_head::valid_head_update;
+pub(crate) use crate::source_code_provider::{
+    valid_delivery_repository as valid_repository, valid_git_branch as valid_branch,
+    valid_git_revision as valid_revision,
+};
 
 pub const GITHUB_TOKEN_ENV: &str = "GH_TOKEN";
 pub const DELIVERY_SIGNAL_FIELD: &str = "delivery";
@@ -85,7 +85,7 @@ const REVIEW_SYNC_DEADLINE: Duration = Duration::from_secs(60);
 const REVIEW_SYNC_INTERVAL: Duration = Duration::from_secs(1);
 const REVIEW_SYNC_MAX_INTERVAL: Duration = Duration::from_secs(8);
 const MAX_TOKEN_BYTES: usize = 4_096;
-const MAX_REVIEW_ID_BYTES: usize = 32;
+const MAX_REVIEW_ID_BYTES: usize = 256;
 const MAX_CONFLICT_DIAGNOSTIC_BYTES: usize = 8 * 1_024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -164,52 +164,25 @@ impl DeliveryMode {
         matches!(self, Self::PullRequestV2 | Self::MergeV3)
     }
 
+    /// Provider capabilities used by the existing workflow node.
+    #[must_use]
+    pub const fn required_capabilities(
+        self,
+    ) -> &'static [crate::source_code_provider::SourceCapability] {
+        use crate::source_code_provider::SourceCapability::{Read, Push, PullRequest, Checks, Merge};
+        match self {
+            Self::Push => &[Read, Push],
+            Self::PullRequest => &[Read, Push, PullRequest],
+            Self::PullRequestV2 => &[Read, Push, PullRequest, Checks],
+            Self::MergeV1 | Self::Merge | Self::MergeV3 => {
+                &[Read, Push, PullRequest, Checks, Merge]
+            }
+        }
+    }
+
     const fn is_merge(self) -> bool {
         matches!(self, Self::MergeV1 | Self::Merge | Self::MergeV3)
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DeliveryTarget {
-    pub repository: String,
-    pub target_branch: String,
-    pub base_revision: String,
-}
-
-impl DeliveryTarget {
-    pub fn new(
-        repository: impl Into<String>,
-        target_branch: impl Into<String>,
-        base_revision: impl Into<String>,
-    ) -> Result<Self, DeliveryConfigError> {
-        let target = Self {
-            repository: repository.into(),
-            target_branch: target_branch.into(),
-            base_revision: base_revision.into(),
-        };
-        if !valid_repository(&target.repository) {
-            return Err(DeliveryConfigError::Repository);
-        }
-        if !valid_branch(&target.target_branch) {
-            return Err(DeliveryConfigError::Branch);
-        }
-        if !valid_revision(&target.base_revision) {
-            return Err(DeliveryConfigError::Revision);
-        }
-        Ok(target)
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum DeliveryConfigError {
-    #[error("GitHub repository must have the form owner/name")]
-    Repository,
-    #[error("target branch is not a bounded Git branch name")]
-    Branch,
-    #[error("base revision must be a lowercase 40-character Git revision")]
-    Revision,
-    #[error("delivery polling requires at least one observation")]
-    PollAttempts,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -298,219 +271,18 @@ impl NativeV2DeliveryConfig {
     }
 }
 
-/// Borrowed credential authority. It is intentionally neither serializable nor printable.
-#[derive(Clone, Copy)]
-pub struct GitHubCredential<'a>(&'a str);
-
-impl<'a> GitHubCredential<'a> {
-    #[must_use]
-    pub fn expose(self) -> &'a str {
-        self.0
-    }
-}
-
-impl fmt::Debug for GitHubCredential<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("GitHubCredential([REDACTED])")
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GitHubPushRequest {
-    pub workspace: PathBuf,
-    pub target: DeliveryTarget,
-    pub head_branch: String,
-    pub head_revision: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GitHubReviewRequest {
-    pub target: DeliveryTarget,
-    pub head_branch: String,
-    pub head_revision: String,
-    pub title: String,
-    pub description: String,
-    pub source_issue: Option<GitHubSourceIssue>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GitHubSourceIssue {
-    pub number: u64,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GitHubReviewReceipt {
-    pub review_id: String,
-    pub repository: String,
-    pub target_branch: String,
-    pub head_branch: String,
-    pub head_revision: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum GitHubChecks {
-    NotRequired,
-    Pending,
-    Passed,
-    Failed { diagnostic: String },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum GitHubReviewState {
-    Open { checks: GitHubChecks },
-    Merged { merge_revision: String },
-    Conflict,
-    Closed,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GitHubReviewObservation {
-    pub review_id: String,
-    pub repository: String,
-    pub target_branch: String,
-    pub head_branch: String,
-    pub head_revision: String,
-    pub state: GitHubReviewState,
-    pub pull_request_ready: bool,
-    pub head_update_required: bool,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GitHubReviewFeedback {
-    pub items: Vec<GitHubReviewFeedbackItem>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GitHubReviewFeedbackItem {
-    pub key: String,
-    pub version: String,
-    pub author: String,
-    pub location: Option<String>,
-    pub body: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GitHubConflictRequest {
-    pub workspace: PathBuf,
-    pub review: GitHubReviewReceipt,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GitHubConflictMaterialization {
-    pub target_revision: String,
-    pub conflicted_paths: Vec<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum GitHubConflictOutcome {
-    Materialized(GitHubConflictMaterialization),
-    ObservationChanged,
-}
-
-/// Target-owned, bounded GitHub effects. Implementations must bound every network operation.
-#[async_trait]
-pub trait GitHubDeliveryAuthority: Send + Sync {
-    /// Observes the bound PR and branch without committing, pushing, or changing metadata.
-    async fn observe_delivery(
-        &self,
-        request: GitHubDeliveryRead<'_>,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError>;
-
-    /// Integrates an exact current target revision before the run branch is first published.
-    async fn reconcile_delivery_target(
-        &self,
-        request: GitHubTargetReconciliation<'_>,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubTargetIntegration, GitHubAuthorityError>;
-
-    /// Fetches the observed head and preserves local work while reconciling its published ancestry.
-    async fn reconcile_delivery_head(
-        &self,
-        request: GitHubHeadReconciliation<'_>,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubReconciliationOutcome, GitHubAuthorityError>;
-
-    async fn push_branch(
-        &self,
-        request: &GitHubPushRequest,
-        credential: GitHubCredential<'_>,
-    ) -> Result<(), GitHubAuthorityError>;
-
-    /// Opens the review or updates the existing run-stable review after an authored loop revisit.
-    async fn open_or_update_review(
-        &self,
-        request: &GitHubReviewRequest,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubReviewReceipt, GitHubAuthorityError>;
-
-    async fn inspect_review(
-        &self,
-        review: &GitHubReviewReceipt,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubReviewObservation, GitHubAuthorityError>;
-
-    /// Reads every visible PR discussion surface behind one stable review/head identity fence.
-    async fn inspect_review_feedback(
-        &self,
-        _review: &GitHubReviewReceipt,
-        _credential: GitHubCredential<'_>,
-    ) -> Result<GitHubReviewFeedback, GitHubAuthorityError> {
-        Ok(GitHubReviewFeedback { items: Vec::new() })
-    }
-
-    /// Requests provider-native integration after GitHub reports its merge policy ready.
-    /// Acceptance is not proof; only a later merged observation confirms success.
-    async fn request_merge(
-        &self,
-        review: &GitHubReviewReceipt,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubMergeRequestOutcome, GitHubAuthorityError>;
-
-    /// Advances a stale non-queue review head through one provider-authorized CAS transition.
-    async fn update_review_head(
-        &self,
-        _workspace: &std::path::Path,
-        _review: &GitHubReviewReceipt,
-        _credential: GitHubCredential<'_>,
-    ) -> Result<GitHubHeadUpdateOutcome, GitHubAuthorityError> {
-        Ok(GitHubHeadUpdateOutcome::Pending)
-    }
-
-    /// Adopts one provider-authorized review-head transition in the local workspace.
-    /// Existing authorities that adopt before returning `Updated` may use this no-op default.
-    async fn synchronize_review_head(
-        &self,
-        _request: GitHubHeadSynchronization<'_>,
-        _credential: GitHubCredential<'_>,
-    ) -> Result<(), GitHubAuthorityError> {
-        Ok(())
-    }
-
-    /// Fetches and integrates the exact current target revision without exposing credentials to
-    /// an agent. A materialized conflict must remain in the workspace; a changed observation must
-    /// leave the original review head clean so delivery can re-observe GitHub.
-    async fn materialize_merge_conflict(
-        &self,
-        _request: &GitHubConflictRequest,
-        _credential: GitHubCredential<'_>,
-    ) -> Result<GitHubConflictOutcome, GitHubAuthorityError> {
-        Err(GitHubAuthorityError::Rejected)
-    }
-}
-
 pub use adapter::NativeV2DeliveryAdapter;
 
-fn github_credential(environment: &ResolvedEnvironment) -> Option<GitHubCredential<'_>> {
-    let name = EnvironmentVariableName::new(GITHUB_TOKEN_ENV).ok()?;
+fn forge_credential<'a>(environment: &'a ResolvedEnvironment, field: &str) -> Option<&'a str> {
+    let name = EnvironmentVariableName::new(field).ok()?;
     let token = environment.get(&name)?;
-    (!token.trim().is_empty() && token.len() <= MAX_TOKEN_BYTES).then_some(GitHubCredential(token))
+    (!token.trim().is_empty() && token.len() <= MAX_TOKEN_BYTES).then_some(token)
 }
 
 struct DeliveryResult<'a> {
     mode: DeliveryMode,
     outcome: &'a str,
-    review: &'a GitHubReviewReceipt,
+    review: &'a SourceReviewReceipt,
     merge_revision: Option<&'a str>,
 }
 
@@ -584,7 +356,7 @@ fn valid_mode_outcome(mode: DeliveryMode, outcome: &str) -> bool {
 
 fn conflict_diagnostic(
     authority_diagnostic: &str,
-    materialization: &GitHubConflictMaterialization,
+    materialization: &SourceConflictMaterialization,
 ) -> Option<String> {
     if !valid_revision(&materialization.target_revision)
         || materialization.conflicted_paths.is_empty()
@@ -660,7 +432,7 @@ fn delivery_result(result: &DeliveryResult<'_>) -> Value {
     Value::Object(fields)
 }
 
-fn valid_review(request: &GitHubReviewRequest, review: &GitHubReviewReceipt) -> bool {
+fn valid_review(request: &SourceReviewRequest, review: &SourceReviewReceipt) -> bool {
     valid_review_id(&review.review_id)
         && review.repository == request.target.repository
         && review.target_branch == request.target.target_branch
@@ -668,7 +440,7 @@ fn valid_review(request: &GitHubReviewRequest, review: &GitHubReviewReceipt) -> 
         && review.head_revision == request.head_revision
 }
 
-fn valid_observation(review: &GitHubReviewReceipt, observation: &GitHubReviewObservation) -> bool {
+fn valid_observation(review: &SourceReviewReceipt, observation: &SourceReviewObservation) -> bool {
     observation.review_id == review.review_id
         && observation.repository == review.repository
         && observation.target_branch == review.target_branch
@@ -723,43 +495,25 @@ async fn emit(control: &DriverControl, message: &str) -> Result<(), NodeRunnerEr
     Ok(())
 }
 
-fn valid_repository(value: &str) -> bool {
-    let Some((owner, name)) = value.split_once('/') else {
-        return false;
-    };
-    !owner.is_empty()
-        && !name.is_empty()
-        && !name.contains('/')
-        && value.len() <= 256
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'/'))
-}
-
-fn valid_branch(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 256
-        && !value.starts_with('-')
-        && !value.contains("..")
-        && !value.ends_with('.')
-        && !value.ends_with('/')
-        && !value.bytes().any(|byte| {
-            byte.is_ascii_control()
-                || byte.is_ascii_whitespace()
-                || matches!(byte, b'~' | b'^' | b':' | b'?' | b'*' | b'[' | b'\\')
-        })
-}
-
-fn valid_revision(value: &str) -> bool {
-    value.len() == 40 && value.bytes().all(is_lowercase_hex_digit)
-}
-
 fn valid_review_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= MAX_REVIEW_ID_BYTES
-        && value.bytes().all(|byte| byte.is_ascii_digit())
+    !value.is_empty() && value.len() <= MAX_REVIEW_ID_BYTES && !value.chars().any(char::is_control)
 }
 
-fn is_lowercase_hex_digit(byte: u8) -> bool {
-    byte.is_ascii_digit() || matches!(byte, b'a'..=b'f')
+/// Derives delivery identity from admitted provenance and the workflow's intended operation.
+pub fn source_target(
+    source: &crate::native_v2_contract::ResolvedSource,
+    mode: DeliveryMode,
+) -> Result<DeliveryTarget, DeliveryConfigError> {
+    let repository = if mode.creates_review() {
+        source
+            .remote
+            .as_ref()
+            .and_then(|remote| remote.forge.as_ref())
+            .map_or(source.repository.as_str(), |forge| {
+                forge.repository.as_str()
+            })
+    } else {
+        source.repository.as_str()
+    };
+    DeliveryTarget::new(repository, source.branch.as_str(), source.revision.as_str())
 }

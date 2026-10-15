@@ -43,6 +43,54 @@ def test_uniform_runtime_requires_an_explicit_harness() -> None:
         UniformRuntime(provider="openrouter", model="gpt-5.6-luna")  # type: ignore[call-arg]
 
 
+def test_one_client_can_select_distinct_folders_per_submission(
+    fake_native: Path, tmp_path: Path
+) -> None:
+    launcher = tmp_path / "launcher"
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    for directory in (launcher, first, second):
+        directory.mkdir()
+
+    async def exercise() -> None:
+        async with Client(target=LocalTarget(launcher), runtime=runtime()) as client:
+            await client.submit("first task", cwd=first, submission_key="first-folder")
+            await client.submit("second task", cwd=second, submission_key="second-folder")
+
+    asyncio.run(exercise())
+    runs = [item for item in read_invocations(fake_native) if item["args"][0] == "run"]
+    assert len(runs) == 4
+    for item, selected in zip(runs, (first, first, second, second), strict=True):
+        assert item["cwd"] == str(launcher)
+        assert item["args"][item["args"].index("--cwd") + 1] == str(selected)
+        assert Path(item["args"][item["args"].index("--input") + 1]).is_absolute()
+
+
+def test_exact_request_forwards_folder_and_source_only_connection(fake_native: Path) -> None:
+    request = RunRequest(
+        title="Generic private source",
+        graph=GraphSpec.from_dict({"profile": "openengine.graph.full/v1"}),
+        initial_input=None,
+        runtime=RuntimePlan.from_dict({"harness": "codex", "provider": "openai", "nodes": {}}),
+        cwd="../selected-folder",
+        repository="https://git.example/nested/team/project.git",
+        source_connection="source-private",
+        branch="main",
+        revision="a" * 64,
+    )
+
+    async def exercise() -> None:
+        async with Client() as client:
+            await client.submit(request)
+
+    asyncio.run(exercise())
+    runs = [item["args"] for item in read_invocations(fake_native) if item["args"][0] == "run"]
+    for arguments in runs:
+        assert arguments[arguments.index("--cwd") + 1] == "../selected-folder"
+        assert arguments[arguments.index("--source-connection") + 1] == "source-private"
+        assert arguments[arguments.index("--repository") + 1] == request.repository
+
+
 def direct_client(fake_native: Path) -> Client:
     return Client(
         target=DirectTarget("http://127.0.0.1:8080"),

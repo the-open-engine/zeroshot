@@ -76,11 +76,13 @@ RUN cd /tmp/github-cli \
         docker-compose \
         /tmp/github-cli/gh_${GH_VERSION}_linux_${TARGETARCH}.deb \
         git \
+        openssh-client \
         libbz2-1.0 \
         libffi-dev \
         libgdbm6t64 \
         liblzma5 \
         libncursesw6 \
+        libnss-wrapper \
         libreadline8t64 \
         libsqlite3-0 \
         libssl-dev \
@@ -88,6 +90,10 @@ RUN cd /tmp/github-cli \
         pkgconf \
         procps \
         ripgrep \
+    && install -d /usr/local/lib/zeroshot \
+    && ln -s "/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/libnss_wrapper.so" \
+        /usr/local/lib/zeroshot/libnss_wrapper.so \
+    && test -r /usr/local/lib/zeroshot/libnss_wrapper.so \
     && git_version="$(git --version)" \
     && dpkg --compare-versions "${git_version#git version }" ge 2.47 \
     && rm -rf /var/lib/apt/lists/* /tmp/github-cli

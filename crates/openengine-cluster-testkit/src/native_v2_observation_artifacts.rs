@@ -85,6 +85,7 @@ pub fn native_v2_source_fixture() -> ResolvedSource {
         repository: SourceRepositoryId::new("open-engine/zeroshot").assert_value(),
         branch: SourceBranchId::new("main").assert_value(),
         revision: SourceRevisionId::new("0123456789abcdef0123456789abcdef01234567").assert_value(),
+        remote: None,
     }
 }
 
@@ -92,7 +93,7 @@ fn status() -> RunStatusResult {
     RunStatusResult {
         run_id: run_id(),
         title: title(),
-        source: native_v2_source_fixture(),
+        source: Some(native_v2_source_fixture()),
         size: RunSize::Medium,
         at_cursor: cursor(7),
         status: RunStatus::Running {
@@ -126,7 +127,7 @@ fn watch_fixture() -> Value {
             subscription_id: SubscriptionId::new("watch-1"),
             run_id: run_id(),
             title: title(),
-            source: native_v2_source_fixture(),
+            source: Some(native_v2_source_fixture()),
             size: RunSize::Medium,
             cursor: cursor(8),
             status: RunStatus::Finished {

@@ -137,13 +137,15 @@ fn submission(key: &str) -> RunSubmission {
         graph: full_graph(vec![success_node()]),
         initial_input: Value::Null,
         runtime: crate::native_v2_candidate::test_support::codex_runtime(BTreeMap::new()),
-        source: ResolvedSource {
+        source: Some(ResolvedSource {
+            remote: None,
+
             repository: SourceRepositoryId::new("open-engine/zeroshot")
                 .assert_value_with("repository"),
             branch: SourceBranchId::new("main").assert_value_with("branch"),
             revision: SourceRevisionId::new("0123456789abcdef0123456789abcdef01234567")
                 .assert_value_with("revision"),
-        },
+        }),
         submission_key: IdempotencyKey::new(key).assert_value_with("submission key"),
     }
 }
@@ -161,6 +163,8 @@ fn bootstrap(
     )
     .assert_value_with("exact empty environment");
     PortableControllerBootstrap {
+        git_credentials: None,
+
         checkpoint: None,
         delivery_run_id: run_id.clone(),
         adopt_existing_delivery: false,

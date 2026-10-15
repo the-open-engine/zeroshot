@@ -130,7 +130,7 @@ fn submission(graph: GraphSpec, nodes: BTreeMap<NodeName, NodeRuntimeBinding>) -
             size: RunSize::Medium,
             nodes,
         },
-        source: resolved_source(),
+        source: Some(resolved_source()),
         submission_key: IdempotencyKey::new("admission-test").assert_value(),
     }
 }
@@ -361,7 +361,7 @@ async fn admits_bedrock_for_both_harnesses_and_preserves_provider_owned_models()
                 binding("provider/future-model", Some(ReasoningEffort::Max)),
             )]),
         },
-        source: resolved_source(),
+        source: Some(resolved_source()),
         submission_key: IdempotencyKey::new("opaque-codex-model").assert_value(),
     };
     let admitted = NativeV2Admission.admit(codex_runtime).await.assert_value();

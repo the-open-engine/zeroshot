@@ -36,6 +36,11 @@ fn prepared_request(run_id: RunId) -> PreparedRunRequest {
     }))
     .assert_value();
     PreparedRunRequest {
+        git_credentials: None,
+
+        cwd: None,
+        source_connection: None,
+
         run_id,
         intent,
         connections: BTreeMap::new(),
@@ -198,6 +203,8 @@ async fn exercise_named_run_rejections(backend: &LocalCliBackend) {
             .run_resume(
                 Some("prod"),
                 RunResumeParams {
+                    git_credentials: None,
+
                     run_id: run_id.clone(),
                     successor_run_id: successor,
                     from: None,
@@ -300,6 +307,8 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
             .run_resume(
                 None,
                 RunResumeParams {
+                    git_credentials: None,
+
                     run_id,
                     successor_run_id: RunId::new("0199f33f-3b44-7d21-9000-000000000032",),
                     from: None,
@@ -413,6 +422,8 @@ async fn local_resume_rejects_an_unusable_state_root_before_observing_the_run() 
 
     let error = backend
         .resume_local(RunResumeParams {
+            git_credentials: None,
+
             run_id: run_id("0199f33f-3b44-7d21-9000-000000000042"),
             successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000043"),
             from: None,
@@ -429,7 +440,7 @@ async fn local_resume_rejects_an_unusable_state_root_before_observing_the_run() 
 async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
     let root = TestDirectory::new("lrr");
     let backend = LocalCliBackend::new(
-        root.path().to_path_buf(),
+        root.child("state"),
         root.child("missing-controller"),
         root.path().to_path_buf(),
         PathBuf::from("git"),
@@ -470,6 +481,8 @@ async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
 
     let error = backend
         .resume_local(RunResumeParams {
+            git_credentials: None,
+
             run_id: original.clone(),
             successor_run_id: successor.clone(),
             from: None,

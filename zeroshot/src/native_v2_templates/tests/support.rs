@@ -92,6 +92,7 @@ pub(super) fn resolved_source() -> ResolvedSource {
         repository: SourceRepositoryId::new("acme/project").assert_value(),
         branch: SourceBranchId::new("main").assert_value(),
         revision: SourceRevisionId::new("a".repeat(40)).assert_value(),
+        remote: None,
     }
 }
 

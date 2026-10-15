@@ -160,6 +160,10 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
         true
     }
 
+    fn supports_git_transport(&self) -> bool {
+        true
+    }
+
     async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
         self.create_controller()
             .await
@@ -177,9 +181,9 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
             connections,
             connection_resolver,
             github_token,
+            git_credentials,
         } = request;
-        materialize_contained_provider_access(&mut submission.runtime)
-            .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
+        prepare_contained_submission(&mut submission)?;
         let digest = submission_digest(&submission)
             .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
         if let Some(receipt) = controller
@@ -194,25 +198,19 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
         let environment = match connection_resolver {
             Some(wire) => {
                 let resolution = build_connection_resolver(run_id.clone(), wire)?;
-                RunEnvironment::with_resolver(
-                    &submission.runtime,
-                    submission.environment.as_ref(),
-                    connections,
-                    resolution,
-                )
+                RunEnvironment::with_resolver_for_submission(&submission, connections, resolution)
             }
-            None => RunEnvironment::exact(
-                &submission.runtime,
-                submission.environment.as_ref(),
-                connections,
-            ),
+            None => RunEnvironment::exact_for_submission(&submission, connections),
         }
         .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
         let receipt = controller
-            .submit_with_exact_environment_and_github_token(
+            .submit_with_exact_environment_and_source_credentials(
                 RunSubmitParams { run_id, submission },
                 environment,
-                github_token,
+                crate::native_v2_cloud::RunSourceCredentials {
+                    github_token,
+                    git_credentials,
+                },
             )
             .await
             .map_err(project_cloud_error)?;
@@ -220,6 +218,18 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
             run_id: receipt.run_id,
         })
     }
+}
+
+fn prepare_contained_submission(
+    submission: &mut openengine_cluster_protocol::RunSubmission,
+) -> Result<(), TargetAuthorityError> {
+    if submission.source.is_none() {
+        return Err(TargetAuthorityError::invalid(
+            "contained runs require a resolved Git source",
+        ));
+    }
+    materialize_contained_provider_access(&mut submission.runtime)
+        .map_err(|error| TargetAuthorityError::invalid(error.to_string()))
 }
 
 fn project_cloud_error(error: NativeV2CloudError) -> TargetAuthorityError {

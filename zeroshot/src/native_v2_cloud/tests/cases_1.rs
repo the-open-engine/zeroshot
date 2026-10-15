@@ -93,10 +93,7 @@ impl CapsuleAllocator for RetainedCleanupFailureAllocator {
         &self,
         _run_id: &RunId,
     ) -> openengine_cluster_protocol::WorkspaceRecovery {
-        openengine_cluster_protocol::WorkspaceRecovery {
-            recoverable: true,
-            ..Default::default()
-        }
+        recoverable_workspace()
     }
 }
 
@@ -132,6 +129,7 @@ async fn allocator_defaults_are_explicit_fail_closed_and_side_effect_free() {
                 run_id: &run_id,
                 admitted: &admitted,
                 github_token: None,
+                git_credentials: None,
             })
             .await,
         Err(RetainedAllocationUnavailable::Settled(
@@ -204,6 +202,7 @@ async fn wave8_cli_contract_submission_rejects_missing_secrets_and_invalid_graph
             source_connection: None,
         }),
         github_token: None,
+        git_credentials: None,
     })
     .err()
     .expect("insecure resolver authority must fail closed");
@@ -271,6 +270,7 @@ async fn wave8_cli_contract_retained_cleanup_and_discard_fail_closed_across_reco
             )]),
             connection_resolver: None,
             github_token: None,
+            git_credentials: None,
         })
         .await
         .assert_value_with("accepted resume");
@@ -313,3 +313,243 @@ async fn allocator_claims_are_exclusive_per_run_not_per_target() {
 }
 
 use openengine_cluster_testkit::assertions::{AssertValue};
+
+fn recoverable_workspace() -> openengine_cluster_protocol::WorkspaceRecovery {
+    openengine_cluster_protocol::WorkspaceRecovery {
+        recoverable: true,
+        ..Default::default()
+    }
+}
+
+struct SourceRecoveryAllocator {
+    runtime: FakeAllocator,
+    resumed_credentials:
+        StdMutex<Vec<Option<openengine_cluster_protocol::GitTransportCredentials>>>,
+}
+
+#[async_trait]
+impl CapsuleAllocator for SourceRecoveryAllocator {
+    async fn claim_controller(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Arc<dyn ExclusiveControllerClaim>, ControllerClaimUnavailable> {
+        self.runtime.claim_controller(run_id).await
+    }
+
+    async fn allocate(
+        &self,
+        request: CapsuleAllocationRequest<'_>,
+    ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
+        self.runtime.allocate(request).await
+    }
+
+    async fn allocate_from_retained(
+        &self,
+        request: RetainedAllocationRequest<'_>,
+    ) -> Result<AllocatedCapsule, RetainedAllocationUnavailable> {
+        self.resumed_credentials
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(request.git_credentials.cloned());
+        self.runtime
+            .allocate(CapsuleAllocationRequest {
+                run_id: request.run_id,
+                admitted: request.admitted,
+                github_token: request.github_token,
+                git_credentials: request.git_credentials,
+                preparation: request.preparation,
+            })
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn destroy_or_confirm_absent(
+        &self,
+        run_id: &RunId,
+        exit: RunRuntimeExit,
+    ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable> {
+        self.runtime.destroy_or_confirm_absent(run_id, exit).await
+    }
+
+    async fn workspace_recovery(
+        &self,
+        _run_id: &RunId,
+    ) -> openengine_cluster_protocol::WorkspaceRecovery {
+        recoverable_workspace()
+    }
+}
+
+#[tokio::test]
+async fn recoverable_status_preserves_source_authorization_and_fresh_resume_isolates_node_values() {
+    use openengine_cluster_protocol::GitTransportCredentials;
+
+    for (remote, credentials) in [
+        (
+            "https://github.com/owner/repo.git",
+            GitTransportCredentials::Https {
+                username: "fresh-source-user".to_owned(),
+                password: "fresh-source-password".to_owned(),
+            },
+        ),
+        (
+            "git@github.com:owner/repo.git",
+            GitTransportCredentials::Ssh {
+                private_key: "fresh-source-private-key".to_owned(),
+                known_hosts: "fresh-source-known-hosts".to_owned(),
+            },
+        ),
+    ] {
+        assert_recoverable_source_resume(remote, credentials).await;
+    }
+}
+
+async fn seed_failed_source_run(submitted: &RunSubmitParams, ledger: &Arc<FakeRunLedger>) {
+    let admitted = NativeV2Admission
+        .admit(submitted.submission.clone())
+        .await
+        .assert_value();
+    ledger
+        .create_or_get(CreateRun {
+            run_id: submitted.run_id.clone(),
+            submission_key: submitted.submission.submission_key.clone(),
+            submission_digest: submission_digest(&submitted.submission).assert_value(),
+            admitted,
+        })
+        .await
+        .assert_value();
+    let failed = ledger
+        .get(&submitted.run_id)
+        .await
+        .assert_value()
+        .assert_value();
+    append_terminal_failure(ledger.as_ref(), &failed, "worker_failed")
+        .await
+        .assert_value();
+}
+
+fn source_recovery_request(remote: &str) -> RunSubmitParams {
+    let mut submitted = request(Value::Null);
+    submitted.submission.source = Some(
+        serde_json::from_value(json!({
+            "repository": "owner/repo",
+            "branch": "main",
+            "revision": "1111111111111111111111111111111111111111",
+            "remote": {
+                "url": remote,
+                "connection": "test",
+                "forge": {"provider": "source.github", "repository": "owner/repo"}
+            }
+        }))
+        .assert_value(),
+    );
+    submitted
+}
+
+async fn assert_recoverable_source_resume(
+    remote: &str,
+    credentials: openengine_cluster_protocol::GitTransportCredentials,
+) {
+    let harness = harness(Behavior::Complete).await;
+    let ledger = &harness.ledger;
+    let submitted = source_recovery_request(remote);
+    let authorized = submitted
+        .submission
+        .connection_requirements()
+        .into_iter()
+        .map(|(key, fields)| (key, fields.into_iter().collect::<Vec<_>>()))
+        .collect::<openengine_cluster_protocol::RunConnectionRequirements>();
+    let source_key = ConnectionKey::new("test").assert_value();
+    let mut expected_fields = credentials.connection_values().assert_value().field_names();
+    expected_fields.push(EnvironmentVariableName::new("NODE_TOKEN").assert_value());
+    expected_fields.sort();
+    assert_eq!(
+        authorized,
+        BTreeMap::from([(source_key.clone(), expected_fields)])
+    );
+
+    seed_failed_source_run(&submitted, ledger).await;
+
+    let allocator = Arc::new(SourceRecoveryAllocator {
+        runtime: FakeAllocator::new(harness.driver.clone(), harness.cleanup.clone()),
+        resumed_credentials: StdMutex::new(Vec::new()),
+    });
+    let controller = NativeV2CloudController::new(ledger.clone(), allocator.clone())
+        .await
+        .assert_value();
+    let status = controller
+        .status(RunStatusParams {
+            run_id: submitted.run_id.clone(),
+        })
+        .await
+        .assert_value();
+    assert!(status.workspace_recovery.recoverable);
+    assert_eq!(
+        status.workspace_recovery.connection_requirements,
+        authorized
+    );
+
+    let mut fresh = credentials
+        .connection_values()
+        .assert_value()
+        .as_map()
+        .clone();
+    fresh.insert(
+        EnvironmentVariableName::new("NODE_TOKEN").assert_value(),
+        "fresh-node-token".to_owned(),
+    );
+    let successor_run_id = RunId::new("source-authorized-successor");
+    controller
+        .resume(RunResumeParams {
+            run_id: submitted.run_id,
+            successor_run_id: successor_run_id.clone(),
+            from: None,
+            connections: BTreeMap::from([(
+                source_key,
+                StaticConnectionValues::new(fresh).assert_value(),
+            )]),
+            connection_resolver: None,
+            github_token: None,
+            git_credentials: None,
+        })
+        .await
+        .assert_value();
+    assert!(matches!(
+        terminal(&controller, &successor_run_id).await,
+        TerminalResult::Succeeded { .. }
+    ));
+    assert_eq!(
+        allocator
+            .resumed_credentials
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_slice(),
+        &[Some(credentials)]
+    );
+    assert_eq!(
+        harness.driver.environments().as_slice(),
+        &[
+            BTreeMap::from([("NODE_TOKEN".to_owned(), "fresh-node-token".to_owned())]),
+            BTreeMap::new(),
+        ]
+    );
+    let successor = ledger
+        .get(&successor_run_id)
+        .await
+        .assert_value()
+        .assert_value();
+    assert_public_resume_admission(&successor.admitted, submitted.submission.source);
+}
+
+fn assert_public_resume_admission(admitted: &AdmittedRun, source: Option<ResolvedSource>) {
+    assert_eq!(admitted.source, source);
+    let durable = serde_json::to_string(admitted).assert_value();
+    for secret in [
+        "fresh-source-user",
+        "fresh-source-password",
+        "fresh-source-private-key",
+        "fresh-source-known-hosts",
+        "fresh-node-token",
+    ] {
+        assert!(!durable.contains(secret));
+    }
+}

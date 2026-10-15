@@ -111,6 +111,8 @@ pub struct RunProfileRunRequest {
     pub connections: RunConnectionValues,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_credentials: Option<super::GitTransportCredentials>,
 }
 
 impl fmt::Debug for RunProfileRunRequest {

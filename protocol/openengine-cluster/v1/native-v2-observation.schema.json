@@ -500,7 +500,85 @@
         }
       ]
     },
+    "ResolvedGitRemote": {
+      "additionalProperties": false,
+      "description": "Credential-free Git locator. Git effects use this transport; forge operations use `forge`.",
+      "properties": {
+        "connection": {
+          "description": "Explicit source-only connection authority; omitted for public or native local Git.",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "forge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceForgeIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "url": {
+          "allOf": [
+            {
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+            },
+            {
+              "if": {
+                "pattern": "://"
+              },
+              "then": {
+                "pattern": "^(https|ssh)://"
+              }
+            }
+          ],
+          "maxLength": 2048,
+          "minLength": 1,
+          "not": {
+            "pattern": "^[A-Za-z]:"
+          },
+          "pattern": "^(?:https://(?:\\[[A-Za-z0-9%:._-]+\\]|[^/@:?#\\\\\\s-][^/@:?#\\\\\\s]*)(?::[0-9]+)?(?:/[^?#\\\\\\s]*)?|ssh://(?:[^/@:?#\\\\\\s]+@)?(?:\\[[A-Za-z0-9%:._-]+\\]|[^/@:?#\\\\\\s-][^/@:?#\\\\\\s]*)(?::[0-9]+)?(?:/[^?#\\\\\\s]*)?|(?:[^/@:?#\\\\\\s]+@)?(?:\\[[A-Za-z0-9%:._-]+\\]|[^/@:?#\\\\\\s-][^/@:?#\\\\\\s]*):(?:[^/:?#\\\\\\s][^?#\\\\\\s]*|/(?:[^/?#\\\\\\s][^?#\\\\\\s]*)?))$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
     "ResolvedSource": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/ResolvedSourceWire"
+        },
+        {
+          "else": {
+            "properties": {
+              "repository": {
+                "pattern": "^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "remote": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "remote"
+            ]
+          }
+        }
+      ]
+    },
+    "ResolvedSourceWire": {
       "additionalProperties": false,
       "properties": {
         "branch": {
@@ -508,14 +586,25 @@
           "minLength": 1,
           "type": "string"
         },
+        "remote": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResolvedGitRemote"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "repository": {
           "maxLength": 255,
-          "minLength": 3,
-          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$",
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
         },
         "revision": {
-          "pattern": "^[0-9a-f]{40}$",
+          "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$",
           "type": "string"
         }
       },
@@ -627,7 +716,14 @@
           "description": "Immutable execution size selected for the run."
         },
         "source": {
-          "$ref": "#/$defs/ResolvedSource",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResolvedSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "Immutable repository snapshot captured when the run was admitted."
         },
         "status": {
@@ -648,7 +744,6 @@
       "required": [
         "runId",
         "title",
-        "source",
         "size",
         "atCursor",
         "status"
@@ -873,7 +968,14 @@
           "$ref": "#/$defs/RunSize"
         },
         "source": {
-          "$ref": "#/$defs/ResolvedSource"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResolvedSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "status": {
           "$ref": "#/$defs/RunStatus"
@@ -891,7 +993,6 @@
       "required": [
         "runId",
         "title",
-        "source",
         "size",
         "atCursor",
         "status"
@@ -912,7 +1013,14 @@
           "$ref": "#/$defs/RunSize"
         },
         "source": {
-          "$ref": "#/$defs/ResolvedSource"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResolvedSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "status": {
           "$ref": "#/$defs/RunStatus"
@@ -931,7 +1039,6 @@
         "subscriptionId",
         "runId",
         "title",
-        "source",
         "size",
         "cursor",
         "status"
@@ -974,6 +1081,29 @@
         "subscriptionId",
         "runId",
         "atCursor"
+      ],
+      "type": "object"
+    },
+    "SourceForgeIdentity": {
+      "additionalProperties": false,
+      "description": "Optional forge identity selects one registered source-code adapter.",
+      "properties": {
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
+        },
+        "repository": {
+          "maxLength": 255,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "repository"
       ],
       "type": "object"
     },

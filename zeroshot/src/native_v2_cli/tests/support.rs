@@ -615,6 +615,9 @@ impl NativeV2CliBackend for FakeBackend {
             run_id: _,
             source: _,
             profile: _,
+            git_credentials: _,
+            cwd: _,
+            source_connection: _,
         } = request;
         self.calls.lock().assert_value().push(Call::Submit {
             target: target.map(str::to_owned),

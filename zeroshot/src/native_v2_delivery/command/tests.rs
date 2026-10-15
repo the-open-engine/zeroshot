@@ -11,6 +11,8 @@ fn failure(stderr: impl Into<String>) -> GitCommandFailure {
         stderr_truncated: false,
         context: Box::<str>::default(),
         timed_out: false,
+        cleanup_unconfirmed: false,
+        classification: None,
     }
 }
 
@@ -29,6 +31,30 @@ fn truncated_output_cannot_retain_a_partial_secret() {
     let (text, truncated) = sanitize(captured, &["credential-value".to_owned()]);
     assert_eq!(text, "safe ");
     assert!(truncated);
+}
+
+#[test]
+fn overlapping_secret_values_are_redacted_as_complete_values() {
+    let username = "git-user";
+    let password = "git-user-secret-canary";
+    let output = format!("username={username} password={password}");
+    for secrets in [
+        [username.to_owned(), password.to_owned()],
+        [password.to_owned(), username.to_owned()],
+    ] {
+        let sanitized = sanitize(
+            CapturedBytes {
+                bytes: output.as_bytes().to_vec(),
+                truncated: false,
+            },
+            &secrets,
+        );
+        assert_eq!(
+            sanitized,
+            ("username=[REDACTED] password=[REDACTED]".to_owned(), false),
+            "secret insertion order must not expose part of a longer value"
+        );
+    }
 }
 
 #[test]
@@ -100,11 +126,11 @@ fn success_and_operator_diagnostics_preserve_bounded_command_context() {
     assert!(diagnostic.contains("trusted delivery"));
     assert!(succeeded.require_success().is_ok());
 
-    let contextual = super::super::GitHubAuthorityError::from(failure("repository refused"))
+    let contextual = super::super::SourceDeliveryError::from(failure("repository refused"))
         .with_context("pushing managed branch");
     assert!(matches!(
         &contextual,
-        super::super::GitHubAuthorityError::Command(_)
+        super::super::SourceDeliveryError::Command(_)
     ));
     assert!(contextual.to_string().contains("repository refused"));
     assert!(contextual.to_string().contains("pushing managed branch"));
@@ -196,14 +222,146 @@ async fn completed_commands_cannot_leave_background_helpers_mutating_the_workspa
 
 #[cfg(unix)]
 #[tokio::test]
-async fn timeout_includes_inherited_pipe_drain() {
+async fn helper_pipe_inheritance_preserves_the_main_exit_status() {
     let mut command = Command::new("/bin/sh");
     command.args(["-c", "(/usr/bin/sleep 2) & exit 17"]);
     let started = std::time::Instant::now();
-    let error = capture(&mut command, Duration::from_millis(20))
+    let outcome = capture(&mut command, Duration::from_secs(1))
         .await
-        .expect_err("deadline");
+        .expect("confirmed descendant cleanup must close inherited pipes");
     assert!(started.elapsed() < Duration::from_secs(1));
-    assert!(error.context.contains("timed out"));
-    assert!(error.stderr_truncated);
+    assert_eq!(outcome.exit_status, Some(17));
+    assert!(!outcome.timed_out);
+    assert!(!outcome.cleanup_unconfirmed);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn sensitive_capture_keeps_protocol_stdout_private_and_errors_sanitized() {
+    let stdout = "private-protocol-output-marker";
+    let stderr = "private-protocol-error-marker";
+    let secrets = [stdout.to_owned(), stderr.to_owned()];
+    for status in [0, 17] {
+        let mut command = Command::new("/bin/sh");
+        command.env_clear().args([
+            "-c",
+            &format!("printf '{stdout}'; printf '{stderr}' >&2; exit {status}"),
+        ]);
+        let output = capture_sensitive(&mut command, Duration::from_secs(1), &secrets)
+            .await
+            .expect("fixture exits with confirmed cleanup");
+        for diagnostic in [format!("{output}"), format!("{output:?}")] {
+            assert!(!diagnostic.contains(stdout));
+            assert!(!diagnostic.contains(stderr));
+        }
+        assert_eq!(output.diagnostic().stdout, "[REDACTED]");
+        assert_eq!(output.diagnostic().stderr, "[REDACTED]");
+        assert!(!output.stdout_truncated());
+        if status == 0 {
+            assert_eq!(
+                output
+                    .require_success()
+                    .expect("successful protocol output")
+                    .stdout(),
+                stdout
+            );
+        } else {
+            let error = output
+                .require_success()
+                .expect_err("failed command is diagnostic-only");
+            assert_eq!(error.stdout, "[REDACTED]");
+            assert_eq!(error.stderr, "[REDACTED]");
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn redaction_cannot_change_authentication_http_or_retry_evidence() {
+    for (stderr, secret, status, authentication, retryable) in [
+        (
+            "fatal: Authentication failed for 'https://forge.invalid/project'",
+            "a",
+            None,
+            true,
+            false,
+        ),
+        (
+            "fatal: could not read Username for 'https://forge.invalid': terminal prompts disabled",
+            "a",
+            None,
+            true,
+            false,
+        ),
+        (
+            "fatal: unable to access 'https://forge.invalid/project': The requested URL returned error: 401",
+            "401",
+            Some(401),
+            true,
+            false,
+        ),
+        (
+            "fatal: unable to access 'https://forge.invalid/project': The requested URL returned error: 503",
+            "503",
+            Some(503),
+            false,
+            true,
+        ),
+        (
+            "fatal: unable to access 'https://forge.invalid/project': Could not resolve host: forge.invalid",
+            "a",
+            None,
+            false,
+            true,
+        ),
+    ] {
+        let mut command = Command::new("/bin/sh");
+        command.env_clear().args([
+            "-c",
+            "printf '%s' \"$1\" >&2; exit 17",
+            "classification-fixture",
+            stderr,
+        ]);
+        let failure =
+            capture_with_secrets(&mut command, Duration::from_secs(1), &[secret.to_owned()])
+                .await
+                .expect("fixture exits with confirmed cleanup")
+                .require_success()
+                .expect_err("fixture emits a Git failure");
+        assert_eq!(failure.http_status(), status);
+        assert_eq!(failure.authentication_failed(), authentication);
+        assert_eq!(failure.retryable_transport(), retryable);
+        assert!(failure.stderr.contains("[REDACTED]"));
+        assert!(!failure.stderr.contains(secret));
+        let mut unconfirmed = failure;
+        unconfirmed.cleanup_unconfirmed = true;
+        assert!(!unconfirmed.retryable_transport());
+    }
+}
+
+#[test]
+fn redaction_never_rescans_markers_or_duplicate_native_secret_aliases() {
+    let aliases = vec!["E".to_owned(); 20];
+    assert_eq!(redact("E", &aliases), "[REDACTED]");
+    assert_eq!(
+        redact(
+            "value=E E",
+            &["E".to_owned(), "REDACTED".to_owned(), "E".to_owned()],
+        ),
+        "value=[REDACTED] [REDACTED]"
+    );
+    assert_eq!(
+        redact("value=é界 é", &["é".to_owned(), "é界".to_owned()]),
+        "value=[REDACTED] [REDACTED]"
+    );
+    let (text, truncated) = sanitize(
+        CapturedBytes {
+            bytes: vec![b'E'; MAX_DIAGNOSTIC_BYTES],
+            truncated: false,
+        },
+        &aliases,
+    );
+    assert!(truncated);
+    assert_eq!(text.len(), MAX_DIAGNOSTIC_BYTES);
+    assert!("[REDACTED]".repeat(MAX_DIAGNOSTIC_BYTES).starts_with(&text));
 }

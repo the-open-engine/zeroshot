@@ -74,7 +74,7 @@ async fn source_checkout_resolves_again_instead_of_reusing_an_earlier_token() {
     .assert_value();
     let secrets = RunSecretEnvelope {
         environment: Arc::new(environment),
-        github_token: None,
+        source_credentials: RunSourceCredentials::default(),
     };
 
     assert_eq!(

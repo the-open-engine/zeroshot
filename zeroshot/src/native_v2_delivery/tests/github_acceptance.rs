@@ -16,8 +16,8 @@ fn github_authority(
     })
 }
 
-fn review_request(source_issue: Option<u64>) -> GitHubReviewRequest {
-    GitHubReviewRequest {
+fn review_request(source_issue: Option<u64>) -> SourceReviewRequest {
+    SourceReviewRequest {
         target: DeliveryTarget::new(
             "acme/project",
             "main",
@@ -28,7 +28,7 @@ fn review_request(source_issue: Option<u64>) -> GitHubReviewRequest {
         head_revision: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned(),
         title: "fix: repair checkout".to_owned(),
         description: "Repair the checkout flow.".to_owned(),
-        source_issue: source_issue.map(|number| GitHubSourceIssue { number }),
+        source_issue: source_issue.map(|number| SourceDeliveryIssue { number }),
     }
 }
 
@@ -40,10 +40,10 @@ async fn production_gh_transport_uses_exact_args_and_a_clean_environment() {
     let authority = github_authority(repo.root.path(), git_program.clone(), gh_program.clone());
     let review_request = review_request(Some(208));
     let target = review_request.target.clone();
-    let credential = GitHubCredential("test-token");
+    let credential = SourceDeliveryCredential::token("test-token");
     authority
         .push_branch(
-            &GitHubPushRequest {
+            &SourcePushRequest {
                 workspace: repo.workspace.clone(),
                 target,
                 head_branch: review_request.head_branch.clone(),
@@ -63,22 +63,35 @@ async fn production_gh_transport_uses_exact_args_and_a_clean_environment() {
         .assert_value();
     assert_eq!(
         observation.state,
-        GitHubReviewState::Open {
-            checks: GitHubChecks::NotRequired
+        SourceReviewState::Open {
+            checks: SourceChecks::NotRequired
         }
     );
     let merge_request = authority
         .request_merge(&review, credential)
         .await
         .assert_value();
-    assert_eq!(merge_request, GitHubMergeRequestOutcome::Accepted);
+    assert_eq!(merge_request, SourceMergeRequestOutcome::Accepted);
 
     let git_capture =
         fs::read_to_string(format!("{}.capture", git_program.display())).assert_value();
     assert!(git_capture.contains("token=test-token"));
     assert!(git_capture.contains(&format!("home={}", repo.root.path().display())));
-    assert!(git_capture.contains("config_count=2"));
-    assert!(git_capture.contains("config_key_1=http.https://github.com/.extraheader"));
+    assert!(git_capture.contains("config_count=4"));
+    assert!(
+        git_capture.contains("config_key_1=http.https://github.com/acme/project.git.extraheader")
+    );
+    assert!(
+        git_capture.contains("config_value_1=\n"),
+        "ambient headers were not cleared"
+    );
+    assert!(
+        git_capture.contains("config_key_2=http.https://github.com/acme/project.git.extraheader")
+    );
+    assert!(git_capture.contains(&format!(
+        "config_value_2=AUTHORIZATION: basic {}",
+        crate::native_v2_delivery::git_auth::encode_basic_credential("test-token")
+    )));
     assert!(git_capture.contains("arg=https://github.com/acme/project.git"));
     assert!(git_capture.contains(&format!(
         "arg={}:refs/heads/zeroshot/v2-test",
@@ -151,7 +164,7 @@ exit 1
     let request = review_request(None);
 
     let error = authority
-        .open_or_update_review(&request, GitHubCredential("test-token"))
+        .open_or_update_review(&request, SourceDeliveryCredential::token("test-token"))
         .await
         .assert_error_with("GitHub API rejection should be preserved");
 
@@ -177,12 +190,12 @@ async fn production_gh_transport_rejects_malformed_or_changed_authority() {
         let authority =
             github_authority(repo.root.path(), PathBuf::from("/usr/bin/git"), gh_program);
         let error = authority
-            .open_or_update_review(&request, GitHubCredential("test-token"))
+            .open_or_update_review(&request, SourceDeliveryCredential::token("test-token"))
             .await
             .assert_error();
         assert!(matches!(
             error,
-            GitHubAuthorityError::Api(_) | GitHubAuthorityError::Identity(_)
+            SourceDeliveryError::Api(_) | SourceDeliveryError::Identity(_)
         ));
         assert!(!error.retryable_operation());
     }

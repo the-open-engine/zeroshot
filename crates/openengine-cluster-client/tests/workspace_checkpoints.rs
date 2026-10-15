@@ -73,6 +73,7 @@ async fn typed_client_lists_and_resumes_using_the_returned_checkpoint_identity()
             connections: BTreeMap::new(),
             connection_resolver: None,
             github_token: None,
+            git_credentials: None,
         })
         .await
         .assert_value();

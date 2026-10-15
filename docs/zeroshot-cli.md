@@ -757,7 +757,7 @@ Commands:
 ```text
 Submit a graph run locally or to a named target.
 
-When --target is omitted, the run uses the current local repository. A foreground run follows NDJSON events until completion. --detach returns after submission. Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the receipt and then detaches. During observation, Ctrl-C detaches without stopping the run. Named-target runs send GH_TOKEN, when set, for source checkout and Git delivery; providers receive it only when the runtime declares GH_TOKEN.
+When --target is omitted, the run uses the selected local folder. A foreground run follows NDJSON events until completion. --detach returns after submission. Ctrl-C before the submission attempt begins cancels the command; once it begins, Ctrl-C waits for the receipt and then detaches. During observation, Ctrl-C detaches without stopping the run. Named-target runs send GH_TOKEN, when set, for source checkout and Git delivery; providers receive it only when the runtime declares GH_TOKEN.
 
 Usage: zeroshot run [OPTIONS] --title <TITLE> --input <FILE>
 
@@ -801,8 +801,14 @@ Options:
 
           The token is used for source checkout and Git delivery. A provider receives it only when the runtime configuration explicitly declares GH_TOKEN.
 
-      --repository <OWNER/NAME>
-          GitHub repository in owner/name form. Requires --target
+      --cwd <FOLDER>
+          Working folder for this run. Defaults to the invoking folder; input files stay relative to it
+
+      --source-connection <KEY>
+          Named connection used only for Git checkout and delivery
+
+      --repository <REPOSITORY>
+          Repository in GitHub owner/name form or a credential-free HTTPS/SSH Git URL. Requires --target
 
       --branch <BRANCH>
           Source branch to resolve for the named run. Requires --target

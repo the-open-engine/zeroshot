@@ -1,9 +1,8 @@
-//! Trusted local-host composition for one native-v2 run in the invoking Git workspace.
+//! Trusted local-host composition for one native-v2 run in a selected folder.
 //!
-//! The local CLI snapshots repository identity, the attached target branch, and exact `HEAD`
-//! before it starts a one-run controller. Provider values are selected only for names declared by
-//! the submitted runtime plan. The candidate then runs as the invoking user in that same
-//! workspace; no cleanup authority owns, resets, or removes workspace mutations.
+//! Repository metadata is optional until the graph asks for Git delivery. Provider values are
+//! selected only for admitted requirements. The candidate runs as the invoking user; the folder
+//! and its mutations remain user-owned.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -11,16 +10,15 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 
 use openengine_cluster_protocol::{
-    RunId, RunSubmission, RuntimeLane, RuntimePlan, SourceBranchId, SourceRepositoryId,
-    SourceRevisionId, ResolvedSource,
+    GitTransportCredentials, RunId, RunSubmission, RuntimeLane, RuntimePlan, ResolvedSource,
 };
 use thiserror::Error;
-use url::Url;
 
 use crate::execution::process::HostedProcessPool;
 use crate::native_v2_candidate::{
-    NativeV2CandidateConfig, NativeV2CandidateError, NativeV2HarnessConfig,
-    build_local_native_v2_candidate_with_github_token, build_local_owner_native_v2_candidate,
+    NativeV2CandidateConfig, NativeV2CandidateDelivery, NativeV2CandidateError,
+    NativeV2HarnessConfig, build_local_native_v2_candidate_with_github_token,
+    build_local_owner_native_v2_candidate,
 };
 use crate::native_v2_claude::{ClaudeAdapterConfig, ClaudeAdapterConfigError, ClaudeProcessEnvironment};
 use crate::native_v2_cli::PreparedRunRequest;
@@ -28,9 +26,8 @@ use crate::native_v2_codex::{NativeV2CodexConfig, NativeV2CodexUser};
 use crate::native_v2_contract::AdmittedRun;
 use crate::native_v2_copilot::{CopilotConfig, CopilotLocalUser};
 use crate::native_v2_capsule::provider_process::{COPILOT_LOCAL_ENVIRONMENT, LocalHarnessEnvironment};
-use crate::native_v2_delivery::{
-    DeliveryTarget, GhCliAuthorityConfig, GhCliDeliveryAuthority, NativeV2DeliveryConfig,
-};
+use crate::native_v2_delivery::NativeV2DeliveryConfig;
+use crate::source_code_provider::adapters::core::{SourceDeliveryFactoryRequest, delivery_authority};
 use crate::native_v2_runner::{NativeNodeRunner, NodeRunner};
 use crate::native_v2_supervisor::{RunEnvironment, RunEnvironmentError};
 
@@ -38,14 +35,28 @@ use crate::native_v2_supervisor::{RunEnvironment, RunEnvironmentError};
 const DEFAULT_SEARCH_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 const MAX_GIT_OUTPUT_BYTES: usize = 16 * 1024;
 
+mod source;
+use source::resolved_git_source;
+mod workspace;
+pub(crate) use workspace::validate_workspace_state;
+use workspace::resolve_workspace;
+
 #[derive(Debug, Error)]
 pub enum LocalCompositionError {
-    #[error("current Git workspace could not be resolved")]
+    #[error("current working folder could not be resolved")]
     Workspace,
+    #[error(
+        "workspace {workspace:?} overlaps state {state:?}; choose another folder or external ZEROSHOT_STATE_DIR"
+    )]
+    WorkspaceStateOverlap { workspace: PathBuf, state: PathBuf },
     #[error("current Git workspace must have an attached branch")]
     DetachedHead,
-    #[error("current Git workspace must have a GitHub origin")]
+    #[error("Git delivery needs a credential-free HTTPS or SSH remote")]
     RepositoryIdentity,
+    #[error("multiple eligible Git remotes were found; configure a branch upstream")]
+    AmbiguousRemote,
+    #[error("Git delivery requires a committed repository source")]
+    DeliverySourceRequired,
     #[error("current Git resolved source is invalid")]
     ResolvedSource,
     #[error("local run identity could not be assigned")]
@@ -54,6 +65,8 @@ pub enum LocalCompositionError {
         "setup and startup require a Docker target; local runs use the invoking machine environment"
     )]
     PreparationRequiresTarget,
+    #[error(transparent)]
+    SourceDelivery(#[from] crate::native_v2_admission::NativeV2AdmissionError),
     #[error(transparent)]
     RunEnvironment(#[from] RunEnvironmentError),
     #[error("local controller storage could not be prepared")]
@@ -78,6 +91,7 @@ pub struct PreparedLocalRun {
     pub submission: RunSubmission,
     pub environment: RunEnvironment,
     pub github_token: Option<String>,
+    pub git_credentials: Option<GitTransportCredentials>,
     pub workspace: PathBuf,
     pub native_environment: BTreeMap<String, String>,
 }
@@ -89,6 +103,7 @@ pub struct LocalProcessCandidateRequest<'a> {
     pub workspace: &'a Path,
     pub storage: &'a Path,
     pub github_token: Option<String>,
+    pub git_credentials: Option<GitTransportCredentials>,
     pub native_environment: &'a BTreeMap<String, String>,
 }
 
@@ -98,36 +113,64 @@ pub fn prepare_local_run(
     current_directory: &Path,
     git_program: &Path,
 ) -> Result<PreparedLocalRun, LocalCompositionError> {
-    let PreparedRunRequest {
-        run_id,
-        intent,
-        connections,
-        github_token,
-        source: _,
-        profile: _,
-    } = request;
-    validate_local_environment(intent.environment.as_ref())?;
-    let environment =
-        RunEnvironment::exact(&intent.runtime, intent.environment.as_ref(), connections)?;
-    let (workspace, source) = local_resolved_source(current_directory, git_program)?;
+    validate_local_environment(request.intent.environment.as_ref())?;
+    let (workspace, source) = prepare_local_source(&request, current_directory, git_program)?;
+    let submission = local_submission(&request.intent, source);
+    let environment = RunEnvironment::exact_for_submission(&submission, request.connections)?;
     let native_environment = capture_local_native_environment(current_directory)?;
     Ok(PreparedLocalRun {
-        delivery_run_id: run_id.clone(),
-        run_id,
-        submission: RunSubmission {
-            title: intent.title,
-            graph: intent.graph,
-            initial_input: intent.initial_input,
-            runtime: intent.runtime,
-            environment: intent.environment,
-            source,
-            submission_key: intent.submission_key,
-        },
+        delivery_run_id: request.run_id.clone(),
+        run_id: request.run_id,
+        submission,
         environment,
-        github_token,
+        github_token: request.github_token,
+        git_credentials: request.git_credentials,
         workspace,
         native_environment,
     })
+}
+
+pub(crate) fn prepare_local_source(
+    request: &PreparedRunRequest,
+    invoking_directory: &Path,
+    git_program: &Path,
+) -> Result<(PathBuf, Option<ResolvedSource>), LocalCompositionError> {
+    let selected = request.cwd.as_deref().unwrap_or(invoking_directory);
+    let selected = if selected.is_absolute() {
+        selected.to_owned()
+    } else {
+        invoking_directory.join(selected)
+    };
+    let workspace = resolve_workspace(&selected, git_program)?;
+    let required =
+        !crate::native_v2_admission::delivery_capabilities(&request.intent.graph.root).is_empty();
+    let source = match &request.source {
+        Some(source) => Some(source.resolved.clone()),
+        None if required => Some(resolved_git_source(
+            &workspace,
+            git_program,
+            request.source_connection.clone(),
+        )?),
+        None => resolved_git_source(&workspace, git_program, None).ok(),
+    };
+    crate::native_v2_admission::validate_source_delivery(source.as_ref(), &request.intent.graph)
+        .map_err(LocalCompositionError::from)?;
+    Ok((workspace, source))
+}
+
+pub(crate) fn local_submission(
+    intent: &crate::native_v2_cli::TargetRunIntent,
+    source: Option<ResolvedSource>,
+) -> RunSubmission {
+    RunSubmission {
+        title: intent.title.clone(),
+        graph: intent.graph.clone(),
+        initial_input: intent.initial_input.clone(),
+        runtime: intent.runtime.clone(),
+        environment: intent.environment.clone(),
+        source,
+        submission_key: intent.submission_key.clone(),
+    }
 }
 
 pub(crate) fn validate_local_environment(
@@ -173,39 +216,9 @@ pub(crate) fn capture_local_native_environment(
 pub(crate) fn local_resolved_source(
     current_directory: &Path,
     git_program: &Path,
-) -> Result<(PathBuf, ResolvedSource), LocalCompositionError> {
-    let workspace = PathBuf::from(git_line(
-        git_program,
-        current_directory,
-        &["rev-parse", "--show-toplevel"],
-    )?);
-    let workspace =
-        std::fs::canonicalize(workspace).map_err(|_| LocalCompositionError::Workspace)?;
-    let branch = git_line(
-        git_program,
-        &workspace,
-        &["symbolic-ref", "--quiet", "--short", "HEAD"],
-    )
-    .map_err(|_| LocalCompositionError::DetachedHead)?;
-    let revision = git_line(
-        git_program,
-        &workspace,
-        &["rev-parse", "--verify", "HEAD^{commit}"],
-    )?;
-    let origin = git_line(
-        git_program,
-        &workspace,
-        &["config", "--get", "remote.origin.url"],
-    )
-    .map_err(|_| LocalCompositionError::RepositoryIdentity)?;
-    let repository = github_repository(&origin).ok_or(LocalCompositionError::RepositoryIdentity)?;
-    let source = ResolvedSource {
-        repository: SourceRepositoryId::new(repository)
-            .map_err(|_| LocalCompositionError::ResolvedSource)?,
-        branch: SourceBranchId::new(branch).map_err(|_| LocalCompositionError::ResolvedSource)?,
-        revision: SourceRevisionId::new(revision)
-            .map_err(|_| LocalCompositionError::ResolvedSource)?,
-    };
+) -> Result<(PathBuf, Option<ResolvedSource>), LocalCompositionError> {
+    let workspace = resolve_workspace(current_directory, git_program)?;
+    let source = resolved_git_source(&workspace, git_program, None).ok();
     Ok((workspace, source))
 }
 
@@ -214,7 +227,21 @@ fn git_line(
     workspace: &Path,
     arguments: &[&str],
 ) -> Result<String, LocalCompositionError> {
-    let output = Command::new(git_program)
+    let value = git_output(git_program, workspace, arguments)?;
+    if value.is_empty() || value.contains(['\r', '\n', '\0']) {
+        return Err(LocalCompositionError::Workspace);
+    }
+    Ok(value)
+}
+
+fn git_output(
+    git_program: &Path,
+    workspace: &Path,
+    arguments: &[&str],
+) -> Result<String, LocalCompositionError> {
+    let mut command = Command::new(git_program);
+    crate::native_v2_delivery::transport::remove_repository_environment(&mut command);
+    let output = command
         .arg("-C")
         .arg(workspace)
         .args(arguments)
@@ -227,43 +254,7 @@ fn git_line(
         return Err(LocalCompositionError::Workspace);
     }
     let value = String::from_utf8(output.stdout).map_err(|_| LocalCompositionError::Workspace)?;
-    let value = value.trim_end_matches(['\r', '\n']);
-    if value.is_empty() || value.contains(['\r', '\n', '\0']) {
-        return Err(LocalCompositionError::Workspace);
-    }
-    Ok(value.to_owned())
-}
-
-fn github_repository(origin: &str) -> Option<String> {
-    let path = github_remote_path(origin)?;
-    let path = path
-        .trim_matches('/')
-        .strip_suffix(".git")
-        .unwrap_or(path.trim_matches('/'));
-    let mut segments = path.split('/');
-    let owner = segments.next()?;
-    let repository = segments.next()?;
-    if owner.is_empty() || repository.is_empty() || segments.next().is_some() {
-        return None;
-    }
-    Some(format!("{owner}/{repository}"))
-}
-
-fn github_remote_path(origin: &str) -> Option<String> {
-    match Url::parse(origin) {
-        Ok(url) => url
-            .host_str()
-            .filter(|host| host.eq_ignore_ascii_case("github.com"))
-            .map(|_| url.path().to_owned()),
-        Err(_) => {
-            let (authority, path) = origin.split_once(':')?;
-            let host = authority
-                .rsplit_once('@')
-                .map_or(authority, |(_, host)| host);
-            host.eq_ignore_ascii_case("github.com")
-                .then(|| path.to_owned())
-        }
-    }
+    Ok(value.trim_end_matches(['\r', '\n']).to_owned())
 }
 
 /// Builds a local-user process candidate rooted in the existing workspace.
@@ -294,32 +285,56 @@ fn build_local_candidate_config(
         workspace,
         storage,
         github_token,
+        git_credentials,
         native_environment,
     } = request;
     let runtime_home = storage.join("runtime");
     prepare_private_directory(&runtime_home)?;
     let lanes = local_lanes(admitted, workspace, &runtime_home, native_environment)?;
-    let target = DeliveryTarget::new(
-        admitted.source.repository.as_str(),
-        admitted.source.branch.as_str(),
-        admitted.source.revision.as_str(),
-    )
-    .map_err(|_| LocalCompositionError::ResolvedSource)?;
-    let mut github_config = GhCliAuthorityConfig::hosted(runtime_home);
-    github_config.git_program = PathBuf::from("git");
-    github_config.gh_program = PathBuf::from("gh");
+    let required_capabilities =
+        crate::native_v2_admission::delivery_capabilities(&admitted.graph.root);
+    let delivery = if required_capabilities.is_empty() {
+        None
+    } else {
+        let source = admitted
+            .source
+            .as_ref()
+            .ok_or(LocalCompositionError::DeliverySourceRequired)?;
+        let mode = crate::native_v2_admission::delivery_mode(&admitted.graph.root)
+            .ok_or(LocalCompositionError::DeliverySourceRequired)?;
+        let target = crate::native_v2_delivery::source_target(source, mode)
+            .map_err(|_| LocalCompositionError::ResolvedSource)?;
+        let authority = delivery_authority(SourceDeliveryFactoryRequest {
+            source,
+            workspace,
+            git_program: Path::new("git"),
+            gh_program: Path::new("gh"),
+            home_directory: &runtime_home,
+            private_directory: &runtime_home,
+            git_identity: None,
+            local_environment: Some(native_environment.clone()),
+            required_capabilities: &required_capabilities,
+            operator_diagnostics: None,
+        })
+        .map_err(|_| LocalCompositionError::ResolvedSource)?;
+        Some(NativeV2CandidateDelivery {
+            config: NativeV2DeliveryConfig {
+                delivery_run_id,
+                adopt_existing_delivery,
+                git_identity: None,
+                workspace: workspace.to_owned(),
+                git_program: PathBuf::from("git"),
+                target,
+                poll: Default::default(),
+            },
+            authority,
+            git_credentials,
+        })
+    };
     let config = NativeV2CandidateConfig {
         lanes,
-        delivery: NativeV2DeliveryConfig {
-            delivery_run_id,
-            adopt_existing_delivery,
-            git_identity: None,
-            workspace: workspace.to_owned(),
-            git_program: PathBuf::from("git"),
-            target,
-            poll: Default::default(),
-        },
-        github: Arc::new(GhCliDeliveryAuthority::new(github_config)),
+        workspace: workspace.to_owned(),
+        delivery,
     };
     if owner_scoped {
         build_local_owner_native_v2_candidate(admitted, config).map_err(Into::into)

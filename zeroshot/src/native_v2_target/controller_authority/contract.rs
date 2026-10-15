@@ -60,6 +60,7 @@ pub(super) struct ControllerDescriptor {
     pub(super) workspace_recovery: bool,
     pub(super) workspace_checkpoints: bool,
     pub(super) node_runtime_lanes: bool,
+    pub(super) git_transport: bool,
 }
 
 pub(super) fn build_controller_descriptor(
@@ -71,6 +72,11 @@ pub(super) fn build_controller_descriptor(
     let workspace_recovery = parse_workspace_recovery(&wire)?;
     let workspace_checkpoints = parse_workspace_checkpoints(&wire)?;
     let node_runtime_lanes = parse_node_runtime_lanes(&wire);
+    let git_transport = wire
+        .extensions
+        .git_transport
+        .as_ref()
+        .is_some_and(|marker| marker.kind == openengine_cluster_protocol::GIT_TRANSPORT_KIND);
     Ok(ControllerDescriptor {
         run_url: same_origin_path(origin, &wire.run_path)?,
         session_url: same_origin_path(origin, &wire.session_path)?,
@@ -78,6 +84,7 @@ pub(super) fn build_controller_descriptor(
         workspace_recovery,
         workspace_checkpoints,
         node_runtime_lanes,
+        git_transport,
     })
 }
 

@@ -2,7 +2,9 @@
 
 `zeroshot acp` is an experimental stdio endpoint that presents one saved local profile as an
 Agent Client Protocol (ACP) agent. Each ACP prompt runs the complete graph once, while the ACP
-session keeps the Git workspace and node provider sessions alive between prompts.
+session keeps the working folder and node provider sessions alive between prompts. Plain folders
+are accepted; a folder inside a Git checkout resolves to its root. The working folder must be disjoint
+from the active Zeroshot state directory.
 
 ## Profile contract
 

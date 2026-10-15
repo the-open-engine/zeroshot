@@ -168,7 +168,10 @@ async fn updated_target_workflow_is_integrated_and_reviewed_before_first_push() 
         let integrated = run_with_adapter(fixture.request(mode), adapter.clone()).await;
 
         fixture.assert_integrated(&authority, &integrated.outcome);
-        assert_eq!(admitted_source.revision.as_str(), fixture.repo.base);
+        assert_eq!(
+            admitted_source.as_ref().assert_value().revision.as_str(),
+            fixture.repo.base
+        );
         let reviewed_head = fixture.head();
 
         // Returning through the authored repair/review loop authorizes the integrated candidate.

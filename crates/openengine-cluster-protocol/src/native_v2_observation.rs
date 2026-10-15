@@ -197,7 +197,8 @@ macro_rules! define_run_status_projection {
             $(#[$title_attribute])?
             pub title: RunTitle,
             $(#[$source_attribute])?
-            pub source: ResolvedSource,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ResolvedSource>,
             $(#[$size_attribute])?
             pub size: RunSize,
             $(#[$cursor_attribute])?
@@ -267,7 +268,8 @@ pub struct RunWatchEventNotification {
     pub subscription_id: SubscriptionId,
     pub run_id: RunId,
     pub title: RunTitle,
-    pub source: ResolvedSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ResolvedSource>,
     pub size: RunSize,
     pub cursor: Cursor,
     pub status: RunStatus,

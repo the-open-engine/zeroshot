@@ -96,7 +96,8 @@ can leave the `ui` feature disabled.
 
 ## Prepare a local run
 
-Run Zeroshot from a Git worktree, and install each agent harness named by the runtime plan:
+Choose an existing working folder with `--cwd FOLDER`, or use the invoking folder. Local runs without
+Git delivery do not need a repository. Install each agent harness named by the runtime plan:
 
 - install and sign in to Codex for `"harness": "codex"`;
 - install and sign in to Claude Code for `"harness": "claude"`;

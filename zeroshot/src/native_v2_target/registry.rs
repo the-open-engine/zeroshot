@@ -17,6 +17,13 @@ const MAX_REGISTRY_BYTES: u64 = 1024 * 1024;
 const RECOVERY_AUTHORIZATION_VERSION: u32 = 1;
 const MAX_RECOVERY_AUTHORIZATION_BYTES: u64 = 1024 * 1024;
 
+/// Immutable, secret-free authority retained for one direct-target run and its successors.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RecoveryConnectionAuthorization {
+    pub connections: RunConnectionRequirements,
+    pub source_connections: RunConnectionRequirements,
+}
+
 pub trait TargetRegistry: Send + Sync {
     fn insert(&self, target: TargetRecord) -> Result<(), TargetConnectorError>;
     fn get(&self, name: &str) -> Result<TargetRecord, TargetConnectorError>;
@@ -31,6 +38,29 @@ pub trait TargetRegistry: Send + Sync {
         target_id: &str,
         run_id: &RunId,
     ) -> Result<RunConnectionRequirements, TargetConnectorError>;
+    fn record_recovery_authorization_with_source(
+        &self,
+        target_id: &str,
+        run_id: &RunId,
+        authorization: &RecoveryConnectionAuthorization,
+    ) -> Result<(), TargetConnectorError> {
+        if !authorization.source_connections.is_empty() {
+            return Err(TargetConnectorError::RecoveryAuthorizationUnavailable);
+        }
+        self.record_recovery_authorization(target_id, run_id, &authorization.connections)
+    }
+
+    fn recovery_authorization_with_source(
+        &self,
+        target_id: &str,
+        run_id: &RunId,
+    ) -> Result<RecoveryConnectionAuthorization, TargetConnectorError> {
+        Ok(RecoveryConnectionAuthorization {
+            connections: self.recovery_authorization(target_id, run_id)?,
+            source_connections: RunConnectionRequirements::new(),
+        })
+    }
+
     fn remove_recovery_authorization(
         &self,
         target_id: &str,
@@ -98,13 +128,29 @@ impl TargetRegistry for FileTargetRegistry {
         run_id: &RunId,
         requirements: &RunConnectionRequirements,
     ) -> Result<(), TargetConnectorError> {
-        if !canonical_requirements(requirements) {
+        self.record_recovery_authorization_with_source(
+            target_id,
+            run_id,
+            &RecoveryConnectionAuthorization {
+                connections: requirements.clone(),
+                source_connections: RunConnectionRequirements::new(),
+            },
+        )
+    }
+
+    fn record_recovery_authorization_with_source(
+        &self,
+        target_id: &str,
+        run_id: &RunId,
+        authorized: &RecoveryConnectionAuthorization,
+    ) -> Result<(), TargetConnectorError> {
+        if !valid_authorization(authorized) {
             return Err(TargetConnectorError::RecoveryAuthorizationInvalid);
         }
         let path = recovery_authorization_path(&self.path, target_id, run_id)?;
         let _lock = self.lock_recovery_authorizations()?;
         if let Some(stored) = read_recovery_authorization(&path)? {
-            return if stored.matches(target_id, run_id, requirements) {
+            return if stored.matches(target_id, run_id, authorized) {
                 Ok(())
             } else {
                 Err(TargetConnectorError::RecoveryAuthorizationMismatch)
@@ -114,7 +160,8 @@ impl TargetRegistry for FileTargetRegistry {
             version: RECOVERY_AUTHORIZATION_VERSION,
             target_id: target_id.to_owned(),
             run_id: run_id.clone(),
-            connection_requirements: requirements.clone(),
+            connection_requirements: authorized.connections.clone(),
+            source_connections: authorized.source_connections.clone(),
         };
         write_recovery_authorization(&path, &authorization)
     }
@@ -124,6 +171,15 @@ impl TargetRegistry for FileTargetRegistry {
         target_id: &str,
         run_id: &RunId,
     ) -> Result<RunConnectionRequirements, TargetConnectorError> {
+        self.recovery_authorization_with_source(target_id, run_id)
+            .map(|authority| authority.connections)
+    }
+
+    fn recovery_authorization_with_source(
+        &self,
+        target_id: &str,
+        run_id: &RunId,
+    ) -> Result<RecoveryConnectionAuthorization, TargetConnectorError> {
         let path = recovery_authorization_path(&self.path, target_id, run_id)?;
         let _lock = self.lock_recovery_authorizations()?;
         let authorization = read_recovery_authorization(&path)?
@@ -131,7 +187,10 @@ impl TargetRegistry for FileTargetRegistry {
         if !authorization.matches_identity(target_id, run_id) {
             return Err(TargetConnectorError::RecoveryAuthorizationInvalid);
         }
-        Ok(authorization.connection_requirements)
+        Ok(RecoveryConnectionAuthorization {
+            connections: authorization.connection_requirements,
+            source_connections: authorization.source_connections,
+        })
     }
 
     fn remove_recovery_authorization(
@@ -170,6 +229,8 @@ struct RecoveryAuthorization {
     target_id: String,
     run_id: RunId,
     connection_requirements: RunConnectionRequirements,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    source_connections: RunConnectionRequirements,
 }
 
 impl RecoveryAuthorization {
@@ -177,16 +238,21 @@ impl RecoveryAuthorization {
         self.version == RECOVERY_AUTHORIZATION_VERSION
             && self.target_id == target_id
             && self.run_id == *run_id
-            && canonical_requirements(&self.connection_requirements)
+            && valid_authorization(&RecoveryConnectionAuthorization {
+                connections: self.connection_requirements.clone(),
+                source_connections: self.source_connections.clone(),
+            })
     }
 
     fn matches(
         &self,
         target_id: &str,
         run_id: &RunId,
-        requirements: &RunConnectionRequirements,
+        authorization: &RecoveryConnectionAuthorization,
     ) -> bool {
-        self.matches_identity(target_id, run_id) && self.connection_requirements == *requirements
+        self.matches_identity(target_id, run_id)
+            && self.connection_requirements == authorization.connections
+            && self.source_connections == authorization.source_connections
     }
 }
 
@@ -211,6 +277,28 @@ fn canonical_requirements(requirements: &RunConnectionRequirements) -> bool {
                 .windows(2)
                 .all(|pair| pair[0].as_str() < pair[1].as_str())
     })
+}
+
+fn valid_authorization(authorization: &RecoveryConnectionAuthorization) -> bool {
+    canonical_requirements(&authorization.connections)
+        && authorization.source_connections.len() <= 1
+        && canonical_requirements(&authorization.source_connections)
+        && authorization
+            .source_connections
+            .iter()
+            .all(|(key, fields)| {
+                valid_source_fields(fields)
+                    && authorization
+                        .connections
+                        .get(key)
+                        .is_some_and(|all| fields.iter().all(|field| all.contains(field)))
+            })
+}
+
+fn valid_source_fields(fields: &[openengine_cluster_protocol::EnvironmentVariableName]) -> bool {
+    let names: Vec<_> = fields.iter().map(|field| field.as_str()).collect();
+    names == ["GIT_PASSWORD", "GIT_USERNAME"]
+        || names == ["GIT_SSH_KNOWN_HOSTS", "GIT_SSH_PRIVATE_KEY"]
 }
 
 fn read_recovery_authorization(

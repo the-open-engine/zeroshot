@@ -31,6 +31,8 @@ fn agent_binding() -> NodeRuntimeBinding {
 
 fn source() -> ResolvedSource {
     ResolvedSource {
+        remote: None,
+
         repository: SourceRepositoryId::new("acme/project").assert_value(),
         branch: SourceBranchId::new("main").assert_value(),
         revision: SourceRevisionId::new("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").assert_value(),
@@ -78,7 +80,7 @@ async fn admitted_with_delivery() -> AdmittedRun {
                 graph,
                 initial_input: Value::Null,
                 runtime,
-                source: source(),
+                source: Some(source()),
                 submission_key: IdempotencyKey::new("required-delivery-gate").assert_value(),
             },
             DeliveryPolicy::Required,
@@ -99,7 +101,7 @@ async fn admitted_without_delivery() -> AdmittedRun {
                 size: RunSize::Medium,
                 nodes: BTreeMap::new(),
             },
-            source: source(),
+            source: Some(source()),
             submission_key: IdempotencyKey::new("optional-delivery-gate").assert_value(),
         })
         .await
@@ -508,7 +510,7 @@ async fn cancellation_delivery_supervisor(
             graph,
             initial_input: Value::Null,
             runtime,
-            source: source(),
+            source: Some(source()),
             submission_key: submission_key.clone(),
         })
         .await

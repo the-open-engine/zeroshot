@@ -54,7 +54,7 @@ fn status_exposes_every_parallel_execution_without_private_identity() {
     let mut result = RunStatusResult {
         run_id: RunId::new("run-1"),
         title: title(),
-        source: source(),
+        source: Some(source()),
         size: RunSize::Medium,
         at_cursor: Cursor::new("v2:7"),
         status: running_status(),
@@ -177,7 +177,7 @@ fn durable_events_carry_run_and_stable_cursor() {
         subscription_id: SubscriptionId::new("watch-1"),
         run_id: RunId::new("run-1"),
         title: title(),
-        source: source(),
+        source: Some(source()),
         size: RunSize::Medium,
         cursor: Cursor::new("v2:8"),
         status: RunStatus::Finished {
@@ -296,7 +296,7 @@ fn force_is_the_only_stop_shape_and_returns_durable_status() {
     let result = RunForceResult {
         run_id: RunId::new("run-1"),
         title: title(),
-        source: source(),
+        source: Some(source()),
         size: RunSize::Medium,
         at_cursor: Cursor::new("v2:10"),
         status: RunStatus::Stopping {

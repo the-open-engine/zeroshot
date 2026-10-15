@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use agent_client_protocol::{self as acp, Agent as _};
 use async_trait::async_trait;
-use fs2::FileExt as _;
+use fs2::FileExt;
 use serde_json::{json, Value};
 #[cfg(feature = "ui")]
 use tokio::io::{AsyncBufReadExt as _, BufReader};
@@ -55,6 +55,44 @@ async fn acp_turns_reuse_provider_session_and_remain_observable() {
     assert_eq!(capture.matches("arg=resume\n").count(), 1);
     assert_eq!(capture.matches("arg=acp-test-thread\n").count(), 1);
     fixture.assert_durable_runs(&run_ids);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_plain_folder_cwd_ignores_ambient_git_repository_redirects() {
+    let fixture = AcpFixture::new();
+    fixture.install_profile();
+    let selected = fixture._root.path().join("plain-selected");
+    std::fs::create_dir(&selected).unwrap();
+    let mut command = fixture.server_command(&fixture.workspace, &fixture.path);
+    command
+        .env("GIT_DIR", fixture.workspace.join(".git"))
+        .env("GIT_COMMON_DIR", fixture.workspace.join(".git"))
+        .env("GIT_WORK_TREE", &fixture.workspace);
+    let (run_ids, messages) = fixture
+        .run_session_at(command.spawn().unwrap(), selected.clone(), false)
+        .await;
+    assert_eq!(messages, ["first", "second"]);
+    let capture = std::fs::read_to_string(&fixture.capture).unwrap();
+    let expected = format!("cwd={}", selected.display());
+    let starts: Vec<_> = capture
+        .lines()
+        .filter(|line| line.starts_with("cwd="))
+        .collect();
+    assert_eq!(starts, [expected.as_str(), expected.as_str()]);
+    for run_id in run_ids {
+        let output = Command::new(&fixture.executable)
+            .args(["status", &run_id])
+            .envs(fixture.environment())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let status: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            status["source"].is_null(),
+            "plain ACP folder acquired source: {status}"
+        );
+    }
+    assert!(!selected.join(".git").exists());
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -104,7 +142,7 @@ async fn active_turn_interruption_is_terminal_and_bounded() {
                         None
                     }
                     Interruption::LoseWorkspace => {
-                        let lease = only_file(&state.join("workspaces"));
+                        let lease = exclusive_workspace_lease(&state.join("workspaces"));
                         std::fs::remove_file(&lease).unwrap();
                         let replacement = OpenOptions::new()
                             .create_new(true)
@@ -384,6 +422,10 @@ impl AcpFixture {
     }
 
     fn spawn_server_in(&self, directory: &Path, path: &str) -> tokio::process::Child {
+        self.server_command(directory, path).spawn().unwrap()
+    }
+
+    fn server_command(&self, directory: &Path, path: &str) -> tokio::process::Command {
         let mut command = tokio::process::Command::new(&self.executable);
         command
             .args(["acp", "--profile", "local:acp-test"])
@@ -394,7 +436,7 @@ impl AcpFixture {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        command.spawn().unwrap()
+        command
     }
 
     fn spawn_stalled_server(&self) -> tokio::process::Child {
@@ -433,11 +475,19 @@ impl AcpFixture {
     }
 
     async fn run_session(&self) -> (Vec<String>, Vec<String>) {
-        let mut child = self.spawn_server();
+        self.run_session_at(self.spawn_server(), self.workspace.clone(), true)
+            .await
+    }
+
+    async fn run_session_at(
+        &self,
+        mut child: tokio::process::Child,
+        session_workspace: PathBuf,
+        advance_source: bool,
+    ) -> (Vec<String>, Vec<String>) {
         let outgoing = child.stdin.take().unwrap();
         let incoming = child.stdout.take().unwrap();
         let client = Arc::new(RecordingClient::default());
-        let session_workspace = self.workspace.clone();
         let result = tokio::task::LocalSet::new()
             .run_until(async move {
                 let (connection, io, session_id) = open_session(
@@ -470,7 +520,7 @@ impl AcpFixture {
                     let zeroshot = meta.get("zeroshot").unwrap();
                     run_ids.push(zeroshot["runId"].as_str().unwrap().to_owned());
                     assert_eq!(zeroshot["rawOutput"]["response"], expected);
-                    if index == 0 {
+                    if index == 0 && advance_source {
                         std::fs::write(session_workspace.join("turn.txt"), "second revision\n")
                             .unwrap();
                         run(&session_workspace, "git", &["add", "turn.txt"]);
@@ -648,6 +698,31 @@ async fn wait_for_file(path: &Path) {
     .unwrap_or_else(|_| panic!("timed out waiting for {}", path.display()));
 }
 
+fn exclusive_workspace_lease(directory: &Path) -> PathBuf {
+    let mut owned = Vec::new();
+    for entry in std::fs::read_dir(directory).unwrap() {
+        let path = entry.unwrap().path();
+        let probe = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        match FileExt::try_lock_shared(&probe) {
+            Ok(()) => FileExt::unlock(&probe).unwrap(),
+            Err(error) => {
+                assert_eq!(
+                    error.raw_os_error(),
+                    fs2::lock_contended_error().raw_os_error()
+                );
+                owned.push(path);
+            }
+        }
+    }
+    assert_eq!(owned.len(), 1, "workspace must have one exclusive lease");
+    owned.pop().unwrap()
+}
+
+#[cfg(feature = "ui")]
 fn only_file(directory: &Path) -> PathBuf {
     let files = std::fs::read_dir(directory)
         .unwrap()
@@ -724,6 +799,7 @@ if [ -e {gate:?} ]; then
   while [ ! -e {release:?} ]; do /usr/bin/sleep 0.02; done
 fi
 {{
+  /usr/bin/printf 'cwd=%s\n' "$(/bin/pwd)"
   for argument in "$@"; do /usr/bin/printf 'arg=%s\n' "$argument"; done
   /usr/bin/printf '%s\n' '---'
 }} >> {capture:?}

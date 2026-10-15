@@ -26,6 +26,9 @@ fn local_request(run_id: RunId) -> PreparedRunRequest {
         intent,
         connections: BTreeMap::new(),
         github_token: Some("github-token".to_owned()),
+        git_credentials: None,
+        cwd: None,
+        source_connection: None,
         source: None,
         profile: None,
     }
@@ -136,7 +139,7 @@ fn assert_local_harness_paths(
 }
 
 #[test]
-fn local_preparation_snapshots_git_identity_and_rejects_ambiguous_sources() {
+fn local_preparation_snapshots_optional_git_identity_and_accepts_generic_sources() {
     let root = TestDirectory::new("local-git-preparation");
     git(root.path(), &["init", "--initial-branch=main"]);
     git(root.path(), &["config", "user.name", "Zeroshot Test"]);
@@ -169,15 +172,30 @@ fn local_preparation_snapshots_git_identity_and_rejects_ambiguous_sources() {
         std::fs::canonicalize(root.path()).assert_value()
     );
     assert_eq!(
-        prepared.submission.source.repository.as_str(),
+        prepared
+            .submission
+            .source
+            .as_ref()
+            .unwrap()
+            .repository
+            .as_str(),
         "open-engine/zeroshot"
     );
-    assert_eq!(prepared.submission.source.branch.as_str(), "main");
+    assert_eq!(
+        prepared.submission.source.as_ref().unwrap().branch.as_str(),
+        "main"
+    );
     assert_eq!(prepared.github_token.as_deref(), Some("github-token"));
 
     git(root.path(), &["checkout", "--detach"]);
+    assert!(
+        local_resolved_source(&nested, Path::new("git"))
+            .assert_value()
+            .1
+            .is_none()
+    );
     assert!(matches!(
-        local_resolved_source(&nested, Path::new("git")),
+        resolved_git_source(root.path(), Path::new("git"), None),
         Err(LocalCompositionError::DetachedHead)
     ));
     git(root.path(), &["checkout", "main"]);
@@ -190,10 +208,16 @@ fn local_preparation_snapshots_git_identity_and_rejects_ambiguous_sources() {
             "https://example.invalid/open-engine/zeroshot.git",
         ],
     );
-    assert!(matches!(
-        local_resolved_source(&nested, Path::new("git")),
-        Err(LocalCompositionError::RepositoryIdentity)
-    ));
+    let source = local_resolved_source(&nested, Path::new("git"))
+        .assert_value()
+        .1
+        .unwrap();
+    let remote = source.remote.unwrap();
+    assert_eq!(
+        remote.url.as_str(),
+        "https://example.invalid/open-engine/zeroshot.git"
+    );
+    assert!(remote.forge.is_none());
 }
 
 #[tokio::test]
@@ -516,12 +540,23 @@ fn parses_canonical_github_remote_forms() {
         "git@github.com:open-engine/zeroshot.git",
     ] {
         assert_eq!(
-            github_repository(remote).as_deref(),
+            crate::source_code_provider::adapters::core::github_repository_reference(remote)
+                .as_deref(),
             Some("open-engine/zeroshot")
         );
     }
-    assert!(github_repository("https://example.com/open-engine/zeroshot.git").is_none());
-    assert!(github_repository("https://github.com/extra/open-engine/zeroshot").is_none());
+    assert!(
+        crate::source_code_provider::adapters::core::github_repository_reference(
+            "https://example.com/open-engine/zeroshot.git"
+        )
+        .is_none()
+    );
+    assert!(
+        crate::source_code_provider::adapters::core::github_repository_reference(
+            "https://github.com/extra/open-engine/zeroshot"
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -538,5 +573,48 @@ fn local_preparation_rejects_target_hooks_before_resolving_source_or_installing_
             ),
             Err(LocalCompositionError::PreparationRequiresTarget)
         ));
+    }
+}
+
+#[test]
+fn a_bare_repository_is_a_plain_folder_but_cannot_supply_git_delivery() {
+    let root = TestDirectory::new("bare-local-source");
+    git(root.path(), &["init", "--bare", "--initial-branch", "main"]);
+    let (workspace, source) = local_resolved_source(root.path(), Path::new("git")).assert_value();
+    assert_eq!(workspace, std::fs::canonicalize(root.path()).assert_value());
+    assert!(source.is_none());
+    assert!(matches!(
+        resolved_git_source(root.path(), Path::new("git"), None),
+        Err(LocalCompositionError::DeliverySourceRequired)
+    ));
+}
+
+#[test]
+fn selected_local_cwd_discovers_a_registered_contributed_forge() {
+    use crate::source_code_provider::adapters::contributed::registration_tests::{
+        HTTPS_REMOTE, SSH_REMOTE, assert_source,
+    };
+    let repo = crate::native_v2_candidate::test_support::TestGitRepository::delivery();
+    let nested = repo.workspace.join("nested");
+    std::fs::create_dir(&nested).assert_value();
+    let invoking = TestDirectory::new("contribution-invoker");
+    for remote in [HTTPS_REMOTE, SSH_REMOTE] {
+        git(&repo.workspace, &["remote", "set-url", "origin", remote]);
+        let mut request = local_request(RunId::new("contribution-discovery"));
+        request.cwd = Some(nested.clone());
+        let (workspace, source) =
+            prepare_local_source(&request, invoking.path(), Path::new("git")).assert_value();
+        assert_eq!(
+            workspace,
+            std::fs::canonicalize(&repo.workspace).assert_value()
+        );
+        let source = source.assert_value();
+        assert_source(&source, remote);
+        assert_eq!(source.revision.as_str(), repo.base);
+        crate::source_code_provider::adapters::core::validate_delivery_source(
+            &source,
+            &[crate::source_code_provider::SourceCapability::PullRequest],
+        )
+        .assert_value();
     }
 }

@@ -73,7 +73,7 @@ pub(super) struct FakeGitHub {
     pub(super) inspections: AtomicUsize,
     pub(super) feedback_reads: AtomicUsize,
     pub(super) delivery_reads: AtomicUsize,
-    pub(super) reviews: Mutex<Vec<GitHubReviewRequest>>,
+    pub(super) reviews: Mutex<Vec<SourceReviewRequest>>,
     pub(super) review_sync_attempts: AtomicUsize,
     pub(super) conflict_materializations: AtomicUsize,
     pub(super) target_reconciliations: AtomicUsize,
@@ -99,7 +99,7 @@ impl FakeGitHub {
         }
     }
 
-    fn review_state(&self, inspection: usize) -> GitHubReviewState {
+    fn review_state(&self, inspection: usize) -> SourceReviewState {
         match self.script {
             Script::NoCi
             | Script::Feedback
@@ -125,13 +125,13 @@ impl FakeGitHub {
             Script::ConflictThenMerges | Script::StaleConflictThenMerges => {
                 self.conflict_repair_state()
             }
-            Script::PendingReadiness => open_review(GitHubChecks::Pending),
-            Script::TerminalClosed => GitHubReviewState::Closed,
+            Script::PendingReadiness => open_review(SourceChecks::Pending),
+            Script::TerminalClosed => SourceReviewState::Closed,
             _ => self.static_review_state(),
         }
     }
 
-    fn static_review_state(&self) -> GitHubReviewState {
+    fn static_review_state(&self) -> SourceReviewState {
         if self.exercises_head_update() || matches!(self.script, Script::RepeatedBehind) {
             return self.no_ci_state();
         }
@@ -139,65 +139,65 @@ impl FakeGitHub {
             Script::CiFailed | Script::ReconcileCompletesThenUnavailable => {
                 open_review(failed_checks())
             }
-            Script::LargeCiDiagnostic => open_review(GitHubChecks::Failed {
+            Script::LargeCiDiagnostic => open_review(SourceChecks::Failed {
                 diagnostic: "failed check: build\n".to_owned() + &"λ🦀".repeat(20_000),
             }),
             Script::Conflict | Script::ConflictMaterializationFailsAfterMutation => {
-                GitHubReviewState::Conflict
+                SourceReviewState::Conflict
             }
-            Script::ConflictAtMerge => open_review(GitHubChecks::NotRequired),
+            Script::ConflictAtMerge => open_review(SourceChecks::NotRequired),
             Script::DeferredMerge => self.no_ci_state(),
             Script::ProtectedBranch | Script::NeverConfirmsMerge => {
-                open_review(GitHubChecks::Passed)
+                open_review(SourceChecks::Passed)
             }
-            _ => open_review(GitHubChecks::Pending),
+            _ => open_review(SourceChecks::Pending),
         }
     }
 
-    fn no_ci_state(&self) -> GitHubReviewState {
+    fn no_ci_state(&self) -> SourceReviewState {
         if self.merge_requested.load(Ordering::SeqCst) {
             merged_review()
         } else {
-            open_review(GitHubChecks::NotRequired)
+            open_review(SourceChecks::NotRequired)
         }
     }
 
-    fn ci_repair_state(&self, inspection: usize) -> GitHubReviewState {
+    fn ci_repair_state(&self, inspection: usize) -> SourceReviewState {
         if inspection == 1 {
             return open_review(failed_checks());
         }
         if self.merge_requested.load(Ordering::SeqCst) {
             merged_review()
         } else {
-            open_review(GitHubChecks::Passed)
+            open_review(SourceChecks::Passed)
         }
     }
 
-    fn conflict_repair_state(&self) -> GitHubReviewState {
+    fn conflict_repair_state(&self) -> SourceReviewState {
         if self.conflict_materializations.load(Ordering::SeqCst) == 0 {
-            GitHubReviewState::Conflict
+            SourceReviewState::Conflict
         } else {
             self.no_ci_state()
         }
     }
 
-    fn registration_race_state(&self, inspection: usize) -> GitHubReviewState {
+    fn registration_race_state(&self, inspection: usize) -> SourceReviewState {
         if self.merge_requested.load(Ordering::SeqCst) {
             merged_review()
         } else if inspection == 1 {
-            open_review(GitHubChecks::NotRequired)
+            open_review(SourceChecks::NotRequired)
         } else {
-            open_review(GitHubChecks::Passed)
+            open_review(SourceChecks::Passed)
         }
     }
 
-    fn multiple_registration_waves_state(&self, inspection: usize) -> GitHubReviewState {
+    fn multiple_registration_waves_state(&self, inspection: usize) -> SourceReviewState {
         if self.merge_requested.load(Ordering::SeqCst) {
             merged_review()
         } else if matches!(inspection, 2 | 4) {
-            open_review(GitHubChecks::Pending)
+            open_review(SourceChecks::Pending)
         } else {
-            open_review(GitHubChecks::Passed)
+            open_review(SourceChecks::Passed)
         }
     }
 
@@ -241,26 +241,26 @@ impl FakeGitHub {
 
     fn immediate_head_update_outcome(
         &self,
-    ) -> Option<Result<GitHubHeadUpdateOutcome, GitHubAuthorityError>> {
+    ) -> Option<Result<SourceHeadUpdateOutcome, SourceDeliveryError>> {
         match self.script {
-            Script::HeadUpdatePending => Some(Ok(GitHubHeadUpdateOutcome::Pending)),
-            Script::HeadUpdatePermanentFailure => Some(Err(GitHubAuthorityError::api(
+            Script::HeadUpdatePending => Some(Ok(SourceHeadUpdateOutcome::Pending)),
+            Script::HeadUpdatePermanentFailure => Some(Err(SourceDeliveryError::api(
                 Some(422),
                 format!(
                     "branch update rejected test-token {}",
                     git_auth::encode_basic_credential("test-token")
                 ),
             ))),
-            Script::HeadUpdateConflict => Some(Ok(GitHubHeadUpdateOutcome::Conflict)),
+            Script::HeadUpdateConflict => Some(Ok(SourceHeadUpdateOutcome::Conflict)),
             Script::HeadUpdateUnavailable
             | Script::HeadRecoveryReviewMissing
             | Script::HeadRecoveryClosed
-            | Script::HeadRecoveryMerged => Some(Err(GitHubAuthorityError::Unavailable)),
+            | Script::HeadRecoveryMerged => Some(Err(SourceDeliveryError::Unavailable)),
             _ => None,
         }
     }
 
-    pub(super) fn review_requests(&self) -> MutexGuard<'_, Vec<GitHubReviewRequest>> {
+    pub(super) fn review_requests(&self) -> MutexGuard<'_, Vec<SourceReviewRequest>> {
         self.reviews.lock().assert_value_with("review request lock")
     }
 }
@@ -300,32 +300,35 @@ fn advance_conflicting_target(remote: &Path) {
     git(&target, &["push", "origin", "main"]);
 }
 
-fn merged_review() -> GitHubReviewState {
-    GitHubReviewState::Merged {
+fn merged_review() -> SourceReviewState {
+    SourceReviewState::Merged {
         merge_revision: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned(),
     }
 }
 
-fn open_review(checks: GitHubChecks) -> GitHubReviewState {
-    GitHubReviewState::Open { checks }
+fn open_review(checks: SourceChecks) -> SourceReviewState {
+    SourceReviewState::Open { checks }
 }
 
-fn failed_checks() -> GitHubChecks {
-    GitHubChecks::Failed {
+fn failed_checks() -> SourceChecks {
+    SourceChecks::Failed {
         diagnostic: "Required CI checks failed:\n- hidden policy concluded failure".to_owned(),
     }
 }
 
 #[async_trait]
-impl GitHubDeliveryAuthority for FakeGitHub {
+impl SourceDeliveryAuthority for FakeGitHub {
+    fn forge_credential_field(&self) -> Option<&'static str> {
+        Some(GITHUB_TOKEN_ENV)
+    }
     async fn observe_delivery(
         &self,
-        request: GitHubDeliveryRead<'_>,
-        _credential: GitHubCredential<'_>,
-    ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError> {
+        request: SourceDeliveryRead<'_>,
+        _credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceDeliverySnapshot, SourceDeliveryError> {
         let read = self.delivery_reads.fetch_add(1, Ordering::SeqCst);
         if matches!(self.script, Script::PreflightRefusedAfterTransientRead) && read == 0 {
-            return Err(GitHubAuthorityError::Unavailable);
+            return Err(SourceDeliveryError::Unavailable);
         }
         let output = tokio::process::Command::new("/usr/bin/git")
             .arg("-C")
@@ -351,14 +354,14 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             let reviews = self.reviews.lock().assert_value();
             let request = reviews.last()?;
             let state = match self.script {
-                Script::HeadRecoveryClosed => GitHubReviewState::Closed,
+                Script::HeadRecoveryClosed => SourceReviewState::Closed,
                 Script::HeadRecoveryMerged => merged_review(),
-                Script::PreflightClosed => GitHubReviewState::Closed,
+                Script::PreflightClosed => SourceReviewState::Closed,
                 Script::PreflightMerged => merged_review(),
                 _ => self.no_ci_state(),
             };
             Some(
-                GitHubReviewReceipt {
+                SourceReviewReceipt {
                     review_id: "17".to_owned(),
                     repository: request.target.repository.clone(),
                     target_branch: request.target.target_branch.clone(),
@@ -368,7 +371,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
                 .observation(state),
             )
         });
-        Ok(GitHubDeliverySnapshot {
+        Ok(SourceDeliverySnapshot {
             review,
             head_revision,
         })
@@ -376,9 +379,9 @@ impl GitHubDeliveryAuthority for FakeGitHub {
 
     async fn reconcile_delivery_target(
         &self,
-        request: GitHubTargetReconciliation<'_>,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubTargetIntegration, GitHubAuthorityError> {
+        request: SourceTargetReconciliation<'_>,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceTargetIntegration, SourceDeliveryError> {
         let attempt = self.target_reconciliations.fetch_add(1, Ordering::SeqCst);
         let authority = crate::native_v2_candidate::test_support::local_delivery_authority(
             request.workspace,
@@ -390,9 +393,9 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         if matches!(self.script, Script::TargetIntegrationResponseLost) && attempt == 0 {
             assert!(matches!(
                 result.outcome,
-                GitHubReconciliationOutcome::NeedsWork(_)
+                SourceReconciliationOutcome::NeedsWork(_)
             ));
-            return Err(GitHubAuthorityError::api(
+            return Err(SourceDeliveryError::api(
                 Some(503),
                 "target integration completed but confirmation was unavailable",
             ));
@@ -400,9 +403,9 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         if matches!(self.script, Script::LaterTargetIntegrationFails) && attempt == 1 {
             assert!(matches!(
                 result.outcome,
-                GitHubReconciliationOutcome::NeedsWork(_)
+                SourceReconciliationOutcome::NeedsWork(_)
             ));
-            return Err(GitHubAuthorityError::repairable(
+            return Err(SourceDeliveryError::repairable(
                 "target integration completed but its response was malformed",
             ));
         }
@@ -411,13 +414,13 @@ impl GitHubDeliveryAuthority for FakeGitHub {
 
     async fn reconcile_delivery_head(
         &self,
-        request: GitHubHeadReconciliation<'_>,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubReconciliationOutcome, GitHubAuthorityError> {
+        request: SourceHeadReconciliation<'_>,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceReconciliationOutcome, SourceDeliveryError> {
         if matches!(self.script, Script::PreflightRefusedAfterTransientRead)
             && request.published.head_revision != request.observed.head_revision
         {
-            return Ok(GitHubReconciliationOutcome::Refused(
+            return Ok(SourceReconciliationOutcome::Refused(
                 "the remote branch no longer has lineage-owned ancestry".to_owned(),
             ));
         }
@@ -438,18 +441,18 @@ impl GitHubDeliveryAuthority for FakeGitHub {
                     request.workspace,
                     &["merge", "--ff-only", &request.observed.head_revision],
                 );
-                return Err(GitHubAuthorityError::api(
+                return Err(SourceDeliveryError::api(
                     Some(503),
                     "operation completed but confirmation was unavailable",
                 ));
             }
-            return Ok(GitHubReconciliationOutcome::Unchanged);
+            return Ok(SourceReconciliationOutcome::Unchanged);
         }
         if request.published.head_revision == request.observed.head_revision {
-            return Ok(GitHubReconciliationOutcome::Unchanged);
+            return Ok(SourceReconciliationOutcome::Unchanged);
         }
         self.synchronize_review_head(
-            GitHubHeadSynchronization {
+            SourceHeadSynchronization {
                 workspace: request.workspace,
                 previous: request.published,
                 updated: request.observed,
@@ -458,9 +461,9 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         )
         .await?;
         Ok(if request.authorized_update {
-            GitHubReconciliationOutcome::Adopted
+            SourceReconciliationOutcome::Adopted
         } else {
-            GitHubReconciliationOutcome::NeedsWork(
+            SourceReconciliationOutcome::NeedsWork(
                 "reconciled an observed remote update".to_owned(),
             )
         })
@@ -468,9 +471,9 @@ impl GitHubDeliveryAuthority for FakeGitHub {
 
     async fn push_branch(
         &self,
-        request: &GitHubPushRequest,
-        credential: GitHubCredential<'_>,
-    ) -> Result<(), GitHubAuthorityError> {
+        request: &SourcePushRequest,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<(), SourceDeliveryError> {
         assert_eq!(credential.expose(), "test-token");
         if matches!(self.script, Script::PushRejected) {
             let mut command = tokio::process::Command::new("/bin/sh");
@@ -488,7 +491,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             return Err(failure.into());
         }
         if !push_succeeded(request, &self.remote).await {
-            return Err(GitHubAuthorityError::Rejected);
+            return Err(SourceDeliveryError::Rejected);
         }
         self.pushed.store(true, Ordering::SeqCst);
         Ok(())
@@ -496,15 +499,15 @@ impl GitHubDeliveryAuthority for FakeGitHub {
 
     async fn open_or_update_review(
         &self,
-        request: &GitHubReviewRequest,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubReviewReceipt, GitHubAuthorityError> {
+        request: &SourceReviewRequest,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceReviewReceipt, SourceDeliveryError> {
         assert!(self.pushed.load(Ordering::SeqCst));
         let attempt = self.review_sync_attempts.fetch_add(1, Ordering::SeqCst) + 1;
         if matches!(self.script, Script::ReviewSyncCredentialExpires)
             && credential.expose() == "test-token"
         {
-            return Err(GitHubAuthorityError::api(
+            return Err(SourceDeliveryError::api(
                 Some(401),
                 "HTTP 401: bad credentials",
             ));
@@ -516,7 +519,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         };
         assert_eq!(credential.expose(), expected);
         if matches!(self.script, Script::ReviewSyncRace) && attempt == 1 {
-            return Err(GitHubAuthorityError::api(
+            return Err(SourceDeliveryError::api(
                 Some(422),
                 concat!(
                     "HTTP 422: validation failed; PullRequest head invalid ",
@@ -528,13 +531,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             .lock()
             .assert_value_with("review request lock")
             .push(request.clone());
-        let mut receipt = GitHubReviewReceipt {
-            review_id: "17".to_owned(),
-            repository: request.target.repository.clone(),
-            target_branch: request.target.target_branch.clone(),
-            head_branch: request.head_branch.clone(),
-            head_revision: request.head_revision.clone(),
-        };
+        let mut receipt = SourceReviewReceipt::for_request(request, "17");
         if matches!(self.script, Script::ReviewIdentityMismatch) {
             receipt.repository = "other/project".to_owned();
         }
@@ -543,30 +540,30 @@ impl GitHubDeliveryAuthority for FakeGitHub {
 
     async fn inspect_review(
         &self,
-        review: &GitHubReviewReceipt,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubReviewObservation, GitHubAuthorityError> {
+        review: &SourceReviewReceipt,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceReviewObservation, SourceDeliveryError> {
         if matches!(self.script, Script::PolicyForbidden) {
-            return Err(GitHubAuthorityError::api(
+            return Err(SourceDeliveryError::api(
                 Some(403),
                 "GraphQL: Resource not accessible by integration (HTTP 403)",
             ));
         }
         if matches!(self.script, Script::PolicySchemaInvalid) {
-            return Err(GitHubAuthorityError::api(
+            return Err(SourceDeliveryError::api(
                 None,
                 "GitHub returned an invalid policy response: missing field `repository`",
             ));
         }
         if matches!(self.script, Script::InspectFailed) {
-            return Err(GitHubAuthorityError::api(
+            return Err(SourceDeliveryError::api(
                 Some(503),
                 "remote inspection service returned an unfamiliar error",
             ));
         }
         let inspection = self.inspections.fetch_add(1, Ordering::SeqCst) + 1;
         if matches!(self.script, Script::CredentialExpires) && credential.expose() == "test-token" {
-            return Err(GitHubAuthorityError::api(Some(401), "Bad credentials"));
+            return Err(SourceDeliveryError::api(Some(401), "Bad credentials"));
         }
         let expected = if self.uses_refreshed_credential() {
             "refreshed-token"
@@ -584,15 +581,15 @@ impl GitHubDeliveryAuthority for FakeGitHub {
 
     async fn inspect_review_feedback(
         &self,
-        _review: &GitHubReviewReceipt,
-        _credential: GitHubCredential<'_>,
-    ) -> Result<GitHubReviewFeedback, GitHubAuthorityError> {
+        _review: &SourceReviewReceipt,
+        _credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceReviewFeedback, SourceDeliveryError> {
         let read = self.feedback_reads.fetch_add(1, Ordering::SeqCst);
         if matches!(self.script, Script::FeedbackReadTransient) && read == 0 {
-            return Err(GitHubAuthorityError::Unavailable);
+            return Err(SourceDeliveryError::Unavailable);
         }
         let items = matches!(self.script, Script::Feedback | Script::FeedbackTooLarge)
-            .then(|| GitHubReviewFeedbackItem {
+            .then(|| SourceReviewFeedbackItem {
                 key: "review_comment:41".to_owned(),
                 version: "v1".to_owned(),
                 author: "review-bot".to_owned(),
@@ -605,16 +602,16 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             })
             .into_iter()
             .collect();
-        Ok(GitHubReviewFeedback { items })
+        Ok(SourceReviewFeedback { items })
     }
 
     async fn request_merge(
         &self,
-        _review: &GitHubReviewReceipt,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubMergeRequestOutcome, GitHubAuthorityError> {
+        _review: &SourceReviewReceipt,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
         if matches!(self.script, Script::MergeFailed) {
-            return Err(GitHubAuthorityError::api(
+            return Err(SourceDeliveryError::api(
                 None,
                 "remote merge service connection reset",
             ));
@@ -627,33 +624,33 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         assert_eq!(credential.expose(), expected);
         self.merge_requests.fetch_add(1, Ordering::SeqCst);
         if matches!(self.script, Script::ConflictAtMerge) {
-            return Ok(GitHubMergeRequestOutcome::Conflict);
+            return Ok(SourceMergeRequestOutcome::Conflict);
         }
         let updates = self.head_updates.load(Ordering::SeqCst);
         if (self.exercises_head_update() && updates == 0)
             || (matches!(self.script, Script::RepeatedBehind) && updates < 2)
         {
-            return Ok(GitHubMergeRequestOutcome::HeadUpdateRequired);
+            return Ok(SourceMergeRequestOutcome::HeadUpdateRequired);
         }
         if self.merge_is_pending() {
-            return Ok(GitHubMergeRequestOutcome::Pending);
+            return Ok(SourceMergeRequestOutcome::Pending);
         }
         self.merge_requested.store(true, Ordering::SeqCst);
-        Ok(GitHubMergeRequestOutcome::Accepted)
+        Ok(SourceMergeRequestOutcome::Accepted)
     }
 
     async fn update_review_head(
         &self,
         workspace: &Path,
-        review: &GitHubReviewReceipt,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubHeadUpdateOutcome, GitHubAuthorityError> {
+        review: &SourceReviewReceipt,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceHeadUpdateOutcome, SourceDeliveryError> {
         assert_eq!(credential.expose(), "test-token");
         if let Some(outcome) = self.immediate_head_update_outcome() {
             return outcome;
         }
         if !self.exercises_head_update() && !matches!(self.script, Script::RepeatedBehind) {
-            return Ok(GitHubHeadUpdateOutcome::Pending);
+            return Ok(SourceHeadUpdateOutcome::Pending);
         }
         let status = tokio::process::Command::new("/usr/bin/git")
             .arg("-C")
@@ -673,7 +670,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             .await
             .assert_value();
         if !status.success() {
-            return Err(GitHubAuthorityError::Rejected);
+            return Err(SourceDeliveryError::Rejected);
         }
         let output = tokio::process::Command::new("/usr/bin/git")
             .arg("-C")
@@ -696,7 +693,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             .await
             .assert_value();
         if !status.success() {
-            return Err(GitHubAuthorityError::Rejected);
+            return Err(SourceDeliveryError::Rejected);
         }
         self.head_updates.fetch_add(1, Ordering::SeqCst);
         let mut updated = review.clone();
@@ -705,7 +702,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             updated.head_branch = "zeroshot/unowned-head".to_owned();
         }
         if matches!(self.script, Script::HeadUpdateResponseLost) {
-            return Err(GitHubAuthorityError::api(
+            return Err(SourceDeliveryError::api(
                 Some(503),
                 "head update completed but its response was lost",
             ));
@@ -713,19 +710,19 @@ impl GitHubDeliveryAuthority for FakeGitHub {
         if matches!(self.script, Script::HeadAdoptionAfterRepair) {
             git(workspace, &["reset", "--hard", &review.head_revision]);
         }
-        Ok(GitHubHeadUpdateOutcome::Updated(updated))
+        Ok(SourceHeadUpdateOutcome::Updated(updated))
     }
 
     async fn synchronize_review_head(
         &self,
-        request: GitHubHeadSynchronization<'_>,
-        credential: GitHubCredential<'_>,
-    ) -> Result<(), GitHubAuthorityError> {
+        request: SourceHeadSynchronization<'_>,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<(), SourceDeliveryError> {
         assert_eq!(credential.expose(), "test-token");
         let attempt = self.head_sync_attempts.fetch_add(1, Ordering::SeqCst) + 1;
         if matches!(self.script, Script::HeadAdoptionAfterRepair) {
             if attempt == 1 {
-                return Err(GitHubAuthorityError::api(
+                return Err(SourceDeliveryError::api(
                     None,
                     "local fetch failed before adoption",
                 ));
@@ -736,27 +733,27 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             );
         }
         if matches!(self.script, Script::HeadAdoptionRace) && attempt == 1 {
-            return Err(GitHubAuthorityError::Unavailable);
+            return Err(SourceDeliveryError::Unavailable);
         }
         if matches!(self.script, Script::HeadAdoptionRejected) {
-            return Err(GitHubAuthorityError::Rejected);
+            return Err(SourceDeliveryError::Rejected);
         }
         if matches!(self.script, Script::HeadAdoptionUnavailable) {
-            return Err(GitHubAuthorityError::Unavailable);
+            return Err(SourceDeliveryError::Unavailable);
         }
         Ok(())
     }
 
     async fn materialize_merge_conflict(
         &self,
-        request: &GitHubConflictRequest,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubConflictOutcome, GitHubAuthorityError> {
+        request: &SourceConflictRequest,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceConflictOutcome, SourceDeliveryError> {
         assert_eq!(credential.expose(), "test-token");
         self.conflict_materializations
             .fetch_add(1, Ordering::SeqCst);
         if matches!(self.script, Script::StaleConflictThenMerges) {
-            return Ok(GitHubConflictOutcome::ObservationChanged);
+            return Ok(SourceConflictOutcome::ObservationChanged);
         }
         advance_conflicting_target(&self.remote);
         let target_revision = git_output(&self.remote, &["rev-parse", "refs/heads/main"]);
@@ -769,7 +766,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             .status()
             .assert_value();
         if !fetch.success() {
-            return Err(GitHubAuthorityError::Rejected);
+            return Err(SourceDeliveryError::Rejected);
         }
         let merge = std::process::Command::new("/usr/bin/git")
             .arg("-C")
@@ -790,13 +787,13 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             .status()
             .assert_value();
         if merge.code() != Some(1) {
-            return Err(GitHubAuthorityError::Rejected);
+            return Err(SourceDeliveryError::Rejected);
         }
         if matches!(
             self.script,
             Script::ConflictMaterializationFailsAfterMutation
         ) {
-            return Err(GitHubAuthorityError::repairable(
+            return Err(SourceDeliveryError::repairable(
                 "conflict inspection failed after integrating a newer target",
             ));
         }
@@ -807,7 +804,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             .output()
             .assert_value();
         if !paths.status.success() {
-            return Err(GitHubAuthorityError::Rejected);
+            return Err(SourceDeliveryError::Rejected);
         }
         let conflicted_paths = String::from_utf8(paths.stdout)
             .assert_value()
@@ -815,10 +812,10 @@ impl GitHubDeliveryAuthority for FakeGitHub {
             .map(str::to_owned)
             .collect::<Vec<_>>();
         if conflicted_paths.is_empty() {
-            return Err(GitHubAuthorityError::Rejected);
+            return Err(SourceDeliveryError::Rejected);
         }
-        Ok(GitHubConflictOutcome::Materialized(
-            GitHubConflictMaterialization {
+        Ok(SourceConflictOutcome::Materialized(
+            SourceConflictMaterialization {
                 target_revision,
                 conflicted_paths,
             },
@@ -826,7 +823,7 @@ impl GitHubDeliveryAuthority for FakeGitHub {
     }
 }
 
-async fn push_succeeded(request: &GitHubPushRequest, remote: &Path) -> bool {
+async fn push_succeeded(request: &SourcePushRequest, remote: &Path) -> bool {
     let mut command = tokio::process::Command::new("/usr/bin/git");
     command
         .arg("-C")
@@ -951,8 +948,19 @@ capture="${0}.capture"
   /usr/bin/printf 'config_count=%s\n' "${GIT_CONFIG_COUNT-unset}"
   /usr/bin/printf 'config_key_1=%s\n' "${GIT_CONFIG_KEY_1-unset}"
   /usr/bin/printf 'config_value_1=%s\n' "${GIT_CONFIG_VALUE_1-unset}"
+  /usr/bin/printf 'config_key_2=%s\n' "${GIT_CONFIG_KEY_2-unset}"
+  /usr/bin/printf 'config_value_2=%s\n' "${GIT_CONFIG_VALUE_2-unset}"
   for argument in "$@"; do /usr/bin/printf 'arg=%s\n' "$argument"; done
 } >> "$capture"
+case " $* " in
+  *" ls-remote "*)
+    for reference in "$@"; do
+      case "$reference" in
+        refs/heads/*)
+          /usr/bin/printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\t%s\n' "$reference" ;;
+      esac
+    done ;;
+esac
 "#;
 
 pub(super) const GH_MISMATCH_SCRIPT: &str = r#"#!/bin/sh

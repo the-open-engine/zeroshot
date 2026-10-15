@@ -1,7 +1,9 @@
 //! Bounded command capture shared by trusted delivery Git operations.
-use std::fmt;
 use std::path::Path;
 use std::process::{ExitStatus, Stdio};
+use crate::execution::process::platform::{
+    self, ProcessContainment, ProcessTreeHandle, terminate_process_tree,
+};
 use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -10,128 +12,60 @@ use tokio::process::Command;
 const MAX_DIAGNOSTIC_BYTES: usize =
     4 * crate::native_v2_target_authority::MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GitCommandFailure {
-    command: Box<str>,
-    working_directory: Box<str>,
-    pub(crate) exit_status: Option<i32>,
-    pub(crate) stdout: String,
-    pub(crate) stderr: String,
-    pub(crate) stdout_truncated: bool,
-    pub(crate) stderr_truncated: bool,
-    context: Box<str>,
-    timed_out: bool,
+pub use crate::source_code_provider::GitCommandFailure;
+
+/// Private command output separates protocol bytes from printable diagnostics.
+/// Only trusted Git parsers read stdout; Debug and Display expose the sanitized record.
+pub(crate) struct GitCommandOutput {
+    raw_stdout: String,
+    raw_stdout_truncated: bool,
+    diagnostic: GitCommandFailure,
 }
 
-impl fmt::Display for GitCommandFailure {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "command: {}\nworkingDirectory: {}\nexitStatus: {:?}\n{}\nstdout{}:\n{}\nstderr{}:\n{}",
-            self.command,
-            self.working_directory,
-            self.exit_status,
-            self.context,
-            if self.stdout_truncated {
-                " (truncated)"
-            } else {
-                ""
-            },
-            self.stdout,
-            if self.stderr_truncated {
-                " (truncated)"
-            } else {
-                ""
-            },
-            self.stderr
-        )
-    }
-}
-
-impl std::error::Error for GitCommandFailure {}
-
-impl GitCommandFailure {
-    pub(super) fn with_context(mut self, context: impl fmt::Display) -> Self {
-        self.context = format!("{}\n{context}", self.context).into_boxed_str();
-        self
+impl GitCommandOutput {
+    pub(crate) fn stdout(&self) -> &str {
+        &self.raw_stdout
     }
 
-    pub(super) fn http_status(&self) -> Option<u16> {
-        self.stderr.lines().find_map(|line| {
-            line.split_once("The requested URL returned error: ")
-                .and_then(|(_, status)| status.split_whitespace().next())
-                .and_then(|status| status.parse().ok())
+    pub(crate) const fn stdout_truncated(&self) -> bool {
+        self.raw_stdout_truncated
+    }
+
+    pub(crate) const fn diagnostic(&self) -> &GitCommandFailure {
+        &self.diagnostic
+    }
+
+    pub(crate) fn into_diagnostic(self) -> GitCommandFailure {
+        self.diagnostic
+    }
+
+    pub(crate) fn require_success(self) -> Result<Self, GitCommandFailure> {
+        let Self {
+            raw_stdout,
+            raw_stdout_truncated,
+            diagnostic,
+        } = self;
+        Ok(Self {
+            raw_stdout,
+            raw_stdout_truncated,
+            diagnostic: diagnostic.require_success()?,
         })
     }
+}
 
-    pub(super) fn authentication_failed(&self) -> bool {
-        self.http_status() == Some(401)
-            || self.stderr.lines().any(|line| {
-                line.starts_with("fatal: Authentication failed for ")
-                    || terminal_http_auth_prompt(line)
-            })
-    }
-
-    pub(super) fn retryable_transport(&self) -> bool {
-        self.timed_out
-            || self
-                .http_status()
-                .is_some_and(|status| matches!(status, 429 | 500..=599))
-            || self
-                .stderr
-                .lines()
-                .filter(|line| line.starts_with("fatal: unable to access "))
-                .any(|line| {
-                    [
-                        "Could not resolve host:",
-                        "Failed to connect to ",
-                        "Connection timed out",
-                        "Recv failure: Connection reset by peer",
-                        "Empty reply from server",
-                    ]
-                    .iter()
-                    .any(|message| line.contains(message))
-                })
-    }
-
-    pub(crate) fn operator_stderr(&self) -> String {
-        format!(
-            "stderr{}:\n{}\ncommand: {}\nworkingDirectory: {}\nexitStatus: {:?}\n{}",
-            if self.stderr_truncated {
-                " (truncated)"
-            } else {
-                ""
-            },
-            self.stderr,
-            self.command,
-            self.working_directory,
-            self.exit_status,
-            self.context,
-        )
-    }
-
-    pub(crate) fn require_success(self) -> Result<Self, Self> {
-        if self.exit_status == Some(0) {
-            Ok(self)
-        } else {
-            Err(self)
-        }
+impl std::fmt::Debug for GitCommandOutput {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("GitCommandOutput")
+            .field("diagnostic", &self.diagnostic)
+            .finish_non_exhaustive()
     }
 }
 
-// With terminal prompts disabled, Git reports an HTTP authentication challenge this way
-// when it has no credential-helper username, even if the rejected token used extraHeader.
-fn terminal_http_auth_prompt(line: &str) -> bool {
-    let Some(prompt) = line.strip_prefix("fatal: could not read ") else {
-        return false;
-    };
-    let remote = prompt
-        .strip_prefix("Username for '")
-        .or_else(|| prompt.strip_prefix("Password for '"));
-    remote.is_some_and(|remote| {
-        (remote.starts_with("http://") || remote.starts_with("https://"))
-            && remote.ends_with("': terminal prompts disabled")
-    })
+impl std::fmt::Display for GitCommandOutput {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.diagnostic, formatter)
+    }
 }
 
 #[derive(Default)]
@@ -146,13 +80,32 @@ pub(crate) async fn capture(
     command: &mut Command,
     deadline: Duration,
 ) -> Result<GitCommandFailure, GitCommandFailure> {
-    let secrets = command_secrets(command);
+    capture_with_secrets(command, deadline, &[]).await
+}
+
+pub(crate) async fn capture_with_secrets(
+    command: &mut Command,
+    deadline: Duration,
+    private_secrets: &[String],
+) -> Result<GitCommandFailure, GitCommandFailure> {
+    capture_sensitive(command, deadline, private_secrets)
+        .await
+        .map(GitCommandOutput::into_diagnostic)
+}
+
+pub(crate) async fn capture_sensitive(
+    command: &mut Command,
+    deadline: Duration,
+    private_secrets: &[String],
+) -> Result<GitCommandOutput, GitCommandFailure> {
+    let mut secrets = command_secrets(command);
+    secrets.extend_from_slice(private_secrets);
     let mut diagnostic = command_diagnostic(command, &secrets);
     command
         .kill_on_drop(true)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let (mut child, _process_group) = spawn_contained(command).map_err(|error| {
+    let (mut child, process_group) = spawn_contained(command).map_err(|error| {
         diagnostic.context = format!("could not start contained command: {error}").into_boxed_str();
         diagnostic.clone()
     })?;
@@ -166,8 +119,9 @@ pub(crate) async fn capture(
     let mut captured_stderr = CapturedBytes::default();
     let retain = MAX_DIAGNOSTIC_BYTES + secrets.iter().map(String::len).max().unwrap_or(0);
     let result = tokio::time::timeout(deadline, async {
+        let completion = wait_and_cleanup(&mut child, &process_group, &mut diagnostic);
         let (status, (), ()) = tokio::join!(
-            child.wait(),
+            completion,
             drain(stdout, &mut captured_stdout, retain),
             drain(stderr, &mut captured_stderr, retain),
         );
@@ -184,12 +138,20 @@ pub(crate) async fn capture(
         captured_stdout.truncated = true;
         captured_stderr.truncated = true;
     }
+    let raw_stdout = String::from_utf8_lossy(&captured_stdout.bytes).into_owned();
+    let raw_stdout_truncated = captured_stdout.truncated;
     (diagnostic.stdout, diagnostic.stdout_truncated) = sanitize(captured_stdout, &secrets);
+    diagnostic.classify_stderr(&String::from_utf8_lossy(&captured_stderr.bytes));
     (diagnostic.stderr, diagnostic.stderr_truncated) = sanitize(captured_stderr, &secrets);
     match result {
-        Ok(Ok(_)) => Ok(diagnostic),
+        Ok(Ok(_)) => Ok(GitCommandOutput {
+            raw_stdout,
+            raw_stdout_truncated,
+            diagnostic,
+        }),
         other => {
-            let _ = child.start_kill();
+            let cleanup = terminate_process_tree(&process_group.tree, &mut child).await;
+            diagnostic.cleanup_unconfirmed |= !cleanup.cleanup.proves_tree_empty();
             diagnostic.context = match other {
                 Err(_) => format!("command timed out after {} seconds", deadline.as_secs()),
                 Ok(Err(error)) => format!("command status unavailable: {error}"),
@@ -199,6 +161,23 @@ pub(crate) async fn capture(
             Err(diagnostic)
         }
     }
+}
+
+async fn wait_and_cleanup(
+    child: &mut tokio::process::Child,
+    group: &ProcessGroup,
+    diagnostic: &mut GitCommandFailure,
+) -> std::io::Result<ExitStatus> {
+    let status = child.wait().await;
+    // Main-process exit is not stream completion: a helper may still hold both pipes.
+    let cleanup = terminate_process_tree(&group.tree, child).await;
+    diagnostic.cleanup_unconfirmed = !cleanup.cleanup.proves_tree_empty();
+    if diagnostic.cleanup_unconfirmed || cleanup.error.is_some() {
+        return Err(std::io::Error::other(cleanup.error.unwrap_or_else(|| {
+            "Git process cleanup is unconfirmed".to_owned()
+        })));
+    }
+    status
 }
 
 fn command_diagnostic(command: &Command, secrets: &[String]) -> GitCommandFailure {
@@ -224,6 +203,8 @@ fn command_diagnostic(command: &Command, secrets: &[String]) -> GitCommandFailur
         stderr_truncated: false,
         context: Box::<str>::default(),
         timed_out: false,
+        cleanup_unconfirmed: false,
+        classification: None,
     }
 }
 
@@ -281,13 +262,31 @@ fn sanitize(mut captured: CapturedBytes, secrets: &[String]) -> (String, bool) {
     (text, truncated)
 }
 
-fn redact(value: &str, secrets: &[String]) -> String {
-    secrets
+pub(super) fn redact(value: &str, secrets: &[String]) -> String {
+    let mut secrets = secrets
         .iter()
-        .filter(|s| !s.is_empty())
-        .fold(value.to_owned(), |text, secret| {
-            text.replace(secret, "[REDACTED]")
-        })
+        .filter(|secret| !secret.is_empty())
+        .collect::<Vec<_>>();
+    secrets
+        .sort_unstable_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
+    secrets.dedup();
+    let mut redacted = String::with_capacity(value.len());
+    let mut skip_until = 0;
+    for (position, character) in value.char_indices() {
+        if position < skip_until {
+            continue;
+        }
+        if let Some(secret) = secrets
+            .iter()
+            .find(|secret| value[position..].starts_with(secret.as_str()))
+        {
+            redacted.push_str("[REDACTED]");
+            skip_until = position + secret.len();
+        } else {
+            redacted.push(character);
+        }
+    }
+    redacted
 }
 
 pub(crate) fn local_git_command(program: &Path, workspace: &Path) -> Command {
@@ -334,44 +333,34 @@ pub(crate) fn local_git_command_with_identity(
 fn spawn_contained(
     command: &mut Command,
 ) -> std::io::Result<(tokio::process::Child, ProcessGroup)> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.as_std_mut().process_group(0);
-        let child = command.spawn()?;
-        let group = ProcessGroup(child.id());
-        Ok((child, group))
-    }
-    #[cfg(windows)]
-    {
-        use crate::execution::process::platform::{
-            configure_process, register_process_tree_for, capture_process_tree, ProcessContainment,
-        };
-        let registration = register_process_tree_for(ProcessContainment::ProcessGroup)?;
-        configure_process(command, ProcessContainment::ProcessGroup);
-        let mut child = command.spawn()?;
-        let group = capture_process_tree(registration, &mut child)?;
-        Ok((child, group))
-    }
+    let registration = platform::register_process_tree_for(ProcessContainment::ProcessGroup)?;
+    platform::configure_process(command, ProcessContainment::ProcessGroup);
+    let mut child = command.spawn()?;
+    let tree = platform::capture_process_tree(registration, &mut child)?;
+    let process_group = ProcessGroup {
+        tree,
+        #[cfg(unix)]
+        pid: child.id(),
+    };
+    Ok((child, process_group))
 }
 
-#[cfg(windows)]
-type ProcessGroup = crate::execution::process::platform::ProcessTreeHandle;
-
-// Dropping a cancelled capture must stop helpers such as git-remote-https as well as Git itself.
-#[cfg(unix)]
-struct ProcessGroup(Option<u32>);
+// Explicit completion awaits the shared containment cleanup. Drop also stops helpers when the
+// caller cancels capture; the enclosing hosted writer domain confirms its remaining cleanup.
+struct ProcessGroup {
+    tree: ProcessTreeHandle,
+    #[cfg(unix)]
+    pid: Option<u32>,
+}
 
 #[cfg(unix)]
 impl Drop for ProcessGroup {
     fn drop(&mut self) {
-        #[cfg(unix)]
         if let Some(pid) = self
-            .0
+            .pid
             .and_then(|pid| i32::try_from(pid).ok())
             .filter(|pid| *pid > 0)
         {
-            // The process was started in its own group; no launcher process belongs to this group.
             unsafe {
                 libc::kill(-pid, libc::SIGKILL);
             }
@@ -379,7 +368,7 @@ impl Drop for ProcessGroup {
     }
 }
 
-pub(super) fn diagnostic_text(bytes: Vec<u8>, truncated: bool, token: &str) -> (String, bool) {
+pub(crate) fn diagnostic_text(bytes: Vec<u8>, truncated: bool, token: &str) -> (String, bool) {
     sanitize(
         CapturedBytes { bytes, truncated },
         &[
@@ -392,3 +381,13 @@ pub(super) fn diagnostic_text(bytes: Vec<u8>, truncated: bool, token: &str) -> (
 #[cfg(test)]
 #[path = "command/tests.rs"]
 mod tests;
+
+pub(crate) fn preparation_failure(
+    command: &Command,
+    context: impl std::fmt::Display,
+) -> GitCommandFailure {
+    let mut failure = command_diagnostic(command, &command_secrets(command));
+    failure.context =
+        format!("private Git transport preparation failed: {context}").into_boxed_str();
+    failure
+}

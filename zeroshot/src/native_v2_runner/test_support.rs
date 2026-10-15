@@ -143,7 +143,7 @@ pub(crate) fn admitted() -> AdmittedRun {
             size: RunSize::Medium,
             nodes: runtime_nodes,
         },
-        source: source(),
+        source: Some(source()),
     }
 }
 

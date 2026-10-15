@@ -111,7 +111,9 @@ pub fn restore(snapshots_root: &Path, id: &SnapshotId, workspace: &Path) -> io::
     let manifest = read_metadata::<serde_json::Value>(&snapshot)?;
     let workspace = restore_destination(workspace)?;
     ensure_disjoint(&workspace, &fs::canonicalize(snapshots_root)?)?;
-    let target_git = git::restore_target(&workspace, manifest.git)?;
+    let snapshot_git = snapshot.join("workspace/.git");
+    let target_git =
+        git::restore_target(&workspace, manifest.git.then_some(snapshot_git.as_path()))?;
     let parent = workspace
         .parent()
         .ok_or_else(|| invalid("workspace has no parent"))?;
@@ -132,7 +134,9 @@ pub fn restore_staged(snapshot: &Path, workspace: &Path) -> io::Result<()> {
     let manifest = read_staged_metadata::<serde_json::Value>(&snapshot)?;
     let workspace = restore_destination(workspace)?;
     ensure_disjoint(&workspace, &snapshot)?;
-    let target_git = git::restore_target(&workspace, manifest.git)?;
+    let snapshot_git = tree.join(".git");
+    let target_git =
+        git::restore_target(&workspace, manifest.git.then_some(snapshot_git.as_path()))?;
     apply_restore(&tree, &workspace, target_git)
 }
 

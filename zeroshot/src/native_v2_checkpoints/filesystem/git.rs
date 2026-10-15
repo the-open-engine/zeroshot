@@ -136,11 +136,11 @@ fn capture_tree(workspace: &Path, tree: &Path, modules: Option<&Path>) -> io::Re
         return Ok(false);
     };
     validate_git_metadata(&layout.common.join("objects"))?;
-    let head = resolved_head(workspace, &layout)?;
+    let head = checkpoint_head(workspace, &layout)?;
     let target = tree.join(".git");
     normalize_git_tree(&layout, &target)?;
     validate_git_metadata(&target)?;
-    write_detached_head(&target, &head)?;
+    write_snapshot_head(&target, &head)?;
     normalize_config(&target)?;
     Ok(true)
 }
@@ -156,7 +156,7 @@ fn capture_nested(workspace: &Path, tree: &Path, modules: Option<&Path>) -> io::
     Ok(())
 }
 
-fn write_detached_head(target: &Path, head: &str) -> io::Result<()> {
+fn write_snapshot_head(target: &Path, head: &str) -> io::Result<()> {
     remove_entry(&target.join("HEAD"))?;
     fs::write(target.join("HEAD"), format!("{head}\n"))
 }
@@ -256,21 +256,101 @@ fn validate_git_metadata(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn resolved_head(workspace: &Path, layout: &GitLayout) -> io::Result<String> {
-    let output = git(workspace)
-        .arg("--git-dir")
-        .arg(git_path(&layout.directory).as_os_str())
+fn checkpoint_head(workspace: &Path, layout: &GitLayout) -> io::Result<String> {
+    require_plain_head(&layout.directory)?;
+    let output = git_directory_command(workspace, &layout.directory)
         .args(["rev-parse", "--verify", "HEAD"])
         .output()?;
     if !output.status.success() {
-        return Err(invalid("workspace snapshots require a committed Git HEAD"));
+        return unborn_head(workspace, layout);
     }
     let head = String::from_utf8(output.stdout).map_err(io::Error::other)?;
     let head = head.trim();
-    if !matches!(head.len(), 40 | 64) || !head.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+    if !checkpoint_revision(head) {
         return Err(invalid("invalid Git checkpoint revision"));
     }
     Ok(head.to_owned())
+}
+
+fn checkpoint_revision(head: &str) -> bool {
+    matches!(head.len(), 40 | 64) && head.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn require_plain_head(directory: &Path) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(directory.join("HEAD"))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(invalid("Git HEAD must be a plain file"));
+    }
+    Ok(())
+}
+
+fn unborn_head(workspace: &Path, layout: &GitLayout) -> io::Result<String> {
+    let output = git_directory_command(workspace, &layout.directory)
+        .args(["symbolic-ref", "--quiet", "--no-recurse", "HEAD"])
+        .output()?;
+    if !output.status.success() {
+        return Err(invalid(
+            "Git checkpoint HEAD is neither committed nor unborn",
+        ));
+    }
+    let reference = String::from_utf8(output.stdout).map_err(io::Error::other)?;
+    let reference = reference.trim();
+    require_branch_reference(&layout.directory, reference)?;
+    require_missing_reference(workspace, layout, reference)?;
+    Ok(format!("ref: {reference}"))
+}
+
+fn require_branch_reference(directory: &Path, reference: &str) -> io::Result<()> {
+    if !reference.starts_with("refs/heads/") {
+        return Err(invalid("invalid unborn Git checkpoint branch"));
+    }
+    let status = git_command(directory, None)
+        .args(["check-ref-format", reference])
+        .status()?;
+    if !status.success() {
+        return Err(invalid("invalid unborn Git checkpoint branch"));
+    }
+    Ok(())
+}
+
+fn require_missing_reference(
+    workspace: &Path,
+    layout: &GitLayout,
+    reference: &str,
+) -> io::Result<()> {
+    let status = git_directory_command(workspace, &layout.directory)
+        .args(["show-ref", "--verify", "--quiet", reference])
+        .status()?;
+    // Git resolves packed and backend-owned refs. The loose-path check additionally rejects a
+    // broken or indirect ref that Git can report as missing; it is never the absence authority.
+    if status.code() != Some(1) || entry_metadata(&layout.common.join(reference))?.is_some() {
+        return Err(invalid(
+            "unborn Git checkpoint branch now exists or cannot be verified; shared refs are preserved",
+        ));
+    }
+    Ok(())
+}
+
+fn snapshot_unborn_reference(directory: &Path) -> io::Result<Option<String>> {
+    require_plain_head(directory)?;
+    let head = read_small(&directory.join("HEAD"))?;
+    let head = head.trim();
+    if let Some(reference) = head.strip_prefix("ref: ") {
+        require_branch_reference(directory, reference)?;
+        return Ok(Some(reference.to_owned()));
+    }
+    if !checkpoint_revision(head) {
+        return Err(invalid("invalid Git checkpoint HEAD"));
+    }
+    Ok(None)
+}
+
+fn git_directory_command(workspace: &Path, directory: &Path) -> Command {
+    let mut command = git(workspace);
+    command
+        .arg("--git-dir")
+        .arg(git_path(directory).as_os_str());
+    command
 }
 
 fn git(workspace: &Path) -> Command {
@@ -388,21 +468,37 @@ fn git_config(path: &Path) -> io::Result<Command> {
 
 pub(super) fn restore_target(
     workspace: &Path,
-    snapshot_has_git: bool,
+    snapshot_git: Option<&Path>,
 ) -> io::Result<Option<GitLayout>> {
+    let unborn_reference = snapshot_git
+        .map(snapshot_unborn_reference)
+        .transpose()?
+        .flatten();
     let target = GitLayout::discover(workspace, None)?;
     if workspace.exists() {
         validate_nested_restore(workspace)?;
     }
-    if target.is_some() && !snapshot_has_git {
+    if target.is_some() && snapshot_git.is_none() {
         return Err(invalid(
             "a snapshot without Git state cannot replace an existing repository",
         ));
     }
     if let Some(layout) = target.as_ref() {
-        validate_git_metadata(&layout.common.join("objects"))?;
+        validate_existing_restore(workspace, layout, unborn_reference.as_deref())?;
     }
     Ok(target)
+}
+
+fn validate_existing_restore(
+    workspace: &Path,
+    layout: &GitLayout,
+    unborn_reference: Option<&str>,
+) -> io::Result<()> {
+    validate_git_metadata(&layout.common.join("objects"))?;
+    if let Some(reference) = unborn_reference {
+        require_missing_reference(workspace, layout, reference)?;
+    }
+    Ok(())
 }
 
 // Nested checkouts become independent repositories. Replacing one that owns linked peers would

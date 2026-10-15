@@ -158,6 +158,9 @@ where
         intent,
         connections,
         github_token,
+        git_credentials: None,
+        cwd: run.cwd.clone(),
+        source_connection: run.source_connection.clone(),
         source: None,
         profile: resolved.remote_selector,
     })
@@ -171,13 +174,80 @@ async fn prepare_validated_submission_with_environment<F>(
 where
     F: Fn(&str) -> Option<OsString>,
 {
-    let mut params = prepare_submission_with_environment(run, resolved, available)?;
-    params.source = named_source::resolve(run, params.github_token.as_deref()).await?;
+    let mut params = prepare_submission_with_environment(run, resolved, &available)?;
     NativeV2Admission
         .validate_intent(&params.intent, DeliveryPolicy::Optional)
         .await
         .map_err(NativeV2CliError::InvalidRun)?;
+    if run.target.is_none() && run.validate_only {
+        validate_local_workspace(&params)?;
+    }
+    let required_capabilities =
+        crate::native_v2_admission::delivery_capabilities(&params.intent.graph.root);
+    if let Some(selected) = named_source::resolve(
+        named_source::NamedSourceRequest {
+            run,
+            token: params.github_token.as_deref(),
+            provided: &params.connections,
+            required_capabilities: &required_capabilities,
+        },
+        &available,
+    )
+    .await?
+    {
+        params.git_credentials = selected.git_credentials;
+        params.source = Some(selected.source);
+        let source = params.source.as_ref().map(|source| &source.resolved);
+        crate::native_v2_admission::validate_source_delivery(source, &params.intent.graph)
+            .map_err(NativeV2CliError::InvalidRun)?;
+        select_source_connections(&mut params)?;
+    }
     Ok(params)
+}
+
+fn validate_local_workspace(params: &PreparedRunRequest) -> Result<(), NativeV2CliError> {
+    let invoking = std::env::current_dir()
+        .map_err(|_| NativeV2CliError::Usage("invoking folder is unavailable".to_owned()))?;
+    let (workspace, _) =
+        crate::native_v2_local::prepare_local_source(params, &invoking, Path::new("git"))
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
+    let state = crate::native_v2_cli::default_local_state_root()?;
+    crate::native_v2_local::validate_workspace_state(&workspace, &state)
+        .map_err(|error| NativeV2CliError::Usage(error.to_string()))
+}
+
+fn select_source_connections(params: &mut PreparedRunRequest) -> Result<(), NativeV2CliError> {
+    let Some(remote) = params
+        .source
+        .as_ref()
+        .and_then(|source| source.resolved.remote.as_ref())
+    else {
+        return Ok(());
+    };
+    if remote
+        .forge
+        .as_ref()
+        .is_none_or(|forge| forge.provider.as_str() != "source.github")
+    {
+        params.github_token = None;
+    }
+    let (Some(key), Some(credentials)) = (&remote.connection, &params.git_credentials) else {
+        return Ok(());
+    };
+    let mut values = credentials
+        .connection_values()
+        .map_err(|error| NativeV2CliError::Usage(error.to_string()))?
+        .as_map()
+        .clone();
+    if let Some(selected) = params.connections.get(key) {
+        values.extend(selected.as_map().clone());
+    }
+    params.connections.insert(
+        key.clone(),
+        StaticConnectionValues::new(values)
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?,
+    );
+    Ok(())
 }
 
 pub(super) enum RunSubmission {
@@ -311,29 +381,13 @@ pub(super) fn select_connections<F>(
 where
     F: Fn(&str) -> Option<OsString>,
 {
-    let mut selected = BTreeMap::new();
-    for (key, fields) in
+    select_connection_requirements(
         openengine_cluster_protocol::run_connection_requirements(runtime, definition)
-    {
-        let mut values = BTreeMap::new();
-        for name in fields {
-            let Some(value) = available(name.as_str()) else {
-                continue;
-            };
-            let value = value
-                .into_string()
-                .map_err(|_| NativeV2CliError::Environment(name.clone()))?;
-            values.insert(name, value);
-        }
-        if !values.is_empty() {
-            selected.insert(
-                key,
-                StaticConnectionValues::new(values)
-                    .map_err(|error| NativeV2CliError::Usage(error.to_string()))?,
-            );
-        }
-    }
-    Ok(selected)
+            .into_iter()
+            .map(|(key, fields)| (key, fields.into_iter().collect()))
+            .collect(),
+        available,
+    )
 }
 
 pub(super) fn select_connection_requirements<F>(
@@ -479,8 +533,13 @@ impl UniformRuntimePlan {
     ) -> Result<RuntimePlan, NativeV2CliError> {
         let harness = self.harness;
         let mut nodes = BTreeMap::new();
+        let mode = crate::native_v2_admission::delivery_mode(&graph.root);
         for (name, delivery) in executable_runtime_roles(&graph.root) {
-            let binding = self.binding((&name, delivery), template, pull_request_feedback)?;
+            let binding = self.binding(
+                (&name, mode.filter(|_| delivery)),
+                template,
+                pull_request_feedback,
+            )?;
             nodes.insert(name, binding);
         }
         self.into_runtime_plan(harness, nodes)
@@ -488,12 +547,12 @@ impl UniformRuntimePlan {
 
     fn binding(
         &self,
-        (name, delivery): (&NodeName, bool),
+        (name, delivery): (&NodeName, Option<crate::native_v2_delivery::DeliveryMode>),
         template: Option<BuiltinGraphTemplate>,
         pull_request_feedback: crate::native_v2_contract::PullRequestFeedback,
     ) -> Result<NodeRuntimeBinding, NativeV2CliError> {
-        if delivery {
-            return git_delivery_binding(pull_request_feedback);
+        if let Some(mode) = delivery {
+            return git_delivery_binding(pull_request_feedback, mode);
         }
         Ok(NodeRuntimeBinding::Agent {
             lane: None,
@@ -569,11 +628,16 @@ impl UniformProvider {
 
 fn git_delivery_binding(
     pull_request_feedback: crate::native_v2_contract::PullRequestFeedback,
+    mode: crate::native_v2_delivery::DeliveryMode,
 ) -> Result<NodeRuntimeBinding, NativeV2CliError> {
-    let connections = connection(
-        crate::native_v2_contract::GITHUB_CONNECTION_KEY,
-        &[GITHUB_TOKEN_ENV],
-    )?;
+    let connections = if mode == crate::native_v2_delivery::DeliveryMode::Push {
+        DeclaredConnections::empty()
+    } else {
+        connection(
+            crate::native_v2_contract::GITHUB_CONNECTION_KEY,
+            &[GITHUB_TOKEN_ENV],
+        )?
+    };
     Ok(NodeRuntimeBinding::GitDelivery {
         connections,
         pull_request_feedback,

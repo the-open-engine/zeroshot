@@ -44,11 +44,12 @@ use crate::native_v2_contract::{
     SourceBranchId, SourceRepositoryId, SourceRevisionId, ResolvedSource,
 };
 use crate::native_v2_delivery::{
-    GitHubDeliveryRead, GitHubDeliverySnapshot, GitHubHeadReconciliation,
-    GitHubReconciliationOutcome, GitHubTargetIntegration, GitHubTargetReconciliation,
-    DeliveryPollPolicy, DeliveryTarget, GitHubAuthorityError, GitHubChecks, GitHubCredential,
-    GitHubMergeRequestOutcome, GitHubPushRequest, GitHubReviewObservation, GitHubReviewReceipt,
-    GitHubReviewRequest, GitHubReviewState, GITHUB_TOKEN_ENV,
+    SourceDeliveryRead, SourceDeliverySnapshot, SourceHeadReconciliation,
+    SourceReconciliationOutcome, SourceTargetIntegration, SourceTargetReconciliation,
+    DeliveryPollPolicy, DeliveryTarget, SourceDeliveryError, SourceChecks,
+    SourceDeliveryCredential, SourceMergeRequestOutcome, SourcePushRequest,
+    SourceReviewObservation, SourceReviewReceipt, SourceReviewRequest, SourceReviewState,
+    GITHUB_TOKEN_ENV,
 };
 use crate::native_v2_runner::{NodeRole, NodeRunner};
 use crate::native_v2_supervisor::{RunEnvironment, RunRuntimeExit};
@@ -74,12 +75,16 @@ impl ScriptedGitHub {
 }
 
 #[async_trait]
-impl GitHubDeliveryAuthority for ScriptedGitHub {
+impl SourceDeliveryAuthority for ScriptedGitHub {
+    fn forge_credential_field(&self) -> Option<&'static str> {
+        Some(GITHUB_TOKEN_ENV)
+    }
+
     async fn reconcile_delivery_target(
         &self,
-        request: GitHubTargetReconciliation<'_>,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubTargetIntegration, GitHubAuthorityError> {
+        request: SourceTargetReconciliation<'_>,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceTargetIntegration, SourceDeliveryError> {
         crate::native_v2_candidate::test_support::local_delivery_authority(
             request.workspace,
             &self.remote,
@@ -90,18 +95,18 @@ impl GitHubDeliveryAuthority for ScriptedGitHub {
 
     async fn observe_delivery(
         &self,
-        request: GitHubDeliveryRead<'_>,
-        _credential: GitHubCredential<'_>,
-    ) -> Result<GitHubDeliverySnapshot, GitHubAuthorityError> {
+        request: SourceDeliveryRead<'_>,
+        _credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceDeliverySnapshot, SourceDeliveryError> {
         let head_revision = request
             .known_review
             .map(|review| review.head_revision.clone());
         let review = request.known_review.map(|review| {
-            review.observation(GitHubReviewState::Open {
-                checks: GitHubChecks::Pending,
+            review.observation(SourceReviewState::Open {
+                checks: SourceChecks::Pending,
             })
         });
-        Ok(GitHubDeliverySnapshot {
+        Ok(SourceDeliverySnapshot {
             review,
             head_revision,
         })
@@ -109,19 +114,19 @@ impl GitHubDeliveryAuthority for ScriptedGitHub {
 
     async fn reconcile_delivery_head(
         &self,
-        _request: GitHubHeadReconciliation<'_>,
-        _credential: GitHubCredential<'_>,
-    ) -> Result<GitHubReconciliationOutcome, GitHubAuthorityError> {
-        Ok(GitHubReconciliationOutcome::Unchanged)
+        _request: SourceHeadReconciliation<'_>,
+        _credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceReconciliationOutcome, SourceDeliveryError> {
+        Ok(SourceReconciliationOutcome::Unchanged)
     }
 
     async fn push_branch(
         &self,
-        request: &GitHubPushRequest,
-        credential: GitHubCredential<'_>,
-    ) -> Result<(), GitHubAuthorityError> {
+        request: &SourcePushRequest,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<(), SourceDeliveryError> {
         if credential.expose() != "test-github-token" {
-            return Err(GitHubAuthorityError::Rejected);
+            return Err(SourceDeliveryError::Rejected);
         }
         let status = tokio::process::Command::new("/usr/bin/git")
             .arg("-C")
@@ -131,25 +136,23 @@ impl GitHubDeliveryAuthority for ScriptedGitHub {
             .arg(format!("HEAD:refs/heads/{}", request.head_branch))
             .status()
             .await
-            .map_err(|_| GitHubAuthorityError::Unavailable)?;
-        if !status.success() {
-            return Err(GitHubAuthorityError::Rejected);
-        }
-        self.pushed.store(true, Ordering::SeqCst);
-        Ok(())
+            .map_err(|_| SourceDeliveryError::Unavailable)?;
+        let published = status.success();
+        self.pushed.store(published, Ordering::SeqCst);
+        published.then_some(()).ok_or(SourceDeliveryError::Rejected)
     }
 
     async fn open_or_update_review(
         &self,
-        request: &GitHubReviewRequest,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubReviewReceipt, GitHubAuthorityError> {
+        request: &SourceReviewRequest,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceReviewReceipt, SourceDeliveryError> {
         if credential.expose() != "test-github-token" || !self.pushed.load(Ordering::SeqCst) {
-            return Err(GitHubAuthorityError::Rejected);
+            return Err(SourceDeliveryError::Rejected);
         }
         let target = request.target.clone();
         let head = (request.head_branch.clone(), request.head_revision.clone());
-        Ok(GitHubReviewReceipt {
+        Ok(SourceReviewReceipt {
             review_id: "17".to_owned(),
             repository: target.repository,
             target_branch: target.target_branch,
@@ -160,19 +163,19 @@ impl GitHubDeliveryAuthority for ScriptedGitHub {
 
     async fn inspect_review(
         &self,
-        review: &GitHubReviewReceipt,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubReviewObservation, GitHubAuthorityError> {
+        review: &SourceReviewReceipt,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceReviewObservation, SourceDeliveryError> {
         if credential.expose() != "test-github-token" {
-            return Err(GitHubAuthorityError::Rejected);
+            return Err(SourceDeliveryError::Rejected);
         }
         let state = if self.merge_requested.load(Ordering::SeqCst) {
-            GitHubReviewState::Merged {
+            SourceReviewState::Merged {
                 merge_revision: review.head_revision.clone(),
             }
         } else {
-            GitHubReviewState::Open {
-                checks: GitHubChecks::NotRequired,
+            SourceReviewState::Open {
+                checks: SourceChecks::NotRequired,
             }
         };
         Ok(review.observation(state))
@@ -180,14 +183,14 @@ impl GitHubDeliveryAuthority for ScriptedGitHub {
 
     async fn request_merge(
         &self,
-        _review: &GitHubReviewReceipt,
-        credential: GitHubCredential<'_>,
-    ) -> Result<GitHubMergeRequestOutcome, GitHubAuthorityError> {
+        _review: &SourceReviewReceipt,
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<SourceMergeRequestOutcome, SourceDeliveryError> {
         if credential.expose() != "test-github-token" {
-            return Err(GitHubAuthorityError::Rejected);
+            return Err(SourceDeliveryError::Rejected);
         }
         self.merge_requested.store(true, Ordering::SeqCst);
-        Ok(GitHubMergeRequestOutcome::Accepted)
+        Ok(SourceMergeRequestOutcome::Accepted)
     }
 }
 
@@ -411,8 +414,13 @@ impl CapsuleAllocator for CandidateAllocator {
                 .iter()
                 .map(|(lane, agent)| (*lane, CandidateAgents::new(agent.clone()))),
         );
-        let local = assemble_runner(admitted, agents, delivery, CandidatePlacement::Capsule)
-            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        let local = assemble_runner(
+            admitted,
+            agents,
+            Some(delivery),
+            CandidatePlacement::Capsule,
+        )
+        .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let endpoint = Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(local)));
         let remote = Arc::new(RemoteCapsuleNodeRunner::new(endpoint));
         Ok(AllocatedCapsule {
@@ -586,7 +594,7 @@ async fn node_instance_session_reused_through_a_loop_stays_on_its_lane() {
             (CODEX_OPENAI, CandidateAgents::new(codex.clone())),
             (CLAUDE_ANTHROPIC, CandidateAgents::new(claude.clone())),
         ]),
-        routing_delivery(root.path()),
+        Some(routing_delivery(root.path())),
         CandidatePlacement::Local(SessionBoundary::Run),
     )
     .assert_value_with("candidate runner");
@@ -667,6 +675,9 @@ async fn submit_through_cli(
     let mut output = Vec::new();
     let outcome = execute_native_v2_cli_with_context(
         NativeV2CliCommand::Run(RunCommand {
+            cwd: None,
+            source_connection: None,
+
             environment: None,
             target: Some("candidate-cloud".to_owned()),
             title: RunTitle::new("Candidate end to end").assert_value_with("title"),
@@ -675,7 +686,9 @@ async fn submit_through_cli(
                 runtime: crate::native_v2_cli::RunRuntime::Exact(runtime_path),
             },
             input: input_path,
-            repository: Some(SourceRepositoryId::new("acme/project").assert_value()),
+            repository: Some(crate::native_v2_cli::RunRepository::GitHub(
+                SourceRepositoryId::new("acme/project").assert_value(),
+            )),
             branch: Some(SourceBranchId::new("main").assert_value()),
             revision: Some(
                 SourceRevisionId::new("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").assert_value(),
@@ -758,7 +771,12 @@ async fn coverage_contract_candidate_builders_bind_only_to_their_admitted_lane_a
 
     let mut mismatched_workspace =
         candidate_config(RuntimePlanKind::Codex, &repository, github.clone());
-    mismatched_workspace.delivery.workspace = repository.root.child("different-workspace");
+    mismatched_workspace
+        .delivery
+        .as_mut()
+        .expect("delivery fixture")
+        .config
+        .workspace = repository.root.child("different-workspace");
     assert_eq!(
         validate_config(&codex, &mismatched_workspace).assert_error(),
         NativeV2CandidateError::WorkspaceMismatch
@@ -842,13 +860,23 @@ async fn candidate_lanes_must_be_exactly_the_admitted_effective_lanes() {
     duplicated
         .lanes
         .push(harness_config(CODEX_OPENAI, &repository));
-    duplicated.delivery.workspace = repository.root.child("different-workspace");
+    duplicated
+        .delivery
+        .as_mut()
+        .expect("delivery fixture")
+        .config
+        .workspace = repository.root.child("different-workspace");
     assert_eq!(
         validate_config(&codex, &duplicated).assert_error(),
         NativeV2CandidateError::RuntimeMismatch
     );
     let mut mismatched = config(RuntimePlanKind::Claude);
-    mismatched.delivery.workspace = repository.root.child("different-workspace");
+    mismatched
+        .delivery
+        .as_mut()
+        .expect("delivery fixture")
+        .config
+        .workspace = repository.root.child("different-workspace");
     assert_eq!(
         validate_config(&codex, &mismatched).assert_error(),
         NativeV2CandidateError::RuntimeMismatch
@@ -866,6 +894,7 @@ async fn candidate_lanes_must_be_exactly_the_admitted_effective_lanes() {
     assert!(without_agents.runtime.lanes().is_empty());
     let mut empty = config(RuntimePlanKind::Codex);
     empty.lanes.clear();
+    empty.delivery = None;
     build_native_v2_candidate(&without_agents, empty)
         .assert_value_with("a plan without agent nodes takes no lanes");
     assert_eq!(
@@ -956,7 +985,7 @@ fn candidate_node_lane_routes_each_agent_binding_only_to_its_own_lane() {
             (CODEX_OPENAI, CandidateAgents::new(codex)),
             (CLAUDE_ANTHROPIC, CandidateAgents::new(claude.clone())),
         ]),
-        delivery: routing_delivery(&workspace),
+        delivery: Some(routing_delivery(&workspace)),
     };
 
     assert_eq!(
@@ -986,7 +1015,7 @@ fn candidate_node_lane_routes_each_agent_binding_only_to_its_own_lane() {
     let claude_only = CandidateNodeLane {
         default_lane: CODEX_OPENAI,
         agents: BTreeMap::from([(CLAUDE_ANTHROPIC, CandidateAgents::new(claude))]),
-        delivery: routing_delivery(&workspace),
+        delivery: Some(routing_delivery(&workspace)),
     };
     assert_eq!(
         routed_agent(&claude_only, &agent_binding(None, "model")),

@@ -5,11 +5,13 @@ use crate::execution::platform::{FileAccess, private_file};
 use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
+#[cfg(test)]
+use openengine_cluster_protocol::RuntimePlan;
 use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionKey, ConnectionListRequest,
     ConnectionListResult, ConnectionMutationResult, ConnectionScope, ConnectionSetRequest,
-    ConnectionSummary, EnvironmentVariableName, RunConnectionValues, RuntimePlan,
-    StaticConnectionValues, STATIC_CONNECTION_KIND,
+    ConnectionSummary, EnvironmentVariableName, RunConnectionValues, StaticConnectionValues,
+    STATIC_CONNECTION_KIND,
 };
 
 use super::{NativeV2CliError, local_io, local_message, prepare_private_directory};
@@ -77,6 +79,7 @@ impl LocalConnectionStore {
         Ok(ConnectionDeleteResult { deleted })
     }
 
+    #[cfg(test)]
     pub(super) fn resolve(
         &self,
         runtime: &RuntimePlan,
@@ -85,6 +88,32 @@ impl LocalConnectionStore {
     ) -> Result<RunEnvironment, NativeV2CliError> {
         let requirements =
             openengine_cluster_protocol::run_connection_requirements(runtime, definition);
+        let resolved = self.resolve_requirements(requirements, explicit)?;
+        RunEnvironment::exact(runtime, definition, resolved).map_err(Into::into)
+    }
+
+    pub(super) fn resolve_submission(
+        &self,
+        submission: &openengine_cluster_protocol::RunSubmission,
+        explicit: &RunConnectionValues,
+    ) -> Result<RunEnvironment, NativeV2CliError> {
+        let requirements = submission
+            .connection_requirements()
+            .into_iter()
+            .map(|(key, fields)| (key, fields.into_iter().collect()))
+            .collect();
+        let resolved = self.resolve_requirements(requirements, explicit)?;
+        RunEnvironment::exact_for_submission(submission, resolved).map_err(Into::into)
+    }
+
+    fn resolve_requirements(
+        &self,
+        requirements: BTreeMap<ConnectionKey, BTreeSet<EnvironmentVariableName>>,
+        explicit: &RunConnectionValues,
+    ) -> Result<RunConnectionValues, NativeV2CliError> {
+        if requirements.is_empty() {
+            return Ok(RunConnectionValues::new());
+        }
         let lock = self.lock()?;
         FileExt::lock_shared(&lock).map_err(local_io)?;
         let stored = self.read()?;
@@ -96,7 +125,7 @@ impl LocalConnectionStore {
                     .map_err(|_| local_message("resolved connection shape is invalid"))?,
             );
         }
-        RunEnvironment::exact(runtime, definition, resolved).map_err(Into::into)
+        Ok(resolved)
     }
 
     fn lock(&self) -> Result<File, NativeV2CliError> {

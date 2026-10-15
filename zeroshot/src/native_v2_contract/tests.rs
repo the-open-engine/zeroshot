@@ -134,10 +134,9 @@ fn environment_values_and_graph_runtime_fields_are_rejected() {
 }
 
 #[test]
-fn title_source_and_one_run_size_are_required_and_bounded() {
+fn title_size_and_present_source_are_bounded() {
     for (pointer, owner_pointer, field) in [
         ("/title", "", "title"),
-        ("/source", "", "source"),
         ("/runtime/size", "/runtime", "size"),
     ] {
         let mut missing = canonical_submission();
@@ -294,4 +293,29 @@ fn run_environment_is_separate_from_agent_runtime_and_preserves_explicit_empty()
     let mut invalid = canonical_submission();
     invalid["runtime"]["environment"] = json!({"startup":"npm ci"});
     assert!(serde_json::from_value::<RunSubmission>(invalid).is_err());
+}
+
+#[test]
+fn source_omission_and_null_admit_without_inventing_repository_identity() {
+    for explicit_null in [false, true] {
+        let mut wire = canonical_submission();
+        if explicit_null {
+            wire["source"] = Value::Null;
+        } else {
+            wire.as_object_mut().assert_value().remove("source");
+        }
+        let request: RunSubmission = serde_json::from_value(wire).assert_value();
+        assert!(request.source.is_none());
+        assert!(!request.requires_git_transport());
+        let encoded = serde_json::to_value(&request).assert_value();
+        assert!(encoded.get("source").is_none());
+        assert_eq!(
+            RunSubmissionIntent::from(&request).connection_requirements(),
+            request
+                .connection_requirements()
+                .into_iter()
+                .map(|(key, fields)| (key, fields.into_iter().collect()))
+                .collect()
+        );
+    }
 }

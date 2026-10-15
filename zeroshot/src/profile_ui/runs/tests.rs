@@ -43,6 +43,38 @@ async fn serve_local_ui(fixture: &Fixture) -> (String, tokio::task::JoinHandle<(
     (authority, task)
 }
 
+fn repository_source() -> ResolvedSource {
+    ResolvedSource {
+        remote: None,
+        repository: SourceRepositoryId::new("open-engine/test-matrix").assert_value(),
+        branch: SourceBranchId::new("main").assert_value(),
+        revision: SourceRevisionId::new("a".repeat(40)).assert_value(),
+    }
+}
+
+#[tokio::test]
+async fn folder_run_summary_omits_repository_metadata() {
+    let fixture = Fixture::new().await;
+    let mut snapshot = fixture
+        .ledger
+        .get(&fixture.id)
+        .await
+        .assert_value()
+        .assert_value()
+        .snapshot;
+    assert!(
+        serde_json::to_value(summary(&snapshot, None))
+            .assert_value()
+            .get("source")
+            .is_some()
+    );
+    snapshot.source = None;
+    assert_eq!(
+        serde_json::to_value(summary(&snapshot, None)).assert_value()["source"],
+        Value::Null
+    );
+}
+
 #[tokio::test]
 async fn target_shared_ledger_uses_the_same_definition_and_replay_projection() {
     let fixture = Fixture::new().await;
@@ -351,12 +383,7 @@ impl Fixture {
                         size: RunSize::Small,
                         nodes: Default::default(),
                     },
-                    source: ResolvedSource {
-                        repository: SourceRepositoryId::new("open-engine/test-matrix")
-                            .assert_value(),
-                        branch: SourceBranchId::new("main").assert_value(),
-                        revision: SourceRevisionId::new("a".repeat(40)).assert_value(),
-                    },
+                    source: Some(repository_source()),
                 },
             })
             .await

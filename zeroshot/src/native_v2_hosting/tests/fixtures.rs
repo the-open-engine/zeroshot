@@ -53,6 +53,19 @@ impl RepositoryFixture {
             &["clone", "--bare", text(&seed), text(&remote)],
         );
         git(&remote, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+        if unsafe { libc::geteuid() } == 0 {
+            // The local upload-pack reads this directory as the contained checkout writer.
+            let writer = test_process_pool()
+                .active_run_slot(
+                    0,
+                    openengine_cluster_server::graph_verifier::FULL_V1_MAX_NODE_EXECUTIONS,
+                )
+                .assert_value()
+                .identity(crate::execution::process::HostedProcessScope::Writer)
+                .assert_value();
+            std::os::unix::fs::chown(&remote, Some(writer.uid()), Some(writer.gid()))
+                .assert_value();
+        }
         Self {
             _root: root,
             remote,
@@ -113,11 +126,12 @@ pub(super) fn submission(runtime: RuntimePlan, revision: &str, key: &str) -> Run
         graph: graph(),
         initial_input: Value::Null,
         runtime,
-        source: ResolvedSource {
+        source: Some(ResolvedSource {
+            remote: None,
             repository: SourceRepositoryId::new("acme/project").assert_value_with("repository"),
             branch: SourceBranchId::new("main").assert_value_with("branch"),
             revision: SourceRevisionId::new(revision).assert_value_with("revision"),
-        },
+        }),
         submission_key: IdempotencyKey::new(key).assert_value_with("submission key"),
     }
 }
@@ -240,11 +254,8 @@ fn commit(repository: &Path, message: &str) {
 
 fn git(repository: &Path, arguments: &[&str]) {
     assert!(
-        Command::new("/usr/bin/git")
+        git_command(repository)
             .args(arguments)
-            .current_dir(repository)
-            .env_clear()
-            .env("LANG", "C")
             .status()
             .assert_value_with("run Git")
             .success()
@@ -252,11 +263,8 @@ fn git(repository: &Path, arguments: &[&str]) {
 }
 
 fn git_output(repository: &Path, arguments: &[&str]) -> String {
-    let output = Command::new("/usr/bin/git")
+    let output = git_command(repository)
         .args(arguments)
-        .current_dir(repository)
-        .env_clear()
-        .env("LANG", "C")
         .output()
         .assert_value_with("run Git");
     assert!(output.status.success());
@@ -264,6 +272,17 @@ fn git_output(repository: &Path, arguments: &[&str]) -> String {
         .assert_value_with("Git UTF-8")
         .trim()
         .to_owned()
+}
+
+fn git_command(repository: &Path) -> Command {
+    let mut command = Command::new("/usr/bin/git");
+    command
+        .arg("-c")
+        .arg(format!("safe.directory={}", repository.display()))
+        .current_dir(repository)
+        .env_clear()
+        .env("LANG", "C");
+    command
 }
 
 fn text(path: &Path) -> &str {

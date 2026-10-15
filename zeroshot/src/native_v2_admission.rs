@@ -73,6 +73,10 @@ pub enum NativeV2AdmissionError {
         policy: DeliveryPolicy,
         found: usize,
     },
+    #[error("Git delivery requires a committed repository source")]
+    DeliverySourceRequired,
+    #[error("invalid source delivery: {0}")]
+    InvalidSourceDelivery(String),
     #[error("merge plans require exactly one graph-visible Git merge delivery node")]
     MergeDeliveryRequired,
     #[error("merge-plan agent node {node} must not declare GH_TOKEN")]
@@ -180,6 +184,26 @@ impl NativeV2Admission {
         submission: RunSubmission,
         delivery_policy: DeliveryPolicy,
     ) -> Result<AdmittedRun, NativeV2AdmissionError> {
+        self.admit_using_registry(submission, delivery_policy, None)
+            .await
+    }
+
+    /// Uses the caller's registered source adapters with the same graph and runtime admission.
+    pub async fn admit_with_source_registry(
+        &self,
+        submission: RunSubmission,
+        registry: &crate::source_code_provider::SourceCodeProviderRegistry,
+    ) -> Result<AdmittedRun, NativeV2AdmissionError> {
+        self.admit_using_registry(submission, DeliveryPolicy::Optional, Some(registry))
+            .await
+    }
+
+    async fn admit_using_registry(
+        &self,
+        submission: RunSubmission,
+        delivery_policy: DeliveryPolicy,
+        registry: Option<&crate::source_code_provider::SourceCodeProviderRegistry>,
+    ) -> Result<AdmittedRun, NativeV2AdmissionError> {
         let RunSubmission {
             title,
             graph,
@@ -201,6 +225,7 @@ impl NativeV2Admission {
             },
             delivery_policy,
         )?;
+        validate_source_delivery_with_registry(source.as_ref(), &prepared.graph, registry)?;
         let verified = verify_submission(&prepared).await?;
 
         Ok(AdmittedRun {
@@ -222,6 +247,65 @@ impl NativeV2Admission {
         let prepared = prepare_submission(intent.clone(), delivery_policy)?;
         verify_submission(&prepared).await.map(|_| ())
     }
+}
+
+pub(crate) fn delivery_mode(root: &GraphNode) -> Option<crate::native_v2_delivery::DeliveryMode> {
+    executable_declarations(root)
+        .into_iter()
+        .find_map(|declaration| {
+            crate::native_v2_delivery::DeliveryMode::from_worker(&declaration.worker)
+        })
+}
+
+pub(crate) fn delivery_capabilities(
+    root: &GraphNode,
+) -> Vec<crate::source_code_provider::SourceCapability> {
+    let mut capabilities = Vec::new();
+    for declaration in executable_declarations(root) {
+        if let Some(mode) =
+            crate::native_v2_delivery::DeliveryMode::from_worker(&declaration.worker)
+        {
+            for capability in mode.required_capabilities() {
+                if !capabilities.contains(capability) {
+                    capabilities.push(*capability);
+                }
+            }
+        }
+    }
+    capabilities
+}
+
+pub(crate) fn validate_source_delivery(
+    source: Option<&openengine_cluster_protocol::ResolvedSource>,
+    graph: &GraphSpec,
+) -> Result<(), NativeV2AdmissionError> {
+    validate_source_delivery_with_registry(source, graph, None)
+}
+
+fn validate_source_delivery_with_registry(
+    source: Option<&openengine_cluster_protocol::ResolvedSource>,
+    graph: &GraphSpec,
+    registry: Option<&crate::source_code_provider::SourceCodeProviderRegistry>,
+) -> Result<(), NativeV2AdmissionError> {
+    let capabilities = delivery_capabilities(&graph.root);
+    if capabilities.is_empty() {
+        return Ok(());
+    }
+    let source = source.ok_or(NativeV2AdmissionError::DeliverySourceRequired)?;
+    match registry {
+        Some(registry) => {
+            crate::source_code_provider::adapters::core::validate_delivery_source_with_registry(
+                source,
+                &capabilities,
+                registry,
+            )
+        }
+        None => crate::source_code_provider::adapters::core::validate_delivery_source(
+            source,
+            &capabilities,
+        ),
+    }
+    .map_err(|error| NativeV2AdmissionError::InvalidSourceDelivery(error.to_string()))
 }
 
 struct PreparedSubmission {

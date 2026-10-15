@@ -112,6 +112,8 @@ fn prepared_local_run(
     workspace: PathBuf,
 ) -> PreparedLocalRun {
     PreparedLocalRun {
+        git_credentials: None,
+
         delivery_run_id: run_id.clone(),
         run_id,
         environment: RunEnvironment::exact(
@@ -131,6 +133,11 @@ fn prepared_local_run(
 fn prepared_request(run_id: RunId, submission_key: &str) -> PreparedRunRequest {
     let submission = contract_submission(submission_key);
     PreparedRunRequest {
+        git_credentials: None,
+
+        cwd: None,
+        source_connection: None,
+
         run_id,
         intent: TargetRunIntent {
             environment: None,
@@ -239,6 +246,12 @@ async fn local_idempotency_contract_finds_matches_and_fails_closed() {
     let submission = contract_submission("local-idempotency");
     let digest = submission_digest(&submission).assert_value();
     create_contract_run(&backend, &run_id, &submission).await;
+    backend
+        .write_recovery_document(
+            &run_id,
+            &recovery_document(submission.clone(), root.path().to_owned(), None),
+        )
+        .assert_value();
 
     let admitted = NativeV2Admission
         .admit(submission.clone())
@@ -254,7 +267,7 @@ async fn local_idempotency_contract_finds_matches_and_fails_closed() {
     );
     assert_eq!(
         backend
-            .existing_submission(&submission.submission_key, &digest)
+            .existing_submission(&submission.submission_key, &digest, root.path())
             .await
             .assert_value(),
         Some(run_id.clone())
@@ -443,7 +456,7 @@ async fn lane_preflight_checks_the_retained_workspace_only_without_checkpoint_re
 async fn local_bootstrap_and_resume_failures_leave_recoverable_state() {
     let root = TestDirectory::new("lbr");
     let backend = LocalCliBackend::new(
-        root.path().to_owned(),
+        root.child("state"),
         root.child("missing-controller"),
         root.path().to_owned(),
         PathBuf::from("git"),
@@ -482,6 +495,8 @@ async fn local_bootstrap_and_resume_failures_leave_recoverable_state() {
     let error = backend
         .start_local_successor(
             RunResumeParams {
+                git_credentials: None,
+
                 run_id: original.clone(),
                 successor_run_id: successor.clone(),
                 from: None,
@@ -754,6 +769,16 @@ async fn assert_local_start_deduplicates_before_controller_launch() {
     )
     .assert_value();
     create_contract_run(&backend, &existing, &prepared.submission).await;
+    backend
+        .write_recovery_document(
+            &existing,
+            &recovery_document(
+                prepared.submission.clone(),
+                prepared.workspace.clone(),
+                None,
+            ),
+        )
+        .assert_value();
 
     assert_eq!(
         backend
@@ -767,7 +792,7 @@ async fn assert_local_start_deduplicates_before_controller_launch() {
     let absent_digest = submission_digest(&absent).assert_value();
     assert!(
         backend
-            .existing_submission(&absent.submission_key, &absent_digest)
+            .existing_submission(&absent.submission_key, &absent_digest, root.path())
             .await
             .assert_value()
             .is_none()

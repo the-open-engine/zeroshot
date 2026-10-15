@@ -43,7 +43,7 @@ pub(super) fn request_with_key(input: Value, submission_key: &str) -> RunSubmitP
             graph: graph(),
             initial_input: valid_input_or(input),
             runtime: runtime(),
-            source: source(),
+            source: Some(source()),
             submission_key: IdempotencyKey::new(submission_key).assert_value_with("submission key"),
         },
     }
@@ -59,6 +59,7 @@ pub(super) fn test_connection_values(value: &str) -> StaticConnectionValues {
 
 pub(super) fn source() -> ResolvedSource {
     ResolvedSource {
+        remote: None,
         repository: SourceRepositoryId::new("owner/repo").assert_value_with("repository"),
         branch: SourceBranchId::new("main").assert_value_with("branch"),
         revision: SourceRevisionId::new("1111111111111111111111111111111111111111")
@@ -310,7 +311,7 @@ pub(super) fn complex_request() -> RunSubmitParams {
             graph: complex_graph(),
             initial_input: valid_input_or(Value::Null),
             runtime: complex_runtime(),
-            source: source(),
+            source: Some(source()),
             submission_key: IdempotencyKey::new("cloud-complex")
                 .assert_value_with("submission key"),
         },

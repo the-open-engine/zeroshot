@@ -896,6 +896,65 @@
       ],
       "type": "object"
     },
+    "GitTransportCredentials": {
+      "description": "Private, bounded transport authority. It never belongs in a source record or submission digest.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "https",
+              "type": "string"
+            },
+            "password": {
+              "maxLength": 65536,
+              "minLength": 1,
+              "pattern": "^[^\\u0000]+$",
+              "type": "string"
+            },
+            "username": {
+              "maxLength": 65536,
+              "minLength": 1,
+              "pattern": "^[^\\u0000]+$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "username",
+            "password"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "ssh",
+              "type": "string"
+            },
+            "knownHosts": {
+              "maxLength": 65536,
+              "minLength": 1,
+              "pattern": "^[^\\u0000]+$",
+              "type": "string"
+            },
+            "privateKey": {
+              "maxLength": 65536,
+              "minLength": 1,
+              "pattern": "^[^\\u0000]+$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "privateKey",
+            "knownHosts"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "GraphDiagnostic": {
       "additionalProperties": false,
       "properties": {
@@ -3806,7 +3865,85 @@
         }
       ]
     },
+    "ResolvedGitRemote": {
+      "additionalProperties": false,
+      "description": "Credential-free Git locator. Git effects use this transport; forge operations use `forge`.",
+      "properties": {
+        "connection": {
+          "description": "Explicit source-only connection authority; omitted for public or native local Git.",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "forge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceForgeIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "url": {
+          "allOf": [
+            {
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+            },
+            {
+              "if": {
+                "pattern": "://"
+              },
+              "then": {
+                "pattern": "^(https|ssh)://"
+              }
+            }
+          ],
+          "maxLength": 2048,
+          "minLength": 1,
+          "not": {
+            "pattern": "^[A-Za-z]:"
+          },
+          "pattern": "^(?:https://(?:\\[[A-Za-z0-9%:._-]+\\]|[^/@:?#\\\\\\s-][^/@:?#\\\\\\s]*)(?::[0-9]+)?(?:/[^?#\\\\\\s]*)?|ssh://(?:[^/@:?#\\\\\\s]+@)?(?:\\[[A-Za-z0-9%:._-]+\\]|[^/@:?#\\\\\\s-][^/@:?#\\\\\\s]*)(?::[0-9]+)?(?:/[^?#\\\\\\s]*)?|(?:[^/@:?#\\\\\\s]+@)?(?:\\[[A-Za-z0-9%:._-]+\\]|[^/@:?#\\\\\\s-][^/@:?#\\\\\\s]*):(?:[^/:?#\\\\\\s][^?#\\\\\\s]*|/(?:[^/?#\\\\\\s][^?#\\\\\\s]*)?))$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
     "ResolvedSource": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/ResolvedSourceWire"
+        },
+        {
+          "else": {
+            "properties": {
+              "repository": {
+                "pattern": "^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "remote": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "remote"
+            ]
+          }
+        }
+      ]
+    },
+    "ResolvedSourceWire": {
       "additionalProperties": false,
       "properties": {
         "branch": {
@@ -3814,14 +3951,25 @@
           "minLength": 1,
           "type": "string"
         },
+        "remote": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResolvedGitRemote"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "repository": {
           "maxLength": 255,
-          "minLength": 3,
-          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$",
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
         },
         "revision": {
-          "pattern": "^[0-9a-f]{40}$",
+          "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$",
           "type": "string"
         }
       },
@@ -4202,7 +4350,14 @@
           "description": "Immutable execution size selected for the run."
         },
         "source": {
-          "$ref": "#/$defs/ResolvedSource",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResolvedSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "Immutable repository snapshot captured when the run was admitted."
         },
         "status": {
@@ -4223,7 +4378,6 @@
       "required": [
         "runId",
         "title",
-        "source",
         "size",
         "atCursor",
         "status"
@@ -4427,6 +4581,17 @@
           ],
           "description": "Omission preserves restarting from the latest retained workspace."
         },
+        "gitCredentials": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GitTransportCredentials"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Fresh generic Git authority, excluded from immutable source and submission identity."
+        },
         "githubToken": {
           "description": "Fresh GitHub credential for private source checkout or Git delivery.",
           "type": [
@@ -4575,7 +4740,14 @@
           "$ref": "#/$defs/RunSize"
         },
         "source": {
-          "$ref": "#/$defs/ResolvedSource"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResolvedSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "status": {
           "$ref": "#/$defs/RunStatus"
@@ -4593,7 +4765,6 @@
       "required": [
         "runId",
         "title",
-        "source",
         "size",
         "atCursor",
         "status"
@@ -4622,7 +4793,14 @@
           "$ref": "#/$defs/RuntimePlan"
         },
         "source": {
-          "$ref": "#/$defs/ResolvedSource"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResolvedSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "submissionKey": {
           "maxLength": 256,
@@ -4642,7 +4820,6 @@
         "graph",
         "initialInput",
         "runtime",
-        "source",
         "submissionKey"
       ],
       "type": "object"
@@ -4691,7 +4868,14 @@
           "$ref": "#/$defs/RunSize"
         },
         "source": {
-          "$ref": "#/$defs/ResolvedSource"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResolvedSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "status": {
           "$ref": "#/$defs/RunStatus"
@@ -4710,7 +4894,6 @@
         "subscriptionId",
         "runId",
         "title",
-        "source",
         "size",
         "cursor",
         "status"
@@ -4981,6 +5164,29 @@
         "node_instance"
       ],
       "type": "string"
+    },
+    "SourceForgeIdentity": {
+      "additionalProperties": false,
+      "description": "Optional forge identity selects one registered source-code adapter.",
+      "properties": {
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
+        },
+        "repository": {
+          "maxLength": 255,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "repository"
+      ],
+      "type": "object"
     },
     "StaticConnectionValues": {
       "additionalProperties": false,

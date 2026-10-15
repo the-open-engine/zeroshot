@@ -197,6 +197,7 @@ where
                 connections,
                 connection_resolver: None,
                 github_token,
+                git_credentials: None,
             },
         )
         .await?;

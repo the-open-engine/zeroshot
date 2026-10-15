@@ -3,11 +3,11 @@ use super::*;
 impl NativeV2DeliveryAdapter {
     pub(super) async fn complete_conflict(
         &self,
-        drive: &mut ReviewDrive<'_>,
+        drive: &mut ReviewDrive<'_, '_>,
         authority_diagnostic: &str,
     ) -> Result<ReviewStep, DeliveryStop> {
         emit(drive.control, "delivery: materializing merge conflict").await?;
-        let request = GitHubConflictRequest {
+        let request = SourceConflictRequest {
             workspace: self.config.workspace.clone(),
             review: drive.review.clone(),
         };
@@ -15,14 +15,14 @@ impl NativeV2DeliveryAdapter {
         // Materialization can mutate the workspace before its result becomes observable.
         self.record_review_base(None);
         let outcome = self
-            .materialize_conflict(&request, &mut drive.credentials, drive.control)
+            .materialize_conflict(&request, drive.credentials, drive.control)
             .await?;
-        let GitHubConflictOutcome::Materialized(materialization) = outcome else {
+        let SourceConflictOutcome::Materialized(materialization) = outcome else {
             // ObservationChanged confirms the original clean review head was restored.
             self.record_review_base(previous_base);
             emit(
                 drive.control,
-                "delivery: conflict observation changed; rechecking GitHub",
+                "delivery: conflict observation changed; rechecking forge",
             )
             .await?;
             return Ok(ReviewStep::Continue);
@@ -35,10 +35,10 @@ impl NativeV2DeliveryAdapter {
 
     async fn materialize_conflict(
         &self,
-        request: &GitHubConflictRequest,
+        request: &SourceConflictRequest,
         credentials: &mut DeliveryCredentials<'_>,
         control: &DriverControl,
-    ) -> Result<GitHubConflictOutcome, DeliveryStop> {
+    ) -> Result<SourceConflictOutcome, DeliveryStop> {
         let mut retry = preflight::OperationRetry::default();
         loop {
             ensure_active(control)?;

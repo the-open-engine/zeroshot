@@ -100,7 +100,8 @@ impl RunPhase {
 pub struct RunSnapshot {
     pub run_id: RunId,
     pub title: RunTitle,
-    pub source: ResolvedSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ResolvedSource>,
     pub size: RunSize,
     pub cursor: Cursor,
     pub phase: RunPhase,
@@ -297,7 +298,10 @@ pub struct SnapshotAndTail {
 pub struct RunSummary {
     pub run_id: RunId,
     pub title: RunTitle,
-    pub source: ResolvedSource,
+    /// Ordinary local folders have no repository provenance.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<ResolvedSource>,
     pub size: RunSize,
     pub cursor: Cursor,
     pub phase: RunPhase,

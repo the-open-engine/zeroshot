@@ -228,17 +228,19 @@ fn request() -> TargetRunRequest {
             graph: graph_fixture("worker", json!({"kind": "null"})),
             initial_input: Value::Null,
             runtime: crate::native_v2_candidate::test_support::codex_runtime(BTreeMap::new()),
-            source: ResolvedSource {
+            source: Some(ResolvedSource {
                 repository: SourceRepositoryId::new("owner/repo").assert_value(),
                 branch: SourceBranchId::new("main").assert_value(),
                 revision: SourceRevisionId::new("0123456789abcdef0123456789abcdef01234567")
                     .assert_value(),
-            },
+                remote: None,
+            }),
             submission_key: IdempotencyKey::new("target-authority-test").assert_value(),
         },
         connections: BTreeMap::new(),
         connection_resolver: None,
         github_token: None,
+        git_credentials: None,
     }
 }
 
@@ -469,6 +471,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
                 connections: BTreeMap::new(),
                 connection_resolver: None,
                 github_token: None,
+                git_credentials: None,
             })
             .await
             .expect_err("unsupported checkpoint resume must be rejected"),
@@ -490,6 +493,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
                 connections: BTreeMap::new(),
                 connection_resolver: None,
                 github_token: None,
+                git_credentials: None,
             })
             .await
             .expect_err("missing run must be rejected by controller");
@@ -509,6 +513,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
             connections: BTreeMap::new(),
             connection_resolver: None,
             github_token: None,
+            git_credentials: None,
         },
         RunResumeParams {
             run_id: run_id(),
@@ -517,6 +522,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
             connections: BTreeMap::new(),
             connection_resolver: None,
             github_token: None,
+            git_credentials: None,
         },
     ] {
         let error = client
@@ -854,6 +860,7 @@ async fn assert_workspace_recovery(endpoint: &str, bearer: Option<&str>, adverti
                 connections: BTreeMap::new(),
                 connection_resolver: None,
                 github_token: None,
+                git_credentials: None,
             })
             .await
             .expect_err("missing run must be rejected"),

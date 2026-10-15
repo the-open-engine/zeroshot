@@ -57,7 +57,7 @@ pub use contracts::{
     AllocatedCapsule, CapsuleAllocationRequest, CapsuleAllocationUnavailable, CapsuleAllocator,
     CapsuleCleanup, CapsulePreparation, PreparationProgress, CapsuleCleanupUnavailable,
     CapsuleDestroyed, CloudRunReceipt, ControllerClaimUnavailable, ExclusiveControllerClaim,
-    RetainedAllocationRequest, RetainedAllocationUnavailable,
+    RetainedAllocationRequest, RetainedAllocationUnavailable, RunSourceCredentials,
 };
 pub use crate::native_v2_supervisor::RunEnvironment;
 
@@ -115,7 +115,7 @@ enum ForceTarget {
 
 struct RunSecretEnvelope {
     environment: Arc<RunEnvironment>,
-    github_token: Option<String>,
+    source_credentials: RunSourceCredentials,
 }
 
 struct ResumeSecretRequest<'a> {
@@ -124,6 +124,7 @@ struct ResumeSecretRequest<'a> {
     connections: openengine_cluster_protocol::RunConnectionValues,
     connection_resolver: Option<openengine_cluster_protocol::TargetConnectionResolver>,
     github_token: Option<String>,
+    git_credentials: Option<openengine_cluster_protocol::GitTransportCredentials>,
 }
 
 struct AllocatedRunStart {
@@ -198,12 +199,10 @@ impl NativeV2CloudController {
         &self,
         request: RunSubmitParams,
     ) -> Result<CloudRunReceipt, NativeV2CloudError> {
-        let environment = RunEnvironment::exact(
-            &request.submission.runtime,
-            request.submission.environment.as_ref(),
-            BTreeMap::new(),
-        )?;
-        self.submit_inner(request, environment, None).await
+        let environment =
+            RunEnvironment::exact_for_submission(&request.submission, BTreeMap::new())?;
+        self.submit_inner(request, environment, RunSourceCredentials::default())
+            .await
     }
 
     /// Trusted bootstrap path for a run whose exact, bounded environment was already selected.
@@ -212,7 +211,8 @@ impl NativeV2CloudController {
         request: RunSubmitParams,
         environment: RunEnvironment,
     ) -> Result<CloudRunReceipt, NativeV2CloudError> {
-        self.submit_inner(request, environment, None).await
+        self.submit_inner(request, environment, RunSourceCredentials::default())
+            .await
     }
 
     /// Trusted target bootstrap with a checkout/delivery credential kept outside provider
@@ -223,14 +223,32 @@ impl NativeV2CloudController {
         environment: RunEnvironment,
         github_token: Option<String>,
     ) -> Result<CloudRunReceipt, NativeV2CloudError> {
-        self.submit_inner(request, environment, github_token).await
+        self.submit_inner(
+            request,
+            environment,
+            RunSourceCredentials {
+                github_token,
+                git_credentials: None,
+            },
+        )
+        .await
+    }
+
+    /// Keeps generic Git and optional forge authority private through checkout and allocation.
+    pub async fn submit_with_exact_environment_and_source_credentials(
+        &self,
+        request: RunSubmitParams,
+        environment: RunEnvironment,
+        credentials: RunSourceCredentials,
+    ) -> Result<CloudRunReceipt, NativeV2CloudError> {
+        self.submit_inner(request, environment, credentials).await
     }
 
     async fn submit_inner(
         &self,
         request: RunSubmitParams,
         environment: RunEnvironment,
-        github_token: Option<String>,
+        source_credentials: RunSourceCredentials,
     ) -> Result<CloudRunReceipt, NativeV2CloudError> {
         let _turn = self.submission_turn.lock().await;
         let RunSubmitParams { run_id, submission } = request;
@@ -239,8 +257,7 @@ impl NativeV2CloudController {
         let admitted = NativeV2Admission
             .admit_with_policy(submission, self.delivery_policy)
             .await?;
-        let environment =
-            environment.for_runtime(&admitted.runtime, admitted.environment.as_ref())?;
+        let environment = environment.for_admitted(&admitted)?;
         let created = self
             .ledger
             .create_or_get(CreateRun {
@@ -264,7 +281,7 @@ impl NativeV2CloudController {
                     stored,
                     RunSecretEnvelope {
                         environment: Arc::new(environment),
-                        github_token,
+                        source_credentials,
                     },
                 )
                 .await
@@ -399,6 +416,7 @@ impl NativeV2CloudController {
             connections,
             connection_resolver,
             github_token,
+            git_credentials,
         } = params;
         let source = self.recoverable_resume_source(&run_id).await?;
         let (submission_key, submission_digest) =
@@ -410,6 +428,7 @@ impl NativeV2CloudController {
             connections,
             connection_resolver,
             github_token,
+            git_credentials,
         })?;
         let controller_claim = self.allocator.claim_controller(&successor_run_id).await?;
         let stored = self
@@ -574,11 +593,9 @@ impl NativeV2CloudController {
         }
         if failed && result.workspace_recovery.recoverable {
             if let Some(stored) = self.ledger.get(&result.run_id).await? {
-                result.workspace_recovery.connection_requirements =
-                    openengine_cluster_protocol::run_connection_requirements(
-                        &stored.admitted.runtime,
-                        stored.admitted.environment.as_ref(),
-                    )
+                result.workspace_recovery.connection_requirements = stored
+                    .admitted
+                    .connection_requirements()
                     .into_iter()
                     .map(|(key, fields)| (key, fields.into_iter().collect()))
                     .collect();
@@ -760,24 +777,23 @@ fn resume_secret_envelope(
         connections,
         connection_resolver,
         github_token,
+        git_credentials,
     } = request;
     let environment = match connection_resolver {
-        Some(wire) => RunEnvironment::with_resolver(
-            &admitted.runtime,
-            admitted.environment.as_ref(),
+        Some(wire) => RunEnvironment::with_resolver_for_admitted(
+            admitted,
             connections,
             crate::native_v2_hosting::build_connection_resolver(successor_run_id.clone(), wire)
                 .map_err(|_| NativeV2CloudError::ResumeCredentials)?,
         ),
-        None => RunEnvironment::exact(
-            &admitted.runtime,
-            admitted.environment.as_ref(),
-            connections,
-        ),
+        None => RunEnvironment::exact_for_admitted(admitted, connections),
     }?;
     Ok(RunSecretEnvelope {
         environment: Arc::new(environment),
-        github_token,
+        source_credentials: RunSourceCredentials {
+            github_token,
+            git_credentials,
+        },
     })
 }
 
@@ -785,4 +801,4 @@ mod backend;
 mod source;
 use backend::{append_runtime_lost, append_terminal_failure};
 pub(crate) use backend::submission_digest;
-use source::source_github_token;
+use source::source_credentials;

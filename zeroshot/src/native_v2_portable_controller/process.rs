@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use openengine_cluster_client::NdjsonTransport;
-use openengine_cluster_protocol::{RunConnectionValues, RunId, RunSubmission};
+use openengine_cluster_protocol::{GitTransportCredentials, RunConnectionValues, RunId, RunSubmission};
 use openengine_cluster_server::admission::CancellationSignal;
 use openengine_cluster_server::identity::{
     BindingAttributes, ConnectionBinding, ConnectionIdentity, ConnectionIdentityConfig,
@@ -42,6 +42,8 @@ struct PortableBootstrapDocument {
     native_environment: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     github_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    git_credentials: Option<GitTransportCredentials>,
     workspace: PathBuf,
     workspace_lease: PathBuf,
     checkpoint_repository: PathBuf,
@@ -57,11 +59,7 @@ impl PortableBootstrapDocument {
             &self.checkpoint_repository,
             &self.storage,
         )?;
-        let environment = RunEnvironment::exact(
-            &self.submission.runtime,
-            self.submission.environment.as_ref(),
-            self.connections,
-        )?;
+        let environment = RunEnvironment::exact_for_submission(&self.submission, self.connections)?;
         Ok(PortableControllerBootstrap {
             checkpoint: self.checkpoint,
             run_id: self.run_id,
@@ -71,6 +69,7 @@ impl PortableBootstrapDocument {
             environment,
             native_environment: self.native_environment,
             github_token: self.github_token,
+            git_credentials: self.git_credentials,
             workspace: self.workspace,
             workspace_lease: self.workspace_lease,
             checkpoint_repository: self.checkpoint_repository,
@@ -143,6 +142,7 @@ pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), Portabl
     let delivery_run_id = bootstrap.delivery_run_id.clone();
     let adopt_existing_delivery = bootstrap.adopt_existing_delivery;
     let github_token = bootstrap.github_token.clone();
+    let git_credentials = bootstrap.git_credentials.clone();
     let native_environment = bootstrap.native_environment.clone();
     let controller = Arc::new(
         PortableRunController::start(bootstrap, move |admitted| {
@@ -154,6 +154,7 @@ pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), Portabl
                     workspace: &workspace,
                     storage: &storage,
                     github_token,
+                    git_credentials,
                     native_environment: &native_environment,
                 },
             )
@@ -194,9 +195,9 @@ fn encode_bootstrap(
         &bootstrap.checkpoint_repository,
         &bootstrap.storage,
     )?;
-    let environment = bootstrap.environment.for_runtime(
-        &bootstrap.submission.runtime,
-        bootstrap.submission.environment.as_ref(),
+    let environment = RunEnvironment::exact_for_submission(
+        &bootstrap.submission,
+        bootstrap.environment.bootstrap_values(),
     )?;
     let document = PortableBootstrapDocument {
         checkpoint: bootstrap.checkpoint.clone(),
@@ -207,6 +208,7 @@ fn encode_bootstrap(
         connections: environment.bootstrap_values(),
         native_environment: bootstrap.native_environment.clone(),
         github_token: bootstrap.github_token.clone(),
+        git_credentials: bootstrap.git_credentials.clone(),
         workspace: bootstrap.workspace.clone(),
         workspace_lease: bootstrap.workspace_lease.clone(),
         checkpoint_repository: bootstrap.checkpoint_repository.clone(),

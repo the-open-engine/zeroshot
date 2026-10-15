@@ -133,10 +133,31 @@ impl PreparationProgress for QuietPreparation {
     }
 }
 
+/// Ephemeral checkout and forge authority, excluded from immutable run state.
+#[derive(Clone, Default)]
+pub struct RunSourceCredentials {
+    pub github_token: Option<String>,
+    pub git_credentials: Option<openengine_cluster_protocol::GitTransportCredentials>,
+}
+
+impl std::fmt::Debug for RunSourceCredentials {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RunSourceCredentials")
+            .field(
+                "github_token",
+                &self.github_token.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("git_credentials", &self.git_credentials)
+            .finish()
+    }
+}
+
 pub struct CapsuleAllocationRequest<'a> {
     pub run_id: &'a RunId,
     pub admitted: &'a AdmittedRun,
     pub github_token: Option<&'a str>,
+    pub git_credentials: Option<&'a openengine_cluster_protocol::GitTransportCredentials>,
     pub preparation: CapsulePreparation,
 }
 
@@ -147,6 +168,7 @@ pub struct RetainedAllocationRequest<'a> {
     pub run_id: &'a RunId,
     pub admitted: &'a AdmittedRun,
     pub github_token: Option<&'a str>,
+    pub git_credentials: Option<&'a openengine_cluster_protocol::GitTransportCredentials>,
 }
 
 /// Allocator-owned proof that this is the only active controller for one run.

@@ -120,6 +120,14 @@ impl TargetHttpControlAuthority {
         &self,
         target: &TargetRecord,
     ) -> Result<(HostedRunsDescriptor, AccessToken), TargetAuthorityError> {
+        self.require_hosted_run_access_for(target, false).await
+    }
+
+    async fn require_hosted_run_access_for(
+        &self,
+        target: &TargetRecord,
+        git_transport: bool,
+    ) -> Result<(HostedRunsDescriptor, AccessToken), TargetAuthorityError> {
         if matches!(target.access, TargetAccess::Direct) {
             return Err(TargetAuthorityError::new(
                 "direct target does not use hosted run lifecycle",
@@ -127,6 +135,7 @@ impl TargetHttpControlAuthority {
         }
         let (auth, controller) = self.descriptors(target).await?;
         let routes = auth.hosted_runs.clone();
+        super::require_git_transport(&controller, git_transport)?;
         let access = self
             .access_token(target, &auth, &controller.audience)
             .await?;

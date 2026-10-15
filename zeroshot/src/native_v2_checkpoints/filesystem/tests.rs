@@ -821,3 +821,209 @@ fn nested_repository_with_linked_peers_refuses_restore_before_mutating_any_files
     assert_eq!(git(&peer, &["rev-parse", "HEAD"]), peer_head);
     assert!(nested.join(".git/worktrees/external-peer").is_dir());
 }
+
+fn assert_unborn(directory: &Path, branch: &str) {
+    assert_eq!(git(directory, &["symbolic-ref", "HEAD"]), branch);
+    let output = Command::new("git")
+        .current_dir(directory)
+        .args(["rev-parse", "--verify", "HEAD"])
+        .output()
+        .assert_value();
+    assert!(
+        !output.status.success(),
+        "unborn HEAD unexpectedly resolved"
+    );
+}
+
+#[test]
+fn unborn_snapshot_restores_staged_files_into_same_and_fresh_workspaces() {
+    let fixture = Fixture::new();
+    git(&fixture.workspace, &["init", "-b", "unborn-writer"]);
+    fs::write(fixture.workspace.join("staged"), "checkpoint index").assert_value();
+    git(&fixture.workspace, &["add", "staged"]);
+    fs::write(fixture.workspace.join("staged"), "checkpoint working tree").assert_value();
+    let id = capture(&fixture.workspace, &fixture.snapshots, &()).assert_value();
+    assert_unborn(&fixture.tree(&id), "refs/heads/unborn-writer");
+
+    git(
+        &fixture.workspace,
+        &["config", "checkpoint.authority", "later"],
+    );
+    fs::write(fixture.workspace.join("staged"), "later index").assert_value();
+    git(&fixture.workspace, &["add", "staged"]);
+    fs::write(fixture.workspace.join("later-only"), "remove").assert_value();
+    restore(&fixture.snapshots, &id, &fixture.workspace).assert_value();
+    assert_unborn(&fixture.workspace, "refs/heads/unborn-writer");
+    assert_eq!(
+        git(&fixture.workspace, &["show", ":staged"]),
+        "checkpoint index"
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.workspace.join("staged")).assert_value(),
+        "checkpoint working tree"
+    );
+    assert!(!fixture.workspace.join("later-only").exists());
+    assert_eq!(
+        git(&fixture.workspace, &["config", "checkpoint.authority"]),
+        "later"
+    );
+
+    let fresh = fixture._root.path().join("fresh-unborn");
+    restore(&fixture.snapshots, &id, &fresh).assert_value();
+    assert_unborn(&fresh, "refs/heads/unborn-writer");
+    assert_eq!(git(&fresh, &["show", ":staged"]), "checkpoint index");
+    assert_eq!(git(&fresh, &["status", "--porcelain"]), "AM staged");
+}
+
+#[test]
+fn empty_unborn_snapshot_restores_without_initializing_or_retaining_a_later_index() {
+    let fixture = Fixture::new();
+    git(&fixture.workspace, &["init", "-b", "main"]);
+    let id = capture(&fixture.workspace, &fixture.snapshots, &()).assert_value();
+    assert!(!fixture.tree(&id).join(".git/index").exists());
+    fs::write(fixture.workspace.join("later"), "later staged file").assert_value();
+    git(&fixture.workspace, &["add", "later"]);
+
+    restore(&fixture.snapshots, &id, &fixture.workspace).assert_value();
+
+    assert_unborn(&fixture.workspace, "refs/heads/main");
+    assert!(!fixture.workspace.join(".git/index").exists());
+    assert!(!fixture.workspace.join("later").exists());
+    assert_eq!(git(&fixture.workspace, &["status", "--porcelain"]), "");
+}
+
+#[test]
+fn unborn_snapshot_refuses_a_now_packed_branch_without_mutating_files_or_index() {
+    let fixture = Fixture::new();
+    git(&fixture.workspace, &["init", "-b", "main"]);
+    fs::write(fixture.workspace.join("staged"), "unborn checkpoint").assert_value();
+    git(&fixture.workspace, &["add", "staged"]);
+    let id = capture(&fixture.workspace, &fixture.snapshots, &()).assert_value();
+    git(&fixture.workspace, &["commit", "-m", "first commit"]);
+    git(&fixture.workspace, &["pack-refs", "--all"]);
+    assert!(!fixture.workspace.join(".git/refs/heads/main").exists());
+    let shared_ref = git(&fixture.workspace, &["rev-parse", "refs/heads/main"]);
+    fs::write(fixture.workspace.join("staged"), "current staged edit").assert_value();
+    git(&fixture.workspace, &["add", "staged"]);
+    fs::write(fixture.workspace.join("keep"), "current untracked edit").assert_value();
+    let current_index = fs::read(fixture.workspace.join(".git/index")).assert_value();
+    let current_head = fs::read(fixture.workspace.join(".git/HEAD")).assert_value();
+
+    let error = restore(&fixture.snapshots, &id, &fixture.workspace).unwrap_err();
+    assert!(error.to_string().contains("shared refs are preserved"));
+    let stage = fixture.snapshots.join(id.as_str());
+    assert!(restore_staged(&stage, &fixture.workspace).is_err());
+    assert_eq!(
+        git(&fixture.workspace, &["rev-parse", "refs/heads/main"]),
+        shared_ref
+    );
+    assert_eq!(
+        fs::read(fixture.workspace.join(".git/index")).assert_value(),
+        current_index
+    );
+    assert_eq!(
+        fs::read(fixture.workspace.join(".git/HEAD")).assert_value(),
+        current_head
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.workspace.join("keep")).assert_value(),
+        "current untracked edit"
+    );
+    assert_eq!(
+        git(&fixture.workspace, &["show", ":staged"]),
+        "current staged edit"
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.tree(&id).join("staged")).assert_value(),
+        "unborn checkpoint"
+    );
+}
+
+#[test]
+fn unborn_linked_worktree_restore_preserves_its_admin_identity_and_shared_refs() {
+    let fixture = Fixture::new();
+    fixture.initialize_git();
+    let linked = fixture._root.path().join("unborn-linked");
+    git(
+        &fixture.workspace,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "writer",
+            linked.to_str().assert_value(),
+        ],
+    );
+    git(&linked, &["switch", "--orphan", "unborn-writer"]);
+    fs::write(linked.join("staged"), "checkpoint staged").assert_value();
+    git(&linked, &["add", "staged"]);
+    let marker = fs::read(linked.join(".git")).assert_value();
+    let id = capture(&linked, &fixture.snapshots, &()).assert_value();
+
+    fs::write(fixture.workspace.join("tracked"), "shared branch advanced").assert_value();
+    git(
+        &fixture.workspace,
+        &["commit", "-am", "advance shared branch"],
+    );
+    let shared_ref = git(&fixture.workspace, &["rev-parse", "refs/heads/main"]);
+    fs::write(linked.join("staged"), "later index").assert_value();
+    git(&linked, &["add", "staged"]);
+    restore(&fixture.snapshots, &id, &linked).assert_value();
+
+    assert_unborn(&linked, "refs/heads/unborn-writer");
+    assert_eq!(fs::read(linked.join(".git")).assert_value(), marker);
+    assert_eq!(git(&linked, &["show", ":staged"]), "checkpoint staged");
+    assert_eq!(
+        git(&fixture.workspace, &["rev-parse", "refs/heads/main"]),
+        shared_ref
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.workspace.join("tracked")).assert_value(),
+        "shared branch advanced"
+    );
+    assert!(
+        fixture
+            .workspace
+            .join(".git/worktrees/unborn-linked")
+            .is_dir()
+    );
+}
+
+#[test]
+fn unborn_capture_refuses_malformed_symbolic_head_without_publishing() {
+    for head in [
+        "ref: refs/heads/../outside\n",
+        "ref: refs/heads/main\nextra\n",
+        "ref: refs/remotes/missing\n",
+    ] {
+        let fixture = Fixture::new();
+        git(&fixture.workspace, &["init", "-b", "main"]);
+        fs::write(fixture.workspace.join(".git/HEAD"), head).assert_value();
+        fs::write(fixture.workspace.join("kept"), "caller bytes").assert_value();
+        assert!(capture(&fixture.workspace, &fixture.snapshots, &()).is_err());
+        assert_eq!(
+            fs::read_to_string(fixture.workspace.join("kept")).assert_value(),
+            "caller bytes"
+        );
+        assert_eq!(fs::read_dir(&fixture.snapshots).assert_value().count(), 0);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn unborn_capture_refuses_symlinked_head_without_touching_its_target() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = Fixture::new();
+    git(&fixture.workspace, &["init", "-b", "main"]);
+    let external = fixture._root.path().join("external-head");
+    fs::write(&external, "ref: refs/heads/main\n").assert_value();
+    fs::remove_file(fixture.workspace.join(".git/HEAD")).assert_value();
+    symlink(&external, fixture.workspace.join(".git/HEAD")).assert_value();
+    assert!(capture(&fixture.workspace, &fixture.snapshots, &()).is_err());
+    assert_eq!(
+        fs::read_to_string(&external).assert_value(),
+        "ref: refs/heads/main\n"
+    );
+    assert_eq!(fs::read_dir(&fixture.snapshots).assert_value().count(), 0);
+}

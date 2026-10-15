@@ -13,13 +13,18 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use fs2::FileExt;
-use openengine_cluster_protocol::{RunCheckpointsParams, RunCheckpointsResult, RunId};
+use openengine_cluster_protocol::{
+    GitTransportCredentials, RunCheckpointsParams, RunCheckpointsResult, RunId,
+};
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, watch};
 
 use crate::execution::process::{HostedProcessIdentity, HostedProcessPool, HostedProcessScope};
 use crate::native_v2_admission::writer_nodes;
-use crate::native_v2_candidate::{NativeV2CandidateConfig, build_native_v2_candidate};
+use crate::native_v2_candidate::{
+    NativeV2CandidateConfig, NativeV2CandidateDelivery, build_native_v2_candidate_with_github_token,
+};
+use crate::source_code_provider::adapters::core::{SourceDeliveryFactoryRequest, delivery_authority};
 use crate::native_v2_capsule::{
     CapsuleFilesystem, CapsuleFilesystemSpec, NativeCapsuleNodeEndpoint, RemoteCapsuleNodeRunner,
     prepare_capsule_filesystem,
@@ -32,10 +37,7 @@ use crate::native_v2_cloud::{
     RetainedAllocationUnavailable,
 };
 use crate::native_v2_contract::AdmittedRun;
-use crate::native_v2_delivery::{
-    DeliveryLineage, GhCliAuthorityConfig, GhCliDeliveryAuthority, NativeV2DeliveryConfig,
-};
-use crate::native_v2_delivery::DeliveryTarget;
+use crate::native_v2_delivery::{DeliveryLineage, NativeV2DeliveryConfig};
 use crate::native_v2_portable_controller::WorkspaceIdentity;
 use crate::native_v2_supervisor::RunRuntimeExit;
 use crate::native_v2_supervisor::checkpoints::{
@@ -93,6 +95,7 @@ struct CapsuleBuildRequest<'a> {
     adopt_existing_delivery: bool,
     admitted: &'a AdmittedRun,
     github_token: Option<&'a str>,
+    git_credentials: Option<&'a GitTransportCredentials>,
     install_source: bool,
     transfer_retained_workspace: bool,
     preparation: CapsulePreparation,
@@ -203,6 +206,7 @@ impl ProductionCapsuleAllocator {
             run_id,
             admitted,
             github_token,
+            git_credentials,
             preparation,
         } = request;
         let allocation = self
@@ -212,6 +216,7 @@ impl ProductionCapsuleAllocator {
                 adopt_existing_delivery: false,
                 admitted,
                 github_token,
+                git_credentials,
                 install_source: true,
                 transfer_retained_workspace: false,
                 preparation,
@@ -313,8 +318,7 @@ impl ProductionCapsuleAllocator {
         } else {
             Vec::new()
         };
-        let target = self
-            .capsule_delivery_target(request, &filesystem, active_process_pool)
+        self.install_capsule_source(request, &filesystem, active_process_pool)
             .await?;
         let hosted_workspace = self
             .prepare_hosted_workspace(WorkspacePreparation {
@@ -354,7 +358,6 @@ impl ProductionCapsuleAllocator {
             request,
             PreparedCapsule {
                 filesystem,
-                target,
                 hosted_workspace,
                 paths,
             },
@@ -367,48 +370,26 @@ impl ProductionCapsuleAllocator {
         request: &CapsuleBuildRequest<'_>,
         prepared: PreparedCapsule,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
+        let delivery = self.candidate_delivery(request, &pending, &prepared)?;
         let PendingCapsule {
             run_id,
             state,
             process_pool: active_process_pool,
-            git_identity,
+            git_identity: _,
         } = pending;
         let PreparedCapsule {
             filesystem,
-            target,
             hosted_workspace,
-            paths,
+            ..
         } = prepared;
-        let delivery_run_id = state
-            .restored_delivery_run_id
-            .get()
-            .unwrap_or(request.delivery_run_id);
-        let github_config = GhCliAuthorityConfig {
-            git_identity: Some(git_identity),
-            git_program: self.config.git_program.clone(),
-            gh_program: self.config.gh_program.clone(),
-            ..GhCliAuthorityConfig::hosted(paths.runtime_home)
-        };
-        let candidate = build_native_v2_candidate(
+        let candidate = build_native_v2_candidate_with_github_token(
             request.admitted,
             NativeV2CandidateConfig {
                 lanes: self.lanes(request.admitted, &filesystem, active_process_pool)?,
-                delivery: NativeV2DeliveryConfig::for_hosted_workspace(
-                    DeliveryLineage::new(
-                        delivery_run_id.clone(),
-                        request.adopt_existing_delivery || delivery_run_id != run_id,
-                    ),
-                    filesystem.workspace.clone(),
-                    target,
-                    git_identity,
-                ),
-                github: Arc::new(
-                    GhCliDeliveryAuthority::new(github_config).with_operator_diagnostics(
-                        request.run_id.clone(),
-                        self.config.operator_diagnostics.clone(),
-                    ),
-                ),
+                workspace: filesystem.workspace.clone(),
+                delivery,
             },
+            request.github_token.map(Arc::<str>::from),
         )
         .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let workspace_identity = WorkspaceIdentity::capture(&filesystem.workspace)
@@ -437,6 +418,63 @@ impl ProductionCapsuleAllocator {
             checkpoints: Some(hosted_workspace.checkpoints),
             execution_seed: hosted_workspace.execution_seed,
         })
+    }
+
+    fn candidate_delivery(
+        &self,
+        request: &CapsuleBuildRequest<'_>,
+        pending: &PendingCapsule<'_>,
+        prepared: &PreparedCapsule,
+    ) -> Result<Option<NativeV2CandidateDelivery>, CapsuleAllocationUnavailable> {
+        let delivery_run_id = pending
+            .state
+            .restored_delivery_run_id
+            .get()
+            .unwrap_or(request.delivery_run_id);
+        let capabilities =
+            crate::native_v2_admission::delivery_capabilities(&request.admitted.graph.root);
+        if capabilities.is_empty() {
+            Ok(None)
+        } else {
+            let source = request
+                .admitted
+                .source
+                .as_ref()
+                .ok_or(CapsuleAllocationUnavailable::Runtime)?;
+            let mode = crate::native_v2_admission::delivery_mode(&request.admitted.graph.root)
+                .ok_or(CapsuleAllocationUnavailable::Runtime)?;
+            let target = crate::native_v2_delivery::source_target(source, mode)
+                .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+            let authority = delivery_authority(SourceDeliveryFactoryRequest {
+                source,
+                workspace: &prepared.filesystem.workspace,
+                git_program: &self.config.git_program,
+                gh_program: &self.config.gh_program,
+                home_directory: &prepared.paths.runtime_home,
+                private_directory: &prepared.paths.runtime_home,
+                git_identity: Some(pending.git_identity),
+                local_environment: None,
+                required_capabilities: &capabilities,
+                operator_diagnostics: Some((
+                    request.run_id.clone(),
+                    self.config.operator_diagnostics.clone(),
+                )),
+            })
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+            Ok(Some(NativeV2CandidateDelivery {
+                config: NativeV2DeliveryConfig::for_hosted_workspace(
+                    DeliveryLineage::new(
+                        delivery_run_id.clone(),
+                        request.adopt_existing_delivery || delivery_run_id != pending.run_id,
+                    ),
+                    prepared.filesystem.workspace.clone(),
+                    target,
+                    pending.git_identity,
+                ),
+                authority,
+                git_credentials: request.git_credentials.cloned(),
+            }))
+        }
     }
 
     async fn prepare_hosted_workspace(
@@ -508,31 +546,34 @@ impl ProductionCapsuleAllocator {
         Ok(filesystem)
     }
 
-    async fn capsule_delivery_target(
+    async fn install_capsule_source(
         &self,
         request: &CapsuleBuildRequest<'_>,
         filesystem: &CapsuleFilesystem,
         process_pool: HostedProcessPool,
-    ) -> Result<DeliveryTarget, CapsuleAllocationUnavailable> {
+    ) -> Result<(), CapsuleAllocationUnavailable> {
+        let resolved = request
+            .admitted
+            .source
+            .as_ref()
+            .ok_or(CapsuleAllocationUnavailable::SourceCheckout)?;
         if !request.install_source {
-            return DeliveryTarget::new(
-                request.admitted.source.repository.as_str(),
-                request.admitted.source.branch.as_str(),
-                request.admitted.source.revision.as_str(),
-            )
-            .map_err(|_| CapsuleAllocationUnavailable::Runtime);
+            return Ok(());
         }
-        let repository = request.admitted.source.repository.as_str();
-        let source = self.repository_source(repository);
+        let source = self.repository_source(resolved);
         install_repository(RepositoryInstall {
             git_program: &self.config.git_program,
             source: &source,
-            resolved: &request.admitted.source,
+            resolved,
             workspace: &filesystem.workspace,
             process_pool,
             github_token: request.github_token,
+            git_credentials: request.git_credentials,
+            private_directory: &run_directory(&self.config.storage_root, request.run_id)
+                .join("runtime"),
         })
         .await
+        .map(|_| ())
         .map_err(|error| {
             error.record_diagnostic(request.run_id, &self.config.operator_diagnostics);
             CapsuleAllocationUnavailable::SourceCheckout
@@ -665,12 +706,15 @@ impl ProductionCapsuleAllocator {
         }
     }
 
-    fn repository_source(&self, repository: &str) -> std::ffi::OsString {
+    fn repository_source(
+        &self,
+        source: &crate::native_v2_contract::ResolvedSource,
+    ) -> std::ffi::OsString {
         #[cfg(test)]
         if let Some(path) = &self.source_override {
             return super::repository::path_source(path);
         }
-        production_source(repository)
+        production_source(source)
     }
 }
 
@@ -768,6 +812,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
             run_id,
             admitted,
             github_token,
+            git_credentials,
             preparation,
         } = request;
         self.validate_retained_selection(source_run_id, &selection)?;
@@ -782,6 +827,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                 adopt_existing_delivery: true,
                 admitted,
                 github_token,
+                git_credentials,
                 install_source: false,
                 transfer_retained_workspace: true,
                 preparation,
@@ -886,7 +932,6 @@ impl ExclusiveControllerClaim for ProductionControllerClaim {}
 
 struct PreparedCapsule {
     filesystem: CapsuleFilesystem,
-    target: DeliveryTarget,
     hosted_workspace: HostedWorkspace,
     paths: CapsuleBuildPaths,
 }

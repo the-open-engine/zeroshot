@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use super::*;
-use crate::native_v2_delivery::github::valid_generated_description;
+use crate::source_code_provider::valid_delivery_description;
 
 const LEGACY_TITLE: &str = "feat: complete Zeroshot task";
 const LEGACY_DESCRIPTION: &str = "Created by Zeroshot v2.";
@@ -23,7 +23,7 @@ struct LegacyIssueInput {
 pub(super) struct PreparedDeliveryInput {
     pub(super) title: String,
     pub(super) description: String,
-    pub(super) source_issue: Option<GitHubSourceIssue>,
+    pub(super) source_issue: Option<SourceDeliveryIssue>,
 }
 
 pub(super) fn delivery_input(input: &Value) -> Result<PreparedDeliveryInput, DeliveryStop> {
@@ -31,7 +31,7 @@ pub(super) fn delivery_input(input: &Value) -> Result<PreparedDeliveryInput, Del
         return Ok(legacy_input(None));
     }
     if let Ok(input) = serde_json::from_value::<ManifestInput>(input.clone()) {
-        if !valid_generated_description(&input.description) {
+        if !valid_delivery_description(&input.description) {
             return Err(DeliveryStop::Outcome(WorkerOutcome::malformed()));
         }
         return Ok(PreparedDeliveryInput {
@@ -44,7 +44,7 @@ pub(super) fn delivery_input(input: &Value) -> Result<PreparedDeliveryInput, Del
     Ok(legacy_input(Some(parse_source_issue(&input.issue_number)?)))
 }
 
-fn legacy_input(source_issue: Option<GitHubSourceIssue>) -> PreparedDeliveryInput {
+fn legacy_input(source_issue: Option<SourceDeliveryIssue>) -> PreparedDeliveryInput {
     PreparedDeliveryInput {
         title: LEGACY_TITLE.to_owned(),
         description: LEGACY_DESCRIPTION.to_owned(),
@@ -52,20 +52,20 @@ fn legacy_input(source_issue: Option<GitHubSourceIssue>) -> PreparedDeliveryInpu
     }
 }
 
-fn optional_source_issue(value: Option<&str>) -> Result<Option<GitHubSourceIssue>, DeliveryStop> {
+fn optional_source_issue(value: Option<&str>) -> Result<Option<SourceDeliveryIssue>, DeliveryStop> {
     let Some(value) = value.filter(|value| !value.is_empty()) else {
         return Ok(None);
     };
     parse_source_issue(value).map(Some)
 }
 
-fn parse_source_issue(value: &str) -> Result<GitHubSourceIssue, DeliveryStop> {
+fn parse_source_issue(value: &str) -> Result<SourceDeliveryIssue, DeliveryStop> {
     let number = value
         .parse::<u64>()
         .ok()
         .filter(|number| *number > 0 && number.to_string() == value)
         .ok_or_else(|| DeliveryStop::Outcome(WorkerOutcome::malformed()))?;
-    Ok(GitHubSourceIssue { number })
+    Ok(SourceDeliveryIssue { number })
 }
 
 fn malformed<T>(result: Result<T, serde_json::Error>) -> Result<T, DeliveryStop> {

@@ -30,7 +30,10 @@ another run. A failed Cloud run does not authorize silently implementing the tas
 
 ## Choose the target
 
-- Local execution omits `--target` and is the only mode that edits the invoking worktree directly.
+- Local execution omits `--target`; `--cwd DIR` selects an existing folder and defaults to the invoking
+  folder. Runs without Git delivery need no repository. File arguments remain relative to the
+  invoking folder. Keep the workspace disjoint from active Zeroshot state; use an external
+  `ZEROSHOT_STATE_DIR` when necessary.
 - Zeroshot Cloud is built in. Sign in once with `zeroshot target login cloud`, then use
   `--target cloud` explicitly on Cloud commands. Cloud setup (organizations, GitHub App,
   connections) is documented at https://cloud.zeroshot.sh/docs.
@@ -123,13 +126,19 @@ zeroshot run --title "TASK" --profile org:NAME --input input.json \
 still be fetched from the target first, so this command requires Cloud access. It does not prove
 connection availability.
 
-For named targets, Zeroshot resolves source from the invoking Git worktree's attached upstream.
-Without an upstream, it requires exactly one GitHub remote. Detached worktrees require explicit
-repository and branch values. Override source only when needed:
+For named targets, `--cwd` selects the client Git checkout. Zeroshot prefers its attached upstream,
+then a unique eligible HTTPS/SSH remote. Docker and Cloud still require an exact committed Git
+source. Detached worktrees require repository and branch overrides. `--repository` accepts GitHub
+`owner/name` or a credential-free HTTPS/SSH clone URL. Override source only when needed:
 
 ```console
 --target cloud --repository OWNER/REPOSITORY --branch BRANCH --revision SHA
 ```
+
+Git push uses shared transport and needs no GitHub API. PR and merge require a registered forge;
+GitHub is maintained today. `--source-connection KEY` authorizes source-only HTTPS
+(`GIT_USERNAME`, `GIT_PASSWORD`) or pinned SSH (`GIT_SSH_PRIVATE_KEY`, `GIT_SSH_KNOWN_HOSTS`)
+credentials. Generic forms require the target's `openengine.git-transport/v1` capability.
 
 Cloud receives the remote revision, not uncommitted files. Check relevant dirty or unpushed work and
 never push or omit it without authorization. Confirm the exact repository, branch, revision, target,

@@ -1,0 +1,271 @@
+use std::path::Path;
+
+use serde::Deserialize;
+use serde_json::Value;
+
+use super::*;
+
+const UPDATE_HEAD_MUTATION: &str = r#"
+mutation($pullRequestId: ID!, $expectedHeadOid: GitObjectID!) {
+  updatePullRequestBranch(input: {
+    pullRequestId: $pullRequestId
+    expectedHeadOid: $expectedHeadOid
+    updateMethod: MERGE
+  }) {
+    pullRequest {
+      id
+      number
+      repository { nameWithOwner }
+      baseRefName
+      headRefName
+      headRefOid
+    }
+  }
+}
+"#;
+
+#[path = "head/reconcile.rs"]
+mod reconcile;
+pub(super) use reconcile::reconcile;
+
+const MAX_GIT_OUTPUT_BYTES: usize = 4 * 1_024;
+
+#[derive(Deserialize)]
+struct UpdateHeadWire {
+    data: UpdateHeadDataWire,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateHeadDataWire {
+    update_pull_request_branch: Option<UpdateHeadPayloadWire>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateHeadPayloadWire {
+    pull_request: Option<UpdatedPullRequestWire>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdatedPullRequestWire {
+    id: String,
+    number: u64,
+    repository: UpdatedRepositoryWire,
+    base_ref_name: String,
+    head_ref_name: String,
+    head_ref_oid: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdatedRepositoryWire {
+    name_with_owner: String,
+}
+
+#[derive(Clone, Copy)]
+struct HeadUpdateContext<'a> {
+    authority: &'a GhCliDeliveryAuthority,
+    workspace: &'a Path,
+    credential: SourceDeliveryCredential<'a>,
+}
+
+pub(super) struct HeadUpdateRequest<'a> {
+    pub(super) workspace: &'a Path,
+    pub(super) review: &'a SourceReviewReceipt,
+    pub(super) pull_request_id: &'a str,
+}
+
+pub(super) async fn update_review_head(
+    authority: &GhCliDeliveryAuthority,
+    request: HeadUpdateRequest<'_>,
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<SourceReviewReceipt, SourceDeliveryError> {
+    let context = HeadUpdateContext {
+        authority,
+        workspace: request.workspace,
+        credential,
+    };
+    require_local_head(context, &request.review.head_revision).await?;
+    let value = context
+        .authority
+        .api(
+            &update_arguments(request.pull_request_id, &request.review.head_revision),
+            context.credential,
+        )
+        .await?;
+    updated_receipt(value, request.review, request.pull_request_id)
+}
+
+pub(super) async fn synchronize_review_head(
+    authority: &GhCliDeliveryAuthority,
+    request: SourceHeadSynchronization<'_>,
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<(), SourceDeliveryError> {
+    adopt_local_head(
+        HeadUpdateContext {
+            authority,
+            workspace: request.workspace,
+            credential,
+        },
+        request.previous,
+        request.updated,
+    )
+    .await
+}
+
+fn update_arguments(pull_request_id: &str, expected_head: &str) -> Vec<String> {
+    vec![
+        "graphql".to_owned(),
+        "-f".to_owned(),
+        format!("query={UPDATE_HEAD_MUTATION}"),
+        "-f".to_owned(),
+        format!("pullRequestId={pull_request_id}"),
+        "-f".to_owned(),
+        format!("expectedHeadOid={expected_head}"),
+    ]
+}
+
+fn updated_receipt(
+    value: Value,
+    previous: &SourceReviewReceipt,
+    pull_request_id: &str,
+) -> Result<SourceReviewReceipt, SourceDeliveryError> {
+    let wire: UpdateHeadWire =
+        serde_json::from_value(value).map_err(|_| SourceDeliveryError::Rejected)?;
+    let updated = wire
+        .data
+        .update_pull_request_branch
+        .and_then(|payload| payload.pull_request)
+        .ok_or(SourceDeliveryError::Rejected)?;
+    let receipt = SourceReviewReceipt {
+        review_id: updated.number.to_string(),
+        repository: updated.repository.name_with_owner,
+        target_branch: updated.base_ref_name,
+        head_branch: updated.head_ref_name,
+        head_revision: updated.head_ref_oid,
+    };
+    (updated.id == pull_request_id && valid_head_update(previous, &receipt))
+        .then_some(receipt)
+        .ok_or(SourceDeliveryError::Rejected)
+}
+
+async fn require_local_head(
+    context: HeadUpdateContext<'_>,
+    expected: &str,
+) -> Result<(), SourceDeliveryError> {
+    let head = git_output(
+        git_command(
+            &context.authority.config,
+            context.workspace,
+            context.credential,
+        )
+        .args(["rev-parse", "HEAD"]),
+        context.authority.config.api_deadline,
+    )
+    .await?;
+    let status = git_output(
+        git_command(
+            &context.authority.config,
+            context.workspace,
+            context.credential,
+        )
+        .args(["status", "--porcelain=v1", "--untracked-files=all"]),
+        context.authority.config.api_deadline,
+    )
+    .await?;
+    if head.trim() == expected && status.is_empty() {
+        return Ok(());
+    }
+    Err(SourceDeliveryError::repairable(format!(
+        "Local Git state cannot adopt the authorized head: expected HEAD {expected}, actual HEAD {}\n\
+             git status --porcelain=v1 --untracked-files=all:\n{status}",
+        head.trim()
+    )))
+}
+
+async fn adopt_local_head(
+    context: HeadUpdateContext<'_>,
+    previous: &SourceReviewReceipt,
+    updated: &SourceReviewReceipt,
+) -> Result<(), SourceDeliveryError> {
+    if !local_transition_required(context, previous, updated).await? {
+        return Ok(());
+    }
+    fetch_head(context, previous, updated).await?;
+    adopt_fetched_head(context, (previous, updated)).await
+}
+
+async fn fetch_head(
+    context: HeadUpdateContext<'_>,
+    previous: &SourceReviewReceipt,
+    updated: &SourceReviewReceipt,
+) -> Result<(), SourceDeliveryError> {
+    context
+        .authority
+        .git_transport(context.workspace, &previous.repository)
+        .fetch_exact(
+            &updated.head_revision,
+            context
+                .credential
+                .with_github_git_token(context.credential.expose()),
+        )
+        .await
+}
+
+async fn adopt_fetched_head(
+    context: HeadUpdateContext<'_>,
+    transition: (&SourceReviewReceipt, &SourceReviewReceipt),
+) -> Result<(), SourceDeliveryError> {
+    let (previous, updated) = transition;
+    if !local_transition_required(context, previous, updated).await? {
+        return Ok(());
+    }
+    let mut ancestor = head_command(context);
+    ancestor.args([
+        "merge-base",
+        "--is-ancestor",
+        &previous.head_revision,
+        &updated.head_revision,
+    ]);
+    bounded_status(ancestor, context.authority.config.api_deadline).await?;
+    let mut fast_forward = head_command(context);
+    fast_forward.args(["merge", "--ff-only", &updated.head_revision]);
+    bounded_status(fast_forward, context.authority.config.api_deadline).await?;
+    require_local_head(context, &updated.head_revision).await
+}
+
+async fn local_transition_required(
+    context: HeadUpdateContext<'_>,
+    previous: &SourceReviewReceipt,
+    updated: &SourceReviewReceipt,
+) -> Result<bool, SourceDeliveryError> {
+    if require_local_head(context, &updated.head_revision)
+        .await
+        .is_ok()
+    {
+        return Ok(false);
+    }
+    require_local_head(context, &previous.head_revision).await?;
+    Ok(true)
+}
+
+async fn git_output(
+    command: &mut Command,
+    deadline: Duration,
+) -> Result<String, SourceDeliveryError> {
+    bounded_git_output(command, deadline, MAX_GIT_OUTPUT_BYTES).await
+}
+
+#[cfg(test)]
+#[path = "head/tests.rs"]
+mod tests;
+
+fn head_command(context: HeadUpdateContext<'_>) -> Command {
+    git_command(
+        &context.authority.config,
+        context.workspace,
+        context.credential,
+    )
+}

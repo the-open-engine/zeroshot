@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from zeroshot._projection import _log_event, _plan_status
+from zeroshot._projection import _log_event, _plan_status, _status, _summary
 from zeroshot.errors import ProtocolError
 
 
@@ -79,3 +79,55 @@ def test_merge_plan_projection_rejects_omitted_nullable_fields() -> None:
     del runs[0]["queueExpiresAt"]
     with pytest.raises(ProtocolError, match="queueExpiresAt"):
         _plan_status(value)
+
+
+def local_status() -> dict[str, object]:
+    return {
+        "runId": "folder-run",
+        "title": "Ordinary folder",
+        "size": "small",
+        "atCursor": "v2:0",
+        "status": {"phase": "admitted"},
+    }
+
+
+@pytest.mark.parametrize("explicit_null", [False, True])
+def test_local_status_and_inventory_preserve_source_absence(explicit_null: bool) -> None:
+    value = local_status()
+    if explicit_null:
+        value["source"] = None
+    status = _status(value)
+    assert status.source is None
+    assert _summary(status).source is None
+
+
+def test_generic_git_source_preserves_remote_and_opaque_forge_identity() -> None:
+    value = local_status()
+    value["source"] = {
+        "repository": "nested/team/project:42",
+        "branch": "main",
+        "revision": "a" * 64,
+        "remote": {
+            "url": "ssh://alice@git.example:2222/team/nested/project.git",
+            "connection": "source-private",
+            "forge": {"provider": "source.contributed", "repository": "opaque:project"},
+        },
+    }
+    source = _status(value).source
+    assert source is not None
+    assert source.repository == "nested/team/project:42"
+    assert source.revision == "a" * 64
+    assert source.remote is not None
+    assert source.remote.url == "ssh://alice@git.example:2222/team/nested/project.git"
+    assert source.remote.connection == "source-private"
+    assert source.remote.forge is not None
+    assert source.remote.forge.provider == "source.contributed"
+    assert source.remote.forge.repository == "opaque:project"
+
+
+@pytest.mark.parametrize("source", [False, "repo", {"repository": "owner/repo"}])
+def test_present_malformed_source_remains_a_protocol_error(source: object) -> None:
+    value = local_status()
+    value["source"] = source
+    with pytest.raises(ProtocolError, match="source"):
+        _status(value)

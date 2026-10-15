@@ -8,6 +8,7 @@ use openengine_cluster_protocol::{DeclaredConnections, FieldName, RunId, WorkerR
 use openengine_cluster_testkit::assertions::AssertValue;
 
 use super::*;
+use crate::source_code_provider::adapters::core::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
 use crate::execution::process::{HostedProcessIdentity, HostedProcessPool, HostedProcessScope};
 use crate::execution::process::test_support::KillCapabilityGuard;
 use crate::native_v2_candidate::test_support::TestDirectory;

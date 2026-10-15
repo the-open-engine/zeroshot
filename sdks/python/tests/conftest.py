@@ -61,7 +61,7 @@ def plan_projection(state):
         }],
     }
 
-entry = {"args": args}
+entry = {"args": args, "cwd": os.getcwd()}
 for name in ("--input", "--graph", "--runtime-config", "--uniform-runtime-config"):
     path = option(name)
     if path:
@@ -105,7 +105,8 @@ elif args[:2] == ["plan", "watch"]:
 elif args[:2] == ["plan", "force-stop"]:
     print(json.dumps(plan_projection("cancelled")))
 elif args and args[0] == "run":
-    task = entry.get("--input", {}).get("task")
+    initial_input = entry.get("--input")
+    task = initial_input.get("task") if isinstance(initial_input, dict) else None
     if task == "invalid":
         secret = os.environ.get("OPENROUTER_API_KEY", "")
         print(json.dumps({
