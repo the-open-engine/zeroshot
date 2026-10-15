@@ -6,8 +6,11 @@ and engine on one release line.
 
 ## Install and run
 
+Download your platform's wheel from [Python SDK releases](https://github.com/the-open-engine/zeroshot/releases?q=zeroshot-python-v).
+Replace `WHEEL_FILE` with its local path:
+
 ```console
-python -m pip install the-open-engine-zeroshot
+python -m pip install WHEEL_FILE
 ```
 
 ```python

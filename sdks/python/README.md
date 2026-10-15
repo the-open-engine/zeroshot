@@ -1,9 +1,10 @@
 # Zeroshot Python SDK
 
-Install the `the-open-engine-zeroshot` distribution from PyPI and import it as `zeroshot`:
+Download your platform's wheel from [Python SDK releases](https://github.com/the-open-engine/zeroshot/releases?q=zeroshot-python-v).
+Replace `WHEEL_FILE` with its local path and import the package as `zeroshot`:
 
 ```console
-pip install the-open-engine-zeroshot
+python -m pip install WHEEL_FILE
 ```
 
 `zeroshot` is a typed async client for the Zeroshot run engine. Each platform wheel contains the

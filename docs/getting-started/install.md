@@ -123,10 +123,11 @@ the canonical `zeroshot-skill.md`, and `SHA256SUMS`; archive names contain the r
 target triple.
 
 The Python SDK requires Python 3.11 or newer and ships the matching executable inside each platform
-wheel:
+wheel. Download your platform's wheel from [Python SDK releases](https://github.com/the-open-engine/zeroshot/releases?q=zeroshot-python-v).
+Replace `WHEEL_FILE` with its local path:
 
 ```console
-python -m pip install the-open-engine-zeroshot
+python -m pip install WHEEL_FILE
 ```
 
 For a long-running target, use `ghcr.io/the-open-engine/zeroshot-target`. See the
