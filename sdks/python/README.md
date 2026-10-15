@@ -1,6 +1,6 @@
 # Zeroshot Python SDK
 
-Download your platform's wheel from [Python SDK releases](https://github.com/the-open-engine/zeroshot/releases?q=zeroshot-python-v).
+Download the wheel for your [OS and CPU](https://zeroshot.sh/docs/current/guides/python-sdk/#install-and-run) from [Python SDK releases](https://github.com/the-open-engine/zeroshot/releases?q=zeroshot-python-v).
 Replace `WHEEL_FILE` with its local path and import the package as `zeroshot`:
 
 ```console

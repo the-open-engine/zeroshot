@@ -123,7 +123,7 @@ the canonical `zeroshot-skill.md`, and `SHA256SUMS`; archive names contain the r
 target triple.
 
 The Python SDK requires Python 3.11 or newer and ships the matching executable inside each platform
-wheel. Download your platform's wheel from [Python SDK releases](https://github.com/the-open-engine/zeroshot/releases?q=zeroshot-python-v).
+wheel. Download the wheel for your [OS and CPU](../guides/python-sdk.md#install-and-run) from [Python SDK releases](https://github.com/the-open-engine/zeroshot/releases?q=zeroshot-python-v).
 Replace `WHEEL_FILE` with its local path:
 
 ```console
