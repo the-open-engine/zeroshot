@@ -211,6 +211,7 @@ pub(in crate::native_v2_cli) struct FakeBackend {
     attach_behavior: AttachBehavior,
     failed_watch: bool,
     runtime_failure_before_terminal: bool,
+    unanswered_status: Option<tokio::sync::watch::Sender<()>>,
     error_logs: usize,
     pending_logs: bool,
     queued_lifecycle: bool,
@@ -673,6 +674,10 @@ impl NativeV2CliBackend for FakeBackend {
             target: target.map(str::to_owned),
             run_id: params.run_id.as_str().to_owned(),
         });
+        if let Some(started) = &self.unanswered_status {
+            let _ = started.send(());
+            return std::future::pending().await;
+        }
         if self.runtime_failure_before_terminal {
             return Ok(runtime_failure_status(&params.run_id));
         }

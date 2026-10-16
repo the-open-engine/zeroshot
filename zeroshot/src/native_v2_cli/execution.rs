@@ -410,12 +410,19 @@ where
     .await?
     {
         // A runtime failure can close the watch before its terminal snapshot is durable, or
-        // without one when persistence is unavailable. Run status reports either result.
+        // without one when persistence is unavailable. Run status reports either result, and
+        // Ctrl-C still detaches while it is read.
         CliOutcome::Completed => {
             let params = RunStatusParams {
                 run_id: receipt.run_id.clone(),
             };
-            outcome_for_status(&context.backend.run_status(target, params).await?.status)
+            tokio::select! {
+                biased;
+                () = detach.as_mut() => CliOutcome::Detached,
+                result = context.backend.run_status(target, params) => {
+                    outcome_for_status(&result?.status)
+                }
+            }
         }
         outcome => outcome,
     };

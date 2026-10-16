@@ -9,6 +9,18 @@ impl FakeBackend {
         }
     }
 
+    /// The watch closes before a terminal snapshot, and the status read signals `started`, then
+    /// never answers.
+    pub(in super::super) fn with_unanswered_status_after_early_close(
+        started: tokio::sync::watch::Sender<()>,
+    ) -> Self {
+        Self {
+            runtime_failure_before_terminal: true,
+            unanswered_status: Some(started),
+            ..Self::default()
+        }
+    }
+
     pub(in super::super) fn with_failed_watch_and_error_logs(count: usize) -> Self {
         Self {
             failed_watch: true,

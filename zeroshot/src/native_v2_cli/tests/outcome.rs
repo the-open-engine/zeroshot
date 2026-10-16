@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use openengine_cluster_protocol::MergePlanState;
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::json;
@@ -85,6 +87,34 @@ async fn foreground_run_settles_a_watch_closed_before_the_terminal_snapshot() {
 
     let (outcome, _) = execute_durable_command("watch", &backend).await;
     assert_eq!(outcome, CliOutcome::Completed);
+}
+
+#[tokio::test]
+async fn ctrl_c_detaches_while_settling_a_watch_closed_before_the_terminal_snapshot() {
+    let (notification, _) = tokio::sync::watch::channel(());
+    let backend = FakeBackend::with_unanswered_status_after_early_close(notification.clone());
+    let mut signal = EdgeDetachSignal { notification };
+    let mut output = Vec::new();
+
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(5),
+        execute_run_task("runtime failure", &backend, &mut signal, &mut output),
+    )
+    .await
+    .assert_value_with("Ctrl-C ends the status read")
+    .assert_value();
+
+    assert_eq!(outcome, CliOutcome::Detached);
+    let calls = backend.calls();
+    assert!(calls.contains(&Call::Status {
+        target: Some("prod".to_owned()),
+        run_id: "run-public".to_owned(),
+    }));
+    assert!(
+        !calls
+            .iter()
+            .any(|call| matches!(call, Call::Logs { .. } | Call::Force { .. }))
+    );
 }
 
 #[tokio::test]
