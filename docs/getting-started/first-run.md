@@ -81,7 +81,8 @@ and select the run in **Runs**.
 Normal completion happens when the graph reaches a terminal node. An explicit
 `zeroshot force-stop RUN_ID` also closes the run, while engine or target failures can produce a
 terminal failure result. `zeroshot logs RUN_ID` keeps the error records that explain a failure,
-such as a failed node's error or the runtime cause.
+such as a failed node's error or the runtime cause. A failed foreground run exits with status 1 and
+its error lists the latest of those records, followed by the `zeroshot logs` command for the rest.
 
 ## Try the smaller template
 

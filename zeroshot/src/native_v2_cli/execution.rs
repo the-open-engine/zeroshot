@@ -21,6 +21,8 @@ mod attach;
 mod connections;
 #[path = "execution/context.rs"]
 mod context;
+#[path = "execution/failure.rs"]
+mod failure;
 #[path = "execution/merge_plans.rs"]
 mod merge_plans;
 #[path = "execution/profiles.rs"]
@@ -31,6 +33,7 @@ mod status;
 mod submission;
 use attach::{RoutedAttach, follow_attach};
 pub(crate) use context::CliExecutionContext;
+pub use failure::RunFailure;
 pub use submission::{try_execute_native_v2_preflight, try_execute_native_v2_static};
 use submission::{RunSubmission, select_connection_requirements, submit_run, validate_github_token};
 use status::outcome_for_status;
@@ -391,11 +394,12 @@ where
     if run.detach || interrupted {
         return Ok(CliOutcome::Detached);
     }
-    let outcome = follow_durable_with_detach(
+    let target = run.target.as_deref();
+    let outcome = match follow_durable_with_detach(
         DurableFollow {
             backend: context.backend,
-            target: run.target.as_deref(),
-            run_id: receipt.run_id,
+            target,
+            run_id: receipt.run_id.clone(),
             kind: DurableFollowKind::Watch,
             initial_cursor: None,
             execution: None,
@@ -403,31 +407,30 @@ where
         detach.as_mut(),
         output,
     )
-    .await?;
-    foreground_run_outcome(outcome)
-}
-
-fn foreground_run_outcome(outcome: CliOutcome) -> Result<CliOutcome, NativeV2CliError> {
+    .await?
+    {
+        // A runtime failure can close the watch before its terminal snapshot is durable, or
+        // without one when persistence is unavailable. Run status reports either result.
+        CliOutcome::Completed => {
+            let params = RunStatusParams {
+                run_id: receipt.run_id.clone(),
+            };
+            outcome_for_status(&context.backend.run_status(target, params).await?.status)
+        }
+        outcome => outcome,
+    };
     if outcome == CliOutcome::Failed {
-        Err(NativeV2CliError::RunFailed)
-    } else {
-        Ok(outcome)
+        let failure =
+            RunFailure::read(context.backend, target, receipt.run_id, detach.as_mut()).await;
+        return Err(NativeV2CliError::RunFailed(failure));
     }
+    Ok(outcome)
 }
 
 #[derive(Clone, Copy)]
 enum DurableFollowKind {
     Watch,
     Logs,
-}
-
-impl DurableFollowKind {
-    const fn done_outcome(self) -> CliOutcome {
-        match self {
-            Self::Watch => CliOutcome::Detached,
-            Self::Logs => CliOutcome::Completed,
-        }
-    }
 }
 
 struct DurableFollow<'a, B> {
@@ -566,7 +569,7 @@ async fn follow_durable_with_detach<B, D, W>(
 where
     B: NativeV2CliBackend,
     D: Future<Output = ()> + ?Sized,
-    W: Write,
+    W: DurableOutput,
 {
     let mut from_cursor = follow.initial_cursor.clone();
     let mut opened = false;
@@ -593,7 +596,7 @@ where
                 SubscriptionStep::Item(Some(DurableItem::Closed(
                     SubscriptionCloseReason::Done,
                 ))) => {
-                    return Ok(follow.kind.done_outcome());
+                    return Ok(CliOutcome::Completed);
                 }
                 SubscriptionStep::Item(Some(DurableItem::Closed(
                     SubscriptionCloseReason::SlowConsumer,
@@ -611,10 +614,26 @@ where
     }
 }
 
+/// Receives each new event of a durable follow once, in cursor order.
+trait DurableOutput {
+    fn watch_event(&mut self, event: CliRunWatchEventNotification) -> Result<(), NativeV2CliError>;
+    fn log_event(&mut self, event: RunLogEventNotification) -> Result<(), NativeV2CliError>;
+}
+
+impl<W: Write> DurableOutput for W {
+    fn watch_event(&mut self, event: CliRunWatchEventNotification) -> Result<(), NativeV2CliError> {
+        write_json(self, &event)
+    }
+
+    fn log_event(&mut self, event: RunLogEventNotification) -> Result<(), NativeV2CliError> {
+        write_json(self, &event)
+    }
+}
+
 fn write_durable_event(
     event: DurableItem,
     from_cursor: &mut Option<Cursor>,
-    output: &mut impl Write,
+    output: &mut impl DurableOutput,
 ) -> Result<Option<CliOutcome>, NativeV2CliError> {
     let cursor = event.cursor().cloned();
     if cursor.is_some() && cursor == *from_cursor {
@@ -623,11 +642,11 @@ fn write_durable_event(
     let outcome = match event {
         DurableItem::Watch(event) => {
             let outcome = watched_outcome(&event.status);
-            write_json(output, &event)?;
+            output.watch_event(event)?;
             outcome
         }
         DurableItem::Log(event) => {
-            write_json(output, &event)?;
+            output.log_event(event)?;
             None
         }
         DurableItem::Closed(SubscriptionCloseReason::SourceUnavailable) => {
@@ -677,3 +696,7 @@ mod incomplete_stream_tests;
 #[cfg(test)]
 #[path = "execution/exact_miss_tests.rs"]
 mod exact_miss_tests;
+
+#[cfg(test)]
+#[path = "execution/failure_tests.rs"]
+mod failure_tests;

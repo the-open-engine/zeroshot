@@ -72,7 +72,8 @@ pub use support::VERSION;
 mod update;
 
 pub use execution::{
-    execute_native_v2_cli, try_execute_native_v2_preflight, try_execute_native_v2_static,
+    RunFailure, execute_native_v2_cli, try_execute_native_v2_preflight,
+    try_execute_native_v2_static,
 };
 pub use parser::{Cli, parse_native_v2_args};
 
@@ -458,8 +459,8 @@ pub enum NativeV2CliError {
         origin: String,
         message: String,
     },
-    #[error("run finished unsuccessfully")]
-    RunFailed,
+    #[error("{0}")]
+    RunFailed(RunFailure),
     #[error("merge plan finished unsuccessfully")]
     MergePlanFailed,
     #[error("could not write CLI output: {0}")]

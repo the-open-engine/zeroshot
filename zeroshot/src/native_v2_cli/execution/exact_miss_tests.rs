@@ -33,10 +33,6 @@ async fn assert_private_dispatch_refusals(backend: &FakeBackend) {
 }
 
 fn assert_durable_duplicate_and_close_edges() {
-    assert_eq!(
-        DurableFollowKind::Watch.done_outcome(),
-        CliOutcome::Detached
-    );
     let cursor = Cursor::new("v2:11");
     let mut from_cursor = Some(cursor.clone());
     let mut duplicate_output = Vec::new();
