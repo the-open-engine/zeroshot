@@ -540,3 +540,32 @@ fn token_file_bootstrap_keeps_credentials_out_of_submission_and_consumes_private
     assert!(restored.native_environment.is_empty());
     assert!(!path.exists());
 }
+
+#[tokio::test]
+async fn controller_entry_reports_why_a_loaded_bootstrap_could_not_start() {
+    let root = TestDirectory::new("startup-failure");
+    let storage = root.child("state");
+    crate::execution::platform::create_private_directory(&storage)
+        .assert_value_with("create run storage");
+    // The workspace is absent, so the controller fails after consuming its bootstrap.
+    let mut prepared = bootstrap(
+        RunId::new("startup-failure"),
+        submission("startup-failure"),
+        root.child("missing-workspace"),
+        storage.clone(),
+    );
+    prepared.github_token = Some("startup-secret-token".to_owned());
+    let path = storage.join("controller.bootstrap.json");
+    write_bootstrap_file(&path, &prepared).assert_value_with("write bootstrap");
+
+    let error = run_controller_process(&path).await.assert_error();
+
+    assert!(!path.exists(), "bootstrap must be consumed");
+    let report = take_startup_failure(&PortableControllerPaths::new(&storage))
+        .assert_value_with("startup failure report");
+    assert!(
+        report.starts_with(&error.to_string()),
+        "report {report:?} must name {error}"
+    );
+    assert!(!report.contains("startup-secret-token"));
+}
