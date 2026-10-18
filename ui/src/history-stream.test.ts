@@ -324,3 +324,18 @@ test('terminal run status does not end collecting observation', () => {
   for (const state of ['complete', 'incomplete', 'expired', 'unavailable'] as const)
     assert.equal(canFollowHistory({ ...run, observation: { state } }), false);
 });
+
+test('history observation calls browser fetch without a transport receiver', async (t) => {
+  const source = channel();
+  const stream = setup(async function (this: unknown) {
+    // Native Window.fetch rejects a class instance as its receiver in Chromium.
+    if (this !== undefined) throw new TypeError('Illegal invocation');
+    return source.response;
+  });
+  t.after(stream.dispose);
+  await until(() => stream.states.includes('connected'));
+  source.send(frame(page({ finished: true })));
+  await until(() => source.cancelled);
+  assert.equal(stream.pages.length, 1);
+  assert.equal(stream.errors.length, 0);
+});
