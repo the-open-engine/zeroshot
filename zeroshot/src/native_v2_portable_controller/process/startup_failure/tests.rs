@@ -17,7 +17,7 @@ fn startup_failure_is_redacted_control_safe_and_consumed_once() {
     let (_root, paths) = storage();
     let error = PortableControllerError::Io(io::Error::new(
         io::ErrorKind::NotFound,
-        "restic rejected token-secret-value\u{1b}[31m with\0bytes",
+        "restic rejected token-secret-value\u{1b}[31m with\0bytes\nand\tlines",
     ));
 
     record_startup_failure(&paths, &error, &["token-secret-value".to_owned()]);
@@ -25,7 +25,7 @@ fn startup_failure_is_redacted_control_safe_and_consumed_once() {
     let report = take_startup_failure(&paths).assert_value();
     assert_eq!(
         report,
-        "portable controller I/O failed: restic rejected [REDACTED] [31m with\u{fffd}bytes"
+        "portable controller I/O failed: restic rejected [REDACTED] [31m with\u{fffd}bytes and lines"
     );
     assert!(!paths.startup_failure().exists());
     assert_eq!(take_startup_failure(&paths), None);
@@ -70,12 +70,27 @@ fn startup_redactions_cover_bootstrap_credentials_but_not_ordinary_context() {
         username: "git-user".to_owned(),
         password: "git-password-value".to_owned(),
     });
+    // The local bootstrap carries the whole invoking shell.
     bootstrap.native_environment = BTreeMap::from([
         (
             "ANTHROPIC_API_KEY".to_owned(),
             "native-key-value".to_owned(),
         ),
+        ("OPENAI_BASE_URL".to_owned(), "https://u:p@x".to_owned()),
+        ("GH_TOKEN".to_owned(), "shell-github-token".to_owned()),
+        (
+            "AWS_SECRET_ACCESS_KEY".to_owned(),
+            "shell-aws-secret".to_owned(),
+        ),
+        (
+            "UNFAMILIAR_SETTING".to_owned(),
+            "unfamiliar-value".to_owned(),
+        ),
+        ("Home".to_owned(), "/Users/someone".to_owned()),
+        ("PWD".to_owned(), "/Users/someone/project".to_owned()),
+        ("LC_ALL".to_owned(), "en_US.UTF-8".to_owned()),
         ("LANG".to_owned(), "C.UTF-8".to_owned()),
+        ("FEATURE_FLAG".to_owned(), "enabled".to_owned()),
     ]);
 
     let redactions = startup_redactions(&bootstrap);
@@ -84,9 +99,21 @@ fn startup_redactions_cover_bootstrap_credentials_but_not_ordinary_context() {
         "github-token-value",
         "git-password-value",
         "native-key-value",
+        "https://u:p@x",
+        "shell-github-token",
+        "shell-aws-secret",
+        "unfamiliar-value",
     ] {
         assert!(redactions.iter().any(|value| value == secret), "{secret}");
     }
-    assert!(!redactions.iter().any(|value| value == "C.UTF-8"));
-    assert!(!redactions.iter().any(|value| value == "git-user"));
+    for public in [
+        "/Users/someone",
+        "/Users/someone/project",
+        "en_US.UTF-8",
+        "C.UTF-8",
+        "enabled",
+        "git-user",
+    ] {
+        assert!(!redactions.iter().any(|value| value == public), "{public}");
+    }
 }

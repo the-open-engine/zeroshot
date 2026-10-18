@@ -70,5 +70,8 @@ fn local_controller_receives_an_absolute_restic_selector() {
                 .into_os_string()
         )
     );
-    assert!(environment(OsString::new()).is_empty());
+    assert_eq!(
+        environment(OsString::new()).get(std::ffi::OsStr::new("ZEROSHOT_RESTIC")),
+        Some(&OsString::new())
+    );
 }

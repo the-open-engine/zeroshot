@@ -26,8 +26,8 @@ use super::{
 
 #[path = "process/startup_failure.rs"]
 mod startup_failure;
-use startup_failure::{record_startup_failure, startup_redactions};
-pub use startup_failure::take_startup_failure;
+use startup_failure::{record_startup_failure, startup_paths, startup_redactions};
+pub use startup_failure::{record_unloaded_startup_failure, take_startup_failure};
 
 const BOOTSTRAP_MAX_BYTES: u64 = 4 * 1024 * 1024;
 const READY_MAX_BYTES: u64 = 16 * 1024;
@@ -164,8 +164,7 @@ pub fn guard_controller_process() -> Result<(), PortableControllerError> {
 /// Runs the private one-run controller child used by the shipped executable's re-exec path.
 /// The bootstrap is consumed before any durable controller effect and is never retained.
 pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), PortableControllerError> {
-    // The bootstrap is written into its run storage, which receives any startup failure report.
-    let paths = PortableControllerPaths::new(bootstrap_path.parent().unwrap_or(bootstrap_path));
+    let paths = startup_paths(bootstrap_path);
     let bootstrap = load_bootstrap_file(bootstrap_path)
         .inspect_err(|error| record_startup_failure(&paths, error, &[]))?;
     let redactions = startup_redactions(&bootstrap);

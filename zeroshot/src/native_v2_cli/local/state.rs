@@ -85,12 +85,17 @@ fn copy_minimal_environment(
         }
     }
     // The Restic selector names Zeroshot's own checkpoint tool, not harness context. Resolve a
-    // relative value here so the detached controller finds the same executable.
-    if let Some(value) = source(RESTIC_ENVIRONMENT).filter(|value| !value.is_empty()) {
-        command.env(
-            RESTIC_ENVIRONMENT,
-            std::path::absolute(value).map_err(local_io)?,
-        );
+    // relative value here so the detached controller finds the same executable; an empty value
+    // stays empty so the controller rejects it like any other Zeroshot process.
+    if let Some(value) = source(RESTIC_ENVIRONMENT) {
+        let value = if value.is_empty() {
+            value
+        } else {
+            std::path::absolute(value)
+                .map_err(local_io)?
+                .into_os_string()
+        };
+        command.env(RESTIC_ENVIRONMENT, value);
     }
     Ok(())
 }

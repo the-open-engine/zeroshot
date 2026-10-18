@@ -29,7 +29,8 @@ pub(crate) use lease::workspace_lease_path;
 pub use process::{load_bootstrap_file, read_ready, wait_ready, write_bootstrap_file};
 pub use process::{
     PortableControllerServer, PortableControllerTransport, connect_transport,
-    guard_controller_process, run_controller_process, take_startup_failure,
+    guard_controller_process, record_unloaded_startup_failure, run_controller_process,
+    take_startup_failure,
 };
 
 #[cfg(test)]

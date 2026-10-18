@@ -318,6 +318,8 @@ impl LocalCliBackend {
         {
             let _ = child.kill().await;
             remove_private_bootstrap(&bootstrap_path);
+            // A controller past the deadline may still have recorded why; nobody will read it.
+            let _ = take_startup_failure(&paths);
             return Err(error);
         }
         Ok(prepared.run_id)

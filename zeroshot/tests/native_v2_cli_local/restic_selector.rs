@@ -6,42 +6,29 @@ use super::*;
 const STARTUP_EXITED: &str = "controller exited before becoming ready";
 const SELECTOR_UNUSABLE: &str = "ZEROSHOT_RESTIC does not name a restic executable";
 
-#[tokio::test(flavor = "multi_thread")]
-async fn detached_run_reports_why_its_controller_could_not_start() {
-    let mut fixture = LocalFixture::new();
-    let missing = fixture.root.path("missing-restic");
-    fixture
-        .harness_environment
-        .insert("ZEROSHOT_RESTIC".to_owned(), missing.display().to_string());
-
-    let output = fixture
-        .run("Unusable Restic selector", "finish", true)
-        .await;
-
-    assert!(!output.status.success(), "run must fail: {output:?}");
-    let stderr = String::from_utf8_lossy(&output.stderr);
+fn bundled_restic() -> PathBuf {
+    let restic = Path::new(env!("CARGO_BIN_EXE_zeroshot")).with_file_name("restic");
     assert!(
-        stderr.contains(STARTUP_EXITED) && stderr.contains(SELECTOR_UNUSABLE),
-        "the startup failure must name its cause:\n{stderr}"
+        restic.is_file(),
+        "local CLI tests need restic beside {}",
+        env!("CARGO_BIN_EXE_zeroshot")
     );
-    assert!(!stderr.contains(DECLARED_KEY), "{stderr}");
+    restic
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn detached_controller_uses_the_selected_restic() {
+async fn relative_restic_selector_checkpoints_a_successful_local_run() {
     let mut fixture = LocalFixture::new();
     let directory = fixture.root.path("selected-restic");
     fs::create_dir_all(&directory).assert_value_with("create selected Restic directory");
-    let marker = fixture.root.path("selected-restic-ran");
-    let marker_path = marker.to_str().assert_value_with("marker path");
-    assert!(
-        !marker_path.contains('\''),
-        "marker path must not need quoting"
-    );
-    let restic = directory.join("restic");
+    let invocations = fixture.root.path("selected-restic.log");
     openengine_cluster_testkit::fixture::write_executable(
-        &restic,
-        format!("#!/bin/sh\nprintf '%s\\n' \"$1\" >> '{marker_path}'\nexit 1\n"),
+        &directory.join("restic"),
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$1\" >> {}\nexec {} \"$@\"\n",
+            shell_literal(invocations.to_str().assert_value_with("log path")),
+            shell_literal(bundled_restic().to_str().assert_value_with("restic path")),
+        ),
         0o755,
     )
     .assert_value_with("write selected Restic");
@@ -52,15 +39,56 @@ async fn detached_controller_uses_the_selected_restic() {
         "../selected-restic/restic".to_owned(),
     );
 
-    let run_id = fixture.submit_detached("finish").await;
+    let output = fixture.run("Selected Restic", "finish", false).await;
 
-    let deadline = Instant::now() + CLI_TIMEOUT;
-    while !marker.exists() {
-        assert!(
-            Instant::now() < deadline,
-            "the controller did not run the selected Restic"
+    assert_success(&output, "local run with a relative ZEROSHOT_RESTIC");
+    let invoked = fs::read_to_string(&invocations).unwrap_or_default();
+    assert!(
+        !invoked.trim().is_empty(),
+        "the controller did not run the selected Restic"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unusable_restic_selector_names_the_controller_startup_failure() {
+    let mut fixture = LocalFixture::new();
+    let directory = fixture.root.path("restic-directory");
+    fs::create_dir_all(&directory).assert_value_with("create Restic directory");
+    for (selector, cause) in [
+        (
+            fixture.root.path("missing-restic"),
+            "No such file or directory",
+        ),
+        (directory, "restic executable is not a file"),
+    ] {
+        fixture
+            .harness_environment
+            .insert("ZEROSHOT_RESTIC".to_owned(), selector.display().to_string());
+
+        let output = fixture
+            .run("Unusable Restic selector", "finish", true)
+            .await;
+
+        assert!(!output.status.success(), "run must fail: {output:?}");
+        let stderr = String::from_utf8(output.stderr).assert_value_with("UTF-8 stderr");
+        let expected = format!(
+            "local controller operation failed: {STARTUP_EXITED}: portable controller I/O \
+             failed: {SELECTOR_UNUSABLE}: {cause}"
         );
-        sleep(Duration::from_millis(30)).await;
+        assert!(
+            stderr.contains(&expected),
+            "the startup failure must name its cause {expected:?}:\n{stderr}"
+        );
+        assert!(!stderr.contains(DECLARED_KEY), "{stderr}");
+        assert_eq!(stderr.lines().count(), 1, "one printable line:\n{stderr}");
+        assert!(
+            !stderr.trim_end().chars().any(char::is_control),
+            "{stderr:?}"
+        );
     }
-    wait_for_exit(fixture.ready_pid(&run_id)).await;
+    for run in fs::read_dir(fixture.state.join("runs")).assert_value_with("list runs") {
+        let storage = run.assert_value_with("run entry").path();
+        assert!(!storage.join("controller.startup-failure.txt").exists());
+        assert!(!storage.join("controller.bootstrap.json").exists());
+    }
 }
