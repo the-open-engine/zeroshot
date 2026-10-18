@@ -19,6 +19,7 @@ use thiserror::Error;
 use crate::native_v2_claude::{ClaudeAdapter, ClaudeAdapterConfig, ClaudeAdapterConfigError};
 use crate::native_v2_codex::{NativeV2CodexAdapter, NativeV2CodexConfig};
 use crate::native_v2_copilot::{CopilotAdapter, CopilotConfig};
+use crate::native_v2_pi::{PiAdapter, PiAdapterConfigError, PiConfig};
 use crate::native_v2_contract::{
     AdmittedRun, CopilotProvider, NodeInvocation, NodeRuntimeBinding, RuntimeLane,
 };
@@ -44,6 +45,7 @@ pub enum NativeV2HarnessConfig {
     Copilot(CopilotConfig),
     Codex(NativeV2CodexConfig),
     Claude(ClaudeAdapterConfig),
+    Pi(PiConfig),
 }
 
 impl NativeV2HarnessConfig {
@@ -59,6 +61,9 @@ impl NativeV2HarnessConfig {
             Self::Claude(config) => RuntimeLane::Claude {
                 provider: config.provider,
             },
+            Self::Pi(config) => RuntimeLane::Pi {
+                provider: config.provider,
+            },
         }
     }
 
@@ -67,6 +72,7 @@ impl NativeV2HarnessConfig {
             Self::Copilot(config) => &config.workspace,
             Self::Codex(config) => &config.workspace,
             Self::Claude(config) => &config.workspace,
+            Self::Pi(config) => &config.workspace,
         }
     }
 }
@@ -117,6 +123,8 @@ pub enum NativeV2CandidateError {
     WorkspaceMismatch,
     #[error(transparent)]
     Claude(#[from] ClaudeAdapterConfigError),
+    #[error(transparent)]
+    Pi(#[from] PiAdapterConfigError),
     #[error(transparent)]
     Runner(#[from] NodeRunnerError),
 }
@@ -271,6 +279,13 @@ fn build_lane_agents(
                 ClaudeAdapter::new_local(config)?
             } else {
                 ClaudeAdapter::new(config)?
+            }))
+        }
+        NativeV2HarnessConfig::Pi(config) => {
+            CandidateAgents::new(Arc::new(if placement.is_local() {
+                PiAdapter::new_local(config)?
+            } else {
+                PiAdapter::new(config)?
             }))
         }
     })

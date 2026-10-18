@@ -22,13 +22,46 @@ use crate::worker_catalog::ReasoningEffort;
 mod environment;
 pub(crate) use environment::{
     CLAUDE_LOCAL_ENVIRONMENT, CODEX_LOCAL_ENVIRONMENT, COPILOT_LOCAL_ENVIRONMENT,
-    LocalHarnessEnvironment, current_process_environment, private_local_values,
+    PI_LOCAL_ENVIRONMENT, LocalHarnessEnvironment, current_process_environment,
+    extend_declared_environment, merge_local_environment, private_local_values,
     provider_redactions,
 };
+pub(crate) mod text;
+pub(crate) mod turn;
+pub(crate) use crate::native_v2_runner::LiveOutput as ProviderEmission;
+
+pub(crate) struct ProviderResult {
+    pub(crate) session_id: Option<String>,
+    pub(crate) message: String,
+}
+
+pub(crate) struct ProviderTurnFailure {
+    pub(crate) session_id: Option<String>,
+    pub(crate) retryable: bool,
+    pub(crate) diagnostic: String,
+}
+
+pub(crate) enum ProviderAttempt {
+    Complete(ProviderResult),
+    Failed(ProviderTurnFailure),
+}
+
+impl ProviderAttempt {
+    pub(crate) fn process_failure(diagnostic: impl Into<String>) -> Self {
+        Self::Failed(ProviderTurnFailure {
+            session_id: None,
+            retryable: false,
+            diagnostic: diagnostic.into(),
+        })
+    }
+}
+
 mod configuration;
 pub(crate) use configuration::{ConfigurationRequest, PermissionPolicy, inspect_configuration};
 mod contained;
 mod filesystem;
+mod provider_file;
+pub(crate) use provider_file::write_provider_file;
 
 pub(crate) use contained::ProviderProcess;
 pub(crate) use filesystem::{
@@ -298,12 +331,34 @@ pub(crate) fn process_scope(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ProviderProcessFailureKind {
+    IncompleteInput,
+    Completion,
+    Stderr,
+}
+
+pub(crate) struct ProviderProcessFailure {
+    pub(crate) kind: ProviderProcessFailureKind,
+    pub(crate) detail: String,
+}
+
 /// Returns fatal process facts and, once either the process or provider output failed, stderr.
 pub(crate) fn process_failure_detail(
     output: &ProcessSessionOutput,
     externally_cancelled: bool,
     provider_output_failed: bool,
 ) -> Result<Option<String>, NodeRunnerError> {
+    process_failure_context(output, externally_cancelled, provider_output_failed)
+        .map(|failure| failure.map(|failure| failure.detail))
+}
+
+/// Native transcripts distinguish failed execution from stderr accompanying a provider failure.
+pub(crate) fn process_failure_context(
+    output: &ProcessSessionOutput,
+    externally_cancelled: bool,
+    provider_output_failed: bool,
+) -> Result<Option<ProviderProcessFailure>, NodeRunnerError> {
     if output.cancelled || externally_cancelled {
         return Err(NodeRunnerError::Cancelled);
     }
@@ -311,12 +366,20 @@ pub(crate) fn process_failure_detail(
     if failures.is_empty() && !provider_output_failed {
         return Ok(None);
     }
+    let kind = if failures.is_empty() {
+        ProviderProcessFailureKind::Stderr
+    } else {
+        ProviderProcessFailureKind::Completion
+    };
     append_process_stderr(
         &mut failures,
         &output.stderr_tail,
         output.stderr_tail_truncated,
     );
-    Ok((!failures.is_empty()).then(|| failures.join("; ")))
+    Ok((!failures.is_empty()).then(|| ProviderProcessFailure {
+        kind,
+        detail: failures.join("; "),
+    }))
 }
 
 fn process_failure_reasons(output: &ProcessSessionOutput) -> Vec<String> {

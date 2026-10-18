@@ -875,7 +875,7 @@ async fn validate_profile(profile: &RunProfile) -> Result<(), AcpServeError> {
         .runtime
         .lanes()
         .iter()
-        .any(|lane| matches!(lane, RuntimeLane::Copilot { .. }))
+        .any(|lane| matches!(lane, RuntimeLane::Copilot { .. } | RuntimeLane::Pi { .. }))
     {
         return Err(AcpServeError::Profile(
             "only Codex and Claude lanes are supported",

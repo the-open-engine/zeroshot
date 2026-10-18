@@ -85,7 +85,7 @@ impl TerminalMetadata {
         }
         self.known_usage = match self.known_usage {
             None => Some(usage),
-            Some(total) => match add_usage(total, usage) {
+            Some(total) => match TokenUsageDelta::checked_add(total, usage) {
                 Some(total) => Some(total),
                 None => {
                     self.incomplete = true;
@@ -138,33 +138,6 @@ impl TerminalMetadata {
         };
         events.push(terminal);
         events
-    }
-}
-
-fn add_usage(left: TokenUsageDelta, right: TokenUsageDelta) -> Option<TokenUsageDelta> {
-    let input_tokens = left.input_tokens.checked_add(right.input_tokens)?;
-    let output_tokens = left.output_tokens.checked_add(right.output_tokens)?;
-    let cache_read_input_tokens =
-        add_optional_usage(left.cache_read_input_tokens, right.cache_read_input_tokens)?;
-    let cache_creation_input_tokens = add_optional_usage(
-        left.cache_creation_input_tokens,
-        right.cache_creation_input_tokens,
-    )?;
-    Some(TokenUsageDelta {
-        input_tokens,
-        output_tokens,
-        cache_read_input_tokens,
-        cache_creation_input_tokens,
-    })
-}
-
-fn add_optional_usage(
-    left: Option<openengine_cluster_protocol::TokenCount>,
-    right: Option<openengine_cluster_protocol::TokenCount>,
-) -> Option<Option<openengine_cluster_protocol::TokenCount>> {
-    match (left, right) {
-        (Some(left), Some(right)) => left.checked_add(right).map(Some),
-        _ => Some(None),
     }
 }
 

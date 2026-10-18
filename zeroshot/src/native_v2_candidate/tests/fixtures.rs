@@ -20,6 +20,7 @@ pub(super) enum RuntimePlanKind {
     ClaudeOverride,
     ClaudeReviewer,
     CopilotReviewer,
+    Pi,
 }
 
 impl RuntimePlanKind {
@@ -27,7 +28,7 @@ impl RuntimePlanKind {
         match self {
             Self::ClaudeReviewer => Some(CLAUDE_ANTHROPIC),
             Self::CopilotReviewer => Some(COPILOT_GITHUB),
-            Self::Codex | Self::Claude | Self::ClaudeOverride => None,
+            Self::Codex | Self::Claude | Self::ClaudeOverride | Self::Pi => None,
         }
     }
 }
@@ -63,6 +64,7 @@ pub(super) fn runtime(kind: RuntimePlanKind) -> RuntimePlan {
         | RuntimePlanKind::CopilotReviewer => agent_binding(None, "gpt-5.6-sol"),
         RuntimePlanKind::Claude => agent_binding(None, "claude-sonnet-5"),
         RuntimePlanKind::ClaudeOverride => agent_binding(Some(CLAUDE_ANTHROPIC), "claude-sonnet-5"),
+        RuntimePlanKind::Pi => agent_binding(None, "claude-sonnet-5"),
     };
     let mut nodes = BTreeMap::from([
         (
@@ -91,6 +93,11 @@ pub(super) fn runtime(kind: RuntimePlanKind) -> RuntimePlan {
         },
         RuntimePlanKind::Claude => RuntimePlan::Claude {
             provider: ClaudeProvider::Anthropic,
+            size: RunSize::Medium,
+            nodes,
+        },
+        RuntimePlanKind::Pi => RuntimePlan::Pi {
+            provider: crate::native_v2_contract::PiProvider::Anthropic,
             size: RunSize::Medium,
             nodes,
         },
@@ -280,6 +287,17 @@ pub(super) fn harness_config(
                 ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
             ]))
             .assert_value_with("Claude environment"),
+            process_pool: pool,
+        }),
+        RuntimeLane::Pi { provider } => NativeV2HarnessConfig::Pi(PiConfig {
+            provider,
+            executable: "/usr/bin/false".to_owned(),
+            prefix_arguments: Vec::new(),
+            workspace: repository.workspace.clone(),
+            runtime_home: repository.root.child("pi-runtime"),
+            local_user_home: None,
+            native_environment: Default::default(),
+            base_environment: PiProcessEnvironment::default(),
             process_pool: pool,
         }),
     }

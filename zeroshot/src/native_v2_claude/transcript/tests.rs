@@ -2,6 +2,7 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{Value, json};
 
 use super::*;
+use crate::native_v2_capsule::provider_process::ProviderProcessFailureKind;
 
 #[path = "tests/limits.rs"]
 mod limit_tests;
@@ -55,7 +56,12 @@ fn decode(bytes: &[u8], chunk_bytes: usize, process_failure: Option<&str>) -> De
     }
     emissions.extend(transcript.finish_stream());
     let usage = transcript.token_usage();
-    let attempt = transcript.finish(process_failure).assert_value();
+    let attempt = transcript
+        .finish(process_failure.map(|detail| ProviderProcessFailure {
+            kind: ProviderProcessFailureKind::Completion,
+            detail: detail.to_owned(),
+        }))
+        .assert_value();
     Decoded {
         attempt,
         emissions,
@@ -137,7 +143,6 @@ fn redactions_are_deduplicated_and_longest_first() {
         "secret".to_owned(),
         String::new(),
     ]);
-    assert_eq!(transcript.redactions, vec!["secret-tail", "secret"]);
     let mut bytes = Vec::new();
     append_event(
         &mut bytes,
@@ -631,6 +636,43 @@ fn process_failures_are_merged_into_terminal_attempts() {
         failed.diagnostic,
         "provider rejected request; provider process exited with status 17; stderr: useful detail"
     );
+}
+
+#[test]
+fn native_api_retry_metadata_survives_completion_and_incomplete_input() {
+    for (kind, detail) in [
+        (
+            ProviderProcessFailureKind::Completion,
+            "provider process exited with status 1",
+        ),
+        (
+            ProviderProcessFailureKind::IncompleteInput,
+            "provider process input failed: broken pipe",
+        ),
+    ] {
+        for retryable in [false, true] {
+            let mut bytes = Vec::new();
+            if retryable {
+                append_event(&mut bytes, json!({"type":"system", "subtype":"api_retry"}));
+            }
+            append_event(&mut bytes, failure("native API failure", "session-1"));
+            let mut transcript = ClaudeTranscript::new(Vec::new());
+            transcript.push(&bytes);
+            transcript.finish_stream();
+            let failure = failed_attempt(
+                transcript
+                    .finish(Some(ProviderProcessFailure {
+                        kind,
+                        detail: detail.to_owned(),
+                    }))
+                    .assert_value(),
+            );
+            assert_eq!(failure.retryable, retryable);
+            assert_eq!(failure.session_id.as_deref(), Some("session-1"));
+            assert!(failure.diagnostic.contains("native API failure"));
+            assert!(failure.diagnostic.contains(detail));
+        }
+    }
 }
 
 #[test]

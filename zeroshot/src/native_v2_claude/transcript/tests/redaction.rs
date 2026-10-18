@@ -192,8 +192,7 @@ fn empty_streamed_blocks_do_not_accumulate_held_parts() {
             .is_empty()
         );
     }
-    assert_eq!(transcript.pending.text, "token sk-test-");
-    assert_eq!(transcript.pending.parts.len(), 1);
+    assert_eq!(transcript.pending.buffered(), ("token sk-test-", 1));
     let emissions = push_events(
         &mut transcript,
         vec![text("0123456789abcdef ok"), block_stop()],
@@ -214,8 +213,7 @@ fn empty_assistant_blocks_do_not_accumulate_held_parts() {
     let mut transcript = redacting();
     let event = json!({"type":"assistant","message":{"content":content}});
     assert!(push_events(&mut transcript, vec![event]).is_empty());
-    assert_eq!(transcript.pending.text, "token sk-test-");
-    assert_eq!(transcript.pending.parts.len(), 1);
+    assert_eq!(transcript.pending.buffered(), ("token sk-test-", 1));
     assert_eq!(
         emitted(&transcript.finish_stream()),
         [(LiveOutputStream::Output, "token sk-test-")]

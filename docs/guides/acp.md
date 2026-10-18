@@ -17,7 +17,7 @@ The ACP preview accepts a deliberately narrow profile:
 - Runtime connections aren't accepted. The endpoint supports Codex and Claude through their local
   user login and configuration.
 - Agent nodes may mix Codex and Claude [lanes](../reference/runtime-plan.md#per-node-lanes). A
-  Copilot lane isn't accepted.
+  Copilot or Pi lane isn't accepted.
 
 These limits keep one ACP turn equivalent to one ordinary local run; the graph compiler, reducer,
 provider adapters, and run ledger stay unchanged.

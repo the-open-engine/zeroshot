@@ -3,9 +3,7 @@ use std::collections::BTreeMap;
 use crate::native_v2_contract::ClaudeProvider;
 use crate::native_v2_capsule::gateway;
 use crate::native_v2_capsule::provider_process::{effort_token, with_driver_detail};
-use crate::native_v2_runner::{
-    DriverInvocation, NodeRunnerError, ResolvedEnvironment, render_agent_prompt,
-};
+use crate::native_v2_runner::{DriverInvocation, NodeRunnerError, render_agent_prompt};
 use crate::worker_catalog::ReasoningEffort;
 
 pub(super) const AWS_BEARER_TOKEN_BEDROCK: &str = "AWS_BEARER_TOKEN_BEDROCK";
@@ -49,19 +47,6 @@ pub(super) fn claude_arguments(
         argv.extend(["--resume".to_owned(), resume_id.to_owned()]);
     }
     argv
-}
-
-pub(super) fn extend_declared_environment(
-    environment: &mut BTreeMap<String, String>,
-    resolved: &ResolvedEnvironment,
-) -> Result<(), NodeRunnerError> {
-    for (name, value) in resolved.iter() {
-        if value.contains('\0') || environment.contains_key(name.as_str()) {
-            return Err(NodeRunnerError::Driver);
-        }
-        environment.insert(name.as_str().to_owned(), value.to_owned());
-    }
-    Ok(())
 }
 
 pub(super) fn configure_bedrock(

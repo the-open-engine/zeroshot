@@ -53,7 +53,7 @@ impl PreparedSkill {
             failures: &mut failures,
         };
         let agents = home.join(".agents").join("skills").join(SKILL_NAME);
-        install_location("Codex/GitHub Copilot", &agents, self, &mut progress);
+        install_location("Codex/GitHub Copilot/Pi", &agents, self, &mut progress);
 
         let claude_root = claude_config
             .map(PathBuf::from)

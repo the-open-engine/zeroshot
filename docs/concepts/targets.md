@@ -66,6 +66,14 @@ command translated to the singular RPC contract uses its authored `modelId` as t
 Contained targets use a private Copilot home and require the canonical `COPILOT_GITHUB_TOKEN`
 connection instead.
 
+Local Pi runs use the current user's `~/.pi/agent` for a `pi/anthropic` or `pi/openai` lane, which
+reuses a stored Pi login. Any other Pi lane, a declared credential, or a caller-owned endpoint
+instead receives a private agent directory so no ambient catalog or credential is inherited. A
+declared or ambient `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, or `OPENAI_API_BASE` becomes a Pi
+provider override that keeps that provider's own protocol, and `pi/gateway` carries
+`GATEWAY_BASE_URL`, `GATEWAY_API_KEY`, and an authored `GATEWAY_API` wire protocol. Pi exposes no
+permission control, so Pi runs add no bypass flag; containment remains the boundary.
+
 The local target intentionally has the same-user trust boundary as running the harness CLI directly:
 native config, user files, and credential-store access remain subject to that harness's own sandbox
 and tool policy. Zeroshot transfers the invoking shell through a private, one-shot bootstrap and
@@ -116,7 +124,7 @@ Values discovered from local configuration are not persisted or sent to hosted t
 ## Direct target
 
 A direct target exposes Zeroshot's HTTP and OECP contracts without application-level authentication.
-The released container includes Zeroshot plus pinned Codex, Claude, and GitHub Copilot harnesses.
+The released container includes Zeroshot plus pinned Codex, Claude, GitHub Copilot, and Pi harnesses.
 A run can mix their lanes; its connection requirements are then the union over its nodes, such as
 `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` for a Codex worker with Claude Code reviewers.
 

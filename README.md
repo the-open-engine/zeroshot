@@ -41,7 +41,7 @@ then save the workflow as a profile and reuse it.
 
 The agent that writes the code cannot approve its own work. The engine enforces the graph's review
 gates and retry limits. Think of it as CI for coding agents, starting before the code is written.
-zeroshot runs Claude Code, Codex, or Copilot as the worker and reviewers, with a separate harness
+zeroshot runs Pi, Claude Code, Codex, or Copilot as the worker and reviewers, with a separate harness
 and provider available for each agent.
 
 The CLI is free and MIT licensed. Run locally, [self-host](#self-hosted-run-the-docker-target), or
@@ -78,9 +78,9 @@ npm install -g @the-open-engine-company/zeroshot
 
 The installer requires Node.js 18 or newer and installs a verified native binary for Linux
 x64/arm64, macOS x64/arm64, or Windows x64. It also installs one zeroshot skill for Codex, GitHub
-Copilot, and Claude Code at user scope.
+Copilot, Pi, and Claude Code at user scope.
 
-For local execution, install and sign in to Codex, Claude Code, or GitHub Copilot. Local runs can
+For local execution, install and sign in to Codex, Claude Code, GitHub Copilot, or Pi. Local runs can
 reuse the harness's existing login, including subscription-backed sessions. See the
 [installation guide](docs/getting-started/install.md) for harness prerequisites.
 
@@ -250,7 +250,7 @@ See [targets and source credentials](docs/concepts/targets.md) for setup.
 ### Self-hosted: run the Docker target
 
 Keep execution and durable state on infrastructure you control. The target image includes the native
-engine plus pinned Codex, Claude, and GitHub Copilot harness CLIs.
+engine plus pinned Codex, Claude, GitHub Copilot, and Pi harness CLIs.
 
 ```bash
 docker run --detach --restart unless-stopped --name zeroshot-target \

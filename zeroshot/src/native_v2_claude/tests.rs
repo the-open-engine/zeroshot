@@ -82,14 +82,14 @@ fn coverage_contract_claude_configuration_redacts_values_and_rejects_invalid_lau
             "SECRET".to_owned(),
             "value".to_owned(),
         )])),
-        Err(ClaudeAdapterConfigError::NonMinimalEnvironment(name)) if name == "SECRET"
+        Err(crate::native_v2_capsule::ProcessEnvironmentError::NonMinimalEnvironment(name)) if name == "SECRET"
     ));
     assert!(matches!(
         ClaudeProcessEnvironment::new(BTreeMap::from([(
             "PATH".to_owned(),
             "bad\0value".to_owned(),
         )])),
-        Err(ClaudeAdapterConfigError::InvalidEnvironment)
+        Err(crate::native_v2_capsule::ProcessEnvironmentError::InvalidEnvironment)
     ));
     assert!(matches!(
         ClaudeAdapter::new_local(adapter_configuration(

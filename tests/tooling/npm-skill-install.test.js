@@ -215,7 +215,7 @@ describe('npm Zeroshot skill installation boundaries', () => {
     const output = [];
     const errors = [];
     const results = [
-      { label: 'Codex/GitHub Copilot', status: 'installed' },
+      { label: 'Codex/GitHub Copilot/Pi', status: 'installed' },
       { label: 'Claude Code', status: 'failed', path: '/bad/path', message: 'denied' },
     ];
     const stdout = { write: (value) => output.push(value) };
@@ -223,7 +223,7 @@ describe('npm Zeroshot skill installation boundaries', () => {
 
     assert.equal(reportSkillResults(results, stdout, stderr), false);
 
-    assert.match(output.join(''), /ready for Codex\/GitHub Copilot/);
+    assert.match(output.join(''), /ready for Codex\/GitHub Copilot\/Pi/);
     assert.match(errors.join(''), /Claude Code: \/bad\/path: denied/);
     assert.match(errors.join(''), /lifecycle scripts enabled/);
     assert.throws(

@@ -3,6 +3,7 @@
 //! Declared connections overlay these values. Hosted adapters never call this helper.
 
 use std::collections::BTreeMap;
+use crate::native_v2_runner::{NodeRunnerError, ResolvedEnvironment};
 use std::fmt;
 
 pub(crate) const CODEX_LOCAL_ENVIRONMENT: &[&str] = &[
@@ -35,6 +36,31 @@ pub(crate) const CLAUDE_LOCAL_ENVIRONMENT: &[&str] = &[
     "CLAUDE_CODE_USE_MANTLE",
     "CLAUDE_CODE_USE_VERTEX",
     "CLAUDE_CODE_USE_FOUNDRY",
+];
+
+/// Pi provider credentials, endpoint settings, and process controls.
+///
+/// The lane decides which of these it accepts; the harness only forwards names a caller may have
+/// set in their invoking shell. Pi resolves credentials from its own agent directory first, so a
+/// native-local lane reuses a stored login while every other lane drops these values.
+pub(crate) const PI_LOCAL_ENVIRONMENT: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_OAUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_BEDROCK_BASE_URL",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENAI_API_BASE",
+    "OPENROUTER_API_KEY",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "PI_CODING_AGENT_DIR",
+    "PI_CODING_AGENT_SESSION_DIR",
+    "PI_OFFLINE",
+    "PI_SKIP_VERSION_CHECK",
+    "PI_TELEMETRY",
 ];
 
 pub(crate) const COPILOT_LOCAL_ENVIRONMENT: &[&str] = &[
@@ -222,6 +248,40 @@ fn private_local_value(name: &str) -> bool {
         "XDG_RUNTIME_DIR",
     ];
     PRIVATE_SUFFIXES.iter().any(|suffix| name.ends_with(suffix)) || PRIVATE_NAMES.contains(&name)
+}
+
+/// Declaring one authentication form suppresses every ambient form in that credential group.
+pub(crate) fn merge_local_environment(
+    environment: &mut BTreeMap<String, String>,
+    resolved: &ResolvedEnvironment,
+    local: &BTreeMap<String, String>,
+    credentials: &[&str],
+) {
+    let declared_auth = resolved
+        .iter()
+        .any(|(name, _)| credentials.contains(&name.as_str()));
+    for (name, value) in local {
+        if declared_auth && credentials.contains(&name.as_str()) {
+            continue;
+        }
+        environment
+            .entry(name.clone())
+            .or_insert_with(|| value.clone());
+    }
+}
+
+/// Overlay declared connections without replacing harness-owned launch settings.
+pub(crate) fn extend_declared_environment(
+    environment: &mut BTreeMap<String, String>,
+    resolved: &ResolvedEnvironment,
+) -> Result<(), NodeRunnerError> {
+    for (name, value) in resolved.iter() {
+        if value.contains('\0') || environment.contains_key(name.as_str()) {
+            return Err(NodeRunnerError::Driver);
+        }
+        environment.insert(name.as_str().to_owned(), value.to_owned());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

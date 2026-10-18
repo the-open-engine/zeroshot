@@ -17,14 +17,14 @@ zeroshot update
 ```
 
 The update does not elevate privileges; the current executable must be writable by the caller.
-Unchanged managed skill copies are installed or refreshed for Codex, GitHub Copilot, and Claude
+Unchanged managed skill copies are installed or refreshed for Codex, GitHub Copilot, Pi, and Claude
 Code. A user-edited or conflicting skill is preserved, and the command fails with its exact path
 after completing any safe updates.
 
 Release builds cover Linux x64 and arm64, macOS x64 and arm64, and Windows x64. Node.js is only an
 installer dependency; the command itself is a Rust executable.
 
-The package installs one managed skill for Codex and GitHub Copilot under `$HOME/.agents/skills`,
+The package installs one managed skill for Codex, GitHub Copilot, and Pi under `$HOME/.agents/skills`,
 and for Claude Code under `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills`. No agent selection or
 per-project installation is needed. npm 7 and newer do not run uninstall hooks; after removing the
 package, delete its two skill directories manually only if their `SKILL.md` files remain unmodified.
@@ -101,11 +101,13 @@ Git delivery do not need a repository. Install each agent harness named by the r
 
 - install and sign in to Codex for `"harness": "codex"`;
 - install and sign in to Claude Code for `"harness": "claude"`;
-- install GitHub Copilot CLI 1.0.86 for `"harness": "copilot"` with `"provider": "github"`.
+- install GitHub Copilot CLI 1.0.86 for `"harness": "copilot"` with `"provider": "github"`;
+- install and sign in to Pi for `"harness": "pi"`.
 
-Local Codex/OpenAI, Claude/Anthropic, and Copilot/GitHub lanes reuse the installed harness's native
-login and configuration. Other provider lanes can read declared values from the current environment
-or the private Zeroshot connection store. For example, this command prompts without echo and keeps
+Local Codex/OpenAI, Claude/Anthropic, Copilot/GitHub, Pi/Anthropic, and Pi/OpenAI lanes reuse the
+installed harness's native login and configuration. Other provider lanes can read declared values
+from the current environment or the private Zeroshot connection store. For example, this command
+prompts without echo and keeps
 an OpenAI value out of runtime JSON for a contained target:
 
 ```console

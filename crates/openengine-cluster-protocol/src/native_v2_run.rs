@@ -466,6 +466,35 @@ pub enum ClaudeProvider {
     Bedrock,
 }
 
+/// Provider lanes owned by the Pi harness.
+///
+/// Each variant names one Pi provider whose credentials resolve through a named connection. Pi
+/// owns the wire behavior of every lane; this enum only selects which lane the adapter
+/// configures and which requirements admission materializes.
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PiProvider {
+    Anthropic,
+    #[serde(rename = "openai")]
+    OpenAi,
+    #[serde(rename = "openrouter")]
+    OpenRouter,
+    Gateway,
+    Bedrock,
+}
+
+impl PiProvider {
+    /// True when a local run can reuse the user's stored Pi login for this lane, so the lane needs
+    /// no connection. Pi resolves credentials from its own agent directory before the process
+    /// environment, so native reuse means exactly that stored credential.
+    #[must_use]
+    pub const fn natively_authenticated(self) -> bool {
+        matches!(self, Self::Anthropic | Self::OpenAi)
+    }
+}
+
 /// One harness and provider pair: the run-level default, or an agent node's override.
 #[derive(
     Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,
@@ -475,6 +504,7 @@ pub enum RuntimeLane {
     Copilot { provider: CopilotProvider },
     Codex { provider: CodexProvider },
     Claude { provider: ClaudeProvider },
+    Pi { provider: PiProvider },
 }
 
 impl RuntimeLane {
@@ -485,6 +515,7 @@ impl RuntimeLane {
             Self::Copilot { .. } => "copilot",
             Self::Codex { .. } => "codex",
             Self::Claude { .. } => "claude",
+            Self::Pi { .. } => "pi",
         }
     }
 
@@ -506,6 +537,13 @@ impl RuntimeLane {
                 ClaudeProvider::OpenRouter => "openrouter",
                 ClaudeProvider::Gateway => "gateway",
                 ClaudeProvider::Bedrock => "bedrock",
+            },
+            Self::Pi { provider } => match provider {
+                PiProvider::Anthropic => "anthropic",
+                PiProvider::OpenAi => "openai",
+                PiProvider::OpenRouter => "openrouter",
+                PiProvider::Gateway => "gateway",
+                PiProvider::Bedrock => "bedrock",
             },
         }
     }

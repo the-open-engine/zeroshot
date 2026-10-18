@@ -271,6 +271,38 @@ pub(crate) fn resolve_agent_response_with_dialect(
     response: &str,
     dialect: ProviderSchemaDialect,
 ) -> Result<AgentResponse, NodeRunnerError> {
+    resolve_agent_response_rendering(contract, response, dialect, CorrectionRendering::Contract)
+}
+
+/// Resolves a response whose prompt carried the provider schema rather than the ephemeral contract
+/// object, so a rejection restates that same schema instead of the contract.
+pub(crate) fn resolve_agent_response_with_schema(
+    contract: &NodeResponseContract,
+    response: &str,
+    dialect: ProviderSchemaDialect,
+) -> Result<AgentResponse, NodeRunnerError> {
+    resolve_agent_response_rendering(
+        contract,
+        response,
+        dialect,
+        CorrectionRendering::Schema(dialect),
+    )
+}
+
+/// Which response representation a correction turn restates. The initial prompt and every
+/// correction must agree so the provider never sees the contract and the schema together.
+#[derive(Clone, Copy)]
+enum CorrectionRendering {
+    Contract,
+    Schema(ProviderSchemaDialect),
+}
+
+fn resolve_agent_response_rendering(
+    contract: &NodeResponseContract,
+    response: &str,
+    dialect: ProviderSchemaDialect,
+    correction: CorrectionRendering,
+) -> Result<AgentResponse, NodeRunnerError> {
     let semantic_response = parse_provider_envelope(response);
     let parsed = match semantic_response {
         Ok(mut response) => {
@@ -283,10 +315,18 @@ pub(crate) fn resolve_agent_response_with_dialect(
     };
     Ok(match parsed {
         Ok(outcome) => AgentResponse::Complete(outcome),
-        Err(error) => AgentResponse::Correction {
-            prompt: render_agent_correction(contract, &error)?,
-            diagnostic: error,
-        },
+        Err(error) => {
+            let prompt = match correction {
+                CorrectionRendering::Contract => render_agent_correction(contract, &error)?,
+                CorrectionRendering::Schema(dialect) => {
+                    render_agent_correction_with_schema(contract, &error, dialect)?
+                }
+            };
+            AgentResponse::Correction {
+                prompt,
+                diagnostic: error,
+            }
+        }
     })
 }
 
@@ -489,6 +529,39 @@ pub fn render_agent_prompt(
     ))
 }
 
+/// Renders a provider-neutral node turn with the provider's machine-readable response schema in
+/// place of the ephemeral contract object.
+///
+/// Lanes that have no native schema flag, such as Pi, carry the schema in the prompt itself. The
+/// contract object is deliberately omitted because its `kind` discriminator is runtime bookkeeping
+/// that providers otherwise copy into their final response.
+pub(crate) fn render_agent_prompt_with_schema(
+    instructions: &NodeInstructions,
+    input: &Value,
+    response: &NodeResponseContract,
+    dialect: ProviderSchemaDialect,
+) -> Result<String, NodeRunnerError> {
+    let runtime_guidance = guidance::runtime_guidance(response);
+    let instructions = instructions.as_str();
+    let input = serde_json::to_string(input).map_err(|_| NodeRunnerError::Driver)?;
+    let response_schema = serde_json::to_string(&response.provider_schema(dialect))
+        .map_err(|_| NodeRunnerError::Driver)?;
+    Ok(format!(
+        "Execute this graph node using the shared workspace.\n\
+         Authored instructions:\n{instructions}\n\
+         {runtime_guidance}\
+         Input JSON:\n{input}\n\
+         Runtime-owned response schema:\n{response_schema}\n\
+         The response schema describes the required JSON value; never return the schema itself. \
+         Return only JSON with no Markdown or commentary. The provider response must be exactly \
+         an object with one field named response whose value matches the schema's response \
+         property. For a worker, response contains the output value; a response property whose \
+         type is null requires the literal null inside {{\"response\":null}}. For a verifier, \
+         response contains exactly an object with output, signals, and diagnostic; every signal \
+         must use one of its declared labels."
+    ))
+}
+
 /// Renders one mechanical correction turn in the already-open provider session.
 pub(crate) fn render_agent_correction(
     response: &NodeResponseContract,
@@ -501,6 +574,25 @@ pub(crate) fn render_agent_correction(
          Response contract:\n{response}\n\
          Return a corrected provider response only: exactly an object with one field named \
          response. It must be valid JSON with no Markdown or commentary."
+    ))
+}
+
+/// Renders one mechanical correction turn in the already-open provider session, restating the
+/// provider's machine-readable schema rather than the contract.
+pub(crate) fn render_agent_correction_with_schema(
+    response: &NodeResponseContract,
+    error: &NodeResponseError,
+    dialect: ProviderSchemaDialect,
+) -> Result<String, NodeRunnerError> {
+    let response_schema = serde_json::to_string(&response.provider_schema(dialect))
+        .map_err(|_| NodeRunnerError::Driver)?;
+    Ok(format!(
+        "Your previous final response was rejected mechanically and was not passed to the graph.\n\
+         Validation error:\n{error}\n\
+         Response schema:\n{response_schema}\n\
+         Return a corrected provider response only: exactly an object with one field named \
+         response whose value matches the schema above. It must be valid JSON with no Markdown \
+         or commentary."
     ))
 }
 

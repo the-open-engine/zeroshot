@@ -3,21 +3,35 @@ use std::collections::BTreeMap;
 
 use crate::execution::process::HostedProcessPool;
 use crate::native_v2_candidate::NativeV2HarnessConfig;
-use crate::native_v2_capsule::CapsuleFilesystem;
-use crate::native_v2_claude::{ClaudeAdapterConfig, ClaudeProcessEnvironment};
+use crate::native_v2_capsule::{CapsuleFilesystem, HarnessProcessEnvironment};
+use crate::native_v2_claude::ClaudeAdapterConfig;
 use crate::native_v2_cloud::CapsuleAllocationUnavailable;
 use crate::native_v2_codex::NativeV2CodexConfig;
 use crate::native_v2_contract::{AdmittedRun, RuntimeLane};
 use crate::native_v2_hosting::environment;
+use crate::native_v2_pi::PiConfig;
 use super::ProductionCapsuleAllocator;
 
 #[derive(Clone, Copy)]
 struct HostedLaneInputs<'a> {
     filesystem: &'a CapsuleFilesystem,
     search_path: &'a str,
-    tools_directory: &'a str,
     base_environment: &'a BTreeMap<String, String>,
     process_pool: HostedProcessPool,
+}
+
+impl HostedLaneInputs<'_> {
+    fn process_environment(
+        self,
+        base: &HarnessProcessEnvironment,
+    ) -> Result<HarnessProcessEnvironment, CapsuleAllocationUnavailable> {
+        let environment = base
+            .for_capsule(&self.filesystem.runtime_home, self.search_path)
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        let mut values = environment.clone_values();
+        values.extend(self.base_environment.clone());
+        HarnessProcessEnvironment::new(values).map_err(|_| CapsuleAllocationUnavailable::Runtime)
+    }
 }
 
 impl ProductionCapsuleAllocator {
@@ -35,12 +49,10 @@ impl ProductionCapsuleAllocator {
         let tools_directory = environment::tools_directory(run_root)
             .to_string_lossy()
             .into_owned();
-        let base_environment =
-            BTreeMap::from([("ZEROSHOT_TOOLS".to_owned(), tools_directory.clone())]);
+        let base_environment = BTreeMap::from([("ZEROSHOT_TOOLS".to_owned(), tools_directory)]);
         let inputs = HostedLaneInputs {
             filesystem,
             search_path: &search_path,
-            tools_directory: &tools_directory,
             base_environment: &base_environment,
             process_pool,
         };
@@ -60,7 +72,6 @@ impl ProductionCapsuleAllocator {
         let HostedLaneInputs {
             filesystem,
             search_path,
-            tools_directory,
             base_environment,
             process_pool,
         } = inputs;
@@ -91,19 +102,27 @@ impl ProductionCapsuleAllocator {
                 }))
             }
             RuntimeLane::Claude { provider } => {
-                let base_environment = self
-                    .config
-                    .claude_process_environment
-                    .for_capsule(&filesystem.runtime_home, search_path)
-                    .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-                let mut values = base_environment.clone_values();
-                values.insert("ZEROSHOT_TOOLS".to_owned(), tools_directory.to_owned());
-                let base_environment = ClaudeProcessEnvironment::new(values)
-                    .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+                let base_environment =
+                    inputs.process_environment(&self.config.claude_process_environment)?;
                 Ok(NativeV2HarnessConfig::Claude(ClaudeAdapterConfig {
                     provider,
                     executable: self.config.claude_executable.clone(),
                     prefix_arguments: self.config.claude_prefix_arguments.clone(),
+                    workspace: filesystem.workspace.clone(),
+                    runtime_home: filesystem.runtime_home.clone(),
+                    local_user_home: None,
+                    native_environment: Default::default(),
+                    base_environment,
+                    process_pool,
+                }))
+            }
+            RuntimeLane::Pi { provider } => {
+                let base_environment =
+                    inputs.process_environment(&self.config.pi_process_environment)?;
+                Ok(NativeV2HarnessConfig::Pi(PiConfig {
+                    provider,
+                    executable: self.config.pi_executable.clone(),
+                    prefix_arguments: self.config.pi_prefix_arguments.clone(),
                     workspace: filesystem.workspace.clone(),
                     runtime_home: filesystem.runtime_home.clone(),
                     local_user_home: None,

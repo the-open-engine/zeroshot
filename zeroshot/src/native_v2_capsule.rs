@@ -203,8 +203,10 @@ pub trait CapsuleNodeChannel: Send + Sync {
 
 mod endpoint;
 pub(crate) mod gateway;
+pub(crate) mod process_environment;
 pub(crate) mod provider_json_lines;
 pub(crate) mod provider_process;
+pub use process_environment::{HarnessProcessEnvironment, ProcessEnvironmentError};
 mod remote;
 
 pub use endpoint::NativeCapsuleNodeEndpoint;

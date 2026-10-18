@@ -78,7 +78,7 @@ fn boundary_contract_usage_reduction_handles_incomplete_optional_and_each_overfl
         cache_read_input_tokens: None,
         cache_creation_input_tokens: None,
     };
-    assert!(add_usage(base, usage(1)).is_none());
+    assert!(TokenUsageDelta::checked_add(base, usage(1)).is_none());
 
     let cache_read = TokenUsageDelta {
         input_tokens: one,
@@ -90,7 +90,7 @@ fn boundary_contract_usage_reduction_handles_incomplete_optional_and_each_overfl
         cache_read_input_tokens: Some(one),
         ..usage(1)
     };
-    assert!(add_usage(cache_read, cache_read_increment).is_none());
+    assert!(TokenUsageDelta::checked_add(cache_read, cache_read_increment).is_none());
 
     let cache_create = TokenUsageDelta {
         input_tokens: one,
@@ -102,8 +102,14 @@ fn boundary_contract_usage_reduction_handles_incomplete_optional_and_each_overfl
         cache_creation_input_tokens: Some(one),
         ..usage(1)
     };
-    assert!(add_usage(cache_create, cache_create_increment).is_none());
-    assert_eq!(add_optional_usage(Some(one), None), Some(None));
+    assert!(TokenUsageDelta::checked_add(cache_create, cache_create_increment).is_none());
+    assert_eq!(
+        cache_read_increment
+            .checked_add(usage(1))
+            .assert_value()
+            .cache_read_input_tokens,
+        None
+    );
 }
 
 #[tokio::test]

@@ -20,11 +20,13 @@ use crate::native_v2_candidate::{
     NativeV2HarnessConfig, TrustedDeliveryCapabilities,
     build_local_native_v2_candidate_with_authority, build_local_owner_native_v2_candidate,
 };
-use crate::native_v2_claude::{ClaudeAdapterConfig, ClaudeAdapterConfigError, ClaudeProcessEnvironment};
+use crate::native_v2_claude::{ClaudeAdapterConfig, ClaudeAdapterConfigError};
 use crate::native_v2_cli::PreparedRunRequest;
 use crate::native_v2_codex::{NativeV2CodexConfig, NativeV2CodexUser};
 use crate::native_v2_contract::AdmittedRun;
+use crate::native_v2_capsule::HarnessProcessEnvironment;
 use crate::native_v2_copilot::{CopilotConfig, CopilotLocalUser};
+use crate::native_v2_pi::{PiAdapterConfigError, PiConfig};
 use crate::native_v2_capsule::provider_process::{COPILOT_LOCAL_ENVIRONMENT, LocalHarnessEnvironment};
 use crate::native_v2_delivery::{NativeV2DeliveryConfig, TrustedGitHubTokenFile};
 use crate::native_v2_delivery::validation::TrustedDeliveryValidator;
@@ -46,6 +48,8 @@ use workspace::resolve_workspace;
 
 #[derive(Debug, Error)]
 pub enum LocalCompositionError {
+    #[error(transparent)]
+    ProcessEnvironment(#[from] crate::native_v2_capsule::ProcessEnvironmentError),
     #[error("current working folder could not be resolved")]
     Workspace,
     #[error(
@@ -87,6 +91,8 @@ pub enum LocalCompositionError {
     },
     #[error(transparent)]
     Claude(#[from] ClaudeAdapterConfigError),
+    #[error(transparent)]
+    Pi(#[from] PiAdapterConfigError),
     #[error(transparent)]
     Candidate(#[from] NativeV2CandidateError),
 }
@@ -213,25 +219,70 @@ pub(crate) fn capture_local_native_environment(
     let mut environment = LocalHarnessEnvironment::new(
         crate::native_v2_capsule::provider_process::current_process_environment(),
     );
+    resolve_relative_home_overrides(&mut environment, invoking_directory)?;
+    Ok(environment.into_values())
+}
+
+/// Resolves every harness home override that the invoking shell may have set relatively against
+/// the invoking directory, before the controller detaches. The variable is forwarded to the
+/// harness child, whose working directory differs, so leaving it relative would change what it
+/// points at.
+fn resolve_relative_home_overrides(
+    environment: &mut LocalHarnessEnvironment,
+    invoking_directory: &Path,
+) -> Result<(), LocalCompositionError> {
+    let user_home = current_user_home(environment);
     for name in [
         "CODEX_HOME",
         "CLAUDE_CONFIG_DIR",
         "COPILOT_HOME",
         "COPILOT_PROVIDERS_CONFIG",
+        "PI_CODING_AGENT_DIR",
     ] {
         let Some(value) = environment.get_mut(name) else {
             continue;
         };
-        let path = PathBuf::from(&*value);
-        if path.is_relative() {
-            *value = invoking_directory
-                .join(path)
-                .into_os_string()
-                .into_string()
-                .map_err(|_| LocalCompositionError::NativeEnvironment)?;
+        // Pi owns file-URL decoding, including platform rules and percent escapes.
+        if name == "PI_CODING_AGENT_DIR" && value.starts_with("file://") {
+            continue;
         }
+        let path = if name == "PI_CODING_AGENT_DIR" {
+            pi_agent_directory_path(value, user_home.as_deref())?
+        } else {
+            PathBuf::from(&*value)
+        };
+        let path = if path.is_relative() {
+            invoking_directory.join(path)
+        } else {
+            path
+        };
+        *value = path
+            .into_os_string()
+            .into_string()
+            .map_err(|_| LocalCompositionError::NativeEnvironment)?;
     }
-    Ok(environment.into_values())
+    Ok(())
+}
+
+/// Pi expands a leading home shorthand before resolving its agent directory. Resolve it against
+/// the captured user's home before detachment instead of treating the tilde as a workspace name.
+fn pi_agent_directory_path(
+    value: &str,
+    user_home: Option<&Path>,
+) -> Result<PathBuf, LocalCompositionError> {
+    let relative = if value == "~" {
+        Some("")
+    } else {
+        value
+            .strip_prefix("~/")
+            .or_else(|| value.strip_prefix("~\\").filter(|_| cfg!(windows)))
+    };
+    match relative {
+        Some(relative) => Ok(user_home
+            .ok_or(LocalCompositionError::NativeEnvironment)?
+            .join(relative)),
+        None => Ok(PathBuf::from(value)),
+    }
 }
 
 pub(crate) fn local_resolved_source(
@@ -465,7 +516,18 @@ fn local_lane(
             runtime_home: runtime_home.to_owned(),
             local_user_home: local_home.clone(),
             native_environment: native_environment.clone(),
-            base_environment: local_claude_environment(search_path, native_environment)?,
+            base_environment: local_process_environment(search_path, native_environment)?,
+            process_pool,
+        }),
+        RuntimeLane::Pi { provider } => NativeV2HarnessConfig::Pi(PiConfig {
+            provider,
+            executable: "pi".to_owned(),
+            prefix_arguments: Vec::new(),
+            workspace: workspace.to_owned(),
+            runtime_home: runtime_home.to_owned(),
+            local_user_home: local_home.clone(),
+            native_environment: native_environment.clone(),
+            base_environment: local_process_environment(search_path, native_environment)?,
             process_pool,
         }),
     };
@@ -529,17 +591,17 @@ fn default_search_path(environment: &LocalHarnessEnvironment) -> String {
     }
 }
 
-fn local_claude_environment(
+fn local_process_environment(
     search_path: &str,
     native_environment: &LocalHarnessEnvironment,
-) -> Result<ClaudeProcessEnvironment, ClaudeAdapterConfigError> {
+) -> Result<HarnessProcessEnvironment, crate::native_v2_capsule::ProcessEnvironmentError> {
     let mut base_environment = BTreeMap::from([("PATH".to_owned(), search_path.to_owned())]);
     for name in ["LANG", "LC_ALL", "TERM", "TMPDIR"] {
         if let Some(value) = native_environment.get(name) {
             base_environment.insert(name.to_owned(), value.clone());
         }
     }
-    ClaudeProcessEnvironment::new(base_environment)
+    HarnessProcessEnvironment::new(base_environment)
 }
 
 fn prepare_private_directory(path: &Path) -> Result<(), LocalCompositionError> {

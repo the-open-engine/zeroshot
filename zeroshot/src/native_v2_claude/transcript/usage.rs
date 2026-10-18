@@ -86,7 +86,7 @@ impl ProvisionalUsage {
             return;
         };
         self.anonymous = match self.anonymous {
-            Some(current) => match add_usage(current, usage) {
+            Some(current) => match TokenUsageDelta::checked_add(current, usage) {
                 Some(total) => Some(total),
                 None => {
                     self.invalid = true;
@@ -105,7 +105,7 @@ impl ProvisionalUsage {
         for usage in self.messages.values().copied() {
             let usage = usage.complete()?;
             total = Some(match total {
-                Some(current) => add_usage(current, usage)?,
+                Some(current) => TokenUsageDelta::checked_add(current, usage)?,
                 None => usage,
             });
         }
@@ -241,36 +241,11 @@ fn parse_model_usage(value: Option<&Value>) -> Option<TokenUsageDelta> {
     for model in models.values() {
         let usage = parse_usage_snapshot(Some(model), UsageKeys::CLAUDE_MODEL)?.complete()?;
         total = Some(match total {
-            Some(current) => add_usage(current, usage)?,
+            Some(current) => TokenUsageDelta::checked_add(current, usage)?,
             None => usage,
         });
     }
     total
-}
-
-fn add_usage(left: TokenUsageDelta, right: TokenUsageDelta) -> Option<TokenUsageDelta> {
-    Some(TokenUsageDelta {
-        input_tokens: left.input_tokens.checked_add(right.input_tokens)?,
-        output_tokens: left.output_tokens.checked_add(right.output_tokens)?,
-        cache_read_input_tokens: add_optional_tokens(
-            left.cache_read_input_tokens,
-            right.cache_read_input_tokens,
-        )?,
-        cache_creation_input_tokens: add_optional_tokens(
-            left.cache_creation_input_tokens,
-            right.cache_creation_input_tokens,
-        )?,
-    })
-}
-
-fn add_optional_tokens(
-    left: Option<TokenCount>,
-    right: Option<TokenCount>,
-) -> Option<Option<TokenCount>> {
-    match (left, right) {
-        (Some(left), Some(right)) => left.checked_add(right).map(Some),
-        _ => Some(None),
-    }
 }
 
 #[cfg(test)]

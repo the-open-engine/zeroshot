@@ -4,7 +4,7 @@ set -eu
 # Project toolchains may change PATH; the harness keeps its image-owned interpreter.
 name=${0##*/}
 case "$name" in
-  codex | copilot)
+  codex | copilot | pi)
     exec /opt/zeroshot/bin/node "/opt/zeroshot/harness/bin/$name" "$@"
     ;;
   claude)

@@ -161,4 +161,7 @@ export PATH
 codex --version
 claude --version
 copilot --no-auto-update --version
+# Pi prints its version before any model or catalog request, so no network or
+# credential is needed for this smoke check.
+pi --version
 printf 'harness-interpreters: independent of project PATH\n'

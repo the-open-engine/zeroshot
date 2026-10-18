@@ -10,7 +10,7 @@ const MANAGED_MARKER = 'managed by @the-open-engine-company/zeroshot';
 const MANAGED_PATTERN =
   /^<!-- managed by @the-open-engine-company\/zeroshot; sha256=([a-f0-9]{64}) -->\n/;
 const TARGETS = Object.freeze([
-  Object.freeze({ id: 'agents', label: 'Codex/GitHub Copilot' }),
+  Object.freeze({ id: 'agents', label: 'Codex/GitHub Copilot/Pi' }),
   Object.freeze({ id: 'claude', label: 'Claude Code' }),
 ]);
 

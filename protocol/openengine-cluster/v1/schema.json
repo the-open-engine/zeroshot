@@ -3747,6 +3747,17 @@
       ],
       "type": "string"
     },
+    "PiProvider": {
+      "description": "Provider lanes owned by the Pi harness.\n\nEach variant names one Pi provider whose credentials resolve through a named connection. Pi\nowns the wire behavior of every lane; this enum only selects which lane the adapter\nconfigures and which requirements admission materializes.",
+      "enum": [
+        "anthropic",
+        "openai",
+        "openrouter",
+        "gateway",
+        "bedrock"
+      ],
+      "type": "string"
+    },
     "PlanParams": {
       "additionalProperties": false,
       "properties": {
@@ -5024,6 +5035,23 @@
             "provider"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "harness": {
+              "const": "pi",
+              "type": "string"
+            },
+            "provider": {
+              "$ref": "#/$defs/PiProvider"
+            }
+          },
+          "required": [
+            "harness",
+            "provider"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -5109,6 +5137,37 @@
             },
             "provider": {
               "$ref": "#/$defs/ClaudeProvider"
+            },
+            "size": {
+              "$ref": "#/$defs/RunSize"
+            }
+          },
+          "required": [
+            "harness",
+            "provider",
+            "size",
+            "nodes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "harness": {
+              "const": "pi",
+              "type": "string"
+            },
+            "nodes": {
+              "additionalProperties": false,
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+                  "$ref": "#/$defs/NodeRuntimeBinding"
+                }
+              },
+              "type": "object"
+            },
+            "provider": {
+              "$ref": "#/$defs/PiProvider"
             },
             "size": {
               "$ref": "#/$defs/RunSize"

@@ -119,7 +119,4 @@ fn coverage_contract_terminal_usage_aliases_and_optional_counts_fail_closed() {
     assert_eq!(parsed.input_tokens.get(), 1);
     assert_eq!(parsed.cache_read_input_tokens.assert_value().get(), 4);
     assert!(parsed.cache_creation_input_tokens.is_none());
-
-    assert_eq!(add_optional_tokens(count(1), None), Some(None));
-    assert!(add_optional_tokens(count(MAX_SAFE_GENERATION), count(1)).is_none());
 }

@@ -21,8 +21,8 @@
 The workflow publishes no alternate tag prefix, package, image, executable alias, source-build
 fallback, or compatibility artifact.
 
-The npm installer copies the same managed skill to `$HOME/.agents/skills/zeroshot` for Codex and
-GitHub Copilot, and to `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/zeroshot` for Claude Code. These
+The npm installer copies the same managed skill to `$HOME/.agents/skills/zeroshot` for Codex, GitHub
+Copilot, and Pi, and to `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/zeroshot` for Claude Code. These
 fixed user scopes are installed unconditionally so agents added later need no Zeroshot reinstall.
 Package updates and `zeroshot update` replace only an unchanged managed copy. An edited or
 conflicting skill is preserved and fails installation visibly. npm 7 and newer provide no uninstall

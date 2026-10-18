@@ -1,6 +1,6 @@
 # Zeroshot
 
-> Zeroshot runs a software task as an explicit multi-agent graph: one agent implements, independent agents review the result against the task's acceptance criteria and for code quality, rejected work goes to a bounded repair loop, and nothing is delivered until the graph's checks pass. The implementing agent never approves its own work. It is a native CLI (`zeroshot`) for Linux, macOS, and Windows, driving Codex, Claude Code, or GitHub Copilot as the agent harness. MIT licensed.
+> Zeroshot runs a software task as an explicit multi-agent graph: one agent implements, independent agents review the result against the task's acceptance criteria and for code quality, rejected work goes to a bounded repair loop, and nothing is delivered until the graph's checks pass. The implementing agent never approves its own work. It is a native CLI (`zeroshot`) for Linux, macOS, and Windows, driving Codex, Claude Code, GitHub Copilot, or Pi as the agent harness. MIT licensed.
 
 ## What it does
 
@@ -37,7 +37,7 @@ zeroshot run --title "Add JSON status output" --template software-change \
 
 Replace `YOUR_MODEL_ID` with a model your installed Codex CLI supports, and drop `--validate-only` to start the run. The worker edits the selected folder (`--cwd FOLDER`); Git is optional without delivery. The [first-run guide](https://zeroshot.sh/docs/current/getting-started/first-run/) covers other harnesses.
 
-The installer needs Node.js 18+ and installs a verified native binary plus a Zeroshot skill for Codex, Claude Code, and GitHub Copilot. Local runs reuse the harness's existing login.
+The installer needs Node.js 18+ and installs a verified native binary plus a Zeroshot skill for Codex, Claude Code, GitHub Copilot, and Pi. Local runs reuse the harness's existing login.
 
 ## Docs
 

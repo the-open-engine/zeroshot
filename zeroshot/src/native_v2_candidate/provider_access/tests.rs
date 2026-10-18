@@ -80,6 +80,8 @@ fn native_local_lanes_do_not_invent_provider_connections() {
         ("codex", "openai"),
         ("claude", "anthropic"),
         ("copilot", "github"),
+        ("pi", "anthropic"),
+        ("pi", "openai"),
     ] {
         let mut runtime = runtime(harness, provider, json!({}));
         materialize_provider_access(&mut runtime, ProviderAccessPlacement::Local).assert_value();
@@ -120,6 +122,30 @@ fn contained_and_non_native_lanes_receive_canonical_fallbacks() {
             ProviderAccessPlacement::Local,
             json!({"bedrock":["AWS_BEARER_TOKEN_BEDROCK","AWS_REGION"]}),
         ),
+        (
+            "pi",
+            "anthropic",
+            ProviderAccessPlacement::Contained,
+            json!({"anthropic":["ANTHROPIC_API_KEY"]}),
+        ),
+        (
+            "pi",
+            "openrouter",
+            ProviderAccessPlacement::Local,
+            json!({"openrouter":["OPENROUTER_API_KEY"]}),
+        ),
+        (
+            "pi",
+            "bedrock",
+            ProviderAccessPlacement::Local,
+            json!({"bedrock":["AWS_BEARER_TOKEN_BEDROCK","AWS_REGION"]}),
+        ),
+        (
+            "pi",
+            "gateway",
+            ProviderAccessPlacement::Contained,
+            json!({"gateway":["GATEWAY_BASE_URL","GATEWAY_API_KEY","GATEWAY_API"]}),
+        ),
     ] {
         let mut runtime = runtime(harness, provider, json!({}));
         materialize_provider_access(&mut runtime, placement).assert_value();
@@ -130,7 +156,10 @@ fn contained_and_non_native_lanes_receive_canonical_fallbacks() {
             .as_array_mut()
             .assert_value();
         github.push(json!("GH_TOKEN"));
-        github.sort_by_key(ToString::to_string);
+        // Requirements are a sorted set, so every field list is compared in that order.
+        for fields in expected.values_mut().filter_map(Value::as_array_mut) {
+            fields.sort_by_key(ToString::to_string);
+        }
         assert_eq!(requirements(&runtime), Value::Object(expected));
     }
 }

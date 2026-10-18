@@ -6,7 +6,7 @@ use crate::execution::process::{
 use crate::native_v2_capsule::provider_process::{
     ProcessExchange, ProcessInputFailure, ProviderExecutionFiles, ProviderProcess,
     exchange_process_io, open_provider_process, process_failure_detail, require_process_cleanup,
-    safe_provider_text,
+    text::ProviderText,
 };
 use crate::native_v2_contract::TokenUsageDelta;
 use crate::native_v2_runner::{DriverControl, LiveOutput, LiveOutputStream, NodeRunnerError};
@@ -238,30 +238,15 @@ async fn emit_text(
     text: &str,
     redactions: &[String],
 ) -> Result<(), NodeRunnerError> {
-    let safe = safe_provider_text(text, redactions);
-    let mut rest = safe.as_str();
-    while !rest.is_empty() {
-        let split = output_chunk_end(rest)?;
-        let (part, tail) = rest.split_at(split);
-        control.emit(LiveOutput::new(stream, part)?).await?;
-        rest = tail;
+    let mut emissions = Vec::new();
+    ProviderText::new(redactions).emit(&mut emissions, stream, text);
+    for output in emissions {
+        control.emit(output).await?;
     }
     if text.is_empty() {
         control.emit(LiveOutput::new(stream, "")?).await?;
     }
     Ok(())
-}
-
-fn output_chunk_end(text: &str) -> Result<usize, NodeRunnerError> {
-    if text.len() <= 8 * 1024 {
-        return Ok(text.len());
-    }
-    text.char_indices()
-        .map(|(index, _)| index)
-        .take_while(|index| *index <= 8 * 1024)
-        .last()
-        .filter(|index| *index > 0)
-        .ok_or(NodeRunnerError::UnsafeOutput)
 }
 
 #[cfg(test)]

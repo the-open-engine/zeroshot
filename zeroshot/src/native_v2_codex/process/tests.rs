@@ -165,9 +165,12 @@ fn coverage_contract_delivery_and_process_failures_preserve_all_safe_evidence() 
 
 #[test]
 fn coverage_contract_output_chunk_boundaries_preserve_utf8_without_exceeding_the_live_limit() {
-    assert_eq!(output_chunk_end("short").assert_value(), 5);
+    assert_eq!(
+        crate::native_v2_capsule::provider_process::text::utf8_chunks("short", 8192)[0].len(),
+        5
+    );
     let text = format!("{}é-tail", "a".repeat(8 * 1024 - 1));
-    let end = output_chunk_end(&text).assert_value();
+    let end = crate::native_v2_capsule::provider_process::text::utf8_chunks(&text, 8192)[0].len();
     assert_eq!(end, 8 * 1024 - 1);
     assert!(text.is_char_boundary(end));
     assert!(end <= 8 * 1024);

@@ -12,101 +12,34 @@ mod permissions;
 mod session;
 #[path = "native_v2_claude/transcript.rs"]
 mod transcript;
-#[path = "native_v2_claude/turn_process.rs"]
-mod turn_process;
+use crate::native_v2_capsule::provider_process::turn as turn_process;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::execution::process::{HostedProcessPool, ProcessSessionCommand, ProcessStdout};
+use crate::execution::process::{HostedProcessPool, ProcessSessionCommand};
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderExecution, ProviderExecutionFiles, ProviderProcessRunners,
     CLAUDE_LOCAL_ENVIRONMENT, LocalHarnessEnvironment, agent_workspace_access, provider_redactions,
-    report_provider_error, with_driver_detail,
+    report_provider_error, with_driver_detail, merge_local_environment,
+    extend_declared_environment,
 };
 use crate::native_v2_contract::{ClaudeProvider, NodeRuntimeBinding};
 use crate::native_v2_runner::{
     AgentResponse, resolve_agent_response, DriverControl, DriverInvocation, LiveOutput,
     LiveOutputStream, NodeRunnerError, ProviderSchemaDialect, ResolvedEnvironment,
 };
-use command::{
-    ClaudeTurnArguments, claude_arguments, configure_provider, extend_declared_environment, prompt,
-};
+use command::{ClaudeTurnArguments, claude_arguments, configure_provider, prompt};
 use session::{ClaudeSession, attempt_session_id, observe_session};
-use transcript::{ClaudeAttempt, ClaudeEmission, ClaudeTranscript};
-use turn_process::ClaudeProcessStart;
+use transcript::{ClaudeAttempt, ClaudeTranscript};
+use turn_process::ProviderProcessStart as ClaudeProcessStart;
 
-const MINIMAL_ENVIRONMENT_NAMES: [&str; 7] = [
-    "HOME",
-    "LANG",
-    "LC_ALL",
-    "PATH",
-    "TERM",
-    "TMPDIR",
-    "ZEROSHOT_TOOLS",
-];
+pub use crate::native_v2_capsule::HarnessProcessEnvironment as ClaudeProcessEnvironment;
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum ClaudeAdapterConfigError {
     #[error("Claude executable must not be empty")]
     EmptyExecutable,
-    #[error("base process environment contains non-minimal name {0}")]
-    NonMinimalEnvironment(String),
-    #[error("base process environment contains an invalid value")]
-    InvalidEnvironment,
-}
-
-/// Explicit non-secret environment needed to launch the CLI and its tools.
-///
-/// The controller supplies this value. It is deliberately not populated from the ambient
-/// process, and only a small allowlist can cross this boundary.
-#[derive(Clone, Default)]
-pub struct ClaudeProcessEnvironment(BTreeMap<String, String>);
-
-impl ClaudeProcessEnvironment {
-    pub fn new(values: BTreeMap<String, String>) -> Result<Self, ClaudeAdapterConfigError> {
-        for (name, value) in &values {
-            if !MINIMAL_ENVIRONMENT_NAMES.contains(&name.as_str()) {
-                return Err(ClaudeAdapterConfigError::NonMinimalEnvironment(
-                    name.clone(),
-                ));
-            }
-            if value.contains('\0') {
-                return Err(ClaudeAdapterConfigError::InvalidEnvironment);
-            }
-        }
-        Ok(Self(values))
-    }
-
-    pub(crate) fn clone_values(&self) -> BTreeMap<String, String> {
-        self.0.clone()
-    }
-
-    pub(crate) fn for_capsule(
-        &self,
-        runtime_home: &Path,
-        default_path: &str,
-    ) -> Result<Self, ClaudeAdapterConfigError> {
-        let runtime_home = runtime_home
-            .to_str()
-            .filter(|value| !value.is_empty())
-            .ok_or(ClaudeAdapterConfigError::InvalidEnvironment)?;
-        let mut values = self.clone_values();
-        values.insert("HOME".to_owned(), runtime_home.to_owned());
-        values
-            .entry("PATH".to_owned())
-            .or_insert_with(|| default_path.to_owned());
-        Self::new(values)
-    }
-}
-
-impl std::fmt::Debug for ClaudeProcessEnvironment {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_tuple("ClaudeProcessEnvironment")
-            .field(&self.0.keys().collect::<Vec<_>>())
-            .finish()
-    }
 }
 
 /// Claude adapter for one provider lane.
@@ -288,31 +221,17 @@ impl ClaudeAdapter {
                 "Claude declared environment conflicts with reserved process configuration",
             )
         })?;
-        let declared_auth = resolved.iter().any(|(name, _)| {
-            matches!(
-                name.as_str(),
-                "ANTHROPIC_API_KEY"
-                    | "ANTHROPIC_AUTH_TOKEN"
-                    | "CLAUDE_CODE_OAUTH_TOKEN"
-                    | "CLAUDE_CODE_OAUTH_REFRESH_TOKEN"
-            )
-        });
-        for (name, value) in &self.local_environment {
-            if declared_auth
-                && matches!(
-                    name.as_str(),
-                    "ANTHROPIC_API_KEY"
-                        | "ANTHROPIC_AUTH_TOKEN"
-                        | "CLAUDE_CODE_OAUTH_TOKEN"
-                        | "CLAUDE_CODE_OAUTH_REFRESH_TOKEN"
-                )
-            {
-                continue;
-            }
-            environment
-                .entry(name.clone())
-                .or_insert_with(|| value.clone());
-        }
+        merge_local_environment(
+            &mut environment,
+            resolved,
+            &self.local_environment,
+            &[
+                "ANTHROPIC_API_KEY",
+                "ANTHROPIC_AUTH_TOKEN",
+                "CLAUDE_CODE_OAUTH_TOKEN",
+                "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+            ],
+        );
         configure_provider(&mut environment, self.provider).map_err(|error| {
             with_driver_detail(
                 error,
@@ -444,63 +363,6 @@ enum ClaudeTurnAdvance {
 struct ClaudeCommandInput<'a> {
     resume_id: Option<&'a str>,
     files: &'a ProviderExecutionFiles,
-}
-
-async fn collect_transcript(
-    mut stdout: ProcessStdout,
-    transcript: &mut ClaudeTranscript,
-    control: &DriverControl,
-) -> Result<(), NodeRunnerError> {
-    let mut delivery_error = None;
-    while let Some(chunk) = stdout.recv().await {
-        let emissions = transcript.push(chunk.as_slice());
-        if delivery_error.is_none() {
-            delivery_error = emit_claude(control, emissions).await.err();
-        }
-    }
-    // The transcript holds back text until a line or block ends, or while it could begin a redacted
-    // value, so the remainder can include text received before cancellation. Record it even when
-    // cancellation already started.
-    let emissions = transcript.finish_stream();
-    if matches!(delivery_error, None | Some(NodeRunnerError::Cancelled)) {
-        if let Err(error) = emit_claude_final(control, emissions).await {
-            delivery_error.get_or_insert(error);
-        }
-    }
-    delivery_error.map_or(Ok(()), Err)
-}
-
-async fn emit_claude(
-    control: &DriverControl,
-    emissions: Vec<ClaudeEmission>,
-) -> Result<(), NodeRunnerError> {
-    let mut emissions = emissions.into_iter();
-    while let Some(emission) = emissions.next() {
-        let output = LiveOutput::new(emission.stream, emission.text)?;
-        match control.emit(output.clone()).await {
-            Ok(()) => {}
-            Err(NodeRunnerError::Cancelled) => {
-                // This batch can carry text held back before cancellation; record it once.
-                control.emit_final(output).await?;
-                emit_claude_final(control, emissions.collect()).await?;
-                return Err(NodeRunnerError::Cancelled);
-            }
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(())
-}
-
-async fn emit_claude_final(
-    control: &DriverControl,
-    emissions: Vec<ClaudeEmission>,
-) -> Result<(), NodeRunnerError> {
-    for emission in emissions {
-        control
-            .emit_final(LiveOutput::new(emission.stream, emission.text)?)
-            .await?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

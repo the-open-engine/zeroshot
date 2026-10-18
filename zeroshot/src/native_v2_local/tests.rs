@@ -283,10 +283,32 @@ async fn local_harness_contract_materializes_each_native_lane_without_processes(
         NativeV2HarnessConfig::Claude(config) => {
             assert_eq!(config.workspace, workspace);
             assert_eq!(config.runtime_home, runtime_home);
-            assert_eq!(config.local_user_home, Some(home));
+            assert_eq!(config.local_user_home, Some(home.clone()));
             assert_eq!(config.executable, "claude");
         }
         _ => panic!("expected Claude harness"),
+    }
+    match single_lane(
+        local_lanes(
+            &admitted_for("pi", "anthropic").await,
+            &workspace,
+            &runtime_home,
+            &environment,
+        )
+        .assert_value(),
+    ) {
+        NativeV2HarnessConfig::Pi(config) => {
+            assert_eq!(
+                config.provider,
+                crate::native_v2_contract::PiProvider::Anthropic
+            );
+            assert_eq!(config.executable, "pi");
+            assert_eq!(config.workspace, workspace);
+            assert_eq!(config.runtime_home, runtime_home);
+            // A native-local lane reuses the invoking user's home so Pi finds `~/.pi/agent`.
+            assert_eq!(config.local_user_home, Some(home.clone()));
+        }
+        _ => panic!("expected Pi harness"),
     }
 }
 
@@ -574,6 +596,110 @@ fn local_preparation_rejects_target_hooks_before_resolving_source_or_installing_
             Err(LocalCompositionError::PreparationRequiresTarget)
         ));
     }
+}
+
+#[test]
+fn relative_harness_home_overrides_resolve_against_the_invoking_directory() {
+    let invoking = Path::new("/invoking/dir");
+    let mut environment = LocalHarnessEnvironment::new(BTreeMap::from([
+        ("CODEX_HOME".to_owned(), "codex".to_owned()),
+        ("CLAUDE_CONFIG_DIR".to_owned(), "claude".to_owned()),
+        ("COPILOT_HOME".to_owned(), "copilot".to_owned()),
+        (
+            "COPILOT_PROVIDERS_CONFIG".to_owned(),
+            "providers.json".to_owned(),
+        ),
+        ("PI_CODING_AGENT_DIR".to_owned(), "pi".to_owned()),
+        ("PATH".to_owned(), "/usr/bin".to_owned()),
+    ]));
+    resolve_relative_home_overrides(&mut environment, invoking).assert_value();
+
+    for (name, relative) in [
+        ("CODEX_HOME", "codex"),
+        ("CLAUDE_CONFIG_DIR", "claude"),
+        ("COPILOT_HOME", "copilot"),
+        ("COPILOT_PROVIDERS_CONFIG", "providers.json"),
+        ("PI_CODING_AGENT_DIR", "pi"),
+    ] {
+        let expected = invoking.join(relative);
+        assert_eq!(
+            environment.get(name).map(String::as_str),
+            expected.to_str(),
+            "{name} must resolve against the invoking directory"
+        );
+    }
+    // An unrelated name, and an already-absolute override, are left untouched.
+    assert_eq!(
+        environment.get("PATH").map(String::as_str),
+        Some("/usr/bin")
+    );
+
+    let mut absolute = LocalHarnessEnvironment::new(BTreeMap::from([(
+        "PI_CODING_AGENT_DIR".to_owned(),
+        "/absolute/pi".to_owned(),
+    )]));
+    resolve_relative_home_overrides(&mut absolute, invoking).assert_value();
+    assert_eq!(
+        absolute.get("PI_CODING_AGENT_DIR").map(String::as_str),
+        Some("/absolute/pi")
+    );
+}
+
+#[test]
+fn pi_agent_home_shorthand_uses_the_captured_user_home() {
+    let invoking = Path::new("/invoking/dir");
+    let home = if cfg!(windows) {
+        Path::new(r"C:\Users\captured")
+    } else {
+        Path::new("/captured/home")
+    };
+    for (authored, relative) in [("~", ""), ("~/.pi/custom", ".pi/custom")] {
+        let mut environment = LocalHarnessEnvironment::new(BTreeMap::from([
+            ("HOME".to_owned(), home.to_string_lossy().into_owned()),
+            (
+                "USERPROFILE".to_owned(),
+                home.to_string_lossy().into_owned(),
+            ),
+            ("PI_CODING_AGENT_DIR".to_owned(), authored.to_owned()),
+        ]));
+        resolve_relative_home_overrides(&mut environment, invoking).assert_value();
+        assert_eq!(
+            environment.get("PI_CODING_AGENT_DIR").map(PathBuf::from),
+            Some(home.join(relative)),
+            "{authored} must keep Pi's native home expansion"
+        );
+    }
+    assert_eq!(
+        pi_agent_directory_path("~otheruser/.pi", Some(home)).assert_value(),
+        PathBuf::from("~otheruser/.pi")
+    );
+    let backslash = pi_agent_directory_path(r"~\.pi\custom", Some(home)).assert_value();
+    assert_eq!(
+        backslash,
+        if cfg!(windows) {
+            home.join(r".pi\custom")
+        } else {
+            PathBuf::from(r"~\.pi\custom")
+        }
+    );
+}
+
+#[test]
+fn pi_agent_directory_file_urls_keep_their_native_encoding() {
+    let authored = if cfg!(windows) {
+        "file:///C:/Users/captured/.pi/custom%20agent%23test"
+    } else {
+        "file:///captured/home/.pi/custom%20agent%23test"
+    };
+    let mut environment = LocalHarnessEnvironment::new(BTreeMap::from([(
+        "PI_CODING_AGENT_DIR".to_owned(),
+        authored.to_owned(),
+    )]));
+    resolve_relative_home_overrides(&mut environment, Path::new("/invoking/dir")).assert_value();
+    assert_eq!(
+        environment.get("PI_CODING_AGENT_DIR").map(String::as_str),
+        Some(authored)
+    );
 }
 
 #[test]
