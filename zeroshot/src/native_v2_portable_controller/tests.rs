@@ -130,7 +130,7 @@ async fn checkpoint_scratch_gc_failure_does_not_reject_confirmed_runtime_cleanup
     );
 }
 
-fn submission(key: &str) -> RunSubmission {
+pub(super) fn submission(key: &str) -> RunSubmission {
     RunSubmission {
         environment: None,
         title: RunTitle::new("Portable controller test").assert_value_with("title"),
@@ -150,7 +150,7 @@ fn submission(key: &str) -> RunSubmission {
     }
 }
 
-fn bootstrap(
+pub(super) fn bootstrap(
     run_id: RunId,
     submission: RunSubmission,
     workspace: PathBuf,

@@ -268,6 +268,10 @@ async fn final_contract_controller_entry_consumes_a_rejected_bootstrap_before_an
         Err(PortableControllerError::Bootstrap)
     ));
     assert!(!path.exists());
+    assert_eq!(
+        take_startup_failure(&PortableControllerPaths::new(root.path())).as_deref(),
+        Some("portable controller bootstrap is malformed or too large")
+    );
 }
 
 #[test]

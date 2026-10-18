@@ -671,6 +671,21 @@ async fn local_stale_state_and_readiness_fail_closed() {
                 .to_string()
                 .contains("exited before becoming ready")
         );
+        crate::execution::process::write_new_file(
+            &paths.startup_failure(),
+            b"portable controller I/O failed: restic is unavailable",
+            0o600,
+        )
+        .assert_value();
+        assert_eq!(
+            wait_for_controller(&mut exited, &paths, &run_id, Duration::ZERO)
+                .await
+                .assert_error()
+                .to_string(),
+            "local controller operation failed: controller exited before becoming ready: \
+             portable controller I/O failed: restic is unavailable"
+        );
+        assert!(!paths.startup_failure().exists());
 
         let mut waiting = tokio::process::Command::new("sh")
             .args(["-c", "read _"])

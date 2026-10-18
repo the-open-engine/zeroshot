@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::Path;
 
 use openengine_cluster_protocol::{RunId, is_canonical_uuid_v7};
@@ -50,8 +51,17 @@ fn local_socket_path_capacity() -> usize {
     address.sun_path.len()
 }
 
+const RESTIC_ENVIRONMENT: &str = "ZEROSHOT_RESTIC";
+
 pub(super) fn copy_minimal_process_environment(
     command: &mut Command,
+) -> Result<(), NativeV2CliError> {
+    copy_minimal_environment(command, |name| std::env::var_os(name))
+}
+
+fn copy_minimal_environment(
+    command: &mut Command,
+    source: impl Fn(&str) -> Option<OsString>,
 ) -> Result<(), NativeV2CliError> {
     for name in [
         "PATH",
@@ -70,9 +80,17 @@ pub(super) fn copy_minimal_process_environment(
         "TEMP",
         "TMP",
     ] {
-        if let Some(value) = std::env::var_os(name).filter(|value| !value.is_empty()) {
+        if let Some(value) = source(name).filter(|value| !value.is_empty()) {
             command.env(name, value);
         }
+    }
+    // The Restic selector names Zeroshot's own checkpoint tool, not harness context. Resolve a
+    // relative value here so the detached controller finds the same executable.
+    if let Some(value) = source(RESTIC_ENVIRONMENT).filter(|value| !value.is_empty()) {
+        command.env(
+            RESTIC_ENVIRONMENT,
+            std::path::absolute(value).map_err(local_io)?,
+        );
     }
     Ok(())
 }
