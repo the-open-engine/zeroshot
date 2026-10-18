@@ -7,6 +7,8 @@ export function workspaceStorageKeys(mount: URL, workspace: WorkspaceIdentity) {
   )}`;
   return {
     draft: `${prefix}.draft`,
+    runView: (source: string, runId: string) =>
+      `${prefix}.run-view.${encodeURIComponent(JSON.stringify([source, runId]))}`,
     environmentDraft: `${prefix}.environment-draft`,
     lastProfile: `${prefix}.last-profile`,
     layout: (name: string) => `${prefix}.layout.${encodeURIComponent(name)}`,

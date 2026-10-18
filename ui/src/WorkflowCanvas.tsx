@@ -15,6 +15,7 @@ import {
   type NodeProps,
   type Edge,
   type EdgeProps,
+  type Viewport,
 } from '@xyflow/react';
 import {
   Plus,
@@ -63,6 +64,7 @@ import {
   type WorkflowObservation,
 } from './workflow-observation';
 export type { WorkflowNodeObservation, WorkflowObservation } from './workflow-observation';
+import type { CanvasView } from './run-view-state';
 import './workflow.css';
 
 export type WorkflowAction = {
@@ -527,6 +529,8 @@ export function WorkflowCanvas(p: {
   select: (name: string) => void;
   focus?: { name: string; tick: number };
   observation?: WorkflowObservation;
+  view?: CanvasView;
+  onViewChange?: (view: CanvasView) => void;
   action?: (a: WorkflowAction) => void;
   editOutcome?: (edge: WorkflowEdge) => void;
   reorder?: (source: string, target: string) => void;
@@ -536,16 +540,13 @@ export function WorkflowCanvas(p: {
   inspectorHidden: boolean;
   showInspector: () => void;
 }) {
-  const { fitView, setCenter } = useReactFlow();
+  const { fitView, setCenter, setViewport } = useReactFlow();
   const readOnly = !!p.observation;
   const contextKey = p.observation?.key ?? p.document.name;
-  const [collapsed, setCollapsed] = useState<Set<string>>(() =>
-    readOnly ? collapsedWorkflowGroups(p.document.graph.root) : new Set()
-  );
+  const { collapsed, setCollapsed, initialViewport, moved } = useCanvasView(p, readOnly);
   const [error, setError] = useState('');
   const layoutRevision = useRef(0);
   const lastFocus = useRef<number | undefined>(undefined);
-  const flowElement = useRef<HTMLDivElement>(null);
   const projection = useMemo(
     () => compactWorkflow(projectWorkflow(p.document, collapsed)),
     [p.document, collapsed]
@@ -611,9 +612,15 @@ export function WorkflowCanvas(p: {
           ),
         });
       setError('');
-      if (reset || !focusRef.current || lastFocus.current === focusRef.current.tick)
+      const restore = initialViewport.current;
+      initialViewport.current = undefined;
+      if (restore || reset || !focusRef.current || lastFocus.current === focusRef.current.tick)
         requestAnimationFrame(() =>
-          requestAnimationFrame(() => fitView({ padding: 0.12, maxZoom: 0.9, duration: 180 }))
+          requestAnimationFrame(() => {
+            if (revision !== layoutRevision.current) return;
+            if (restore) void setViewport(restore);
+            else void fitView({ padding: 0.12, maxZoom: 0.9, duration: 180 });
+          })
         );
     } catch (cause) {
       if (revision === layoutRevision.current) setError((cause as Error).message);
@@ -622,7 +629,13 @@ export function WorkflowCanvas(p: {
     }
   }
   useEffect(() => {
-    setCollapsed(readOnly ? collapsedWorkflowGroups(p.document.graph.root) : new Set());
+    setCollapsed(
+      p.view
+        ? new Set(p.view.collapsed)
+        : readOnly
+          ? collapsedWorkflowGroups(p.document.graph.root)
+          : new Set()
+    );
     setDragPositions({});
     lastFocus.current = undefined;
   }, [contextKey, readOnly]);
@@ -633,25 +646,6 @@ export function WorkflowCanvas(p: {
     };
   }, [signature, contextKey]);
   useEffect(() => setDragPositions({}), [layoutKey]);
-  useEffect(() => {
-    if (!readOnly || !flowElement.current) return;
-    let previous = '';
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const observer = new ResizeObserver(([entry]) => {
-      const size = `${Math.round(entry.contentRect.width)}:${Math.round(entry.contentRect.height)}`;
-      if (size === previous) return;
-      const initialized = !!previous;
-      previous = size;
-      if (!initialized || !entry.contentRect.width || !entry.contentRect.height) return;
-      clearTimeout(timer);
-      timer = setTimeout(() => void fitView({ padding: 0.12, maxZoom: 0.9, duration: 180 }), 120);
-    });
-    observer.observe(flowElement.current);
-    return () => {
-      observer.disconnect();
-      clearTimeout(timer);
-    };
-  }, [readOnly, fitView]);
   useEffect(() => {
     if (!p.focus || lastFocus.current === p.focus.tick) return;
     const ancestors = pathTo(p.document.graph.root, p.focus.name)
@@ -755,8 +749,9 @@ export function WorkflowCanvas(p: {
         collapseAll={() => setCollapsed(collapsedWorkflowGroups(p.document.graph.root))}
         arrange={() => void layout(true)}
       />
-      <div ref={flowElement} className={`flow ${layoutBusy ? 'workflow-arranging' : ''}`}>
+      <div className={`flow ${layoutBusy ? 'workflow-arranging' : ''}`}>
         <ReactFlow
+          onMoveEnd={moved}
           nodes={[...regions, ...activities]}
           edges={edges}
           nodeTypes={nodeTypes}
@@ -817,4 +812,28 @@ export function WorkflowCanvas(p: {
       </div>
     </section>
   );
+}
+
+function useCanvasView(p: Parameters<typeof WorkflowCanvas>[0], readOnly: boolean) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(() =>
+    p.view
+      ? new Set(p.view.collapsed)
+      : readOnly
+        ? collapsedWorkflowGroups(p.document.graph.root)
+        : new Set()
+  );
+  const initialViewport = useRef(p.view?.viewport);
+  const viewport = useRef(p.view?.viewport);
+  const viewChanged = useRef(p.onViewChange);
+  viewChanged.current = p.onViewChange;
+  const collapsedRef = useRef(collapsed);
+  collapsedRef.current = collapsed;
+  useEffect(() => {
+    viewChanged.current?.({ collapsed: [...collapsed], viewport: viewport.current });
+  }, [collapsed]);
+  function moved(_: unknown, next: Viewport) {
+    viewport.current = next;
+    viewChanged.current?.({ collapsed: [...collapsedRef.current], viewport: next });
+  }
+  return { collapsed, setCollapsed, initialViewport, moved };
 }

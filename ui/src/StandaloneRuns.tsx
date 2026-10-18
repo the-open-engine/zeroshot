@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, ChevronDown, ChevronRight, Menu, RefreshCw, Search } from 'lucide-react';
 import { AppHeader } from './AppHeader';
 import { RunHistoryBoundary } from './RunHistoryBoundary';
+import { workspaceStorageKeys } from './workspace-storage';
 import { RunHistoryView } from './RunHistoryView';
 import { createExampleRunHistory } from './run-history-source';
 import { humanize, type RunSummary } from './run-history';
@@ -32,14 +33,16 @@ function mergeRuns(previous: RunSummary[], incoming: RunSummary[]) {
 function selectedRun() {
   const [kind, id] = window.location.hash.slice(1).split('/').slice(1);
   try {
-    return id ? { example: kind === 'example', id: decodeURIComponent(id) } : undefined;
+    return id && ['local', 'example'].includes(kind)
+      ? { example: kind === 'example', id: decodeURIComponent(id) }
+      : undefined;
   } catch {
     return undefined;
   }
 }
 
 /** Standalone navigation owns the run list and hash. Hosts can mount RunHistoryView directly. */
-type StandaloneRunsProps = { services: WorkspaceServices; bootstrap: Bootstrap };
+type StandaloneRunsProps = { services: WorkspaceServices; bootstrap: Bootstrap; viewScope: string };
 export function StandaloneRuns(props: StandaloneRunsProps) {
   return (
     <RunHistoryBoundary workspace={props.bootstrap.workspace}>
@@ -47,8 +50,9 @@ export function StandaloneRuns(props: StandaloneRunsProps) {
     </RunHistoryBoundary>
   );
 }
-function StandaloneRunsContent({ services, bootstrap }: StandaloneRunsProps) {
+function StandaloneRunsContent({ services, bootstrap, viewScope }: StandaloneRunsProps) {
   const history = services.history;
+  const storage = workspaceStorageKeys(services.mount, bootstrap.workspace);
   const exampleSource = useMemo(() => createExampleRunHistory(services.mount), [services.mount]);
   const [selection, setSelection] = useState(selectedRun);
   const [runs, setRuns] = useState<RunSummary[]>([]),
@@ -216,7 +220,15 @@ function StandaloneRunsContent({ services, bootstrap }: StandaloneRunsProps) {
           </div>
         </nav>
         <RunHistoryView
+          key={`${selection?.example}:${selection?.id}`}
           runId={selection?.id}
+          viewKey={
+            selection &&
+            storage.runView(
+              `${viewScope}:${selection.example ? 'example' : 'history'}`,
+              selection.id
+            )
+          }
           source={selection?.example ? exampleSource : history}
           workers={bootstrap.workers ?? []}
           emptyAction={

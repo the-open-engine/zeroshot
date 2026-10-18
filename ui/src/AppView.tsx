@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 import {
   AlertCircle,
@@ -60,6 +60,21 @@ export function AppView({ model }: { model: AppModel }) {
     host,
     renderRun,
   } = model;
+  const runScope = useMemo(
+    () => Array.from(window.crypto.getRandomValues(new Uint32Array(4))).join('-'),
+    [bootstrap.workspace.kind, bootstrap.workspace.id]
+  );
+  const lastRun = useRef(
+    window.location.hash.startsWith('#runs/') ? window.location.hash : '#runs'
+  );
+  useEffect(() => {
+    const remember = () => {
+      if (window.location.hash === '#runs' || window.location.hash.startsWith('#runs/'))
+        lastRun.current = window.location.hash;
+    };
+    window.addEventListener('hashchange', remember);
+    return () => window.removeEventListener('hashchange', remember);
+  }, []);
   return (
     <NumericDraftProvider value={numericDrafts}>
       <AuthoringProvider value={services.authoring}>
@@ -72,7 +87,7 @@ export function AppView({ model }: { model: AppModel }) {
               section="profiles"
               workspace={bootstrap.workspace}
               navigate={(section) => {
-                if (section === 'runs') window.location.hash = 'runs';
+                if (section === 'runs') window.location.hash = lastRun.current;
               }}
             >
               <button
@@ -113,7 +128,9 @@ export function AppView({ model }: { model: AppModel }) {
         {host && hosted.showingRun && (
           <div className="app embedded-app">{renderRun?.(hosted.runId)}</div>
         )}
-        {!host && historyPage && <StandaloneRuns services={services} bootstrap={bootstrap} />}
+        {!host && historyPage && (
+          <StandaloneRuns services={services} bootstrap={bootstrap} viewScope={runScope} />
+        )}
         {defaultsPage && (
           <DefaultsPage
             back={() => {

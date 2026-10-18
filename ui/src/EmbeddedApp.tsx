@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { workspaceStorageKeys } from './workspace-storage';
 import { RunHistoryView } from './RunHistoryView';
 import { RunHistoryBoundary } from './RunHistoryBoundary';
 import { createEmbeddedFetch } from './embedded-fetch';
@@ -57,7 +58,15 @@ export function EmbeddedApp() {
       renderRun={(runId) => (
         <RunHistoryBoundary workspace={loaded.bootstrap.workspace} embedded>
           <RunHistoryView
+            key={runId}
             runId={runId}
+            viewKey={
+              runId &&
+              workspaceStorageKeys(loaded.services.mount, loaded.bootstrap.workspace).runView(
+                'history',
+                runId
+              )
+            }
             source={loaded.services.history}
             workers={loaded.bootstrap.workers ?? []}
           />

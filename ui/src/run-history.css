@@ -303,13 +303,8 @@
   font-size: inherit;
 }
 .run-inspector {
-  width: 370px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--hairline);
-  background: var(--surface);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+  position: relative;
+  --inspector-default-width: 370px;
 }
 .run-inspector-header {
   display: flex;
@@ -722,7 +717,7 @@
     width: 225px;
   }
   .run-inspector {
-    width: 330px;
+    --inspector-default-width: 330px;
   }
   .history-header h1 {
     font-size: 22px;
@@ -735,7 +730,7 @@
     right: 0;
     top: 0;
     bottom: 0;
-    width: 350px;
+    --inspector-default-width: 350px;
     box-shadow: -5px 0 20px var(--shadow-panel);
   }
   .history-header .profile-title {
@@ -807,8 +802,5 @@
   .app-header .brand-rule,
   .app-header .brand > span:last-child {
     display: none;
-  }
-  .run-inspector {
-    width: 100%;
   }
 }

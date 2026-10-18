@@ -33,3 +33,16 @@ export const runDetailFixture = (runId = 'run/selected'): RunDetail => ({
   initialInput: null,
   history: { initialCursor: 'v2:0', cursor: 'v2:0', complete: false, limitations: [] },
 });
+
+/** Installs only the browser globals needed by a mounted component test. */
+export function installTestGlobals(values: Record<string, unknown>) {
+  const restorers = Object.entries(values).map(([name, value]) => {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, name);
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+    return () => {
+      if (previous) Object.defineProperty(globalThis, name, previous);
+      else Reflect.deleteProperty(globalThis, name);
+    };
+  });
+  return () => restorers.forEach((restore) => restore());
+}

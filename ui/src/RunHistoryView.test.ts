@@ -115,6 +115,7 @@ function installBrowser(t: TestContext) {
     }
     dom.window.close();
   });
+  return dom.window;
 }
 
 async function flushEffects() {
@@ -338,6 +339,164 @@ test('preparation logs are visible before the first node and remain readable aft
     assert.match(renderedText(container), /Graph execution did not start/);
     assert.match(renderedText(container), /Installing the project toolchain/);
     assert.doesNotMatch(renderedText(container), /History incomplete/);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test('a remounted run restores its paused cursor, inspector and execution without retaining a subscription', async (t) => {
+  stubWorker(t);
+  const browser = installBrowser(t);
+  const { RunHistoryView } = await viewerModule(t);
+  const { createRoot } = await import('react-dom/client');
+  const detail = runDetailFixture('remembered-run');
+  const events: HistoryPage['events'] = [
+    { cursor: 'v2:1', event: { kind: 'run_started' } },
+    {
+      cursor: 'v2:2',
+      event: { kind: 'safe_log', execution: null, stream: 'system', line: 'Fixture log' },
+    },
+  ];
+  let watches = 0;
+  let lastSignal: AbortSignal | undefined;
+  const source: RunHistoryReader = {
+    detail: async () => detail,
+    page: async () => ({ ...completePage(), events, nextCursor: 'v2:2', headCursor: 'v2:2' }),
+    watch(_id, _after, _observer, signal) {
+      watches++;
+      lastSignal = signal;
+      return () => {
+        watches--;
+      };
+    },
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root = createRoot(container);
+  const render = () =>
+    act(async () =>
+      root.render(
+        createElement(RunHistoryView, {
+          runId: detail.runId,
+          source,
+          workers: [],
+          viewKey: 'workspace-a:history:remembered-run',
+        })
+      )
+    );
+  const click = async (label: string) => {
+    const button = container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
+    assert.ok(button, label);
+    await act(async () => button.click());
+  };
+  await render();
+  await flushEffects();
+  assert.equal(watches, 1);
+  await click('Go to start');
+  await click('Open inspector');
+  await click('Next event');
+  const position = () =>
+    container.querySelector<HTMLInputElement>('[aria-label="History position"]')!.value;
+  assert.equal(position(), '1');
+  await act(async () => root.unmount());
+  assert.equal(watches, 0);
+  assert.equal(lastSignal?.aborted, true);
+  const saved = JSON.parse(browser.sessionStorage.getItem('workspace-a:history:remembered-run')!);
+  assert.equal(saved.cursor, 'v2:1');
+  assert.equal(saved.following, false);
+  assert.equal(saved.inspector, true);
+  root = createRoot(container);
+  try {
+    await render();
+    await flushEffects();
+    assert.equal(position(), '1');
+    assert.ok(container.querySelector('[aria-label="Run inspector"]'));
+    assert.equal(watches, 1, 'only the remounted viewer owns a subscription');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test('bounded replay retains a pending saved cursor and execution until explicit continuation reaches it', async (t) => {
+  stubWorker(t);
+  const browser = installBrowser(t);
+  const { RunHistoryView } = await viewerModule(t);
+  const { createRoot } = await import('react-dom/client');
+  const key = 'long-run-view';
+  browser.sessionStorage.setItem(
+    key,
+    JSON.stringify({
+      selected: 'run',
+      inspector: true,
+      execution: 'pinned-execution',
+      cursor: 'v2:6000',
+      following: false,
+    })
+  );
+  const events: HistoryPage['events'] = Array.from({ length: 6000 }, (_, index) => ({
+    cursor: `v2:${index + 1}`,
+    event: { kind: 'safe_log', execution: null, stream: 'system', line: 'Fixture output' },
+  }));
+  let pageReads = 0;
+  const source: RunHistoryReader = {
+    detail: async () => ({ ...runDetailFixture('long-run'), phase: 'finished' }),
+    async page(_id, after) {
+      pageReads++;
+      const offset = Number(after.slice(3));
+      const batch = events.slice(offset, offset + 1000);
+      return {
+        events: batch,
+        nextCursor: batch.at(-1)!.cursor,
+        headCursor: 'v2:6000',
+        complete: offset + batch.length === events.length,
+      };
+    },
+  };
+  const assertPinned = () => {
+    const saved = JSON.parse(browser.sessionStorage.getItem(key)!);
+    assert.equal(saved.cursor, 'v2:6000');
+    assert.equal(saved.execution, 'pinned-execution');
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(RunHistoryView, { runId: 'long-run', source, workers: [], viewKey: key })
+      )
+    );
+    await flushEffects();
+    assert.equal(pageReads, 5, 'the initial bounded batch must still stop');
+    assert.match(renderedText(container), /Load more history to restore your saved position/);
+    assertPinned();
+    const more = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Load more history'
+    );
+    assert.ok(more);
+    await act(async () => more.click());
+    await flushEffects();
+    assert.equal(pageReads, 6);
+    assert.doesNotMatch(renderedText(container), /restore your saved position/);
+    assertPinned();
+    await act(async () => root.unmount());
+    const saved = JSON.parse(browser.sessionStorage.getItem(key)!);
+    browser.sessionStorage.setItem(key, JSON.stringify({ ...saved, cursor: 'v2:1' }));
+    root = createRoot(container);
+    await act(async () =>
+      root.render(
+        createElement(RunHistoryView, { runId: 'long-run', source, workers: [], viewKey: key })
+      )
+    );
+    await flushEffects();
+    assert.equal(pageReads, 11, 'restoration still reads the full bounded batch');
+    assert.equal(
+      JSON.parse(browser.sessionStorage.getItem(key)!).cursor,
+      'v2:1',
+      'pages after the restored position cannot advance it'
+    );
   } finally {
     await act(async () => root.unmount());
     container.remove();

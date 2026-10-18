@@ -14,6 +14,15 @@ import {
   Play,
   X,
 } from 'lucide-react';
+import { InspectorPanel } from './InspectorPanel';
+import {
+  useRunView,
+  historyViewCursor,
+  restoredRunNode,
+  restoredHistoryPosition,
+  useRunViewPersistence,
+  type RunViewState,
+} from './run-view-state';
 import { ExecutionTimeline } from './ExecutionTimeline';
 import { ControlTimeline } from './ControlTimeline';
 import { appendControlHistory, type ControlRecord } from './control-history';
@@ -53,17 +62,21 @@ const dateLabel = (time?: number | null) =>
         minute: '2-digit',
       })
     : '';
+type RunHistoryViewProps = {
+  runId?: string;
+  source: RunHistoryReader;
+  workers: WorkerOption[];
+  emptyAction?: ReactNode;
+  viewKey?: string;
+};
 export function RunHistoryView({
   runId,
   source,
   workers,
   emptyAction,
-}: {
-  runId?: string;
-  source: RunHistoryReader;
-  workers: WorkerOption[];
-  emptyAction?: ReactNode;
-}) {
+  viewKey,
+}: RunHistoryViewProps) {
+  const { saved: savedView, canvas, setCanvas } = useRunView(viewKey);
   const [playing, setPlaying] = useState(false);
   const [playbackNode, setPlaybackNode] = useState<string>();
   const [selected, setSelected] = useState(''),
@@ -86,26 +99,40 @@ export function RunHistoryView({
     historyPending,
     error,
     retained,
+    restoreCursor,
+    restorePending,
     isLiveRun,
     follow,
     loadHistory,
   } = useHistoryFeed(runId, source, {
+    restore: savedView,
     onLoad: () => {
       setPlaying(false);
       setPlaybackNode(undefined);
     },
     onReset: () => {
-      setInspector(false);
-      setExecution('');
+      setCanvas(savedView.canvas);
+      setInspector(Boolean(savedView.inspector));
+      setExecution(savedView.execution ?? '');
       setReadingExecution('');
       setFocus(undefined);
       setPositions({});
     },
     onOpen: (detail) => {
-      setSelected(detail.graph.root.name);
-      setInspector(detail.phase === 'admitted' || !!environmentFailure(detail));
+      setSelected(restoredRunNode(detail.graph.root, savedView));
+      setInspector(
+        savedView.inspector ?? (detail.phase === 'admitted' || !!environmentFailure(detail))
+      );
     },
     onMissing: () => setPlaying(false),
+  });
+  useRunViewPersistence(viewKey, run, loading, {
+    selected,
+    inspector,
+    execution,
+    following,
+    canvas,
+    cursor: historyViewCursor(restoreCursor.current, events, cursorIndex),
   });
   const document: Document | undefined = useMemo(
     () => run && { name: run.runId, graph: run.graph, runtime: run.runtime },
@@ -260,6 +287,8 @@ export function RunHistoryView({
                 select={inspect}
                 focus={focus}
                 observation={{ key: run.runId, nodes: projection.nodes }}
+                view={canvas}
+                onViewChange={setCanvas}
                 inspectorHidden={!inspector}
                 showInspector={() => setInspector(true)}
               />
@@ -309,6 +338,7 @@ export function RunHistoryView({
             loadedHead={loadedHead}
             playing={playing}
             historyPending={historyPending}
+            restorePending={restorePending}
             eventsCount={events.length}
             showNode={() => reveal(moment.node!)}
             goLatest={goLatest}
@@ -492,6 +522,7 @@ function HistoryEmpty({
 }
 
 type HistoryFeedCallbacks = {
+  restore?: Partial<RunViewState>;
   onLoad: () => void;
   onReset: () => void;
   onOpen: (detail: RunDetail) => void;
@@ -523,6 +554,8 @@ function useHistoryFeed(
   const retainedControl = useRef<ControlRecord[]>([]);
   const cursorIntent = useRef(0);
   const pageCursor = useRef('v2:0');
+  const restoreCursor = useRef<string | undefined>(undefined);
+  const [restorePending, setRestorePending] = useState(false);
   const isLiveRun = !!run && canFollowHistory(run);
   async function loadHistory(id: string, dataSource: RunHistoryReader, reset: boolean) {
     const generation = ++loadGeneration.current;
@@ -542,6 +575,7 @@ function useHistoryFeed(
       setControlError('');
       setCursorIndex(-1);
       follow(false);
+      restoreCursor.current = callbacks.restore?.cursor;
       setLoadedHead(false);
       callbacks.onReset();
       pageCursor.current = 'v2:0';
@@ -562,9 +596,13 @@ function useHistoryFeed(
       setRun(detail);
       if (reset) {
         callbacks.onOpen(detail);
-        follow(!!dataSource.watch && canFollowHistory(detail));
+        follow(
+          (callbacks.restore?.following ?? true) && !!dataSource.watch && canFollowHistory(detail),
+          true
+        );
       }
-      const initialIntent = cursorIntent.current;
+      // A saved position owns its seek; later pages must not replace an already restored cursor.
+      const initialIntent = restoreCursor.current ? undefined : cursorIntent.current;
       let collected = retained.current;
       let count = 0,
         bytes = 0,
@@ -588,8 +626,23 @@ function useHistoryFeed(
         complete = page.complete;
         retainEvents(collected);
         setLoadedHead(complete);
-        if ((reset && cursorIntent.current === initialIntent) || followLatest.current)
-          setCursorIndex(collected.length - 1);
+        if (
+          (reset && cursorIntent.current === initialIntent) ||
+          followLatest.current ||
+          restoreCursor.current
+        ) {
+          const position = restoredHistoryPosition(
+            followLatest.current ? undefined : restoreCursor.current,
+            collected,
+            complete
+          );
+          if (position === undefined) setRestorePending(true);
+          else {
+            setCursorIndex(position);
+            restoreCursor.current = undefined;
+            setRestorePending(false);
+          }
+        }
         acceptObservation(id, page);
         if (page.complete && page.finished) finishRun(id, collected, page);
       }
@@ -642,7 +695,11 @@ function useHistoryFeed(
       setControlError(message(error));
     }
   }
-  function follow(value: boolean) {
+  function follow(value: boolean, restoring = false) {
+    if (!restoring) {
+      restoreCursor.current = undefined;
+      setRestorePending(false);
+    }
     cursorIntent.current++;
     followLatest.current = value;
     setFollowing(value);
@@ -731,6 +788,8 @@ function useHistoryFeed(
     historyPending,
     error,
     retained,
+    restoreCursor,
+    restorePending,
     isLiveRun,
     follow,
     loadHistory,
@@ -748,6 +807,7 @@ type RunTimelineProps = {
   loadedHead: boolean;
   playing: boolean;
   historyPending: boolean;
+  restorePending: boolean;
   eventsCount: number;
   showNode: () => void;
   goLatest: () => void;
@@ -788,6 +848,7 @@ function RunTimeline({
   loadedHead,
   playing,
   historyPending,
+  restorePending,
   eventsCount,
   showNode,
   goLatest,
@@ -899,7 +960,9 @@ function RunTimeline({
         </div>
       ) : !loadedHead || connection === 'limited' ? (
         <div className="history-load-state">
-          {eventsCount} events loaded{' '}
+          {restorePending
+            ? 'Load more history to restore your saved position.'
+            : `${eventsCount} events loaded`}{' '}
           <button className="text-button" onClick={loadMore}>
             Load more history
           </button>
@@ -957,7 +1020,7 @@ function RunInspector({
   readingTranscript,
 }: RunInspectorProps) {
   return (
-    <aside className="run-inspector" aria-label="Run inspector">
+    <InspectorPanel className="run-inspector" label="Run inspector">
       <header className="run-inspector-header">
         <div>
           <span className="eyebrow">
@@ -1105,7 +1168,7 @@ function RunInspector({
           raw
         />
       </div>
-    </aside>
+    </InspectorPanel>
   );
 }
 

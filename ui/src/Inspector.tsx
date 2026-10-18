@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Field } from './Field';
+import { InspectorPanel } from './InspectorPanel';
 import { NumberField } from './NumberField';
 import { useNumericDrafts } from './numeric-drafts';
 export { Field } from './Field';
@@ -64,7 +65,7 @@ export function Inspector(p: InspectorProps) {
     if (node) p.updateNode({ ...node, [key]: value });
   };
   return (
-    <aside className="inspector" aria-label="Profile inspector">
+    <InspectorPanel className="inspector" label="Profile inspector">
       <div className="inspector-tabs">
         <span className="inspector-label">Node</span>
         <button
@@ -292,7 +293,7 @@ export function Inspector(p: InspectorProps) {
           <div className="inspector-empty">Select a node to edit its configuration.</div>
         )}
       </div>
-    </aside>
+    </InspectorPanel>
   );
 }
 function ActivitySettings({

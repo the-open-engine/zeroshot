@@ -773,6 +773,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   structural visits/decisions with source cursors and stable identities; JavaScript never evaluates
   guards or invents worker executions. Keep loop visits, retries, and Map items distinct. Projection
   failure leaves recorded worker history readable; verifier rejection is a decision, not a crash.
+- Profile and run inspectors share `InspectorPanel`, pointer/keyboard resizing, and one client-only
+  width preference. Viewport clamping preserves the preferred width when the available space shrinks.
+- Run navigation retains tab-scoped view preferences (node/inspector, execution, cursor, graph
+  expansion and viewport) under the workspace identity and run/source identity. History and
+  definitions are always fetched anew; unmount cancels polling, reads, streams and replay timers.
+  Standalone tab navigation remembers its last run route only for the mounted workspace shell;
+  explicit run hashes take precedence. Standalone snapshots use a fresh shell namespace on reload
+  so local/target history cannot inherit prior-page preferences. Hosted shells own restoring their
+  selected run identity. A saved cursor beyond the bounded batch remains pending through explicit
+  Load more; intermediate pages cannot replace it.
 - Read-only history reuses `WorkflowCanvas`; groups start collapsed and scrubbing preserves expansion.
   Seek pauses following; transcript scrolling stays live and follows only at the bottom. Keep the
   execution pinned while reading. Node timelines use the shared cursor; transcripts remain bounded.
