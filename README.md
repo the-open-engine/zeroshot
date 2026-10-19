@@ -43,8 +43,8 @@ The engine enforces the graph’s review gates and retry limits. Think of it as 
 starting before the code is written. Each agent can use its own model and harness (Pi, Claude Code,
 Codex or Copilot).
 
-We tested [a small model in a review loop](https://theopenengine.com/blog/review-loop/) against a
-larger model working alone.
+On 20 ProgramBench tasks, [a small model in a review loop](https://theopenengine.com/blog/review-loop/)
+matched a larger model's score at a median 58% of its cost.
 
 The CLI is free and MIT licensed. Run locally, [self-host](#self-hosted-run-the-docker-target), or
 use [zeroshot Cloud](https://cloud.zeroshot.sh/docs).
