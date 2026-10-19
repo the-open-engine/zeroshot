@@ -117,7 +117,7 @@ a delivery failure; both repairs return to both reviewers.
 
 The 22-second GIF exports are `docs/assets/zeroshot-demo.gif` (light) and
 `docs/assets/zeroshot-demo-dark.gif` (dark), rendered at 1600 × 940 and 15 fps.
-The README uses the static SVG when reduced motion is preferred.
+The documentation retains these workflow assets; the README uses the product-page graphs below.
 
 ## Social buttons
 
@@ -186,3 +186,22 @@ const { pathToFileURL } = require('node:url');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 JS
 ```
+
+## Product-page graph exports
+
+The README uses `docs/assets/product-graph-{feature,danger}-{wide,mobile}.png`, exported from
+the inline SVG diagrams at <https://zeroshot.sh/#topology> on October 19, 2026. The source panels
+are `graph-panel-feature` (Ship a feature) and `graph-panel-danger` (A risky change), each with
+desktop and mobile SVG layouts. These are illustrative custom graphs, not recordings or built-in
+templates. The README links back to the interactive examples.
+
+Exports retain the source paths, node labels, role icons, Caveat 600 font and warm-paper palette
+from the page stylesheet `assets/index-CvFDPx6b.css`. Sixteen SVG units of padding protect icons at
+the edges. Animation overlays are hidden for the static export. PNGs are rendered at 2× scale from
+960px desktop and 390px mobile display widths, after the font finishes loading. The mobile images
+are selected below a 641px viewport width. Both themes use the product page's paper background.
+
+For a refresh, extract the desktop and mobile SVG from each source panel, include its SVG defs and
+applicable `.custom-diagram` styles, and load the page's Caveat font. Render each standalone drawing
+with Playwright as above, using the specified widths and padding. Check all four exports before
+replacing them. The source page owns changes to the graph drawings.

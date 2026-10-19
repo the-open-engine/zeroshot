@@ -50,21 +50,19 @@ The CLI is free and MIT licensed. Run locally, [self-host](#self-hosted-run-the-
 use [zeroshot Cloud](https://cloud.zeroshot.sh/docs).
 
 <div align="center">
-  <picture>
-    <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/zeroshot-workflow.svg">
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/zeroshot-demo-dark.gif">
-    <img src="docs/assets/zeroshot-demo.gif" alt="Animated zeroshot workflow: implementation, parallel acceptance and code review, repair, and optional Git delivery" width="960">
-  </picture>
+  <a href="https://zeroshot.sh/#topology">
+    <picture>
+      <source media="(max-width: 640px)" srcset="docs/assets/product-graph-feature-mobile.png">
+      <img src="docs/assets/product-graph-feature-wide.png" alt="Example custom graph: a worker, parallel acceptance and code review plus a bugfinder, UI review, adversarial end-to-end testing, and delivery. Rejections return to the worker for repair." width="960">
+    </picture>
+  </a>
   <br>
-  <em>Workflow illustration: both reviews run again after a repair. Git delivery is optional.</em><br>
-  <a href="docs/assets/zeroshot-workflow.svg">Static diagram</a>
+  <em>Example custom workflow from the product page. <a href="https://zeroshot.sh/#topology">Explore the interactive graphs.</a></em>
 </div>
 
 We want to explore how much task decomposition and validation loops can narrow the gap between
 open models and closed frontier systems. The graph, review rules, and repair paths are open for
 anyone to inspect, change, and test on real work.
-
-**[▶ Video: a single agent vs. zeroshot](https://x.com/eivindmeyer_cv/status/2106898797771288828)** (scripted)
 
 Questions, ideas, or a run worth showing? Join the [zeroshot community on Discord](https://theopenengine.com/discord).
 
@@ -140,19 +138,15 @@ Connect GitHub and bring your own model API keys.
 ## Bring your own graph topology
 
 Choose each agent's model and instructions, which steps run in parallel, and when to retry.
-Example topology, adding stages after the review loop:
+This example routes changes to auth, payments, or migrations through a blast-radius map and security
+review before acceptance and code review. Other changes go straight to review.
 
-```text
-Implementation
-      ↓
-Code review + acceptance review
-      ↓
-Bugfinder: adversarial tests
-      ↓
-E2E tests
-      ↓
-Delivery
-```
+<a href="https://zeroshot.sh/#topology">
+<picture>
+  <source media="(max-width: 640px)" srcset="docs/assets/product-graph-danger-mobile.png">
+  <img src="docs/assets/product-graph-danger-wide.png" alt="Example custom graph: a risk check routes auth, payments, or migration changes through blast-radius mapping and security review. All changes then pass acceptance and code review; rejection returns to the worker for repair." width="960">
+</picture>
+</a>
 
 The software-change review loop, auto-research graph, and delivery are built in. You define other
 stages, their tools, services and credentials, and where failures go for repair.
