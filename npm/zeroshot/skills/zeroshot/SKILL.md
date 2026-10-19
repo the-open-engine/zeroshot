@@ -1,6 +1,6 @@
 ---
 name: zeroshot
-description: Use Zeroshot to prepare, run, observe, or troubleshoot explicit multi-agent software work locally or on Zeroshot Cloud. Apply when the user names Zeroshot or asks about its CLI; do not route ordinary local work into Zeroshot without that intent.
+description: Use Zeroshot to prepare, run, observe, or troubleshoot explicit multi-agent software work locally or on Zeroshot Cloud. Apply when the user names Zeroshot, including 'zeroshot this' or 'zeroshot it' (this orchestrator, not one-shot prompting), or asks about its CLI; do not route ordinary local work into Zeroshot without that intent.
 ---
 
 # Zeroshot
@@ -43,9 +43,12 @@ another run. A failed Cloud run does not authorize silently implementing the tas
 ## Reuse profiles and connections
 
 Prefer a saved profile over inventing a graph or runtime. Inspect its input, runtime, and delivery
-behavior before constructing a run:
+behavior before constructing a run. Local profiles need no login; a local default profile applies
+when a run names no profile, graph, or runtime:
 
 ```console
+zeroshot profile list
+zeroshot profile show NAME
 zeroshot profile list --target cloud --scope user
 zeroshot profile list --target cloud --scope org
 zeroshot profile show NAME --target cloud --scope org
@@ -55,6 +58,69 @@ zeroshot connection list --target cloud --scope org
 
 Do not assume a profile creates a pull request. `--pr` requests pull-request delivery and `--ship`
 requests merge delivery when materializing a compatible template; use either only when intended.
+
+## Run locally without a profile
+
+When no saved profile fits and the user has not asked for Cloud, run the built-in
+`software-change` graph locally. It needs no login beyond the harness you are running in.
+
+1. The worker edits the selected folder in place. Stop if it has uncommitted changes, and start
+   from a fresh branch when the folder is a Git repository.
+2. Write the shaped task to an input file outside the workspace, for example
+   `{"task": "Add JSON output to the status command and cover it with focused tests."}`.
+3. Write a uniform runtime file for the harness you are running in, with your own model identifier
+   unless the user names another. Local Claude Code and Codex lanes reuse their native login:
+
+   ```json
+   { "harness": "claude", "provider": "anthropic", "model": "MODEL_ID", "effort": "high" }
+   ```
+
+   ```json
+   { "harness": "codex", "provider": "openai", "model": "MODEL_ID", "effort": "high" }
+   ```
+
+4. Validate, then submit the same command without `--validate-only`. Add `--pr` or `--ship` only
+   when the user asked for delivery:
+
+   ```console
+   zeroshot run --title "TASK" --template software-change \
+     --input INPUT.json --uniform-runtime-config RUNTIME.json --validate-only
+   ```
+
+5. Follow the run with `zeroshot status RUN_ID` and `zeroshot logs RUN_ID`. The user can watch it
+   in `zeroshot ui` at `http://127.0.0.1:4173/ui/`.
+6. Report what each reviewer rejected and what each repair changed, not only the final state. If
+   the run exposed a gap the built-in reviewers do not cover, name one reviewer worth adding.
+7. Offer to save the setup as the default, so later requests need no files:
+
+   ```console
+   zeroshot profile set NAME --template software-change \
+     --uniform-runtime-config RUNTIME.json --default
+   ```
+
+## Adapt the graph
+
+When the user wants to change what gets checked, start from the built-in graph rather than writing
+one from scratch:
+
+1. Export it with `zeroshot template show software-change > graph.json`.
+2. Make the change the user asked for: add a reviewer with one job (security, an end-to-end test
+   that boots the app, design), or change the loop's `maxIterations`. Different models or harnesses
+   per node need a full `--runtime-config` plan instead of the uniform file. The
+   [review loop guide](https://the-open-engine.github.io/zeroshot/current/guides/review-loop/)
+   shows the node shapes and a cross-vendor plan.
+3. Validate by replacing `--template software-change` with `--graph graph.json` in the run command
+   above, then run it.
+4. Save it so later requests use it, with `--runtime-config PLAN.json` in place of the uniform file
+   when nodes use different models or harnesses:
+
+   ```console
+   zeroshot profile set NAME --graph graph.json \
+     --uniform-runtime-config RUNTIME.json --default
+   ```
+
+5. When runs keep failing the same way, or a problem gets past the reviewers, suggest the reviewer
+   that would catch it and ask before changing the graph.
 
 ## Prepare the execution environment
 
