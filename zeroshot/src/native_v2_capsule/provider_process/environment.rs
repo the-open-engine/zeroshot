@@ -215,13 +215,19 @@ pub(crate) fn provider_redactions(
     local: &BTreeMap<String, String>,
 ) -> Vec<String> {
     super::redaction_values(
-        environment.iter().map(|(_, value)| value).chain(
-            local
-                .iter()
-                .filter(|(name, _)| private_local_value(name))
-                .map(|(_, value)| value.as_str()),
-        ),
+        environment
+            .iter()
+            .map(|(_, value)| value)
+            .chain(private_local_values(local)),
     )
+}
+
+/// Captured native context values that may carry credentials.
+pub(crate) fn private_local_values(local: &BTreeMap<String, String>) -> impl Iterator<Item = &str> {
+    local
+        .iter()
+        .filter(|(name, _)| private_local_value(name))
+        .map(|(_, value)| value.as_str())
 }
 
 fn private_local_value(name: &str) -> bool {

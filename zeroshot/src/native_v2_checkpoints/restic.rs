@@ -31,7 +31,12 @@ pub(crate) struct ResticProgram {
 impl ResticProgram {
     pub(super) fn discover() -> io::Result<Self> {
         if let Some(configured) = std::env::var_os("ZEROSHOT_RESTIC") {
-            return Self::from_path(PathBuf::from(configured));
+            return Self::from_path(PathBuf::from(configured)).map_err(|error| {
+                io::Error::new(
+                    error.kind(),
+                    format!("ZEROSHOT_RESTIC does not name a restic executable: {error}"),
+                )
+            });
         }
         let name = if cfg!(windows) {
             "restic.exe"
@@ -54,7 +59,8 @@ impl ResticProgram {
         }
         Err(io::Error::new(
             io::ErrorKind::NotFound,
-            "the bundled restic executable is unavailable",
+            "the bundled restic executable is unavailable; place restic beside zeroshot, on PATH, \
+             or name it with ZEROSHOT_RESTIC",
         ))
     }
 

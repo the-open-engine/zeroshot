@@ -15,7 +15,8 @@ use zeroshot_engine::native_v2_cli::{
     JSON_ERROR_FORMAT,
 };
 use zeroshot_engine::native_v2_portable_controller::{
-    PortableControllerError, guard_controller_process, run_controller_process,
+    PortableControllerError, guard_controller_process, record_unloaded_startup_failure,
+    run_controller_process,
 };
 
 use native_v2_target::{
@@ -66,7 +67,10 @@ async fn run_private_controller(arguments: &[std::ffi::OsString]) -> Result<bool
     let Some(bootstrap) = private_controller_bootstrap(arguments)? else {
         return Ok(false);
     };
-    guard_controller_process()?;
+    if let Err(error) = guard_controller_process() {
+        record_unloaded_startup_failure(&bootstrap, &error);
+        return Err(error.into());
+    }
     run_controller_process(&bootstrap).await?;
     Ok(true)
 }

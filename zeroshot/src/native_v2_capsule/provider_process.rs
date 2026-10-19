@@ -24,7 +24,8 @@ mod environment;
 pub(crate) use environment::{
     CLAUDE_LOCAL_ENVIRONMENT, CODEX_LOCAL_ENVIRONMENT, COPILOT_LOCAL_ENVIRONMENT,
     PI_LOCAL_ENVIRONMENT, LocalHarnessEnvironment, current_process_environment,
-    provider_redactions, merge_local_environment, extend_declared_environment,
+    extend_declared_environment, merge_local_environment, private_local_values,
+    provider_redactions,
 };
 pub(crate) mod text;
 pub(crate) mod turn;

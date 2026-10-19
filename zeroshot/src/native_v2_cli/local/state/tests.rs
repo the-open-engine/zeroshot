@@ -42,3 +42,36 @@ fn local_controller_receives_only_minimal_non_harness_environment() {
         assert!(!environment.contains_key(std::ffi::OsStr::new(name)));
     }
 }
+
+#[test]
+fn local_controller_receives_an_absolute_restic_selector() {
+    let environment = |restic: OsString| {
+        let mut command = Command::new("true");
+        command.env_clear();
+        copy_minimal_environment(&mut command, |name| {
+            (name == "ZEROSHOT_RESTIC").then(|| restic.clone())
+        })
+        .expect("copy local environment");
+        command
+            .as_std()
+            .get_envs()
+            .filter_map(|(name, value)| value.map(|value| (name.to_owned(), value.to_owned())))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+
+    let relative = Path::new("tools").join("restic");
+    let forwarded = environment(relative.clone().into_os_string());
+    assert_eq!(
+        forwarded.get(std::ffi::OsStr::new("ZEROSHOT_RESTIC")),
+        Some(
+            &std::env::current_dir()
+                .expect("current directory")
+                .join(relative)
+                .into_os_string()
+        )
+    );
+    assert_eq!(
+        environment(OsString::new()).get(std::ffi::OsStr::new("ZEROSHOT_RESTIC")),
+        Some(&OsString::new())
+    );
+}

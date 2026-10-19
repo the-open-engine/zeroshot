@@ -39,7 +39,7 @@ use crate::native_v2_supervisor::RunEnvironment;
 use crate::native_v2_portable_controller::{
     ControllerLease, ControllerLeaseError, PortableControllerBootstrap, PortableControllerError,
     PortableControllerPaths, PortableControllerServer, PortableRunController, read_ready,
-    write_bootstrap_file,
+    take_startup_failure, write_bootstrap_file,
 };
 use crate::native_v2_portable_controller::process::{PortableControllerTransport, connect_transport};
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
@@ -326,6 +326,8 @@ impl LocalCliBackend {
         {
             let _ = child.kill().await;
             remove_private_bootstrap(&bootstrap_path);
+            // A controller past the deadline may still have recorded why; nobody will read it.
+            let _ = take_startup_failure(&paths);
             return Err(error);
         }
         Ok(prepared.run_id)
@@ -849,7 +851,12 @@ async fn wait_for_controller(
             }
         }
         if child.try_wait().map_err(local_io)?.is_some() {
-            return Err(local_message("controller exited before becoming ready"));
+            return Err(match take_startup_failure(paths) {
+                Some(reason) => {
+                    local_message(format!("controller exited before becoming ready: {reason}"))
+                }
+                None => local_message("controller exited before becoming ready"),
+            });
         }
         if Instant::now() >= deadline {
             return Err(local_message(

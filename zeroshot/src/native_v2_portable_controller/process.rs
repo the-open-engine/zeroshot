@@ -24,6 +24,11 @@ use super::{
     PortableControllerReady,
 };
 
+#[path = "process/startup_failure.rs"]
+mod startup_failure;
+use startup_failure::{record_startup_failure, startup_paths, startup_redactions};
+pub use startup_failure::{record_unloaded_startup_failure, take_startup_failure};
+
 const BOOTSTRAP_MAX_BYTES: u64 = 4 * 1024 * 1024;
 const READY_MAX_BYTES: u64 = 16 * 1024;
 const READY_KIND: &str = "zeroshot.portable-controller-ready/v1";
@@ -159,7 +164,19 @@ pub fn guard_controller_process() -> Result<(), PortableControllerError> {
 /// Runs the private one-run controller child used by the shipped executable's re-exec path.
 /// The bootstrap is consumed before any durable controller effect and is never retained.
 pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), PortableControllerError> {
-    let bootstrap = load_bootstrap_file(bootstrap_path)?;
+    let paths = startup_paths(bootstrap_path);
+    let bootstrap = load_bootstrap_file(bootstrap_path)
+        .inspect_err(|error| record_startup_failure(&paths, error, &[]))?;
+    let redactions = startup_redactions(&bootstrap);
+    let server = start_controller_process(bootstrap)
+        .await
+        .inspect_err(|error| record_startup_failure(&paths, error, &redactions))?;
+    server.serve_until_terminal().await
+}
+
+async fn start_controller_process(
+    bootstrap: PortableControllerBootstrap,
+) -> Result<PortableControllerServer, PortableControllerError> {
     let workspace = bootstrap.workspace.clone();
     let storage = bootstrap.storage.clone();
     let delivery_run_id = bootstrap.delivery_run_id.clone();
@@ -189,7 +206,7 @@ pub async fn run_controller_process(bootstrap_path: &Path) -> Result<(), Portabl
         })
         .await?,
     );
-    controller.bind().await?.serve_until_terminal().await
+    controller.bind().await
 }
 
 pub fn load_bootstrap_file(
