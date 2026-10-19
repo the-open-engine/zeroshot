@@ -46,7 +46,8 @@ The engine enforces the graph’s review gates and retry limits. Think of it as 
 starting before the code is written. Each agent can use its own model and harness: Pi, Claude Code,
 Codex or Copilot.
 
-[Experiment: a small model with a review loop](https://theopenengine.com/blog/review-loop/).
+We tested [a small model in a review loop](https://theopenengine.com/blog/review-loop/) against a
+larger model working alone.
 
 The CLI is free and MIT licensed. Run locally, [self-host](#self-hosted-run-the-docker-target), or
 use [zeroshot Cloud](https://cloud.zeroshot.sh/docs).
@@ -64,15 +65,7 @@ use [zeroshot Cloud](https://cloud.zeroshot.sh/docs).
   <em>Example custom workflow from the product page. <a href="https://zeroshot.sh/#topology">Explore the interactive graphs.</a></em>
 </div>
 
-We want to explore how much task decomposition and validation loops can narrow the gap between
-open models and closed frontier systems. The graph, review rules, and repair paths are open for
-anyone to inspect, change, and test on real work.
-
-Questions, ideas, or a run worth showing? Join the [zeroshot community on Discord](https://theopenengine.com/discord).
-
 ## Get started
-
-Prefer Cloud? [Cloud setup →](https://cloud.zeroshot.sh/docs)
 
 ### Run locally
 
@@ -244,7 +237,10 @@ the progress judge decides whether the result should replace the current candida
 charter. A valid result can go into the archive without replacing it. An auditor checks the ledger,
 archive, and workspace before the next iteration.
 
-Inspect the graph with `zeroshot template show auto-research`.
+The graph keeps adopted, record-only, and aborted results under `.zeroshot/research`; add `--push`
+when each finalized iteration should be published. Inspect it with
+`zeroshot template show auto-research`, and see [Execution](docs/concepts/execution.md) for the
+research workflow's decision and evidence rules.
 
 ## Choose delivery and execution
 
@@ -286,19 +282,6 @@ isolation, builds, and HTTPS.
 
 A failed run with a recoverable workspace can be
 [restarted or resumed](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run).
-
-## Research graph
-
-zeroshot also includes an `auto-research` graph for ten bounded iterations of experiments with
-independent review of evidence, method, and progress. It keeps adopted, record-only, and aborted
-results under `.zeroshot/research`; add `--push` when each finalized iteration should be published.
-
-```bash
-zeroshot template list
-zeroshot template show auto-research
-```
-
-See [Execution](docs/concepts/execution.md) for the research workflow's decision and evidence rules.
 
 ## Community
 
