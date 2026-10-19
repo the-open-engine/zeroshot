@@ -39,12 +39,9 @@ For example, give a security reviewer the job of checking that users cannot acce
 data. A rejection sends its findings back to the worker for repair, followed by another review. Save
 that workflow as a profile and reuse it.
 
-[Build your own review loop](docs/guides/review-loop.md), or start from the built-in
-`software-change` graph and adapt it.
-
 The engine enforces the graph’s review gates and retry limits. Think of it as CI for coding agents,
-starting before the code is written. Each agent can use its own model and harness: Pi, Claude Code,
-Codex or Copilot.
+starting before the code is written. Each agent can use its own model and harness (Pi, Claude Code,
+Codex or Copilot).
 
 We tested [a small model in a review loop](https://theopenengine.com/blog/review-loop/) against a
 larger model working alone.
@@ -62,7 +59,7 @@ use [zeroshot Cloud](https://cloud.zeroshot.sh/docs).
     </picture>
   </a>
   <br>
-  <em>Example custom workflow from the product page. <a href="https://zeroshot.sh/#topology">Explore the interactive graphs.</a></em>
+  <em>Example custom workflow. <a href="https://zeroshot.sh/#topology">Explore the interactive graphs.</a></em>
 </div>
 
 ## Get started
@@ -95,7 +92,7 @@ reuse the harness's existing login, including subscription-backed sessions. See 
 This example uses Codex and keeps delivery local. **The worker edits the selected folder**;
 Git is optional. Add `--cwd FOLDER` to select another folder; input files stay relative to the invoking folder.
 
-Create `input.json`, replacing the example task with a change appropriate for your project:
+Create `input.json` with a task for your project:
 
 ```json
 {
@@ -133,6 +130,8 @@ zeroshot ui
 
 Visit `http://127.0.0.1:4173/ui/` and open **Runs**. Stopping the UI server leaves active runs
 running. The CLI also provides `zeroshot list`, `zeroshot status RUN_ID`, and `zeroshot logs RUN_ID`.
+A failed run with a recoverable workspace can be
+[restarted or resumed](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run).
 
 For other harnesses and providers, see [Runtimes and connections](docs/concepts/runtimes-and-connections.md).
 
@@ -141,7 +140,7 @@ For other harnesses and providers, see [Runtimes and connections](docs/concepts/
 Connect GitHub and bring your own model API keys.
 [Cloud setup guide →](https://cloud.zeroshot.sh/docs)
 
-## Bring your own graph topology
+## Build your own graph
 
 Choose each agent's model and instructions, which steps run in parallel, and when to retry.
 This example routes changes to auth, payments, or migrations through a blast-radius map and security
@@ -197,8 +196,7 @@ the node names. See the
 [RuntimePlan reference](docs/reference/runtime-plan.md) for every field.
 
 A profile stores a graph and its runtime settings. Use **Profiles** in the browser UI to edit and
-save your configuration. Keep different profiles for different kinds of work, or reuse one for the
-next task.
+save your configuration.
 
 Once you've saved a local profile named `my-profile`, run another task with it:
 
@@ -244,7 +242,7 @@ research workflow's decision and evidence rules.
 
 ## Choose delivery and execution
 
-Keep the first result local, then enable the delivery mode that fits your process:
+Runs keep the work local unless you pass a delivery flag:
 
 | Delivery         | Behavior                                         |
 | ---------------- | ------------------------------------------------ |
@@ -280,9 +278,6 @@ The target also serves its profile editor and run viewer at `http://127.0.0.1:80
 See the [target image guide](docker/zeroshot-target/README.md) for persistent storage, network
 isolation, builds, and HTTPS.
 
-A failed run with a recoverable workspace can be
-[restarted or resumed](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run).
-
 ## Community
 
 - [Discord](https://theopenengine.com/discord): ask questions, share runs and graphs, and talk to the team.
@@ -298,7 +293,8 @@ A failed run with a recoverable workspace can be
 - [Cluster API reference](https://zeroshot.sh/docs/current/reference/cluster/api/)
 - [Graph contract](docs/reference/cluster/graph.md)
 
-Also check out: [Opcore](https://github.com/the-open-engine/opcore).
+[Opcore](https://github.com/the-open-engine/opcore) gives coding agents feedback on each edit while
+they write code.
 
 ## Development
 
