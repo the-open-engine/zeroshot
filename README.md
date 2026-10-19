@@ -35,14 +35,16 @@
 Turn a task into a reviewed pull request through a workflow you control. Choose the agents and
 models, define what must pass, and decide where rejected work goes for repair.
 
-Start with the built-in `software-change` graph: implementation → independent review → repair →
-optional delivery. Or design your own topology. Add security reviewers, test agents, and parallel checks,
-then save the workflow as a profile and reuse it.
+For example, give a security reviewer the job of checking that users cannot access another account’s
+data. A rejection sends its findings back to the worker for repair, followed by another review. Save
+that workflow as a profile and reuse it.
 
-The agent that writes the code cannot approve its own work. The engine enforces the graph's review
-gates and retry limits. Think of it as CI for coding agents, starting before the code is written.
-zeroshot runs Pi, Claude Code, Codex, or Copilot as the worker and reviewers, with a separate harness
-and provider available for each agent.
+[Build your own review loop](docs/guides/review-loop.md), or start from the built-in
+`software-change` graph and adapt it.
+
+The engine enforces the graph’s review gates and retry limits. Think of it as CI for coding agents,
+starting before the code is written. Each agent can use its own model and harness: Pi, Claude Code,
+Codex or Copilot.
 
 The CLI is free and MIT licensed. Run locally, [self-host](#self-hosted-run-the-docker-target), or
 use [zeroshot Cloud](https://cloud.zeroshot.sh/docs).
@@ -135,32 +137,6 @@ For other harnesses and providers, see [Runtimes and connections](docs/concepts/
 Connect GitHub and bring your own model API keys.
 [Cloud setup guide →](https://cloud.zeroshot.sh/docs)
 
-## What the built-in workflow does
-
-1. A worker implements the task.
-2. Acceptance and code reviewers check the result independently, in parallel.
-3. Rejected work goes to one repair worker with both reviews' feedback, then through both reviews
-   again.
-4. With delivery enabled, accepted work proceeds through the configured Git and CI steps.
-5. Delivery conflicts return through repair and review.
-
-The graph defines the sequence, parallel steps, retry paths, and exit conditions before execution
-starts. Runs are bounded, and events are recorded in a durable SQLite ledger. A passing run means
-its configured checks accepted the work; coverage depends on the requirements, reviewers, tests,
-and environment you provide.
-
-## Auto-research
-
-The built-in `auto-research` template runs ten iterations by default; set a positive
-`options.iterations` value in the run input to choose another count. Three scouts propose
-directions, then a planner chooses an experiment and either the current candidate or a restorable
-archived candidate as its starting point. Independent judges check the evidence and method, while
-the progress judge decides whether the result should replace the current candidate under the task
-charter. A valid result can go into the archive without replacing it. An auditor checks the ledger,
-archive, and workspace before the next iteration.
-
-Inspect the graph with `zeroshot template show auto-research`.
-
 ## Bring your own graph topology
 
 Choose each agent's model and instructions, which steps run in parallel, and when to retry.
@@ -187,7 +163,9 @@ Inspect the built-in graph as a starting point:
 zeroshot template show software-change
 ```
 
-See the [graph contract](docs/reference/cluster/graph.md) for custom graph authoring and
+Start with [Build a review loop](docs/guides/review-loop.md), a complete example with two independent
+reviewers and a repair loop. Adapt the reviewers’ instructions to your project. See the
+[graph contract](docs/reference/cluster/graph.md) for supported graph structures and
 [Prepare a runtime environment](docs/guides/runtime-environments.md) for dependency and service setup.
 
 ## Save and reuse a profile
@@ -228,6 +206,32 @@ zeroshot run \
 
 The CLI and UI share the same local profiles. See
 [UI setup](docs/getting-started/install.md#open-the-workspace-ui).
+
+## What the built-in workflow does
+
+1. A worker implements the task.
+2. Acceptance and code reviewers check the result independently, in parallel.
+3. Rejected work goes to one repair worker with both reviews' feedback, then through both reviews
+   again.
+4. With delivery enabled, accepted work proceeds through the configured Git and CI steps.
+5. Delivery conflicts return through repair and review.
+
+The graph defines the sequence, parallel steps, retry paths, and exit conditions before execution
+starts. Runs are bounded, and events are recorded in a durable SQLite ledger. A passing run means
+its configured checks accepted the work; coverage depends on the requirements, reviewers, tests,
+and environment you provide.
+
+## Auto-research
+
+The built-in `auto-research` template runs ten iterations by default; set a positive
+`options.iterations` value in the run input to choose another count. Three scouts propose
+directions, then a planner chooses an experiment and either the current candidate or a restorable
+archived candidate as its starting point. Independent judges check the evidence and method, while
+the progress judge decides whether the result should replace the current candidate under the task
+charter. A valid result can go into the archive without replacing it. An auditor checks the ledger,
+archive, and workspace before the next iteration.
+
+Inspect the graph with `zeroshot template show auto-research`.
 
 ## Choose delivery and execution
 
