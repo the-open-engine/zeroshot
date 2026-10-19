@@ -169,3 +169,44 @@ test('HTTP pages reject a failure marker that does not describe a finished runti
   );
   await assert.rejects(source.page('retained-run', 'v2:3'), invalidFailure);
 });
+
+test('runtime failure context is preserved without creating a terminal replay event', () => {
+  const context = {
+    primary: { message: 'Runtime output persistence failed' },
+    recorded: [],
+    incomplete: true,
+  };
+  const page = { ...failedPage(), runtimeFailure: { ...failure, context } };
+  const detail = finishRunHistory(running(), events(), page);
+  assert.deepEqual(detail.terminal, { status: 'failed', reason: failure.reason, context });
+  assert.equal(readRunDetail(detail, detail.runId), detail);
+  assert.equal(
+    projectHistory(
+      { name: detail.runId, graph: detail.graph, runtime: detail.runtime },
+      events(),
+      2
+    ).terminal,
+    undefined
+  );
+});
+
+test('runtime failure context rejects malformed, oversized and future evidence', () => {
+  for (const context of [
+    false,
+    { recorded: [], incomplete: 'true' },
+    { recorded: [{ message: 'failure' }], incomplete: false, primary: { message: 1 } },
+    { recorded: Array.from({ length: 6 }, () => ({ message: 'failure' })), incomplete: false },
+    { recorded: [], incomplete: false, primary: { message: 'x'.repeat(16_385) } },
+    { recorded: [], incomplete: false, primary: { message: 'unsafe\u001bcontrol' } },
+    { recorded: [], incomplete: false, primary: { message: 'failure', cursor: 'v2:4' } },
+    { recorded: [], incomplete: false, primary: { message: 'failure', cursor: 'invalid' } },
+    {
+      recorded: [],
+      incomplete: false,
+      primary: { message: 'failure', execution: { execution: '', node: 'worker' } },
+    },
+  ]) {
+    const page = { ...failedPage(), runtimeFailure: { ...failure, context } } as HistoryPage;
+    assert.throws(() => appendHistory(events(), page), invalidFailure);
+  }
+});

@@ -1,4 +1,5 @@
 import { ApiError } from './api';
+import { validFailureContext } from './failure-context';
 import type { HistoryPage, RunDetail, RuntimeFailure } from './run-history';
 
 export function historyCursorSequence(cursor: unknown): bigint {
@@ -18,6 +19,18 @@ export function invalidRuntimeFailure(): ApiError {
   );
 }
 
+export function validateFailureContext(context: unknown, head: unknown) {
+  if (context == null) return;
+  if (!validFailureContext(context)) throw invalidRuntimeFailure();
+  for (const diagnostic of [context.primary, ...context.recorded]) {
+    if (
+      diagnostic?.cursor != null &&
+      historyCursorSequence(diagnostic.cursor) > historyCursorSequence(head)
+    )
+      throw invalidRuntimeFailure();
+  }
+}
+
 export function readRuntimeFailure(value: unknown, head: unknown): RuntimeFailure | undefined {
   if (value === undefined) return undefined;
   const failure = value as Partial<RuntimeFailure> | null;
@@ -27,6 +40,7 @@ export function readRuntimeFailure(value: unknown, head: unknown): RuntimeFailur
       historyCursorSequence(failure.atCursor) > historyCursorSequence(head)
     )
       throw invalidRuntimeFailure();
+    validateFailureContext(failure.context, head);
   } catch {
     throw invalidRuntimeFailure();
   }

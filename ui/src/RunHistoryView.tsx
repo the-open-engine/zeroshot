@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { InspectorPanel } from './InspectorPanel';
+import { RunFailureDetails } from './RunFailureDetails';
 import {
   useRunView,
   historyViewCursor,
@@ -47,6 +48,7 @@ import {
   type HistoryPage,
   type Invocation,
   type RunDetail,
+  type RunTerminal,
 } from './run-history';
 import { canFollowHistory, observationEnded } from './history-contract';
 import { readHistoryWhenReady } from './history-readiness';
@@ -78,6 +80,7 @@ export function RunHistoryView({
 }: RunHistoryViewProps) {
   const { saved: savedView, canvas, setCanvas } = useRunView(viewKey);
   const [playing, setPlaying] = useState(false);
+  const [viewingLatest, setViewingLatest] = useState(true);
   const [playbackNode, setPlaybackNode] = useState<string>();
   const [selected, setSelected] = useState(''),
     [inspector, setInspector] = useState(false),
@@ -111,6 +114,7 @@ export function RunHistoryView({
       setPlaybackNode(undefined);
     },
     onReset: () => {
+      setViewingLatest(!savedView.cursor || savedView.following === true);
       setCanvas(savedView.canvas);
       setInspector(Boolean(savedView.inspector));
       setExecution(savedView.execution ?? '');
@@ -119,9 +123,16 @@ export function RunHistoryView({
       setPositions({});
     },
     onOpen: (detail) => {
+      setViewingLatest(
+        !savedView.cursor || savedView.following === true || savedView.cursor === detail.cursor
+      );
       setSelected(restoredRunNode(detail.graph.root, savedView));
       setInspector(
-        savedView.inspector ?? (detail.phase === 'admitted' || !!environmentFailure(detail))
+        savedView.inspector ??
+          (detail.phase === 'admitted' ||
+            !!environmentFailure(detail) ||
+            (detail.terminal?.status === 'failed' && !!detail.terminal.context) ||
+            !!detail.runtimeFailure?.context)
       );
     },
     onMissing: () => setPlaying(false),
@@ -178,6 +189,7 @@ export function RunHistoryView({
     // Each step owns its checkpoint until the timer fires; incoming live logs cannot postpone it.
   }, [playing, cursorIndex, playbackNode]);
   function scrub(next: number) {
+    setViewingLatest(false);
     setPlaying(false);
     follow(false);
     setExecution('');
@@ -185,6 +197,7 @@ export function RunHistoryView({
     setCursorIndex(moments[Math.max(0, Math.min(moments.length - 1, next))].index);
   }
   function goLatest() {
+    setViewingLatest(true);
     setPlaying(false);
     setPlaybackNode(undefined);
     setExecution('');
@@ -204,6 +217,7 @@ export function RunHistoryView({
   }
   function playNode(restart = false) {
     if (!selectedReplay.length) return;
+    setViewingLatest(false);
     follow(false);
     if (!restart && playing && playbackNode === selected) {
       setPlaying(false);
@@ -218,10 +232,41 @@ export function RunHistoryView({
     setPlaybackNode(selected);
     setPlaying(nextReplayPosition(start, moments.length, selectedReplay) !== undefined);
   }
+  function inspectDiagnostic(cursor: string) {
+    const index = events.findIndex((event) => event.cursor === cursor);
+    if (index < 0 || !document) return;
+    setViewingLatest(false);
+    const event = events[index].event;
+    const reference = event.reference ?? event.completion?.reference;
+    const execution = event.execution ?? reference?.execution;
+    const invocation = projection?.invocations.find((item) => item.id === String(execution));
+    setPlaying(false);
+    follow(false);
+    setReadingExecution('');
+    setSelected(invocation?.node ?? document.graph.root.name);
+    setExecution(invocation?.id ?? '');
+    setInspector(true);
+    setCursorIndex(index);
+  }
   function reveal(name: string) {
     inspect(name);
     setFocus({ name, tick: Date.now() });
   }
+  const displayedTerminal: RunTerminal | undefined =
+    projection?.terminal ??
+    (loadedHead && moment.index === events.length - 1 && run?.runtimeFailure
+      ? { status: 'failed', reason: run.runtimeFailure.reason, context: run.runtimeFailure.context }
+      : undefined);
+  const currentFailure =
+    !displayedTerminal &&
+    viewingLatest &&
+    !restorePending &&
+    moment.index === events.length - 1 &&
+    !loadedHead &&
+    !loading &&
+    error
+      ? unavailableFailure(run)
+      : undefined;
   const node = document && findNode(document.graph.root, selected);
   const names = node && descendantNames(node);
   const nodeInvocations =
@@ -262,7 +307,7 @@ export function RunHistoryView({
             <div className="profile-title">
               <h1 title={run.title}>{run.title}</h1>
               <span
-                className={`run-status state-${projection.terminal?.status ?? (shownStatus === 'failed' ? 'failed' : 'replay')}`}
+                className={`run-status state-${displayedTerminal?.status ?? (shownStatus === 'failed' ? 'failed' : 'replay')}`}
               >
                 {run.example ? 'Simulated' : humanize(shownStatus)}
               </span>
@@ -298,6 +343,8 @@ export function RunHistoryView({
                 run={run}
                 document={document}
                 projection={projection}
+                terminal={displayedTerminal}
+                currentFailure={currentFailure}
                 node={node}
                 moment={moment}
                 nodeControls={nodeControls}
@@ -323,6 +370,8 @@ export function RunHistoryView({
                 play={() => playNode()}
                 restart={() => playNode(true)}
                 reveal={reveal}
+                inspectDiagnostic={inspectDiagnostic}
+                hasLog={(cursor) => events.some((entry) => entry.cursor === cursor)}
                 readingTranscript={readingTranscript}
               />
             )}
@@ -344,6 +393,7 @@ export function RunHistoryView({
             goLatest={goLatest}
             scrub={scrub}
             togglePlay={() => {
+              setViewingLatest(false);
               follow(false);
               if (safePosition === moments.length - 1) setCursorIndex(-1);
               setPlaybackNode(undefined);
@@ -366,6 +416,13 @@ export function RunHistoryView({
       )}
     </main>
   );
+}
+
+function unavailableFailure(run: RunDetail | undefined) {
+  if (!['incomplete', 'expired', 'unavailable'].includes(run?.observation?.state ?? '')) return;
+  if (run?.terminal?.status === 'failed') return run.terminal;
+  const failure = run?.runtimeFailure;
+  return failure && { status: 'failed' as const, reason: failure.reason, context: failure.context };
 }
 
 function isPreparingEnvironment(run: RunDetail | undefined, events: HistoryEvent[]): boolean {
@@ -944,7 +1001,7 @@ function RunTimeline({
           className="icon-button"
           title="Go to latest"
           aria-label="Go to latest"
-          disabled={safePosition === moments.length - 1 && (!isLiveRun || following)}
+          disabled={safePosition === moments.length - 1 && loadedHead && (!isLiveRun || following)}
           onClick={goLatest}
         >
           <ChevronsRight size={18} />
@@ -976,6 +1033,8 @@ type RunInspectorProps = {
   run: RunDetail;
   document: Document;
   projection: ReturnType<typeof projectHistory>;
+  terminal?: RunTerminal;
+  currentFailure?: Extract<RunTerminal, { status: 'failed' }>;
   node: GraphNode;
   moment: ReturnType<typeof historyMoments>[number];
   nodeControls: ReturnType<typeof projectHistory>['controls'];
@@ -993,6 +1052,8 @@ type RunInspectorProps = {
   play: () => void;
   restart: () => void;
   reveal: (name: string) => void;
+  inspectDiagnostic: (cursor: string) => void;
+  hasLog: (cursor: string) => boolean;
   readingTranscript: (reading: boolean) => void;
 };
 
@@ -1000,6 +1061,8 @@ function RunInspector({
   run,
   document,
   projection,
+  terminal,
+  currentFailure,
   node,
   moment,
   nodeControls,
@@ -1017,6 +1080,8 @@ function RunInspector({
   play,
   restart,
   reveal,
+  inspectDiagnostic,
+  hasLog,
   readingTranscript,
 }: RunInspectorProps) {
   return (
@@ -1056,15 +1121,34 @@ function RunInspector({
               <dt>At cursor</dt>
               <dd className="mono">{moment.cursor}</dd>
             </dl>
-            {projection.terminal && (
+            {currentFailure && (
+              <section aria-label="Current run status">
+                <h3>Current run status</h3>
+                <p className="history-muted">
+                  The run failed. This status is separate from the available recorded playback.
+                </p>
+                <ValueSection title="Failure reason" value={currentFailure.reason} open />
+                {currentFailure.context && (
+                  <RunFailureDetails
+                    context={currentFailure.context}
+                    openLog={inspectDiagnostic}
+                    hasLog={hasLog}
+                  />
+                )}
+              </section>
+            )}
+            {terminal && (
               <ValueSection
-                title={projection.terminal.status === 'succeeded' ? 'Run output' : 'Failure reason'}
-                value={
-                  projection.terminal.status === 'succeeded'
-                    ? projection.terminal.output
-                    : projection.terminal.reason
-                }
+                title={terminal.status === 'succeeded' ? 'Run output' : 'Failure reason'}
+                value={terminal.status === 'succeeded' ? terminal.output : terminal.reason}
                 open
+              />
+            )}
+            {terminal?.status === 'failed' && terminal.context && (
+              <RunFailureDetails
+                context={terminal.context}
+                openLog={inspectDiagnostic}
+                hasLog={hasLog}
               />
             )}
             <ValueSection title="Run inputs" value={run.initialInput} />

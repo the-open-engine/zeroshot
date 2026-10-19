@@ -87,9 +87,8 @@ test('simulated run lists keep successful output only in detail', async () => {
     phase: 'finished',
     terminal: { status: 'succeeded' as const, output },
   };
-  const source = createExampleRunHistory(
-    new URL('https://example.test/ui/'),
-    async () => Response.json([{ detail: run, events: [] }])
+  const source = createExampleRunHistory(new URL('https://example.test/ui/'), async () =>
+    Response.json([{ detail: run, events: [] }])
   );
   const [summary] = (await source.list()).runs;
   assert.deepEqual(summary.terminal, { status: 'succeeded' });
@@ -106,6 +105,37 @@ const page = (...records: HistoryEvent[]): HistoryPage => ({
   nextCursor: records.at(-1)?.cursor ?? 'v2:0',
   headCursor: 'v2:12',
   complete: false,
+});
+
+test('detail and terminal replay reject malformed or forward-pointing failure context', () => {
+  const run = detail();
+  const valid = { recorded: [{ message: 'Delivery failed', cursor: 'v2:1' }], incomplete: false };
+  for (const context of [
+    { recorded: null, incomplete: false },
+    { ...valid, recorded: Array(6).fill({ message: 'too many' }) },
+    { ...valid, primary: { message: '\u001bunsafe control' } },
+    ...['v2:2', 'v2:00', 'v2:9223372036854775808'].map((cursor) => ({
+      ...valid,
+      primary: { message: 'Unavailable log', cursor },
+    })),
+  ]) {
+    const terminal = { status: 'failed', reason: 'delivery_failed', context };
+    assert.throws(() => readRunDetail({ ...run, cursor: 'v2:1', terminal }, run.runId));
+    const incoming = page({
+      cursor: 'v2:1',
+      event: { kind: 'terminal', result: terminal },
+    } as HistoryEvent);
+    assert.throws(() => appendHistory([], incoming));
+  }
+  for (const context of [valid, undefined]) {
+    const terminal = { status: 'failed', reason: 'delivery_failed', context } as const;
+    assert.equal(readRunDetail({ ...run, cursor: 'v2:1', terminal }, run.runId).terminal, terminal);
+    assert.equal(
+      appendHistory([], page({ cursor: 'v2:1', event: { kind: 'terminal', result: terminal } }))
+        .length,
+      1
+    );
+  }
 });
 
 test('retried and overlapping replay pages do not duplicate events or mutate the earlier prefix', () => {

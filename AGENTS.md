@@ -378,6 +378,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   from recorded node failures; recovered/voided evidence never establishes terminal causality.
   Diagnostic overflow marks context incomplete independently of token usage. Producer and capsule
   records retain their existing execution/cursor identity; no separate diagnostics API or store exists.
+  When history is unavailable, the viewer separates current failure status from recorded playback
+  and offers log navigation only for loaded evidence.
   Exhausted corrections mark only the final rejected response. Failure-only parser previews redact
   before cleanup and exclude successful answer text. Known unconfirmed cleanup keeps its fatal
   classification while bounded best-effort publication records any missing diagnostic coverage.

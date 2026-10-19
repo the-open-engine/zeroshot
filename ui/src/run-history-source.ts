@@ -5,16 +5,12 @@ import type { HistoryRetryDelay } from './history-readiness';
 import {
   historyCursorSequence as cursorSequence,
   invalidRuntimeFailure,
+  validateFailureContext,
   readPageRuntimeFailure,
   readRuntimeFailure,
   readObservation,
 } from './history-contract';
-import type {
-  HistoryEvent,
-  HistoryPage,
-  RunDetail,
-  RunSummary,
-} from './run-history';
+import type { HistoryEvent, HistoryPage, RunDetail, RunSummary } from './run-history';
 
 /** A viewer needs a selected run, not knowledge of its host's run menu. */
 export interface RunHistoryReader {
@@ -47,6 +43,13 @@ export function readRunDetail(value: unknown, requestedRunId: string): RunDetail
       'The server returned a different run. Reload to try again.'
     );
   readObservation(detail.observation);
+  if (detail.terminal?.status === 'failed')
+    validateFailureContext(detail.terminal.context, detail.cursor);
+  validateDefinitionRuntimeFailure(detail);
+  return detail as RunDetail;
+}
+
+function validateDefinitionRuntimeFailure(detail: Partial<RunDetail>) {
   const failure = readRuntimeFailure(detail.runtimeFailure, detail.history?.cursor);
   if (
     failure &&
@@ -57,7 +60,6 @@ export function readRunDetail(value: unknown, requestedRunId: string): RunDetail
       detail.cursor !== detail.history.cursor)
   )
     throw invalidRuntimeFailure();
-  return detail as RunDetail;
 }
 
 export function createRunHistorySource(
@@ -173,6 +175,8 @@ export function appendHistory(
   const next = [...previous];
   let pageSequence = -1n;
   for (const event of page.events) {
+    if (event.event.kind === 'terminal' && event.event.result?.status === 'failed')
+      validateFailureContext(event.event.result.context, event.cursor);
     const current = cursorSequence(event.cursor);
     if (current < pageSequence) throw historyPageError();
     pageSequence = current;

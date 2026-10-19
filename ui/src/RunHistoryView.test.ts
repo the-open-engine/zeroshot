@@ -4,7 +4,8 @@ import { act, createElement } from 'react';
 import type { Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { JSDOM } from 'jsdom';
-import type { HistoryPage } from './run-history';
+import type { HistoryPage, RunDetail } from './run-history';
+import { ApiError } from './api';
 import type { RunHistoryReader } from './run-history-source';
 import { createViteTestServer, runDetailFixture } from './test-support';
 
@@ -37,6 +38,18 @@ const completePage = (): HistoryPage => ({
 });
 
 const renderedText = (container: HTMLElement) => container.textContent ?? '';
+async function clickButton(container: HTMLElement, label: string) {
+  const button = container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
+  assert.ok(button, label);
+  await act(async () => button.click());
+}
+async function loadMoreHistory(container: HTMLElement) {
+  const button = [...container.querySelectorAll('button')].find(
+    (candidate) => candidate.textContent === 'Load more history'
+  );
+  assert.ok(button);
+  await act(async () => button.click());
+}
 const browserGlobals = [
   'window',
   'document',
@@ -385,11 +398,7 @@ test('a remounted run restores its paused cursor, inspector and execution withou
         })
       )
     );
-  const click = async (label: string) => {
-    const button = container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
-    assert.ok(button, label);
-    await act(async () => button.click());
-  };
+  const click = (label: string) => clickButton(container, label);
   await render();
   await flushEffects();
   assert.equal(watches, 1);
@@ -472,11 +481,7 @@ test('bounded replay retains a pending saved cursor and execution until explicit
     assert.equal(pageReads, 5, 'the initial bounded batch must still stop');
     assert.match(renderedText(container), /Load more history to restore your saved position/);
     assertPinned();
-    const more = [...container.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Load more history'
-    );
-    assert.ok(more);
-    await act(async () => more.click());
+    await loadMoreHistory(container);
     await flushEffects();
     assert.equal(pageReads, 6);
     assert.doesNotMatch(renderedText(container), /restore your saved position/);
@@ -501,4 +506,351 @@ test('bounded replay retains a pending saved cursor and execution until explicit
     await act(async () => root.unmount());
     container.remove();
   }
+});
+
+function failureHistoryFixture(durable: boolean) {
+  const reference = { runId: 'failed-run', node: 'deliver', execution: '1', nodeInstance: '1' };
+  const terminal = {
+    status: 'failed' as const,
+    reason: durable ? 'delivery_failed' : 'runtime_failed',
+    context: {
+      primary: durable ? undefined : { message: 'Runtime output persistence failed' },
+      recorded: [
+        {
+          message: 'GitHub API request failed: HTTP 404 — base branch not found',
+          execution: { execution: 'opaque:execution:1', node: 'deliver' },
+          cursor: 'v2:3',
+        },
+      ],
+      incomplete: true,
+    },
+  };
+  const detail = {
+    ...runDetailFixture('failed-run'),
+    phase: 'finished',
+    terminal,
+    ...(durable
+      ? {}
+      : {
+          runtimeFailure: {
+            atCursor: 'v2:3',
+            reason: 'runtime_failed' as const,
+            context: terminal.context,
+          },
+        }),
+  };
+  detail.graph.root = { kind: 'seq', name: 'run', children: [{ kind: 'step', name: 'deliver' }] };
+  const events: HistoryPage['events'] = [
+    { cursor: 'v2:1', event: { kind: 'run_started' } },
+    { cursor: 'v2:2', event: { kind: 'node_started', reference, input: null, attempt: 1 } },
+    {
+      cursor: 'v2:3',
+      event: {
+        kind: 'safe_log',
+        execution: '1',
+        stream: 'error',
+        line: 'Recorded delivery detail',
+      },
+    },
+    ...(durable
+      ? [
+          {
+            cursor: 'v2:4',
+            event: {
+              kind: 'node_completed',
+              completion: { reference, outcome: { status: 'error', code: 'crash' } },
+            },
+          },
+          { cursor: 'v2:5', event: { kind: 'terminal', result: terminal } },
+        ]
+      : []),
+  ];
+  const source: RunHistoryReader = {
+    detail: async () => detail,
+    page: async () => ({
+      ...completePage(),
+      events,
+      nextCursor: durable ? 'v2:5' : 'v2:3',
+      headCursor: durable ? 'v2:5' : 'v2:3',
+      finished: true,
+      ...(!durable ? { runtimeFailure: detail.runtimeFailure } : {}),
+    }),
+  };
+  return { detail, source };
+}
+
+for (const durable of [true, false])
+  test(`failure context follows replay and log selection (${durable ? 'durable' : 'unpersisted'})`, async (t) => {
+    stubWorker(t);
+    installBrowser(t);
+    const { RunHistoryView } = await viewerModule(t);
+    const { createRoot } = await import('react-dom/client');
+    const { detail, source } = failureHistoryFixture(durable);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const click = (label: string) => clickButton(container, label);
+    try {
+      await act(async () =>
+        root.render(
+          createElement(RunHistoryView, {
+            runId: detail.runId,
+            source,
+            workers: [],
+          })
+        )
+      );
+      await flushEffects();
+      const details = () => container.querySelector('[aria-label="Failure details"]');
+      assert.ok(details(), 'failed runs open their context in the inspector');
+      assert.match(details()!.textContent!, /Recorded failures/);
+      assert.match(details()!.textContent!, /HTTP 404 — base branch not found/);
+      assert.doesNotMatch(details()!.textContent!, /Log not loaded/);
+      assert.match(details()!.textContent!, /Additional failure details may be missing/);
+      assert.doesNotMatch(details()!.textContent!, /Root cause/);
+      if (!durable) assert.match(details()!.textContent!, /Runtime output persistence failed/);
+      await click('Go to start');
+      assert.equal(details(), null, 'earlier replay must not expose terminal context');
+      await click('Go to latest');
+      const log = [...container.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('View log · v2:3')
+      );
+      assert.ok(log);
+      await act(async () => log.click());
+      assert.equal(details(), null);
+      assert.equal(
+        container.querySelector<HTMLInputElement>('[aria-label="History position"]')?.value,
+        '3'
+      );
+      assert.match(renderedText(container), /Recorded delivery detail/);
+      assert.match(
+        container.querySelector('[aria-label="Run inspector"]')!.textContent!,
+        /Deliver/
+      );
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+const incompleteHistoryError = () =>
+  new ApiError(503, 'history_incomplete', 'The remaining archive could not be retained.');
+
+function unavailableDetail(runtime = true): RunDetail {
+  const { detail } = failureHistoryFixture(!runtime);
+  return {
+    ...detail,
+    cursor: 'v2:6',
+    history: { ...detail.history, cursor: 'v2:6', complete: false },
+    observation: { state: 'incomplete', code: 'history_incomplete' },
+  };
+}
+
+async function withUnavailableViewer(
+  t: TestContext,
+  source: RunHistoryReader,
+  check: (view: {
+    container: HTMLElement;
+    browser: ReturnType<typeof installBrowser>;
+    render: (next: RunHistoryReader) => Promise<void>;
+  }) => Promise<void>,
+  savedCursor?: string
+) {
+  stubWorker(t);
+  const browser = installBrowser(t);
+  const viewKey = 'unavailable-failure-view';
+  if (savedCursor)
+    browser.sessionStorage.setItem(
+      viewKey,
+      JSON.stringify({
+        selected: 'run',
+        inspector: true,
+        execution: '',
+        cursor: savedCursor,
+        following: false,
+      })
+    );
+  const { RunHistoryView } = await viewerModule(t);
+  const { createRoot } = await import('react-dom/client');
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const render = async (next: RunHistoryReader) => {
+    await act(async () =>
+      root.render(
+        createElement(RunHistoryView, {
+          runId: 'failed-run',
+          source: next,
+          workers: [],
+          viewKey,
+        })
+      )
+    );
+    await flushEffects();
+  };
+  try {
+    await render(source);
+    await check({ container, browser, render });
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+}
+
+for (const runtime of [true, false])
+  test(`current failure remains visible when no history page is available (${runtime ? 'runtime' : 'terminal'})`, async (t) => {
+    const detail = unavailableDetail(runtime);
+    const source: RunHistoryReader = {
+      detail: async () => detail,
+      page: async () => {
+        throw incompleteHistoryError();
+      },
+    };
+    await withUnavailableViewer(t, source, async ({ container }) => {
+      const current = container.querySelector('[aria-label="Current run status"]');
+      assert.ok(current);
+      assert.match(current.textContent!, /separate from the available recorded playback/);
+      assert.match(current.textContent!, /HTTP 404 — base branch not found/);
+      assert.match(current.textContent!, /Log not loaded · v2:3/);
+      assert.equal(
+        [...current.querySelectorAll('button')].find((button) =>
+          button.textContent?.includes('View log')
+        ),
+        undefined,
+        'a cursor outside loaded history cannot offer a no-op navigation link'
+      );
+      assert.match(renderedText(container), /This archive is incomplete/);
+      assert.match(renderedText(container), /The remaining archive could not be retained/);
+      assert.equal(container.querySelector('.run-status')?.textContent, 'Replay');
+      assert.equal(
+        container.querySelector('.timeline-caption strong')?.textContent,
+        'Before the run'
+      );
+      assert.equal(
+        container.querySelector<HTMLInputElement>('[aria-label="History position"]')?.max,
+        '0'
+      );
+    });
+  });
+
+function retainedPrefixSource(): RunHistoryReader {
+  const reference = { runId: 'failed-run', node: 'deliver', execution: '1', nodeInstance: '1' };
+  return {
+    detail: async () => unavailableDetail(),
+    page: async (_id, after) => {
+      if (after !== 'v2:0') throw incompleteHistoryError();
+      return {
+        events: [
+          { cursor: 'v2:1', event: { kind: 'run_started' } },
+          { cursor: 'v2:2', event: { kind: 'node_started', reference, input: null, attempt: 1 } },
+        ],
+        nextCursor: 'v2:2',
+        headCursor: 'v2:6',
+        complete: false,
+      };
+    },
+  };
+}
+
+test('an unavailable suffix keeps current status separate from replay of the retained prefix', async (t) => {
+  await withUnavailableViewer(t, retainedPrefixSource(), async ({ container }) => {
+    const current = () => container.querySelector('[aria-label="Current run status"]');
+    assert.ok(current());
+    assert.equal(
+      container.querySelector('.timeline-caption strong')?.textContent,
+      'Deliver started'
+    );
+    assert.equal(container.querySelector('.run-status')?.textContent, 'Replay');
+    await clickButton(container, 'Go to start');
+    assert.equal(current(), null);
+    await clickButton(container, 'Next event');
+    assert.equal(current(), null);
+    await clickButton(container, 'Next event');
+    assert.equal(current(), null, 'the prefix end is still a recorded replay position');
+    await clickButton(container, 'Go to latest');
+    await flushEffects();
+    assert.ok(current(), 'explicit latest intent may show the separately labelled current status');
+    assert.match(renderedText(container), /The remaining archive could not be retained/);
+  });
+});
+
+test('a saved earlier cursor at the retained prefix end does not reveal later failure context', async (t) => {
+  await withUnavailableViewer(
+    t,
+    retainedPrefixSource(),
+    async ({ container, browser }) => {
+      assert.equal(container.querySelector('[aria-label="Current run status"]'), null);
+      assert.equal(
+        JSON.parse(browser.sessionStorage.getItem('unavailable-failure-view')!).cursor,
+        'v2:2'
+      );
+      assert.equal(
+        container.querySelector<HTMLInputElement>('[aria-label="History position"]')?.value,
+        '2'
+      );
+      await clickButton(container, 'Go to latest');
+      await flushEffects();
+      assert.ok(container.querySelector('[aria-label="Current run status"]'));
+    },
+    'v2:2'
+  );
+});
+
+test('paging in flight does not expose unobserved current failure context', async (t) => {
+  let rejectPage: ((reason: unknown) => void) | undefined;
+  const source: RunHistoryReader = {
+    detail: async () => unavailableDetail(),
+    page: () =>
+      new Promise((_resolve, reject) => {
+        rejectPage = reject;
+      }),
+  };
+  await withUnavailableViewer(t, source, async ({ container, render }) => {
+    assert.ok(rejectPage);
+    assert.equal(container.querySelector('[aria-label="Current run status"]'), null);
+    assert.match(renderedText(container), /Loading history/);
+    await act(async () => rejectPage!(incompleteHistoryError()));
+    await flushEffects();
+    assert.ok(container.querySelector('[aria-label="Current run status"]'));
+    await render({
+      detail: async () => runDetailFixture('failed-run'),
+      page: async () => completePage(),
+    });
+    assert.equal(container.querySelector('[aria-label="Current run status"]'), null);
+    assert.doesNotMatch(renderedText(container), /The remaining archive could not be retained/);
+  });
+});
+
+test('a bounded history batch does not expose future failure context before an unavailable read', async (t) => {
+  let pageReads = 0;
+  const source: RunHistoryReader = {
+    detail: async () => ({
+      ...unavailableDetail(),
+      cursor: 'v2:6000',
+      history: { ...unavailableDetail().history, cursor: 'v2:6000' },
+    }),
+    async page(_id, after) {
+      pageReads++;
+      const offset = Number(after.slice(3));
+      if (offset >= 5000) throw incompleteHistoryError();
+      return {
+        events: Array.from({ length: 1000 }, (_, index) => ({
+          cursor: `v2:${offset + index + 1}`,
+          event: { kind: 'safe_log', execution: null, stream: 'system', line: 'Retained output' },
+        })),
+        nextCursor: `v2:${offset + 1000}`,
+        headCursor: 'v2:6000',
+        complete: false,
+      };
+    },
+  };
+  await withUnavailableViewer(t, source, async ({ container }) => {
+    assert.equal(pageReads, 5);
+    assert.equal(container.querySelector('[aria-label="Current run status"]'), null);
+    assert.doesNotMatch(renderedText(container), /The remaining archive could not be retained/);
+    await loadMoreHistory(container);
+    await flushEffects();
+    assert.equal(pageReads, 6);
+    assert.ok(container.querySelector('[aria-label="Current run status"]'));
+  });
 });
