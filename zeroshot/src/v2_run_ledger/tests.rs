@@ -104,6 +104,7 @@ fn projected_snapshot(run: &str) -> RunSnapshot {
 
 fn safe_log(execution: Option<ExecutionId>) -> RunEvent {
     RunEvent::SafeLog {
+        diagnostic: None,
         execution,
         timestamp: UnixTimestampMillis::new(1_725_000_000_123).assert_value(),
         stream: SafeLogStream::System,
@@ -383,6 +384,7 @@ async fn fake_projects_outputs_voids_safe_logs_and_terminal_in_order() {
                 started(first.clone()),
                 started(second.clone()),
                 RunEvent::SafeLog {
+                    diagnostic: None,
                     execution: Some(first.execution),
                     timestamp: UnixTimestampMillis::new(1_725_000_000_123).assert_value(),
                     stream: SafeLogStream::Output,
@@ -607,6 +609,7 @@ async fn sqlite_survives_reopen_and_preserves_cursor_tail_and_identity() {
                     RunEvent::RunStarted,
                     started(reference(&run_id, 1)),
                     RunEvent::SafeLog {
+                        diagnostic: None,
                         execution: Some(ExecutionId::new(1).assert_value()),
                         timestamp: UnixTimestampMillis::new(1_725_000_000_123).assert_value(),
                         stream: SafeLogStream::System,
@@ -780,3 +783,6 @@ async fn sqlite_reopens_legacy_generic_and_absent_source_without_fabricated_prov
     drop(reopened);
     std::fs::remove_file(path).assert_value();
 }
+
+#[path = "tests/failure_context.rs"]
+mod failure_context;

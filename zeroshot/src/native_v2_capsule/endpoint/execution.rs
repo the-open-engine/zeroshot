@@ -48,9 +48,20 @@ pub(super) struct TerminalMetadata {
     errors: Vec<CapsuleNodeEvent>,
     incomplete: bool,
     overflowed: bool,
+    usage_overflowed: bool,
+    diagnostics_incomplete: bool,
+    last_failure_message: Option<String>,
 }
 
 impl TerminalMetadata {
+    fn observe(&mut self, event: &CapsuleNodeEvent) {
+        if let CapsuleNodeEvent::Output { output, .. } = event {
+            if output.diagnostic == Some(FailureDiagnosticKind::Failure) {
+                self.last_failure_message = Some(output.text.clone());
+            }
+        }
+    }
+
     fn retain(&mut self, event: CapsuleNodeEvent) {
         let usage = match event {
             CapsuleNodeEvent::TokenUsage { usage } => usage,
@@ -63,9 +74,10 @@ impl TerminalMetadata {
                 ..
             } => {
                 if self.errors.len() < crate::native_v2_runner::DURABLE_OUTPUT_CAPACITY {
+                    self.observe(&event);
                     self.errors.push(event);
                 } else {
-                    self.incomplete = true;
+                    self.diagnostics_incomplete = true;
                     self.overflowed = true;
                 }
                 return;
@@ -80,7 +92,7 @@ impl TerminalMetadata {
             self.incomplete = true;
             return;
         };
-        if self.overflowed {
+        if self.usage_overflowed {
             return;
         }
         self.known_usage = match self.known_usage {
@@ -89,6 +101,7 @@ impl TerminalMetadata {
                 Some(total) => Some(total),
                 None => {
                     self.incomplete = true;
+                    self.usage_overflowed = true;
                     self.overflowed = true;
                     Some(total)
                 }
@@ -108,17 +121,25 @@ impl TerminalMetadata {
         if self.incomplete {
             events.push(CapsuleNodeEvent::TokenUsage { usage: None });
         }
-        if let Err(error @ NodeRunnerError::DriverDetail(_)) = &completion {
+        if self.diagnostics_incomplete {
             events.push(CapsuleNodeEvent::Output {
-                output: CapsuleOutput {
-                    stream: CapsuleOutputStream::Error,
-                    text: crate::native_v2_runner::bounded_log_text(
-                        error.to_string(),
-                        crate::v2_run_ledger::MAX_SAFE_LOG_BYTES / 2,
-                    ),
-                },
+                output: LiveOutput::diagnostic(
+                    FailureDiagnosticKind::Incomplete,
+                    "Some diagnostic output was lost because the capsule terminal queue overflowed",
+                )
+                .into(),
                 timestamp: crate::native_v2_runner::current_timestamp(),
             });
+        }
+        if let Err(error @ NodeRunnerError::DriverDetail(_)) = &completion {
+            let diagnostic =
+                LiveOutput::diagnostic(FailureDiagnosticKind::Failure, error.to_string());
+            if self.last_failure_message.as_deref() != Some(diagnostic.text.as_str()) {
+                events.push(CapsuleNodeEvent::Output {
+                    output: diagnostic.into(),
+                    timestamp: crate::native_v2_runner::current_timestamp(),
+                });
+            }
         }
         let terminal = if matches!(completion, Err(NodeRunnerError::CleanupUnconfirmed)) {
             CapsuleNodeEvent::Failed {
@@ -243,7 +264,10 @@ async fn apply_local_output(
             context.terminal_metadata.retain(event);
         }
         permit = context.events.reserve() => match permit {
-            Ok(permit) => permit.send(event),
+            Ok(permit) => {
+                context.terminal_metadata.observe(&event);
+                permit.send(event);
+            },
             Err(_) => {
                 *context.consumer_gone = true;
                 context.handle.cancel();

@@ -57,6 +57,7 @@ fn boundary_contract_usage_reduction_handles_incomplete_optional_and_each_overfl
         output: CapsuleOutput {
             stream: CapsuleOutputStream::System,
             text: "ignored".to_owned(),
+            diagnostic: None,
         },
         timestamp: UnixTimestampMillis::new(1).assert_value(),
     });
@@ -203,6 +204,7 @@ fn cancellation_error_buffer_is_bounded_and_cleanup_failure_keeps_priority() {
                 output: CapsuleOutput {
                     stream: CapsuleOutputStream::Error,
                     text: format!("error {index}"),
+                    diagnostic: None,
                 },
                 timestamp: UnixTimestampMillis::new(index as u64 + 1).assert_value(),
             });
@@ -215,12 +217,104 @@ fn cancellation_error_buffer_is_bounded_and_cleanup_failure_keeps_priority() {
                 if output.text == format!("error {index}") && timestamp.get() == index as u64 + 1)
             );
         }
-        assert!(matches!(
-            events[capacity],
-            CapsuleNodeEvent::TokenUsage { usage: None }
-        ));
+        assert_eq!(
+            diagnostic_kind(&events[capacity]),
+            Some(FailureDiagnosticKind::Incomplete)
+        );
         assert!(
             matches!(&events[capacity + 1], CapsuleNodeEvent::Failed { failure } if *failure == expected)
         );
+    }
+}
+
+#[test]
+fn canonical_runner_detail_survives_wire_reduction_once() {
+    let cause = NodeRunnerError::DriverDetail("underlying provider failure".to_owned());
+    let event = CapsuleNodeEvent::Output {
+        output: LiveOutput::diagnostic(FailureDiagnosticKind::Failure, cause.to_string()).into(),
+        timestamp: UnixTimestampMillis::new(7).assert_value(),
+    };
+    let mut metadata = TerminalMetadata::default();
+    metadata.retain(event.clone());
+    let events = metadata.into_events(Err(cause));
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0], event);
+    assert!(matches!(
+        events[1],
+        CapsuleNodeEvent::Failed {
+            failure: CapsuleNodeFailure::ExecutionFailed
+        }
+    ));
+    let encoded = serde_json::to_string(&events).assert_value();
+    assert_eq!(
+        serde_json::from_str::<Vec<CapsuleNodeEvent>>(&encoded).assert_value(),
+        events
+    );
+}
+
+#[test]
+fn prior_recovered_diagnostic_never_hides_a_different_terminal_detail() {
+    let mut metadata = TerminalMetadata::default();
+    metadata.retain(CapsuleNodeEvent::Output {
+        output: LiveOutput::diagnostic(FailureDiagnosticKind::Failure, "earlier evidence").into(),
+        timestamp: UnixTimestampMillis::new(7).assert_value(),
+    });
+    let events = metadata.into_events(Err(NodeRunnerError::DriverDetail("final cause".to_owned())));
+    assert_eq!(events.len(), 3);
+    assert!(matches!(&events[1], CapsuleNodeEvent::Output { output, .. }
+        if output.diagnostic == Some(FailureDiagnosticKind::Failure) && output.text.contains("final cause")));
+}
+
+#[test]
+fn capsule_rejects_failure_metadata_on_an_ordinary_output_stream() {
+    let output = CapsuleOutput {
+        stream: CapsuleOutputStream::System,
+        text: "wrong stream".to_owned(),
+        diagnostic: Some(FailureDiagnosticKind::Failure),
+    };
+    assert_eq!(output.into_live(), Err(NodeRunnerError::UnsafeOutput));
+}
+
+#[test]
+fn dropped_terminal_diagnostic_does_not_suppress_the_final_runner_detail() {
+    let mut metadata = TerminalMetadata::default();
+    let capacity = crate::native_v2_runner::DURABLE_OUTPUT_CAPACITY;
+    for index in 0..capacity {
+        metadata.retain(CapsuleNodeEvent::Output {
+            output: CapsuleOutput {
+                stream: CapsuleOutputStream::Error,
+                text: format!("earlier error {index}"),
+                diagnostic: None,
+            },
+            timestamp: UnixTimestampMillis::new(index as u64 + 1).assert_value(),
+        });
+    }
+    let cause = NodeRunnerError::DriverDetail("last useful cause".to_owned());
+    metadata.retain(CapsuleNodeEvent::Output {
+        output: LiveOutput::diagnostic(FailureDiagnosticKind::Failure, cause.to_string()).into(),
+        timestamp: UnixTimestampMillis::new(capacity as u64 + 1).assert_value(),
+    });
+    let events = metadata.into_events(Err(cause));
+    assert_eq!(events.len(), capacity + 3);
+    assert_eq!(
+        diagnostic_kind(&events[capacity]),
+        Some(FailureDiagnosticKind::Incomplete)
+    );
+    assert!(
+        matches!(&events[capacity + 1], CapsuleNodeEvent::Output { output, .. }
+        if output.diagnostic == Some(FailureDiagnosticKind::Failure)
+            && output.text.contains("last useful cause"))
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, CapsuleNodeEvent::TokenUsage { usage: None }))
+    );
+}
+
+fn diagnostic_kind(event: &CapsuleNodeEvent) -> Option<FailureDiagnosticKind> {
+    match event {
+        CapsuleNodeEvent::Output { output, .. } => output.diagnostic,
+        _ => None,
     }
 }

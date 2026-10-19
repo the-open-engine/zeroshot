@@ -453,3 +453,28 @@ async fn reusable_session_requires_a_provider_session_identifier() {
     );
     assert!(!rendered.contains("execution failed without provider detail"));
 }
+
+#[test]
+fn cleanup_preview_keeps_native_errors_and_excludes_successful_response_text() {
+    use crate::native_v2_capsule::provider_process::turn::ProviderTranscript;
+    let mut transcript =
+        crate::native_v2_claude::transcript::ClaudeTranscript::new(vec!["private-key".to_owned()]);
+    let record = json!({"type":"result", "subtype":"error_during_execution", "is_error":true,
+        "result":"native rejection private-key"})
+    .to_string()
+        + "\n";
+    transcript.push(record.as_bytes());
+    let diagnostic = transcript
+        .failure_diagnostic(Some("stdin failed private-key"))
+        .unwrap();
+    assert!(diagnostic.contains("native rejection [REDACTED]"));
+    assert!(diagnostic.contains("stdin failed [REDACTED]"));
+    assert!(!diagnostic.contains("private-key"));
+    let mut transcript = crate::native_v2_claude::transcript::ClaudeTranscript::new(Vec::new());
+    let record = json!({"type":"result", "subtype":"success", "is_error":false,
+        "result":"private successful answer"})
+    .to_string()
+        + "\n";
+    transcript.push(record.as_bytes());
+    assert!(transcript.failure_diagnostic(None).is_none());
+}

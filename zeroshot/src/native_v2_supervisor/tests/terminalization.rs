@@ -41,6 +41,7 @@ async fn terminalizing_cancelled_writer_requires_confirmed_cleanup() {
                         if line.as_str().contains("provider process cleanup could not be confirmed"))));
             } else {
                 let expected = TerminalResult::Failed {
+                    context: None,
                     reason: EnumLabel::new(reason).assert_value(),
                 };
                 assert_eq!(result.assert_value(), expected);

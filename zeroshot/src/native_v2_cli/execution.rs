@@ -395,6 +395,7 @@ where
         return Ok(CliOutcome::Detached);
     }
     let target = run.target.as_deref();
+    let mut observed = failure::FailureOutput::new(output);
     let outcome = match follow_durable_with_detach(
         DurableFollow {
             backend: context.backend,
@@ -405,7 +406,7 @@ where
             execution: None,
         },
         detach.as_mut(),
-        output,
+        &mut observed,
     )
     .await?
     {
@@ -420,16 +421,21 @@ where
                 biased;
                 () = detach.as_mut() => CliOutcome::Detached,
                 result = context.backend.run_status(target, params) => {
-                    outcome_for_status(&result?.status)
+                    let result = result?;
+                    observed.observe(&result.status);
+                    outcome_for_status(&result.status)
                 }
             }
         }
         outcome => outcome,
     };
     if outcome == CliOutcome::Failed {
-        let failure =
-            RunFailure::read(context.backend, target, receipt.run_id, detach.as_mut()).await;
-        return Err(NativeV2CliError::RunFailed(failure));
+        let failure = if let Some(failure) = observed.context {
+            RunFailure::from_context(receipt.run_id, target, failure)
+        } else {
+            RunFailure::read(context.backend, target, receipt.run_id, detach.as_mut()).await
+        };
+        return Err(NativeV2CliError::RunFailed(Box::new(failure)));
     }
     Ok(outcome)
 }
@@ -499,7 +505,7 @@ where
         match self {
             Self::Watch(subscription) => subscription.next().await.map(|item| {
                 item.map(|item| match item {
-                    CliSubscriptionItem::Event(event) => DurableItem::Watch(event),
+                    CliSubscriptionItem::Event(event) => DurableItem::Watch(Box::new(event)),
                     CliSubscriptionItem::Closed { reason } => DurableItem::Closed(reason),
                 })
             }),
@@ -514,7 +520,7 @@ where
 }
 
 enum DurableItem {
-    Watch(CliRunWatchEventNotification),
+    Watch(Box<CliRunWatchEventNotification>),
     Log(RunLogEventNotification),
     Closed(SubscriptionCloseReason),
 }
@@ -649,7 +655,7 @@ fn write_durable_event(
     let outcome = match event {
         DurableItem::Watch(event) => {
             let outcome = watched_outcome(&event.status);
-            output.watch_event(event)?;
+            output.watch_event(*event)?;
             outcome
         }
         DurableItem::Log(event) => {

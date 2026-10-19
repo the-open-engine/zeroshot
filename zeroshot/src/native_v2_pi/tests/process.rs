@@ -467,3 +467,41 @@ async fn a_run_without_authored_instructions_fails_before_dispatch() {
         "{outcome:?}"
     );
 }
+
+#[test]
+fn cleanup_preview_keeps_only_redacted_failure_evidence() {
+    use crate::native_v2_capsule::provider_process::turn::ProviderTranscript;
+    let mut transcript = crate::native_v2_pi::PiTranscript::new(vec!["private-key".to_owned()]);
+    let record = serde_json::json!({"type":"message_end", "message":{"role":"assistant",
+        "stopReason":"error", "errorMessage":"native rejection private-key"}})
+    .to_string()
+        + "\n";
+    transcript.push(record.as_bytes());
+    let diagnostic = transcript
+        .failure_diagnostic(Some("stdin failed private-key"))
+        .unwrap();
+    assert_eq!(
+        diagnostic,
+        "Pi provider failure: native rejection [REDACTED]; stdin failed [REDACTED]"
+    );
+    let mut transcript = crate::native_v2_pi::PiTranscript::new(Vec::new());
+    transcript.push(COMPLETED_TURN.as_bytes());
+    transcript.finish_stream();
+    assert!(transcript.failure_diagnostic(None).is_none());
+}
+
+#[tokio::test]
+async fn exhausted_corrections_publish_only_the_last_validation_error_as_failure() {
+    let directory = TestDirectory::new("pi-exhausted-correction");
+    let adapter = scripted_adapter(&directory, &script(&[REJECTED_ENVELOPE]));
+    let (outcome, seen) = run_turn(&adapter, false).await;
+    assert_eq!(outcome.unwrap(), WorkerOutcome::malformed());
+    let failures = seen
+        .iter()
+        .filter(|output| {
+            output.diagnostic == Some(openengine_cluster_protocol::FailureDiagnosticKind::Failure)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].text.contains("final output rejected:"));
+}

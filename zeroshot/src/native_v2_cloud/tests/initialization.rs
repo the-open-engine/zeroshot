@@ -145,6 +145,7 @@ async fn rejected_seed_waits_for_confirmed_cleanup_before_terminalization() {
     assert_eq!(
         terminal(&replacement, &run_id).await,
         TerminalResult::Failed {
+            context: None,
             reason: EnumLabel::new("runtime_lost").assert_value()
         }
     );
@@ -198,7 +199,7 @@ async fn asynchronous_initialization_failure_releases_preparation_and_controller
         .await
         .assert_value();
     assert!(matches!(terminal(&controller, &receipt.run_id).await,
-        TerminalResult::Failed { reason } if reason.as_str() == "runtime_unavailable"));
+        TerminalResult::Failed { reason, .. } if reason.as_str() == "runtime_unavailable"));
     tokio::time::timeout(Duration::from_secs(2), async {
         while !controller.runtimes.lock().await.is_empty() {
             tokio::task::yield_now().await;

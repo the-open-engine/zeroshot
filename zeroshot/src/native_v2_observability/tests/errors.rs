@@ -92,6 +92,7 @@ pub(super) async fn persist_output(
         .append(
             run_id,
             vec![RunEvent::SafeLog {
+                diagnostic: None,
                 execution: Some(execution),
                 timestamp: openengine_cluster_protocol::UnixTimestampMillis::new(1_725_000_000_123)
                     .assert_value(),

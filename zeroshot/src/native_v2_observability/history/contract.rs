@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use openengine_cluster_protocol::{Cursor, RunId, TerminalResult};
+use openengine_cluster_protocol::{Cursor, FailureContext, RunId, TerminalResult};
 
 use super::{HistoryPage, RunDefinition, RuntimeFailure};
 use crate::v2_run_ledger::{cursor_for, cursor_sequence, RunPhase, MAX_REPLAY_EVENTS};
@@ -24,6 +24,13 @@ pub fn validate_run_definition(
 ) -> Result<(), RunHistoryContractError> {
     validate_definition_header(definition, expected_run_id)?;
     let cursor = validate_definition_cursors(definition)?;
+    if let Some(TerminalResult::Failed {
+        context: Some(context),
+        ..
+    }) = &definition.terminal
+    {
+        validate_failure_context(context, cursor)?;
+    }
     validate_definition_runtime_failure(definition, cursor)
 }
 
@@ -60,7 +67,7 @@ fn validate_definition_runtime_failure(
     validate_runtime_failure(failure, cursor)?;
     let coherent_terminal = matches!(
         &definition.terminal,
-        Some(TerminalResult::Failed { reason }) if reason.as_str() == failure.reason
+        Some(TerminalResult::Failed { reason, context }) if reason.as_str() == failure.reason && context == &failure.context
     );
     if definition.phase != RunPhase::Finished || !coherent_terminal || definition.history.complete {
         return invalid();
@@ -165,6 +172,23 @@ fn validate_runtime_failure(
         || canonical_sequence(&failure.at_cursor)? > head
     {
         return invalid();
+    }
+    if let Some(context) = &failure.context {
+        validate_failure_context(context, head)?;
+    }
+    Ok(())
+}
+
+fn validate_failure_context(
+    context: &FailureContext,
+    head: u64,
+) -> Result<(), RunHistoryContractError> {
+    for diagnostic in context.primary.iter().chain(&context.recorded) {
+        if let Some(cursor) = &diagnostic.cursor
+            && canonical_sequence(cursor)? > head
+        {
+            return invalid();
+        }
     }
     Ok(())
 }

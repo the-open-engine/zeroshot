@@ -86,6 +86,7 @@ async fn failed_map_item_routes_its_error_without_fabricating_a_collected_value(
         assert_eq!(
             reduction.terminal,
             Some(TerminalProjection::Failed {
+                context: None,
                 reason: "inspection_failed".parse().assert_value(),
             })
         );
@@ -162,6 +163,7 @@ async fn failed_map_collection_never_reuses_a_prior_collection_as_an_item_result
     assert_eq!(
         reduction.terminal,
         Some(TerminalProjection::Failed {
+            context: None,
             reason: "inspection_failed".parse().assert_value(),
         })
     );

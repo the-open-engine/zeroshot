@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use openengine_cluster_protocol::{MAX_SAFE_GENERATION, UnixTimestampMillis};
+use openengine_cluster_protocol::{FailureDiagnosticKind, MAX_SAFE_GENERATION, UnixTimestampMillis};
 use tokio::sync::{broadcast, mpsc, watch, Notify};
 
 use super::{
@@ -85,19 +85,26 @@ pub(super) fn closed_live_attach() -> ReadOnlyAttach {
     ReadOnlyAttach { receiver }
 }
 
+#[derive(Default)]
+pub(super) struct TerminalOverflow {
+    usage: AtomicBool,
+    diagnostics: AtomicBool,
+}
+
 /// Lossless run-local bridge into the durable log writer.
 ///
 /// Provider adapters emit bounded chunks while continuously draining the child process. The
 /// bounded output queue applies backpressure until the durable consumer has persisted earlier
 /// events. Once cancellation begins, usage metadata and errors take a bounded, nonblocking side
 /// channel so process cleanup cannot deadlock behind a saturated output queue. Side-channel
-/// overflow is reported immediately and becomes one trailing incomplete-usage marker after both
-/// queues close and drain.
+/// overflow is reported immediately and becomes a trailing incomplete marker for the affected
+/// metadata after both queues close and drain. Diagnostic loss never implies token-usage loss.
 pub struct DurableOutput {
     pub(super) receiver: mpsc::Receiver<DurableNodeEvent>,
     pub(super) cancelled_terminal: mpsc::Receiver<DurableNodeEvent>,
-    cancelled_terminal_overflowed: Arc<AtomicBool>,
+    terminal_overflow: Arc<TerminalOverflow>,
     usage_incomplete_emitted: bool,
+    diagnostics_incomplete_emitted: bool,
     saturated: Arc<Notify>,
 }
 
@@ -105,14 +112,15 @@ impl DurableOutput {
     pub(super) fn new(
         receiver: mpsc::Receiver<DurableNodeEvent>,
         cancelled_terminal: mpsc::Receiver<DurableNodeEvent>,
-        cancelled_terminal_overflowed: Arc<AtomicBool>,
+        terminal_overflow: Arc<TerminalOverflow>,
         saturated: Arc<Notify>,
     ) -> Self {
         Self {
             receiver,
             cancelled_terminal,
-            cancelled_terminal_overflowed,
+            terminal_overflow,
             usage_incomplete_emitted: false,
+            diagnostics_incomplete_emitted: false,
             saturated,
         }
     }
@@ -163,19 +171,34 @@ impl DurableOutput {
         if matches!(event, DurableNodeEvent::TokenUsage(None)) {
             self.usage_incomplete_emitted = true;
         }
+        if matches!(&event, DurableNodeEvent::Output { output, .. }
+            if output.diagnostic == Some(FailureDiagnosticKind::Incomplete))
+        {
+            self.diagnostics_incomplete_emitted = true;
+        }
         event
     }
 
     fn take_overflow_marker(&mut self) -> Option<DurableNodeEvent> {
-        if !self
-            .cancelled_terminal_overflowed
-            .swap(false, Ordering::AcqRel)
-            || self.usage_incomplete_emitted
+        if self.terminal_overflow.usage.swap(false, Ordering::AcqRel)
+            && !self.usage_incomplete_emitted
         {
-            return None;
+            self.usage_incomplete_emitted = true;
+            return Some(DurableNodeEvent::TokenUsage(None));
         }
-        self.usage_incomplete_emitted = true;
-        Some(DurableNodeEvent::TokenUsage(None))
+        if self
+            .terminal_overflow
+            .diagnostics
+            .swap(false, Ordering::AcqRel)
+            && !self.diagnostics_incomplete_emitted
+        {
+            self.diagnostics_incomplete_emitted = true;
+            return Some(durable_output_event(LiveOutput::diagnostic(
+                FailureDiagnosticKind::Incomplete,
+                "Some diagnostic output was lost while execution was settling",
+            )));
+        }
+        None
     }
 
     async fn recv_pending(&mut self) -> Option<DurableNodeEvent> {
@@ -226,11 +249,17 @@ pub(super) struct DurableEventSender {
     events: mpsc::Sender<DurableNodeEvent>,
     cancelled_terminal: mpsc::Sender<DurableNodeEvent>,
     cancelled_terminal_active: Arc<AtomicBool>,
-    cancelled_terminal_overflowed: Arc<AtomicBool>,
+    terminal_overflow: Arc<TerminalOverflow>,
     saturated: Arc<Notify>,
 }
 
 impl DurableEventSender {
+    pub(super) fn mark_diagnostics_incomplete(&self) {
+        self.terminal_overflow
+            .diagnostics
+            .store(true, Ordering::Release);
+    }
+
     pub(super) async fn send(
         &self,
         event: DurableNodeEvent,
@@ -289,9 +318,12 @@ impl DurableEventSender {
         match self.cancelled_terminal.try_send(event) {
             Ok(()) => Ok(()),
             Err(mpsc::error::TrySendError::Closed(_)) => Err(NodeRunnerError::DurableOutputClosed),
-            Err(mpsc::error::TrySendError::Full(_)) => {
-                self.cancelled_terminal_overflowed
-                    .store(true, Ordering::Release);
+            Err(mpsc::error::TrySendError::Full(event)) => {
+                match event {
+                    DurableNodeEvent::TokenUsage(_) => &self.terminal_overflow.usage,
+                    DurableNodeEvent::Output { .. } => &self.terminal_overflow.diagnostics,
+                }
+                .store(true, Ordering::Release);
                 Err(NodeRunnerError::DriverDetail(
                     CANCELLED_TERMINAL_OVERFLOW_DETAIL.to_owned(),
                 ))
@@ -317,20 +349,20 @@ pub(super) fn durable_event_channel_with_capacity(
     let (cancelled_terminal, cancelled_terminal_receiver) =
         mpsc::channel(CANCELLED_TERMINAL_CAPACITY);
     let cancelled_terminal_active = Arc::new(AtomicBool::new(false));
-    let cancelled_terminal_overflowed = Arc::new(AtomicBool::new(false));
+    let terminal_overflow = Arc::new(TerminalOverflow::default());
     let saturated = Arc::new(Notify::new());
     (
         DurableEventSender {
             events,
             cancelled_terminal,
             cancelled_terminal_active,
-            cancelled_terminal_overflowed: cancelled_terminal_overflowed.clone(),
+            terminal_overflow: terminal_overflow.clone(),
             saturated: saturated.clone(),
         },
         DurableOutput::new(
             receiver,
             cancelled_terminal_receiver,
-            cancelled_terminal_overflowed,
+            terminal_overflow,
             saturated,
         ),
     )

@@ -995,6 +995,7 @@ async fn repeatedly_crashed_parallel_review_fails_after_the_retry_limit() {
     assert_eq!(
         reduce(&verified, &initial_input, &history).terminal,
         Some(TerminalProjection::Failed {
+            context: None,
             reason: "review_failed".parse().assert_value()
         })
     );
@@ -1139,6 +1140,7 @@ async fn delivery_infrastructure_failure_never_dispatches_code_repair() {
     assert_eq!(
         reduction.terminal,
         Some(TerminalProjection::Failed {
+            context: None,
             reason: "delivery_failed".parse().assert_value()
         })
     );

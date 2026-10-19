@@ -416,6 +416,7 @@ async fn observer_reconciles_process_loss_without_constructing_or_dispatching_a_
         status.status,
         RunStatus::Finished {
             terminal_result: TerminalResult::Failed {
+                context: None,
                 reason: openengine_cluster_protocol::EnumLabel::new("runtime_lost")
                     .assert_value_with("runtime-lost label"),
             },
@@ -443,7 +444,7 @@ async fn observer_reconciles_process_loss_without_constructing_or_dispatching_a_
     let client = ClusterClient::new(transport.as_ref());
     assert!(matches!(
         wait_terminal(&client, &run_id).await,
-        TerminalResult::Failed { reason } if reason.as_str() == "runtime_lost"
+        TerminalResult::Failed { reason, .. } if reason.as_str() == "runtime_lost"
     ));
     server_task.abort();
     assert!(server_task.await.assert_error().is_cancelled());

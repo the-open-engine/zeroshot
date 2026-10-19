@@ -273,6 +273,7 @@ pub(super) async fn assert_failed_cleanup(
     assert_eq!(
         terminal(&harness.controller, run_id).await,
         TerminalResult::Failed {
+            context: None,
             reason: EnumLabel::new(reason).assert_value_with("label")
         }
     );
@@ -303,6 +304,29 @@ pub(super) async fn terminal(
     })
     .await
     .assert_value_with("run became terminal")
+}
+
+pub(super) fn assert_runtime_failure(result: &TerminalResult, explanation: &str) {
+    let TerminalResult::Failed {
+        reason,
+        context: Some(context),
+    } = result
+    else {
+        panic!("runtime failure lost its context: {result:?}");
+    };
+    assert_eq!(reason.as_str(), "runtime_failed");
+    let primary = context.primary.as_ref().assert_value_with("runtime cause");
+    assert!(
+        primary.message.as_str().contains(explanation),
+        "{primary:?}"
+    );
+    assert!(primary.execution.is_none());
+    assert!(
+        !primary
+            .message
+            .as_str()
+            .contains("synthetic private panic payload")
+    );
 }
 
 pub(super) async fn seed_controller_reconstructed_run(

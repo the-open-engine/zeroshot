@@ -5,8 +5,8 @@
 //! The first workspace checkpoint cannot capture a leftover Unix socket, so the supervisor fails the
 //! run before dispatch: usually `runtime_failed`, occasionally `runtime_lost` when controller exit
 //! wins the race. The user's surfaces are the foreground `zeroshot run` output and the durable
-//! `zeroshot logs RUN_ID` replay, which the UI history shares. One of them must name the workspace
-//! entry that stopped the run instead of only the bare terminal reason.
+//! `zeroshot logs RUN_ID` replay, which the UI history shares. Status, foreground output and replay
+//! must name the workspace entry that stopped the run instead of only the bare terminal reason.
 
 use std::fs;
 use std::os::unix::net::UnixListener;
@@ -31,7 +31,7 @@ const SOCKET: &str = "dev-server.sock";
 const CLI_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[tokio::test(flavor = "multi_thread")]
-async fn local_run_failing_its_first_checkpoint_names_the_cause_on_a_cli_surface() {
+async fn local_run_failing_its_first_checkpoint_preserves_the_cause_across_cli_surfaces() {
     let fixture = LocalFixture::new();
     fs::write(fixture.repository.join(".gitignore"), format!("{SOCKET}\n"))
         .assert_value_with("write ignore rules");
@@ -62,9 +62,30 @@ async fn local_run_failing_its_first_checkpoint_names_the_cause_on_a_cli_surface
         "failed",
         "a workspace with a socket must fail its first checkpoint: {status}"
     );
+    let context = status
+        .assert_key("status")
+        .assert_key("terminalResult")
+        .assert_key("context");
+    assert!(
+        context.to_string().contains(SOCKET),
+        "status lost the checkpoint failure detail: {status}"
+    );
+    let foreground = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        foreground.contains(SOCKET),
+        "foreground output lost the checkpoint failure detail: {foreground}"
+    );
 
     let logs = replay_logs(&fixture, &run_id).await;
     assert_success(&logs, "local logs replay");
+    assert!(
+        String::from_utf8_lossy(&logs.stdout).contains(SOCKET),
+        "durable logs lost the checkpoint failure detail: {logs:?}"
+    );
     let surfaces = [
         ("zeroshot run stdout", &run.stdout),
         ("zeroshot run stderr", &run.stderr),

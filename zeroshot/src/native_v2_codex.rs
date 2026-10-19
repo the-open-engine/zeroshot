@@ -265,10 +265,7 @@ impl NativeV2CodexAdapter {
         turn: &CodexTurn<'_>,
         state: &mut CodexRunState,
     ) -> Result<Option<WorkerOutcome>, NodeRunnerError> {
-        let advance = {
-            let CodexRunState { response, retry } = state;
-            self.advance_turn(turn, response.prompt(), retry).await
-        };
+        let advance = self.advance_turn(turn, state).await;
         match advance {
             Ok(CodexTurnAdvance::Response(response)) => state.accept_response(turn, response).await,
             Ok(CodexTurnAdvance::ProviderFailure(detail)) => {
@@ -290,9 +287,9 @@ impl NativeV2CodexAdapter {
     async fn advance_turn(
         &self,
         turn: &CodexTurn<'_>,
-        prompt: &str,
-        retry: &mut ProviderFailureRetry,
+        state: &mut CodexRunState,
     ) -> Result<CodexTurnAdvance, NodeRunnerError> {
+        let prompt = state.response.prompt().to_owned();
         turn.session
             .core
             .ensure_live(ClosedSessionFailure::Driver)?;
@@ -302,8 +299,8 @@ impl NativeV2CodexAdapter {
                 turn,
                 CodexTurnExecution {
                     resume: resume.as_deref(),
-                    prompt,
-                    retry,
+                    prompt: &prompt,
+                    retry: &mut state.retry,
                 },
             )
             .await?;
@@ -314,7 +311,7 @@ impl NativeV2CodexAdapter {
         {
             return Ok(CodexTurnAdvance::ProviderFailure(detail.to_owned()));
         }
-        resolve_codex_output(turn, output, retry).await
+        resolve_codex_output(turn, output, state).await
     }
 
     async fn execute_turn(
@@ -480,7 +477,7 @@ enum CodexTurnAdvance {
 async fn resolve_codex_output(
     turn: &CodexTurn<'_>,
     output: CodexOutput,
-    retry: &ProviderFailureRetry,
+    state: &CodexRunState,
 ) -> Result<CodexTurnAdvance, NodeRunnerError> {
     if let Some(failure) = output.failure_message() {
         return Ok(CodexTurnAdvance::ProviderFailure(failure.to_owned()));
@@ -490,9 +487,14 @@ async fn resolve_codex_output(
         output.final_message()?,
         ProviderSchemaDialect::OpenAiStrict,
     )?;
-    if let Some(error) = response.correction_error() {
-        retry.report_correction(turn.control, &error).await?;
-    }
+    state
+        .retry
+        .report_correction(
+            turn.control,
+            &response,
+            state.response.corrections_exhausted(),
+        )
+        .await?;
     if let Some(diagnostic) = turn
         .session
         .missing_required_thread(turn.invocation, &response)

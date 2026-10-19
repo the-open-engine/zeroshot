@@ -71,11 +71,9 @@ async fn drive_cleanup_failure_automatically_retries_and_reports_runtime_failure
     let receipt = submit_test_request(&harness.controller, request(Value::Null))
         .await
         .assert_value_with("submit");
-    assert_eq!(
-        terminal(&harness.controller, &receipt.run_id).await,
-        TerminalResult::Failed {
-            reason: EnumLabel::new("runtime_failed").assert_value_with("label")
-        }
+    assert_runtime_failure(
+        &terminal(&harness.controller, &receipt.run_id).await,
+        "runtime cleanup could not be confirmed",
     );
     assert_eq!(
         harness.cleanup.exits(),
@@ -154,6 +152,7 @@ async fn allocation_cleanup_refusal_remains_nonterminal_until_recovery_confirms_
     assert_eq!(
         terminal(&harness.controller, &receipt.run_id).await,
         TerminalResult::Failed {
+            context: None,
             reason: EnumLabel::new("source_checkout_unavailable").assert_value_with("label")
         }
     );

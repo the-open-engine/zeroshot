@@ -4,6 +4,8 @@
     options:
       members:
         - ActiveExecution
+        - FailureContext
+        - FailureDiagnostic
         - LogEvent
         - MergePlanRunStatus
         - MergePlanStatus

@@ -62,6 +62,7 @@ async fn fail_terminal_is_reduced_without_dispatch() {
             .await
             .assert_value_with("terminal"),
         TerminalResult::Failed {
+            context: None,
             reason: EnumLabel::new("rejected").assert_value_with("label")
         }
     );

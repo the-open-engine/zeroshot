@@ -68,6 +68,10 @@ enum Behavior {
         outcome: WorkerOutcome,
     },
     Fail(NodeRunnerError),
+    Reported {
+        message: &'static str,
+        result: Result<WorkerOutcome, NodeRunnerError>,
+    },
     Together(Arc<tokio::sync::Barrier>),
     CancelAfterStart(Arc<tokio::sync::Barrier>, NodeRunnerError),
     Hang,
@@ -191,6 +195,15 @@ impl NodeDriver for FakeDriver {
                 Err(NodeRunnerError::Cancelled)
             }
             Behavior::Fail(error) => Err(error),
+            Behavior::Reported { message, result } => {
+                control
+                    .emit(LiveOutput::diagnostic(
+                        openengine_cluster_protocol::FailureDiagnosticKind::Failure,
+                        message,
+                    ))
+                    .await?;
+                result
+            }
         };
         self.state().active -= 1;
         result

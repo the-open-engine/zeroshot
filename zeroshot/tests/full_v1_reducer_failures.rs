@@ -131,6 +131,7 @@ async fn failed_step_does_not_promote_success_only_writes_before_error_routing()
     assert_eq!(
         reduction.terminal,
         Some(TerminalProjection::Failed {
+            context: None,
             reason: "worker_failed".parse().assert_value()
         })
     );

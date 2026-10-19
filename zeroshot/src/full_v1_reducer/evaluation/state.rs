@@ -70,6 +70,7 @@ pub(super) fn attempts_exhausted() -> Result<Status, ReducerError> {
     Ok(Status::Terminal {
         position: HistoryPosition::ZERO,
         projection: TerminalProjection::Failed {
+            context: None,
             reason: attempts_exhausted_reason()?,
         },
     })

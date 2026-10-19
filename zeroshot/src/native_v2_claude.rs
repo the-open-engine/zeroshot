@@ -21,8 +21,7 @@ use crate::execution::process::{HostedProcessPool, ProcessSessionCommand};
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderExecution, ProviderExecutionFiles, ProviderProcessRunners,
     CLAUDE_LOCAL_ENVIRONMENT, LocalHarnessEnvironment, agent_workspace_access, provider_redactions,
-    report_provider_error, with_driver_detail, merge_local_environment,
-    extend_declared_environment,
+    with_driver_detail, merge_local_environment, extend_declared_environment,
 };
 use crate::native_v2_contract::{ClaudeProvider, NodeRuntimeBinding};
 use crate::native_v2_runner::{
@@ -30,7 +29,7 @@ use crate::native_v2_runner::{
     LiveOutputStream, NodeRunnerError, ProviderSchemaDialect, ResolvedEnvironment,
 };
 use command::{ClaudeTurnArguments, claude_arguments, configure_provider, prompt};
-use session::{ClaudeSession, attempt_session_id, observe_session};
+use session::{ClaudeRunState, ClaudeSession, attempt_session_id, observe_session};
 use transcript::{ClaudeAttempt, ClaudeTranscript};
 use turn_process::ProviderProcessStart as ClaudeProcessStart;
 
@@ -246,28 +245,26 @@ impl ClaudeAdapter {
     async fn advance_turn(
         &self,
         turn: &ClaudeTurn<'_>,
-        resume_id: &mut Option<String>,
-        prompt: String,
+        state: &mut ClaudeRunState,
     ) -> Result<ClaudeTurnAdvance, NodeRunnerError> {
         turn.session
             .core
             .ensure_live(ClosedSessionFailure::SessionLost)?;
         let attempt = self
-            .execute_turn(turn, resume_id.as_deref(), prompt)
+            .execute_turn(
+                turn,
+                state.resume_id.as_deref(),
+                state.response.prompt().to_owned(),
+            )
             .await?;
-        if let Err(diagnostic) = observe_session(resume_id, attempt_session_id(&attempt)) {
+        if let Err(diagnostic) = observe_session(&mut state.resume_id, attempt_session_id(&attempt))
+        {
             return Ok(ClaudeTurnAdvance::ProviderFailure {
                 retryable: false,
                 diagnostic: diagnostic.to_owned(),
             });
         }
-        resolve_claude_attempt(
-            turn,
-            resume_id,
-            attempt,
-            &provider_redactions(&turn.invocation.environment, &self.local_environment),
-        )
-        .await
+        resolve_claude_attempt(turn, state, attempt).await
     }
 
     async fn execute_turn(
@@ -312,9 +309,8 @@ impl ClaudeAdapter {
 
 async fn resolve_claude_attempt(
     turn: &ClaudeTurn<'_>,
-    resume_id: &Option<String>,
+    state: &ClaudeRunState,
     attempt: ClaudeAttempt,
-    redactions: &[String],
 ) -> Result<ClaudeTurnAdvance, NodeRunnerError> {
     let result = match attempt {
         ClaudeAttempt::Complete(result) => result,
@@ -326,11 +322,16 @@ async fn resolve_claude_attempt(
         }
     };
     let response = resolve_agent_response(&turn.invocation.response, &result.message)?;
-    if let Some(error) = response.correction_error() {
-        report_provider_error("Claude", &error, redactions, turn.control).await?;
-    }
+    state
+        .retry
+        .report_correction(
+            turn.control,
+            &response,
+            state.response.corrections_exhausted(),
+        )
+        .await?;
     if matches!(response, AgentResponse::Correction { .. }) {
-        if resume_id.is_none() {
+        if state.resume_id.is_none() {
             return Ok(ClaudeTurnAdvance::ProviderFailure {
                 retryable: false,
                 diagnostic:

@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use openengine_cluster_protocol::{RunId, UnixTimestampMillis};
+use openengine_cluster_protocol::{FailureDiagnosticKind, RunId, UnixTimestampMillis};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, mpsc, oneshot, watch};
 
@@ -52,6 +52,8 @@ pub enum CapsuleOutputStream {
 pub struct CapsuleOutput {
     pub stream: CapsuleOutputStream,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<FailureDiagnosticKind>,
 }
 
 impl CapsuleOutput {
@@ -61,7 +63,12 @@ impl CapsuleOutput {
             CapsuleOutputStream::Error => LiveOutputStream::Error,
             CapsuleOutputStream::System => LiveOutputStream::System,
         };
-        LiveOutput::new(stream, self.text)
+        if self.diagnostic.is_some() && stream != LiveOutputStream::Error {
+            return Err(NodeRunnerError::UnsafeOutput);
+        }
+        let mut output = LiveOutput::new(stream, self.text)?;
+        output.diagnostic = self.diagnostic;
+        Ok(output)
     }
 }
 
@@ -75,6 +82,7 @@ impl From<LiveOutput> for CapsuleOutput {
         Self {
             stream,
             text: value.text,
+            diagnostic: value.diagnostic,
         }
     }
 }

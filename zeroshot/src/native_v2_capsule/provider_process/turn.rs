@@ -7,7 +7,8 @@ use crate::execution::process::{ProcessRunnerError, ProcessSessionCommand, Proce
 use crate::native_v2_capsule::provider_process::{
     ProcessExchange, ProcessInputFailure, ProviderExecutionFiles, ProviderProcess,
     ProviderProcessFailure, ProviderProcessFailureKind, exchange_process_io, open_provider_process,
-    process_failure_context, process_failure_detail, require_process_cleanup,
+    process_failure_context, process_failure_detail, report_cleanup_failure,
+    require_process_cleanup,
 };
 use crate::native_v2_runner::{DriverControl, LiveOutput, NodeRunnerError};
 
@@ -21,6 +22,11 @@ pub(crate) trait ProviderTranscript: Send {
     fn finish_stream(&mut self) -> Vec<ProviderEmission>;
     fn token_usage(&self) -> Option<TokenUsageDelta>;
     fn is_success(&self) -> bool;
+    /// Returns only producer-redacted failure evidence, without consuming the transcript.
+    fn failure_diagnostic(&self, _process_detail: Option<&str>) -> Option<String> {
+        None
+    }
+
     fn finish(
         self,
         process_failure: Option<ProviderProcessFailure>,
@@ -111,12 +117,16 @@ async fn finish_input_failure<T: ProviderTranscript>(
         completion,
     } = failure;
     let usage = control.record_token_usage(transcript.token_usage()).await;
+    let diagnostic = format!("provider process input failed: {input_error}");
+    if let Some(detail) = cleanup_failure_diagnostic(&transcript, &completion, Some(&diagnostic)) {
+        report_cleanup_failure(control, detail).await;
+    }
     require_process_cleanup(&completion)?;
     if input_failure_cancelled(control, &output, &completion) {
         return Err(NodeRunnerError::Cancelled);
     }
 
-    let mut diagnostic = format!("provider process input failed: {input_error}");
+    let mut diagnostic = diagnostic;
     if let Err(error) = output {
         append_detail(
             &mut diagnostic,
@@ -148,11 +158,11 @@ async fn finish_output_failure<T: ProviderTranscript>(
     error: NodeRunnerError,
 ) -> Result<ProviderAttempt, NodeRunnerError> {
     let token_usage = transcript.token_usage();
-    let attempt = failed_completion(
-        completion,
-        format!("provider output delivery failed: {error}"),
-        control,
-    );
+    let diagnostic = format!("provider output delivery failed: {error}");
+    if let Some(detail) = cleanup_failure_diagnostic(&transcript, &completion, Some(&diagnostic)) {
+        report_cleanup_failure(control, detail).await;
+    }
+    let attempt = failed_completion(completion, diagnostic, control);
     let usage = control.record_token_usage(token_usage).await;
     match attempt {
         Err(NodeRunnerError::Cancelled) => Err(NodeRunnerError::Cancelled),
@@ -171,6 +181,9 @@ async fn finish_process_completion<T: ProviderTranscript>(
 ) -> Result<ProviderAttempt, NodeRunnerError> {
     let completion = process.wait().await;
     let usage = control.record_token_usage(transcript.token_usage()).await;
+    if let Some(detail) = cleanup_failure_diagnostic(&transcript, &completion, None) {
+        report_cleanup_failure(control, detail).await;
+    }
     let attempt = resolve_process_completion(transcript, completion, control.is_cancelled());
     match attempt {
         Err(error) => Err(error),
@@ -179,6 +192,28 @@ async fn finish_process_completion<T: ProviderTranscript>(
             Ok(attempt)
         }
     }
+}
+
+fn cleanup_failure_diagnostic<T: ProviderTranscript>(
+    transcript: &T,
+    completion: &Result<ProcessSessionOutput, ProcessRunnerError>,
+    detail: Option<&str>,
+) -> Option<String> {
+    if require_process_cleanup(completion).is_ok() {
+        return None;
+    }
+    let process = match completion {
+        Ok(output) => process_failure_detail(output, false, !transcript.is_success())
+            .ok()
+            .flatten(),
+        Err(error) => Some(format!("provider process completion failed: {error}")),
+    };
+    let details = detail
+        .into_iter()
+        .chain(process.as_deref())
+        .collect::<Vec<_>>()
+        .join("; ");
+    transcript.failure_diagnostic((!details.is_empty()).then_some(details.as_str()))
 }
 
 fn resolve_process_completion<T: ProviderTranscript>(

@@ -119,7 +119,7 @@ impl From<&TerminalResult> for RunHistoryTerminalSynopsis {
     fn from(value: &TerminalResult) -> Self {
         match value {
             TerminalResult::Succeeded { .. } => Self::Succeeded {},
-            TerminalResult::Failed { reason } => Self::Failed {
+            TerminalResult::Failed { reason, .. } => Self::Failed {
                 reason: reason.as_str().to_owned(),
             },
         }

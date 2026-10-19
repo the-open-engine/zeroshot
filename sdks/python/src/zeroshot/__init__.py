@@ -50,6 +50,12 @@ from .runs import (
     ActiveExecution as ActiveExecution,
 )
 from .runs import (
+    FailureContext as FailureContext,
+)
+from .runs import (
+    FailureDiagnostic as FailureDiagnostic,
+)
+from .runs import (
     LogEvent as LogEvent,
 )
 from .runs import (

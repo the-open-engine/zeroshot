@@ -54,6 +54,36 @@ class ActiveExecution:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class FailureDiagnostic:
+    """One producer-redacted failure record retained with the run.
+
+    Args:
+        message: Bounded secret-safe explanation.
+        execution: Associated executable graph node, or None for a run-wide record.
+        cursor: Cursor of the original diagnostic log, when durably recorded.
+    """
+
+    message: str
+    execution: ActiveExecution | None = None
+    cursor: str | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FailureContext:
+    """Recorded failure evidence without inferring causality from log order.
+
+    Args:
+        primary: Explicitly identified runtime failure, when available.
+        recorded: Recent failure records, which may include recovered or voided attempts.
+        incomplete: Whether additional failure evidence may be missing from this summary.
+    """
+
+    primary: FailureDiagnostic | None = None
+    recorded: tuple[FailureDiagnostic, ...] = ()
+    incomplete: bool = False
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class RunResult:
     """Terminal outcome from Client.run(), Run.wait(), or Run.force_stop().
 
@@ -62,12 +92,14 @@ class RunResult:
         succeeded: Whether the graph completed successfully.
         output: Successful graph output, which may be JSON null.
         failure: Stable nonempty failure reason when succeeded is false.
+        context: Structured safe failure evidence, or None for older run data.
     """
 
     run_id: str
     succeeded: bool
     output: JsonValue = None
     failure: str | None = None
+    context: FailureContext | None = None
 
     def raise_for_failure(self) -> None:
         """Raise RunFailedError for a failed graph result; otherwise return None."""

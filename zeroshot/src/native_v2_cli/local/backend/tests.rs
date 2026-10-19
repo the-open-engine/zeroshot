@@ -457,6 +457,7 @@ async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
                 crate::v2_run_ledger::RunEvent::RunStarted,
                 crate::v2_run_ledger::RunEvent::Terminal {
                     result: TerminalResult::Failed {
+                        context: None,
                         reason: EnumLabel::new("runtime_failed").assert_value(),
                     },
                 },

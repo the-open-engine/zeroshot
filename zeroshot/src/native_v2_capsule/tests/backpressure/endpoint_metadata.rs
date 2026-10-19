@@ -190,6 +190,7 @@ impl CapsuleNodeChannel for ErrorBurstChannel {
                         output: CapsuleOutput {
                             stream: CapsuleOutputStream::Error,
                             text: format!("error {index}"),
+                            diagnostic: None,
                         },
                         timestamp: openengine_cluster_protocol::UnixTimestampMillis::new(1)
                             .assert_value(),

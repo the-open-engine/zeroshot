@@ -100,6 +100,21 @@ impl ProviderTranscript for ClaudeTranscript {
         self.session_failure.is_none() && matches!(self.terminal, Some(ClaudeTerminal::Complete(_)))
     }
 
+    fn failure_diagnostic(&self, process_detail: Option<&str>) -> Option<String> {
+        let terminal = match &self.terminal {
+            Some(ClaudeTerminal::Failed(detail)) => Some(detail.as_str()),
+            _ => None,
+        };
+        self.pending.failure_diagnostic(
+            "Claude",
+            self.session_failure
+                .as_deref()
+                .into_iter()
+                .chain(terminal)
+                .chain(process_detail),
+        )
+    }
+
     fn finish(
         mut self,
         process_failure: Option<ProviderProcessFailure>,

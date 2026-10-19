@@ -9,6 +9,8 @@ from .errors import ProtocolError
 from .plans import MergePlanRunStatus, MergePlanStatus
 from .runs import (
     ActiveExecution,
+    FailureContext,
+    FailureDiagnostic,
     LogEvent,
     RunResult,
     RunStatus,
@@ -158,6 +160,45 @@ def _terminal_result(run_id: str, value: object) -> RunResult:
         run_id=run_id,
         succeeded=False,
         failure=_string(terminal, "reason", "run status.status.terminalResult"),
+        context=_failure_context(terminal.get("context")),
+    )
+
+
+def _failure_context(value: object) -> FailureContext | None:
+    if value is None:
+        return None
+    context = _mapping(value, "failure context")
+    primary = context.get("primary")
+    incomplete = context.get("incomplete", False)
+    if not isinstance(incomplete, bool):
+        raise ProtocolError("Zeroshot emitted malformed failure context.incomplete")
+    return FailureContext(
+        primary=_failure_diagnostic(primary) if primary is not None else None,
+        recorded=tuple(
+            _failure_diagnostic(item)
+            for item in _mapping_list(context.get("recorded", []), "failure context.recorded")
+        ),
+        incomplete=incomplete,
+    )
+
+
+def _failure_diagnostic(value: object) -> FailureDiagnostic:
+    diagnostic = _mapping(value, "failure diagnostic")
+    execution = diagnostic.get("execution")
+    active = None
+    if execution is not None:
+        identity = _mapping(execution, "failure diagnostic.execution")
+        active = ActiveExecution(
+            execution=_string(identity, "execution", "failure diagnostic.execution"),
+            node=_string(identity, "node", "failure diagnostic.execution"),
+        )
+    cursor = diagnostic.get("cursor")
+    if cursor is not None and not isinstance(cursor, str):
+        raise ProtocolError("Zeroshot emitted malformed failure diagnostic.cursor")
+    return FailureDiagnostic(
+        message=_string(diagnostic, "message", "failure diagnostic"),
+        execution=active,
+        cursor=cursor,
     )
 
 

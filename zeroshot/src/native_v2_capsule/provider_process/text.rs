@@ -66,6 +66,22 @@ impl ProviderText {
         safe_provider_text(text, &self.redactions)
     }
 
+    /// Failure-only preview; successful response text is never a diagnostic input.
+    pub(crate) fn failure_diagnostic<'a>(
+        &self,
+        provider: &str,
+        details: impl IntoIterator<Item = &'a str>,
+    ) -> Option<String> {
+        let detail = details
+            .into_iter()
+            .filter(|value| !value.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("; ");
+        (!detail.is_empty()).then(|| {
+            super::provider_failure_diagnostic(provider, Some(&detail), None, &self.redactions)
+        })
+    }
+
     #[cfg(test)]
     pub(crate) fn buffered(&self) -> (&str, usize) {
         (&self.pending.text, self.pending.parts.len())
@@ -134,6 +150,7 @@ impl ProviderText {
             emissions.push(ProviderEmission {
                 stream,
                 text: chunk,
+                diagnostic: None,
             });
         }
     }

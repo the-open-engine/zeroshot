@@ -230,6 +230,7 @@ async fn startup_reconciles_every_persisted_nonterminal_before_status_is_visible
         status.status,
         RunStatus::Finished {
             terminal_result: TerminalResult::Failed {
+                context: None,
                 reason: EnumLabel::new("runtime_lost").assert_value_with("label")
             },
             metadata: Default::default(),
@@ -276,7 +277,7 @@ async fn wave8_cli_contract_retained_cleanup_and_discard_fail_closed_across_reco
         .assert_value_with("accepted resume");
     let terminal = terminal(&controller, &successor_run_id).await;
     assert!(
-        matches!(terminal, TerminalResult::Failed { reason } if reason.as_str() == "runtime_unavailable")
+        matches!(terminal, TerminalResult::Failed { reason, .. } if reason.as_str() == "runtime_unavailable")
     );
     assert_eq!(
         allocator.cleanup_calls(),

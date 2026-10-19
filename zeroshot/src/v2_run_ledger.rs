@@ -10,8 +10,9 @@ use std::fmt;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    Cursor, IdempotencyKey, Phase, PositiveInteger, RunId, RunSize, RunTitle, Sha256Digest,
-    ResolvedSource, TerminalResult, TokenUsage, UnixTimestampMillis, WorkerOutcome,
+    Cursor, FailureContext, FailureDiagnosticKind, IdempotencyKey, Phase, PositiveInteger, RunId,
+    RunSize, RunTitle, Sha256Digest, ResolvedSource, TerminalResult, TokenUsage,
+    UnixTimestampMillis, WorkerOutcome,
 };
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -28,7 +29,9 @@ pub mod sqlite;
 #[path = "v2_run_ledger/state.rs"]
 mod state;
 
-pub(crate) use state::{apply_event, cursor_for, cursor_sequence, initial_cursor, validate_create};
+pub(crate) use state::{
+    apply_event, cursor_for, cursor_sequence, initial_cursor, prepare_event, validate_create,
+};
 
 pub const INITIAL_CURSOR: &str = "v2:0";
 pub const MAX_ADMITTED_RUN_BYTES: usize = 2 * 1024 * 1024;
@@ -111,34 +114,43 @@ pub struct RunSnapshot {
     pub execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
     pub terminal: Option<TerminalResult>,
     pub token_usage: Option<TokenUsage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_context: Option<Box<FailureContext>>,
 }
 
 impl RunSnapshot {
     #[must_use]
     pub fn admitted(run_id: RunId, admitted: &AdmittedRun) -> Self {
-        Self {
+        Self::empty(
             run_id,
-            title: admitted.title.clone(),
-            source: admitted.source.clone(),
-            size: admitted.runtime.size(),
-            cursor: initial_cursor(),
-            phase: RunPhase::Admitted,
-            force_stop_requested: false,
-            executions: BTreeMap::new(),
-            execution_seed: Vec::new(),
-            terminal: None,
-            token_usage: None,
-        }
+            admitted.title.clone(),
+            admitted.source.clone(),
+            admitted.runtime.size(),
+        )
     }
 
-    /// Returns the immutable metadata and empty projection used to replay durable events.
+    /// Returns immutable metadata and the empty projection used to replay durable events.
     #[must_use]
     pub fn replay_seed(&self) -> Self {
+        Self::empty(
+            self.run_id.clone(),
+            self.title.clone(),
+            self.source.clone(),
+            self.size,
+        )
+    }
+
+    fn empty(
+        run_id: RunId,
+        title: RunTitle,
+        source: Option<ResolvedSource>,
+        size: RunSize,
+    ) -> Self {
         Self {
-            run_id: self.run_id.clone(),
-            title: self.title.clone(),
-            source: self.source.clone(),
-            size: self.size,
+            run_id,
+            title,
+            source,
+            size,
             cursor: initial_cursor(),
             phase: RunPhase::Admitted,
             force_stop_requested: false,
@@ -146,6 +158,7 @@ impl RunSnapshot {
             execution_seed: Vec::new(),
             terminal: None,
             token_usage: None,
+            failure_context: None,
         }
     }
 
@@ -165,6 +178,8 @@ pub struct NodeSnapshot {
     pub input: Value,
     pub started_at: Cursor,
     pub state: NodeState,
+    #[serde(default)]
+    pub failure_diagnostic: bool,
 }
 
 impl NodeSnapshot {
@@ -217,6 +232,8 @@ pub enum RunEvent {
         timestamp: UnixTimestampMillis,
         stream: SafeLogStream,
         line: SafeLogLine,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        diagnostic: Option<FailureDiagnosticKind>,
     },
     TokenUsageObserved {
         execution: ExecutionId,

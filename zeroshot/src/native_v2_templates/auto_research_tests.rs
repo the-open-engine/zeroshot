@@ -284,6 +284,7 @@ async fn rejected_research_audit_repairs_then_rechecks_before_continuing() {
     assert_eq!(
         reduce(&verified, &input, &rejected_history).terminal,
         Some(TerminalProjection::Failed {
+            context: None,
             reason: "iteration_finalization_rejected".parse().assert_value()
         })
     );
@@ -423,6 +424,7 @@ async fn auditor_crash_fails_without_retrying_a_written_audit() {
     assert_eq!(
         failed.terminal,
         Some(TerminalProjection::Failed {
+            context: None,
             reason: "iteration_finalization_audit_failed".parse().assert_value()
         })
     );

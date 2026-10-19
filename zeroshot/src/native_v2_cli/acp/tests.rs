@@ -429,6 +429,7 @@ fn wave7_cli_contract_acp_turns_state_and_payloads_preserve_failure_semantics() 
     let failed = TurnResult::new(
         run_id,
         TerminalResult::Failed {
+            context: None,
             reason: reason.clone(),
         },
         false,
@@ -440,7 +441,10 @@ fn wave7_cli_contract_acp_turns_state_and_payloads_preserve_failure_semantics() 
         Some("Zeroshot run failed: runtime_failed")
     );
     assert_eq!(
-        terminal_value(TerminalResult::Failed { reason }),
+        terminal_value(TerminalResult::Failed {
+            reason,
+            context: None
+        }),
         json!({"failed":"runtime_failed"})
     );
     assert!(

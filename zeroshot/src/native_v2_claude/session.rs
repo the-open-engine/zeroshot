@@ -104,14 +104,7 @@ impl ClaudeAdapter {
         state: &mut ClaudeRunState,
         control: &DriverControl,
     ) -> Result<Option<WorkerOutcome>, NodeRunnerError> {
-        match self
-            .advance_turn(
-                turn,
-                &mut state.resume_id,
-                state.response.prompt().to_owned(),
-            )
-            .await
-        {
+        match self.advance_turn(turn, state).await {
             Ok(ClaudeTurnAdvance::Response(response)) => {
                 if requires_session(&turn.invocation.node) && state.resume_id.is_none() {
                     state
@@ -134,10 +127,10 @@ impl ClaudeAdapter {
     }
 }
 
-struct ClaudeRunState {
-    resume_id: Option<String>,
-    response: AgentResponseState,
-    retry: ProviderFailureRetry,
+pub(super) struct ClaudeRunState {
+    pub(super) resume_id: Option<String>,
+    pub(super) response: AgentResponseState,
+    pub(super) retry: ProviderFailureRetry,
 }
 
 impl ClaudeRunState {

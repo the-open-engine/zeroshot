@@ -19,11 +19,10 @@ use openengine_cluster_protocol::{
     RunMetadata, RunStatus, RunStatusParams, RunStatusResult, RunWatchEventNotification,
     RunWatchParams, RunWatchResult, SubscriptionId,
 };
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::full_v1_reducer::ExecutionId;
-use crate::native_v2_contract::ExecutionRef;
+use crate::native_v2_contract::{ExecutionRef, visible_text};
 use crate::native_v2_runner::{AttachReceiveError, LiveOutputSource, ReadOnlyAttach};
 use crate::native_v2_supervisor::{LiveOutputRegistrar, LiveOutputRegistration, LiveOutputUnavailable};
 use crate::v2_run_ledger::{
@@ -258,7 +257,11 @@ impl NativeV2Observability {
     }
 
     pub(crate) fn runtime_failed(&self, run_id: &RunId) {
-        self.runtime.fail(run_id);
+        self.runtime.fail(run_id, None);
+    }
+
+    pub(crate) fn runtime_failed_with_cause(&self, run_id: &RunId, cause: &str) {
+        self.runtime.fail(run_id, Some(cause));
     }
 
     pub(crate) async fn refresh_runtime(&self, run_id: &RunId) {

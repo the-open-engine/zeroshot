@@ -17,6 +17,10 @@ use crate::{
     RunSize, RunTitle, SubscriptionId, ResolvedSource, TerminalResult, MAX_SAFE_GENERATION,
 };
 
+#[path = "native_v2_observation/failure.rs"]
+mod failure;
+pub use failure::*;
+
 /// Non-negative token counter that remains exact in JavaScript clients.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]

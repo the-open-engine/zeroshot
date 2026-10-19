@@ -39,21 +39,31 @@ pub(super) fn finish_uncertain_authority(mut failure: RepairFailure) -> Delivery
 
 impl From<SourceDeliveryError> for DeliveryStop {
     fn from(error: SourceDeliveryError) -> Self {
+        let diagnostic = error.to_string();
         if error.cleanup_unconfirmed() {
-            Self::Runner(NodeRunnerError::CleanupUnconfirmed)
+            Self::Explained {
+                result: Box::new(Err(NodeRunnerError::CleanupUnconfirmed)),
+                diagnostic,
+            }
         } else if matches!(error, SourceDeliveryError::Identity(_)) {
-            Self::Outcome(WorkerOutcome::declared_failure(WorkerErrorCode::Refusal))
+            Self::failure(
+                WorkerOutcome::declared_failure(WorkerErrorCode::Refusal),
+                diagnostic,
+            )
         } else if error.authentication_failed() {
-            Self::Outcome(WorkerOutcome::authentication_refusal())
+            Self::failure(WorkerOutcome::authentication_refusal(), diagnostic)
         } else if error.retryable_operation() {
             Self::Retry(error)
         } else if matches!(
             error,
             SourceDeliveryError::Repairable(_) | SourceDeliveryError::Command(_)
         ) {
-            repair(error.to_string())
+            repair(diagnostic)
         } else {
-            Self::Outcome(WorkerOutcome::declared_failure(WorkerErrorCode::Crash))
+            Self::failure(
+                WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
+                diagnostic,
+            )
         }
     }
 }
@@ -159,6 +169,9 @@ impl DeliveryCredentials<'_> {
             source_secrets(git, &mut secrets);
         }
         if let Some(environment) = self.environment {
+            for (_, value) in environment.iter() {
+                secrets.push(value.to_owned());
+            }
             for field in [self.forge_field, Some(GITHUB_TOKEN_ENV)]
                 .into_iter()
                 .flatten()
@@ -205,7 +218,10 @@ fn source_secrets(
 pub(super) fn git_failure(error: super::super::git::GitError) -> DeliveryStop {
     match error {
         super::super::git::GitError::Command(failure) if failure.cleanup_unconfirmed => {
-            DeliveryStop::Runner(NodeRunnerError::CleanupUnconfirmed)
+            DeliveryStop::Explained {
+                result: Box::new(Err(NodeRunnerError::CleanupUnconfirmed)),
+                diagnostic: failure.to_string(),
+            }
         }
         error => repair(error.to_string()),
     }

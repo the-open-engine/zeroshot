@@ -12,7 +12,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use super::{
     AppendResult, CreateRun, CreateRunOutcome, RunEvent, RunLedger, RunLedgerError, RunSummary,
     SnapshotAndTail, StoredRun, StoredRunEvent, apply_event, cursor_for, cursor_sequence,
-    validate_create, MAX_REPLAY_BYTES, MAX_REPLAY_EVENTS,
+    prepare_event, validate_create, MAX_REPLAY_BYTES, MAX_REPLAY_EVENTS,
 };
 
 const SCHEMA: &str = "
@@ -325,6 +325,7 @@ impl PendingAppend<'_, '_> {
     }
 
     fn one_event(&mut self, event: RunEvent) -> Result<StoredRunEvent, RunLedgerError> {
+        let event = prepare_event(&self.stored.snapshot, event);
         self.sequence = next_sequence(self.sequence)?;
         apply_event(&mut self.stored.snapshot, &event, self.sequence)?;
         insert_event(self.transaction, self.run_id, self.sequence, &event)?;

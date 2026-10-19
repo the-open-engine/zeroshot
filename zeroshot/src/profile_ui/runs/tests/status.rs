@@ -126,17 +126,7 @@ async fn failed_runtime_drains_all_retained_pages_and_reconnects_at_the_same_cur
     let (fixture, source, _) = failed_runtime().await;
     fixture
         .ledger
-        .append(
-            &fixture.id,
-            (0..MAX_REPLAY_EVENTS + 3)
-                .map(|index| RunEvent::SafeLog {
-                    execution: Some(ExecutionId::new(1).assert_value()),
-                    timestamp: UnixTimestampMillis::new(index as u64 + 1).assert_value(),
-                    stream: SafeLogStream::Output,
-                    line: SafeLogLine::new(format!("retained {index}")).assert_value(),
-                })
-                .collect(),
-        )
+        .append(&fixture.id, safe_logs(MAX_REPLAY_EVENTS + 3, "retained"))
         .await
         .assert_value();
     let stream = source
@@ -230,17 +220,7 @@ async fn missing_local_or_target_status_cannot_finish_or_repair_retained_history
     fixture.start(1).await;
     fixture
         .ledger
-        .append(
-            &fixture.id,
-            (0..MAX_REPLAY_EVENTS)
-                .map(|index| RunEvent::SafeLog {
-                    execution: Some(ExecutionId::new(1).assert_value()),
-                    timestamp: UnixTimestampMillis::new(index as u64 + 1).assert_value(),
-                    stream: SafeLogStream::Output,
-                    line: SafeLogLine::new(format!("retained {index}")).assert_value(),
-                })
-                .collect(),
-        )
+        .append(&fixture.id, safe_logs(MAX_REPLAY_EVENTS, "retained"))
         .await
         .assert_value();
     let target = NativeRunHistory::target(

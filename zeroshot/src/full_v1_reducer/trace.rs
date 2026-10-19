@@ -161,7 +161,7 @@ impl Engine<'_> {
                 record.state = StructuralTraceState::Succeeded;
                 record.output = Some(output.clone());
             }
-            TerminalResult::Failed { reason } => {
+            TerminalResult::Failed { reason, .. } => {
                 record.state = StructuralTraceState::Failed;
                 record.detail = Some(reason.as_str().to_owned());
             }

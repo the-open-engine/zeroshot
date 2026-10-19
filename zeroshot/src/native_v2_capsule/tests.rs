@@ -384,6 +384,7 @@ fn boundary_contract_capsule_wire_mappings_preserve_streams_and_failure_classifi
         let output = CapsuleOutput {
             stream: wire,
             text: "detail".to_owned(),
+            diagnostic: None,
         };
         let mapped = output.clone().into_live().assert_value();
         assert_eq!(mapped.stream, live);

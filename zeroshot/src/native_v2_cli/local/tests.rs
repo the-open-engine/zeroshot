@@ -72,6 +72,7 @@ fn contract_status(submission: &RunSubmission, run_id: RunId, failed: bool) -> R
         status: if failed {
             RunStatus::Finished {
                 terminal_result: TerminalResult::Failed {
+                    context: None,
                     reason: EnumLabel::new("runtime_failed").assert_value(),
                 },
                 metadata: Default::default(),

@@ -93,15 +93,18 @@ async fn definition_validation_covers_versions_identity_cursors_and_runtime_fail
     let mut failed = valid.clone();
     failed.phase = RunPhase::Finished;
     failed.terminal = Some(TerminalResult::Failed {
+        context: None,
         reason: "runtime_failed".parse().assert_value(),
     });
     failed.history.complete = false;
     failed.runtime_failure = Some(RuntimeFailure {
+        context: None,
         at_cursor: Cursor::new("v2:0"),
         reason: "runtime_failed".into(),
     });
     assert!(validate_run_definition(&failed, &valid.run_id).is_ok());
     failed.terminal = Some(TerminalResult::Failed {
+        context: None,
         reason: "runtime_lost".parse().assert_value(),
     });
     failed.runtime_failure.as_mut().assert_value().reason = "runtime_lost".into();
@@ -109,6 +112,7 @@ async fn definition_validation_covers_versions_identity_cursors_and_runtime_fail
     failed.runtime_failure.as_mut().assert_value().reason = "other".into();
     assert!(validate_run_definition(&failed, &valid.run_id).is_err());
     failed.runtime_failure = Some(RuntimeFailure {
+        context: None,
         at_cursor: Cursor::new("v2:1"),
         reason: "runtime_failed".into(),
     });
@@ -177,6 +181,7 @@ fn page_validation_anchors_ordered_control_and_coherent_runtime_failure() {
 
     valid.finished = true;
     valid.runtime_failure = Some(RuntimeFailure {
+        context: None,
         at_cursor: Cursor::new("v2:2"),
         reason: "runtime_failed".into(),
     });
@@ -192,4 +197,53 @@ fn page_validation_anchors_ordered_control_and_coherent_runtime_failure() {
     changed = valid;
     changed.runtime_failure.as_mut().assert_value().at_cursor = Cursor::new("v2:3");
     assert!(validate_history_page(&changed, &Cursor::new("v2:0")).is_err());
+}
+
+#[tokio::test]
+async fn failure_context_requires_retained_cursors_and_coherent_runtime_metadata() {
+    let mut valid = definition().await;
+    valid.phase = RunPhase::Finished;
+    valid.history.complete = false;
+    let context = json!({
+        "primary": {"message": "checkpoint failed", "cursor": "v2:0"},
+        "recorded": [],
+        "incomplete": true
+    });
+    valid.terminal = Some(
+        serde_json::from_value(json!({
+            "status": "failed", "reason": "runtime_failed", "context": context
+        }))
+        .assert_value(),
+    );
+    valid.runtime_failure = Some(
+        serde_json::from_value(json!({
+            "atCursor": "v2:0", "reason": "runtime_failed", "context": context
+        }))
+        .assert_value(),
+    );
+    assert!(validate_run_definition(&valid, &valid.run_id).is_ok());
+
+    let mut changed = valid.clone();
+    changed.runtime_failure.as_mut().assert_value().context = None;
+    assert!(validate_run_definition(&changed, &valid.run_id).is_err());
+
+    for cursor in ["v2:1", "v2:00", "v2:9223372036854775808"] {
+        let mut changed = valid.clone();
+        let failure = changed.runtime_failure.as_mut().assert_value();
+        let diagnostic = failure
+            .context
+            .as_mut()
+            .assert_value()
+            .primary
+            .as_mut()
+            .assert_value();
+        diagnostic.cursor = Some(Cursor::new(cursor));
+        if let Some(TerminalResult::Failed { context, .. }) = &mut changed.terminal {
+            *context = failure.context.clone();
+        }
+        assert!(
+            validate_run_definition(&changed, &valid.run_id).is_err(),
+            "{cursor}"
+        );
+    }
 }

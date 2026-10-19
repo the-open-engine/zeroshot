@@ -10,16 +10,28 @@ impl FinishedDispatch {
         } else {
             Vec::new()
         };
+        let synthetic = force
+            || matches!(
+                &self.result,
+                DispatchResult::Interrupted
+                    | DispatchResult::Completed(Err(
+                        NodeRunnerError::Cancelled | NodeRunnerError::RunClosed
+                    ))
+            );
         let cause = settled_failure_cause(&self.result, force);
         let outcome = settled_outcome(&self.reference, self.result, force)?;
-        events.extend(super::logging::completion_events(
+        let mut completion = super::logging::completion_events(
             NodeCompletion {
                 reference: self.reference,
                 outcome,
             },
             Some(self.elapsed),
             cause.as_deref(),
-        )?);
+        )?;
+        if synthetic {
+            super::logging::clear_diagnostics(&mut completion);
+        }
+        events.extend(completion);
         Ok(events)
     }
 

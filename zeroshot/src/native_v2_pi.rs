@@ -27,8 +27,7 @@ use std::path::{Path, PathBuf};
 use crate::execution::process::{HostedProcessPool, ProcessSessionCommand};
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, LocalHarnessEnvironment, PI_LOCAL_ENVIRONMENT, ProviderExecution,
-    ProviderExecutionFiles, ProviderProcessRunners, provider_redactions, report_provider_error,
-    with_driver_detail,
+    ProviderExecutionFiles, ProviderProcessRunners, provider_redactions, with_driver_detail,
 };
 use crate::native_v2_contract::{NodeRuntimeBinding, PiProvider};
 use crate::native_v2_runner::{
@@ -379,13 +378,12 @@ impl PiAdapter {
             .core
             .ensure_live(ClosedSessionFailure::SessionLost)?;
         let attempt = self.execute_turn(turn, state, prompt).await?;
-        let redactions = self.redactions(&turn.invocation.environment);
         let expected = state.session_id.clone();
         match attempt {
             PiAttempt::Complete(result) => {
                 observe_session(result.session_id.as_deref(), &expected)
                     .map_err(|detail| NodeRunnerError::DriverDetail(detail.to_owned()))?;
-                resolve_pi_response(turn, result, &redactions, state.dialect).await
+                resolve_pi_response(turn, result, state).await
             }
             PiAttempt::Failed(failure) => {
                 observe_session(failure.session_id.as_deref(), &expected)
@@ -438,14 +436,21 @@ impl PiAdapter {
 async fn resolve_pi_response(
     turn: &PiTurn<'_>,
     result: PiResult,
-    redactions: &[String],
-    dialect: ProviderSchemaDialect,
+    state: &PiRunState,
 ) -> Result<PiTurnAdvance, NodeRunnerError> {
-    let response =
-        resolve_agent_response_with_schema(&turn.invocation.response, &result.message, dialect)?;
-    if let Some(error) = response.correction_error() {
-        report_provider_error("Pi", &error, redactions, turn.control).await?;
-    }
+    let response = resolve_agent_response_with_schema(
+        &turn.invocation.response,
+        &result.message,
+        state.dialect,
+    )?;
+    state
+        .retry
+        .report_correction(
+            turn.control,
+            &response,
+            state.response.corrections_exhausted(),
+        )
+        .await?;
     if matches!(response, AgentResponse::Correction { .. }) {
         turn.control
             .emit(LiveOutput::new(

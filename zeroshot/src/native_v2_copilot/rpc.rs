@@ -1,13 +1,13 @@
 use std::collections::BTreeSet;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
-use openengine_cluster_protocol::WorkerOutcome;
+use openengine_cluster_protocol::{FailureDiagnosticKind, WorkerOutcome};
 use crate::execution::process::{
     ProcessFrame, ProcessRunnerError, ProcessStdout, MAX_PROCESS_MESSAGE_BYTES,
 };
 use crate::native_v2_capsule::provider_process::{
-    ProviderProcess, ProviderExecutionFiles, redaction_values, report_provider_error,
-    safe_provider_text,
+    ProviderProcess, ProviderExecutionFiles, provider_error_output, redaction_values,
+    report_provider_error, safe_provider_text,
 };
 use crate::native_v2_runner::{
     AgentResponseState, DriverControl, DriverInvocation, NodeRunnerError, ProviderSchemaDialect,
@@ -244,7 +244,12 @@ impl<'a> CopilotRpc<'a> {
             ProviderSchemaDialect::OpenAiStrict,
         )?;
         if let Some(error) = response.correction_error() {
-            report_provider_error("Copilot", &error, &self.redactions, self.control).await?;
+            if let Some(mut output) = provider_error_output("Copilot", &error, &self.redactions)? {
+                output.diagnostic = state
+                    .corrections_exhausted()
+                    .then_some(FailureDiagnosticKind::Failure);
+                self.control.emit(output).await?;
+            }
         }
         state.accept("Copilot", self.control, response).await
     }

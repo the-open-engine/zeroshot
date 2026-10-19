@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use openengine_cluster_protocol::{
-    Cursor, RunId, RunStatus, RunStatusParams, RunStatusResult, TerminalResult,
+    Cursor, FailureContext, RunId, RunStatus, RunStatusParams, RunStatusResult, TerminalResult,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -26,12 +26,17 @@ pub(crate) enum RuntimeStatusReader {
 pub struct RuntimeFailure {
     pub at_cursor: Cursor,
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<Box<FailureContext>>,
 }
 
 impl RuntimeFailure {
     pub(crate) fn apply(&self, value: &mut Value) {
         value["phase"] = json!("finished");
         value["terminal"] = json!({"status":"failed", "reason":self.reason});
+        if let Some(context) = &self.context {
+            value["terminal"]["context"] = json!(context);
+        }
         value["runtimeFailure"] = json!(self);
     }
 }
@@ -117,11 +122,12 @@ pub(crate) fn confirmed_failure(
     }
     match status.status {
         RunStatus::Finished {
-            terminal_result: TerminalResult::Failed { reason },
+            terminal_result: TerminalResult::Failed { reason, context },
             ..
         } if reason.as_str() == "runtime_failed" => Some(RuntimeFailure {
             at_cursor: status.at_cursor,
             reason: "runtime_failed".into(),
+            context,
         }),
         _ => None,
     }

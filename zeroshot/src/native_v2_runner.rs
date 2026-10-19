@@ -11,7 +11,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    GraphNode, NodeInstructions, NodeName, RunId, UnixTimestampMillis, WorkerOutcome, WorkerRef,
+    FailureDiagnosticKind, GraphNode, NodeInstructions, NodeName, RunId, UnixTimestampMillis,
+    WorkerOutcome, WorkerRef,
 };
 use tokio::sync::{broadcast, oneshot, watch, Mutex};
 
@@ -81,6 +82,7 @@ pub enum LiveOutputStream {
 pub struct LiveOutput {
     pub stream: LiveOutputStream,
     pub text: String,
+    pub diagnostic: Option<FailureDiagnosticKind>,
 }
 
 impl LiveOutput {
@@ -89,7 +91,20 @@ impl LiveOutput {
         if text.len() > MAX_LIVE_OUTPUT_BYTES || text.contains('\0') {
             return Err(NodeRunnerError::UnsafeOutput);
         }
-        Ok(Self { stream, text })
+        Ok(Self {
+            stream,
+            text,
+            diagnostic: None,
+        })
+    }
+
+    /// The producer must redact owned credentials before constructing a public diagnostic.
+    pub(crate) fn diagnostic(kind: FailureDiagnosticKind, message: impl Into<String>) -> Self {
+        Self {
+            stream: LiveOutputStream::Error,
+            text: bounded_log_text(message.into(), MAX_LIVE_OUTPUT_BYTES / 2),
+            diagnostic: Some(kind),
+        }
     }
 }
 
@@ -217,6 +232,10 @@ impl DriverControl {
             .await?;
         let _ = self.live_output.send(output);
         Ok(())
+    }
+
+    pub(crate) fn mark_diagnostics_incomplete(&self) {
+        self.durable_output.mark_diagnostics_incomplete();
     }
 
     pub async fn record_token_usage(

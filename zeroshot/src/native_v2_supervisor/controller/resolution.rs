@@ -93,6 +93,7 @@ impl NativeV2Supervisor {
             .append(
                 &self.run_id,
                 vec![RunEvent::SafeLog {
+                    diagnostic: None,
                     execution: Some(reference.execution),
                     timestamp: crate::native_v2_runner::current_timestamp(),
                     stream: SafeLogStream::System,

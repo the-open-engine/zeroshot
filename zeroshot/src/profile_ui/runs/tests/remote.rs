@@ -360,6 +360,7 @@ async fn assert_live_append(
         .append(
             &fixture.id,
             vec![RunEvent::SafeLog {
+                diagnostic: None,
                 execution: Some(ExecutionId::new(1).assert_value()),
                 timestamp: UnixTimestampMillis::new(10_000).assert_value(),
                 stream: SafeLogStream::Output,
@@ -651,6 +652,7 @@ fn remote_summary_validation_preserves_terminal_authority() {
     assert!(!invalid_remote_summary(&queued));
 
     let failure = RuntimeFailure {
+        context: None,
         at_cursor: Cursor::new("v2:7"),
         reason: "runtime_failed".into(),
     };

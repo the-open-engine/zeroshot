@@ -1,4 +1,7 @@
-use openengine_cluster_protocol::{Cursor, PositiveInteger, TerminalResult, TokenCount, TokenUsage};
+use openengine_cluster_protocol::{
+    ActiveExecution, BoundedLogMessage, Cursor, FailureDiagnostic, FailureDiagnosticKind,
+    PositiveInteger, TerminalResult, TokenCount, TokenUsage,
+};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -44,6 +47,20 @@ fn bounded_json(value: &impl Serialize, maximum: usize) -> Result<(), ()> {
     (bytes.len() <= maximum).then_some(()).ok_or(())
 }
 
+/// Include the current diagnostic projection in the terminal event before persisting it.
+/// Earlier records in the same append are already projected, so event and status agree.
+pub(crate) fn prepare_event(snapshot: &RunSnapshot, mut event: RunEvent) -> RunEvent {
+    if let RunEvent::Terminal {
+        result: TerminalResult::Failed { reason, context },
+    } = &mut event
+        && context.is_none()
+        && reason.as_str() != "force_stopped"
+    {
+        *context = snapshot.failure_context.clone();
+    }
+    event
+}
+
 pub(crate) fn apply_event(
     snapshot: &mut RunSnapshot,
     event: &RunEvent,
@@ -87,7 +104,7 @@ fn apply_event_kind(
         RunEvent::ExecutionVoided { reference, reason } => {
             apply_execution_voided(snapshot, reference, *reason, sequence)
         }
-        RunEvent::SafeLog { execution, .. } => apply_safe_log(snapshot, *execution),
+        RunEvent::SafeLog { .. } => apply_safe_log(snapshot, event, sequence),
         RunEvent::TokenUsageObserved { execution, usage } => {
             apply_token_usage(snapshot, *execution, usage.as_ref())
         }
@@ -154,6 +171,7 @@ fn apply_node_started(
             input: input.clone(),
             started_at: cursor_for(sequence),
             state: NodeState::Active,
+            failure_diagnostic: false,
         },
     );
     Ok(())
@@ -223,15 +241,89 @@ fn apply_execution_voided(
 }
 
 fn apply_safe_log(
-    snapshot: &RunSnapshot,
-    execution: Option<ExecutionId>,
+    snapshot: &mut RunSnapshot,
+    event: &RunEvent,
+    sequence: u64,
 ) -> Result<(), RunLedgerError> {
-    match execution {
-        None => Ok(()),
-        Some(id) if snapshot.executions.contains_key(&id) => Ok(()),
-        Some(_) => Err(RunLedgerError::InvalidEvent(
+    if let RunEvent::SafeLog {
+        execution: Some(id),
+        ..
+    } = event
+        && !snapshot.executions.contains_key(id)
+    {
+        return Err(RunLedgerError::InvalidEvent(
             "log references an unknown execution",
-        )),
+        ));
+    }
+    apply_failure_diagnostic(snapshot, event, sequence)
+}
+
+fn apply_failure_diagnostic(
+    snapshot: &mut RunSnapshot,
+    event: &RunEvent,
+    sequence: u64,
+) -> Result<(), RunLedgerError> {
+    let RunEvent::SafeLog {
+        execution,
+        stream,
+        line,
+        diagnostic: Some(kind),
+        ..
+    } = event
+    else {
+        return Ok(());
+    };
+    if *stream != super::SafeLogStream::Error {
+        return Err(RunLedgerError::InvalidEvent(
+            "failure diagnostic must use the error stream",
+        ));
+    }
+    if *kind == FailureDiagnosticKind::Incomplete {
+        snapshot.failure_context.get_or_insert_default().incomplete = true;
+        return Ok(());
+    }
+    let public_execution = diagnostic_execution(snapshot, *execution)?;
+    let message = BoundedLogMessage::new(crate::native_v2_runner::bounded_log_text(
+        crate::native_v2_contract::visible_text(line.as_str()),
+        openengine_cluster_protocol::MAX_LOG_MESSAGE_BYTES,
+    ))
+    .unwrap_or_else(|_| BoundedLogMessage::redacted());
+    let diagnostic = FailureDiagnostic {
+        message,
+        execution: public_execution,
+        cursor: Some(cursor_for(sequence)),
+    };
+    let context = snapshot.failure_context.get_or_insert_default();
+    if execution.is_none() && context.primary.is_none() {
+        context.primary = Some(diagnostic);
+    } else {
+        context.record(diagnostic);
+    }
+    Ok(())
+}
+
+fn diagnostic_execution(
+    snapshot: &mut RunSnapshot,
+    execution: Option<ExecutionId>,
+) -> Result<Option<ActiveExecution>, RunLedgerError> {
+    match execution {
+        Some(id) => {
+            let node = snapshot
+                .executions
+                .get_mut(&id)
+                .ok_or(RunLedgerError::InvalidEvent(
+                    "diagnostic execution was not dispatched",
+                ))?;
+            node.failure_diagnostic = true;
+            Ok(Some(ActiveExecution {
+                execution: node
+                    .reference
+                    .public_execution()
+                    .map_err(|_| RunLedgerError::Corrupt)?,
+                node: node.reference.node.clone(),
+            }))
+        }
+        None => Ok(None),
     }
 }
 

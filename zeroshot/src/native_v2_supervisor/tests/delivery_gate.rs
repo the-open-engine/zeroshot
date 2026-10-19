@@ -170,6 +170,7 @@ fn snapshot(
         snapshot.executions.insert(
             reference.execution,
             NodeSnapshot {
+                failure_diagnostic: false,
                 reference: reference.clone(),
                 occurrence: StructuralOccurrence {
                     node: reference.node.clone(),
@@ -190,6 +191,7 @@ fn snapshot(
 
 fn delivery_unconfirmed() -> TerminalResult {
     TerminalResult::Failed {
+        context: None,
         reason: EnumLabel::new("delivery_unconfirmed").assert_value(),
     }
 }

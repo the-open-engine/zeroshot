@@ -90,6 +90,15 @@ impl ProviderTranscript for PiTranscript {
         matches!(self.terminal, Some(Terminal::Complete(_)))
     }
 
+    fn failure_diagnostic(&self, process_detail: Option<&str>) -> Option<String> {
+        let detail = match &self.terminal {
+            Some(Terminal::Failed(detail)) => Some(detail.as_str()),
+            _ => None,
+        };
+        self.output
+            .failure_diagnostic("Pi", detail.into_iter().chain(process_detail))
+    }
+
     /// Settles the attempt from the last assistant message. A recovered retry is a success, and a
     /// failure reported after the final answer is a failure, because the last message is
     /// authoritative.

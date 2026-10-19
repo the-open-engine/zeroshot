@@ -460,7 +460,7 @@ pub enum NativeV2CliError {
         message: String,
     },
     #[error("{0}")]
-    RunFailed(RunFailure),
+    RunFailed(Box<RunFailure>),
     #[error("merge plan finished unsuccessfully")]
     MergePlanFailed,
     #[error("could not write CLI output: {0}")]

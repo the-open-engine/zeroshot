@@ -793,7 +793,7 @@ async fn required_parallel_outputs_move_existing_failure_handling_before_a_new_c
     );
     assert!(matches!(
         failed.terminal,
-        Some(TerminalProjection::Failed { reason }) if reason.as_str() == "campaign_failed"
+        Some(TerminalProjection::Failed { reason, .. }) if reason.as_str() == "campaign_failed"
     ));
     assert!(!failed.decisions.iter().any(|decision| matches!(decision, Decision::Dispatch { occurrence, .. } if occurrence.node.as_str()=="assemble")));
     let mut assembly = settled(
@@ -812,7 +812,7 @@ async fn required_parallel_outputs_move_existing_failure_handling_before_a_new_c
         ],
     );
     assert!(
-        matches!(failed.terminal, Some(TerminalProjection::Failed { reason }) if reason.as_str() == "execution_failed")
+        matches!(failed.terminal, Some(TerminalProjection::Failed { reason, .. }) if reason.as_str() == "execution_failed")
     );
 }
 

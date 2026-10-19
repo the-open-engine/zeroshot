@@ -35,8 +35,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use openengine_cluster_protocol::RunId;
-use openengine_cluster_protocol::{EnumLabel, FieldName, WorkerErrorCode, WorkerOutcome, WorkerRef};
+use openengine_cluster_protocol::{
+    EnumLabel, FailureDiagnosticKind, FieldName, RunId, WorkerErrorCode, WorkerOutcome, WorkerRef,
+};
 use serde_json::{Map, Value, json};
 
 use crate::native_v2_contract::{

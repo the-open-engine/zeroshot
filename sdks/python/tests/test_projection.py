@@ -131,3 +131,72 @@ def test_present_malformed_source_remains_a_protocol_error(source: object) -> No
     value["source"] = source
     with pytest.raises(ProtocolError, match="source"):
         _status(value)
+
+
+def failed_status(context: object = None) -> dict[str, object]:
+    value = local_status()
+    terminal = {"status": "failed", "reason": "delivery_failed"}
+    if context is not None:
+        terminal["context"] = context
+    value["status"] = {"phase": "finished", "terminalResult": terminal}
+    return value
+
+
+def test_failed_status_retains_immutable_structured_evidence_without_inventing_a_cause() -> None:
+    from dataclasses import FrozenInstanceError
+
+    from zeroshot import ActiveExecution, FailureContext, FailureDiagnostic
+
+    context = {
+        "primary": {"message": "Runtime cleanup failed"},
+        "recorded": [
+            {
+                "message": "GitHub API request failed: HTTP 404 — base branch not found",
+                "execution": {"execution": "opaque:execution:1", "node": "deliver"},
+                "cursor": "v2:3",
+            }
+        ],
+        "incomplete": True,
+    }
+    result = _status(failed_status(context)).result
+    assert result is not None
+    assert result.failure == "delivery_failed"
+    assert result.context == FailureContext(
+        primary=FailureDiagnostic(message="Runtime cleanup failed"),
+        recorded=(
+            FailureDiagnostic(
+                message="GitHub API request failed: HTTP 404 — base branch not found",
+                execution=ActiveExecution(execution="opaque:execution:1", node="deliver"),
+                cursor="v2:3",
+            ),
+        ),
+        incomplete=True,
+    )
+    context["recorded"].clear()
+    assert len(result.context.recorded) == 1
+    with pytest.raises(FrozenInstanceError):
+        result.context.recorded[0].message = "changed"
+
+
+def test_old_failed_status_has_no_inferred_context() -> None:
+    result = _status(failed_status()).result
+    assert result is not None
+    assert result.failure == "delivery_failed"
+    assert result.context is None
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        False,
+        "failure",
+        {"incomplete": "true"},
+        {"recorded": None},
+        {"recorded": [{"message": 123}]},
+        {"primary": {"message": "failed", "execution": "1"}},
+        {"primary": {"message": "failed", "cursor": 3}},
+    ],
+)
+def test_failed_status_rejects_malformed_failure_evidence(context: object) -> None:
+    with pytest.raises(ProtocolError, match="failure"):
+        _status(failed_status(context))

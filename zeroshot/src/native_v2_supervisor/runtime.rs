@@ -28,13 +28,13 @@ impl NativeV2Supervisor {
     }
 
     pub(super) async fn record_failure_logs(&self, logs: Vec<RunEvent>) {
-        if !logs.is_empty() {
-            let _ = tokio::time::timeout(
-                Duration::from_secs(1),
-                self.ledger.append(&self.run_id, logs),
-            )
-            .await;
+        if logs.is_empty() {
+            return;
         }
+        let _ = tokio::time::timeout(Duration::from_secs(1), async {
+            self.ledger.append(&self.run_id, logs).await
+        })
+        .await;
     }
 
     pub(super) async fn drain_failed_tasks(&self, tasks: &mut JoinSet<FinishedDispatch>) {
@@ -294,6 +294,7 @@ pub(super) async fn bridge_durable_events(
                     timestamp,
                     stream: safe_log_stream(output.stream),
                     line: SafeLogLine::new(output.text)?,
+                    diagnostic: output.diagnostic,
                 },
                 DurableNodeEvent::TokenUsage(usage) => {
                     RunEvent::TokenUsageObserved { execution, usage }

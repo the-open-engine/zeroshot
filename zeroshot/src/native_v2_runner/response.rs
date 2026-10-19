@@ -229,6 +229,10 @@ impl AgentResponseState {
         &self.prompt
     }
 
+    pub(crate) fn corrections_exhausted(&self) -> bool {
+        self.corrections == MAX_OUTPUT_CORRECTIONS
+    }
+
     pub(crate) fn replace_prompt(&mut self, prompt: String) {
         self.prompt = prompt;
     }
@@ -241,7 +245,7 @@ impl AgentResponseState {
     ) -> Result<Option<WorkerOutcome>, NodeRunnerError> {
         match response {
             AgentResponse::Complete(outcome) => Ok(Some(outcome)),
-            AgentResponse::Correction { .. } if self.corrections == MAX_OUTPUT_CORRECTIONS => {
+            AgentResponse::Correction { .. } if self.corrections_exhausted() => {
                 control
                     .emit(LiveOutput::new(
                         LiveOutputStream::System,

@@ -99,11 +99,13 @@ impl PortableRunEngine {
                     );
                     let failed_observability = observability.clone();
                     let failed_run_id = run_id.clone();
+                    let public_cause = cause.clone();
                     let recovery = task_result(
                         tokio::spawn(async move {
                             supervisor
                                 .fail_runtime(&cause, || {
-                                    failed_observability.runtime_failed(&failed_run_id)
+                                    failed_observability
+                                        .runtime_failed_with_cause(&failed_run_id, &cause)
                                 })
                                 .await
                         })
@@ -125,7 +127,7 @@ impl PortableRunEngine {
                         "run {} runtime_failed: {details}",
                         run_id.as_str()
                     );
-                    observability.runtime_failed(&run_id);
+                    observability.runtime_failed_with_cause(&run_id, &public_cause);
                     observability.refresh_runtime(&run_id).await;
                 }
             }

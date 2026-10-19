@@ -37,9 +37,10 @@ impl ReviewProgress {
             SourceReviewState::Merged { merge_revision } if valid_revision(&merge_revision) => {
                 Ok(Self::Merged(merge_revision))
             }
-            SourceReviewState::Merged { .. } => {
-                Err(DeliveryStop::Outcome(WorkerOutcome::malformed()))
-            }
+            SourceReviewState::Merged { .. } => Err(DeliveryStop::failure(
+                WorkerOutcome::malformed(),
+                "Forge reported a merged review without a valid merge revision",
+            )),
             SourceReviewState::Open { checks } => Ok(Self::from_open(
                 checks,
                 observation.pull_request_ready,
@@ -61,17 +62,11 @@ impl ReviewProgress {
     }
 }
 
-pub(super) async fn failed_review(
-    control: &DriverControl,
-    detail: &str,
-) -> Result<ReviewStep, DeliveryStop> {
-    let error = NodeRunnerError::DriverDetail(detail.to_owned());
-    let _ = report_provider_error("Git delivery", &error, &[], control).await;
-    Err(crash_outcome())
-}
-
-pub(super) fn crash_outcome() -> DeliveryStop {
-    DeliveryStop::Outcome(WorkerOutcome::declared_failure(WorkerErrorCode::Crash))
+pub(super) fn failed_review(detail: &str) -> Result<ReviewStep, DeliveryStop> {
+    Err(DeliveryStop::failure(
+        WorkerOutcome::declared_failure(WorkerErrorCode::Crash),
+        detail,
+    ))
 }
 
 pub(super) async fn review_completion(
@@ -139,14 +134,10 @@ impl NativeV2DeliveryAdapter {
                 DeliveryValidationDecision::Pending => {
                     completed_attempts = completed_attempts.saturating_add(1);
                     if !self.config.poll.has_next(completed_attempts) {
-                        emit(
-                            preparation.control,
-                            "delivery: trusted publication validation timed out",
-                        )
-                        .await?;
-                        return Err(DeliveryStop::Outcome(WorkerOutcome::declared_failure(
-                            WorkerErrorCode::Timeout,
-                        )));
+                        return Err(DeliveryStop::failure(
+                            WorkerOutcome::declared_failure(WorkerErrorCode::Timeout),
+                            "trusted publication validation timed out",
+                        ));
                     }
                     emit(
                         preparation.control,

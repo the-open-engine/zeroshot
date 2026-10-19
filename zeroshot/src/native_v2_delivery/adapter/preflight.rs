@@ -364,13 +364,13 @@ impl NativeV2DeliveryAdapter {
 
     pub(super) async fn refuse_delivery(
         &self,
-        control: &DriverControl,
+        _control: &DriverControl,
         diagnostic: &str,
     ) -> Result<(), DeliveryStop> {
-        emit(control, diagnostic).await?;
-        Err(DeliveryStop::Outcome(WorkerOutcome::declared_failure(
-            WorkerErrorCode::Refusal,
-        )))
+        Err(DeliveryStop::failure(
+            WorkerOutcome::declared_failure(WorkerErrorCode::Refusal),
+            diagnostic,
+        ))
     }
 
     pub(super) fn retry_interval(&self, attempt: usize) -> Duration {
@@ -445,9 +445,12 @@ impl NativeV2DeliveryAdapter {
         }
         retry.attempts = retry.attempts.saturating_add(1);
         if !self.config.poll.has_next(retry.attempts) {
-            return Err(DeliveryStop::Outcome(WorkerOutcome::declared_failure(
-                WorkerErrorCode::Timeout,
-            )));
+            return Err(DeliveryStop::failure(
+                WorkerOutcome::declared_failure(WorkerErrorCode::Timeout),
+                error
+                    .with_context("Delivery operation retry limit exhausted")
+                    .to_string(),
+            ));
         }
         if can_refresh {
             return self

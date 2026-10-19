@@ -301,6 +301,7 @@ async fn stopped_runs_settle_pending_controls_without_selecting_post_stop_routes
             &fixture.id,
             vec![RunEvent::Terminal {
                 result: TerminalResult::Failed {
+                    context: None,
                     reason: "runtime_failed".parse().assert_value(),
                 },
             }],
@@ -332,6 +333,7 @@ async fn bounded_pages_and_new_live_readers_publish_identical_control_deltas() {
     let reviews = begin_reviews(&fixture).await;
     let logs = (0..MAX_REPLAY_EVENTS + 7)
         .map(|index| RunEvent::SafeLog {
+            diagnostic: None,
             execution: Some(reviews[0].execution),
             timestamp: UnixTimestampMillis::new(index as u64 + 1).assert_value(),
             stream: SafeLogStream::Output,

@@ -345,3 +345,30 @@ fn boundary_contract_every_reasoning_effort_has_a_stable_provider_token() {
     assert_eq!(effort_token(ReasoningEffort::Xhigh), "xhigh");
     assert_eq!(effort_token(ReasoningEffort::Max), "max");
 }
+
+#[tokio::test]
+async fn stalled_cleanup_publication_marks_diagnostics_incomplete_without_usage_loss() {
+    use crate::native_v2_runner::DurableNodeEvent;
+    use openengine_cluster_protocol::FailureDiagnosticKind;
+    let (_cancellation, control, mut output) = crate::native_v2_runner::test_support::control();
+    control
+        .emit(LiveOutput::new(LiveOutputStream::Output, "consumer stalled").unwrap())
+        .await
+        .unwrap();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        report_cleanup_failure(&control, "last failure cause".to_owned()),
+    )
+    .await
+    .unwrap();
+    drop(control);
+    assert!(
+        matches!(output.recv().await.unwrap(), DurableNodeEvent::Output { output, .. }
+        if output.diagnostic.is_none())
+    );
+    assert!(
+        matches!(output.recv().await.unwrap(), DurableNodeEvent::Output { output, .. }
+        if output.diagnostic == Some(FailureDiagnosticKind::Incomplete))
+    );
+    assert!(output.recv().await.is_err());
+}

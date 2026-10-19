@@ -148,6 +148,7 @@ async fn force_stop_closes_active_work_and_never_dispatches_again() {
             .assert_value_with("drive task")
             .assert_value_with("terminal"),
         TerminalResult::Failed {
+            context: None,
             reason: EnumLabel::new("force_stopped").assert_value_with("label")
         }
     );

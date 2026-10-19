@@ -3,7 +3,8 @@
 use std::time::Duration;
 
 use openengine_cluster_protocol::{
-    EnumLabel, TerminalResult, WorkerErrorCode, WorkerFailureReason, WorkerOutcome,
+    EnumLabel, FailureDiagnosticKind, TerminalResult, WorkerErrorCode, WorkerFailureReason,
+    WorkerOutcome,
 };
 
 use crate::native_v2_contract::{ExecutionRef, NodeCompletion};
@@ -40,14 +41,15 @@ pub(super) fn node_failure_log(
             WorkerFailureReason::AuthenticationRequired => ": authentication required",
             WorkerFailureReason::MalformedResult => ": result did not match the node contract",
         };
-        let cause = cause.map_or_else(String::new, |cause| format!(": {cause}"));
+        let cause_text = cause.map_or_else(String::new, |cause| format!(": {cause}"));
         return error_log(
             Some(reference.execution),
             format!(
-                "Node {} failed: {}{timing}{reason}{cause}",
+                "Node {} failed: {}{timing}{reason}{cause_text}",
                 reference.node.as_str(),
                 code.as_str(),
             ),
+            Some(FailureDiagnosticKind::Failure),
         )
         .map(Some);
     }
@@ -55,13 +57,21 @@ pub(super) fn node_failure_log(
 }
 
 pub(super) fn runtime_failure_log(cause: &str) -> Result<RunEvent, RunLedgerError> {
-    error_log(None, format!("Runtime failed: {cause}"))
+    error_log(
+        None,
+        format!("Runtime failed: {cause}"),
+        Some(FailureDiagnosticKind::Failure),
+    )
 }
 
 pub(super) fn terminal_events(result: TerminalResult) -> Result<Vec<RunEvent>, RunLedgerError> {
     let mut events = Vec::new();
-    if let TerminalResult::Failed { reason } = &result {
-        events.push(error_log(None, format!("Run failed: {}", reason.as_str()))?);
+    if let TerminalResult::Failed { reason, .. } = &result {
+        events.push(error_log(
+            None,
+            format!("Run failed: {}", reason.as_str()),
+            None,
+        )?);
     }
     events.push(RunEvent::Terminal { result });
     Ok(events)
@@ -73,6 +83,7 @@ pub(crate) fn terminal_failure_events(
     code: WorkerErrorCode,
 ) -> Result<Vec<RunEvent>, RunLedgerError> {
     let terminal = TerminalResult::Failed {
+        context: None,
         reason: EnumLabel::new(reason).map_err(|_| RunLedgerError::Corrupt)?,
     };
     let cause = format!("run {reason}");
@@ -87,6 +98,7 @@ pub(crate) fn terminal_failure_events(
             Some(&cause),
         )?);
     }
+    clear_diagnostics(&mut events);
     events.extend(terminal_events(terminal)?);
     Ok(events)
 }
@@ -94,9 +106,11 @@ pub(crate) fn terminal_failure_events(
 fn error_log(
     execution: Option<crate::full_v1_reducer::ExecutionId>,
     message: String,
+    diagnostic: Option<FailureDiagnosticKind>,
 ) -> Result<RunEvent, RunLedgerError> {
     Ok(RunEvent::SafeLog {
         execution,
+        diagnostic,
         timestamp: crate::native_v2_runner::current_timestamp(),
         stream: SafeLogStream::Error,
         line: SafeLogLine::new(crate::native_v2_runner::bounded_log_text(
@@ -104,4 +118,38 @@ fn error_log(
             crate::v2_run_ledger::MAX_SAFE_LOG_BYTES / 2,
         ))?,
     })
+}
+
+/// Synthetic run-stop completions and duplicate fallback logs are not new diagnostic causes.
+pub(super) fn clear_diagnostics(events: &mut [RunEvent]) {
+    for event in events {
+        if let RunEvent::SafeLog { diagnostic, .. } = event {
+            *diagnostic = None;
+        }
+    }
+}
+
+/// A producer detail supersedes a generic settlement summary, never a later concrete error.
+pub(super) fn clear_recorded_diagnostics(
+    events: &mut [RunEvent],
+    snapshot: &RunSnapshot,
+    has_detail: bool,
+) {
+    if has_detail {
+        return;
+    }
+    for event in events {
+        if let RunEvent::SafeLog {
+            execution: Some(id),
+            diagnostic,
+            ..
+        } = event
+            && snapshot
+                .executions
+                .get(id)
+                .is_some_and(|node| node.failure_diagnostic)
+        {
+            *diagnostic = None;
+        }
+    }
 }

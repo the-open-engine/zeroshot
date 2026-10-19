@@ -1,8 +1,7 @@
 //! The cause of a failed foreground run.
 //!
-//! The run's durable error logs already explain its failure. A failed foreground run follows them
-//! like `zeroshot logs`, within a deadline and its Ctrl-C signal, so the process error names the
-//! cause. Reading them is best effort and never replaces the failure itself.
+//! A foreground run keeps the structured context from its terminal status. Older runs without
+//! context fall back to durable error logs within a deadline and the caller's Ctrl-C signal.
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -10,9 +9,14 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
-use openengine_cluster_protocol::{BoundedLogMessage, LogLevel, RunId, RunLogEventNotification};
+use openengine_cluster_protocol::{
+    BoundedLogMessage, EnumLabel, FailureContext, FailureDiagnostic, LogLevel, RunId,
+    RunLogEventNotification, RunStatus, TerminalResult,
+};
 
-use super::super::{CliOutcome, CliRunWatchEventNotification, NativeV2CliBackend, NativeV2CliError};
+use super::super::{
+    CliOutcome, CliRunStatus, CliRunWatchEventNotification, NativeV2CliBackend, NativeV2CliError,
+};
 use super::{DurableFollow, DurableFollowKind, DurableOutput, follow_durable_with_detach};
 
 /// Most recent error log records a failed foreground run reports; `zeroshot logs` keeps them all.
@@ -30,9 +34,65 @@ pub struct RunFailure {
     errors: VecDeque<BoundedLogMessage>,
     omitted: usize,
     complete: bool,
+    context: Option<(EnumLabel, Box<FailureContext>)>,
+}
+
+/// Writes the ordinary watch output while retaining its terminal failure context.
+pub(super) struct FailureOutput<'a, W> {
+    output: &'a mut W,
+    pub(super) context: Option<(EnumLabel, Box<FailureContext>)>,
+}
+
+impl<'a, W> FailureOutput<'a, W> {
+    pub(super) fn new(output: &'a mut W) -> Self {
+        Self {
+            output,
+            context: None,
+        }
+    }
+
+    pub(super) fn observe(&mut self, status: &CliRunStatus) {
+        if let CliRunStatus::Target(RunStatus::Finished {
+            terminal_result:
+                TerminalResult::Failed {
+                    reason,
+                    context: Some(context),
+                },
+            ..
+        }) = status
+        {
+            self.context = Some((reason.clone(), context.clone()));
+        }
+    }
+}
+
+impl<W: std::io::Write> DurableOutput for FailureOutput<'_, W> {
+    fn watch_event(&mut self, event: CliRunWatchEventNotification) -> Result<(), NativeV2CliError> {
+        self.observe(&event.status);
+        super::write_json(self.output, &event)
+    }
+
+    fn log_event(&mut self, event: RunLogEventNotification) -> Result<(), NativeV2CliError> {
+        super::write_json(self.output, &event)
+    }
 }
 
 impl RunFailure {
+    pub(super) fn from_context(
+        run_id: RunId,
+        target: Option<&str>,
+        context: (EnumLabel, Box<FailureContext>),
+    ) -> Self {
+        Self {
+            run_id,
+            target: target.map(str::to_owned),
+            complete: !context.1.incomplete,
+            context: Some(context),
+            errors: VecDeque::new(),
+            omitted: 0,
+        }
+    }
+
     pub(super) async fn read<B, D>(
         backend: &B,
         target: Option<&str>,
@@ -49,6 +109,7 @@ impl RunFailure {
             errors: VecDeque::new(),
             omitted: 0,
             complete: false,
+            context: None,
         };
         let follow = DurableFollow {
             backend,
@@ -88,7 +149,19 @@ impl DurableOutput for RunFailure {
 impl fmt::Display for RunFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("run finished unsuccessfully")?;
-        if !self.errors.is_empty() {
+        if let Some((reason, context)) = &self.context {
+            write!(formatter, ": {}", reason.as_str())?;
+            if let Some(primary) = &context.primary {
+                formatter.write_str("\nFailure:")?;
+                write_diagnostic(formatter, primary)?;
+            }
+            if !context.recorded.is_empty() {
+                formatter.write_str("\nRecorded failures:")?;
+                for diagnostic in &context.recorded {
+                    write_diagnostic(formatter, diagnostic)?;
+                }
+            }
+        } else if !self.errors.is_empty() {
             let shown = self.errors.len();
             if self.omitted == 0 {
                 formatter.write_str("\nError logs:")?;
@@ -101,7 +174,11 @@ impl fmt::Display for RunFailure {
             }
         }
         if !self.complete {
-            formatter.write_str("\nThe run log could not be read completely.")?;
+            formatter.write_str(if self.context.is_some() {
+                "\nAdditional failure details may be missing; see the full run log."
+            } else {
+                "\nThe run log could not be read completely."
+            })?;
         }
         write!(
             formatter,
@@ -113,4 +190,19 @@ impl fmt::Display for RunFailure {
         }
         Ok(())
     }
+}
+
+fn write_diagnostic(
+    formatter: &mut fmt::Formatter<'_>,
+    diagnostic: &FailureDiagnostic,
+) -> fmt::Result {
+    formatter.write_str("\n  ")?;
+    if let Some(execution) = &diagnostic.execution {
+        write!(formatter, "{}: ", execution.node.as_str())?;
+    }
+    formatter.write_str(diagnostic.message.as_str())?;
+    if let Some(cursor) = &diagnostic.cursor {
+        write!(formatter, " (log {})", cursor.as_str())?;
+    }
+    Ok(())
 }

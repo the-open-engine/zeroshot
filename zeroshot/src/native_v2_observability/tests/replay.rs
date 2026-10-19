@@ -22,6 +22,7 @@ async fn seed_replay(ledger: &dyn RunLedger, log_count: usize, message_bytes: us
     for start in (0..log_count).step_by(128) {
         let events = (start..(start + 128).min(log_count))
             .map(|index| RunEvent::SafeLog {
+                diagnostic: None,
                 execution: Some(worker.execution),
                 timestamp: UnixTimestampMillis::new(1_700_000_000_000).assert_value(),
                 stream: SafeLogStream::Output,

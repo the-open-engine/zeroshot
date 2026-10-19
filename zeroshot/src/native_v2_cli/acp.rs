@@ -808,7 +808,7 @@ impl TurnResult {
                 raw_output: output,
                 stop_reason: acp::StopReason::EndTurn,
             }),
-            TerminalResult::Failed { reason } => Ok(Self {
+            TerminalResult::Failed { reason, .. } => Ok(Self {
                 run_id,
                 raw_output: json!({ "failed": reason.as_str() }),
                 message: Some(format!("Zeroshot run failed: {}", reason.as_str())),
@@ -825,7 +825,7 @@ impl TurnResult {
 fn terminal_value(terminal: TerminalResult) -> Value {
     match terminal {
         TerminalResult::Succeeded { output } => output,
-        TerminalResult::Failed { reason } => json!({ "failed": reason.as_str() }),
+        TerminalResult::Failed { reason, .. } => json!({ "failed": reason.as_str() }),
     }
 }
 

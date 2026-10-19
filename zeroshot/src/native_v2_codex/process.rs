@@ -5,7 +5,8 @@ use crate::execution::process::{
 };
 use crate::native_v2_capsule::provider_process::{
     ProcessExchange, ProcessInputFailure, ProviderExecutionFiles, ProviderProcess,
-    exchange_process_io, open_provider_process, process_failure_detail, require_process_cleanup,
+    exchange_process_io, open_provider_process, process_failure_detail,
+    provider_failure_diagnostic, report_cleanup_failure, require_process_cleanup,
     text::ProviderText,
 };
 use crate::native_v2_contract::TokenUsageDelta;
@@ -77,32 +78,29 @@ pub(super) async fn exchange_turn(
     let stdout = process.detach_stdout();
     let collected = collect_output(stdout, context.control, redactions);
     let exchange = exchange_process_io(process, prompt.as_bytes(), collected).await;
-    let (resolved, usage) = match exchange {
+    let (collected, completion, input_error) = match exchange {
         ProcessExchange::Complete(collected) => {
-            let output_complete = collected.delivery_error.is_none();
-            let output = retain_delivery_evidence(collected.output, collected.delivery_error);
-            let completion = finish_process(process, output_complete).await;
-            (
-                resolve_process_completion(output, completion, context.control.is_cancelled()),
-                collected.usage,
-            )
+            let completion = finish_process(process, collected.delivery_error.is_none()).await;
+            (collected, completion, None)
         }
         ProcessExchange::InputFailure(ProcessInputFailure {
-            output: collected,
+            output,
             input_error,
             completion,
-        }) => {
-            let output = retain_delivery_evidence(collected.output, collected.delivery_error);
-            (
-                resolve_input_failure(
-                    output,
-                    input_error,
-                    completion,
-                    context.control.is_cancelled(),
-                ),
-                collected.usage,
-            )
+        }) => (output, completion, Some(input_error)),
+    };
+    let usage = collected.usage;
+    let output = retain_delivery_evidence(collected.output, collected.delivery_error);
+    if let Some(diagnostic) =
+        cleanup_failure_diagnostic(&output, &completion, input_error.as_ref(), redactions)
+    {
+        report_cleanup_failure(context.control, diagnostic).await;
+    }
+    let resolved = match input_error {
+        Some(error) => {
+            resolve_input_failure(output, error, completion, context.control.is_cancelled())
         }
+        None => resolve_process_completion(output, completion, context.control.is_cancelled()),
     };
     let normalized_usage = context.session.usage_delta(usage, context.resumed).await;
     let recorded = context.control.record_token_usage(normalized_usage).await;
@@ -115,6 +113,33 @@ pub(super) async fn exchange_turn(
     recorded?;
     context.session.commit_usage(usage, context.resumed).await;
     resolved
+}
+
+fn cleanup_failure_diagnostic(
+    output: &Result<CodexOutput, NodeRunnerError>,
+    completion: &Result<ProcessSessionOutput, ProcessRunnerError>,
+    input_error: Option<&ProcessRunnerError>,
+    redactions: &[String],
+) -> Option<String> {
+    if require_process_cleanup(completion).is_ok() {
+        return None;
+    }
+    let mut details = match output {
+        Ok(output) => output.failure_message().map(str::to_owned),
+        Err(NodeRunnerError::DriverDetail(detail)) => Some(detail.clone()),
+        _ => None,
+    }
+    .into_iter()
+    .collect::<Vec<_>>();
+    if let Some(error) = input_error {
+        details.push(format!("provider process input failed: {error}"));
+    }
+    let process = completion_detail(completion, !details.is_empty())
+        .ok()
+        .flatten();
+    details.extend(process);
+    (!details.is_empty())
+        .then(|| provider_failure_diagnostic("Codex", Some(&details.join("; ")), None, redactions))
 }
 
 fn finish_collection(

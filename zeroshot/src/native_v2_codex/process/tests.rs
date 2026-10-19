@@ -175,3 +175,44 @@ fn coverage_contract_output_chunk_boundaries_preserve_utf8_without_exceeding_the
     assert!(text.is_char_boundary(end));
     assert!(end <= 8 * 1024);
 }
+
+#[test]
+fn unconfirmed_cleanup_retains_redacted_native_input_and_process_causes() {
+    let secret = "sk-cleanup-secret";
+    let output = Ok(CodexOutput::provider_failure(format!(
+        "native model rejection {secret}"
+    )));
+    let mut process = completion(ProcessCleanupEvidence::TimedOut, true);
+    process.exit_code = Some(17);
+    process.cancelled = false;
+    process.stderr_tail = format!("stderr cause {secret}").into_bytes();
+    let process = Ok(process);
+    let input = ProcessRunnerError::Io(format!("stdin rejected {secret}"));
+    let diagnostic =
+        cleanup_failure_diagnostic(&output, &process, Some(&input), &[secret.to_owned()]).unwrap();
+    assert!(diagnostic.contains("native model rejection [REDACTED]"));
+    assert!(diagnostic.contains("stdin rejected [REDACTED]"));
+    assert!(diagnostic.contains("stderr cause [REDACTED]"));
+    assert!(!diagnostic.contains(secret));
+    assert!(matches!(
+        resolve_input_failure(output, input, process, false),
+        Err(NodeRunnerError::CleanupUnconfirmed)
+    ));
+}
+
+#[test]
+fn successful_answer_text_is_never_previewed_as_a_cleanup_failure() {
+    let mut decoder = CodexOutputDecoder::new();
+    decoder.push(b"{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"private successful answer\"}}\n");
+    decoder.push(b"{\"type\":\"turn.completed\"}\n");
+    let output = Ok(decoder.finish());
+    let diagnostic = cleanup_failure_diagnostic(
+        &output,
+        &Ok(completion(ProcessCleanupEvidence::TimedOut, false)),
+        None,
+        &[],
+    )
+    .unwrap();
+    assert!(diagnostic.contains("cleanup"));
+    assert!(!diagnostic.contains("private successful answer"));
+}

@@ -265,6 +265,7 @@ async fn populate_history(fixture: &HistoryServer) {
         },
     ];
     events.extend((0..MAX_REPLAY_EVENTS + 2).map(|index| RunEvent::SafeLog {
+        diagnostic: None,
         execution: Some(reference().execution),
         timestamp: UnixTimestampMillis::new(index as u64 + 1).assert_value(),
         stream: SafeLogStream::Output,

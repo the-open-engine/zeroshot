@@ -60,6 +60,7 @@ pub(super) async fn cursor_fixture() -> (
                 started(&left),
                 started(&right),
                 RunEvent::SafeLog {
+                    diagnostic: None,
                     execution: Some(left.execution),
                     timestamp: openengine_cluster_protocol::UnixTimestampMillis::new(
                         1_725_000_000_123,
@@ -70,6 +71,7 @@ pub(super) async fn cursor_fixture() -> (
                 },
                 completed(&left, Value::Null),
                 RunEvent::SafeLog {
+                    diagnostic: None,
                     execution: Some(left.execution),
                     timestamp: openengine_cluster_protocol::UnixTimestampMillis::new(
                         1_725_000_000_456,
@@ -128,8 +130,10 @@ async fn failure_fallback_refreshes_usage_and_yields_to_a_durable_terminal() {
     else {
         panic!("storage refresh must retain the known failure");
     };
-    assert!(matches!(terminal_result, TerminalResult::Failed { reason }
-        if reason.as_str() == "runtime_failed"));
+    assert!(
+        matches!(terminal_result, TerminalResult::Failed { reason, .. }
+        if reason.as_str() == "runtime_failed")
+    );
     let usage = metadata.token_usage.assert_value();
     assert_eq!(usage.input_tokens.get(), 17);
     assert_eq!(usage.output_tokens.get(), 4);
@@ -147,4 +151,46 @@ async fn failure_fallback_refreshes_usage_and_yields_to_a_durable_terminal() {
     ));
     service.runtime_failed(&run_id);
     assert_eq!(service.status(params).await.assert_value(), terminal);
+}
+
+#[tokio::test]
+async fn unpersisted_failure_preserves_first_safe_cause_without_fabricating_history() {
+    let (ledger, run_id) = ledger_run("unpersisted-context").await;
+    let initial = ledger
+        .append(&run_id, vec![RunEvent::RunStarted])
+        .await
+        .assert_value();
+    let service = NativeV2Observability::new(ledger.clone());
+    service.track_runtime(&initial.snapshot).assert_value();
+    service.runtime_failed_with_cause(&run_id, "could not persist run history");
+    service.runtime_failed_with_cause(&run_id, "secondary cleanup error");
+    let status = service
+        .status(RunStatusParams {
+            run_id: run_id.clone(),
+        })
+        .await
+        .assert_value();
+    assert_eq!(status.at_cursor, initial.snapshot.cursor);
+    let RunStatus::Finished {
+        terminal_result:
+            TerminalResult::Failed {
+                context: Some(context),
+                ..
+            },
+        ..
+    } = status.status
+    else {
+        panic!("missing fallback context");
+    };
+    let primary = context.primary.assert_value();
+    assert!(
+        primary
+            .message
+            .as_str()
+            .contains("could not persist run history")
+    );
+    assert!(primary.cursor.is_none() && context.incomplete);
+    let stored = ledger.get(&run_id).await.assert_value().assert_value();
+    assert!(stored.snapshot.terminal.is_none());
+    assert_eq!(stored.snapshot.cursor, initial.snapshot.cursor);
 }

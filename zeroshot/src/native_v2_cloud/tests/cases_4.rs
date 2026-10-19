@@ -37,7 +37,7 @@ async fn force_cancels_preparation_without_waiting_for_allocation_or_starting_no
     .assert_value()
     .assert_value();
     assert!(
-        matches!(forced.status, RunStatus::Finished { terminal_result: TerminalResult::Failed { reason }, .. }
+        matches!(forced.status, RunStatus::Finished { terminal_result: TerminalResult::Failed { reason, .. }, .. }
         if reason.as_str() == "force_stopped")
     );
     assert_eq!(allocator.allocation_count(), 1);

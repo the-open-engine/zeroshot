@@ -80,6 +80,7 @@ async fn review_and_delivery_repairs_share_the_budget_and_worker_instance() {
         assert_eq!(
             exhausted.terminal,
             Some(TerminalProjection::Failed {
+                context: None,
                 reason: "change_attempts_exhausted".parse().assert_value(),
             })
         );

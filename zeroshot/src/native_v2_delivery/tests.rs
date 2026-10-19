@@ -35,6 +35,8 @@ use crate::native_v2_supervisor::{NativeV2Supervisor, RunEnvironment};
 use crate::v2_run_ledger::fake::FakeRunLedger;
 use crate::v2_run_ledger::{CreateRun, RunLedger};
 
+#[path = "tests/diagnostics.rs"]
+mod diagnostics;
 #[path = "tests/github_fixture.rs"]
 pub(super) mod github_fixture;
 #[path = "tests/head_update.rs"]

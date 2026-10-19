@@ -21,6 +21,7 @@ pub use openengine_cluster_protocol::{
     SourceRevisionId, MAX_DECLARED_CONNECTIONS, MAX_DECLARED_ENVIRONMENT_NAMES,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use serde_json::Value;
 use thiserror::Error;
 
@@ -193,6 +194,43 @@ pub struct ExecutionRef {
     pub execution: ExecutionId,
 }
 
+impl ExecutionRef {
+    /// The shared, opaque selector used by attach, logs and failure diagnostics.
+    pub(crate) fn public_execution(
+        &self,
+    ) -> Result<openengine_cluster_protocol::ExecutionRef, &'static str> {
+        let mut digest = Sha256::new();
+        digest.update(b"zeroshot/native-v2/execution-ref/v1\0");
+        digest.update(self.run_id.as_str().as_bytes());
+        digest.update(b"\0");
+        digest.update(self.node.as_str().as_bytes());
+        digest.update(b"\0");
+        digest.update(self.node_instance.to_string().as_bytes());
+        digest.update(b"\0");
+        digest.update(self.execution.to_string().as_bytes());
+        let token = digest
+            .finalize()
+            .iter()
+            .fold(String::from("nv2-"), |mut token, byte| {
+                use std::fmt::Write as _;
+                let _ = write!(token, "{byte:02x}");
+                token
+            });
+        openengine_cluster_protocol::ExecutionRef::new(token)
+    }
+}
+
+pub(crate) fn visible_text(text: &str) -> String {
+    let mut visible = String::with_capacity(text.len());
+    for character in text.chars() {
+        if character.is_control() {
+            visible.extend(character.escape_default());
+        } else {
+            visible.push(character);
+        }
+    }
+    visible
+}
 /// Provider-neutral usage reported for exactly one launched agent invocation.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]

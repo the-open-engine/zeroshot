@@ -778,6 +778,66 @@
       ],
       "type": "object"
     },
+    "FailureContext": {
+      "additionalProperties": false,
+      "description": "The known runtime cause and recent recorded node failures are deliberately separate.\nRecorded failures are evidence; retries or parallel branches may have recovered from them.",
+      "properties": {
+        "incomplete": {
+          "default": false,
+          "type": "boolean"
+        },
+        "primary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureDiagnostic"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recorded": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FailureDiagnostic"
+          },
+          "maxItems": 5,
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "FailureDiagnostic": {
+      "additionalProperties": false,
+      "description": "One recorded explanation, with an optional execution selector and retained log cursor.\nA missing cursor means there is no reference into the available durable history.",
+      "properties": {
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "execution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActiveExecution"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "maxLength": 16384,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
     "FaultAction": {
       "description": "Descriptive only, like [`FaultRetryDisposition`]: naming `Retry` never itself retries or\nauthorizes a retry.",
       "enum": [
@@ -5478,6 +5538,16 @@
         {
           "additionalProperties": false,
           "properties": {
+            "context": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FailureContext"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "reason": {
               "maxLength": 128,
               "minLength": 1,

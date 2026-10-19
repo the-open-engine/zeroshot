@@ -330,11 +330,15 @@ impl FailureHarness {
     }
 
     async fn failed(&self) -> RunStatusResult {
-        assert_eq!(
-            terminal(&self.controller, &self.before.run_id).await,
-            TerminalResult::Failed {
-                reason: EnumLabel::new("runtime_failed").assert_value_with("failure reason"),
+        let explanation = match self.ledger.point {
+            FailurePoint::CompletionPanic | FailurePoint::PeerCompletionPanic => {
+                "supervisor task panicked".to_owned()
             }
+            _ => sqlite_failure().to_string(),
+        };
+        assert_runtime_failure(
+            &terminal(&self.controller, &self.before.run_id).await,
+            &explanation,
         );
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
@@ -522,12 +526,13 @@ async fn completion_append_failure_after_normal_driver_exit_is_observable_and_du
     assert_eq!(harness.cleanup.terminal_seen(), vec![false]);
     let stored = harness.retained().await;
     assert_eq!(stored.snapshot.cursor, status.at_cursor);
-    assert_eq!(
-        stored.snapshot.terminal,
-        Some(TerminalResult::Failed {
-            reason: EnumLabel::new("runtime_failed").assert_value_with("failure reason"),
-        })
-    );
+    let RunStatus::Finished {
+        terminal_result, ..
+    } = status.status
+    else {
+        panic!("status must remain terminal");
+    };
+    assert_eq!(stored.snapshot.terminal, Some(terminal_result));
     harness.assert_storage_diagnostic();
 }
 
@@ -701,11 +706,9 @@ async fn supervisor_panic_waits_for_peer_output_before_cleanup_and_durable_failu
     );
     gate.release_output.notify_one();
 
-    assert_eq!(
-        terminal(&controller, &receipt.run_id).await,
-        TerminalResult::Failed {
-            reason: EnumLabel::new("runtime_failed").assert_value_with("failure reason"),
-        }
+    assert_runtime_failure(
+        &terminal(&controller, &receipt.run_id).await,
+        "supervisor task panicked",
     );
     assert_eq!(cleanup.exits(), vec![RunRuntimeExit::RuntimeLost]);
     assert_eq!(cleanup.terminal_seen(), vec![false]);
@@ -771,6 +774,7 @@ async fn force_cancels_before_storage_recovers_and_survives_a_dropped_waiter() {
         assert_eq!(
             terminal(&harness.controller, &harness.before.run_id).await,
             TerminalResult::Failed {
+                context: None,
                 reason: EnumLabel::new("force_stopped").assert_value_with("force reason"),
             }
         );
@@ -818,7 +822,7 @@ async fn confirmed_failure_is_observable_while_terminal_persistence_is_blocked()
     assert!(matches!(
         status.status,
         RunStatus::Finished {
-            terminal_result: TerminalResult::Failed { ref reason },
+            terminal_result: TerminalResult::Failed { ref reason, .. },
             ..
         } if reason.as_str() == "runtime_failed"
     ));

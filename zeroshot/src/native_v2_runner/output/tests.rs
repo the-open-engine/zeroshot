@@ -42,7 +42,8 @@ async fn closed_result_rechecks_the_other_lane_after_a_closed_lane_wakes_receive
 async fn overflow_does_not_duplicate_an_existing_incomplete_marker() {
     let (sender, mut output) = durable_event_channel_with_capacity(1);
     sender
-        .cancelled_terminal_overflowed
+        .terminal_overflow
+        .usage
         .store(true, Ordering::Release);
     assert!(
         sender
@@ -86,7 +87,7 @@ async fn coverage_contract_receive_selects_the_only_open_lane() {
         let mut output = DurableOutput::new(
             receiver,
             cancelled_receiver,
-            Arc::new(AtomicBool::new(false)),
+            Arc::new(TerminalOverflow::default()),
             Arc::new(Notify::new()),
         );
         if terminal {
@@ -136,5 +137,57 @@ fn coverage_contract_cancelled_terminal_lane_reports_closed_and_overflow() {
         Err(NodeRunnerError::DriverDetail(detail))
             if detail == CANCELLED_TERMINAL_OVERFLOW_DETAIL
     ));
-    assert!(sender.cancelled_terminal_overflowed.load(Ordering::Acquire));
+    assert!(sender.terminal_overflow.usage.load(Ordering::Acquire));
+}
+
+#[tokio::test]
+async fn diagnostic_overflow_is_explicit_without_marking_token_usage_incomplete() {
+    let (sender, mut output) = durable_event_channel_with_capacity(1);
+    for _ in 0..CANCELLED_TERMINAL_CAPACITY {
+        sender
+            .cancelled_terminal
+            .try_send(DurableNodeEvent::TokenUsage(None))
+            .expect("capacity");
+    }
+    let failure = durable_output_event(LiveOutput::diagnostic(
+        FailureDiagnosticKind::Failure,
+        "original cause",
+    ));
+    assert!(sender.try_send_cancelled_terminal(failure).is_err());
+    assert!(sender.terminal_overflow.diagnostics.load(Ordering::Acquire));
+    assert!(!sender.terminal_overflow.usage.load(Ordering::Acquire));
+    drop(sender);
+    for _ in 0..CANCELLED_TERMINAL_CAPACITY {
+        assert_eq!(output.recv().await, Ok(DurableNodeEvent::TokenUsage(None)));
+    }
+    let DurableNodeEvent::Output { output: marker, .. } =
+        output.recv().await.expect("diagnostic marker")
+    else {
+        panic!("diagnostic loss must not become token-usage loss");
+    };
+    assert_eq!(marker.diagnostic, Some(FailureDiagnosticKind::Incomplete));
+    assert!(marker.text.contains("diagnostic output was lost"));
+    assert_eq!(output.recv().await, Err(AttachReceiveError::Closed));
+}
+
+#[tokio::test]
+async fn usage_and_diagnostic_overflow_each_keep_their_own_marker() {
+    let (sender, mut output) = durable_event_channel_with_capacity(1);
+    sender
+        .terminal_overflow
+        .usage
+        .store(true, Ordering::Release);
+    sender
+        .terminal_overflow
+        .diagnostics
+        .store(true, Ordering::Release);
+    drop(sender);
+    assert_eq!(output.recv().await, Ok(DurableNodeEvent::TokenUsage(None)));
+    let DurableNodeEvent::Output { output: marker, .. } =
+        output.recv().await.expect("diagnostic marker")
+    else {
+        panic!("expected independent diagnostic loss marker");
+    };
+    assert_eq!(marker.diagnostic, Some(FailureDiagnosticKind::Incomplete));
+    assert_eq!(output.recv().await, Err(AttachReceiveError::Closed));
 }

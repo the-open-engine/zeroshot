@@ -236,8 +236,14 @@ impl GetResult {
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, tag = "status", rename_all = "snake_case")]
 pub enum TerminalResult {
-    Succeeded { output: serde_json::Value },
-    Failed { reason: EnumLabel },
+    Succeeded {
+        output: serde_json::Value,
+    },
+    Failed {
+        reason: EnumLabel,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context: Option<Box<FailureContext>>,
+    },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]

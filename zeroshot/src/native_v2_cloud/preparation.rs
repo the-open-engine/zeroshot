@@ -78,6 +78,7 @@ impl PreparationProgress for LedgerPreparationProgress {
             .append(
                 &self.run_id,
                 vec![RunEvent::SafeLog {
+                    diagnostic: None,
                     execution: None,
                     timestamp,
                     stream: SafeLogStream::System,

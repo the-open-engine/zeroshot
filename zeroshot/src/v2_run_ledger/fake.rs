@@ -9,7 +9,7 @@ use openengine_cluster_protocol::{Cursor, IdempotencyKey, RunId};
 use super::{
     AppendResult, CreateRun, CreateRunOutcome, RunEvent, RunLedger, RunLedgerError, RunSummary,
     SnapshotAndTail, StoredRun, StoredRunEvent, apply_event, cursor_for, cursor_sequence,
-    validate_create, MAX_REPLAY_BYTES, MAX_REPLAY_EVENTS,
+    prepare_event, validate_create, MAX_REPLAY_BYTES, MAX_REPLAY_EVENTS,
 };
 
 #[derive(Clone, Default)]
@@ -184,6 +184,7 @@ fn append_locked(run: &mut FakeRun, events: Vec<RunEvent>) -> Result<AppendResul
     let mut sequence = cursor_sequence(&snapshot.cursor)?;
     let mut stored_events = Vec::with_capacity(events.len());
     for event in events {
+        let event = prepare_event(&snapshot, event);
         sequence = sequence.checked_add(1).ok_or(RunLedgerError::Storage)?;
         apply_event(&mut snapshot, &event, sequence)?;
         stored_events.push(StoredRunEvent {

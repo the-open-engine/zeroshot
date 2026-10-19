@@ -466,6 +466,7 @@ fn enforce_delivery_terminal(
         return Ok(terminal);
     }
     Ok(TerminalResult::Failed {
+        context: None,
         reason: EnumLabel::new("delivery_unconfirmed")
             .map_err(|_| NativeV2SupervisorError::InvalidState)?,
     })

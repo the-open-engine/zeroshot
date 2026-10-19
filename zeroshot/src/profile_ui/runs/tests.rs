@@ -290,6 +290,7 @@ struct Fixture {
 fn safe_logs(count: usize, prefix: &str) -> Vec<RunEvent> {
     (0..count)
         .map(|index| RunEvent::SafeLog {
+            diagnostic: None,
             execution: Some(ExecutionId::new(1).assert_value()),
             timestamp: UnixTimestampMillis::new(index as u64 + 1).assert_value(),
             stream: SafeLogStream::Output,
@@ -439,6 +440,7 @@ async fn definition_uses_admitted_inputs_and_history_preserves_browser_identitie
             &fixture.id,
             vec![
                 RunEvent::SafeLog {
+                    diagnostic: None,
                     execution: Some(ExecutionId::new(identity).assert_value()),
                     timestamp: UnixTimestampMillis::new(1_789_612_345_678).assert_value(),
                     stream: SafeLogStream::Output,

@@ -149,6 +149,68 @@ async fn successful_retry_preserves_the_failed_attempt_and_runner_cause() {
 }
 
 #[tokio::test]
+async fn producer_detail_suppresses_only_generic_settlement_diagnostics() {
+    for (result, expected) in [
+        (Ok(WorkerOutcome::malformed()), 1),
+        (Err(NodeRunnerError::Driver), 1),
+        (
+            Err(NodeRunnerError::DriverDetail("detach failed".into())),
+            2,
+        ),
+    ] {
+        let harness = harness(
+            graph(
+                sequence(
+                    vec![
+                        step("worker", 1_000),
+                        json!({"kind": "fail", "name": "stop", "reason": "worker_failed"}),
+                    ],
+                    null_type(),
+                ),
+                null_type(),
+            ),
+            Value::Null,
+            FakeDriver::scripted([(
+                "worker",
+                vec![Behavior::Reported {
+                    message: "response did not match the contract",
+                    result,
+                }],
+            )]),
+        )
+        .await;
+        let terminal = harness.supervisor.drive().await.assert_value();
+        let TerminalResult::Failed {
+            context: Some(context),
+            ..
+        } = terminal
+        else {
+            panic!("failed terminal lost producer context");
+        };
+        assert!(context.primary.is_none());
+        assert_eq!(context.recorded.len(), expected);
+        assert_eq!(
+            context.recorded[0].message.as_str(),
+            "response did not match the contract"
+        );
+        assert!(
+            context
+                .recorded
+                .iter()
+                .all(|item| item.execution.is_some() && item.cursor.is_some())
+        );
+        if expected == 2 {
+            assert!(
+                context.recorded[1]
+                    .message
+                    .as_str()
+                    .contains("detach failed")
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn returned_driver_details_survive_public_logs_without_breaking_settlement() {
     for detail in [
         "repository not found; upstream response: 404".to_owned(),

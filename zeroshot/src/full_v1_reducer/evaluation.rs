@@ -115,6 +115,7 @@ impl Engine<'_> {
             GraphNode::Fail(terminal) => Ok(Status::Terminal {
                 position: HistoryPosition::ZERO,
                 projection: TerminalProjection::Failed {
+                    context: None,
                     reason: terminal.reason.as_label().clone(),
                 },
             }),

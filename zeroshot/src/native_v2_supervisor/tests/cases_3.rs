@@ -86,6 +86,7 @@ async fn active_history_after_runtime_loss_is_terminalized_without_redispatch() 
     let reference = seed_active_execution(harness.ledger.as_ref(), &run_id).await;
 
     let expected = TerminalResult::Failed {
+        context: None,
         reason: EnumLabel::new("runtime_lost").assert_value_with("label"),
     };
     assert_eq!(

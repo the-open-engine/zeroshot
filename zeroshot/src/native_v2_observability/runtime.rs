@@ -3,7 +3,7 @@
 //! normal completion removes them, while a failed runtime remains observable for this controller.
 
 use super::*;
-use openengine_cluster_protocol::{EnumLabel, TerminalResult};
+use openengine_cluster_protocol::{EnumLabel, FailureContext, FailureDiagnostic, TerminalResult};
 
 #[derive(Clone, Default)]
 pub(super) struct RuntimeObservation {
@@ -14,6 +14,7 @@ struct RuntimeStatus {
     last: RunStatusResult,
     metadata: RunMetadata,
     failed: bool,
+    context: Option<Box<FailureContext>>,
 }
 
 impl RuntimeObservation {
@@ -27,6 +28,7 @@ impl RuntimeObservation {
                     token_usage: snapshot.token_usage.clone(),
                 },
                 failed: false,
+                context: snapshot.failure_context.clone(),
             },
         );
         Ok(())
@@ -45,6 +47,7 @@ impl RuntimeObservation {
             let failure = runtime.failed.then(|| runtime.last.status.clone());
             runtime.last = current;
             runtime.metadata.token_usage = snapshot.token_usage.clone();
+            runtime.context = snapshot.failure_context.clone();
             if snapshot.terminal.is_none()
                 && let Some(RunStatus::Finished {
                     terminal_result, ..
@@ -59,13 +62,15 @@ impl RuntimeObservation {
         Ok(runtime.last.clone())
     }
 
-    pub(super) fn fail(&self, run_id: &RunId) {
+    pub(super) fn fail(&self, run_id: &RunId, cause: Option<&str>) {
         if let Some(runtime) = self.entries().get_mut(run_id) {
             runtime.failed = true;
             if !matches!(runtime.last.status, RunStatus::Finished { .. }) {
+                let context = unpersisted_context(runtime.context.clone(), cause);
                 runtime.last.status = RunStatus::Finished {
                     metadata: runtime.metadata.clone(),
                     terminal_result: TerminalResult::Failed {
+                        context,
                         reason: EnumLabel::new("runtime_failed")
                             .expect("static runtime failure reason"),
                     },
@@ -96,4 +101,31 @@ impl RuntimeObservation {
     fn entries(&self) -> MutexGuard<'_, BTreeMap<RunId, RuntimeStatus>> {
         self.entries.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+fn unpersisted_context(
+    context: Option<Box<FailureContext>>,
+    cause: Option<&str>,
+) -> Option<Box<FailureContext>> {
+    let Some(cause) = cause else {
+        return context;
+    };
+    let mut context = context.unwrap_or_default();
+    if context.primary.is_none() {
+        let message = crate::native_v2_runner::bounded_log_text(
+            format!("Runtime failed: {cause}"),
+            crate::v2_run_ledger::MAX_SAFE_LOG_BYTES / 2,
+        );
+        context.primary = Some(FailureDiagnostic {
+            message: BoundedLogMessage::new(crate::native_v2_runner::bounded_log_text(
+                visible_text(&message),
+                openengine_cluster_protocol::MAX_LOG_MESSAGE_BYTES,
+            ))
+            .unwrap_or_else(|_| BoundedLogMessage::redacted()),
+            execution: None,
+            cursor: None,
+        });
+    }
+    context.incomplete = true;
+    Some(context)
 }

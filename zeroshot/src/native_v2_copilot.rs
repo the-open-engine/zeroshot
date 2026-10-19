@@ -21,7 +21,7 @@ use crate::execution::process::HostedProcessPool;
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderExecution, ProviderFilesystemConfig, ProviderProcessRunners,
     ProviderExecutionFiles, ProviderProcess, open_provider_process, require_process_cleanup,
-    redact_provider_error, report_provider_error,
+    provider_failure_diagnostic, redact_provider_error, report_cleanup_failure,
 };
 use crate::native_v2_runner::{DriverControl, DriverInvocation, NodeRunnerError, ResolvedEnvironment};
 use session::CopilotSession;
@@ -214,23 +214,25 @@ async fn finish_rpc(
     let outcome = outcome.and_then(|outcome| drained.map(|()| outcome));
     let completion = match require_process_cleanup(&completion) {
         Ok(completion) => completion,
-        Err(cleanup_error) => {
-            // Cleanup owns settlement, but its classification cannot carry the original cause.
-            // Preserve that cause without letting a stopped log consumer delay cleanup failure.
-            if let Err(error @ NodeRunnerError::DriverDetail(_)) = &outcome {
-                let _ = tokio::time::timeout(
-                    std::time::Duration::from_millis(100),
-                    report_provider_error("Copilot", error, &connection.redactions, control),
-                )
-                .await;
-            }
-            return Err(cleanup_error);
-        }
+        Err(_) => return Err(rpc_cleanup_failure(&outcome, &connection.redactions, control).await),
     };
     if control.is_cancelled() && outcome.is_ok() {
         return Err(NodeRunnerError::Cancelled);
     }
     outcome.map_err(|error| connection.failure_diagnostic(error, completion))
+}
+
+// Cleanup owns settlement, while the earlier provider explanation remains diagnostic evidence.
+async fn rpc_cleanup_failure(
+    outcome: &Result<WorkerOutcome, NodeRunnerError>,
+    redactions: &[String],
+    control: &DriverControl,
+) -> NodeRunnerError {
+    if let Err(NodeRunnerError::DriverDetail(detail)) = outcome {
+        let diagnostic = provider_failure_diagnostic("Copilot", Some(detail), None, redactions);
+        report_cleanup_failure(control, diagnostic).await;
+    }
+    NodeRunnerError::CleanupUnconfirmed
 }
 
 async fn exchange_rpc(

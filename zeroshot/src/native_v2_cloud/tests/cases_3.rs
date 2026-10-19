@@ -227,6 +227,7 @@ async fn wave9_cli_contract_settled_allocation_refusal_cleans_up_before_terminal
     assert_eq!(
         terminal(&harness.controller, &run_id).await,
         TerminalResult::Failed {
+            context: None,
             reason: EnumLabel::new("runtime_unavailable").assert_value_with("failure label")
         }
     );

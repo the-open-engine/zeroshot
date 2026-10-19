@@ -214,6 +214,7 @@ async fn force_stop_and_runtime_loss_cancel_initial_resolution_without_late_star
         assert_eq!(
             terminal,
             TerminalResult::Failed {
+                context: None,
                 reason: EnumLabel::new(if lost {
                     "runtime_lost"
                 } else {

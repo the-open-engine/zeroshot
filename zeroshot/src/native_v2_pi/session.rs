@@ -51,8 +51,8 @@ pub(super) struct PiRunState {
     /// The schema dialect matching the lane's wire protocol, shared with response resolution so a
     /// correction restates the same schema the initial prompt carried.
     pub(super) dialect: ProviderSchemaDialect,
-    response: AgentResponseState,
-    retry: ProviderFailureRetry,
+    pub(super) response: AgentResponseState,
+    pub(super) retry: ProviderFailureRetry,
 }
 
 pub(super) enum PiTurnAdvance {

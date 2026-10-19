@@ -366,6 +366,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   outcomes log detail separately only when completion would lose it. Correction prompts stay out of
   diagnostics. Public error formatting is bounded and control-safe without suppressing causes.
   These public summaries stay separate from private operator diagnostics.
+  Existing Error output and safe-log records may carry `FailureDiagnosticKind` metadata; their text
+  is the public-safe explanation. The ordinary ledger projection retains a bounded `FailureContext`
+  and attaches it to failed terminal results in the same append transaction. Status, watch, SDK,
+  shared UI and archived history carry that result directly. Known runtime causes remain distinct
+  from recorded node failures; recovered/voided evidence never establishes terminal causality.
+  Diagnostic overflow marks context incomplete independently of token usage. Producer and capsule
+  records retain their existing execution/cursor identity; no separate diagnostics API or store exists.
+  Exhausted corrections mark only the final rejected response. Failure-only parser previews redact
+  before cleanup and exclude successful answer text. Known unconfirmed cleanup keeps its fatal
+  classification while bounded best-effort publication records any missing diagnostic coverage.
 - A failed durable-output bridge cancels and drains its provider immediately. Fatal supervisor
   errors and task panics publish their private primary diagnostic before recovery waits or stderr
   writes, then close owned work and attempt runtime cleanup before durable failure. Recovery failures

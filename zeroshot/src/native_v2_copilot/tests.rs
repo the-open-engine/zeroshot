@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
-use openengine_cluster_protocol::{IdempotencyKey, NodeName, RunSize, RunTitle};
+use openengine_cluster_protocol::{FailureDiagnosticKind, IdempotencyKey, NodeName, RunSize, RunTitle};
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{Value, json};
 use super::*;
@@ -735,6 +735,15 @@ async fn malformed_output_receives_only_two_corrections_in_the_same_session() {
         let fixture = Fixture::new(mode).await;
         let (events, outcome) = complete(fixture.start(1).await).await;
         let errors = error_output(&events);
+        let typed = events
+            .iter()
+            .filter(|event| {
+                matches!(event,
+            DurableNodeEvent::Output { output, .. }
+                if output.diagnostic == Some(FailureDiagnosticKind::Failure))
+            })
+            .count();
+        assert_eq!(typed, usize::from(mode == "malformed"));
         let expected = if mode == "correction" { 1 } else { 3 };
         assert_eq!(
             errors
@@ -1080,4 +1089,61 @@ async fn cancellation_during_cleanup_preserves_an_already_received_provider_erro
         error_output(&events).is_empty(),
         "terminal detail must not be duplicated"
     );
+}
+
+#[tokio::test]
+async fn unconfirmed_cleanup_preserves_a_redacted_bounded_provider_diagnostic() {
+    let (_, control, mut output) = crate::native_v2_runner::test_support::control();
+    let secret = "gho_private-cleanup-cause";
+    let detail = format!(
+        "provider rejected {secret} \u{1b} {} final cause",
+        "λ🦀".repeat(5000)
+    );
+    let outcome = Err(NodeRunnerError::DriverDetail(detail));
+    assert_eq!(
+        rpc_cleanup_failure(&outcome, &[secret.to_owned()], &control).await,
+        NodeRunnerError::CleanupUnconfirmed
+    );
+    let DurableNodeEvent::Output {
+        output: diagnostic, ..
+    } = output.recv().await.assert_value()
+    else {
+        panic!("expected provider diagnostic before cleanup settlement");
+    };
+    assert_eq!(diagnostic.diagnostic, Some(FailureDiagnosticKind::Failure));
+    assert_eq!(diagnostic.stream, LiveOutputStream::Error);
+    assert!(diagnostic.text.contains("provider rejected [REDACTED]"));
+    assert!(diagnostic.text.contains("final cause"));
+    assert!(diagnostic.text.len() <= 8192);
+    assert!(!diagnostic.text.contains(secret));
+    assert!(!diagnostic.text.contains('\u{1b}'));
+}
+
+#[tokio::test]
+async fn final_malformed_validation_detail_survives_capsule_transport() {
+    use crate::native_v2_capsule::{NativeCapsuleNodeEndpoint, RemoteCapsuleNodeRunner};
+    let fixture = Fixture::new("validation_secret_long").await;
+    let endpoint = Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(
+        fixture.runtime.clone(),
+    )));
+    let proxy = RemoteCapsuleNodeRunner::new(endpoint);
+    let handle = proxy.start(fixture.request(1)).await.assert_value();
+    let (events, outcome) = complete(handle).await;
+    assert_eq!(outcome.assert_value(), WorkerOutcome::malformed());
+    let failures = events
+        .iter()
+        .filter_map(|event| match event {
+            DurableNodeEvent::Output { output, .. }
+                if output.diagnostic == Some(FailureDiagnosticKind::Failure) =>
+            {
+                Some(output)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].text.contains("final output rejected:"));
+    assert!(failures[0].text.contains("[REDACTED]"));
+    assert!(!failures[0].text.contains("gho_fak"));
+    assert!(failures[0].text.len() <= 8192);
 }
