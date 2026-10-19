@@ -78,6 +78,15 @@ Prefer Cloud? [Cloud setup →](https://cloud.zeroshot.sh/docs)
 npm install -g @the-open-engine-company/zeroshot
 ```
 
+Paste this into Claude Code or Codex in your repo:
+
+```text
+Use the zeroshot skill to set up a local run for a small issue in this repo.
+Work on a fresh branch and stop if there are uncommitted changes.
+Show me the task and workflow before starting.
+Once I approve, run it, monitor progress, and summarize the result.
+```
+
 The installer requires Node.js 18 or newer and installs a verified native binary for Linux
 x64/arm64, macOS x64/arm64, or Windows x64. It also installs one zeroshot skill for Codex, GitHub
 Copilot, Pi, and Claude Code at user scope.
@@ -86,7 +95,7 @@ For local execution, install and sign in to Codex, Claude Code, GitHub Copilot, 
 reuse the harness's existing login, including subscription-backed sessions. See the
 [installation guide](docs/getting-started/install.md) for harness prerequisites.
 
-#### Run your first task
+#### Run directly from the CLI
 
 This example uses Codex and keeps delivery local. **The worker edits the selected folder**;
 Git is optional. Add `--cwd FOLDER` to select another folder; input files stay relative to the invoking folder.
