@@ -46,6 +46,8 @@ The engine enforces the graph’s review gates and retry limits. Think of it as 
 starting before the code is written. Each agent can use its own model and harness: Pi, Claude Code,
 Codex or Copilot.
 
+[Experiment: a small model with a review loop](https://theopenengine.com/blog/review-loop/).
+
 The CLI is free and MIT licensed. Run locally, [self-host](#self-hosted-run-the-docker-target), or
 use [zeroshot Cloud](https://cloud.zeroshot.sh/docs).
 
@@ -184,7 +186,12 @@ Each step can use its own model. Pass `--runtime-config` with one binding per no
   "provider": "anthropic",
   "size": "medium",
   "nodes": {
-    "worker": { "kind": "agent", "model": "WORKER_MODEL_ID", "effort": "high", "sessionScope": "node_instance" },
+    "worker": {
+      "kind": "agent",
+      "model": "WORKER_MODEL_ID",
+      "effort": "high",
+      "sessionScope": "node_instance"
+    },
     "acceptance": { "kind": "agent", "model": "REVIEW_MODEL_ID", "effort": "high" },
     "code": { "kind": "agent", "model": "REVIEW_MODEL_ID", "effort": "max" }
   }
@@ -210,13 +217,14 @@ zeroshot run \
 ```
 
 The CLI and UI share the same local profiles. See
-[UI setup](docs/getting-started/install.md#open-the-workspace-ui).
+[UI setup](docs/getting-started/install.md#open-the-workspace-ui). For shared team configurations,
+see [organization profiles](https://cloud.zeroshot.sh/docs/connections-and-profiles).
 
 ## What the built-in workflow does
 
 1. A worker implements the task.
 2. Acceptance and code reviewers check the result independently, in parallel.
-3. Rejected work goes to one repair worker with both reviews' feedback, then through both reviews
+3. Rejected work returns to the same worker with both reviews' feedback, then through both reviews
    again.
 4. With delivery enabled, accepted work proceeds through the configured Git and CI steps.
 5. Delivery conflicts return through repair and review.

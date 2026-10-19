@@ -65,6 +65,18 @@ charter, use `auto-research`; custom graphs follow the same protocol contracts.
 
 <!-- prettier-ignore-end -->
 
+### Where code is processed
+
+The execution target and model provider are separate choices. Local and self-hosted runs keep
+the checkout and run ledger on your infrastructure, but a harness using an external model provider
+sends that provider the code and context it needs. Self-hosting zeroshot does not make model
+processing local. Check the selected provider's data-handling terms before using client code.
+
+For Cloud-hosted execution, see the [Cloud privacy notice](https://cloud.zeroshot.sh/legal/privacy)
+for data locations and [retention](https://cloud.zeroshot.sh/legal/privacy#retention).
+[Runtime connections](concepts/runtimes-and-connections.md) describe how to select providers and
+supply credentials.
+
 ## Read more
 
 [How execution works](concepts/execution.md) describes the graph and reduction model. Read
