@@ -363,9 +363,18 @@ pub(crate) fn process_failure_context(
     if output.cancelled || externally_cancelled {
         return Err(NodeRunnerError::Cancelled);
     }
+    Ok(process_failure_evidence(output, provider_output_failed))
+}
+
+/// Captured process facts remain useful when cleanup fails, even after cancellation.
+/// This only formats evidence; callers still own cancellation and cleanup classification.
+pub(crate) fn process_failure_evidence(
+    output: &ProcessSessionOutput,
+    provider_output_failed: bool,
+) -> Option<ProviderProcessFailure> {
     let mut failures = process_failure_reasons(output);
     if failures.is_empty() && !provider_output_failed {
-        return Ok(None);
+        return None;
     }
     let kind = if failures.is_empty() {
         ProviderProcessFailureKind::Stderr
@@ -377,10 +386,10 @@ pub(crate) fn process_failure_context(
         &output.stderr_tail,
         output.stderr_tail_truncated,
     );
-    Ok((!failures.is_empty()).then(|| ProviderProcessFailure {
+    (!failures.is_empty()).then(|| ProviderProcessFailure {
         kind,
         detail: failures.join("; "),
-    }))
+    })
 }
 
 fn process_failure_reasons(output: &ProcessSessionOutput) -> Vec<String> {

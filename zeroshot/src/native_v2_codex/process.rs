@@ -5,7 +5,7 @@ use crate::execution::process::{
 };
 use crate::native_v2_capsule::provider_process::{
     ProcessExchange, ProcessInputFailure, ProviderExecutionFiles, ProviderProcess,
-    exchange_process_io, open_provider_process, process_failure_detail,
+    exchange_process_io, open_provider_process, process_failure_evidence,
     provider_failure_diagnostic, report_cleanup_failure, require_process_cleanup,
     text::ProviderText,
 };
@@ -134,9 +134,7 @@ fn cleanup_failure_diagnostic(
     if let Some(error) = input_error {
         details.push(format!("provider process input failed: {error}"));
     }
-    let process = completion_detail(completion, !details.is_empty())
-        .ok()
-        .flatten();
+    let process = completion_detail(completion, !details.is_empty());
     details.extend(process);
     (!details.is_empty())
         .then(|| provider_failure_diagnostic("Codex", Some(&details.join("; ")), None, redactions))
@@ -189,7 +187,7 @@ pub(super) fn resolve_process_completion(
     let provider_output_failed = output
         .as_ref()
         .map_or(true, |output| output.failure_message().is_some());
-    let process_detail = completion_detail(&completion, provider_output_failed)?;
+    let process_detail = completion_detail(&completion, provider_output_failed);
     merge_completion_detail(output, process_detail)
 }
 
@@ -204,7 +202,7 @@ pub(super) fn resolve_input_failure(
         CodexOutput::provider_failure(format!("provider output collection failed: {error}"))
     });
     output.merge_failure_detail(format!("provider process input failed: {input_error}"));
-    if let Some(detail) = completion_detail(&completion, true)? {
+    if let Some(detail) = completion_detail(&completion, true) {
         output.merge_failure_detail(detail);
     }
     Ok(output)
@@ -229,10 +227,11 @@ fn check_process_completion(
 fn completion_detail(
     completion: &Result<ProcessSessionOutput, ProcessRunnerError>,
     provider_output_failed: bool,
-) -> Result<Option<String>, NodeRunnerError> {
+) -> Option<String> {
     match completion {
-        Err(error) => Ok(Some(format!("provider process completion failed: {error}"))),
-        Ok(completion) => process_failure_detail(completion, false, provider_output_failed),
+        Err(error) => Some(format!("provider process completion failed: {error}")),
+        Ok(completion) => process_failure_evidence(completion, provider_output_failed)
+            .map(|failure| failure.detail),
     }
 }
 

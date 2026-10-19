@@ -7,8 +7,8 @@ use crate::execution::process::{ProcessRunnerError, ProcessSessionCommand, Proce
 use crate::native_v2_capsule::provider_process::{
     ProcessExchange, ProcessInputFailure, ProviderExecutionFiles, ProviderProcess,
     ProviderProcessFailure, ProviderProcessFailureKind, exchange_process_io, open_provider_process,
-    process_failure_context, process_failure_detail, report_cleanup_failure,
-    require_process_cleanup,
+    process_failure_context, process_failure_detail, process_failure_evidence,
+    report_cleanup_failure, require_process_cleanup,
 };
 use crate::native_v2_runner::{DriverControl, LiveOutput, NodeRunnerError};
 
@@ -203,9 +203,9 @@ fn cleanup_failure_diagnostic<T: ProviderTranscript>(
         return None;
     }
     let process = match completion {
-        Ok(output) => process_failure_detail(output, false, !transcript.is_success())
-            .ok()
-            .flatten(),
+        Ok(output) => {
+            process_failure_evidence(output, !transcript.is_success()).map(|failure| failure.detail)
+        }
         Err(error) => Some(format!("provider process completion failed: {error}")),
     };
     let details = detail

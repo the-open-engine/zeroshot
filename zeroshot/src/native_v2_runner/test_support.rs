@@ -9,9 +9,7 @@ use openengine_cluster_protocol::{
     RunTitle, ResolvedSource, StructuralBounds, TerminationWitness, WorkerRef,
 };
 use serde_json::{json, Value};
-use tokio::sync::watch;
-#[cfg(unix)]
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use super::*;
 use crate::native_v2_candidate::test_support::full_graph;
@@ -423,10 +421,6 @@ use openengine_cluster_testkit::assertions::{AssertValue};
 
 /// A driver control for tests that drive one turn directly: nothing is cancelled, the live channel
 /// holds one event, and the caller drains the durable channel it gets back.
-///
-/// Only the Unix-gated provider lifecycle tests drive a turn themselves, so this is compiled for the
-/// same platforms as its callers.
-#[cfg(unix)]
 pub(crate) fn control() -> (watch::Sender<bool>, DriverControl, DurableOutput) {
     let (cancel, cancellation) = watch::channel(false);
     let (live_output, _) = broadcast::channel(1);
