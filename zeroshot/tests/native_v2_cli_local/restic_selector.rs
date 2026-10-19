@@ -6,14 +6,15 @@ use super::*;
 const STARTUP_EXITED: &str = "controller exited before becoming ready";
 const SELECTOR_UNUSABLE: &str = "ZEROSHOT_RESTIC does not name a restic executable";
 
-fn bundled_restic() -> PathBuf {
-    let restic = Path::new(env!("CARGO_BIN_EXE_zeroshot")).with_file_name("restic");
-    assert!(
-        restic.is_file(),
-        "local CLI tests need restic beside {}",
-        env!("CARGO_BIN_EXE_zeroshot")
-    );
-    restic
+fn test_restic() -> PathBuf {
+    [
+        Path::new(env!("CARGO_BIN_EXE_zeroshot")).with_file_name("restic"),
+        PathBuf::from("/usr/bin/restic"),
+        PathBuf::from("/bin/restic"),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_file())
+    .assert_value_with("local CLI tests need bundled or system-installed Restic")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -27,7 +28,7 @@ async fn relative_restic_selector_checkpoints_a_successful_local_run() {
         format!(
             "#!/bin/sh\nprintf '%s\\n' \"$1\" >> {}\nexec {} \"$@\"\n",
             shell_literal(invocations.to_str().assert_value_with("log path")),
-            shell_literal(bundled_restic().to_str().assert_value_with("restic path")),
+            shell_literal(test_restic().to_str().assert_value_with("restic path")),
         ),
         0o755,
     )
