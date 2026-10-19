@@ -454,6 +454,53 @@ async fn lane_preflight_checks_the_retained_workspace_only_without_checkpoint_re
     }
 }
 
+// Windows also searches the parent PATH and executable directory, so an empty captured PATH
+// cannot establish that gh is absent.
+#[cfg(unix)]
+#[tokio::test]
+async fn github_delivery_preflight_rejects_a_missing_gh_before_launch() {
+    let root = TestDirectory::new("delivery-preflight");
+    let backend = LocalCliBackend::new(
+        root.path().to_owned(),
+        root.child("missing-controller"),
+        root.path().to_owned(),
+        PathBuf::from("git"),
+    )
+    .with_ready_timeout(Duration::ZERO);
+    let workspace = root.child("workspace");
+    let bin = root.child("bin");
+    for directory in [&workspace, &bin] {
+        std::fs::create_dir(directory).assert_value();
+    }
+    openengine_cluster_testkit::fixture::write_executable(
+        &bin.join("git"),
+        "#!/bin/sh\nexit 0\n",
+        0o755,
+    )
+    .assert_value();
+    let run_id = RunId::new("0199f33f-3b44-7d21-9000-000000000062");
+    let mut submission = contract_submission("delivery-preflight");
+    submission.graph = full_graph(vec![
+        crate::native_v2_candidate::test_support::git_delivery_node(),
+        success_node(),
+    ]);
+    let mut prepared = prepared_local_run(run_id.clone(), submission, workspace);
+    prepared.native_environment =
+        BTreeMap::from([("PATH".to_owned(), bin.to_string_lossy().into_owned())]);
+
+    let error = backend
+        .start_prepared_controller_with_lineage(prepared, None, None)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, NativeV2CliError::Usage(_)));
+    assert_eq!(
+        error.to_string(),
+        "Git delivery needs the `gh` executable on PATH"
+    );
+    assert!(!backend.run_storage(&run_id).assert_value().exists());
+}
+
 #[tokio::test]
 async fn local_bootstrap_and_resume_failures_leave_recoverable_state() {
     let root = TestDirectory::new("lbr");

@@ -401,6 +401,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Allocation retains cleanup authority before checkout starts, including through startup errors and
   cancellation. Controllers confirm destruction before recording an allocation failure as terminal.
   Local Git retains the caller identity.
+- Delivery clears the environment of its Git and GitHub CLI processes, so local composition pins
+  delivery Git and, when the GitHub adapter is selected, `gh` to the files `find_executable` finds
+  on the captured search path. Local `run`/`resume` reject a missing one as a usage error with the
+  lane executable check; checkpoint resumes resolve them when the controller composes the restored
+  run, before any agent starts. Hosted composition keeps its fixed `/usr/bin` programs.
 - Local controllers may use `ZEROSHOT_GITHUB_TOKEN_FILE` for renewable trusted GitHub delivery
   authority. The private file stays outside the checkout and is reopened at delivery entry and after
   authentication rejection. Explicit `GH_TOKEN` wins and invalid explicit values fail closed. The

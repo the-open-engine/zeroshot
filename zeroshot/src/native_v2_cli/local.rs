@@ -262,13 +262,21 @@ impl LocalCliBackend {
         checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
     ) -> Result<RunId, NativeV2CliError> {
         // Checkpoint restoration replaces this workspace under the controller's lease. A relative
-        // executable may exist only in that snapshot, so defer its lookup to provider startup.
+        // executable may exist only in that snapshot, so defer its lookup to the controller, which
+        // composes delivery after the restore and starts providers later.
         if checkpoint.is_none() {
             crate::native_v2_local::check_lane_executables(
                 &prepared.submission.runtime,
                 &prepared.native_environment,
                 &prepared.workspace,
             )
+            .and_then(|()| {
+                crate::native_v2_local::check_delivery_executables(
+                    &prepared.submission,
+                    &prepared.native_environment,
+                    &prepared.workspace,
+                )
+            })
             .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
         }
         let adopt_existing_delivery = resumed_from.is_some();
