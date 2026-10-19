@@ -31,8 +31,9 @@ Authored edges then route review, retries, and the final result.
 [![Zeroshot built-in workflow: implementation, parallel independent acceptance and code review, bounded repair, optional Git delivery, and delivery repair returning to both reviews.](assets/zeroshot-workflow-mobile.svg){ loading=lazy }](assets/zeroshot-workflow-mobile.svg){ .docs-graph-tall }
 
 The built-in `software-change` template uses the route shown above. For work that does not need its
-review loop, use `single-worker`. For ten rounds of measured, reversible research against a durable
-charter, use `auto-research`; custom graphs follow the same protocol contracts.
+review loop, use `single-worker`. For research, use `auto-research`. It runs ten rounds of experiments
+by default, and a new result replaces the current one only when the progress judge accepts it. Custom
+graphs follow the same protocol contracts.
 
 ## Choose where it runs
 

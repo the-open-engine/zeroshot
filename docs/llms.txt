@@ -1,6 +1,6 @@
 # Zeroshot
 
-> Zeroshot runs a software task as an explicit multi-agent graph: one agent implements, independent agents review the result against the task's acceptance criteria and for code quality, rejected work goes to a bounded repair loop, and nothing is delivered until the graph's checks pass. The implementing agent never approves its own work. It is a native CLI (`zeroshot`) for Linux, macOS, and Windows, driving Codex, Claude Code, GitHub Copilot, or Pi as the agent harness. MIT licensed.
+> Zeroshot runs a software task as an explicit multi-agent graph: one agent implements, independent agents review the result against the task's acceptance criteria and for code quality, rejected work goes to a bounded repair loop, and nothing is delivered until the graph's checks pass. It is a native CLI (`zeroshot`) for Linux, macOS, and Windows, driving Codex, Claude Code, GitHub Copilot, or Pi as the agent harness. MIT licensed.
 
 ## What it does
 
