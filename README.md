@@ -32,16 +32,17 @@
 
 **Build your own open-source software factory.**
 
-Turn a task into a reviewed pull request through a workflow you control. Choose the agents and
-models, define what must pass, and decide where rejected work goes for repair.
+CI, but it starts before the code is written.
+
+Choose the agents and models, define what must pass, and decide where rejected work goes for
+repair.
 
 For example, give a security reviewer the job of checking that users cannot access another account’s
 data. A rejection sends its findings back to the worker for repair, followed by another review. Save
 that workflow as a profile and reuse it.
 
-The engine enforces the graph’s review gates and retry limits. Think of it as CI for coding agents,
-starting before the code is written. Each agent can use its own model and harness (Pi, Claude Code,
-Codex or Copilot).
+The engine enforces the graph’s review gates and retry limits. Each agent can use its own model and
+harness (Pi, Claude Code, Codex or Copilot).
 
 We tested [a small model in a review loop](https://theopenengine.com/blog/review-loop/) against a
 larger model working alone.
