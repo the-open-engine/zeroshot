@@ -50,9 +50,11 @@ impl RuntimeObservation {
             runtime.context = snapshot.failure_context.clone();
             if snapshot.terminal.is_none()
                 && let Some(RunStatus::Finished {
-                    terminal_result, ..
+                    mut terminal_result,
+                    ..
                 }) = failure
             {
+                refresh_failure_context(&mut terminal_result, runtime.context.as_deref());
                 runtime.last.status = RunStatus::Finished {
                     metadata: runtime.metadata.clone(),
                     terminal_result,
@@ -101,6 +103,24 @@ impl RuntimeObservation {
     fn entries(&self) -> MutexGuard<'_, BTreeMap<RunId, RuntimeStatus>> {
         self.entries.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+fn refresh_failure_context(terminal: &mut TerminalResult, current: Option<&FailureContext>) {
+    let TerminalResult::Failed {
+        context: previous, ..
+    } = terminal
+    else {
+        return;
+    };
+    let Some(current) = current else {
+        return;
+    };
+    let mut refreshed = current.clone();
+    if let Some(previous) = previous {
+        refreshed.primary = previous.primary.clone().or(refreshed.primary);
+        refreshed.incomplete |= previous.incomplete;
+    }
+    *previous = Some(Box::new(refreshed));
 }
 
 fn unpersisted_context(
