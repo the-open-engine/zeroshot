@@ -10,6 +10,7 @@ export function RunFailureDetails({
   openLog: (cursor: string) => void;
   hasLog: (cursor: string) => boolean;
 }) {
+  const recorded = context.recorded ?? [];
   const diagnostic = (entry: FailureDiagnostic, key: string) => (
     <div className="failure-diagnostic" key={key}>
       {entry.execution && <strong>{entry.execution.node}</strong>}
@@ -32,10 +33,10 @@ export function RunFailureDetails({
           {diagnostic(context.primary, 'primary')}
         </>
       )}
-      {context.recorded.length > 0 && (
+      {recorded.length > 0 && (
         <>
           <h3>Recorded failures</h3>
-          {context.recorded.map((entry, index) => diagnostic(entry, `recorded-${index}`))}
+          {recorded.map((entry, index) => diagnostic(entry, `recorded-${index}`))}
         </>
       )}
       {context.incomplete && (

@@ -5,8 +5,8 @@ export type FailureDiagnostic = {
 };
 export type FailureContext = {
   primary?: FailureDiagnostic | null;
-  recorded: FailureDiagnostic[];
-  incomplete: boolean;
+  recorded?: FailureDiagnostic[];
+  incomplete?: boolean;
 };
 
 const encoder = new TextEncoder();
@@ -31,16 +31,22 @@ function validDiagnostic(value: unknown): value is FailureDiagnostic {
   );
 }
 
+function validRecorded(value: unknown): boolean {
+  return (
+    value === undefined ||
+    (Array.isArray(value) && value.length <= 5 && value.every(validDiagnostic))
+  );
+}
+
 /** Native public diagnostic bounds also apply to observation metadata without a terminal event. */
 export function validFailureContext(value: unknown): value is FailureContext {
   const context = value as Partial<FailureContext> | null;
   return (
     !!context &&
+    typeof context === 'object' &&
     !Array.isArray(context) &&
-    typeof context.incomplete === 'boolean' &&
+    (context.incomplete === undefined || typeof context.incomplete === 'boolean') &&
     (context.primary == null || validDiagnostic(context.primary)) &&
-    Array.isArray(context.recorded) &&
-    context.recorded.length <= 5 &&
-    context.recorded.every(validDiagnostic)
+    validRecorded(context.recorded)
   );
 }

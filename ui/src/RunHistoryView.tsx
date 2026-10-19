@@ -80,7 +80,7 @@ export function RunHistoryView({
 }: RunHistoryViewProps) {
   const { saved: savedView, canvas, setCanvas } = useRunView(viewKey);
   const [playing, setPlaying] = useState(false);
-  const [viewingLatest, setViewingLatest] = useState(true);
+  const failureView = useFailurePresentation(savedView);
   const [playbackNode, setPlaybackNode] = useState<string>();
   const [selected, setSelected] = useState(''),
     [inspector, setInspector] = useState(false),
@@ -88,6 +88,27 @@ export function RunHistoryView({
   const [readingExecution, setReadingExecution] = useState('');
   const [positions, setPositions] = useState<Positions>({}),
     [focus, setFocus] = useState<{ name: string; tick: number }>();
+  const history = useHistoryFeed(runId, source, {
+    restore: savedView,
+    onLoad: () => {
+      setPlaying(false);
+      setPlaybackNode(undefined);
+    },
+    onReset: () => {
+      failureView.reset();
+      setCanvas(savedView.canvas);
+      setInspector(Boolean(savedView.inspector));
+      setExecution(savedView.execution ?? '');
+      setReadingExecution('');
+      setFocus(undefined);
+      setPositions({});
+    },
+    onOpen: (detail) => {
+      setSelected(restoredRunNode(detail.graph.root, savedView));
+      setInspector(failureView.open(detail));
+    },
+    onMissing: () => setPlaying(false),
+  });
   const {
     run,
     events,
@@ -107,36 +128,7 @@ export function RunHistoryView({
     isLiveRun,
     follow,
     loadHistory,
-  } = useHistoryFeed(runId, source, {
-    restore: savedView,
-    onLoad: () => {
-      setPlaying(false);
-      setPlaybackNode(undefined);
-    },
-    onReset: () => {
-      setViewingLatest(!savedView.cursor || savedView.following === true);
-      setCanvas(savedView.canvas);
-      setInspector(Boolean(savedView.inspector));
-      setExecution(savedView.execution ?? '');
-      setReadingExecution('');
-      setFocus(undefined);
-      setPositions({});
-    },
-    onOpen: (detail) => {
-      setViewingLatest(
-        !savedView.cursor || savedView.following === true || savedView.cursor === detail.cursor
-      );
-      setSelected(restoredRunNode(detail.graph.root, savedView));
-      setInspector(
-        savedView.inspector ??
-          (detail.phase === 'admitted' ||
-            !!environmentFailure(detail) ||
-            (detail.terminal?.status === 'failed' && !!detail.terminal.context) ||
-            !!detail.runtimeFailure?.context)
-      );
-    },
-    onMissing: () => setPlaying(false),
-  });
+  } = history;
   useRunViewPersistence(viewKey, run, loading, {
     selected,
     inspector,
@@ -189,7 +181,7 @@ export function RunHistoryView({
     // Each step owns its checkpoint until the timer fires; incoming live logs cannot postpone it.
   }, [playing, cursorIndex, playbackNode]);
   function scrub(next: number) {
-    setViewingLatest(false);
+    failureView.replay();
     setPlaying(false);
     follow(false);
     setExecution('');
@@ -197,7 +189,7 @@ export function RunHistoryView({
     setCursorIndex(moments[Math.max(0, Math.min(moments.length - 1, next))].index);
   }
   function goLatest() {
-    setViewingLatest(true);
+    failureView.latest();
     setPlaying(false);
     setPlaybackNode(undefined);
     setExecution('');
@@ -217,7 +209,7 @@ export function RunHistoryView({
   }
   function playNode(restart = false) {
     if (!selectedReplay.length) return;
-    setViewingLatest(false);
+    failureView.replay();
     follow(false);
     if (!restart && playing && playbackNode === selected) {
       setPlaying(false);
@@ -233,40 +225,25 @@ export function RunHistoryView({
     setPlaying(nextReplayPosition(start, moments.length, selectedReplay) !== undefined);
   }
   function inspectDiagnostic(cursor: string) {
-    const index = events.findIndex((event) => event.cursor === cursor);
-    if (index < 0 || !document) return;
-    setViewingLatest(false);
-    const event = events[index].event;
-    const reference = event.reference ?? event.completion?.reference;
-    const execution = event.execution ?? reference?.execution;
-    const invocation = projection?.invocations.find((item) => item.id === String(execution));
+    const target = failureView.diagnostic(cursor, events, projection);
+    if (!target || !document) return;
     setPlaying(false);
     follow(false);
     setReadingExecution('');
-    setSelected(invocation?.node ?? document.graph.root.name);
-    setExecution(invocation?.id ?? '');
+    setSelected(target.invocation?.node ?? document.graph.root.name);
+    setExecution(target.invocation?.id ?? '');
     setInspector(true);
-    setCursorIndex(index);
+    setCursorIndex(target.index);
   }
   function reveal(name: string) {
     inspect(name);
     setFocus({ name, tick: Date.now() });
   }
-  const displayedTerminal: RunTerminal | undefined =
-    projection?.terminal ??
-    (loadedHead && moment.index === events.length - 1 && run?.runtimeFailure
-      ? { status: 'failed', reason: run.runtimeFailure.reason, context: run.runtimeFailure.context }
-      : undefined);
-  const currentFailure =
-    !displayedTerminal &&
-    viewingLatest &&
-    !restorePending &&
-    moment.index === events.length - 1 &&
-    !loadedHead &&
-    !loading &&
-    error
-      ? unavailableFailure(run)
-      : undefined;
+  const { terminal: displayedTerminal, currentFailure } = failureView.presentation(
+    history,
+    moment.index,
+    projection?.terminal
+  );
   const node = document && findNode(document.graph.root, selected);
   const names = node && descendantNames(node);
   const nodeInvocations =
@@ -285,39 +262,16 @@ export function RunHistoryView({
   const nodeControls = projection?.controls.filter((visit) => visit.node === node?.name) ?? [];
   const showExecutions =
     node && (['step', 'verifier'].includes(node.kind) || node.name === document?.graph.root.name);
-  const preparing = isPreparingEnvironment(run, events);
-  const currentState =
-    projection?.terminal?.status ??
-    (loadedHead && run?.runtimeFailure
-      ? 'failed'
-      : loadedHead && preparing
-        ? 'Preparing environment'
-        : safePosition === 0
-          ? 'Before run'
-          : loadedHead && run?.phase === 'finished'
-            ? 'Recorded history'
-            : 'In progress');
-  const shownStatus = safePosition === moments.length - 1 && loadedHead ? currentState : 'Replay';
-
   return (
     <main className="workspace history-workspace">
       {run && document && projection ? (
         <>
-          <div className="workspace-header history-header">
-            <div className="profile-title">
-              <h1 title={run.title}>{run.title}</h1>
-              <span
-                className={`run-status state-${displayedTerminal?.status ?? (shownStatus === 'failed' ? 'failed' : 'replay')}`}
-              >
-                {run.example ? 'Simulated' : humanize(shownStatus)}
-              </span>
-            </div>
-          </div>
-          <RunHistoryAlerts
+          <RunHistoryHeader
             run={run}
-            error={error}
-            loading={loading}
-            preparing={preparing}
+            terminal={displayedTerminal}
+            history={history}
+            position={safePosition}
+            momentsCount={moments.length}
             openLog={() => inspect(document.graph.root.name)}
             retry={() => void loadHistory(run.runId, source, false)}
           />
@@ -393,7 +347,7 @@ export function RunHistoryView({
             goLatest={goLatest}
             scrub={scrub}
             togglePlay={() => {
-              setViewingLatest(false);
+              failureView.replay();
               follow(false);
               if (safePosition === moments.length - 1) setCursorIndex(-1);
               setPlaybackNode(undefined);
@@ -415,6 +369,126 @@ export function RunHistoryView({
         />
       )}
     </main>
+  );
+}
+
+type HistoryFeed = ReturnType<typeof useHistoryFeed>;
+function useFailurePresentation(saved: Partial<RunViewState>) {
+  const [viewingLatest, setViewingLatest] = useState(true);
+  return {
+    reset() {
+      setViewingLatest(!saved.cursor || saved.following === true);
+    },
+    open(detail: RunDetail) {
+      setViewingLatest(!saved.cursor || saved.following === true || saved.cursor === detail.cursor);
+      return (
+        saved.inspector ??
+        (detail.phase === 'admitted' ||
+          !!environmentFailure(detail) ||
+          (detail.terminal?.status === 'failed' && !!detail.terminal.context) ||
+          !!detail.runtimeFailure?.context)
+      );
+    },
+    replay() {
+      setViewingLatest(false);
+    },
+    latest() {
+      setViewingLatest(true);
+    },
+    presentation(history: HistoryFeed, index: number, observed: RunTerminal | undefined) {
+      const atHead = index === history.events.length - 1;
+      const failure = history.run?.runtimeFailure;
+      const terminal =
+        observed ??
+        (history.loadedHead && atHead && failure
+          ? { status: 'failed' as const, reason: failure.reason, context: failure.context }
+          : undefined);
+      return {
+        terminal,
+        currentFailure: terminal
+          ? undefined
+          : latestUnavailableFailure(history, atHead, viewingLatest),
+      };
+    },
+    diagnostic(
+      cursor: string,
+      events: HistoryEvent[],
+      projection: ReturnType<typeof projectHistory> | undefined
+    ) {
+      const index = events.findIndex((event) => event.cursor === cursor);
+      if (index < 0) return;
+      setViewingLatest(false);
+      const event = events[index].event;
+      const reference = event.reference ?? event.completion?.reference;
+      const execution = event.execution ?? reference?.execution;
+      const invocation = projection?.invocations.find((item) => item.id === String(execution));
+      return { index, invocation };
+    },
+  };
+}
+
+function latestUnavailableFailure(history: HistoryFeed, atHead: boolean, viewingLatest: boolean) {
+  if (!viewingLatest || history.restorePending || !atHead) return;
+  if (history.loadedHead || history.loading || !history.error) return;
+  return unavailableFailure(history.run);
+}
+
+function currentHistoryState(
+  run: RunDetail,
+  terminal: RunTerminal | undefined,
+  preparing: boolean,
+  atStart: boolean
+) {
+  if (terminal) return terminal.status;
+  if (run.runtimeFailure) return 'failed';
+  if (preparing) return 'Preparing environment';
+  if (atStart) return 'Before run';
+  return run.phase === 'finished' ? 'Recorded history' : 'In progress';
+}
+
+function RunHistoryHeader({
+  run,
+  terminal,
+  history,
+  position,
+  momentsCount,
+  openLog,
+  retry,
+}: {
+  run: RunDetail;
+  terminal: RunTerminal | undefined;
+  history: HistoryFeed;
+  position: number;
+  momentsCount: number;
+  openLog: () => void;
+  retry: () => void;
+}) {
+  const preparing = isPreparingEnvironment(run, history.events);
+  const shownStatus =
+    history.loadedHead && position === momentsCount - 1
+      ? currentHistoryState(run, terminal, preparing, position === 0)
+      : 'Replay';
+  return (
+    <>
+      <div className="workspace-header history-header">
+        <div className="profile-title">
+          <h1 title={run.title}>{run.title}</h1>
+          <span
+            className={`run-status state-${terminal?.status ?? (shownStatus === 'failed' ? 'failed' : 'replay')}`}
+          >
+            {run.example ? 'Simulated' : humanize(shownStatus)}
+          </span>
+        </div>
+      </div>
+      <RunHistoryAlerts
+        run={run}
+        error={history.error}
+        loading={history.loading}
+        preparing={preparing}
+        openLog={openLog}
+        retry={retry}
+      />
+    </>
   );
 }
 

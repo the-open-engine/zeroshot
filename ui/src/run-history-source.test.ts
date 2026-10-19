@@ -111,6 +111,9 @@ test('detail and terminal replay reject malformed or forward-pointing failure co
   const run = detail();
   const valid = { recorded: [{ message: 'Delivery failed', cursor: 'v2:1' }], incomplete: false };
   for (const context of [
+    false,
+    'invalid',
+    { incomplete: null },
     { recorded: null, incomplete: false },
     { ...valid, recorded: Array(6).fill({ message: 'too many' }) },
     { ...valid, primary: { message: '\u001bunsafe control' } },
@@ -127,7 +130,14 @@ test('detail and terminal replay reject malformed or forward-pointing failure co
     } as HistoryEvent);
     assert.throws(() => appendHistory([], incoming));
   }
-  for (const context of [valid, undefined]) {
+  for (const context of [
+    valid,
+    {},
+    { primary: { message: 'Runtime failed' } },
+    { recorded: valid.recorded },
+    { incomplete: true },
+    undefined,
+  ]) {
     const terminal = { status: 'failed', reason: 'delivery_failed', context } as const;
     assert.equal(readRunDetail({ ...run, cursor: 'v2:1', terminal }, run.runId).terminal, terminal);
     assert.equal(

@@ -22,7 +22,7 @@ export function invalidRuntimeFailure(): ApiError {
 export function validateFailureContext(context: unknown, head: unknown) {
   if (context == null) return;
   if (!validFailureContext(context)) throw invalidRuntimeFailure();
-  for (const diagnostic of [context.primary, ...context.recorded]) {
+  for (const diagnostic of [context.primary, ...(context.recorded ?? [])]) {
     if (
       diagnostic?.cursor != null &&
       historyCursorSequence(diagnostic.cursor) > historyCursorSequence(head)
