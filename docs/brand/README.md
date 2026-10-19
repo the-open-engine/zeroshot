@@ -189,19 +189,38 @@ JS
 
 ## Product-page graph exports
 
-The README uses `docs/assets/product-graph-{feature,danger}-{wide,mobile}.png`, exported from
-the inline SVG diagrams at <https://zeroshot.sh/#topology> on October 19, 2026. The source panels
-are `graph-panel-feature` (Ship a feature) and `graph-panel-danger` (A risky change), each with
-desktop and mobile SVG layouts. These are illustrative custom graphs, not recordings or built-in
-templates. The README links back to the interactive examples.
+The README uses the graphs at <https://zeroshot.sh/#topology>, captured on October 19, 2026.
+The source panels are `graph-panel-feature` (Ship a feature) and `graph-panel-danger` (A risky
+change), each with desktop and mobile SVG layouts. These are illustrative custom graphs, not
+recordings or built-in templates. The README links back to the interactive examples.
 
-Exports retain the source paths, node labels, role icons, Caveat 600 font and warm-paper palette
-from the page stylesheet `assets/index-CvFDPx6b.css`. Sixteen SVG units of padding protect icons at
-the edges. Animation overlays are hidden for the static export. PNGs are rendered at 2× scale from
-960px desktop and 390px mobile display widths, after the font finishes loading. The mobile images
-are selected below a 641px viewport width. Both themes use the product page's paper background.
+`docs/assets/product-graph-feature-{wide,mobile}.gif` preserves the feature graph's 16-second
+animation: review rejection, repair, end-to-end rejection, repair, then delivery. The exports
+have 240 frames at 15 fps and loop continuously. Desktop is 1280px wide; mobile is 780px wide.
+The risk-routing graph is static on the source page and remains a PNG in the README.
 
-For a refresh, extract the desktop and mobile SVG from each source panel, include its SVG defs and
-applicable `.custom-diagram` styles, and load the page's Caveat font. Render each standalone drawing
-with Playwright as above, using the specified widths and padding. Check all four exports before
-replacing them. The source page owns changes to the graph drawings.
+The four `product-graph-{feature,danger}-{wide,mobile}.png` files are static exports. The feature
+PNGs are selected when the reader requests reduced motion. The mobile layout is selected at
+viewport widths of 640px or less, with reduced-motion sources taking precedence.
+
+Exports retain the page's paths, labels, role icons, Caveat 600 font, and warm-paper palette.
+Sixteen SVG units of padding protect icons at the edges. Both themes use the page's paper
+background. PNGs are rendered at 2× scale from 960px desktop and 390px mobile display widths.
+
+The feature animation's SVG sources are frozen in `diagram-sources/product-graph-feature-*.svg`.
+Their animation rules come from the page stylesheet `assets/index-CvFDPx6b.css`; the source
+keyframes and timing are unchanged. Caveat and its SIL Open Font License are in `assets/`,
+from [Google Fonts](https://github.com/google/fonts/tree/main/ofl/caveat). Rendering is offline.
+
+With the Playwright install described above and FFmpeg on PATH, reproduce the GIFs from the
+repository root:
+
+```sh
+NODE_PATH=/tmp/open-engine-banner-tools/node_modules node docs/brand/render-product-graphs.cjs
+```
+
+The renderer pauses the source CSS animations and seeks every frame explicitly. Inspect the
+review rejection, end-to-end rejection, final delivery, and loop boundary in both sizes.
+When updating the drawings, refresh them from the source page, preserve its animation rules,
+and inspect the README's normal and reduced-motion variants. The source page owns changes to
+the graph drawings.

@@ -52,8 +52,10 @@ use [zeroshot Cloud](https://cloud.zeroshot.sh/docs).
 <div align="center">
   <a href="https://zeroshot.sh/#topology">
     <picture>
-      <source media="(max-width: 640px)" srcset="docs/assets/product-graph-feature-mobile.png">
-      <img src="docs/assets/product-graph-feature-wide.png" alt="Example custom graph: a worker, parallel acceptance and code review plus a bugfinder, UI review, adversarial end-to-end testing, and delivery. Rejections return to the worker for repair." width="960">
+      <source media="(prefers-reduced-motion: reduce) and (max-width: 640px)" srcset="docs/assets/product-graph-feature-mobile.png">
+      <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/product-graph-feature-wide.png">
+      <source media="(max-width: 640px)" srcset="docs/assets/product-graph-feature-mobile.gif">
+      <img src="docs/assets/product-graph-feature-wide.gif" alt="Example custom graph: a worker, parallel acceptance and code review plus a bugfinder, UI review, adversarial end-to-end testing, and delivery. Rejections return to the worker for repair." width="960">
     </picture>
   </a>
   <br>
