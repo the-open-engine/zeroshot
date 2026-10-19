@@ -55,7 +55,7 @@ use [zeroshot Cloud](https://cloud.zeroshot.sh/docs).
       <source media="(prefers-reduced-motion: reduce) and (max-width: 640px)" srcset="docs/assets/product-graph-feature-mobile.png">
       <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/product-graph-feature-wide.png">
       <source media="(max-width: 640px)" srcset="docs/assets/product-graph-feature-mobile.gif">
-      <img src="docs/assets/product-graph-feature-wide.gif" alt="Example custom graph: a worker, parallel acceptance and code review plus a bugfinder, UI review, adversarial end-to-end testing, and delivery. Rejections return to the worker for repair." width="960">
+      <img src="docs/assets/product-graph-feature-wide.gif" alt="Example custom graph: a worker, parallel acceptance and code review plus a bugfinder, UI review, adversarial end-to-end testing, and delivery. Rejections return to the worker for repair." width="640">
     </picture>
   </a>
   <br>
@@ -146,7 +146,7 @@ review before acceptance and code review. Other changes go straight to review.
 <a href="https://zeroshot.sh/#topology">
 <picture>
   <source media="(max-width: 640px)" srcset="docs/assets/product-graph-danger-mobile.png">
-  <img src="docs/assets/product-graph-danger-wide.png" alt="Example custom graph: a risk check routes auth, payments, or migration changes through blast-radius mapping and security review. All changes then pass acceptance and code review; rejection returns to the worker for repair." width="960">
+  <img src="docs/assets/product-graph-danger-wide.png" alt="Example custom graph: a risk check routes auth, payments, or migration changes through blast-radius mapping and security review. All changes then pass acceptance and code review; rejection returns to the worker for repair." width="640">
 </picture>
 </a>
 
