@@ -196,6 +196,15 @@ pub fn validate_delivery_source_with_registry(
     Ok(())
 }
 
+/// Whether [`delivery_authority`] selects the GitHub adapter, which runs the GitHub CLI.
+pub(crate) fn delivery_uses_github_cli(
+    source: &ResolvedSource,
+    required: &[SourceCapability],
+) -> bool {
+    provider_ref(source, required)
+        .is_ok_and(|selected| selected.id().as_str() == GITHUB_PROVIDER_ID)
+}
+
 pub(crate) fn delivery_authority(
     mut request: SourceDeliveryFactoryRequest<'_>,
 ) -> Result<Arc<dyn SourceDeliveryAuthority>, SourceDeliveryFactoryError> {

@@ -121,6 +121,18 @@ that name. Zeroshot also supplies `CODEX_API_KEY` for native OpenAI authenticati
 Values discovered from local configuration are not persisted or sent to hosted targets. See
 [Runtimes and connections](runtimes-and-connections.md).
 
+### Workspace snapshot disk usage
+
+Workspace snapshots recursively copy entries without applying `.gitignore`, including generated
+directories such as `target/` and `node_modules/`.
+
+Zeroshot tries filesystem cloning or reflinks where supported. Otherwise, each capture needs space
+for another full workspace copy during staging, in addition to Restic checkpoint storage. Concurrent
+runs increase peak disk usage and can fail with `no space left on device`.
+
+On tight disks, clean unnecessary build artifacts or keep large generated directories outside the
+workspace where practical.
+
 ## Direct target
 
 A direct target exposes Zeroshot's HTTP and OECP contracts without application-level authentication.

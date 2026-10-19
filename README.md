@@ -244,7 +244,8 @@ PR and ship runs address visible pull request review feedback by default; pass `
 ignore it.
 
 Push needs a committed Git checkout and an HTTPS or SSH remote. PR and ship additionally need a
-forge adapter; GitHub is maintained today. Docker and cloud runs require an exact Git source.
+forge adapter; GitHub is maintained today. Local GitHub PR and ship runs also need the GitHub CLI
+(`gh`) on `PATH`. Docker and cloud runs require an exact Git source.
 See [targets and source credentials](docs/concepts/targets.md) for setup.
 
 ### Self-hosted: run the Docker target

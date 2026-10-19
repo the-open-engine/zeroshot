@@ -554,6 +554,122 @@ fn an_empty_path_entry_finds_lane_executables_in_the_directory_the_harness_start
     check_lane_executables(&mixed_lane_plan(), &environment, &workspace).assert_value();
 }
 
+fn forge_source(url: &str, provider: &str) -> ResolvedSource {
+    serde_json::from_value(json!({
+        "repository": "open-engine/zeroshot",
+        "branch": "main",
+        "revision": "0123456789abcdef0123456789abcdef01234567",
+        "remote": {
+            "url": url,
+            "forge": { "provider": provider, "repository": "open-engine/zeroshot" }
+        }
+    }))
+    .assert_value()
+}
+
+fn github_source() -> ResolvedSource {
+    forge_source(
+        "https://github.com/open-engine/zeroshot.git",
+        "source.github",
+    )
+}
+
+fn delivery_submission(source: &ResolvedSource) -> RunSubmission {
+    serde_json::from_value(json!({
+        "title": "Local delivery programs",
+        "graph": full_graph(vec![
+            crate::native_v2_candidate::test_support::git_delivery_node(),
+            success_node(),
+        ]),
+        "initialInput": null,
+        "runtime": {
+            "harness": "codex",
+            "provider": "openai",
+            "size": "small",
+            "nodes": { "deliver": { "kind": "git_delivery" } }
+        },
+        "source": source,
+        "submissionKey": "local-delivery-programs"
+    }))
+    .assert_value()
+}
+
+#[cfg(unix)]
+#[test]
+fn delivery_pins_git_and_the_github_cli_that_the_captured_search_path_finds() {
+    let root = TestDirectory::new("delivery-programs-pinned");
+    let (bin, environment) = search_directory(&root);
+    install_executable(&bin, "git");
+    install_executable(&bin, "gh");
+
+    let required = crate::native_v2_delivery::DeliveryMode::PullRequest.required_capabilities();
+    let programs = local_delivery_programs(&github_source(), required, &environment, root.path())
+        .assert_value();
+    assert_eq!(programs.git, bin.join("git"));
+    assert_eq!(programs.gh, bin.join("gh"));
+}
+
+// Only Unix restricts lookup to the captured PATH; Windows retains native fallback searches.
+#[cfg(unix)]
+#[test]
+fn github_delivery_without_gh_or_git_on_the_captured_search_path_names_the_missing_program() {
+    let root = TestDirectory::new("delivery-programs-missing");
+    let (bin, environment) = search_directory(&root);
+    let submission = delivery_submission(&github_source());
+
+    install_executable(&bin, "git");
+    let error = check_delivery_executables(&submission, &environment, root.path()).assert_error();
+    assert!(matches!(
+        error,
+        LocalCompositionError::MissingDeliveryExecutable { executable: "gh" }
+    ));
+    assert_eq!(
+        error.to_string(),
+        "Git delivery needs the `gh` executable on PATH"
+    );
+
+    std::fs::remove_file(bin.join("git")).assert_value();
+    install_executable(&bin, "gh");
+    let error = check_delivery_executables(&submission, &environment, root.path()).assert_error();
+    assert_eq!(
+        error.to_string(),
+        "Git delivery needs the `git` executable on PATH"
+    );
+
+    install_executable(&bin, "git");
+    check_delivery_executables(&submission, &environment, root.path()).assert_value();
+}
+
+#[test]
+fn only_github_forge_delivery_needs_the_github_cli() {
+    use crate::native_v2_delivery::DeliveryMode;
+    use crate::source_code_provider::adapters::contributed::registration_tests::{
+        HTTPS_REMOTE, PROVIDER,
+    };
+
+    let root = TestDirectory::new("delivery-programs-forge");
+    let (bin, environment) = search_directory(&root);
+    install_executable(&bin, "git");
+
+    for (source, required) in [
+        (github_source(), DeliveryMode::Push.required_capabilities()),
+        (
+            forge_source(HTTPS_REMOTE, PROVIDER),
+            DeliveryMode::Merge.required_capabilities(),
+        ),
+    ] {
+        let programs =
+            local_delivery_programs(&source, required, &environment, root.path()).assert_value();
+        assert_eq!(programs.gh, Path::new("gh"));
+    }
+
+    let without_delivery = RunSubmission {
+        graph: full_graph(vec![success_node()]),
+        ..delivery_submission(&github_source())
+    };
+    check_delivery_executables(&without_delivery, &BTreeMap::new(), root.path()).assert_value();
+}
+
 #[test]
 fn parses_canonical_github_remote_forms() {
     for remote in [

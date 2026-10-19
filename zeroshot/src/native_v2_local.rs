@@ -89,6 +89,8 @@ pub enum LocalCompositionError {
         lane: RuntimeLane,
         executable: &'static str,
     },
+    #[error("Git delivery needs the `{executable}` executable on PATH")]
+    MissingDeliveryExecutable { executable: &'static str },
     #[error(transparent)]
     Claude(#[from] ClaudeAdapterConfigError),
     #[error(transparent)]
@@ -378,11 +380,17 @@ fn build_local_candidate_config(
             .ok_or(LocalCompositionError::DeliverySourceRequired)?;
         let target = crate::native_v2_delivery::source_target(source, mode)
             .map_err(|_| LocalCompositionError::ResolvedSource)?;
+        let programs = local_delivery_programs(
+            source,
+            &required_capabilities,
+            native_environment,
+            workspace,
+        )?;
         let authority = delivery_authority(SourceDeliveryFactoryRequest {
             source,
             workspace,
-            git_program: Path::new("git"),
-            gh_program: Path::new("gh"),
+            git_program: &programs.git,
+            gh_program: &programs.gh,
             home_directory: &runtime_home,
             private_directory: &runtime_home,
             git_identity: None,
@@ -397,7 +405,7 @@ fn build_local_candidate_config(
                 adopt_existing_delivery,
                 git_identity: None,
                 workspace: workspace.to_owned(),
-                git_program: PathBuf::from("git"),
+                git_program: programs.git,
                 target,
                 poll: Default::default(),
             },
@@ -549,23 +557,77 @@ pub(crate) fn search_path_depends_on_working_directory(
     std::env::split_paths(&search_path).any(|entry| entry.is_relative())
 }
 
+fn find_local_executable(
+    executable: &str,
+    native_environment: &BTreeMap<String, String>,
+    working_directory: &Path,
+) -> Option<PathBuf> {
+    let search_path = local_search_path(&LocalHarnessEnvironment::new(native_environment.clone()));
+    let lookup = BTreeMap::from([("PATH".to_owned(), search_path)]);
+    crate::execution::platform::find_executable(executable, &lookup, working_directory)
+}
+
 /// Checks that each lane's harness executable is on the search path its adapter spawns with.
 pub(crate) fn check_lane_executables(
     runtime: &RuntimePlan,
     native_environment: &BTreeMap<String, String>,
     working_directory: &Path,
 ) -> Result<(), LocalCompositionError> {
-    let search_path = local_search_path(&LocalHarnessEnvironment::new(native_environment.clone()));
-    let lookup = BTreeMap::from([("PATH".to_owned(), search_path)]);
     for lane in runtime.lanes() {
         let executable = lane.harness_name();
-        if crate::execution::platform::find_executable(executable, &lookup, working_directory)
-            .is_none()
-        {
+        if find_local_executable(executable, native_environment, working_directory).is_none() {
             return Err(LocalCompositionError::MissingLaneExecutable { lane, executable });
         }
     }
     Ok(())
+}
+
+struct LocalDeliveryPrograms {
+    git: PathBuf,
+    gh: PathBuf,
+}
+
+/// Pins delivery's programs to the files the captured search path finds. Delivery clears the
+/// environment of its Git and GitHub CLI processes, so a bare name would search only the system's
+/// default directories.
+fn local_delivery_programs(
+    source: &ResolvedSource,
+    required: &[crate::source_code_provider::SourceCapability],
+    native_environment: &BTreeMap<String, String>,
+    working_directory: &Path,
+) -> Result<LocalDeliveryPrograms, LocalCompositionError> {
+    let find = |executable| {
+        find_local_executable(executable, native_environment, working_directory)
+            .ok_or(LocalCompositionError::MissingDeliveryExecutable { executable })
+    };
+    // Other providers never start the GitHub CLI.
+    let gh = if crate::source_code_provider::adapters::core::delivery_uses_github_cli(
+        source, required,
+    ) {
+        find("gh")?
+    } else {
+        PathBuf::from("gh")
+    };
+    Ok(LocalDeliveryPrograms {
+        git: find("git")?,
+        gh,
+    })
+}
+
+/// Checks that the programs the submission's delivery runs are on the captured search path.
+pub(crate) fn check_delivery_executables(
+    submission: &RunSubmission,
+    native_environment: &BTreeMap<String, String>,
+    working_directory: &Path,
+) -> Result<(), LocalCompositionError> {
+    let required = crate::native_v2_admission::delivery_capabilities(&submission.graph.root);
+    match &submission.source {
+        Some(source) if !required.is_empty() => {
+            local_delivery_programs(source, &required, native_environment, working_directory)
+                .map(drop)
+        }
+        _ => Ok(()),
+    }
 }
 
 fn current_user_home(environment: &LocalHarnessEnvironment) -> Option<PathBuf> {
