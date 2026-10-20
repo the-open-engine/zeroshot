@@ -30,9 +30,11 @@
 
 # zeroshot
 
-**Build your own open-source software factory.**
+**Stop babysitting your agents.**
 
-CI, but it starts before the code is written.
+Prompts are suggestions. Graphs are enforced.
+
+zeroshot runs coding, independent review and repairs through the workflow you define.
 
 Choose the agents and models, define what must pass, and decide where rejected work goes for
 repair.
