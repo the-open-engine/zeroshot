@@ -16,6 +16,12 @@ pub(super) struct ResolvedRunProfile {
     pub(super) remote_selector: Option<RunProfileSelector>,
 }
 
+struct StoredProfileLookup<'a, B> {
+    target: Option<&'a str>,
+    backend: &'a B,
+    local: &'a LocalRunProfileStore,
+}
+
 pub(super) async fn resolve_run_profile<B>(
     run: &RunCommand,
     backend: &B,
@@ -56,22 +62,53 @@ async fn resolve_stored_profile_with_store<B: NativeV2CliBackend>(
     backend: &B,
     local: &LocalRunProfileStore,
 ) -> Result<ResolvedRunProfile, NativeV2CliError> {
-    for scope in profile_scopes(reference, target, backend).await? {
-        let list = profile_list(scope, target, backend, local).await?;
+    let lookup = StoredProfileLookup {
+        target,
+        backend,
+        local,
+    };
+    if reference
+        .is_none_or(|reference| matches!(reference.qualifier, None | Some(ProfileQualifier::Local)))
+        && let Some(profile) = lookup.find(None, reference).await?
+    {
+        return Ok(profile);
+    }
+    for scope in profile_scopes(reference, target, backend)
+        .await?
+        .into_iter()
+        .flatten()
+    {
+        if let Some(profile) = lookup.find(Some(scope), reference).await? {
+            return Ok(profile);
+        }
+    }
+    Err(profile_not_found(reference))
+}
+
+impl<B: NativeV2CliBackend> StoredProfileLookup<'_, B> {
+    async fn find(
+        &self,
+        scope: Option<RunProfileScope>,
+        reference: Option<&ProfileReference>,
+    ) -> Result<Option<ResolvedRunProfile>, NativeV2CliError> {
+        let list = profile_list(scope, self.target, self.backend, self.local).await?;
         let Some(selected) = select_profile(list, reference) else {
-            continue;
+            return Ok(None);
         };
         let selector = RunProfileSelector {
             scope: selected.scope,
             name: selected.name,
         };
         let profile = match scope {
-            None => local.show(selector.clone())?,
-            Some(_) => backend.profile_show(target, selector.clone()).await?,
+            None => self.local.show(selector.clone())?,
+            Some(_) => {
+                self.backend
+                    .profile_show(self.target, selector.clone())
+                    .await?
+            }
         };
-        return Ok(from_profile(profile, scope.map(|_| selector)));
+        Ok(Some(from_profile(profile, scope.map(|_| selector))))
     }
-    Err(profile_not_found(reference))
 }
 
 async fn profile_scopes<B: NativeV2CliBackend>(

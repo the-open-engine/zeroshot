@@ -219,6 +219,7 @@ pub(in crate::native_v2_cli) struct FakeBackend {
     resume_requirements: Option<RunConnectionRequirements>,
     trusted_resume_requirements: Option<RunConnectionRequirements>,
     resource_scope: Option<openengine_cluster_protocol::ConnectionScope>,
+    unavailable_machine_identity: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -228,6 +229,13 @@ pub(super) enum CursorCallKind {
 }
 
 impl FakeBackend {
+    pub(in crate::native_v2_cli) fn with_unavailable_machine_identity() -> Self {
+        Self {
+            unavailable_machine_identity: true,
+            ..Self::default()
+        }
+    }
+
     pub(in crate::native_v2_cli) fn with_organization_owner() -> Self {
         Self {
             resource_scope: Some(openengine_cluster_protocol::ConnectionScope::Org),
@@ -459,6 +467,11 @@ impl NativeV2CliBackend for FakeBackend {
         &self,
         _target: Option<&str>,
     ) -> Result<openengine_cluster_protocol::ConnectionScope, NativeV2CliError> {
+        if self.unavailable_machine_identity {
+            return Err(NativeV2CliError::Target(
+                "machine identity unavailable".to_owned(),
+            ));
+        }
         Ok(self
             .resource_scope
             .unwrap_or(openengine_cluster_protocol::ConnectionScope::User))

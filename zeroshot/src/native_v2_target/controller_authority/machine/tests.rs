@@ -31,11 +31,33 @@ fn organization_selection_is_a_separate_transport_header() {
     )
     .assert_value()
     .assert_value();
+    assert!(!format!("{credential:?}").contains("test-api-key"));
     assert_eq!(credential.api_key, "test-api-key");
     assert_eq!(
         credential.organization.assert_value(),
         "00000000-0000-4000-8000-000000000001"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn machine_credentials_reject_non_utf8_key_and_organization_values() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    let key_error = MachineCredential::from_environment_with(|name| {
+        (name == "ZEROSHOT_API_KEY").then(|| OsString::from_vec(vec![0xff]))
+    })
+    .assert_error()
+    .to_string();
+    assert!(key_error.contains("ZEROSHOT_API_KEY must be valid UTF-8"));
+    let organization_error = MachineCredential::from_environment_with(|name| match name {
+        "ZEROSHOT_API_KEY" => Some(OsString::from("test-api-key")),
+        "ZEROSHOT_ORGANIZATION" => Some(OsString::from_vec(vec![0xff])),
+        _ => None,
+    })
+    .assert_error()
+    .to_string();
+    assert!(organization_error.contains("ZEROSHOT_ORGANIZATION must be an organization UUID"));
 }
 
 #[test]

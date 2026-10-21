@@ -173,6 +173,47 @@ async fn merge_plans_and_run_operations_share_the_same_access_cache() {
 }
 
 #[tokio::test]
+async fn merge_plans_never_reuse_a_cached_delegation_admin_token() {
+    use openengine_cluster_protocol::DelegationOwner;
+    use zeroshot_engine::native_v2_cli::DelegationAction;
+    let body = merge_plan_body(Vec::new());
+    let (origin, server) = spawn_merge_plan_authority(vec![("200 OK", body)], 2, 1).await;
+    let root = temp_root();
+    let (credentials, authority) = test_authority(&root);
+    let target = hosted_target("local", origin);
+    credentials
+        .set(&target.id, "refresh-0")
+        .await
+        .assert_value();
+    authority
+        .delegation(
+            &target,
+            DelegationAction::List {
+                owner: DelegationOwner::User,
+                organization_id: None,
+            },
+        )
+        .await
+        .assert_value();
+    authority
+        .merge_plan_status(&target, &MergePlanId::new("plan-1"))
+        .await
+        .assert_value();
+    let requests = tokio::time::timeout(std::time::Duration::from_secs(5), server)
+        .await
+        .assert_value()
+        .assert_value();
+    assert_eq!(
+        merge_plan_authorizations(&requests),
+        vec!["Bearer access-2"]
+    );
+    let tokens = refresh_token_bodies(&requests);
+    assert_eq!(tokens.len(), 2);
+    assert!(tokens[0].contains("audience=admin"));
+    assert!(tokens[1].contains("audience=controller"));
+}
+
+#[tokio::test]
 async fn delayed_auth_rejection_cannot_evict_a_newer_issuance_even_with_the_same_token_value() {
     let root = temp_root();
     let (listener, address, origin) = bind_target_authority().await;
@@ -422,7 +463,8 @@ async fn spawn_merge_plan_authority(
         let mut responses = responses.into_iter();
         for _ in 0..request_count {
             let (mut stream, request) = accept_merge_plan_request(&listener).await;
-            let operation = merge_plan_operation_response(&request, &mut responses);
+            let operation = merge_plan_operation_response(&request, &mut responses)
+                .or_else(|| merge_plan_account_response(&request));
             let (status, body) = if let Some(response) = operation {
                 response
             } else {
@@ -455,6 +497,19 @@ async fn spawn_merge_plan_authority(
         captured
     });
     (origin, server)
+}
+
+fn merge_plan_account_response(request: &CapturedHttpRequest) -> Option<(&'static str, String)> {
+    match (request.method.as_str(), request.path.as_str()) {
+        ("GET", "/auth/v1/me") => Some((
+            "200 OK",
+            json!({"id":"00000000-0000-4000-8000-000000000001"}).to_string(),
+        )),
+        ("GET", "/auth/v1/delegations?owner=user") => {
+            Some(("200 OK", json!({"delegations":[]}).to_string()))
+        }
+        _ => None,
+    }
 }
 
 fn merge_plan_operation_response(

@@ -214,3 +214,30 @@ async fn organization_owner_resolves_bare_and_default_profiles_without_user_cata
         .is_err()
     );
 }
+
+#[tokio::test]
+async fn local_bare_and_default_profiles_resolve_without_machine_identity() {
+    let root = tempfile::tempdir().assert_value();
+    let local = LocalRunProfileStore::new(root.path().to_owned());
+    let (graph, runtime) = materialization_fixture();
+    local
+        .set(openengine_cluster_protocol::RunProfileSetRequest {
+            name: RunProfileName::new("offline").assert_value(),
+            scope: RunProfileScope::User,
+            graph: graph.clone(),
+            runtime: runtime.clone(),
+            set_default: true,
+        })
+        .assert_value();
+    for selection in [Some(reference("offline", None)), None] {
+        let backend = FakeBackend::with_unavailable_machine_identity();
+        let resolved =
+            resolve_stored_profile_with_store(Some("prod"), selection.as_ref(), &backend, &local)
+                .await
+                .assert_value();
+        assert_eq!(resolved.graph, graph);
+        assert_eq!(resolved.runtime, runtime);
+        assert!(resolved.remote_selector.is_none());
+        assert!(backend.calls().is_empty());
+    }
+}

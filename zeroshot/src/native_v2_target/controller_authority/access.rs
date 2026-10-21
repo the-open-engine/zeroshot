@@ -61,7 +61,9 @@ impl CachedHostedAccess {
         &self,
         target: &TargetRecord,
     ) -> Option<(MergePlansDescriptor, AccessToken)> {
-        (self.identity.target == *target && Instant::now() < self.access.0.reusable_until)
+        (self.identity.target == *target
+            && self.identity.audience == openengine_cluster_protocol::TARGET_CONTROLLER_AUDIENCE
+            && Instant::now() < self.access.0.reusable_until)
             .then(|| {
                 self.merge_plans
                     .clone()

@@ -287,7 +287,9 @@ fn controller_response(
         ("GET", "/auth/v1/me") => {
             Some(json!({"id": "00000000-0000-4000-8000-000000000001"}).to_string())
         }
-        ("GET", "/api/v1/machine") => Some(json!({"owner":"org"}).to_string()),
+        ("GET", "/api/v1/machine") => Some(json!({"owner":
+            if request.authorization.as_deref() == Some("Bearer user-machine-key") { "user" } else { "org" }
+        }).to_string()),
         ("POST", "/native-v2/run") => {
             Some(r#"{"runId":"018f5e78-7f95-7c22-8d98-3f15af20c991"}"#.to_owned())
         }

@@ -180,6 +180,49 @@ async fn machine_keys_cannot_manage_delegations_or_start_human_login() {
 }
 
 #[tokio::test]
+async fn user_machine_keys_default_to_the_user_catalog_without_oauth() {
+    let root = super::super::fixtures::temp_root();
+    let (origin, server) = spawn_target_authority(2).await;
+    let target = super::super::fixtures::hosted_target("prod", origin);
+    let authority = super::super::fixtures::test_http_authority(root.path("refresh-locks"))
+        .with_machine_key("user-machine-key", None);
+    assert_eq!(
+        authority
+            .default_resource_scope(&target)
+            .await
+            .assert_value(),
+        ConnectionScope::User
+    );
+    let requests = server.await.assert_value();
+    assert_eq!(requests[1].path, "/api/v1/machine");
+    assert_eq!(
+        requests[1].authorization.as_deref(),
+        Some("Bearer user-machine-key")
+    );
+    assert!(requests[1].organization.is_none());
+}
+
+#[tokio::test]
+async fn machine_keys_reject_direct_targets_before_any_network_request() {
+    let root = super::super::fixtures::temp_root();
+    let target = super::super::fixtures::direct_target("http://127.0.0.1:1");
+    let authority = super::super::fixtures::test_http_authority(root.path("refresh-locks"))
+        .with_machine_key(API_KEY, None);
+    assert_eq!(
+        authority.discover(&target).await.assert_error().to_string(),
+        "ZEROSHOT_API_KEY requires a hosted target"
+    );
+    assert_eq!(
+        authority
+            .default_resource_scope(&target)
+            .await
+            .assert_error()
+            .to_string(),
+        "ZEROSHOT_API_KEY requires a hosted target"
+    );
+}
+
+#[tokio::test]
 async fn human_cli_manages_delegations_with_account_admin_authority_and_one_time_keys() {
     use openengine_cluster_protocol::{
         DelegationCreateRequest, DelegationKeyCreateRequest, DelegationOwner,
