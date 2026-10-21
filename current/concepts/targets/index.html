@@ -658,6 +658,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Hosted target">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1797,6 +1814,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Hosted target">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2005,6 +2039,29 @@ and capacity. Zeroshot's CLI and protocol do not prescribe those product policie
 <p>Follow the <a href="https://cloud.zeroshot.sh/docs">Cloud documentation</a> for Zeroshot Cloud. Its pages
 should link to the version of these core docs that matches the deployed target, as described in
 <a href="../../project/versioning/">Documentation versions</a>.</p>
+<h3 id="api-keys">API keys<a class="headerlink" href="#api-keys" title="Permanent link">&para;</a></h3>
+<p>Hosted targets that advertise API key authentication support machine delegations. Sign in as a
+human to create one:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot target login cloud</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">zeroshot delegation create ci</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go">zeroshot delegation create release --owner org --organization ORGANIZATION_UUID</span>
+</code></pre></div>
+<p>Any user can delegate their own current permissions. Organization owners and admins can create
+organization delegations. Creation prints an <code>api_key</code> once; store it as <code>ZEROSHOT_API_KEY</code> in your
+CI secret store. Keys expire after 90 days by default; <code>--expires-in-days</code> accepts 1–365.</p>
+<p>With the key set, use the normal CLI with <code>--target cloud</code>, including connections, profiles, merge
+plans, live sessions, and resume. For a user key, set <code>ZEROSHOT_ORGANIZATION</code> to the organization
+UUID when organization selection is needed. Organization keys stay in their own organization.
+Omitted connection and profile scopes follow the owner's scope.</p>
+<p>Delegation management requires human login. Unset <code>ZEROSHOT_API_KEY</code> before managing keys:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot delegation list</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">zeroshot delegation key create DELEGATION_ID --name rotation</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="go">zeroshot delegation key revoke DELEGATION_ID OLD_KEY_ID</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="go">zeroshot delegation disable DELEGATION_ID</span>
+</code></pre></div>
+<p>Create the replacement before revoking the old key. Revoking a key blocks further calls while
+accepted runs continue. API keys authenticate the CLI; keep provider and source credentials in
+their usual connections.</p>
 <h2 id="source-and-delivery-credentials">Source and delivery credentials<a class="headerlink" href="#source-and-delivery-credentials" title="Permanent link">&para;</a></h2>
 <p>Git checkout and push use shared HTTPS or SSH transport. A local push needs an attached, committed branch
 and an eligible remote; it uses the invoking user's native Git configuration and authentication when
@@ -2049,7 +2106,7 @@ See <a href="../../project/source-code-adapters/">Source-code adapters</a> for t
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-20">20 October 2026</time>
+    Last updated <time datetime="2026-10-21">21 October 2026</time>
   </span>
 
     
