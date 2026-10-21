@@ -43,7 +43,7 @@ async fn wave7_cli_contract_management_routes_values_without_secret_output() {
     let backend = FakeBackend::default();
     let route = ConnectionRoute {
         target: Some("prod".to_owned()),
-        scope: ConnectionScope::Org,
+        scope: Some(ConnectionScope::Org),
     };
 
     let mut listed = Vec::new();
@@ -142,7 +142,7 @@ async fn wave7_cli_contract_connection_dispatch_rejects_empty_and_wrong_operatio
         NativeV2CliCommand::ConnectionSet(ConnectionSetCommand {
             route: ConnectionRoute {
                 target: Some("prod".to_owned()),
-                scope: ConnectionScope::Org,
+                scope: Some(ConnectionScope::Org),
             },
             key: ConnectionKey::new("empty").assert_value(),
             input: ConnectionInput::Prompt(Vec::new()),
@@ -268,7 +268,7 @@ async fn connection_mutations_surface_output_failure_after_backend_completion() 
     let backend = FakeBackend::default();
     let route = ConnectionRoute {
         target: Some("prod".to_owned()),
-        scope: ConnectionScope::Org,
+        scope: Some(ConnectionScope::Org),
     };
     let field = EnvironmentVariableName::new("OPENAI_API_KEY").assert_value();
     let values =
@@ -287,7 +287,7 @@ async fn connection_mutations_surface_output_failure_after_backend_completion() 
         &route,
         ConnectionSetRequest {
             key: ConnectionKey::new("openai").assert_value(),
-            scope: route.scope,
+            scope: route.scope.assert_value(),
             values,
         },
         &backend,
@@ -327,7 +327,7 @@ async fn connection_mutations_surface_output_failure_after_backend_completion() 
         &route,
         ConnectionSetRequest {
             key: ConnectionKey::new("openai").assert_value(),
-            scope: route.scope,
+            scope: route.scope.assert_value(),
             values: StaticConnectionValues::new(BTreeMap::from([(
                 EnvironmentVariableName::new("OPENAI_API_KEY").assert_value(),
                 "provider-secret".to_owned(),

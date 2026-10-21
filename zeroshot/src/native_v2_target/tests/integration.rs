@@ -810,7 +810,7 @@ fn assert_device_exchange(requests: &[CapturedHttpRequest]) {
             .contains("device_token=22222222-2222-4222-8222-222222222222")
     );
     assert!(request.body.contains("device_label=zeroshot-cli"));
-    assert!(request.body.contains("audience=controller"));
+    assert!(request.body.contains("audience=admin"));
 }
 
 fn assert_submit_and_session_requests(requests: &[CapturedHttpRequest], run_id: &RunId) {

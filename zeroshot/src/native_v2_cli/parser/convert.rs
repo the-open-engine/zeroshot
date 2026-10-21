@@ -64,12 +64,20 @@ impl CliCommand {
             Self::Acp(args) => args.into_command(),
             Self::Ui { listen, target } => ui_command(listen, target),
             Self::Target { command } => command.into_command(),
+            command => command.into_execution_command(),
+        }
+    }
+
+    fn into_execution_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
+        match self {
+            Self::Delegation { command } => command.into_command(),
             Self::Connection { command } => command.into_command(),
             Self::Profile { command } => command.into_command(),
             Self::Template { command } => command.into_command(),
             Self::Plan { command } => command.into_command(),
             Self::Run(args) => args.into_command(),
             Self::Utility(command) => command.into_command(),
+            _ => Err(usage("expected an execution or management command")),
         }
     }
 }
@@ -151,14 +159,14 @@ fn connection_fields(
 
 fn connection_route(
     target: Option<String>,
-    scope: ConnectionScopeArg,
+    scope: Option<ConnectionScopeArg>,
 ) -> Result<ConnectionRoute, NativeV2CliError> {
     Ok(ConnectionRoute {
         target: validated_target(target)?,
-        scope: match scope {
+        scope: scope.map(|scope| match scope {
             ConnectionScopeArg::User => ConnectionScope::User,
             ConnectionScopeArg::Org => ConnectionScope::Org,
-        },
+        }),
     })
 }
 
@@ -684,7 +692,7 @@ fn optional_branch(branch: Option<String>) -> Result<Option<SourceBranchId>, Nat
         .map_err(|error| usage(format!("invalid --branch: {error}")))
 }
 
-fn validate_public_id(value: &str, kind: &str) -> Result<(), NativeV2CliError> {
+pub(super) fn validate_public_id(value: &str, kind: &str) -> Result<(), NativeV2CliError> {
     if value.is_empty() || value.chars().count() > 256 || value.chars().any(char::is_control) {
         return Err(usage(format!(
             "{kind} must be 1..=256 non-control characters"
@@ -693,6 +701,6 @@ fn validate_public_id(value: &str, kind: &str) -> Result<(), NativeV2CliError> {
     Ok(())
 }
 
-fn usage(message: impl Into<String>) -> NativeV2CliError {
+pub(super) fn usage(message: impl Into<String>) -> NativeV2CliError {
     NativeV2CliError::Usage(message.into())
 }

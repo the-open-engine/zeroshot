@@ -55,14 +55,14 @@ fn named_command(
 
 pub(super) fn profile_route(
     target: Option<String>,
-    scope: ProfileScopeArg,
+    scope: Option<ProfileScopeArg>,
 ) -> Result<ProfileRoute, NativeV2CliError> {
     let target = super::validated_target(target)?;
-    let scope = match scope {
+    let scope = scope.map(|scope| match scope {
         ProfileScopeArg::User => RunProfileScope::User,
         ProfileScopeArg::Org => RunProfileScope::Org,
-    };
-    if target.is_none() && scope == RunProfileScope::Org {
+    });
+    if target.is_none() && scope == Some(RunProfileScope::Org) {
         return Err(super::usage("organization profiles require --target"));
     }
     Ok(ProfileRoute { target, scope })

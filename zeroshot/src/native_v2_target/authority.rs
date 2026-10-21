@@ -27,8 +27,27 @@ use super::{TargetAuthorityError, TargetOecpAccess, TargetRecord};
 /// The external contract which hosting must implement before the native-v2 CLI can reach cloud.
 #[async_trait]
 pub trait TargetControlAuthority: Send + Sync {
+    fn redact_error(&self, error: TargetAuthorityError) -> TargetAuthorityError {
+        error
+    }
+
     async fn discover(&self, target: &TargetRecord) -> Result<(), TargetAuthorityError>;
     async fn login(&self, target: &TargetRecord) -> Result<(), TargetAuthorityError>;
+    async fn default_resource_scope(
+        &self,
+        _target: &TargetRecord,
+    ) -> Result<openengine_cluster_protocol::ConnectionScope, TargetAuthorityError> {
+        Ok(openengine_cluster_protocol::ConnectionScope::User)
+    }
+    async fn delegation(
+        &self,
+        _target: &TargetRecord,
+        _action: zeroshot_engine::native_v2_cli::DelegationAction,
+    ) -> Result<zeroshot_engine::native_v2_cli::DelegationResult, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise delegation management",
+        ))
+    }
     async fn submit(
         &self,
         target: &TargetRecord,

@@ -215,6 +215,39 @@ Follow the [Cloud documentation](https://cloud.zeroshot.sh/docs) for Zeroshot Cl
 should link to the version of these core docs that matches the deployed target, as described in
 [Documentation versions](../project/versioning.md).
 
+### API keys
+
+Hosted targets that advertise API key authentication support machine delegations. Sign in as a
+human to create one:
+
+```console
+zeroshot target login cloud
+zeroshot delegation create ci
+zeroshot delegation create release --owner org --organization ORGANIZATION_UUID
+```
+
+Any user can delegate their own current permissions. Organization owners and admins can create
+organization delegations. Creation prints an `api_key` once; store it as `ZEROSHOT_API_KEY` in your
+CI secret store. Keys expire after 90 days by default; `--expires-in-days` accepts 1–365.
+
+With the key set, use the normal CLI with `--target cloud`, including connections, profiles, merge
+plans, live sessions, and resume. For a user key, set `ZEROSHOT_ORGANIZATION` to the organization
+UUID when organization selection is needed. Organization keys stay in their own organization.
+Omitted connection and profile scopes follow the owner's scope.
+
+Delegation management requires human login. Unset `ZEROSHOT_API_KEY` before managing keys:
+
+```console
+zeroshot delegation list
+zeroshot delegation key create DELEGATION_ID --name rotation
+zeroshot delegation key revoke DELEGATION_ID OLD_KEY_ID
+zeroshot delegation disable DELEGATION_ID
+```
+
+Create the replacement before revoking the old key. Revoking a key blocks further calls while
+accepted runs continue. API keys authenticate the CLI; keep provider and source credentials in
+their usual connections.
+
 ## Source and delivery credentials
 
 Git checkout and push use shared HTTPS or SSH transport. A local push needs an attached, committed branch

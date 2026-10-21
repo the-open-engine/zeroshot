@@ -74,14 +74,8 @@ where
     if command.is_plan_operation() {
         return merge_plans::execute(command, context, signal, output).await;
     }
-    if command.is_connection_operation() {
-        return connections::execute_connection(command, context.backend, output).await;
-    }
-    if command.is_profile_operation() {
-        return profiles::execute_profile(command, context.backend, output).await;
-    }
-    if command.is_target_operation() {
-        return execute_target(command, context.backend).await;
+    if command.is_management_operation() {
+        return execute_management(command, context.backend, output).await;
     }
     match command {
         NativeV2CliCommand::Run(run) => execute_run(*run, context, signal, output).await,
@@ -89,6 +83,26 @@ where
         | NativeV2CliCommand::TargetServe(_)
         | NativeV2CliCommand::Ui { .. } => Err(NativeV2CliError::ProcessCommand),
         command => execute_run_operation(command, context, signal, output).await,
+    }
+}
+
+async fn execute_management<B: NativeV2CliBackend, W: Write>(
+    command: NativeV2CliCommand,
+    backend: &B,
+    output: &mut W,
+) -> Result<CliOutcome, NativeV2CliError> {
+    if command.is_connection_operation() {
+        return connections::execute_connection(command, backend, output).await;
+    }
+    if command.is_profile_operation() {
+        return profiles::execute_profile(command, backend, output).await;
+    }
+    match command {
+        NativeV2CliCommand::Delegation(command) => {
+            write_json(output, &backend.delegation(command).await?)?;
+            Ok(CliOutcome::Completed)
+        }
+        command => execute_target(command, backend).await,
     }
 }
 

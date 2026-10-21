@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::io::{Read, Write};
 
 use openengine_cluster_protocol::{
-    ConnectionDeleteRequest, ConnectionListRequest, ConnectionSetRequest, EnvironmentVariableName,
-    StaticConnectionValues,
+    ConnectionDeleteRequest, ConnectionListRequest, ConnectionScope, ConnectionSetRequest,
+    EnvironmentVariableName, StaticConnectionValues,
 };
 
 use crate::native_v2_cli::{
@@ -24,35 +24,48 @@ where
 {
     match command {
         NativeV2CliCommand::ConnectionList(route) => {
-            let result = backend
-                .connection_list(
-                    route.target.as_deref(),
-                    ConnectionListRequest { scope: route.scope },
-                )
-                .await?;
-            write_json(output, &result)?;
-            Ok(CliOutcome::Completed)
+            execute_connection_list(route, backend, output).await
         }
         NativeV2CliCommand::ConnectionSet(command) => {
             execute_connection_set(command, backend, output, read_connection_values).await
         }
         NativeV2CliCommand::ConnectionDelete { route, key } => {
-            let result = backend
-                .connection_delete(
-                    route.target.as_deref(),
-                    ConnectionDeleteRequest {
-                        key,
-                        scope: route.scope,
-                    },
-                )
-                .await?;
-            write_json(output, &result)?;
-            Ok(CliOutcome::Completed)
+            execute_connection_delete(route, key, backend, output).await
         }
         _ => Err(NativeV2CliError::Usage(
             "expected a connection operation".to_owned(),
         )),
     }
+}
+
+async fn execute_connection_list<B: NativeV2CliBackend, W: Write>(
+    route: ConnectionRoute,
+    backend: &B,
+    output: &mut W,
+) -> Result<CliOutcome, NativeV2CliError> {
+    let scope = resolve_scope(&route, backend).await?;
+    let result = backend
+        .connection_list(route.target.as_deref(), ConnectionListRequest { scope })
+        .await?;
+    write_json(output, &result)?;
+    Ok(CliOutcome::Completed)
+}
+
+async fn execute_connection_delete<B: NativeV2CliBackend, W: Write>(
+    route: ConnectionRoute,
+    key: openengine_cluster_protocol::ConnectionKey,
+    backend: &B,
+    output: &mut W,
+) -> Result<CliOutcome, NativeV2CliError> {
+    let scope = resolve_scope(&route, backend).await?;
+    let result = backend
+        .connection_delete(
+            route.target.as_deref(),
+            ConnectionDeleteRequest { key, scope },
+        )
+        .await?;
+    write_json(output, &result)?;
+    Ok(CliOutcome::Completed)
 }
 
 async fn execute_connection_set<B, W>(
@@ -66,18 +79,29 @@ where
     W: Write,
 {
     let ConnectionSetCommand { route, key, input } = command;
+    let scope = resolve_scope(&route, backend).await?;
     let values = read_values(input)?;
     store_connection_values(
         &route,
-        ConnectionSetRequest {
-            key,
-            scope: route.scope,
-            values,
-        },
+        ConnectionSetRequest { key, scope, values },
         backend,
         output,
     )
     .await
+}
+
+async fn resolve_scope<B: NativeV2CliBackend>(
+    route: &ConnectionRoute,
+    backend: &B,
+) -> Result<ConnectionScope, NativeV2CliError> {
+    match route.scope {
+        Some(scope) => Ok(scope),
+        None => {
+            backend
+                .default_resource_scope(route.target.as_deref())
+                .await
+        }
+    }
 }
 
 async fn store_connection_values<B, W>(

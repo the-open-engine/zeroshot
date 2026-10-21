@@ -17,6 +17,7 @@ Commands:
   acp                Serve one local Zeroshot profile as an experimental ACP agent over stdio
   ui                 Serve the local profile editor and live or recorded run history
   target             Manage named targets or serve a direct target
+  delegation         Manage user or organization machine delegations and API keys
   connection         Inspect and manage named runtime connections
   profile            Manage reusable graph/runtime profiles
   template           Inspect built-in graph templates
@@ -87,7 +88,7 @@ Options:
 ```text
 Manage named targets or serve a direct target.
 
-The built-in `cloud` target points to https://api.cloud.zeroshot.sh. Run `zeroshot target login cloud` to sign in. See https://cloud.zeroshot.sh/docs for Cloud setup.
+The built-in `cloud` target points to https://api.cloud.zeroshot.sh. Run `zeroshot target login cloud` to sign in. For unattended access, set ZEROSHOT_API_KEY instead of logging in. See https://cloud.zeroshot.sh/docs for Cloud setup.
 
 Usage: zeroshot target <COMMAND>
 
@@ -186,6 +187,255 @@ Commands:
   help   Print this message or the help of the given subcommand(s)
 ```
 
+### `zeroshot delegation`
+
+```text
+Manage user or organization machine delegations and API keys.
+
+Requires human login. Set ZEROSHOT_API_KEY for unattended target commands; set ZEROSHOT_ORGANIZATION to select an organization with a user-owned key.
+
+Usage: zeroshot delegation <COMMAND>
+
+Commands:
+  list     List delegation metadata without secret keys
+  create   Create a delegation and its first API key. Prints the key once
+  show     Read one delegation and its key metadata
+  disable  Disable a delegation and revoke its access
+  key      Create, inspect, or revoke a delegation's API keys
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+
+API keys act with their owner's current permissions and support every target command except delegation management. User-owned delegations follow the user's memberships; organization-owned delegations stay in one organization and require an owner or admin to manage. Keys expire after 90 days by default, with a maximum of 365 days. Creation prints the secret once. Store it in your CI secret store; do not put it in profiles, connections, or run input.
+```
+
+#### `zeroshot delegation list`
+
+```text
+List delegation metadata without secret keys
+
+Usage: zeroshot delegation list [OPTIONS]
+
+Options:
+      --target <NAME>
+          Configured hosted target
+
+          [default: cloud]
+
+      --owner <OWNER>
+          Delegate your user or an organization
+
+          [default: user]
+          [possible values: user, org]
+
+      --organization <UUID>
+          Organization UUID. Required with --owner org
+
+  -h, --help
+          Print help
+```
+
+#### `zeroshot delegation create`
+
+```text
+Create a delegation and its first API key. Prints the key once
+
+Usage: zeroshot delegation create [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          Display name for this machine delegation
+
+Options:
+      --target <NAME>
+          Configured hosted target
+
+          [default: cloud]
+
+      --owner <OWNER>
+          Delegate your user or an organization
+
+          [default: user]
+          [possible values: user, org]
+
+      --organization <UUID>
+          Organization UUID. Required with --owner org
+
+      --expires-in-days <EXPIRES_IN_DAYS>
+          API key lifetime in days (1-365)
+
+          [default: 90]
+
+  -h, --help
+          Print help
+```
+
+#### `zeroshot delegation show`
+
+```text
+Read one delegation and its key metadata
+
+Usage: zeroshot delegation show [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+          Delegation UUID
+
+Options:
+      --target <NAME>
+          Configured hosted target
+
+          [default: cloud]
+
+  -h, --help
+          Print help
+```
+
+#### `zeroshot delegation disable`
+
+```text
+Disable a delegation and revoke its access
+
+Usage: zeroshot delegation disable [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+          Delegation UUID
+
+Options:
+      --target <NAME>
+          Configured hosted target
+
+          [default: cloud]
+
+  -h, --help
+          Print help
+```
+
+#### `zeroshot delegation key`
+
+```text
+Create, inspect, or revoke a delegation's API keys
+
+Usage: zeroshot delegation key <COMMAND>
+
+Commands:
+  list    List key metadata without secrets
+  create  Create another key for overlapping rotation. Prints the key once
+  revoke  Revoke one key. Accepted runs continue
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help
+```
+
+##### `zeroshot delegation key list`
+
+```text
+List key metadata without secrets
+
+Usage: zeroshot delegation key list [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+          Delegation UUID
+
+Options:
+      --target <NAME>
+          Configured hosted target
+
+          [default: cloud]
+
+  -h, --help
+          Print help
+```
+
+##### `zeroshot delegation key create`
+
+```text
+Create another key for overlapping rotation. Prints the key once
+
+Usage: zeroshot delegation key create [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+          Delegation UUID
+
+Options:
+      --target <NAME>
+          Configured hosted target
+
+          [default: cloud]
+
+      --name <NAME>
+          Optional label for this key
+
+      --expires-in-days <EXPIRES_IN_DAYS>
+          API key lifetime in days (1-365)
+
+          [default: 90]
+
+  -h, --help
+          Print help
+```
+
+##### `zeroshot delegation key revoke`
+
+```text
+Revoke one key. Accepted runs continue
+
+Usage: zeroshot delegation key revoke [OPTIONS] <ID> <KEY_ID>
+
+Arguments:
+  <ID>
+          Delegation UUID
+
+  <KEY_ID>
+          Key UUID
+
+Options:
+      --target <NAME>
+          Configured hosted target
+
+          [default: cloud]
+
+  -h, --help
+          Print help
+```
+
+##### `zeroshot delegation key help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: zeroshot delegation key help [COMMAND]
+
+Commands:
+  list    List key metadata without secrets
+  create  Create another key for overlapping rotation. Prints the key once
+  revoke  Revoke one key. Accepted runs continue
+  help    Print this message or the help of the given subcommand(s)
+```
+
+#### `zeroshot delegation help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: zeroshot delegation help [COMMAND]
+
+Commands:
+  list     List delegation metadata without secret keys
+  create   Create a delegation and its first API key. Prints the key once
+  show     Read one delegation and its key metadata
+  disable  Disable a delegation and revoke its access
+  key      Create, inspect, or revoke a delegation's API keys
+  help     Print this message or the help of the given subcommand(s)
+```
+
 ### `zeroshot connection`
 
 ```text
@@ -236,9 +486,8 @@ Options:
           Use this named hosted target. If omitted, use local connections
 
       --scope <SCOPE>
-          Select user- or organization-scoped connections
+          Connection scope. Defaults to the authenticated owner's scope
 
-          [default: user]
           [possible values: user, org]
 
   -h, --help
@@ -267,9 +516,8 @@ Options:
           Use this named hosted target. If omitted, use local connections
 
       --scope <SCOPE>
-          Select user- or organization-scoped connections
+          Connection scope. Defaults to the authenticated owner's scope
 
-          [default: user]
           [possible values: user, org]
 
   -h, --help
@@ -299,9 +547,8 @@ Options:
           Use this named hosted target. If omitted, use local connections
 
       --scope <SCOPE>
-          Select user- or organization-scoped connections
+          Connection scope. Defaults to the authenticated owner's scope
 
-          [default: user]
           [possible values: user, org]
 
   -h, --help
@@ -354,9 +601,8 @@ Options:
           Use this named hosted target. If omitted, use local profiles
 
       --scope <SCOPE>
-          Select user- or organization-scoped hosted profiles
+          Hosted profile scope. Defaults to the authenticated owner's scope
 
-          [default: user]
           [possible values: user, org]
 
   -h, --help
@@ -412,9 +658,8 @@ Options:
           Use this named hosted target. If omitted, use local profiles
 
       --scope <SCOPE>
-          Select user- or organization-scoped hosted profiles
+          Hosted profile scope. Defaults to the authenticated owner's scope
 
-          [default: user]
           [possible values: user, org]
 
   -h, --help
@@ -437,9 +682,8 @@ Options:
           Use this named hosted target. If omitted, use local profiles
 
       --scope <SCOPE>
-          Select user- or organization-scoped hosted profiles
+          Hosted profile scope. Defaults to the authenticated owner's scope
 
-          [default: user]
           [possible values: user, org]
 
   -h, --help
@@ -462,9 +706,8 @@ Options:
           Use this named hosted target. If omitted, use local profiles
 
       --scope <SCOPE>
-          Select user- or organization-scoped hosted profiles
+          Hosted profile scope. Defaults to the authenticated owner's scope
 
-          [default: user]
           [possible values: user, org]
 
   -h, --help
@@ -487,9 +730,8 @@ Options:
           Use this named hosted target. If omitted, use local profiles
 
       --scope <SCOPE>
-          Select user- or organization-scoped hosted profiles
+          Hosted profile scope. Defaults to the authenticated owner's scope
 
-          [default: user]
           [possible values: user, org]
 
   -h, --help
@@ -1160,6 +1402,7 @@ Commands:
   acp                Serve one local Zeroshot profile as an experimental ACP agent over stdio
   ui                 Serve the local profile editor and live or recorded run history
   target             Manage named targets or serve a direct target
+  delegation         Manage user or organization machine delegations and API keys
   connection         Inspect and manage named runtime connections
   profile            Manage reusable graph/runtime profiles
   template           Inspect built-in graph templates

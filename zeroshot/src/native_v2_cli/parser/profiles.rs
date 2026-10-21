@@ -30,9 +30,9 @@ pub(super) struct ProfileRouteArgs {
     /// Use this named hosted target. If omitted, use local profiles.
     #[arg(long, value_name = "NAME")]
     pub(super) target: Option<String>,
-    /// Select user- or organization-scoped hosted profiles.
-    #[arg(long, value_enum, default_value_t)]
-    pub(super) scope: ProfileScopeArg,
+    /// Hosted profile scope. Defaults to the authenticated owner's scope.
+    #[arg(long, value_enum)]
+    pub(super) scope: Option<ProfileScopeArg>,
 }
 
 #[derive(Debug, Args)]

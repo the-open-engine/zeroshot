@@ -7,9 +7,8 @@ use zeroshot_engine::profile_ui::{
 };
 
 use super::contract::{
-    build_auth_descriptor, build_controller_descriptor, build_run_history_descriptor,
-    require_response_route, validate_metadata_routes, HostedAuthDescriptor, OAuthMetadataWire,
-    RunHistoryDescriptor,
+    build_controller_descriptor, build_run_history_descriptor, require_response_route,
+    HostedAuthDescriptor, RunHistoryDescriptor,
 };
 use super::{AccessToken, TargetHttpControlAuthority};
 use crate::native_v2_target::{TargetAccess, TargetAuthorityError, TargetRecord};
@@ -58,6 +57,9 @@ impl TargetRunHistoryTransport {
                     .map_err(incompatible)?;
                 let hosted = match &self.target.access {
                     TargetAccess::Direct => {
+                        self.authority
+                            .require_no_machine_for_direct()
+                            .map_err(incompatible)?;
                         build_controller_descriptor(
                             &origin,
                             wire,
@@ -67,20 +69,20 @@ impl TargetRunHistoryTransport {
                         None
                     }
                     TargetAccess::Hosted { .. } => {
-                        let auth = build_auth_descriptor(&origin, &wire).map_err(incompatible)?;
+                        let auth = self
+                            .authority
+                            .hosted_auth_descriptor(&origin, &wire)
+                            .map_err(incompatible)?;
                         let controller = build_controller_descriptor(
                             &origin,
                             wire,
                             self.target.access.authentication(),
                         )
                         .map_err(incompatible)?;
-                        let metadata: OAuthMetadataWire = self
-                            .authority
-                            .get_json(&auth.metadata_url, "OAuth metadata")
+                        self.authority
+                            .validate_hosted_metadata(&origin, &auth)
                             .await
                             .map_err(unavailable)?;
-                        validate_metadata_routes(&origin, &auth, &metadata)
-                            .map_err(incompatible)?;
                         Some(HostedHistoryAuthority {
                             auth,
                             audience: controller.audience,
@@ -104,6 +106,30 @@ impl TargetRunHistoryTransport {
             .await
             .map(Some)
             .map_err(unavailable)
+    }
+
+    async fn read_response(
+        &self,
+        request: &RunHistoryRequest,
+        response: reqwest::Response,
+    ) -> Result<RunHistoryResponse, RunHistoryTransportError> {
+        if !response.status().is_success()
+            && let Some(machine) = &self.authority.machine
+        {
+            let status = response.status().as_u16();
+            let mut problem: serde_json::Value = super::contract::read_json_with_limit(
+                response,
+                "run history",
+                request.maximum_problem_bytes(),
+            )
+            .await
+            .map_err(unavailable)?;
+            super::super::authority_error::redact_json(&mut problem, &machine.api_key);
+            let body = serde_json::to_vec(&problem)
+                .map_err(|_| RunHistoryTransportError::unavailable())?;
+            return RunHistoryResponse::new(status, body);
+        }
+        RunHistoryResponse::from_http(request, response).await
     }
 
     fn request_url(
@@ -163,7 +189,7 @@ impl RunHistoryTransport for TargetRunHistoryTransport {
         self.authority
             .invalidate_rejected_access(&response, access.as_ref())
             .await;
-        RunHistoryResponse::from_http(&request, response).await
+        self.read_response(&request, response).await
     }
 }
 

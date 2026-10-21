@@ -3,6 +3,10 @@ use std::path::PathBuf;
 
 use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 
+#[path = "parser/delegations.rs"]
+mod delegations;
+use delegations::DelegationCliCommand;
+
 /// Run multi-agent graphs locally or on named Zeroshot targets.
 ///
 /// Single-result commands write JSON. Foreground `run`, `watch`, `logs`, and `attach` stream
@@ -51,10 +55,20 @@ enum CliCommand {
     ///
     /// The built-in `cloud` target points to https://api.cloud.zeroshot.sh.
     /// Run `zeroshot target login cloud` to sign in.
+    /// For unattended access, set ZEROSHOT_API_KEY instead of logging in.
     /// See https://cloud.zeroshot.sh/docs for Cloud setup.
     Target {
         #[command(subcommand)]
         command: TargetCommand,
+    },
+
+    /// Manage user or organization machine delegations and API keys.
+    ///
+    /// Requires human login. Set ZEROSHOT_API_KEY for unattended target commands;
+    /// set ZEROSHOT_ORGANIZATION to select an organization with a user-owned key.
+    Delegation {
+        #[command(subcommand)]
+        command: DelegationCliCommand,
     },
 
     /// Inspect and manage named runtime connections.
@@ -268,9 +282,9 @@ struct ConnectionRouteArgs {
     #[arg(long, value_name = "NAME")]
     target: Option<String>,
 
-    /// Select user- or organization-scoped connections.
-    #[arg(long, value_enum, default_value_t)]
-    scope: ConnectionScopeArg,
+    /// Connection scope. Defaults to the authenticated owner's scope.
+    #[arg(long, value_enum)]
+    scope: Option<ConnectionScopeArg>,
 }
 
 #[derive(Debug, Args)]

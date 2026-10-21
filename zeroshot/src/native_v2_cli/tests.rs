@@ -20,6 +20,8 @@ mod attach_tests;
 mod checkpoint_tests;
 #[path = "tests/connections.rs"]
 mod connection_tests;
+#[path = "tests/delegations.rs"]
+mod delegation_tests;
 #[path = "tests/environment.rs"]
 mod environment_tests;
 #[path = "tests/lifecycle.rs"]

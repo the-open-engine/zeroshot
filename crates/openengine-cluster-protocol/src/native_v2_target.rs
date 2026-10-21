@@ -478,6 +478,8 @@ pub struct TargetGitTransportDiscovery {
 #[serde(default, rename_all = "snake_case")]
 pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<crate::TargetApiKeyDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub hosted_runs: Option<TargetHostedRunsDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_history: Option<TargetRunHistoryDiscovery>,
@@ -522,12 +524,17 @@ pub struct TargetDiscoveryDocument {
 impl TargetDiscoveryExtensions {
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.hosted_runs.is_none()
+        self.api_key.is_none()
+            && self.hosted_runs.is_none()
             && self.run_history.is_none()
             && self.merge_plans.is_none()
             && self.connections.is_none()
             && self.run_profiles.is_none()
-            && self.workspace_recovery.is_none()
+            && self.controller_extensions_empty()
+    }
+
+    const fn controller_extensions_empty(&self) -> bool {
+        self.workspace_recovery.is_none()
             && self.workspace_checkpoints.is_none()
             && self.hosted_workspace_recovery.is_none()
             && self.node_runtime_lanes.is_none()

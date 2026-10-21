@@ -24,6 +24,17 @@ impl Drop for TestDirectory {
 }
 
 #[test]
+fn git_metadata_commands_exclude_the_cloud_machine_credential() {
+    let command = git_command(None);
+    assert!(
+        command
+            .as_std()
+            .get_envs()
+            .any(|(name, value)| { name == "ZEROSHOT_API_KEY" && value.is_none() })
+    );
+}
+
+#[test]
 fn registered_github_identity_recognizes_supported_remote_forms() {
     for url in [
         "git@github.com:owner/repo.git",

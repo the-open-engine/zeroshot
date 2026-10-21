@@ -6,6 +6,22 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use super::*;
 
+#[test]
+fn target_api_keys_cannot_be_collected_by_a_runtime_connection_requirement() {
+    let fields = ["ZEROSHOT_API_KEY", "zeroshot_api_key", "OPENAI_API_KEY"]
+        .into_iter()
+        .map(|name| EnvironmentVariableName::new(name).assert_value())
+        .collect();
+    let selected = select_connection_requirements(
+        BTreeMap::from([(ConnectionKey::new("provider").assert_value(), fields)]),
+        |_| Some(OsString::from("must-stay-private")),
+    )
+    .assert_value();
+    let values = selected.values().next().assert_value().as_map();
+    assert_eq!(values.len(), 1);
+    assert!(values.contains_key(&EnvironmentVariableName::new("OPENAI_API_KEY").assert_value()));
+}
+
 fn uniform(harness: UniformHarness, provider: UniformProvider) -> UniformRuntimePlan {
     UniformRuntimePlan {
         harness,

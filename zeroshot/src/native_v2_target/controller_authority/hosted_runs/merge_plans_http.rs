@@ -93,7 +93,7 @@ impl TargetHttpControlAuthority {
                 .execute_merge_plan_operation(&routes, &access, operation)
                 .await
             {
-                Err(error) if error.is_http_auth_rejection() => {
+                Err(error) if error.is_http_auth_rejection() && self.machine.is_none() => {
                     self.invalidate_access(&access).await;
                     if retried {
                         return Err(error);

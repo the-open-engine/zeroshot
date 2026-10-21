@@ -24,6 +24,20 @@ pub trait TargetConnector: Send + Sync {
 
     async fn add(&self, request: TargetAdd) -> Result<(), NativeV2CliError>;
     async fn login(&self, name: &str) -> Result<(), NativeV2CliError>;
+    async fn default_resource_scope(
+        &self,
+        _name: &str,
+    ) -> Result<openengine_cluster_protocol::ConnectionScope, NativeV2CliError> {
+        Ok(openengine_cluster_protocol::ConnectionScope::User)
+    }
+    async fn delegation(
+        &self,
+        _command: crate::native_v2_cli::DelegationCommand,
+    ) -> Result<crate::native_v2_cli::DelegationResult, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise delegation management".to_owned(),
+        ))
+    }
     async fn connection_list(
         &self,
         name: &str,

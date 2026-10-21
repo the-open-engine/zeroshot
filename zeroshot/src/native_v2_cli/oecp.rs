@@ -136,6 +136,22 @@ where
         self.connector.login(name).await
     }
 
+    async fn default_resource_scope(
+        &self,
+        target: Option<&str>,
+    ) -> Result<openengine_cluster_protocol::ConnectionScope, NativeV2CliError> {
+        self.connector
+            .default_resource_scope(require_named_target(target)?)
+            .await
+    }
+
+    async fn delegation(
+        &self,
+        command: crate::native_v2_cli::DelegationCommand,
+    ) -> Result<crate::native_v2_cli::DelegationResult, NativeV2CliError> {
+        self.connector.delegation(command).await
+    }
+
     async fn connection_list(
         &self,
         target: Option<&str>,

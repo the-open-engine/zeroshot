@@ -1,5 +1,6 @@
 use openengine_cluster_protocol::{
-    GraphSpec, RunProfile, RunProfileListRequest, RunProfileScope, RunProfileSelector, RuntimePlan,
+    ConnectionScope, GraphSpec, RunProfile, RunProfileListRequest, RunProfileScope,
+    RunProfileSelector, RuntimePlan,
 };
 
 use super::{materialize_graph, materialize_runtime, validate_graph_profile};
@@ -46,8 +47,17 @@ where
     B: NativeV2CliBackend,
 {
     let local = LocalRunProfileStore::production()?;
-    for scope in profile_scopes(reference, target)? {
-        let list = profile_list(scope, target, backend, &local).await?;
+    resolve_stored_profile_with_store(target, reference, backend, &local).await
+}
+
+async fn resolve_stored_profile_with_store<B: NativeV2CliBackend>(
+    target: Option<&str>,
+    reference: Option<&ProfileReference>,
+    backend: &B,
+    local: &LocalRunProfileStore,
+) -> Result<ResolvedRunProfile, NativeV2CliError> {
+    for scope in profile_scopes(reference, target, backend).await? {
+        let list = profile_list(scope, target, backend, local).await?;
         let Some(selected) = select_profile(list, reference) else {
             continue;
         };
@@ -64,15 +74,16 @@ where
     Err(profile_not_found(reference))
 }
 
-fn profile_scopes(
+async fn profile_scopes<B: NativeV2CliBackend>(
     reference: Option<&ProfileReference>,
     target: Option<&str>,
+    backend: &B,
 ) -> Result<Vec<Option<RunProfileScope>>, NativeV2CliError> {
     let scopes = match reference.and_then(|value| value.qualifier) {
         Some(ProfileQualifier::Local) => vec![None],
         Some(ProfileQualifier::User) => vec![Some(RunProfileScope::User)],
         Some(ProfileQualifier::Org) => vec![Some(RunProfileScope::Org)],
-        None => default_scopes(target),
+        None => default_scopes(target, backend).await?,
     };
     if scopes.iter().any(Option::is_some) && target.is_none() {
         return Err(NativeV2CliError::Usage(
@@ -82,12 +93,18 @@ fn profile_scopes(
     Ok(scopes)
 }
 
-fn default_scopes(target: Option<&str>) -> Vec<Option<RunProfileScope>> {
+async fn default_scopes<B: NativeV2CliBackend>(
+    target: Option<&str>,
+    backend: &B,
+) -> Result<Vec<Option<RunProfileScope>>, NativeV2CliError> {
     let mut scopes = vec![None];
     if target.is_some() {
-        scopes.extend([Some(RunProfileScope::User), Some(RunProfileScope::Org)]);
+        if backend.default_resource_scope(target).await? == ConnectionScope::User {
+            scopes.push(Some(RunProfileScope::User));
+        }
+        scopes.push(Some(RunProfileScope::Org));
     }
-    scopes
+    Ok(scopes)
 }
 
 async fn profile_list<B: NativeV2CliBackend>(

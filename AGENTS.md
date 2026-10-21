@@ -185,6 +185,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   provider's `repository_from_remote` hook; CLI source selection has no separate forge catalog and
   rejects ambiguous matches and unsupported provider versions.
 - Named targets store only endpoint, access mode, and login identity. Named runs resolve repository, branch, exact remote revision, and worktree dirtiness client-side from the selected Git worktree plus per-run overrides; target records never bind repositories.
+- `ZEROSHOT_API_KEY` selects hosted machine authentication for the whole target CLI. It stays in
+  memory and HTTP Authorization, bypasses OAuth and the credential store, and never falls back to
+  human login. `ZEROSHOT_ORGANIZATION` supplies the optional organization selection header.
+  Machine keys require the discovered `zeroshot.api-key-authentication/v1` capability. They stay
+  out of runtime connections, native snapshots, and child environments. Omitted connection/profile
+  scopes follow the authenticated owner; explicit scopes remain explicit. Human `delegation`
+  commands use the Admin audience; target login verifies that account before persisting refresh
+  custody, including accounts without an organization.
 - Hosted HTTP authority clones share one bounded in-memory OAuth access-token slot across all
   hosted operations, including merge-plan discovery routes. Reuse requires the same target, login,
   OAuth endpoints/client, and audience with more than thirty seconds of token lifetime remaining.

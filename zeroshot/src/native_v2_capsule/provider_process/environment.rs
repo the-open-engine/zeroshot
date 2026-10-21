@@ -107,6 +107,7 @@ const LOCAL_TRANSPORT_ENVIRONMENT: &[&str] = &[
 pub(crate) fn current_process_environment() -> BTreeMap<String, String> {
     std::env::vars_os()
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+        .filter(|(name, _)| !name.eq_ignore_ascii_case("ZEROSHOT_API_KEY"))
         .collect()
 }
 
@@ -126,7 +127,8 @@ impl LocalHarnessEnvironment {
         Self::for_platform(values, cfg!(windows))
     }
 
-    fn for_platform(values: BTreeMap<String, String>, windows: bool) -> Self {
+    fn for_platform(mut values: BTreeMap<String, String>, windows: bool) -> Self {
+        values.retain(|name, _| !name.eq_ignore_ascii_case("ZEROSHOT_API_KEY"));
         Self { values, windows }
     }
 

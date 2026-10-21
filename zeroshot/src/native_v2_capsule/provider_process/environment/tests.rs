@@ -1,6 +1,23 @@
 use super::*;
 
 #[test]
+fn target_api_keys_never_enter_the_local_harness_snapshot() {
+    let environment = LocalHarnessEnvironment::for_windows(BTreeMap::from([
+        ("ZEROSHOT_API_KEY".to_owned(), "transport-secret".to_owned()),
+        (
+            "zeroshot_api_key".to_owned(),
+            "other-transport-secret".to_owned(),
+        ),
+        ("OPENAI_API_KEY".to_owned(), "provider-secret".to_owned()),
+    ]));
+    assert!(environment.get("ZEROSHOT_API_KEY").is_none());
+    assert_eq!(
+        environment.into_values(),
+        BTreeMap::from([("OPENAI_API_KEY".to_owned(), "provider-secret".to_owned()),])
+    );
+}
+
+#[test]
 fn windows_environment_lookup_is_case_insensitive_and_prefers_userprofile() {
     let mut environment = LocalHarnessEnvironment::for_windows(BTreeMap::from([
         ("Path".to_owned(), r"C:\tools".to_owned()),

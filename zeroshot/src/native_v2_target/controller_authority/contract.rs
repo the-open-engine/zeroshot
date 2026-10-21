@@ -51,6 +51,7 @@ pub(super) struct HostedAuthDescriptor {
     pub(super) merge_plans: Option<MergePlansDescriptor>,
     pub(super) connections: Option<ConnectionsDescriptor>,
     pub(super) run_profiles: Option<RunProfilesDescriptor>,
+    pub(super) delegations: Option<Url>,
 }
 
 pub(super) struct ControllerDescriptor {
@@ -413,6 +414,15 @@ pub(super) fn build_auth_descriptor(
         merge_plans: capabilities.merge_plans,
         connections: capabilities.connections,
         run_profiles: capabilities.run_profiles,
+        delegations: wire
+            .extensions
+            .api_key
+            .as_ref()
+            .map(|capability| {
+                super::machine::validate_discovery(origin, wire)?;
+                same_origin_path(origin, &capability.delegations_path)
+            })
+            .transpose()?,
     })
 }
 

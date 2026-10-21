@@ -28,7 +28,7 @@ pub struct ProfileReference {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProfileRoute {
     pub target: Option<String>,
-    pub scope: RunProfileScope,
+    pub scope: Option<RunProfileScope>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

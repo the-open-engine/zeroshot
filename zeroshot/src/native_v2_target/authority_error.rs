@@ -69,6 +69,20 @@ impl TargetAuthorityError {
         }
     }
 
+    pub(super) fn redact_secret(mut self, secret: &str) -> Self {
+        if secret.is_empty() {
+            return self;
+        }
+        self.message = self.message.replace(secret, "[REDACTED]");
+        if let Some(remote) = &mut self.remote {
+            remote.code = remote.code.replace(secret, "redacted");
+            if let Some(details) = &mut remote.details {
+                redact_json(details, secret);
+            }
+        }
+        self
+    }
+
     pub(super) fn is_http_auth_rejection(&self) -> bool {
         self.remote
             .as_ref()
@@ -94,5 +108,29 @@ impl TargetAuthorityError {
         } else {
             NativeV2CliError::Target(self.message)
         }
+    }
+}
+
+pub(super) fn redact_json(value: &mut serde_json::Value, secret: &str) {
+    if secret.is_empty() {
+        return;
+    }
+    match value {
+        serde_json::Value::String(text) => *text = text.replace(secret, "[REDACTED]"),
+        serde_json::Value::Array(values) => {
+            for value in values {
+                redact_json(value, secret);
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            *fields = std::mem::take(fields)
+                .into_iter()
+                .map(|(name, mut value)| {
+                    redact_json(&mut value, secret);
+                    (name.replace(secret, "[REDACTED]"), value)
+                })
+                .collect();
+        }
+        _ => {}
     }
 }

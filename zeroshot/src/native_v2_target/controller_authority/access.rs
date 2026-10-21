@@ -78,6 +78,12 @@ impl TargetHttpControlAuthority {
         auth: &HostedAuthDescriptor,
         audience: &str,
     ) -> Result<AccessToken, TargetAuthorityError> {
+        if let Some(machine) = &self.machine {
+            return Ok(AccessToken(Arc::new(IssuedAccessToken {
+                value: machine.api_key.clone(),
+                reusable_until: Instant::now(),
+            })));
+        }
         let cached = Arc::clone(&self.hosted_access).lock_owned().await;
         let authority = self.clone();
         let target = target.clone();
@@ -105,6 +111,12 @@ impl TargetHttpControlAuthority {
         cached: &mut Option<CachedHostedAccess>,
         request: HostedAccess<'_>,
     ) -> Result<AccessToken, TargetAuthorityError> {
+        if let Some(machine) = &self.machine {
+            return Ok(AccessToken(Arc::new(IssuedAccessToken {
+                value: machine.api_key.clone(),
+                reusable_until: Instant::now(),
+            })));
+        }
         let HostedAccess {
             target,
             auth,

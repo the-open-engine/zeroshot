@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 mod merge_plan;
 pub use merge_plan::*;
 
+#[path = "delegation.rs"]
+mod delegation;
+pub use delegation::*;
+
 use crate::{
     Cursor, ResolvedSource, RunForceResult, RunId, RunListResult, RunLogEventNotification, RunSize,
     RunStatus, RunStatusResult, RunTitle, RunWatchEventNotification, SubscriptionCloseReason,

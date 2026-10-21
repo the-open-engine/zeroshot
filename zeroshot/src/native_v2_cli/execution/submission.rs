@@ -401,6 +401,9 @@ where
     for (key, fields) in requirements {
         let mut values = BTreeMap::new();
         for name in fields {
+            if name.as_str().eq_ignore_ascii_case("ZEROSHOT_API_KEY") {
+                continue;
+            }
             let Some(value) = available(name.as_str()) else {
                 continue;
             };

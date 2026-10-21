@@ -55,7 +55,9 @@ pub use diagnostic::{ERROR_FORMAT_ENV, JSON_ERROR_FORMAT, NativeV2CliDiagnostic}
 #[path = "native_v2_cli/parser.rs"]
 mod parser;
 
+mod delegations;
 mod profiles;
+pub use delegations::{DelegationAction, DelegationCommand, DelegationResult};
 pub(crate) use profiles::LocalRunProfileStore;
 #[cfg(feature = "ui")]
 pub(crate) use profiles::{profile_revision, ProfileSaveConflict};
@@ -103,7 +105,7 @@ pub struct TargetServe {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConnectionRoute {
     pub target: Option<String>,
-    pub scope: ConnectionScope,
+    pub scope: Option<ConnectionScope>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -293,6 +295,7 @@ pub enum NativeV2CliCommand {
         name: String,
     },
     TargetServe(TargetServe),
+    Delegation(DelegationCommand),
     Ui {
         listen: SocketAddr,
         target: Option<String>,
@@ -347,6 +350,13 @@ pub enum NativeV2CliCommand {
 }
 
 impl NativeV2CliCommand {
+    fn is_management_operation(&self) -> bool {
+        self.is_connection_operation()
+            || self.is_profile_operation()
+            || self.is_target_operation()
+            || matches!(self, Self::Delegation(_))
+    }
+
     fn product_info(&self) -> Option<&str> {
         match self {
             Self::Help(help) => Some(help),
@@ -505,6 +515,22 @@ pub trait NativeV2CliBackend: Send + Sync {
 
     async fn target_add(&self, request: TargetAdd) -> Result<(), NativeV2CliError>;
     async fn target_login(&self, name: &str) -> Result<(), NativeV2CliError>;
+
+    async fn default_resource_scope(
+        &self,
+        _target: Option<&str>,
+    ) -> Result<ConnectionScope, NativeV2CliError> {
+        Ok(ConnectionScope::User)
+    }
+
+    async fn delegation(
+        &self,
+        _command: DelegationCommand,
+    ) -> Result<DelegationResult, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise delegation management".to_owned(),
+        ))
+    }
 
     async fn connection_list(
         &self,

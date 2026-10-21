@@ -1,7 +1,8 @@
 use std::io::Write;
 
 use openengine_cluster_protocol::{
-    RunProfileDefaultRequest, RunProfileListRequest, RunProfileSelector, RunProfileSetRequest,
+    ConnectionScope, RunProfileDefaultRequest, RunProfileListRequest, RunProfileScope,
+    RunProfileSelector, RunProfileSetRequest,
 };
 
 use super::super::{
@@ -44,11 +45,9 @@ async fn list<B: NativeV2CliBackend>(
     backend: &B,
     output: &mut impl Write,
 ) -> Result<(), NativeV2CliError> {
+    let scope = resolve_scope(&route, backend).await?;
     let result = backend
-        .profile_list(
-            route.target.as_deref(),
-            RunProfileListRequest { scope: route.scope },
-        )
+        .profile_list(route.target.as_deref(), RunProfileListRequest { scope })
         .await?;
     write_json(output, &result)
 }
@@ -60,7 +59,7 @@ async fn show<B: NativeV2CliBackend>(
     output: &mut impl Write,
 ) -> Result<(), NativeV2CliError> {
     let target = route.target.as_deref();
-    let request = selector(&route, name);
+    let request = selector(resolve_scope(&route, backend).await?, name);
     let result = backend.profile_show(target, request).await?;
     write_json(output, &result)
 }
@@ -79,12 +78,13 @@ async fn set<B: NativeV2CliBackend>(
     } = command;
     let (graph, mut runtime) = materialize_profile(&graph, &runtime).await?;
     materialize_stored_provider_access(&mut runtime, route.target.is_some())?;
+    let scope = resolve_scope(&route, backend).await?;
     let result = backend
         .profile_set(
             route.target.as_deref(),
             RunProfileSetRequest {
                 name,
-                scope: route.scope,
+                scope,
                 graph,
                 runtime,
                 set_default,
@@ -111,20 +111,18 @@ async fn remove<B: NativeV2CliBackend>(
     backend: &B,
     output: &mut impl Write,
 ) -> Result<(), NativeV2CliError> {
+    let scope = resolve_scope(&route, backend).await?;
     let result = backend
-        .profile_delete(route.target.as_deref(), selector(&route, name))
+        .profile_delete(route.target.as_deref(), selector(scope, name))
         .await?;
     write_json(output, &result)
 }
 
 fn selector(
-    route: &super::super::ProfileRoute,
+    scope: RunProfileScope,
     name: openengine_cluster_protocol::RunProfileName,
 ) -> RunProfileSelector {
-    RunProfileSelector {
-        scope: route.scope,
-        name,
-    }
+    RunProfileSelector { scope, name }
 }
 
 async fn set_default<B: NativeV2CliBackend>(
@@ -133,16 +131,30 @@ async fn set_default<B: NativeV2CliBackend>(
     backend: &B,
     output: &mut impl Write,
 ) -> Result<(), NativeV2CliError> {
+    let scope = resolve_scope(&route, backend).await?;
     let result = backend
         .profile_default(
             route.target.as_deref(),
-            RunProfileDefaultRequest {
-                scope: route.scope,
-                name,
-            },
+            RunProfileDefaultRequest { scope, name },
         )
         .await?;
     write_json(output, &result)
+}
+
+async fn resolve_scope<B: NativeV2CliBackend>(
+    route: &super::super::ProfileRoute,
+    backend: &B,
+) -> Result<RunProfileScope, NativeV2CliError> {
+    match route.scope {
+        Some(scope) => Ok(scope),
+        None => backend
+            .default_resource_scope(route.target.as_deref())
+            .await
+            .map(|scope| match scope {
+                ConnectionScope::User => RunProfileScope::User,
+                ConnectionScope::Org => RunProfileScope::Org,
+            }),
+    }
 }
 
 #[cfg(test)]
