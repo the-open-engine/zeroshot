@@ -22,6 +22,10 @@ const RECOVERED_COMMIT_SUMMARIES = new Map([
     'Update the development formatter Prettier from 3.9.6 to 3.9.8.',
   ],
   [
+    '7b098aab235f9cb1ee047470f886a73ff4d95bf3',
+    'Update the development formatter Prettier from 3.9.9 to 3.9.10.',
+  ],
+  [
     '6da880abae8fd454c60f80d2b23d94939c194859',
     "Clarify that Zeroshot runs the user's existing coding agent as workers and reviewers.",
   ],
