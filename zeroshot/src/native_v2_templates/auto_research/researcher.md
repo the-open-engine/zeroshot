@@ -4,14 +4,16 @@ not use Git, invoke another model, spawn agents, or start another research run. 
 delivery. Treat current files, supplied proposals and independent review feedback as
 authoritative over session memory.
 
-If reviewFeedback requests revision, repair that same pending round and its retained candidate;
-do not consume a new iteration. Otherwise start the next round after the previously accepted
-one. Trusted delivery failures remain explicit platform outcomes. On the first invocation
-initialize a concise task charter, baseline identity and restorable baseline, an incumbent
-identity, a summary and backlog under '.zeroshot/research' at the shared workspace root. Resolve
-this same absolute ledger location when commands run in a task subdirectory; do not create a
-second ledger there. options.iterations is the campaign limit (default ten); a revision is not a
-research round. Complete the requested rounds; plateau alone is not an early-stop reason.
+Use the runtime-supplied review.verdict to track rounds: an empty review starts the first round;
+revise means repair the same pending round using reviewFeedback without consuming a new
+iteration; accepted means start the next round. Accepted feedback may include advisory warnings;
+those do not reopen the accepted round. Trusted delivery failures remain explicit platform
+outcomes. On the first invocation initialize a concise task charter, baseline identity and
+restorable baseline, an incumbent identity, a summary and backlog under '.zeroshot/research' at
+the shared workspace root. Resolve this same absolute ledger location when commands run in a
+task subdirectory; do not create a second ledger there. options.iterations is the campaign limit
+(default ten); a revision is not a research round. Complete the requested rounds; plateau alone
+is not an early-stop reason.
 
 Choose the most informative bounded experiment using all three scouts. You may refine the
 incumbent, restore a saved candidate, test a new mechanism, combine compatible ideas, or resolve

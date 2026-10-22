@@ -50,6 +50,17 @@ impl ResearchProbe {
         reduce(&self.verified, &self.input, &self.history)
     }
 
+    fn next_input(&self) -> Value {
+        self.next()
+            .decisions
+            .into_iter()
+            .find_map(|d| match d {
+                Decision::Dispatch { input, .. } => Some(input),
+                _ => None,
+            })
+            .assert_value()
+    }
+
     fn count(&self, node: &str) -> usize {
         self.history
             .iter()
@@ -107,7 +118,7 @@ impl ResearchProbe {
                 };
             }
             "reviewer" => {
-                let mut output = json!({"reviewFeedback":format!("{verdict}: round1; exact retained hash; inspect evidence")});
+                let mut output = json!({"reviewFeedback":"round1; exact retained hash; inspect evidence; optional archive warning"});
                 if self.delivery == TemplateDelivery::Push {
                     output["title"] = json!("perf: improve the measured objective");
                     output["description"] = json!("Retain the independently supported result.");
@@ -211,6 +222,28 @@ async fn research_binds_large_counts_without_a_template_specific_cap() {
 }
 
 #[tokio::test]
+async fn research_passes_native_acceptance_with_unprefixed_advisory_feedback() {
+    for delivery in [TemplateDelivery::None, TemplateDelivery::Push] {
+        let mut probe = ResearchProbe::new(delivery, Some(2)).await;
+        probe.settle("accepted", None); // first scouts
+        let first = probe.next_input();
+        assert_eq!(first["review"], json!({}));
+        probe.settle("accepted", None); // researcher
+        probe.settle("accepted", None); // reviewer
+        if delivery == TemplateDelivery::Push {
+            probe.settle(DELIVERY_PUSHED_LABEL, None);
+        }
+        probe.settle("accepted", None); // second scouts
+        let next = probe.next_input();
+        assert_eq!(next["review"]["verdict"], "accepted");
+        assert_eq!(
+            next["reviewFeedback"],
+            "round1; exact retained hash; inspect evidence; optional archive warning"
+        );
+    }
+}
+
+#[tokio::test]
 async fn research_delivery_error_stops_before_another_round() {
     let mut probe = ResearchProbe::new(TemplateDelivery::Push, Some(2)).await;
     for _ in 0..3 {
@@ -237,19 +270,11 @@ async fn research_revisions_preserve_feedback_and_parent_scouts_without_spending
             probe.settle("revise", None); // fresh reviewer rejects
             let next = probe.next();
             assert_dispatched_together(&next, &["researcher"]);
-            let input = next
-                .decisions
-                .iter()
-                .find_map(|d| match d {
-                    Decision::Dispatch { input, .. } => Some(input),
-                    _ => None,
-                })
-                .assert_value();
-            assert!(
-                input["reviewFeedback"]
-                    .as_str()
-                    .assert_value()
-                    .starts_with("revise:")
+            let input = probe.next_input();
+            assert_eq!(input["review"]["verdict"], "revise");
+            assert_eq!(
+                input["reviewFeedback"],
+                "round1; exact retained hash; inspect evidence; optional archive warning"
             );
             assert!(
                 input["explorerProposal"]

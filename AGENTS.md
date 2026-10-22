@@ -545,7 +545,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   declaring history absent. Source archives retain actual mutable bytes and path/hash manifests;
   missing optional archives become unavailable rather than blocking a sound current result.
   The researcher returns a substantive `researchReport`; the reviewer returns `reviewFeedback`
-  and `accepted`, `revise`, or `stop`. Revisions return directly to the same researcher node without
+  and `accepted`, `revise`, or `stop`. Its native verdict is carried in `review.verdict` beside the
+  feedback; accepted warnings never reopen a round. Revisions return to the same researcher without
   re-scouting or consuming another research round, followed by fresh review. The work/review loop
   has a 64-pass safety budget. Native review outcomes alone establish independent acceptance;
   there is no second file-based audit counter. Cosmetic or recoverable historical metadata issues

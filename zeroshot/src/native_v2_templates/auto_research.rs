@@ -9,6 +9,8 @@ const ITERATIONS: u64 = 10;
 const REVIEW_PASSES: u64 = 64;
 const REPORT: &str = "researchReport";
 const FEEDBACK: &str = "reviewFeedback";
+const REVIEW: &str = "review";
+const VERDICTS: &[&str] = &["accepted", "revise", "stop"];
 const REVIEWER: &str = "reviewer";
 const RESEARCHER: &str = "researcher";
 const SCOUTS: [&str; 3] = ["explorer", "synthesizer", "challenger"];
@@ -195,12 +197,13 @@ fn researcher() -> Result<GraphNode, BuiltinTemplateError> {
         "challengerProposal",
         REPORT,
         FEEDBACK,
+        REVIEW,
     ];
     Ok(GraphNode::Step(StepNode {
         name: node_name(RESEARCHER)?,
         worker: worker_ref("builtin.agent.researcher@1")?,
         instructions: Some(instructions(RESEARCHER_PROMPT)?),
-        input: research_input(fields)?,
+        input: research_state(TemplateDelivery::None)?,
         output: string_record(&[REPORT])?,
         input_bindings: research_bindings(fields)?,
         write_bindings: vec![output_write(RESEARCHER, REPORT, REPORT)?],
@@ -216,10 +219,16 @@ fn reviewer(delivery: TemplateDelivery) -> Result<GraphNode, BuiltinTemplateErro
         fields.extend([TITLE_FIELD, DESCRIPTION_FIELD]);
         prompt.push_str("\nInclude a concise Conventional Commit title and delivery description describing the actual retained result.");
     }
-    let writes = fields
+    let mut writes = fields
         .iter()
         .map(|field| output_write(REVIEWER, field, field))
         .collect::<Result<Vec<_>, _>>()?;
+    let mut decision = signal_write(REVIEWER, VERDICT_FIELD, REVIEW)?;
+    decision.target = static_value(FieldPath::new(vec![
+        field_name(REVIEW)?,
+        field_name(VERDICT_FIELD)?,
+    ]))?;
+    writes.push(decision);
     Ok(GraphNode::Verifier(VerifierNode {
         name: node_name(REVIEWER)?,
         worker: worker_ref("builtin.agent.research-reviewer@1")?,
@@ -230,10 +239,7 @@ fn reviewer(delivery: TemplateDelivery) -> Result<GraphNode, BuiltinTemplateErro
         write_bindings: writes,
         timeout_ms: None,
         attempts: positive(MAX_AGENT_VERIFIER_ATTEMPTS)?,
-        signals: BTreeMap::from([(
-            field_name(VERDICT_FIELD)?,
-            enum_labels(&["accepted", "revise", "stop"])?,
-        )]),
+        signals: BTreeMap::from([(field_name(VERDICT_FIELD)?, enum_labels(VERDICTS)?)]),
         diagnostic: diagnostic_type()?,
     }))
 }
@@ -325,6 +331,16 @@ fn research_state(delivery: TemplateDelivery) -> Result<PayloadType, BuiltinTemp
     else {
         return Err(BuiltinTemplateError::InvalidStaticContract);
     };
+    fields.insert(
+        field_name(REVIEW)?,
+        required(record_type(vec![(
+            VERDICT_FIELD,
+            PayloadType::Enum {
+                values: enum_labels(VERDICTS)?,
+            },
+            false,
+        )])?),
+    );
     if delivery == TemplateDelivery::Push {
         add_delivery_state_fields(&mut fields, DeliveryMode::Push)?;
         fields.insert(
@@ -377,7 +393,7 @@ fn paths(names: &[&str]) -> Result<Vec<FieldPath>, BuiltinTemplateError> {
 }
 
 fn review_paths(delivery: TemplateDelivery) -> Result<Vec<FieldPath>, BuiltinTemplateError> {
-    let mut result = paths(&[FEEDBACK])?;
+    let mut result = paths(&[FEEDBACK, REVIEW])?;
     if delivery == TemplateDelivery::Push {
         result.extend(paths(&[TITLE_FIELD, DESCRIPTION_FIELD])?);
     }
