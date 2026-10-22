@@ -2397,13 +2397,18 @@ through implementation and every repair; reviewers start fresh each pass. An exp
 authored scopes; use <code>node_instance</code> on <code>worker</code> in an exact plan to retain its session.
 When using the updated template with an older exact runtime config, remove its <code>review_repair</code>
 and <code>delivery_repair</code> bindings. Existing saved profiles keep their stored graph and bindings.</p>
+<p>For <code>auto-research</code>, an omitted uniform <code>sessionScope</code> defaults to <code>node_instance</code> for <code>explorer</code>,
+<code>synthesizer</code>, <code>challenger</code>, and <code>researcher</code>, and <code>execution</code> for <code>reviewer</code>. The normal round has
+these five agent bindings; <code>--push</code> adds <code>checkpoint_delivery</code>. Exact plans must supply these node
+names and their desired scopes. Existing saved profiles keep their stored topology and runtime.</p>
 <p>A uniform configuration applies one lane to every agent node. Neither <code>--uniform-runtime-config</code> nor
 the Python SDK's <code>UniformRuntime</code> can express <a href="#per-node-lanes">per-node lanes</a>; use an exact
 <code>--runtime-config</code> or an opaque <code>RuntimePlan</code> instead.</p>
 <h2 id="template-delivery-bindings">Template delivery bindings<a class="headerlink" href="#template-delivery-bindings" title="Permanent link">&para;</a></h2>
 <p>Built-in templates own their delivery nodes. With <code>software-change</code>, <code>--push</code>, <code>--pr</code>, and <code>--ship</code>
-add a delivery verifier named <code>deliver</code>. The existing <code>worker</code> handles delivery repairs. With <code>auto-research</code>, <code>--push</code>
-adds <code>checkpoint_delivery</code> plus the agent nodes <code>checkpoint_manifest</code> and <code>checkpoint_audit</code>.
+add a delivery verifier named <code>deliver</code>. The existing <code>worker</code> handles delivery repairs. With
+<code>auto-research</code>, <code>--push</code> adds only the trusted <code>checkpoint_delivery</code> node; the researcher and
+reviewer already handle the round records and delivery description.
 <code>single-worker</code> has no delivery modes.</p>
 <p>The CLI inserts a <code>git_delivery</code> binding with no forge connection for push, or
 <code>{"github": ["GH_TOKEN"]}</code> for PR and merge. Git transport uses the selected
@@ -2434,7 +2439,7 @@ with <code>zeroshot template show TEMPLATE</code> plus the same delivery flag.</
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-18">18 October 2026</time>
+    Last updated <time datetime="2026-10-22">22 October 2026</time>
   </span>
 
     
