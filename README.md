@@ -231,17 +231,17 @@ and environment you provide.
 ## Auto-research
 
 The built-in `auto-research` template runs ten iterations by default; set a positive
-`options.iterations` value in the run input to choose another count. Three scouts propose
-directions, then a planner chooses an experiment and either the current candidate or a restorable
-archived candidate as its starting point. Independent judges check the evidence and method, while
-the progress judge decides whether the result should replace the current candidate under the task
-charter. A valid result can go into the archive without replacing it. An auditor checks the ledger,
-archive, and workspace before the next iteration.
+`options.iterations` value in the run input to choose another count. Three independent scouts
+propose directions. One researcher chooses a parent and experiment, runs it, and prepares the
+retained result. A fresh reviewer checks the evidence, correctness, generalization, and progress.
+Required corrections return to the same researcher session; small archive or bookkeeping issues
+are advisory. A normal round uses five model executions.
 
-The graph keeps adopted, record-only, and aborted results under `.zeroshot/research`; add `--push`
-when each finalized iteration should be published. Inspect it with
-`zeroshot template show auto-research`, and see [Execution](docs/concepts/execution.md) for the
-research workflow's decision and evidence rules.
+The scouts and researcher retain their own sessions across rounds by default. Compact records and
+restorable candidates live at the workspace root's `.zeroshot/research`; later rounds can revisit
+archived ideas. Add `--push` to publish each independently accepted round. Inspect the graph with
+`zeroshot template show auto-research`, and see [Execution](docs/concepts/execution.md) for its
+review and exploration rules.
 
 ## Choose delivery and execution
 

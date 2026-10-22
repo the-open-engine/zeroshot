@@ -29,7 +29,7 @@ pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
         };
         for delivery in deliveries {
             let graph = materialize(*template, *delivery)?;
-            let bindings = template_bindings(*template, *delivery)?;
+            let bindings = template_bindings(*template, *delivery, &graph)?;
             result.push(json!({
                 "id":format!("{}:{}", template.name(), delivery.name()),
                 "name":template.name(),
@@ -46,14 +46,19 @@ pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
 fn template_bindings(
     template: BuiltinGraphTemplate,
     delivery: TemplateDelivery,
+    graph: &GraphSpec,
 ) -> Result<serde_json::Map<String, Value>, ApiError> {
     let mut bindings = serde_json::Map::new();
-    let scope = template.default_session_scope("worker");
-    if scope != SessionScope::Execution {
-        bindings.insert(
-            "worker".into(),
-            json!({"kind":"agent", "model":"", "sessionScope":scope}),
-        );
+    let mut pending = vec![&graph.root];
+    while let Some(node) = pending.pop() {
+        let scope = template.default_session_scope(node.name().as_str());
+        if scope != SessionScope::Execution {
+            bindings.insert(
+                node.name().to_string(),
+                json!({"kind":"agent", "model":"", "sessionScope":scope}),
+            );
+        }
+        pending.extend(graph_node_children(node));
     }
     if let Some((name, binding)) = template
         .delivery_runtime_binding(delivery)

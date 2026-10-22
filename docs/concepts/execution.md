@@ -95,29 +95,36 @@ sets the tracking branch automatically. If the remote cannot be reached or authe
 preparation reports that the target branch could not be verified.
 
 `auto-research` runs ten iterations by default. Optional run input `options.iterations` selects a
-positive count that becomes the loop bound at admission, subject to the engine's general per-run
-resource budgets. A single planner compares directions using the durable backlog archive and
-chooses one bounded experiment. The archive retains credible alternatives and their evidence so
-later plans can revisit them. A one-time read-only preflight requires the exact
-judge and experiment sets before the loop; mapped evidence, method, and progress judges
-then review it independently. Ignored scratch files carry their handoffs. Unanimous `adopt` keeps
-working changes. A supported negative or inconclusive result becomes
-`record_only` and restores those changes; invalid, incomplete, or unsafe evidence becomes `abort` and
-also restores them. Finalized records live under
-`.zeroshot/research/iterations/`; the charter, state, summary, and backlog live at the research root.
-Scratch handoffs and backups use per-iteration directories. A planner, experimenter, or judge
-execution failure becomes a finalized aborted iteration; restoration runs when an experiment may have
-changed the workspace, and the bounded loop continues. A recorder or recovery failure stops before
-the next iteration. The charter distinguishes required invariants from
-optional progress measures. If evidence proves that the retained workspace violates an invariant,
-the planner prioritizes repair and judges treat a verified repair as adopt even when it does not
-clear an optional optimization threshold. Mutable state and summaries report the retained workspace
-and its invariant status separately from the best supported historical findings, so a result from a
-restored artifact is never presented as current.
-The template supports local results and `--push`. With `--push`, a read-only worker derives commit
-metadata from the finalized ledger, then the graph revisits its single Git delivery node after each
-iteration rather than only at graph completion. Manifest failures, delivery repair requests, and
-failed or rejected receipt audits stop the run instead of publishing an unreviewed repair.
+positive count bound at admission, subject to the engine's general execution and loop budgets.
+Each normal round has five model executions:
+
+1. Three independent read-only scouts propose exploration, synthesis, and challenge directions.
+2. One researcher selects the parent and experiment, verifies/restores candidate bytes, runs the
+   experiment, and prepares a supported retained result with compact evidence.
+3. A fresh read-only reviewer accepts the proposed disposition, requests concrete corrections, or
+   approves a justified early stop. A supported non-adoption can be accepted without replacing the
+   incumbent. Plateau alone does not justify stopping before the requested count.
+
+The scouts and researcher keep separate continuing sessions by default; the reviewer starts fresh.
+Required corrections return to the same researcher without repeating scouting or consuming another
+research round, then receive fresh review. This work/review cycle has a 64-pass safety limit.
+Routine file, tool, or archive errors can be repaired by the researcher. Missing optional historical
+archives and cosmetic bookkeeping issues are advisory when the current result and retained state
+are supported. Native reviewer outcomes establish approval; no separate file audit counter is
+required. There are no bootstrap, staging, finalization, or extra audit model passes.
+
+Records live under `.zeroshot/research` at the shared workspace root, including for tasks in
+subdirectories. The researcher keeps the charter, current summary, backlog, round evidence, and
+restorable candidate source there. After two accepted non-adoptions, or diminishing returns across
+`max(1, ceil(iterationLimit / 10))` accepted rounds on one approach, it explicitly reconsiders a new
+mechanism, an archived parent, and a discriminating measurement. These are reasoned alternatives,
+not a mandatory parent switch or a fixed gain threshold.
+
+The template supports local results and `--push`. With `--push`, the reviewer supplies title and
+description and one trusted Git delivery node publishes each accepted round. Research agents never
+use Git. Exhausted review, unrecovered execution errors, delivery errors, and delivery repair
+requests stop the run explicitly; unreviewed work is never published. Existing saved profiles and
+admitted runs keep their stored graph and runtime.
 
 PR and merge delivery consider feedback by default. Use `--no-pr-feedback` to ignore PR discussion;
 the [`git_delivery` binding](../reference/runtime-plan.md#git_delivery) describes the runtime

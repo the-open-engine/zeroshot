@@ -16,7 +16,7 @@ machine-readable contract.
 
 | Field      | Value                                                                              |
 | ---------- | ---------------------------------------------------------------------------------- |
-| `harness`  | Harness of the default lane: `codex`, `claude`, `copilot`, or `pi`                |
+| `harness`  | Harness of the default lane: `codex`, `claude`, `copilot`, or `pi`                 |
 | `provider` | Provider of the default lane, supported by the selected harness                    |
 | `size`     | `small`, `medium`, or `large`                                                      |
 | `nodes`    | Object mapping each executable graph node name to a [node binding](#node-bindings) |
@@ -303,6 +303,11 @@ authored scopes; use `node_instance` on `worker` in an exact plan to retain its 
 When using the updated template with an older exact runtime config, remove its `review_repair`
 and `delivery_repair` bindings. Existing saved profiles keep their stored graph and bindings.
 
+For `auto-research`, an omitted uniform `sessionScope` defaults to `node_instance` for `explorer`,
+`synthesizer`, `challenger`, and `researcher`, and `execution` for `reviewer`. The normal round has
+these five agent bindings; `--push` adds `checkpoint_delivery`. Exact plans must supply these node
+names and their desired scopes. Existing saved profiles keep their stored topology and runtime.
+
 A uniform configuration applies one lane to every agent node. Neither `--uniform-runtime-config` nor
 the Python SDK's `UniformRuntime` can express [per-node lanes](#per-node-lanes); use an exact
 `--runtime-config` or an opaque `RuntimePlan` instead.
@@ -310,8 +315,9 @@ the Python SDK's `UniformRuntime` can express [per-node lanes](#per-node-lanes);
 ## Template delivery bindings
 
 Built-in templates own their delivery nodes. With `software-change`, `--push`, `--pr`, and `--ship`
-add a delivery verifier named `deliver`. The existing `worker` handles delivery repairs. With `auto-research`, `--push`
-adds `checkpoint_delivery` plus the agent nodes `checkpoint_manifest` and `checkpoint_audit`.
+add a delivery verifier named `deliver`. The existing `worker` handles delivery repairs. With
+`auto-research`, `--push` adds only the trusted `checkpoint_delivery` node; the researcher and
+reviewer already handle the round records and delivery description.
 `single-worker` has no delivery modes.
 
 The CLI inserts a `git_delivery` binding with no forge connection for push, or

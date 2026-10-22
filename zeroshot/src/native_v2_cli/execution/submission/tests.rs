@@ -186,6 +186,36 @@ fn software_change_session_defaults_preserve_explicit_runtime_choices() {
 }
 
 #[test]
+fn auto_research_session_defaults_preserve_explicit_runtime_choices() {
+    let template = BuiltinGraphTemplate::AutoResearch;
+    let graph = template.materialize(TemplateDelivery::None).assert_value();
+    for override_scope in [
+        None,
+        Some(SessionScope::Execution),
+        Some(SessionScope::NodeInstance),
+    ] {
+        let mut uniform = uniform(UniformHarness::Codex, UniformProvider::OpenAi);
+        uniform.session_scope = override_scope;
+        let runtime = uniform
+            .materialize(&graph, PullRequestFeedback::Consider, Some(template))
+            .assert_value();
+        for role in [
+            "explorer",
+            "synthesizer",
+            "challenger",
+            "researcher",
+            "reviewer",
+        ] {
+            let expected = override_scope.unwrap_or_else(|| template.default_session_scope(role));
+            assert!(
+                matches!(runtime.nodes().get(&NodeName::new(role).assert_value()),
+                Some(NodeRuntimeBinding::Agent { session_scope, .. }) if *session_scope == expected)
+            );
+        }
+    }
+}
+
+#[test]
 fn wave6_cli_contract_connection_selection_and_json_errors_keep_precedence() {
     let field = EnvironmentVariableName::new("OPENAI_API_KEY").assert_value();
     let requirements: RunConnectionRequirements = BTreeMap::from([(

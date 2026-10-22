@@ -115,3 +115,26 @@ fn software_templates_keep_one_worker_session_and_fresh_reviewers() {
         assert!(bindings["code"].is_null());
     }
 }
+
+#[test]
+fn research_editor_bindings_keep_four_sessions_and_a_fresh_reviewer() {
+    let templates = templates().assert_value();
+    for mode in ["none", "push"] {
+        let template = templates
+            .iter()
+            .find(|t| t["name"] == "auto-research" && t["delivery"] == mode)
+            .assert_value();
+        let bindings = &template["runtimeBindings"];
+        for role in ["explorer", "synthesizer", "challenger", "researcher"] {
+            assert_eq!(bindings[role]["sessionScope"], "node_instance");
+        }
+        assert!(
+            bindings.get("reviewer").is_none(),
+            "reviewer uses the protocol's execution default"
+        );
+        assert_eq!(
+            bindings.get("checkpoint_delivery").is_some(),
+            mode == "push"
+        );
+    }
+}

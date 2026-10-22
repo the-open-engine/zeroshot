@@ -51,10 +51,12 @@ impl BuiltinGraphTemplate {
     }
 
     pub(crate) fn default_session_scope(self, node: &str) -> SessionScope {
-        if self == Self::SoftwareChange && node == "worker" {
-            SessionScope::NodeInstance
-        } else {
-            SessionScope::Execution
+        match (self, node) {
+            (Self::SoftwareChange, "worker")
+            | (Self::AutoResearch, "explorer" | "synthesizer" | "challenger" | "researcher") => {
+                SessionScope::NodeInstance
+            }
+            _ => SessionScope::Execution,
         }
     }
 
