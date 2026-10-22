@@ -1,0 +1,275 @@
+{
+  "budgets_usd": {
+    "promotional": 3.96018
+  },
+  "comparisons": {
+    "promotional": {
+      "budget_usd": 3.96018,
+      "luna_ci": [
+        71.13013698630137,
+        79.0068493150685
+      ],
+      "luna_mean": 74.93150684931507,
+      "luna_runs": 5,
+      "sol_ci": [
+        71.64383561643835,
+        75.20547945205479
+      ],
+      "sol_mean": 73.42465753424658,
+      "sol_runs": 5,
+      "verdict": "Luna outperforms (higher mean; intervals overlap)"
+    }
+  },
+  "labels": [
+    "Luna loop",
+    "Sol single worker"
+  ],
+  "luna": "luna-xhigh-dust-self-review",
+  "luna_runs": [
+    {
+      "cumulative_usd": [
+        0.6894,
+        1.259,
+        1.4237,
+        1.7242,
+        1.9297,
+        2.8169,
+        3.4736,
+        3.8266,
+        5.1679,
+        5.6158,
+        5.9884,
+        6.2538,
+        6.4513,
+        6.4817,
+        6.805,
+        7.0864,
+        7.3452,
+        8.2749,
+        8.5094,
+        8.6552,
+        8.6786,
+        8.8103,
+        8.8554,
+        8.9722,
+        9.3074,
+        9.5918,
+        10.6874,
+        11.0355
+      ],
+      "excluded": [],
+      "promotional": {
+        "cost_usd": 3.8266,
+        "excluded": [],
+        "passed": 439,
+        "rounds": 8,
+        "workspace": "build-8"
+      },
+      "run": "01-loop"
+    },
+    {
+      "cumulative_usd": [
+        0.3644,
+        0.9193,
+        1.2614,
+        1.9985,
+        2.7157,
+        3.0123,
+        3.5357,
+        3.5853,
+        3.934,
+        4.4671,
+        4.5658,
+        4.647,
+        4.7117,
+        4.8125,
+        4.9266,
+        4.943,
+        4.9836,
+        5.0368,
+        5.2038,
+        5.2681,
+        5.3818,
+        5.4883,
+        5.8811,
+        6.3253,
+        6.4879,
+        6.5225,
+        6.5436,
+        6.5876,
+        6.6267,
+        6.6432,
+        6.7211,
+        7.0306,
+        7.2686,
+        7.3574,
+        7.7319,
+        8.0641,
+        8.409,
+        8.4649,
+        8.4818,
+        8.4905,
+        8.5437,
+        8.6846,
+        9.1127,
+        9.2287,
+        9.3883,
+        9.4533,
+        9.6174,
+        9.6727,
+        9.6802,
+        9.8901
+      ],
+      "excluded": [],
+      "promotional": {
+        "cost_usd": 3.934,
+        "excluded": [],
+        "passed": 478,
+        "rounds": 9,
+        "workspace": "build-9"
+      },
+      "run": "02-loop"
+    },
+    {
+      "cumulative_usd": [
+        0.3254,
+        0.954,
+        1.4302,
+        1.8191,
+        2.2192,
+        3.1545,
+        3.8246,
+        4.291,
+        5.6534,
+        6.1794,
+        6.4579,
+        9.0314,
+        9.675,
+        10.3118,
+        11.3657,
+        11.4964,
+        11.6532,
+        11.9142,
+        12.0026,
+        12.4201,
+        12.4679
+      ],
+      "excluded": [],
+      "promotional": {
+        "cost_usd": 3.8246,
+        "excluded": [],
+        "passed": 446,
+        "rounds": 7,
+        "workspace": "build-7"
+      },
+      "run": "03-loop"
+    },
+    {
+      "cumulative_usd": [
+        0.5375,
+        1.1095,
+        1.4944,
+        1.9973,
+        2.3986,
+        2.837,
+        3.3301,
+        3.9682,
+        4.624,
+        4.8458,
+        7.6272,
+        8.3104,
+        8.3338,
+        8.5957,
+        8.6137,
+        8.9818,
+        9.3041,
+        9.7778,
+        9.884,
+        10.2186,
+        10.8983
+      ],
+      "excluded": [],
+      "promotional": {
+        "cost_usd": 3.3301,
+        "excluded": [],
+        "passed": 427,
+        "rounds": 7,
+        "workspace": "build-7"
+      },
+      "run": "04-loop"
+    },
+    {
+      "cumulative_usd": [
+        0.4366,
+        0.7058,
+        1.3601,
+        1.6759,
+        2.7151,
+        3.8895,
+        4.4535,
+        4.9072,
+        5.6393,
+        5.9843,
+        9.6164,
+        10.6127,
+        10.8922,
+        12.1659,
+        12.4587
+      ],
+      "excluded": [],
+      "promotional": {
+        "cost_usd": 3.8895,
+        "excluded": [],
+        "passed": 398,
+        "rounds": 6,
+        "workspace": "build-6"
+      },
+      "run": "05-loop"
+    }
+  ],
+  "scored_tests": 584,
+  "sol": "sol-xhigh-dust-single",
+  "sol_runs": [
+    {
+      "cost_usd": 2.7973,
+      "excluded": [],
+      "passed": 414,
+      "run": "01-single",
+      "scored_tests": 584,
+      "workspace": "final"
+    },
+    {
+      "cost_usd": 3.4554,
+      "excluded": [],
+      "passed": 442,
+      "run": "02-single",
+      "scored_tests": 584,
+      "workspace": "final"
+    },
+    {
+      "cost_usd": 3.2343,
+      "excluded": [],
+      "passed": 415,
+      "run": "03-single",
+      "scored_tests": 584,
+      "workspace": "final"
+    },
+    {
+      "cost_usd": 4.7875,
+      "excluded": [],
+      "passed": 434,
+      "run": "04-single",
+      "scored_tests": 584,
+      "workspace": "final"
+    },
+    {
+      "cost_usd": 5.5264,
+      "excluded": [],
+      "passed": 439,
+      "run": "05-single",
+      "scored_tests": 584,
+      "workspace": "final"
+    }
+  ],
+  "task": "bootandy__dust.62bf1e1"
+}

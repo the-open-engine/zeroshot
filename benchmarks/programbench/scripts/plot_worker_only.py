@@ -38,7 +38,7 @@ SUFFIXES = {"worker-loop": "-worker-loop", "self-review": "-self-review"}
 SERIES = {  # key -> (legend, color, marker)
     "sol": ("GPT-5.6 Sol (xhigh), single shot", INK, "o"),
     "single": ("GPT-5.6 Luna (xhigh), single shot", LIGHT_RUST, "o"),
-    "worker-loop": ("GPT-5.6 Luna (xhigh), builder alone told \"Continue.\", all its rounds", MUTED, "s"),
+    "worker-loop": ("GPT-5.6 Luna (xhigh), builder alone told \"Continue.\", at Sol's cost", MUTED, "s"),
     "self-review": ("GPT-5.6 Luna (xhigh), builder alone told to review its work, at Sol's cost", INK_2, "^"),
     "loop": ("GPT-5.6 Luna (xhigh), review loop at Sol's cost", RUST, "D"),
 }
@@ -182,7 +182,7 @@ def summary(rows: list[dict]) -> str:
 
 def main(paths: list[Path], out_dir: Path | None = None) -> list[Path]:
     root = Path(__file__).resolve().parent.parent
-    rows = rows_from(sorted(p for p in paths if not p.name.endswith(".match.json")), root / "figures")
+    rows = rows_from(sorted(p for p in paths if p.name.startswith("luna-xhigh-") and not p.name.endswith(".match.json")), root / "figures")
     load_fonts()
     plt.rcParams.update({
         "font.family": ["Spline Sans", "DejaVu Sans"], "font.size": 10.5,

@@ -1,0 +1,496 @@
+{
+  "note": "Wall-clock minutes from a run's submission to the snapshot after the named build (the runner's per-attempt timestamps). sol: each Sol single worker's build 1. parity: each Luna loop run's parity build (bench parity). match: each loop run's deliverable build at the cost-to-match budget (bench match; 0 for a run with no build within it, null for a task whose loops never reach Sol's mean score).",
+  "tasks": {
+    "ascii-image-converter": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 22.98,
+        "02-loop": 28.61,
+        "03-loop": 43.47,
+        "04-loop": 34.91,
+        "05-loop": 24.34
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 12.58,
+        "02-single": 16.91,
+        "03-single": 22.76,
+        "04-single": 13.97,
+        "05-single": 13.79
+      }
+    },
+    "calcurse": {
+      "loop_match_build": {
+        "01-loop": 31.15,
+        "02-loop": 37.59,
+        "03-loop": 29.52,
+        "04-loop": 27.37,
+        "05-loop": 29.52
+      },
+      "loop_parity_build": {
+        "01-loop": 62.83,
+        "02-loop": 50.75,
+        "03-loop": 62.55,
+        "04-loop": 27.37,
+        "05-loop": 29.52
+      },
+      "match_deliverables": {
+        "01-loop": 7,
+        "02-loop": 4,
+        "03-loop": 3,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 8.5,
+        "02-single": 8.4,
+        "03-single": 7.74,
+        "04-single": 7.27,
+        "05-single": 7.37
+      }
+    },
+    "crowbook": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 12.63,
+        "02-loop": 21.8,
+        "03-loop": 84.08,
+        "04-loop": 34.05,
+        "05-loop": 14.53
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 9.65,
+        "02-single": 10.54,
+        "03-single": 8.57,
+        "04-single": 8.38,
+        "05-single": 7.11
+      }
+    },
+    "datasurgeon": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 25.83,
+        "02-loop": 22.94,
+        "03-loop": 17.68,
+        "04-loop": 16.55,
+        "05-loop": 10.79
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 8.15,
+        "02-single": 7.62,
+        "03-single": 8.25,
+        "04-single": 7.29,
+        "05-single": 4.77
+      }
+    },
+    "direnv": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 61.61,
+        "02-loop": 31.95,
+        "03-loop": 27.87,
+        "04-loop": 23.07,
+        "05-loop": 38.43
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 12.19,
+        "02-single": 10.22,
+        "03-single": 14.54,
+        "04-single": 14.93,
+        "05-single": 9.08
+      }
+    },
+    "ditaa": {
+      "loop_match_build": {
+        "01-loop": 10.61,
+        "02-loop": 11.06,
+        "03-loop": 8.6,
+        "04-loop": 0.0,
+        "05-loop": 5.82
+      },
+      "loop_parity_build": {
+        "01-loop": 42.33,
+        "02-loop": 44.04,
+        "03-loop": 37.82,
+        "04-loop": 32.49,
+        "05-loop": 41.53
+      },
+      "match_deliverables": {
+        "01-loop": 1,
+        "02-loop": 1,
+        "03-loop": 1,
+        "04-loop": 0,
+        "05-loop": 1
+      },
+      "sol_build1": {
+        "01-single": 13.38,
+        "02-single": 5.8,
+        "03-single": 12.31,
+        "04-single": 8.31,
+        "05-single": 10.61
+      }
+    },
+    "dstask": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 29.12,
+        "02-loop": 77.58,
+        "03-loop": 55.59,
+        "04-loop": 13.44,
+        "05-loop": 27.35
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 16.78,
+        "02-single": 15.81,
+        "03-single": 7.95,
+        "04-single": 13.85,
+        "05-single": 8.65
+      }
+    },
+    "dust": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 67.86,
+        "02-loop": 28.0,
+        "03-loop": 55.45,
+        "04-loop": 46.82,
+        "05-loop": 54.06
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 9.46,
+        "02-single": 10.24,
+        "03-single": 11.0,
+        "04-single": 14.72,
+        "05-single": 12.0
+      }
+    },
+    "fasttext": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 36.28,
+        "02-loop": 10.4,
+        "03-loop": 14.18,
+        "04-loop": 18.95,
+        "05-loop": 13.11
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 8.82,
+        "02-single": 5.79,
+        "03-single": 7.66,
+        "04-single": 5.74,
+        "05-single": 11.21
+      }
+    },
+    "gdu": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 12.18,
+        "02-loop": 28.63,
+        "03-loop": 14.0,
+        "04-loop": 31.07,
+        "05-loop": 24.8
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 12.13,
+        "02-single": 9.16,
+        "03-single": 13.27,
+        "04-single": 10.8,
+        "05-single": 9.44
+      }
+    },
+    "gittype": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 19.1,
+        "02-loop": 29.69,
+        "03-loop": 19.16,
+        "04-loop": 25.44,
+        "05-loop": 18.88
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 13.53,
+        "02-single": 13.23,
+        "03-single": 21.71,
+        "04-single": 9.6,
+        "05-single": 12.28
+      }
+    },
+    "igrep": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 14.54,
+        "02-loop": 13.63,
+        "03-loop": 18.59,
+        "04-loop": 14.96,
+        "05-loop": 28.31
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 9.82,
+        "02-single": 10.75,
+        "03-single": 11.31,
+        "04-single": 8.44,
+        "05-single": 7.76
+      }
+    },
+    "keifu": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 13.21,
+        "02-loop": 54.52,
+        "03-loop": 12.62,
+        "04-loop": 16.95,
+        "05-loop": 44.96
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 18.74,
+        "02-single": 16.1,
+        "03-single": 21.12,
+        "04-single": 28.31,
+        "05-single": 18.34
+      }
+    },
+    "marmite": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 22.36,
+        "02-loop": 44.65,
+        "03-loop": 31.06,
+        "04-loop": 17.57,
+        "05-loop": 46.78
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 8.76,
+        "02-single": 11.66,
+        "03-single": 9.97,
+        "04-single": 13.72,
+        "05-single": 13.34
+      }
+    },
+    "parqeye": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 27.12,
+        "02-loop": 25.88,
+        "03-loop": 34.4,
+        "04-loop": 19.14,
+        "05-loop": 19.01
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 18.14,
+        "02-single": 18.19,
+        "03-single": 17.55,
+        "04-single": 18.96,
+        "05-single": 10.23
+      }
+    },
+    "revive": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 28.6,
+        "02-loop": 28.31,
+        "03-loop": 47.12,
+        "04-loop": 18.6,
+        "05-loop": 18.83
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 7.91,
+        "02-single": 8.28,
+        "03-single": 8.43,
+        "04-single": 9.69,
+        "05-single": 8.77
+      }
+    },
+    "samtools": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 32.25,
+        "02-loop": 24.58,
+        "03-loop": 39.69,
+        "04-loop": 13.28,
+        "05-loop": 17.87
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 11.57,
+        "02-single": 9.01,
+        "03-single": 11.18,
+        "04-single": 6.47,
+        "05-single": 7.56
+      }
+    },
+    "svgbob": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 22.94,
+        "02-loop": 24.47,
+        "03-loop": 24.66,
+        "04-loop": 45.24,
+        "05-loop": 40.5
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 9.12,
+        "02-single": 13.19,
+        "03-single": 16.4,
+        "04-single": 7.7,
+        "05-single": 10.33
+      }
+    },
+    "tree-sitter": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 28.6,
+        "02-loop": 27.36,
+        "03-loop": 18.44,
+        "04-loop": 22.62,
+        "05-loop": 34.31
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 6.84,
+        "02-single": 11.82,
+        "03-single": 10.68,
+        "04-single": 9.76,
+        "05-single": 11.8
+      }
+    },
+    "xz": {
+      "loop_match_build": null,
+      "loop_parity_build": {
+        "01-loop": 78.22,
+        "02-loop": 20.18,
+        "04-loop": 22.57,
+        "05-loop": 34.16
+      },
+      "match_deliverables": {
+        "01-loop": 50,
+        "02-loop": 50,
+        "03-loop": 50,
+        "04-loop": 50,
+        "05-loop": 50
+      },
+      "sol_build1": {
+        "01-single": 11.14,
+        "02-single": 15.0,
+        "03-single": 10.83,
+        "04-single": 12.0,
+        "05-single": 12.36
+      }
+    }
+  }
+}

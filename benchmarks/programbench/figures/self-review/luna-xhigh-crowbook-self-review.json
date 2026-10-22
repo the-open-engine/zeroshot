@@ -1,0 +1,253 @@
+{
+  "budgets_usd": {
+    "promotional": 4.0342199999999995
+  },
+  "comparisons": {
+    "promotional": {
+      "budget_usd": 4.0342199999999995,
+      "luna_ci": [
+        61.33828996282527,
+        70.65675340768277
+      ],
+      "luna_mean": 66.51796778190831,
+      "luna_runs": 5,
+      "sol_ci": [
+        63.37050805452293,
+        66.93928128872366
+      ],
+      "sol_mean": 65.27881040892194,
+      "sol_runs": 5,
+      "verdict": "Luna outperforms (higher mean; intervals overlap)"
+    }
+  },
+  "labels": [
+    "Luna loop",
+    "Sol single worker"
+  ],
+  "luna": "luna-xhigh-crowbook-self-review",
+  "luna_runs": [
+    {
+      "cumulative_usd": [
+        0.2826,
+        1.5065,
+        1.7441,
+        3.4387,
+        4.4885,
+        5.2559,
+        5.7223,
+        6.0911,
+        6.6463,
+        7.026,
+        7.532,
+        7.8783,
+        8.67,
+        8.8674,
+        9.9045,
+        11.3015,
+        11.5884,
+        12.2835,
+        13.8688,
+        14.6155,
+        15.2299,
+        15.3961
+      ],
+      "excluded": [],
+      "promotional": {
+        "cost_usd": 3.4387,
+        "excluded": [],
+        "passed": 559,
+        "rounds": 4,
+        "workspace": "build-4"
+      },
+      "run": "01-loop"
+    },
+    {
+      "cumulative_usd": [
+        0.2674,
+        0.6375,
+        1.33,
+        1.4078,
+        2.0131,
+        3.3489,
+        4.2166,
+        4.8152,
+        5.3385,
+        5.8817,
+        6.8031,
+        7.2668,
+        7.4008,
+        8.1123,
+        8.5955,
+        11.997,
+        13.3329,
+        14.0553,
+        14.5277,
+        14.7825,
+        15.4719,
+        15.7657,
+        15.9865,
+        16.1441
+      ],
+      "excluded": [],
+      "promotional": {
+        "cost_usd": 3.3489,
+        "excluded": [],
+        "passed": 461,
+        "rounds": 6,
+        "workspace": "build-6"
+      },
+      "run": "02-loop"
+    },
+    {
+      "cumulative_usd": [
+        0.4205,
+        1.2129,
+        3.457,
+        4.1687,
+        4.9362,
+        6.6652,
+        7.8508,
+        8.3248,
+        9.5111,
+        10.0563,
+        10.3442,
+        10.7974,
+        11.5363,
+        12.4391,
+        13.2692,
+        13.5527,
+        13.911,
+        14.0723,
+        14.1969
+      ],
+      "excluded": [],
+      "promotional": {
+        "cost_usd": 3.457,
+        "excluded": [],
+        "passed": 531,
+        "rounds": 3,
+        "workspace": "build-3"
+      },
+      "run": "03-loop"
+    },
+    {
+      "cumulative_usd": [
+        0.2604,
+        0.6022,
+        1.1377,
+        2.0626,
+        2.7865,
+        3.3768,
+        3.8145,
+        4.1038,
+        4.3728,
+        5.0114,
+        5.7253,
+        6.588,
+        7.4631,
+        9.1726,
+        9.8888,
+        10.5667,
+        11.0964,
+        11.9926,
+        12.7009,
+        13.3266,
+        13.9742,
+        14.1388,
+        14.2616,
+        14.316,
+        14.562,
+        15.1872,
+        15.3778
+      ],
+      "excluded": [],
+      "promotional": {
+        "cost_usd": 3.8145,
+        "excluded": [],
+        "passed": 587,
+        "rounds": 7,
+        "workspace": "build-7"
+      },
+      "run": "04-loop"
+    },
+    {
+      "cumulative_usd": [
+        0.3822,
+        1.5532,
+        2.5041,
+        2.7787,
+        3.6921,
+        5.1589,
+        5.7661,
+        6.5306,
+        7.2221,
+        7.7281,
+        8.0207,
+        8.2277,
+        9.08,
+        9.5531,
+        9.7227,
+        10.4327,
+        10.795,
+        11.6694,
+        11.8299,
+        13.022,
+        13.7907
+      ],
+      "excluded": [],
+      "promotional": {
+        "cost_usd": 3.6921,
+        "excluded": [],
+        "passed": 546,
+        "rounds": 5,
+        "workspace": "build-5"
+      },
+      "run": "05-loop"
+    }
+  ],
+  "scored_tests": 807,
+  "sol": "sol-xhigh-crowbook-single",
+  "sol_runs": [
+    {
+      "cost_usd": 4.3699,
+      "excluded": [],
+      "passed": 499,
+      "run": "01-single",
+      "scored_tests": 807,
+      "workspace": "final"
+    },
+    {
+      "cost_usd": 5.1453,
+      "excluded": [],
+      "passed": 539,
+      "run": "02-single",
+      "scored_tests": 807,
+      "workspace": "final"
+    },
+    {
+      "cost_usd": 3.7806,
+      "excluded": [],
+      "passed": 528,
+      "run": "03-single",
+      "scored_tests": 807,
+      "workspace": "final"
+    },
+    {
+      "cost_usd": 3.6983,
+      "excluded": [],
+      "passed": 521,
+      "run": "04-single",
+      "scored_tests": 807,
+      "workspace": "final"
+    },
+    {
+      "cost_usd": 3.177,
+      "excluded": [],
+      "passed": 547,
+      "run": "05-single",
+      "scored_tests": 807,
+      "workspace": "final"
+    }
+  ],
+  "task": "crowdagger__crowbook.ea214d7"
+}

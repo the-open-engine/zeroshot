@@ -388,7 +388,87 @@ in `figures/checker-session/walltime.json` (`scripts/walltime.py`); figures:
 
 ### Worker only
 
-Not run yet. The experiments and the comparison are defined above; the commands are under Reproduce.
+Without its checker, the loop is only as good as its feedback. Told "Continue.", the builder stops
+working after a few rounds: the median round costs $0.14 at round 2, $0.015 at round 5 and $0.003
+from round 10, so its 50 rounds cost $0.95 per loop, a quarter of Sol's budget, and at Sol's cost
+the builder alone scores below Sol's single worker on 18 of the 20 tasks (58.5% against 65.6% over
+the tasks; the review loop 69.5%), below the review loop on 19, and reaches Sol's mean score on 2.
+Told to review its own work against the task and fix what it finds, the builder alone keeps
+working, at $0.29 to $0.44 per round over its first ten rounds, so 13 rounds fit into Sol's budget
+on average (5 to 35), and at Sol's cost it is ahead of Sol's single worker on 16 of 20 tasks (70.8%
+over the tasks; robustly on 12, robustly behind on 2) and about level with the review loop: ahead on
+13 tasks and behind on 7, by 1.3 points on average, robustly ahead on 3 and robustly behind on 1.
+It reaches Sol's mean score on 17 tasks for a median 56% of Sol's cost, against 18 tasks and 58% for
+the review loop, and it gets there sooner, a median of 48 minutes after submission against 69. The
+loop's advantage, then, does not come from the checker's independent verdict: one session told to
+derive new checks from the task and keep fixing does as well as two at Sol's cost. What it lacks is
+a stop. None of the 100 self-review loops ended on its own, 39 ran into the 6-hour cap and the rest
+through their 50 rounds, for $9.54 per loop, about twice Sol's budget, against $6.75 for the review
+loop, whose checker accepted 6; and after all its rounds it averages 72.6% over the tasks against
+the review loop's 71.1%, with four final workspaces that the evaluation could not score counted
+as 0 (below).
+
+| Task | Budget C | Sol single worker | Luna single shot | Review loop | Builder alone, "Continue." | Builder alone, self-review | Rounds within C, "Continue." → self-review | Cost to reach Sol's mean, loop → "Continue." → self-review |
+|---|---|---|---|---|---|---|---|---|
+| datasurgeon | $2.18 | 76.9% | 55.4% | 63.3% | 72.5% (62.0 to 78.6) | 72.1% (59.4 to 81.3) | 50 → 8 | not reached → not reached → not reached |
+| calcurse | $4.41 | 70.6% | 60.6% | 80.5% | 75.9% (72.1 to 79.8) | 85.0% (81.4 to 88.7) | 50 → 9 | 39% → 32% → 32% |
+| ascii-image-converter | $5.04 | 86.6% | 64.3% | 84.4% | 71.7% (65.8 to 78.3) | 88.5% (85.1 to 91.0) | 50 → 13 | 130% → not reached → 67% |
+| gittype | $4.76 | 71.5% | 58.5% | 76.0% | 63.7% (56.5 to 70.9) | 80.1% (77.1 to 82.4) | 50 → 19 | 20% → not reached → 28% |
+| tree-sitter | $4.03 | 40.7% | 30.8% | 45.5% | 38.2% (36.7 to 39.7) | 49.5% (43.3 to 56.1) | 50 → 11 | 31% → not reached → 55% |
+| fasttext | $2.88 | 76.9% | 63.2% | 78.4% | 69.1% (66.9 to 71.9) | 81.9% (74.2 to 89.7) | 50 → 24 | 80% → not reached → 40% |
+| marmite | $4.60 | 65.9% | 49.0% | 64.4% | 52.5% (48.2 to 58.1) | 67.9% (66.2 to 70.1) | 50 → 9 | 173% → not reached → 59% |
+| igrep | $3.74 | 83.0% | 68.6% | 84.1% | 73.4% (70.3 to 76.7) | 87.4% (85.8 to 89.0) | 50 → 13 | 88% → not reached → 57% |
+| keifu | $6.61 | 89.2% | 69.6% | 91.1% | 61.5% (43.2 to 80.8) | 94.3% (93.1 to 95.4) | 50 → 35 | 44% → not reached → 29% |
+| revive | $4.00 | 45.1% | 44.1% | 49.1% | 43.4% (40.3 to 46.1) | 52.0% (50.1 to 53.6) | 50 → 14 | 12% → not reached → 11% |
+| direnv | $6.05 | 76.8% | 56.0% | 87.4% | 73.0% (65.4 to 78.7) | 89.9% (89.3 to 90.4) | 50 → 10 | 39% → not reached → 29% |
+| parqeye | $6.96 | 76.1% | 55.8% | 89.2% | 52.9% (43.1 to 62.4) | 89.5% (87.8 to 91.2) | 50 → 25 | 50% → not reached → 25% |
+| gdu | $3.79 | 80.2% | 72.5% | 83.7% | 65.7% (42.2 to 79.2) | 83.7% (82.7 to 85.4) | 50 → 12 | 48% → not reached → not reached |
+| crowbook | $4.03 | 65.3% | 45.2% | 67.3% | 58.6% (50.7 to 65.9) | 66.5% (61.3 to 70.7) | 42 → 5 | 90% → not reached → 85% |
+| dstask | $4.90 | 78.6% | 56.8% | 89.2% | 78.2% (70.6 to 85.8) | 88.1% (80.2 to 92.7) | 50 → 15 | 29% → not reached → 39% |
+| svgbob | $3.75 | 55.9% | 45.7% | 53.5% | 47.2% (44.0 to 50.8) | 52.2% (49.4 to 55.3) | 50 → 7 | 193% → not reached → 163% |
+| dust | $3.96 | 73.4% | 66.3% | 76.6% | 71.1% (68.8 to 74.3) | 74.9% (71.1 to 79.0) | 50 → 7 | 66% → not reached → 71% |
+| xz | $4.15 | 49.6% | 37.0% | 44.9% | 38.2% (35.4 to 40.9) | 42.8% (40.5 to 45.1) | 50 → 9 | not reached → not reached → 220% |
+| ditaa | $4.66 | 17.7% | 27.9% | 46.6% | 36.0% (31.7 to 38.7) | 43.3% (41.6 to 45.9) | 50 → 16 | 7% → 6% → 8% |
+| samtools | $3.47 | 31.5% | 21.7% | 35.3% | 26.4% (19.5 to 33.3) | 26.9% (20.4 to 33.4) | 50 → 7 | 65% → not reached → not reached |
+
+![Without a checker, the builder beats Sol's single shot on 16 of 20 sampled ProgramBench tasks when told to review its work and on 2 when told "Continue."; the review loop on 15: GPT-5.6 Sol's single worker, GPT-5.6 Luna's single shot, both worker-only variants and the review loop at Sol's cost, means of 5 runs with 95% bootstrap intervals](figures/worker-only-equal-cost.png)
+
+![The loop reaches Sol's score for 58% of Sol's cost with its checker, 56% with the builder reviewing itself, not reached told "Continue." (medians over 20 sampled ProgramBench tasks): per task, each loop's cost to reach Sol's mean score as a share of Sol's cost](figures/worker-only-equal-score.png)
+
+- Three runs are left out. datasurgeon's self-review run 02 is excluded by the audit: in rounds
+  12 to 20 it ran its executable and the reference on `/proc/1/mem`, among other unreadable paths,
+  to compare their error handling, which the process-environment rule flags. gdu's self-review run
+  04 is left out of the equal-cost comparison: from its first round its workspace holds 23 GB of
+  generated files in some 400 entries, so the evaluation fails before compiling, at programbench's
+  20-second step that hashes the workspace's files; the cost-to-match search counts the build as 0,
+  and with that build as 0 the task's self-review mean at Sol's cost would be 67.0% instead of
+  83.7%. xz's "Continue." run 03 is left out of the equal-cost comparison because its parity
+  workspace was scored on 1415 tests instead of 1410 (as direnv's loop runs in the earlier studies).
+- Late self-review workspaces can outgrow the evaluation in the same way: the final workspaces of
+  marmite's runs 01, 03 and 04 and of gdu's run 04 fail at the hashing step and count as 0 in the
+  average after all rounds above (72.6%); without those four runs the self-review builder's finals
+  average 75.8%.
+- samtools' self-review loop is recorded from its final workspaces, 16.1% to 45.7% (mean 28.9%)
+  against Sol's 31.5%; at Sol's cost it scores 26.9%, and its builds up to round 4 (run 01 up to
+  round 8) were scored as well, with no budget among them reaching Sol's mean. Every other search
+  ran to its end, including samtools' and xz's "Continue." loops (never; they spent $1.85 and $2.21
+  of Sol's $3.47 and $4.15). xz's self-review loop reaches Sol's mean score at 220% of Sol's cost
+  ($9.15), where one of its five runs passes 91.8% of the tests while the other four pass 45% to
+  47%; at Sol's cost it is at 42.8%.
+- All 50 "Continue." rounds fit into Sol's budget in 99 of 100 loops, and their last build is
+  reached a median of 30 minutes after submission (task means 18 to 50). The self-review builder
+  reaches Sol's budget after 1.0 to 4.0 hours (median 1.8), against 1.5 to 4.9 (median 2.3) for the
+  review loop.
+- Model cost of the 100 loops, all rounds: $109 told "Continue.", $1,025 told to review its work,
+  against $693 for the review loop. Wall clock per loop: a median of 28 minutes for 50 "Continue."
+  rounds, 315 minutes for the self-review loops (the review loop's 221).
+
+Per-task results: `figures/worker-loop/<loop>.json` and `figures/self-review/<loop>.json` (from
+`bench parity`) with `<loop>.match.json` (from `bench match`); the loops' rounds, wall clock and
+costs per run in `figures/worker-loop/loops.json` and `figures/self-review/loops.json`
+(`scripts/loop_facts.py`); the wall clock to the compared builds in each directory's
+`walltime.json` (`scripts/walltime.py`); figures:
+`scripts/plot_worker_only.py figures/worker-loop/*.json figures/self-review/*.json`.
 
 ## Reproduce
 
