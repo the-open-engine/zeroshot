@@ -141,6 +141,8 @@ async fn all_repositories_share_one_publication_with_partitioned_maintenance() {
 #[tokio::test]
 async fn ignore_repository_aliases_persist_and_report_exclusions() {
     let (case, other) = multi_case().await;
+    let other = std::fs::canonicalize(other).assert_value();
+    let workspace = std::fs::canonicalize(case.workspace()).assert_value();
     let original = case.advance().await;
     let run = original["runs"]
         .as_array()
@@ -165,7 +167,7 @@ async fn ignore_repository_aliases_persist_and_report_exclusions() {
             .await
             .assert_value();
         assert_eq!(inventory["runs"].as_array().assert_value().len(), 1);
-        assert_eq!(inventory["runs"][0]["workspace"], json!(case.workspace()));
+        assert_eq!(inventory["runs"][0]["workspace"], json!(workspace));
         assert!(
             inventory["excluded"][0]["reason"]
                 .as_str()
