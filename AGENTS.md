@@ -72,7 +72,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   supplied-memory evidence into an empty manifest. Graph guidance supplements only private provider
   invocations after plan validation; it never mutates authored instructions or graph hashes. Hooks
   retrieve complete cards from a frozen resident index with relevance ranking and a cumulative
-  session byte budget. Shared store mutations use expected revisions and retained deletion tombstones.
+  session byte budget. Execution-scoped conversations receive fresh recall budgets; reused
+  node-instance conversations retain theirs. Windows memory storage and initialization use shared
+  private-state helpers, including validation of SQLite sidecars.
+  Shared store mutations use expected revisions and retained deletion tombstones.
   Codex trusts only the exact normalized hash of the product-owned session hook; never bypass trust
   for unrelated native hooks or write user trust configuration. Callback receipts acknowledge returned
   context, not model compliance. Missing carrier acknowledgement, failed provider startup or bounded

@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
-use std::fs::{self, OpenOptions};
+use std::fs;
+#[cfg(unix)]
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -47,6 +49,7 @@ impl ActiveMemoryStore {
         )?;
         initialize(&mut connection)?;
         check_capacity(&connection)?;
+        check_sidecars(path)?;
         Ok(Self { connection })
     }
 
@@ -472,18 +475,32 @@ fn prepare_private_path(path: &Path) -> Result<(), ActiveMemoryError> {
     check_sidecars(path)
 }
 
+#[cfg(unix)]
 fn create_private_directory(parent: &Path) -> Result<(), ActiveMemoryError> {
-    let mut builder = fs::DirBuilder::new();
-    builder.recursive(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
-    }
-    builder.create(parent)?;
+    use std::os::unix::fs::DirBuilderExt;
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(parent)?;
     Ok(())
 }
 
+#[cfg(windows)]
+fn create_private_directory(parent: &Path) -> Result<(), ActiveMemoryError> {
+    crate::execution::platform::private_directory(parent)?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn create_private_file(path: &Path) -> Result<(), ActiveMemoryError> {
+    let file = crate::execution::platform::private_file(
+        path,
+        crate::execution::platform::FileAccess::ReadWrite,
+    )?;
+    check_private(&file.metadata()?, false)
+}
+
+#[cfg(unix)]
 fn create_private_file(path: &Path) -> Result<(), ActiveMemoryError> {
     let mut options = OpenOptions::new();
     options.read(true).write(true).create_new(true);
@@ -506,8 +523,17 @@ fn check_sidecars(path: &Path) -> Result<(), ActiveMemoryError> {
     for suffix in ["-wal", "-shm", "-journal"] {
         let mut sidecar = path.as_os_str().to_owned();
         sidecar.push(suffix);
-        if let Some(metadata) = optional_metadata(&PathBuf::from(sidecar))? {
+        let sidecar = PathBuf::from(sidecar);
+        if let Some(metadata) = optional_metadata(&sidecar)? {
             check_private(&metadata, false)?;
+            #[cfg(windows)]
+            drop(
+                crate::execution::platform::private_file(
+                    &sidecar,
+                    crate::execution::platform::FileAccess::Read,
+                )
+                .map_err(|_| ActiveMemoryError::UnsafeStorage)?,
+            );
         }
     }
     Ok(())

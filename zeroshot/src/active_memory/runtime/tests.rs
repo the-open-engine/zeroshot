@@ -2,8 +2,8 @@ use super::*;
 use crate::active_memory::{LessonDraft, LessonEvidence, LessonScope};
 use serde_json::json;
 
-fn source(budget: usize) -> RunMemorySource {
-    let lesson = LessonDraft {
+fn repository_lesson() -> crate::active_memory::Lesson {
+    LessonDraft {
         id: "runtime-recall".into(),
         scope: LessonScope::Repository {
             repository: "repo:fixture".into(),
@@ -21,11 +21,14 @@ fn source(budget: usize) -> RunMemorySource {
             costly_recurring_reason: "Two repair rounds missed sibling selectors.".into(),
         },
     }
-    .into_lesson(1);
+    .into_lesson(1)
+}
+
+fn source(budget: usize) -> RunMemorySource {
     RunMemorySource {
         index: MemoryIndex::new(MemorySnapshot {
             generation: 1,
-            lessons: vec![lesson],
+            lessons: vec![repository_lesson()],
         })
         .unwrap(),
         workspace: PathBuf::from("/workspace"),
@@ -172,4 +175,154 @@ fn bounded_tool_receipts_preserve_first_and_latest_activity() {
         receipts.last().unwrap().seq,
         (MAX_TOOL_OBSERVATIONS + 20) as u64
     );
+}
+
+fn invocation(
+    scope: crate::execution::SessionScope,
+    execution: u64,
+) -> crate::native_v2_runner::DriverInvocation {
+    use crate::native_v2_runner::{DriverInvocation, NodeResponseContract, NodeRole};
+    let mut request =
+        crate::native_v2_runner::test_support::request("memory-runtime", "worker", (1, execution));
+    if let openengine_cluster_protocol::NodeRuntimeBinding::Agent { session_scope, .. } =
+        &mut request.invocation.binding
+    {
+        *session_scope = scope;
+    }
+    DriverInvocation {
+        provider_session_slot: request.invocation.reference.node_instance,
+        node: request.invocation,
+        role: NodeRole::Worker,
+        response: NodeResponseContract::Worker {
+            output: openengine_cluster_protocol::PayloadType::Null,
+        },
+        environment: request.environment,
+        session: Arc::new(crate::native_v2_runner::test_support::CountingSession {
+            closed: Arc::default(),
+        }),
+    }
+}
+
+fn graph_lesson() -> crate::active_memory::Lesson {
+    let mut lesson = repository_lesson();
+    lesson.id = "runtime-graph".into();
+    lesson.scope = LessonScope::Graph {
+        graph_hash: "a".repeat(64),
+        node_id: "worker".into(),
+        repository: None,
+    };
+    lesson.title = "Check declared outputs".into();
+    lesson.recommendation = "Check every declared output against its schema before returning. Inspect required fields and nested values, and verify errors use the expected channel before completing the node.".into();
+    lesson
+}
+
+#[test]
+fn fresh_execution_sessions_recall_repository_cards_while_reused_sessions_deduplicate() {
+    use crate::execution::SessionScope;
+    for scope in [SessionScope::Execution, SessionScope::NodeInstance] {
+        let source = Arc::new(source(2048));
+        let hooks = ActiveMemoryHooks::new(source.clone()).unwrap();
+        let tool = json!({"tool_name":"Read", "tool_input":{"file_path":"src/guard.rs"}});
+        let first = invocation(scope, 2);
+        assert!(
+            hooks
+                .copilot_context(&first, &tool, &source.workspace)
+                .contains("Preserve sibling guards")
+        );
+        assert!(
+            hooks
+                .copilot_context(&first, &tool, &source.workspace)
+                .is_empty()
+        );
+        let next = invocation(scope, 3);
+        let recalled = hooks.copilot_context(&next, &tool, &source.workspace);
+        assert_eq!(
+            recalled.contains("Preserve sibling guards"),
+            scope == SessionScope::Execution
+        );
+    }
+}
+
+#[test]
+fn graph_guidance_and_tool_callbacks_share_one_budget_with_the_configured_session_lifetime() {
+    use crate::execution::SessionScope;
+    for scope in [SessionScope::Execution, SessionScope::NodeInstance] {
+        let mut source = source(2048);
+        source.graph_enabled = true;
+        source.index = MemoryIndex::new(MemorySnapshot {
+            generation: 1,
+            lessons: vec![repository_lesson(), graph_lesson()],
+        })
+        .unwrap();
+        source.budget = source
+            .index
+            .graph_guidance("worker", 2048, &BTreeSet::new())
+            .bytes_used;
+        let source = Arc::new(source);
+        let hooks = ActiveMemoryHooks::new(source.clone()).unwrap();
+        let first = invocation(scope, 2);
+        let guided = hooks.invocation(first.clone());
+        assert!(
+            guided
+                .node
+                .instructions
+                .unwrap()
+                .as_str()
+                .contains("Check declared outputs")
+        );
+        let tool = json!({"tool_name":"Read", "tool_input":{"file_path":"src/guard.rs"}});
+        assert!(
+            hooks
+                .copilot_context(&first, &tool, &source.workspace)
+                .is_empty()
+        );
+        let repeated = hooks.invocation(first);
+        assert!(
+            !repeated
+                .node
+                .instructions
+                .unwrap()
+                .as_str()
+                .contains("Check declared outputs")
+        );
+        let next = invocation(scope, 3);
+        let recalled = hooks.copilot_context(&next, &tool, &source.workspace);
+        assert_eq!(
+            recalled.contains("Preserve sibling guards"),
+            scope == SessionScope::Execution
+        );
+    }
+}
+
+#[test]
+fn fresh_execution_sessions_receive_graph_guidance_again() {
+    use crate::execution::SessionScope;
+    for scope in [SessionScope::Execution, SessionScope::NodeInstance] {
+        let mut source = source(2048);
+        source.graph_enabled = true;
+        source.index = MemoryIndex::new(MemorySnapshot {
+            generation: 1,
+            lessons: vec![graph_lesson()],
+        })
+        .unwrap();
+        let hooks = ActiveMemoryHooks::new(Arc::new(source)).unwrap();
+        let first = hooks.invocation(invocation(scope, 2));
+        assert!(
+            first
+                .node
+                .instructions
+                .unwrap()
+                .as_str()
+                .contains("Check declared outputs")
+        );
+        let next = hooks.invocation(invocation(scope, 3));
+        assert_eq!(
+            next.node
+                .instructions
+                .unwrap()
+                .as_str()
+                .contains("Check declared outputs"),
+            scope == SessionScope::Execution
+        );
+    }
 }

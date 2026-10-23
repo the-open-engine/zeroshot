@@ -12,7 +12,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use openengine_cluster_protocol::NodeInstructions;
+use openengine_cluster_protocol::{NodeInstructions, NodeRuntimeBinding};
+
+use crate::execution::SessionScope;
 use serde_json::Value;
 
 use crate::execution::process::ProcessSessionCommand;
@@ -87,7 +89,7 @@ impl ActiveMemoryHooks {
         let Some(instructions) = invocation.node.instructions.as_ref() else {
             return invocation;
         };
-        let session = invocation.provider_session_slot.get().to_string();
+        let session = provider_session_key(&invocation);
         let context = self
             .source
             .graph_context(invocation.node.reference.node.as_str(), &session);
@@ -122,6 +124,16 @@ impl ActiveMemoryHooks {
         let scope = broker::HookScope::new(invocation, workspace);
         let query = scope.query(input);
         native::bounded_context(self.source.tool_context(&query))
+    }
+}
+
+fn provider_session_key(invocation: &DriverInvocation) -> String {
+    match &invocation.node.binding {
+        NodeRuntimeBinding::Agent {
+            session_scope: SessionScope::NodeInstance,
+            ..
+        } => format!("node-instance/{}", invocation.provider_session_slot.get()),
+        _ => format!("execution/{}", invocation.node.reference.execution.get()),
     }
 }
 

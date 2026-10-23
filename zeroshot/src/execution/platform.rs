@@ -16,7 +16,6 @@ use unix as native;
 #[cfg(windows)]
 use windows as native;
 
-#[cfg(unix)]
 pub(crate) use native::validate_private_file;
 
 pub(crate) use native::{

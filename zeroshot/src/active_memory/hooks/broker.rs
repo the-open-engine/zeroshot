@@ -31,7 +31,7 @@ impl HookScope {
     pub(super) fn new(invocation: &DriverInvocation, workspace: &Path) -> Self {
         Self {
             node_id: invocation.node.reference.node.as_str().to_owned(),
-            session_key: invocation.provider_session_slot.get().to_string(),
+            session_key: super::provider_session_key(invocation),
             execution_id: invocation.node.reference.execution.get(),
             workspace: workspace.to_path_buf(),
         }

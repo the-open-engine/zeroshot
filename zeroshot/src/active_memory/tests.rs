@@ -597,3 +597,31 @@ fn storage_rejects_symlinks_hardlinks_and_public_modes() {
         Err(ActiveMemoryError::UnsafeStorage)
     ));
 }
+
+#[cfg(windows)]
+#[test]
+fn windows_storage_uses_private_acls_and_rejects_a_public_wal() {
+    use crate::execution::platform::{self, FileAccess};
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("nested").join("memory");
+    let path = directory.join("lessons.sqlite3");
+    let store = ActiveMemoryStore::open(&path).unwrap();
+    platform::validate_private_file(&platform::open_directory(&directory).unwrap()).unwrap();
+    drop(platform::private_file(&path, FileAccess::Read).unwrap());
+    let mut wal = path.as_os_str().to_owned();
+    wal.push("-wal");
+    let wal = std::path::PathBuf::from(wal);
+    assert!(wal.is_file());
+    drop(platform::private_file(&wal, FileAccess::Read).unwrap());
+    assert!(
+        std::process::Command::new("icacls.exe")
+            .arg(&wal)
+            .args(["/grant", "*S-1-1-0:R"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert!(ActiveMemoryStore::open(&path).is_err());
+    drop(store);
+}

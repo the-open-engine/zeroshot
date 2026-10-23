@@ -215,7 +215,7 @@ fn broker_scopes_queries_to_issued_capabilities_and_normalizes_native_fields() {
     let queries = source.queries.lock().assert_value();
     assert_eq!(queries[0].node_id, "worker");
     assert_eq!(queries[0].execution_id, 2);
-    assert_eq!(queries[0].session_key, "1");
+    assert_eq!(queries[0].session_key, "execution/2");
     assert_eq!(queries[0].cwd, Path::new("/workspace/subfolder"));
     assert_eq!(
         queries[0].native_session_id.as_deref(),

@@ -12,15 +12,13 @@ use tokio::io::AsyncReadExt;
 use super::{Result, invalid};
 use crate::active_memory::MAX_STORE_BYTES;
 
+#[cfg(test)]
+#[path = "files/tests.rs"]
+mod tests;
+
 pub(super) fn create_directory(path: &Path) -> Result<()> {
     reject_links(path)?;
-    let mut builder = fs::DirBuilder::new();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
-    }
-    builder.create(path)?;
+    crate::execution::platform::create_private_directory(path)?;
     private_directory(path)
 }
 
@@ -38,6 +36,11 @@ pub(super) fn private_directory(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.is_dir() {
         return Err(invalid("session must be a private directory"));
+    }
+    #[cfg(windows)]
+    {
+        let directory = crate::execution::platform::open_directory(path)?;
+        crate::execution::platform::validate_private_file(&directory)?;
     }
     #[cfg(unix)]
     {
@@ -68,6 +71,11 @@ pub(super) fn write(path: &Path, value: &impl Serialize) -> Result<()> {
         .ok_or_else(|| invalid("missing session directory"))?;
     private_directory(parent)?;
     let mut staged = tempfile::NamedTempFile::new_in(parent)?;
+    #[cfg(windows)]
+    drop(crate::execution::platform::private_file(
+        staged.path(),
+        crate::execution::platform::FileAccess::ReadWrite,
+    )?);
     staged.write_all(&bytes)?;
     staged.as_file().sync_all()?;
     let temporary = staged.into_temp_path();
@@ -82,6 +90,8 @@ pub(super) fn read<T: DeserializeOwned>(path: &Path) -> Result<T> {
         return Err(invalid("expected a bounded regular initialization file"));
     }
     let mut file = crate::execution::platform::open_readonly_file(path)?;
+    #[cfg(windows)]
+    crate::execution::platform::validate_private_file(&file)?;
     let mut bytes = Vec::new();
     Read::by_ref(&mut file)
         .take(MAX_STORE_BYTES as u64 + 1)
