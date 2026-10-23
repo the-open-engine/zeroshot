@@ -241,8 +241,7 @@ async fn capsule_deadline_preserves_usage_and_waits_for_cleanup_before_settlemen
     let state = Arc::new(CleanupState::default());
     let endpoint = NativeCapsuleNodeEndpoint::new(Arc::new(CleanupRunner(state.clone())));
     harness.supervisor.runner = Arc::new(RemoteCapsuleNodeRunner::new(Arc::new(endpoint)));
-    let supervisor = harness.supervisor.clone();
-    let drive = tokio::spawn(async move { supervisor.drive().await });
+    let drive = harness.spawn_drive();
     state.started.notified().await;
     tokio::time::advance(Duration::from_millis(30)).await;
     state.cancelled.notified().await;

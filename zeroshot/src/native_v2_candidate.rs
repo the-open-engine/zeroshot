@@ -77,7 +77,11 @@ impl NativeV2HarnessConfig {
     }
 }
 
+// Library embedders may supply a host-owned recall capability; storage and orchestration stay internal.
+pub use crate::active_memory::hooks::{ActiveMemoryHooks, ActiveMemorySource, HookQuery};
+
 pub struct NativeV2CandidateConfig {
+    pub active_memory: Option<Arc<ActiveMemoryHooks>>,
     pub lanes: Vec<NativeV2HarnessConfig>,
     pub workspace: PathBuf,
     pub delivery: Option<NativeV2CandidateDelivery>,
@@ -230,7 +234,10 @@ fn build_candidate(
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
     validate_config(admitted, &config)?;
     let NativeV2CandidateConfig {
-        lanes, delivery, ..
+        lanes,
+        delivery,
+        active_memory,
+        ..
     } = config;
     let delivery = delivery.map(|delivery| {
         Arc::new(
@@ -241,54 +248,68 @@ fn build_candidate(
                 .with_git_credentials(delivery.git_credentials),
         )
     });
-    let agents = lane_agents(lanes, placement)?;
+    let agents = lane_agents(lanes, placement, active_memory)?;
     assemble_runner(admitted, agents, delivery, placement)
 }
 
 fn lane_agents(
     lanes: Vec<NativeV2HarnessConfig>,
     placement: CandidatePlacement,
+    memory: Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
 ) -> Result<BTreeMap<RuntimeLane, CandidateAgents>, NativeV2CandidateError> {
     lanes
         .into_iter()
-        .map(|harness| Ok((harness.lane(), build_lane_agents(harness, placement)?)))
+        .map(|harness| {
+            Ok((
+                harness.lane(),
+                build_lane_agents(harness, placement, memory.clone())?,
+            ))
+        })
         .collect()
 }
 
 fn build_lane_agents(
     harness: NativeV2HarnessConfig,
     placement: CandidatePlacement,
+    memory: Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
 ) -> Result<CandidateAgents, NativeV2CandidateError> {
-    Ok(match harness {
-        NativeV2HarnessConfig::Copilot(config) => {
-            CandidateAgents::new(Arc::new(if placement.is_local() {
+    let on_failure = memory.clone();
+    let mut agents = match harness {
+        NativeV2HarnessConfig::Copilot(config) => CandidateAgents::new(Arc::new(
+            (if placement.is_local() {
                 CopilotAdapter::new_local(config)
             } else {
                 CopilotAdapter::new(config)
-            }))
-        }
-        NativeV2HarnessConfig::Codex(config) => {
-            CandidateAgents::new(Arc::new(if placement.is_local() {
+            })
+            .with_active_memory(memory),
+        )),
+        NativeV2HarnessConfig::Codex(config) => CandidateAgents::new(Arc::new(
+            (if placement.is_local() {
                 NativeV2CodexAdapter::new_local(config)
             } else {
                 NativeV2CodexAdapter::new(config)
-            }))
-        }
-        NativeV2HarnessConfig::Claude(config) => {
-            CandidateAgents::new(Arc::new(if placement.is_local() {
+            })
+            .with_active_memory(memory),
+        )),
+        NativeV2HarnessConfig::Claude(config) => CandidateAgents::new(Arc::new(
+            (if placement.is_local() {
                 ClaudeAdapter::new_local(config)?
             } else {
                 ClaudeAdapter::new(config)?
-            }))
-        }
-        NativeV2HarnessConfig::Pi(config) => {
-            CandidateAgents::new(Arc::new(if placement.is_local() {
+            })
+            .with_active_memory(memory),
+        )),
+        NativeV2HarnessConfig::Pi(config) => CandidateAgents::new(Arc::new(
+            (if placement.is_local() {
                 PiAdapter::new_local(config)?
             } else {
                 PiAdapter::new(config)?
-            }))
-        }
-    })
+            })
+            .with_active_memory(memory),
+        )),
+    };
+    agents.memory = on_failure;
+    Ok(agents)
 }
 
 fn validate_config(
@@ -348,6 +369,7 @@ fn assemble_runner(
 struct CandidateAgents {
     driver: Arc<dyn NodeDriver>,
     sessions: Arc<dyn SessionFactory>,
+    memory: Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
 }
 
 impl CandidateAgents {
@@ -356,6 +378,7 @@ impl CandidateAgents {
         T: NodeDriver + SessionFactory + 'static,
     {
         Self {
+            memory: None,
             driver: agent.clone(),
             sessions: agent,
         }
@@ -420,7 +443,18 @@ impl NodeDriver for CandidateNodeLane {
         match &invocation.node.binding {
             NodeRuntimeBinding::Agent { .. } => {
                 let agents = self.agents_for(&invocation.node.binding)?;
-                agents.driver.run(invocation, control).await
+                let result = agents.driver.run(invocation, control).await;
+                if result.is_err()
+                    || matches!(
+                        result,
+                        Ok(openengine_cluster_protocol::WorkerOutcome::Error { .. })
+                    )
+                {
+                    if let Some(memory) = &agents.memory {
+                        memory.execution_failed();
+                    }
+                }
+                result
             }
             NodeRuntimeBinding::GitDelivery { .. } => {
                 self.delivery

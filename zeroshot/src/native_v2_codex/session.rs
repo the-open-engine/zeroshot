@@ -185,6 +185,7 @@ impl NodeDriver for NativeV2CodexAdapter {
         invocation: DriverInvocation,
         control: DriverControl,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
+        let invocation = self.memory_invocation(invocation);
         let session = invocation
             .session
             .as_any()

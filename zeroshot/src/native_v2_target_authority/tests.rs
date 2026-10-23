@@ -227,7 +227,10 @@ fn request() -> TargetRunRequest {
             title: RunTitle::new("Target authority test").assert_value(),
             graph: graph_fixture("worker", json!({"kind": "null"})),
             initial_input: Value::Null,
-            runtime: crate::native_v2_candidate::test_support::codex_runtime(BTreeMap::new()),
+            runtime: crate::native_v2_candidate::test_support::codex_runtime(
+                openengine_cluster_protocol::RunSize::Small,
+                BTreeMap::new(),
+            ),
             source: Some(ResolvedSource {
                 repository: SourceRepositoryId::new("owner/repo").assert_value(),
                 branch: SourceBranchId::new("main").assert_value(),

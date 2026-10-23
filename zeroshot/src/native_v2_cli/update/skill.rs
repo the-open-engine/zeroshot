@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 
 use super::{NativeV2CliError, update_error};
 
+#[cfg(test)]
 const SKILL_NAME: &str = "zeroshot";
 const SKILL_FILENAME: &str = "SKILL.md";
 const MANAGED_PREFIX: &[u8] = b"<!-- managed by @the-open-engine-company/zeroshot; sha256=";
@@ -14,17 +15,30 @@ const MANAGED_SUFFIX: &[u8] = b" -->\n";
 const MAX_SKILL_BYTES: u64 = 1024 * 1024;
 
 pub(super) struct PreparedSkill {
+    name: &'static str,
     canonical: Vec<u8>,
     managed: Vec<u8>,
 }
 
+#[cfg(test)]
 pub(super) fn prepare(canonical: Vec<u8>) -> Result<PreparedSkill, NativeV2CliError> {
+    prepare_named(SKILL_NAME, canonical)
+}
+
+pub(super) fn prepare_named(
+    name: &'static str,
+    canonical: Vec<u8>,
+) -> Result<PreparedSkill, NativeV2CliError> {
     if canonical.len() as u64 > MAX_SKILL_BYTES {
         return Err(update_error("release skill exceeds the size limit"));
     }
     std::str::from_utf8(&canonical).map_err(|_| update_error("release skill is not UTF-8"))?;
     let managed = managed_document(&canonical)?;
-    Ok(PreparedSkill { canonical, managed })
+    Ok(PreparedSkill {
+        name,
+        canonical,
+        managed,
+    })
 }
 
 impl PreparedSkill {
@@ -52,14 +66,14 @@ impl PreparedSkill {
             changed: &mut changed,
             failures: &mut failures,
         };
-        let agents = home.join(".agents").join("skills").join(SKILL_NAME);
+        let agents = home.join(".agents").join("skills").join(self.name);
         install_location("Codex/GitHub Copilot/Pi", &agents, self, &mut progress);
 
         let claude_root = claude_config
             .map(PathBuf::from)
             .unwrap_or_else(|| home.join(".claude"));
         if claude_root.is_absolute() {
-            let claude = claude_root.join("skills").join(SKILL_NAME);
+            let claude = claude_root.join("skills").join(self.name);
             install_location("Claude Code", &claude, self, &mut progress);
         } else {
             progress

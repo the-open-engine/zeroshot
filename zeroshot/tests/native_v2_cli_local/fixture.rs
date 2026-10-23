@@ -667,6 +667,8 @@ fn local_runtime() -> Value {
         "harness":"codex",
         "provider":"openai",
         "size":"small",
+        // Prompt and argument captures describe graph workers, not optional global work.
+        "activeMemory":{"repository":false,"graph":false},
         "nodes":{
             "worker":{
                 "kind":"agent",

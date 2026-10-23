@@ -130,6 +130,8 @@ pub struct PortableControllerBootstrap {
     pub workspace: PathBuf,
     pub workspace_lease: PathBuf,
     pub checkpoint_repository: PathBuf,
+    /// Host-owned shared memory; omitted by embedders that have not configured a namespace.
+    pub memory_storage: Option<PathBuf>,
     pub storage: PathBuf,
     pub delivery_policy: DeliveryPolicy,
 }

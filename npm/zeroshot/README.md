@@ -1,6 +1,6 @@
 # `@the-open-engine-company/zeroshot`
 
-Installer for the canonical `zeroshot` executable and agent skill. The package selects the release
+Installer for the canonical `zeroshot` executable and agent skills. The package selects the release
 archive for the current Node platform and architecture, verifies it against that release's
 `SHA256SUMS`, and installs the executable.
 
@@ -9,16 +9,16 @@ runtime configuration, targets, and CLI reference.
 
 The product site is [zeroshot.sh](https://zeroshot.sh/?utm_source=npm&utm_medium=readme&utm_campaign=zeroshot).
 
-The same managed skill is installed for Codex, GitHub Copilot, and Pi at
-`$HOME/.agents/skills/zeroshot/SKILL.md`, and for Claude Code at
-`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/zeroshot/SKILL.md`. Reinstalling updates an unchanged
+The `zeroshot` and `zeroshot-memory-init` managed skills share one source each across hosts.
+They install for Codex, GitHub Copilot, and Pi at `$HOME/.agents/skills/<name>/SKILL.md`, and for
+Claude Code at `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/<name>/SKILL.md`. Reinstalling updates an unchanged
 managed copy. A conflicting or edited skill is preserved; installation fails with the exact path so
 the conflict cannot pass unnoticed.
 
-When set, `CLAUDE_CONFIG_DIR` must be absolute so the global skill has one stable location.
+When set, `CLAUDE_CONFIG_DIR` must be absolute so the managed skills have stable locations.
 
 npm 7 and newer do not run uninstall lifecycle scripts. After uninstalling the package, remove the
-two skill directories above manually if their `SKILL.md` files are still unmodified managed copies.
+managed skill directories above manually if their `SKILL.md` files are still unmodified managed copies.
 
 Installation fails closed with `UNSUPPORTED_ZEROSHOT_HOST` when the host has no declared release target. Source compilation and cross-target substitution are not supported.
 

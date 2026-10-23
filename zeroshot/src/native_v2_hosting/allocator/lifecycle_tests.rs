@@ -42,25 +42,10 @@ fn cleanup_request<'a>(
 }
 
 fn test_allocator(root: &Path) -> ProductionCapsuleAllocator {
-    let harness = PathBuf::from("/usr/bin/false");
-    ProductionCapsuleAllocator::new(ProductionCapsuleConfig {
-        workspace_storage: None,
-        storage_root: root.to_path_buf(),
-        copilot_executable: harness.clone(),
-        codex_executable: harness.clone(),
-        claude_executable: harness.to_string_lossy().into_owned(),
-        claude_prefix_arguments: Vec::new(),
-        claude_process_environment: ClaudeProcessEnvironment::default(),
-        pi_executable: harness.to_string_lossy().into_owned(),
-        pi_prefix_arguments: Vec::new(),
-        pi_process_environment: PiProcessEnvironment::default(),
-        executable_search_path: "/usr/bin:/bin".to_owned(),
-        git_program: harness.clone(),
-        gh_program: harness,
-        process_pool: HostedProcessPool::new(8_000_000, 8_000_000, 8_001_000).assert_value(),
-        operator_diagnostics: Arc::new(OperatorDiagnosticStore::default()),
-    })
-    .assert_value()
+    let mut config = crate::native_v2_hosting::tests::fixtures::capsule_config(root.to_path_buf());
+    config.git_program = PathBuf::from("/usr/bin/false");
+    config.process_pool = HostedProcessPool::new(8_000_000, 8_000_000, 8_001_000).assert_value();
+    crate::native_v2_hosting::tests::fixtures::capsule_allocator(config).assert_value()
 }
 
 #[test]
@@ -479,6 +464,8 @@ fn hosted_copilot_harness_and_invalid_filesystem_layout_preserve_capsule_boundar
     let mut admitted = crate::native_v2_runner::test_support::admitted();
     let nodes = admitted.runtime.nodes().clone();
     admitted.runtime = crate::native_v2_contract::RuntimePlan::Copilot {
+        active_memory: Default::default(),
+        global_agents: Default::default(),
         provider: crate::native_v2_contract::CopilotProvider::Github,
         size: crate::native_v2_contract::RunSize::Medium,
         nodes,
@@ -592,6 +579,8 @@ fn hosted_pi_harness_builds_the_contained_lane_from_the_capsule() {
     let mut admitted = crate::native_v2_runner::test_support::admitted();
     let nodes = admitted.runtime.nodes().clone();
     admitted.runtime = crate::native_v2_contract::RuntimePlan::Pi {
+        active_memory: Default::default(),
+        global_agents: Default::default(),
         provider: crate::native_v2_contract::PiProvider::Anthropic,
         size: crate::native_v2_contract::RunSize::Medium,
         nodes,

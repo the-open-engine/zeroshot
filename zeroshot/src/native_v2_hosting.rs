@@ -40,7 +40,7 @@ use crate::v2_run_ledger::RunLedgerError;
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
 use crate::native_v2_supervisor::RunEnvironment;
 
-use allocator::{ProductionCapsuleAllocator, ProductionCapsuleConfig};
+use allocator::ProductionCapsuleAllocator;
 pub(crate) use connections::build_connection_resolver;
 
 /// Adds missing provider connection requirements for each agent's effective lane.
@@ -69,6 +69,8 @@ pub async fn build_production_target_authority(
 /// Host-owned non-secret capabilities used to compose one installed target.
 #[derive(Clone)]
 pub struct ProductionHostingConfig {
+    /// A host-owned namespace. Cloud embedders select their own tenant-scoped storage.
+    pub memory_storage: Option<PathBuf>,
     /// Private diagnostics collection; the host owns the receiver and durable storage.
     pub operator_diagnostic_output: Option<OperatorDiagnosticOutput>,
     pub workspace_storage: Option<Arc<dyn HostedWorkspaceStorage>>,
@@ -128,23 +130,12 @@ impl ProductionTargetControllerFactory {
         let ledger: Arc<dyn RunLedger> = Arc::new(
             SqliteRunLedger::open(ledger_path).map_err(|_| ProductionHostingError::Ledger)?,
         );
-        let allocator = Arc::new(ProductionCapsuleAllocator::new(ProductionCapsuleConfig {
-            workspace_storage: self.config.workspace_storage.clone(),
-            storage_root: root,
-            copilot_executable: self.config.copilot_executable.clone(),
-            codex_executable: self.config.codex_executable.clone(),
-            claude_executable: self.config.claude_executable.clone(),
-            pi_executable: self.config.pi_executable.clone(),
-            pi_prefix_arguments: self.config.pi_prefix_arguments.clone(),
-            pi_process_environment: self.config.pi_process_environment.clone(),
-            claude_prefix_arguments: self.config.claude_prefix_arguments.clone(),
-            claude_process_environment: self.config.claude_process_environment.clone(),
-            executable_search_path: self.config.executable_search_path.clone(),
-            git_program: self.config.git_program.clone(),
-            gh_program: self.config.gh_program.clone(),
-            process_pool: self.config.process_pool,
-            operator_diagnostics: self.operator_diagnostics.clone(),
-        })?);
+        let mut capsule_config = self.config.as_ref().clone();
+        capsule_config.storage_root = root;
+        let allocator = Arc::new(ProductionCapsuleAllocator::new(
+            Arc::new(capsule_config),
+            self.operator_diagnostics.clone(),
+        )?);
         let controller = NativeV2CloudController::new_with_delivery_policy(
             ledger,
             allocator,
@@ -358,6 +349,7 @@ fn set_traversable_directory(_path: &std::path::Path) -> Result<(), std::io::Err
 impl Default for ProductionHostingConfig {
     fn default() -> Self {
         Self {
+            memory_storage: None,
             operator_diagnostic_output: None,
             workspace_storage: None,
             storage_root: PathBuf::from("/var/lib/zeroshot/native-v2"),

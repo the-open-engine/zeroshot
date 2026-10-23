@@ -8,10 +8,10 @@ use std::path::Path;
 use std::pin::Pin;
 
 use openengine_cluster_protocol::{
-    ClaudeProvider, CodexProvider, DeclaredConnections, DeclaredEnvironment,
-    EnvironmentVariableName, GraphProfile, GraphSpec, IdempotencyKey, ModelId, NodeName,
-    NodeRuntimeBinding, PiProvider, ReasoningEffort, RunConnectionValues, RunSize, RunSubmitResult,
-    RunConnectionRequirements, RuntimePlan, SessionScope, StaticConnectionValues,
+    ActiveMemoryConfig, ClaudeProvider, CodexProvider, DeclaredConnections, DeclaredEnvironment,
+    GlobalAgentsConfig, EnvironmentVariableName, GraphProfile, GraphSpec, IdempotencyKey, ModelId,
+    NodeName, NodeRuntimeBinding, PiProvider, ReasoningEffort, RunConnectionValues, RunSize,
+    RunSubmitResult, RunConnectionRequirements, RuntimePlan, SessionScope, StaticConnectionValues,
 };
 use serde::Deserialize;
 
@@ -53,9 +53,25 @@ where
     if matches!(command, NativeV2CliCommand::Update) {
         return super::super::update::execute(output).await.map(Some);
     }
+    if let NativeV2CliCommand::Memory(command) = command {
+        let result = super::super::memory::execute(command).await?;
+        write_json(output, &result)?;
+        return Ok(Some(CliOutcome::Completed));
+    }
     let NativeV2CliCommand::Run(run) = command else {
         return Ok(None);
     };
+    validate_inline_run(run, output, environment).await
+}
+
+async fn validate_inline_run<F>(
+    run: &RunCommand,
+    output: &mut impl Write,
+    environment: F,
+) -> Result<Option<CliOutcome>, NativeV2CliError>
+where
+    F: Fn(&str) -> Option<OsString>,
+{
     if !run.validate_only {
         return Ok(None);
     }
@@ -522,6 +538,10 @@ struct UniformRuntimePlan {
     session_scope: Option<SessionScope>,
     #[serde(default)]
     connections: Option<DeclaredConnections>,
+    #[serde(default)]
+    active_memory: ActiveMemoryConfig,
+    #[serde(default)]
+    global_agents: GlobalAgentsConfig,
 }
 
 const fn medium_size() -> RunSize {
@@ -588,22 +608,30 @@ impl UniformRuntimePlan {
         match harness {
             UniformHarness::Copilot if self.provider == UniformProvider::Github => {
                 Ok(RuntimePlan::Copilot {
+                    active_memory: self.active_memory,
+                    global_agents: self.global_agents,
                     provider: crate::native_v2_contract::CopilotProvider::Github,
                     size: self.size,
                     nodes,
                 })
             }
             UniformHarness::Codex => Ok(RuntimePlan::Codex {
+                active_memory: self.active_memory,
+                global_agents: self.global_agents,
                 provider: self.provider.codex().ok_or_else(incompatible)?,
                 size: self.size,
                 nodes,
             }),
             UniformHarness::Claude => Ok(RuntimePlan::Claude {
+                active_memory: self.active_memory,
+                global_agents: self.global_agents,
                 provider: self.provider.claude().ok_or_else(incompatible)?,
                 size: self.size,
                 nodes,
             }),
             UniformHarness::Pi => Ok(RuntimePlan::Pi {
+                active_memory: self.active_memory,
+                global_agents: self.global_agents,
                 provider: self.provider.pi().ok_or_else(incompatible)?,
                 size: self.size,
                 nodes,

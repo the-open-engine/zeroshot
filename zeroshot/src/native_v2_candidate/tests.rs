@@ -949,7 +949,7 @@ async fn candidate_keys_each_built_adapter_by_the_lane_its_configuration_serves(
         ] {
             let mut lanes = candidate_config(kind, &repository, github.clone()).lanes;
             lanes.reverse();
-            let agents = lane_agents(lanes, placement).assert_value_with("lane adapters");
+            let agents = lane_agents(lanes, placement, None).assert_value_with("lane adapters");
             assert_eq!(
                 agents.keys().copied().collect::<BTreeSet<_>>(),
                 runtime(kind).lanes()

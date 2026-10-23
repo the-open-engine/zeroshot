@@ -128,7 +128,8 @@ impl DeliveryFixture {
             .assert_value_with("write run input");
         fs::write(
             root.path("runtime.json"),
-            br#"{"harness":"codex","provider":"openai","model":"gpt-5.6","effort":"high","connections":{"openai":["OPENAI_API_KEY"]}}"#,
+            // The delivery stand-in changes files on every invocation; this test isolates gh lookup.
+            br#"{"harness":"codex","provider":"openai","model":"gpt-5.6","effort":"high","activeMemory":{"repository":false,"graph":false},"connections":{"openai":["OPENAI_API_KEY"]}}"#,
         )
         .assert_value_with("write uniform runtime");
         let fixture = Self {

@@ -17,9 +17,11 @@ use super::{
 };
 use crate::full_v1_reducer::{ExecutionVoidReason, StructuralOccurrence};
 use crate::native_v2_contract::{
-    AdmittedRun, CodexProvider, ExecutionId, ExecutionRef, NodeCompletion, NodeInstanceId,
-    RuntimePlan, TokenUsageDelta,
+    AdmittedRun, ExecutionId, ExecutionRef, NodeCompletion, NodeInstanceId, TokenUsageDelta,
 };
+
+#[path = "tests/primary_restart.rs"]
+mod primary_restart;
 
 fn admitted_run() -> AdmittedRun {
     let graph: CompiledGraphIr = serde_json::from_str(include_str!(
@@ -31,11 +33,10 @@ fn admitted_run() -> AdmittedRun {
         title: RunTitle::new("Ledger test").assert_value(),
         graph,
         initial_input: Value::Null,
-        runtime: RuntimePlan::Codex {
-            provider: CodexProvider::OpenAi,
-            size: RunSize::Medium,
-            nodes: Default::default(),
-        },
+        runtime: crate::native_v2_candidate::test_support::codex_runtime(
+            RunSize::Medium,
+            Default::default(),
+        ),
         source: Some(openengine_cluster_testkit::native_v2_source_fixture()),
     }
 }
@@ -59,15 +60,7 @@ fn reference(run: &RunId, execution: u64) -> ExecutionRef {
 }
 
 fn started(reference: ExecutionRef) -> RunEvent {
-    RunEvent::NodeStarted {
-        reference,
-        occurrence: StructuralOccurrence {
-            node: NodeName::new("worker").assert_value(),
-            map_indices: Vec::new(),
-        },
-        attempt: PositiveInteger::new(1).assert_value(),
-        input: json!({ "request": "edit" }),
-    }
+    crate::native_v2_runner::test_support::node_started(&reference, json!({ "request": "edit" }))
 }
 
 fn completed(reference: ExecutionRef, output: Value) -> RunEvent {

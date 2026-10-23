@@ -29,7 +29,6 @@ use crate::native_v2_capsule::{
     CapsuleFilesystem, CapsuleFilesystemSpec, NativeCapsuleNodeEndpoint, RemoteCapsuleNodeRunner,
     prepare_capsule_filesystem,
 };
-use crate::native_v2_claude::ClaudeProcessEnvironment;
 use crate::native_v2_cloud::{
     AllocatedCapsule, CapsuleAllocationRequest, CapsuleAllocationUnavailable, CapsuleAllocator,
     CapsuleCleanup, CapsulePreparation, CapsuleCleanupUnavailable, CapsuleDestroyed,
@@ -37,7 +36,6 @@ use crate::native_v2_cloud::{
     RetainedAllocationUnavailable,
 };
 use crate::native_v2_contract::AdmittedRun;
-use crate::native_v2_pi::PiProcessEnvironment;
 use crate::native_v2_delivery::{DeliveryLineage, NativeV2DeliveryConfig};
 use crate::native_v2_portable_controller::WorkspaceIdentity;
 use crate::native_v2_supervisor::RunRuntimeExit;
@@ -48,30 +46,12 @@ use crate::native_v2_target_authority::OperatorDiagnosticStore;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    HostedWorkspace, HostedWorkspaceRequest, HostedWorkspaceStorage, ProductionHostingError,
+    HostedWorkspace, HostedWorkspaceRequest, ProductionHostingConfig, ProductionHostingError,
     set_traversable_directory,
 };
 use super::environment::{self, EnvironmentProcesses, HookPhase};
 use super::repository::{RepositoryInstall, install_repository, production_source};
 use identity_leases::{ActiveRunProcessPool, ActiveRunProcessPools};
-
-pub(super) struct ProductionCapsuleConfig {
-    pub storage_root: PathBuf,
-    pub copilot_executable: PathBuf,
-    pub codex_executable: PathBuf,
-    pub claude_executable: String,
-    pub claude_prefix_arguments: Vec<String>,
-    pub claude_process_environment: ClaudeProcessEnvironment,
-    pub pi_executable: String,
-    pub pi_prefix_arguments: Vec<String>,
-    pub pi_process_environment: PiProcessEnvironment,
-    pub executable_search_path: String,
-    pub git_program: PathBuf,
-    pub gh_program: PathBuf,
-    pub process_pool: HostedProcessPool,
-    pub operator_diagnostics: Arc<OperatorDiagnosticStore>,
-    pub workspace_storage: Option<Arc<dyn HostedWorkspaceStorage>>,
-}
 
 type FilesystemPreparer =
     fn(&Path, &Path, HostedProcessPool) -> Result<CapsuleFilesystem, CapsuleAllocationUnavailable>;
@@ -166,7 +146,8 @@ struct CleanupRunRequest<'a> {
 }
 
 pub(super) struct ProductionCapsuleAllocator {
-    config: Arc<ProductionCapsuleConfig>,
+    config: Arc<ProductionHostingConfig>,
+    operator_diagnostics: Arc<OperatorDiagnosticStore>,
     process_pools: ActiveRunProcessPools,
     active: Arc<Mutex<BTreeMap<RunId, Arc<ProductionCapsuleState>>>>,
     allocated: Mutex<BTreeSet<RunId>>,
@@ -177,7 +158,10 @@ pub(super) struct ProductionCapsuleAllocator {
 }
 
 impl ProductionCapsuleAllocator {
-    pub fn new(config: ProductionCapsuleConfig) -> Result<Self, ProductionHostingError> {
+    pub fn new(
+        config: Arc<ProductionHostingConfig>,
+        operator_diagnostics: Arc<OperatorDiagnosticStore>,
+    ) -> Result<Self, ProductionHostingError> {
         if config.copilot_executable.as_os_str().is_empty()
             || config.codex_executable.as_os_str().is_empty()
             || config.claude_executable.is_empty()
@@ -192,7 +176,8 @@ impl ProductionCapsuleAllocator {
         reconcile_retained_allocations(&config.storage_root)
             .map_err(|_| ProductionHostingError::CapsuleConfiguration)?;
         Ok(Self {
-            config: Arc::new(config),
+            config,
+            operator_diagnostics,
             process_pools,
             active: Arc::new(Mutex::new(BTreeMap::new())),
             allocated: Mutex::new(BTreeSet::new()),
@@ -387,9 +372,22 @@ impl ProductionCapsuleAllocator {
             hosted_workspace,
             ..
         } = prepared;
+        let memory = crate::active_memory::runtime::PreparedActiveMemory::prepare(
+            crate::active_memory::runtime::MemoryPreparation {
+                admitted: request.admitted,
+                workspace: &filesystem.workspace,
+                storage: self.config.memory_storage.as_deref(),
+            },
+        );
+        let hooks = memory
+            .as_ref()
+            .ok()
+            .and_then(|memory| memory.as_ref())
+            .map(|memory| memory.hooks.clone());
         let candidate = build_native_v2_candidate_with_github_token(
             request.admitted,
             NativeV2CandidateConfig {
+                active_memory: hooks,
                 lanes: self.lanes(request.admitted, &filesystem, active_process_pool)?,
                 workspace: filesystem.workspace.clone(),
                 delivery,
@@ -397,10 +395,19 @@ impl ProductionCapsuleAllocator {
             request.github_token.map(Arc::<str>::from),
         )
         .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        let candidate: Arc<dyn crate::native_v2_runner::NodeRunner> = match memory {
+            Ok(Some(memory)) => memory.wrap(request.admitted, candidate),
+            Ok(None) => Arc::new(candidate),
+            Err(_) => crate::active_memory::runtime::unavailable_memory(Arc::new(candidate)),
+        };
+        let postmortem = candidate.postmortem();
         let workspace_identity = WorkspaceIdentity::capture(&filesystem.workspace)
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-        let endpoint = Arc::new(NativeCapsuleNodeEndpoint::new(Arc::new(candidate)));
-        let runner = Arc::new(RemoteCapsuleNodeRunner::new(endpoint.clone()));
+        let endpoint = Arc::new(NativeCapsuleNodeEndpoint::new(candidate));
+        let runner = crate::active_memory::runtime::attach_postmortem(
+            Arc::new(RemoteCapsuleNodeRunner::new(endpoint.clone())),
+            postmortem,
+        );
         state
             .endpoint
             .set(endpoint)
@@ -462,7 +469,7 @@ impl ProductionCapsuleAllocator {
                 required_capabilities: &capabilities,
                 operator_diagnostics: Some((
                     request.run_id.clone(),
-                    self.config.operator_diagnostics.clone(),
+                    self.operator_diagnostics.clone(),
                 )),
             })
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
@@ -580,7 +587,7 @@ impl ProductionCapsuleAllocator {
         .await
         .map(|_| ())
         .map_err(|error| {
-            error.record_diagnostic(request.run_id, &self.config.operator_diagnostics);
+            error.record_diagnostic(request.run_id, &self.operator_diagnostics);
             CapsuleAllocationUnavailable::SourceCheckout
         })
     }

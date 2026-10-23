@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const SKILL_NAME = 'zeroshot';
+const SKILL_NAMES = Object.freeze(['zeroshot', 'zeroshot-memory-init']);
 const MANAGED_MARKER = 'managed by @the-open-engine-company/zeroshot';
 const MANAGED_PATTERN =
   /^<!-- managed by @the-open-engine-company\/zeroshot; sha256=([a-f0-9]{64}) -->\n/;
@@ -46,7 +46,7 @@ function managedSource(document) {
   return digest(source) === match[1] ? source : null;
 }
 
-function locationResults(homeDirectory, environment) {
+function locationResults(homeDirectory, environment, skillName) {
   if (!homeDirectory || !path.isAbsolute(homeDirectory)) {
     return TARGETS.map((target) => ({
       ...target,
@@ -54,13 +54,13 @@ function locationResults(homeDirectory, environment) {
       message: 'user home is unavailable or not absolute',
     }));
   }
-  const shared = path.join(homeDirectory, '.agents', 'skills', SKILL_NAME);
+  const shared = path.join(homeDirectory, '.agents', 'skills', skillName);
   const configuredClaude = environment.CLAUDE_CONFIG_DIR;
   const claudeRoot = configuredClaude || path.join(homeDirectory, '.claude');
   return [
     { ...TARGETS[0], directory: shared },
     path.isAbsolute(claudeRoot)
-      ? { ...TARGETS[1], directory: path.join(claudeRoot, 'skills', SKILL_NAME) }
+      ? { ...TARGETS[1], directory: path.join(claudeRoot, 'skills', skillName) }
       : {
           ...TARGETS[1],
           status: 'failed',
@@ -133,22 +133,32 @@ function installAt(location, canonical, managed) {
 
 function installSkills(options = {}) {
   const packageRoot = options.packageRoot || path.resolve(__dirname, '..');
-  const source = path.join(packageRoot, 'skills', SKILL_NAME, 'SKILL.md');
-  const canonical = fs.readFileSync(source, 'utf8');
-  const managed = managedDocument(canonical);
   const homeDirectory = options.homeDirectory ?? os.homedir();
   const environment = options.environment ?? process.env;
   const uid = options.uid ?? (typeof process.getuid === 'function' ? process.getuid() : undefined);
-  const locations = locationResults(homeDirectory, environment);
+  const sources = SKILL_NAMES.map((skill) => {
+    const canonical = fs.readFileSync(path.join(packageRoot, 'skills', skill, 'SKILL.md'), 'utf8');
+    return { skill, canonical, managed: managedDocument(canonical) };
+  });
+  const locations = sources.flatMap(({ skill, canonical, managed }) =>
+    locationResults(homeDirectory, environment, skill).map((location) => ({
+      ...location,
+      skill,
+      canonical,
+      managed,
+    }))
+  );
   if (uid === 0 && environment.SUDO_USER && environment.SUDO_USER !== 'root') {
-    return locations.map((location) => ({
+    return locations.map(({ canonical: _canonical, managed: _managed, ...location }) => ({
       ...location,
       status: 'failed',
       message:
         'refusing to create user skills from a sudo npm install; use a user-owned npm prefix',
     }));
   }
-  return locations.map((location) => installAt(location, canonical, managed));
+  return locations.map(({ canonical, managed, ...location }) =>
+    installAt(location, canonical, managed)
+  );
 }
 
 function humanList(values) {
@@ -164,13 +174,17 @@ function reportSkillResults(results, output = process.stdout, errorOutput = proc
   const incomplete = results.filter(
     ({ status }) => !['installed', 'updated', 'unchanged'].includes(status)
   );
-  if (ready.length > 0) {
-    output.write(`zeroshot skill ready for ${humanList(ready.map(({ label }) => label))}\n`);
+  const readySkills = new Set(ready.map(({ skill }) => skill || 'zeroshot'));
+  for (const skill of readySkills) {
+    const labels = ready
+      .filter((result) => (result.skill || 'zeroshot') === skill)
+      .map(({ label }) => label);
+    output.write(`${skill} skill ready for ${humanList(labels)}\n`);
   }
   for (const result of incomplete) {
     const location = result.path ? `${result.path}: ` : '';
     errorOutput.write(
-      `zeroshot skill not installed for ${result.label}: ${location}${result.message}\n`
+      `${result.skill || 'zeroshot'} skill not installed for ${result.label}: ${location}${result.message}\n`
     );
   }
   if (incomplete.length > 0) {
@@ -188,6 +202,7 @@ function requireCompleteSkillInstall(results, output, errorOutput) {
 }
 
 module.exports = {
+  SKILL_NAMES,
   installSkills,
   managedDocument,
   managedSource,

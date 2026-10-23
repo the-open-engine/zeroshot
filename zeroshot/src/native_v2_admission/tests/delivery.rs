@@ -219,6 +219,8 @@ async fn legacy_merge_worker_remains_admissible_but_is_not_a_merge_plan_profile(
             .validate_merge_profile(
                 &legacy_graph,
                 &RuntimePlan::Claude {
+                    active_memory: Default::default(),
+                    global_agents: Default::default(),
                     provider: ClaudeProvider::Anthropic,
                     size: RunSize::Medium,
                     nodes: legacy_nodes,

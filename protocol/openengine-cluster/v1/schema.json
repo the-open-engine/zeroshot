@@ -23,6 +23,28 @@
       ],
       "type": "object"
     },
+    "ActiveMemoryConfig": {
+      "additionalProperties": false,
+      "description": "Retrieval controls. Repository cards and procedural graph guidance are independent.",
+      "properties": {
+        "budgetBytes": {
+          "default": 2048,
+          "format": "uint32",
+          "maximum": 16384,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "graph": {
+          "default": true,
+          "type": "boolean"
+        },
+        "repository": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "AdmissionTransition": {
       "additionalProperties": false,
       "properties": {
@@ -1014,6 +1036,20 @@
           "type": "object"
         }
       ]
+    },
+    "GlobalAgentsConfig": {
+      "additionalProperties": false,
+      "description": "Only product-owned global agents can be configured. Additional keys are rejected.",
+      "properties": {
+        "postmortem": {
+          "$ref": "#/$defs/PostmortemConfig",
+          "default": {
+            "enabled": true,
+            "timeoutMs": 120000
+          }
+        }
+      },
+      "type": "object"
     },
     "GraphDiagnostic": {
       "additionalProperties": false,
@@ -3883,6 +3919,33 @@
       ],
       "type": "string"
     },
+    "PostmortemConfig": {
+      "additionalProperties": false,
+      "description": "The postmortem inherits one real agent node's model, lane and declared connections.\nOmission selects the first worker in graph order, then the first agent verifier.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "sourceNode": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeoutMs": {
+          "default": 120000,
+          "format": "uint32",
+          "maximum": 600000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "PullRequestFeedback": {
       "enum": [
         "consider",
@@ -5120,6 +5183,12 @@
         {
           "additionalProperties": false,
           "properties": {
+            "activeMemory": {
+              "$ref": "#/$defs/ActiveMemoryConfig"
+            },
+            "globalAgents": {
+              "$ref": "#/$defs/GlobalAgentsConfig"
+            },
             "harness": {
               "const": "copilot",
               "type": "string"
@@ -5151,6 +5220,12 @@
         {
           "additionalProperties": false,
           "properties": {
+            "activeMemory": {
+              "$ref": "#/$defs/ActiveMemoryConfig"
+            },
+            "globalAgents": {
+              "$ref": "#/$defs/GlobalAgentsConfig"
+            },
             "harness": {
               "const": "codex",
               "type": "string"
@@ -5182,6 +5257,12 @@
         {
           "additionalProperties": false,
           "properties": {
+            "activeMemory": {
+              "$ref": "#/$defs/ActiveMemoryConfig"
+            },
+            "globalAgents": {
+              "$ref": "#/$defs/GlobalAgentsConfig"
+            },
             "harness": {
               "const": "claude",
               "type": "string"
@@ -5213,6 +5294,12 @@
         {
           "additionalProperties": false,
           "properties": {
+            "activeMemory": {
+              "$ref": "#/$defs/ActiveMemoryConfig"
+            },
+            "globalAgents": {
+              "$ref": "#/$defs/GlobalAgentsConfig"
+            },
             "harness": {
               "const": "pi",
               "type": "string"

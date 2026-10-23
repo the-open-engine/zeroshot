@@ -14,6 +14,7 @@ Single-result commands write JSON. Foreground `run`, `watch`, `logs`, and `attac
 Usage: zeroshot [COMMAND]
 
 Commands:
+  memory             Initialize local Active Memory through the canonical skill
   acp                Serve one local Zeroshot profile as an experimental ACP agent over stdio
   ui                 Serve the local profile editor and live or recorded run history
   target             Manage named targets or serve a direct target
@@ -23,7 +24,7 @@ Commands:
   template           Inspect built-in graph templates
   plan               Validate, submit, and observe hosted merge plans
   run                Submit a graph run locally or to a named target
-  update             Update this executable and managed agent skill to the newest canonical release
+  update             Update this executable and managed agent skills to the newest canonical release
   list               List runs as JSON
   status             Read a run's current status as JSON
   watch              Follow a run's durable event stream as NDJSON
@@ -42,6 +43,57 @@ Options:
 
   -h, --help
           Print help (see a summary with '-h')
+```
+
+### `zeroshot memory`
+
+```text
+Initialize local Active Memory through the canonical skill
+
+Usage: zeroshot memory <COMMAND>
+
+Commands:
+  init  Initialize local Active Memory or resume its saved work
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help
+```
+
+#### `zeroshot memory init`
+
+```text
+Initialize local Active Memory or resume its saved work.
+
+Creates a private session directory on the first call. Later calls return pending agent tasks, validate their responses, and publish after complete maintenance. The zeroshot-memory-init skill orchestrates the specialists using the host's connections. This command makes no model calls. It discovers all finished local runs and uses their recorded checkouts for current-source maintenance.
+
+Usage: zeroshot memory init [OPTIONS] --directory <DIR>
+
+Options:
+      --ignore-repos <REPO>...
+          Repositories to exclude by inventory alias: name, owner/repo, absolute path or repo ID. Comma-separated or repeated; saved with the session. Matching is exact and case-sensitive
+
+      --ignore-graphs <GRAPH>...
+          Graphs to exclude by exact authored root name or graph hash shown in the inventory. Comma-separated or repeated; saved with the session. Matching is exact and case-sensitive
+
+      --directory <DIR>
+          Private session directory outside repository checkouts; created if it does not exist
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `zeroshot memory help`
+
+```text
+Print this message or the help of the given subcommand(s)
+
+Usage: zeroshot memory help [COMMAND]
+
+Commands:
+  init  Initialize local Active Memory or resume its saved work
+  help  Print this message or the help of the given subcommand(s)
 ```
 
 ### `zeroshot acp`
@@ -1135,7 +1187,8 @@ RUNTIME CONFIGURATION
     template-owned delivery binding.
 
     --uniform-runtime-config requires harness, provider, and model. It accepts optional size,
-    effort, sessionScope, and connections fields without nodes. Zeroshot expands that agent binding
+    effort, sessionScope, connections, activeMemory, and globalAgents fields without nodes.
+    Zeroshot expands that agent binding
     across every executable graph node and supplies graph-visible Git delivery bindings itself.
     Omitted connections reuse native local login for codex/openai, claude/anthropic,
     copilot/github, pi/anthropic, and pi/openai; other local lanes and contained targets derive
@@ -1174,9 +1227,9 @@ ENVIRONMENT PREPARATION
 ### `zeroshot update`
 
 ```text
-Update this executable and managed agent skill to the newest canonical release.
+Update this executable and managed agent skills to the newest canonical release.
 
-Downloads the declared archive and agent skill from the latest GitHub Release, verifies their SHA256SUMS entries and the executable version, then replaces this executable and any unchanged Zeroshot-managed skill copies. User-edited skills are preserved and reported as conflicts. The executable's directory must be writable; Zeroshot does not elevate privileges.
+Downloads the declared archive and agent skills from the latest GitHub Release, verifies their SHA256SUMS entries and the executable version, then replaces this executable and any unchanged Zeroshot-managed skill copies. User-edited skills are preserved and reported as conflicts. The executable's directory must be writable; Zeroshot does not elevate privileges.
 
 Usage: zeroshot update
 
@@ -1399,6 +1452,7 @@ Print this message or the help of the given subcommand(s)
 Usage: zeroshot help [COMMAND]
 
 Commands:
+  memory             Initialize local Active Memory through the canonical skill
   acp                Serve one local Zeroshot profile as an experimental ACP agent over stdio
   ui                 Serve the local profile editor and live or recorded run history
   target             Manage named targets or serve a direct target
@@ -1408,7 +1462,7 @@ Commands:
   template           Inspect built-in graph templates
   plan               Validate, submit, and observe hosted merge plans
   run                Submit a graph run locally or to a named target
-  update             Update this executable and managed agent skill to the newest canonical release
+  update             Update this executable and managed agent skills to the newest canonical release
   list               List runs as JSON
   status             Read a run's current status as JSON
   watch              Follow a run's durable event stream as NDJSON

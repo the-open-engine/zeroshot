@@ -24,6 +24,9 @@ use openengine_cluster_protocol::{
 };
 use thiserror::Error;
 
+/// Process entry point for the product-owned native memory callback.
+#[doc(hidden)]
+pub use crate::active_memory::hooks::run_hook_helper as run_active_memory_hook;
 pub use crate::native_v2_contract::RunSubmissionIntent as TargetRunIntent;
 use crate::native_v2_admission::NativeV2AdmissionError;
 use crate::native_v2_supervisor::RunEnvironmentError;
@@ -284,6 +287,7 @@ pub struct RunLogsCommand {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NativeV2CliCommand {
+    Memory(MemoryCommand),
     Help(String),
     Version,
     Acp {
@@ -724,3 +728,6 @@ impl NativeV2CliError {
         matches!(self, Self::Disconnected | Self::TargetTransport { .. })
     }
 }
+
+mod memory;
+pub use memory::MemoryCommand;

@@ -1,4 +1,4 @@
-use openengine_cluster_protocol::{CodexProvider, RunSize, RuntimePlan};
+use openengine_cluster_protocol::RunSize;
 use super::*;
 use openengine_cluster_protocol::{
     NodeName, NodeRuntimeBinding, PositiveInteger, Sha256Digest, TerminalResult,
@@ -111,17 +111,16 @@ impl HistoryServer {
             .materialize(TemplateDelivery::None)
             .assert_value();
         submission.initial_input = json!({"task":"Inspect native history"});
-        submission.runtime = RuntimePlan::Codex {
-            provider: CodexProvider::OpenAi,
-            size: RunSize::Small,
-            nodes: BTreeMap::from([(
+        submission.runtime = crate::native_v2_candidate::test_support::codex_runtime(
+            RunSize::Small,
+            BTreeMap::from([(
                 NodeName::new("worker").assert_value(),
                 serde_json::from_value::<NodeRuntimeBinding>(json!({
                     "kind":"agent", "model":"test-model", "sessionScope":"execution",
                 }))
                 .assert_value(),
             )]),
-        };
+        );
         let admitted = NativeV2Admission.admit(submission).await.assert_value();
         self.factory
             .ledger

@@ -125,6 +125,7 @@ pub struct NativeV2Supervisor {
     live_output: Option<Arc<dyn LiveOutputRegistrar>>,
     runtime_cleanup: Option<Arc<dyn RunRuntimeCleanup>>,
     checkpoints: Option<Arc<dyn checkpoints::RunCheckpointStore>>,
+    postmortem: Option<Arc<dyn crate::active_memory::postmortem::RunPostmortem>>,
     runtime_lost: Arc<AtomicBool>,
     force_requested: Arc<AtomicBool>,
     resolution_stop: watch::Sender<bool>,
@@ -148,6 +149,7 @@ impl NativeV2Supervisor {
             live_output: None,
             runtime_cleanup: None,
             checkpoints: None,
+            postmortem: None,
             runtime_lost: Arc::new(AtomicBool::new(false)),
             force_requested: Arc::new(AtomicBool::new(false)),
             resolution_stop: watch::channel(false).0,
@@ -182,6 +184,15 @@ impl NativeV2Supervisor {
         self
     }
 
+    #[must_use]
+    pub fn with_postmortem(
+        mut self,
+        postmortem: Option<Arc<dyn crate::active_memory::postmortem::RunPostmortem>>,
+    ) -> Self {
+        self.postmortem = postmortem;
+        self
+    }
+
     /// Drives the run until it reaches its durable terminal result.
     pub async fn drive(&self) -> Result<TerminalResult, NativeV2SupervisorError> {
         let _turn = self.drive_turn.lock().await;
@@ -193,23 +204,8 @@ impl NativeV2Supervisor {
 
     async fn initialize(&self) -> Result<Initialization, NativeV2SupervisorError> {
         let mut stored = self.load().await?;
-        if let Some(terminal) = stored.snapshot.terminal {
+        if let Some(terminal) = self.initialized_terminal(&stored).await? {
             return Ok(Initialization::Terminal(terminal));
-        }
-        if self.force_requested.load(Ordering::Acquire)
-            || stored.snapshot.force_stop_requested
-            || stored.snapshot.phase == RunPhase::Stopping
-        {
-            return self
-                .terminalize_force(&mut JoinSet::new())
-                .await
-                .map(Initialization::Terminal);
-        }
-        if stored.snapshot.active_executions().next().is_some() {
-            return self
-                .terminalize_lost(&mut JoinSet::new())
-                .await
-                .map(Initialization::Terminal);
         }
         if stored.snapshot.phase == RunPhase::Admitted {
             stored.snapshot = self
@@ -227,6 +223,31 @@ impl NativeV2Supervisor {
             instructions: catalog.instructions,
             admitted: stored.admitted,
         })))
+    }
+
+    async fn initialized_terminal(
+        &self,
+        stored: &StoredRun,
+    ) -> Result<Option<TerminalResult>, NativeV2SupervisorError> {
+        if let Some(terminal) = stored.snapshot.terminal.clone() {
+            return Ok(Some(terminal));
+        }
+        if let Some(primary) = &stored.snapshot.primary_graph {
+            return self
+                .finish_reduction(&stored.admitted, &stored.snapshot, primary.result.clone())
+                .await
+                .map(Some);
+        }
+        if self.force_requested.load(Ordering::Acquire)
+            || stored.snapshot.force_stop_requested
+            || stored.snapshot.phase == RunPhase::Stopping
+        {
+            return self.terminalize_force(&mut JoinSet::new()).await.map(Some);
+        }
+        if stored.snapshot.active_executions().next().is_some() {
+            return self.terminalize_lost(&mut JoinSet::new()).await.map(Some);
+        }
+        Ok(None)
     }
 
     async fn drive_program(
@@ -326,8 +347,9 @@ impl NativeV2Supervisor {
         snapshot: &RunSnapshot,
         terminal: TerminalResult,
     ) -> Result<TerminalResult, NativeV2SupervisorError> {
-        let terminal =
-            enforce_delivery_terminal(self.delivery_policy, admitted, snapshot, terminal)?;
+        let terminal = self
+            .latch_primary_graph(admitted, snapshot, terminal)
+            .await?;
         self.runner.close_run(&self.run_id).await;
         let succeeded = matches!(terminal, TerminalResult::Succeeded { .. });
         self.finish_failed_checkpoints(succeeded, snapshot).await?;
@@ -339,6 +361,48 @@ impl NativeV2Supervisor {
         self.cleanup_runtime(exit).await?;
         let terminal = self.append_terminal(terminal).await?;
         self.discard_successful_checkpoints(succeeded).await;
+        Ok(terminal)
+    }
+
+    async fn latch_primary_graph(
+        &self,
+        admitted: &AdmittedRun,
+        snapshot: &RunSnapshot,
+        terminal: TerminalResult,
+    ) -> Result<TerminalResult, NativeV2SupervisorError> {
+        let terminal = if let Some(primary) = &snapshot.primary_graph {
+            // Retrying finalization never starts optional model work a second time.
+            if primary.auxiliary_pending {
+                self.ledger
+                    .append(
+                        &self.run_id,
+                        vec![RunEvent::RunTokenUsageObserved { usage: None }],
+                    )
+                    .await?;
+            }
+            primary.result.clone()
+        } else {
+            let terminal =
+                enforce_delivery_terminal(self.delivery_policy, admitted, snapshot, terminal)?;
+            let auxiliary_pending = self.enabled_postmortem(admitted).is_some();
+            let latched = self
+                .ledger
+                .append(
+                    &self.run_id,
+                    vec![RunEvent::PrimaryGraphCompleted {
+                        result: terminal,
+                        auxiliary_pending,
+                    }],
+                )
+                .await?;
+            let terminal = latched
+                .snapshot
+                .primary_graph
+                .ok_or(NativeV2SupervisorError::InvalidState)?
+                .result;
+            self.run_postmortem(admitted, snapshot, &terminal).await?;
+            terminal
+        };
         Ok(terminal)
     }
 
@@ -552,6 +616,7 @@ mod controller;
 mod environment;
 mod failure;
 pub(crate) mod logging;
+mod postmortem;
 mod runtime;
 // Read-only observation shares the supervisor's exact ledger-to-reducer normalization.
 pub(crate) use runtime::{durable_history, next_execution, next_node_instance};

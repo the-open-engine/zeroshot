@@ -55,6 +55,7 @@ nav:
       - Targets: concepts/targets.md
   - Guides:
       - Prepare a runtime environment: guides/runtime-environments.md
+      - Active Memory: guides/active-memory.md
       - Build a review loop: guides/review-loop.md
       - Observe and control runs: guides/observe-and-control.md
       - Use a local graph as an ACP agent: guides/acp.md

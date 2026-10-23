@@ -128,8 +128,7 @@ async fn force_stop_closes_active_work_and_never_dispatches_again() {
         FakeDriver::scripted([("first", vec![Behavior::Hang])]),
     )
     .await;
-    let supervisor = harness.supervisor.clone();
-    let drive = tokio::spawn(async move { supervisor.drive().await });
+    let drive = harness.spawn_drive();
     tokio::time::timeout(Duration::from_secs(1), async {
         while harness.driver.starts("first") == 0 {
             tokio::task::yield_now().await;
@@ -244,8 +243,7 @@ async fn unbounded_worker_survives_seven_hours_and_can_be_stopped() {
         FakeDriver::scripted([("worker", vec![Behavior::Hang])]),
     )
     .await;
-    let supervisor = harness.supervisor.clone();
-    let drive = tokio::spawn(async move { supervisor.drive().await });
+    let drive = harness.spawn_drive();
     while harness.driver.starts("worker") == 0 {
         tokio::task::yield_now().await;
     }

@@ -120,7 +120,10 @@ pub struct PiAdapter {
     base_environment: PiProcessEnvironment,
     runners: ProviderProcessRunners,
     local_environment: BTreeMap<String, String>,
+    active_memory: Option<std::sync::Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
 }
+
+crate::active_memory::hooks::impl_active_memory_adapter!(PiAdapter);
 
 impl PiAdapter {
     /// Hosted adapter. It never inherits ambient configuration or a stored login.
@@ -178,6 +181,7 @@ impl PiAdapter {
             base_environment: configuration.base_environment,
             runners,
             local_environment: BTreeMap::new(),
+            active_memory: None,
         })
     }
 
@@ -196,77 +200,13 @@ impl PiAdapter {
         session_id: &str,
     ) -> Result<ProcessSessionCommand, NodeRunnerError> {
         let (agent_dir, sessions) = self.homes(files);
-        // A caller-owned endpoint becomes Pi's own provider override in the private agent
-        // directory. The secret stays in the declared connection, referenced by interpolation.
-        // The gateway lane registers its own provider, carrying the caller's endpoint, key, and
-        // wire protocol. The anthropic lane only retargets the endpoint and keeps Pi's Messages
-        // protocol, the same escape hatch Claude Code offers through `ANTHROPIC_BASE_URL`.
-        let (model, reasoning) = match &invocation.node.binding {
-            NodeRuntimeBinding::Agent { model, effort, .. } => (model.as_str(), effort.is_some()),
-            _ => {
-                return Err(NodeRunnerError::DriverDetail(
-                    "Pi command requires an agent runtime binding".to_owned(),
-                ));
-            }
-        };
-        let document = match self.provider {
-            PiProvider::Gateway => {
-                let base_url = gateway_base_url(&invocation.environment)?;
-                let api = declared_api(&invocation.environment, command::GATEWAY_API)?;
-                Some(write_gateway(
-                    &agent_dir,
-                    provider_document::GatewayDocument {
-                        base_url: &base_url,
-                        api: &api,
-                        model,
-                        reasoning,
-                    },
-                ))
-            }
-            PiProvider::Anthropic => {
-                // A declared endpoint wins; otherwise a local run honors the invoking shell's
-                // `ANTHROPIC_BASE_URL`, the same setting the Claude lane inherits. Pi itself
-                // ignores the variable for endpoint selection, so it becomes a provider override
-                // here or it would be forwarded and silently dropped.
-                let base_url =
-                    declared_base_url(&invocation.environment, command::ANTHROPIC_BASE_URL)
-                        .or_else(|| self.ambient_base_url(command::ANTHROPIC_BASE_URL));
-                base_url.map(|base_url| {
-                    write_endpoint(
-                        &agent_dir,
-                        provider_document::ANTHROPIC,
-                        &base_url,
-                        anthropic_api_key_field(&invocation.environment),
-                    )
-                })
-            }
-            PiProvider::OpenAi => {
-                // The OpenAI lane honors its own endpoint variables, which Codex already inherits,
-                // so Pi reaches an OpenAI-compatible proxy instead of silently using the public
-                // endpoint. The built-in Responses protocol still applies.
-                let base_url = declared_base_url(&invocation.environment, command::OPENAI_BASE_URL)
-                    .or_else(|| {
-                        declared_base_url(&invocation.environment, command::OPENAI_API_BASE)
-                    })
-                    .or_else(|| self.ambient_base_url(command::OPENAI_BASE_URL))
-                    .or_else(|| self.ambient_base_url(command::OPENAI_API_BASE));
-                base_url.map(|base_url| {
-                    write_endpoint(&agent_dir, OPENAI, &base_url, Some(OPENAI.api_key_field))
-                })
-            }
-            _ => None,
-        };
+        let provider_override = self.configure_provider(invocation, &agent_dir)?;
         // A caller-owned endpoint ends native reuse: the credential and the endpoint then both
         // come from the connection, so inheriting the user's own agent directory would send a
         // stored login to a caller-owned host.
         let native_local = self.native_local()
-            && document.is_none()
+            && !provider_override
             && !command::credential_declared(self.provider, &invocation.environment);
-        if let Some(document) = document {
-            document.map_err(|error| {
-                NodeRunnerError::DriverDetail(format!("Pi provider configuration failed: {error}"))
-            })?;
-        }
         let mut command = command(PiCommandRequest {
             provider: self.provider,
             native_local,
@@ -303,7 +243,89 @@ impl PiAdapter {
             .environment
             .entry("HOME".to_owned())
             .or_insert_with(|| provider_home.to_owned());
+        if let Some(memory) = &self.active_memory {
+            memory.configure(
+                crate::active_memory::hooks::Harness::Pi,
+                &mut command,
+                crate::active_memory::hooks::HookInstallation {
+                    invocation,
+                    home: files.home(),
+                },
+            );
+        }
         Ok(command)
+    }
+
+    /// Writes Pi's provider document and reports whether an endpoint override is present.
+    fn configure_provider(
+        &self,
+        invocation: &DriverInvocation,
+        agent_dir: &Path,
+    ) -> Result<bool, NodeRunnerError> {
+        // A caller-owned endpoint becomes Pi's own provider override in the private agent
+        // directory. The secret stays in the declared connection, referenced by interpolation.
+        // The gateway lane registers its own provider, carrying the caller's endpoint, key, and
+        // wire protocol. The anthropic lane only retargets the endpoint and keeps Pi's Messages
+        // protocol, the same escape hatch Claude Code offers through `ANTHROPIC_BASE_URL`.
+        let (model, reasoning) = match &invocation.node.binding {
+            NodeRuntimeBinding::Agent { model, effort, .. } => (model.as_str(), effort.is_some()),
+            _ => {
+                return Err(NodeRunnerError::DriverDetail(
+                    "Pi command requires an agent runtime binding".to_owned(),
+                ));
+            }
+        };
+        let document = match self.provider {
+            PiProvider::Gateway => {
+                let base_url = gateway_base_url(&invocation.environment)?;
+                let api = declared_api(&invocation.environment, command::GATEWAY_API)?;
+                Some(write_gateway(
+                    agent_dir,
+                    provider_document::GatewayDocument {
+                        base_url: &base_url,
+                        api: &api,
+                        model,
+                        reasoning,
+                    },
+                ))
+            }
+            PiProvider::Anthropic => {
+                // A declared endpoint wins; otherwise a local run honors the invoking shell's
+                // `ANTHROPIC_BASE_URL`, the same setting the Claude lane inherits. Pi itself
+                // ignores the variable for endpoint selection, so it becomes a provider override
+                // here or it would be forwarded and silently dropped.
+                let base_url =
+                    declared_base_url(&invocation.environment, command::ANTHROPIC_BASE_URL)
+                        .or_else(|| self.ambient_base_url(command::ANTHROPIC_BASE_URL));
+                base_url.map(|base_url| {
+                    write_endpoint(
+                        agent_dir,
+                        provider_document::ANTHROPIC,
+                        &base_url,
+                        anthropic_api_key_field(&invocation.environment),
+                    )
+                })
+            }
+            PiProvider::OpenAi => {
+                // The OpenAI lane honors its own endpoint variables, which Codex already inherits,
+                // so Pi reaches an OpenAI-compatible proxy instead of silently using the public
+                // endpoint. The built-in Responses protocol still applies.
+                let base_url = declared_base_url(&invocation.environment, command::OPENAI_BASE_URL)
+                    .or_else(|| {
+                        declared_base_url(&invocation.environment, command::OPENAI_API_BASE)
+                    })
+                    .or_else(|| self.ambient_base_url(command::OPENAI_BASE_URL))
+                    .or_else(|| self.ambient_base_url(command::OPENAI_API_BASE));
+                base_url.map(|base_url| {
+                    write_endpoint(agent_dir, OPENAI, &base_url, Some(OPENAI.api_key_field))
+                })
+            }
+            _ => None,
+        };
+        let overridden = document.is_some();
+        document.transpose().map(|_| overridden).map_err(|error| {
+            NodeRunnerError::DriverDetail(format!("Pi provider configuration failed: {error}"))
+        })
     }
 
     /// The launch command for one turn, exposed so tests can assert the endpoint and home

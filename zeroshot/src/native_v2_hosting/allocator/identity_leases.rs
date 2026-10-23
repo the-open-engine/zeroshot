@@ -4,6 +4,10 @@ use std::sync::{Arc, Mutex};
 use openengine_cluster_server::graph_verifier::FULL_V1_MAX_NODE_EXECUTIONS;
 
 use crate::execution::process::HostedProcessPool;
+use crate::native_v2_runner::AUXILIARY_PROVIDER_SLOT_OFFSET;
+
+// Primary reducer references and built-in global agents occupy disjoint bounded ranges.
+const MAXIMUM_PROCESS_IDENTITY: u64 = AUXILIARY_PROVIDER_SLOT_OFFSET + FULL_V1_MAX_NODE_EXECUTIONS;
 
 #[derive(Clone)]
 pub(super) struct ActiveRunProcessPools {
@@ -13,7 +17,7 @@ pub(super) struct ActiveRunProcessPools {
 
 impl ActiveRunProcessPools {
     pub(super) fn new(seed: HostedProcessPool) -> Result<Self, IdentityLeaseUnavailable> {
-        seed.active_run_slot(0, FULL_V1_MAX_NODE_EXECUTIONS)
+        seed.active_run_slot(0, MAXIMUM_PROCESS_IDENTITY)
             .map_err(|_| IdentityLeaseUnavailable)?;
         Ok(Self {
             seed,
@@ -32,7 +36,7 @@ impl ActiveRunProcessPools {
         }
         let process_pool = self
             .seed
-            .active_run_slot(slot, FULL_V1_MAX_NODE_EXECUTIONS)
+            .active_run_slot(slot, MAXIMUM_PROCESS_IDENTITY)
             .map_err(|_| IdentityLeaseUnavailable)?;
         occupied.insert(slot);
         Ok(ActiveRunProcessPool {

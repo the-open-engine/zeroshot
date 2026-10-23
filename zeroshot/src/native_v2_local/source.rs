@@ -80,7 +80,7 @@ fn branch_upstream(workspace: &Path, git_program: &Path, branch: &str) -> Option
     Some((remote, branch.strip_prefix("refs/heads/")?.to_owned()))
 }
 
-fn select_remote(
+pub(super) fn select_remote(
     workspace: &Path,
     git_program: &Path,
     preferred: Option<&str>,

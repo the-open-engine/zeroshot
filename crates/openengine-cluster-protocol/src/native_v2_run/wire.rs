@@ -11,7 +11,7 @@ use crate::{
 
 use super::{
     ClaudeProvider, CodexProvider, CopilotProvider, NodeRuntimeBinding, PiProvider, RunSize,
-    ResolvedSource, RuntimeLane,
+    ResolvedSource, RuntimeLane, ActiveMemoryConfig, GlobalAgentsConfig,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -20,26 +20,112 @@ pub enum RuntimePlan {
     Copilot {
         provider: CopilotProvider,
         size: RunSize,
+        #[serde(
+            default,
+            rename = "activeMemory",
+            skip_serializing_if = "ActiveMemoryConfig::is_default"
+        )]
+        active_memory: ActiveMemoryConfig,
+        #[serde(
+            default,
+            rename = "globalAgents",
+            skip_serializing_if = "GlobalAgentsConfig::is_default"
+        )]
+        global_agents: GlobalAgentsConfig,
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
     },
     Codex {
         provider: CodexProvider,
         size: RunSize,
+        #[serde(
+            default,
+            rename = "activeMemory",
+            skip_serializing_if = "ActiveMemoryConfig::is_default"
+        )]
+        active_memory: ActiveMemoryConfig,
+        #[serde(
+            default,
+            rename = "globalAgents",
+            skip_serializing_if = "GlobalAgentsConfig::is_default"
+        )]
+        global_agents: GlobalAgentsConfig,
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
     },
     Claude {
         provider: ClaudeProvider,
         size: RunSize,
+        #[serde(
+            default,
+            rename = "activeMemory",
+            skip_serializing_if = "ActiveMemoryConfig::is_default"
+        )]
+        active_memory: ActiveMemoryConfig,
+        #[serde(
+            default,
+            rename = "globalAgents",
+            skip_serializing_if = "GlobalAgentsConfig::is_default"
+        )]
+        global_agents: GlobalAgentsConfig,
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
     },
     Pi {
         provider: PiProvider,
         size: RunSize,
+        #[serde(
+            default,
+            rename = "activeMemory",
+            skip_serializing_if = "ActiveMemoryConfig::is_default"
+        )]
+        active_memory: ActiveMemoryConfig,
+        #[serde(
+            default,
+            rename = "globalAgents",
+            skip_serializing_if = "GlobalAgentsConfig::is_default"
+        )]
+        global_agents: GlobalAgentsConfig,
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
     },
 }
 
 impl RuntimePlan {
+    #[must_use]
+    pub const fn active_memory(&self) -> &ActiveMemoryConfig {
+        match self {
+            Self::Copilot { active_memory, .. }
+            | Self::Codex { active_memory, .. }
+            | Self::Claude { active_memory, .. }
+            | Self::Pi { active_memory, .. } => active_memory,
+        }
+    }
+
+    pub fn active_memory_mut(&mut self) -> &mut ActiveMemoryConfig {
+        match self {
+            Self::Copilot { active_memory, .. }
+            | Self::Codex { active_memory, .. }
+            | Self::Claude { active_memory, .. }
+            | Self::Pi { active_memory, .. } => active_memory,
+        }
+    }
+
+    #[must_use]
+    pub const fn global_agents(&self) -> &GlobalAgentsConfig {
+        match self {
+            Self::Copilot { global_agents, .. }
+            | Self::Codex { global_agents, .. }
+            | Self::Claude { global_agents, .. }
+            | Self::Pi { global_agents, .. } => global_agents,
+        }
+    }
+
+    pub fn global_agents_mut(&mut self) -> &mut GlobalAgentsConfig {
+        match self {
+            Self::Copilot { global_agents, .. }
+            | Self::Codex { global_agents, .. }
+            | Self::Claude { global_agents, .. }
+            | Self::Pi { global_agents, .. } => global_agents,
+        }
+    }
+
     #[must_use]
     pub const fn size(&self) -> RunSize {
         match self {

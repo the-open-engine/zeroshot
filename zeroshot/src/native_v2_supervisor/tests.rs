@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
@@ -15,31 +14,13 @@ use super::*;
 use crate::native_v2_admission::NativeV2Admission;
 use crate::native_v2_contract::RunSubmission;
 use crate::execution::SessionScope;
+use crate::native_v2_runner::test_support::CountingSession;
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NativeNodeRunner, NodeDriver,
     NodeRole, NodeSession, SessionFactory,
 };
 use crate::v2_run_ledger::CreateRun;
 use crate::v2_run_ledger::fake::FakeRunLedger;
-
-struct FakeSession {
-    closed: Arc<AtomicUsize>,
-}
-
-#[async_trait]
-impl NodeSession for FakeSession {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    async fn is_live(&self) -> bool {
-        true
-    }
-
-    async fn close(&self) {
-        self.closed.fetch_add(1, Ordering::SeqCst);
-    }
-}
 
 #[derive(Default)]
 struct FakeSessionFactory {
@@ -55,7 +36,7 @@ impl SessionFactory for FakeSessionFactory {
         _environment: &ResolvedEnvironment,
     ) -> Result<Arc<dyn NodeSession>, NodeRunnerError> {
         self.opened.fetch_add(1, Ordering::SeqCst);
-        Ok(Arc::new(FakeSession {
+        Ok(Arc::new(CountingSession {
             closed: self.closed.clone(),
         }))
     }
@@ -237,6 +218,15 @@ struct Harness {
     ledger: Arc<FakeRunLedger>,
     driver: Arc<FakeDriver>,
     sessions: Arc<FakeSessionFactory>,
+}
+
+impl Harness {
+    fn spawn_drive(
+        &self,
+    ) -> tokio::task::JoinHandle<Result<TerminalResult, NativeV2SupervisorError>> {
+        let supervisor = self.supervisor.clone();
+        tokio::spawn(async move { supervisor.drive().await })
+    }
 }
 
 #[derive(Clone, Default)]
@@ -447,3 +437,6 @@ mod failure_logs;
 mod checkpoint_seed;
 #[path = "tests/checkpoints.rs"]
 mod checkpoint_tests;
+
+#[path = "tests/postmortem.rs"]
+mod postmortem_tests;

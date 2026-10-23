@@ -68,6 +68,7 @@ function stagePackedPackage(temporary) {
     'lib/skills.js',
     'package.json',
     'skills/zeroshot/SKILL.md',
+    'skills/zeroshot-memory-init/SKILL.md',
     'targets.json',
   ]) {
     assert.equal(packedFiles.has(filename), true, `${filename} is missing from npm pack`);
@@ -150,6 +151,8 @@ it('packs and installs the published npm surface on the current host', async (t)
     [
       ['agents', 'installed'],
       ['claude', 'installed'],
+      ['agents', 'installed'],
+      ['claude', 'installed'],
     ]
   );
   const agentSkill = path.join(homeDirectory, '.agents', 'skills', 'zeroshot', 'SKILL.md');
@@ -157,7 +160,7 @@ it('packs and installs the published npm surface on the current host', async (t)
   assert.equal(await installed.install(installOptions), destination);
   assert.deepEqual(
     skillRuns[1].map(({ status }) => status),
-    ['unchanged', 'unchanged']
+    ['unchanged', 'unchanged', 'unchanged', 'unchanged']
   );
   assert.deepEqual(fs.readFileSync(agentSkill), before);
 
@@ -166,7 +169,7 @@ it('packs and installs the published npm surface on the current host', async (t)
   await assert.rejects(installed.install(installOptions), /SKILL_INSTALL_INCOMPLETE/);
   assert.deepEqual(
     skillRuns[2].map(({ status }) => status),
-    ['conflict', 'unchanged']
+    ['conflict', 'unchanged', 'unchanged', 'unchanged']
   );
   assert.deepEqual(fs.readFileSync(agentSkill), edited);
   assert.deepEqual(

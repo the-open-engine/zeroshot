@@ -337,14 +337,17 @@ pub(crate) fn allocation_request<'a>(
 }
 
 pub(crate) fn codex_runtime(
+    size: openengine_cluster_protocol::RunSize,
     nodes: std::collections::BTreeMap<
         openengine_cluster_protocol::NodeName,
         crate::native_v2_contract::NodeRuntimeBinding,
     >,
 ) -> crate::native_v2_contract::RuntimePlan {
     crate::native_v2_contract::RuntimePlan::Codex {
+        active_memory: Default::default(),
+        global_agents: Default::default(),
         provider: openengine_cluster_protocol::CodexProvider::OpenAi,
-        size: openengine_cluster_protocol::RunSize::Small,
+        size,
         nodes,
     }
 }

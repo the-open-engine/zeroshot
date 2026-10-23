@@ -126,6 +126,8 @@ fn submission(graph: GraphSpec, nodes: BTreeMap<NodeName, NodeRuntimeBinding>) -
         graph,
         initial_input: json!({"items":[null]}),
         runtime: RuntimePlan::Claude {
+            active_memory: Default::default(),
+            global_agents: Default::default(),
             provider: ClaudeProvider::Anthropic,
             size: RunSize::Medium,
             nodes,
@@ -354,6 +356,8 @@ async fn admits_bedrock_for_both_harnesses_and_preserves_provider_owned_models()
         graph: graph.clone(),
         initial_input: json!({"items":[null]}),
         runtime: RuntimePlan::Codex {
+            active_memory: Default::default(),
+            global_agents: Default::default(),
             provider: CodexProvider::Bedrock,
             size: RunSize::Small,
             nodes: BTreeMap::from([(

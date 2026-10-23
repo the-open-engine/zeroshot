@@ -29,27 +29,14 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CliCommand {
-    /// Serve one local Zeroshot profile as an experimental ACP agent over stdio.
-    ///
-    /// The MVP supports one active session and text prompts. The profile must accept one task
-    /// string and return one response string from every success node. It supports local Codex or
-    /// Claude node-instance sessions, without maps, delivery, connections, MCP, or session reload.
-    Acp(AcpArgs),
-
-    /// Serve the local profile editor and live or recorded run history.
-    ///
-    /// Open the printed /ui/ URL. Profiles always use the CLI's local store. Run history uses the
-    /// local controller unless --target selects a configured target. Ctrl-C stops the UI
-    /// server; active runs continue.
-    Ui {
-        /// Loopback address for the local UI.
-        #[arg(long, default_value = "127.0.0.1:4173")]
-        listen: SocketAddr,
-
-        /// Read run history from this configured target. Profiles remain local.
-        #[arg(long, value_name = "NAME")]
-        target: Option<String>,
+    /// Initialize local Active Memory through the canonical skill.
+    Memory {
+        #[command(subcommand)]
+        command: super::MemoryCommand,
     },
+
+    #[command(flatten)]
+    Interface(InterfaceCommand),
 
     /// Manage named targets or serve a direct target.
     ///
@@ -115,6 +102,31 @@ enum CliCommand {
     Utility(UtilityCommand),
 }
 
+#[derive(Debug, Subcommand)]
+enum InterfaceCommand {
+    /// Serve one local Zeroshot profile as an experimental ACP agent over stdio.
+    ///
+    /// The MVP supports one active session and text prompts. The profile must accept one task
+    /// string and return one response string from every success node. It supports local Codex or
+    /// Claude node-instance sessions, without maps, delivery, connections, MCP, or session reload.
+    Acp(AcpArgs),
+
+    /// Serve the local profile editor and live or recorded run history.
+    ///
+    /// Open the printed /ui/ URL. Profiles always use the CLI's local store. Run history uses the
+    /// local controller unless --target selects a configured target. Ctrl-C stops the UI
+    /// server; active runs continue.
+    Ui {
+        /// Loopback address for the local UI.
+        #[arg(long, default_value = "127.0.0.1:4173")]
+        listen: SocketAddr,
+
+        /// Read run history from this configured target. Profiles remain local.
+        #[arg(long, value_name = "NAME")]
+        target: Option<String>,
+    },
+}
+
 #[derive(Debug, Args)]
 struct AcpArgs {
     /// Local profile exposed by this agent process, in local:NAME form.
@@ -124,9 +136,9 @@ struct AcpArgs {
 
 #[derive(Debug, Subcommand)]
 enum UtilityCommand {
-    /// Update this executable and managed agent skill to the newest canonical release.
+    /// Update this executable and managed agent skills to the newest canonical release.
     ///
-    /// Downloads the declared archive and agent skill from the latest GitHub Release, verifies
+    /// Downloads the declared archive and agent skills from the latest GitHub Release, verifies
     /// their SHA256SUMS entries and the executable version, then replaces this executable and any
     /// unchanged Zeroshot-managed skill copies. User-edited skills are preserved and reported as
     /// conflicts. The executable's directory must be writable; Zeroshot does not elevate
@@ -487,7 +499,8 @@ struct TemplateShowArgs {
     template-owned delivery binding.
 
     --uniform-runtime-config requires harness, provider, and model. It accepts optional size,
-    effort, sessionScope, and connections fields without nodes. Zeroshot expands that agent binding
+    effort, sessionScope, connections, activeMemory, and globalAgents fields without nodes.
+    Zeroshot expands that agent binding
     across every executable graph node and supplies graph-visible Git delivery bindings itself.
     Omitted connections reuse native local login for codex/openai, claude/anthropic,
     copilot/github, pi/anthropic, and pi/openai; other local lanes and contained targets derive

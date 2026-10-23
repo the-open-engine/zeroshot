@@ -199,14 +199,17 @@ async fn wave5_cli_contract_release_metadata_and_verified_assets_are_self_consis
         ArchiveEntry::File(restic_name, restic),
     ]);
     let canonical_skill = b"---\nname: zeroshot\ndescription: Release skill\n---\n\nVerified.\n";
+    let memory_skill = b"---\nname: zeroshot-memory-init\ndescription: Memory initialization\n---\n\nInitialize.\n";
     let manifest = format!(
-        "{:x}  {SKILL_ASSET}\n{:x}  {filename}\n",
+        "{:x}  {SKILL_ASSET}\n{:x}  zeroshot-memory-init-skill.md\n{:x}  {filename}\n",
         Sha256::digest(canonical_skill),
+        Sha256::digest(memory_skill),
         Sha256::digest(&archive),
     );
     let assets = TestServer::start(vec![
         fixed_response("200 OK", manifest.as_bytes()),
         fixed_response("200 OK", canonical_skill),
+        fixed_response("200 OK", memory_skill),
         fixed_response("200 OK", &archive),
     ]);
     let release = download_release_at(&client, ReleaseVersion([8, 2, 0]), latest, &assets.base_url)
@@ -221,6 +224,7 @@ async fn wave5_cli_contract_release_metadata_and_verified_assets_are_self_consis
     let unchanged = TestServer::start(vec![
         fixed_response("200 OK", manifest.as_bytes()),
         fixed_response("200 OK", canonical_skill),
+        fixed_response("200 OK", memory_skill),
     ]);
     assert!(
         download_release_at(&client, latest, latest, &unchanged.base_url)

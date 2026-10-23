@@ -86,6 +86,31 @@ fn active_run_slots_are_disjoint_from_source_and_each_other() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
+fn contained_auxiliary_cleanup_markers_do_not_overlap_primary_or_adjacent_runs() {
+    let maximum = openengine_cluster_server::graph_verifier::FULL_V1_MAX_NODE_EXECUTIONS;
+    let offset = crate::native_v2_runner::AUXILIARY_PROVIDER_SLOT_OFFSET;
+    let host = HostedProcessPool::new(10_002, 10_002, 20_000).assert_value();
+    let first = host.active_run_slot(0, maximum * 2).assert_value();
+    let second = host.active_run_slot(1, maximum * 2).assert_value();
+    let primary_last = first
+        .cleanup_marker(HostedProcessScope::WriterExecution(maximum))
+        .assert_value()
+        .assert_value();
+    let auxiliary_first = first
+        .cleanup_marker(HostedProcessScope::VerifierNodeInstance(offset + 1))
+        .assert_value()
+        .assert_value();
+    let auxiliary_last = first
+        .cleanup_marker(HostedProcessScope::WriterExecution(offset + maximum))
+        .assert_value()
+        .assert_value();
+    assert!(primary_last < auxiliary_first);
+    assert!(auxiliary_first <= auxiliary_last);
+    assert!(auxiliary_last < writer_identity(second).0);
+}
+
+#[test]
 fn new_file_writes_are_exclusive_and_complete() {
     let directory = TestDirectory::new("process-new-file");
     let path = directory.child("value");

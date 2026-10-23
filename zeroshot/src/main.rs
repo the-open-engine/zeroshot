@@ -191,8 +191,25 @@ fn private_controller_bootstrap(
     Ok(arguments.get(2).cloned().map(PathBuf::from))
 }
 
+fn main() {
+    let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    if arguments
+        .first()
+        .is_some_and(|arg| arg == "__active-memory-hook")
+    {
+        if let [_, capability] = arguments.as_slice() {
+            // This hot path avoids starting Tokio's worker pool for each tool signal.
+            let _ = zeroshot_engine::native_v2_cli::run_active_memory_hook(std::path::Path::new(
+                capability,
+            ));
+        }
+        return;
+    }
+    main_runtime();
+}
+
 #[tokio::main]
-async fn main() {
+async fn main_runtime() {
     if let Err(error) = run().await {
         write_process_error(&error);
         std::process::exit(1);

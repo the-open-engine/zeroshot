@@ -221,16 +221,22 @@ fn runtime(harness: &str, scope: &str, connections: Value) -> RuntimePlan {
     let nodes = BTreeMap::from([(NodeName::new("worker").assert_value(), binding)]);
     match harness {
         "claude" => RuntimePlan::Claude {
+            active_memory: Default::default(),
+            global_agents: Default::default(),
             provider: ClaudeProvider::Anthropic,
             size: RunSize::Small,
             nodes,
         },
         "copilot" => RuntimePlan::Copilot {
+            active_memory: Default::default(),
+            global_agents: Default::default(),
             provider: CopilotProvider::Github,
             size: RunSize::Small,
             nodes,
         },
         _ => RuntimePlan::Codex {
+            active_memory: Default::default(),
+            global_agents: Default::default(),
             provider: CodexProvider::OpenAi,
             size: RunSize::Small,
             nodes,

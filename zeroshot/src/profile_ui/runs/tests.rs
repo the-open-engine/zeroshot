@@ -379,11 +379,10 @@ impl Fixture {
                     title: RunTitle::new("Inspect retained changes").assert_value(),
                     graph,
                     initial_input,
-                    runtime: crate::native_v2_contract::RuntimePlan::Codex {
-                        provider: crate::native_v2_contract::CodexProvider::OpenAi,
-                        size: RunSize::Small,
-                        nodes: Default::default(),
-                    },
+                    runtime: crate::native_v2_candidate::test_support::codex_runtime(
+                        RunSize::Small,
+                        Default::default(),
+                    ),
                     source: Some(repository_source()),
                 },
             })

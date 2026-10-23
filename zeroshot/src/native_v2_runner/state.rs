@@ -188,6 +188,9 @@ pub(super) struct SessionCheckout<'a> {
 }
 
 impl SessionPool {
+    pub(super) fn factory(&self) -> Arc<dyn SessionFactory> {
+        self.factory.clone()
+    }
     pub(super) fn new(factory: Arc<dyn SessionFactory>) -> Self {
         Self {
             factory,

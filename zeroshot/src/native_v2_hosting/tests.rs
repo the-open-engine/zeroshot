@@ -28,7 +28,7 @@ use super::allocator::{ProductionCapsuleAllocator, monitor_workspace_identity, p
 use super::repository::{RepositoryInstall, install_repository, path_source};
 
 mod checkout;
-mod fixtures;
+pub(super) mod fixtures;
 
 use fixtures::*;
 
@@ -247,7 +247,7 @@ fn capsule_configuration_requires_every_executable_boundary() {
             _ => unreachable!(),
         }
         assert!(matches!(
-            ProductionCapsuleAllocator::new(config),
+            capsule_allocator(config),
             Err(ProductionHostingError::CapsuleConfiguration)
         ));
     }
@@ -454,6 +454,8 @@ async fn invalid_submission_fails_before_run_allocation() {
         "invalid-before-effects",
     );
     sourceful.runtime = RuntimePlan::Codex {
+        active_memory: Default::default(),
+        global_agents: Default::default(),
         provider: crate::native_v2_contract::CodexProvider::OpenAi,
         size: RunSize::Small,
         nodes: BTreeMap::new(),
@@ -571,7 +573,7 @@ async fn allocator_uses_one_workspace_then_cleans_without_replacement() {
         "hosting-allocation",
     ))
     .await;
-    let allocator = ProductionCapsuleAllocator::new(capsule_config(root.path().to_owned()))
+    let allocator = capsule_allocator(capsule_config(root.path().to_owned()))
         .assert_value_with("allocator")
         .with_test_filesystem_and_source(repository.remote, portable_filesystem);
     let run_id = RunId::new("run-hosting-one");
@@ -693,7 +695,7 @@ async fn default_claude_environment_owns_private_session_home_until_completion()
     config.claude_process_environment = ClaudeProcessEnvironment::default();
     config.claude_executable = "/bin/sh".to_owned();
     config.claude_prefix_arguments = vec!["-c".to_owned(), CLAUDE_HOME_SCRIPT.to_owned()];
-    let allocator = ProductionCapsuleAllocator::new(config)
+    let allocator = capsule_allocator(config)
         .assert_value_with("allocator")
         .with_test_filesystem_and_source(repository.remote, portable_filesystem);
     let run_id = RunId::new("run-hosting-claude-environment");

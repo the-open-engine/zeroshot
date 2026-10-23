@@ -83,7 +83,7 @@ Once I approve, run it, monitor progress, and summarize the result.
 ```
 
 The installer requires Node.js 18 or newer and installs a verified native binary for Linux
-x64/arm64, macOS x64/arm64, or Windows x64. It also installs one zeroshot skill for Codex, GitHub
+x64/arm64, macOS x64/arm64, or Windows x64. It also installs agent skills for Codex, GitHub
 Copilot, Pi, and Claude Code at user scope.
 
 For local execution, install and sign in to Codex, Claude Code, GitHub Copilot, or Pi. Local runs can
@@ -227,6 +227,9 @@ The graph defines the sequence, parallel steps, retry paths, and exit conditions
 starts. Runs are bounded, and events are recorded in a durable SQLite ledger. A passing run means
 its configured checks accepted the work; coverage depends on the requirements, reviewers, tests,
 and environment you provide.
+
+[Active Memory](docs/guides/active-memory.md) recalls lessons from costly mistakes in local and Docker
+runs; [backfill from history](docs/guides/active-memory.md#initialize-from-local-history).
 
 ## Auto-research
 

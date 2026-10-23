@@ -52,6 +52,7 @@ pub struct ClaudeAdapter {
     base_environment: ClaudeProcessEnvironment,
     runners: ProviderProcessRunners,
     local_environment: BTreeMap<String, String>,
+    active_memory: Option<std::sync::Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
     #[cfg(test)]
     test_permission_policy: Option<crate::native_v2_capsule::provider_process::PermissionPolicy>,
 }
@@ -69,6 +70,8 @@ pub struct ClaudeAdapterConfig {
     pub base_environment: ClaudeProcessEnvironment,
     pub process_pool: HostedProcessPool,
 }
+
+crate::active_memory::hooks::impl_active_memory_adapter!(ClaudeAdapter);
 
 impl ClaudeAdapter {
     pub fn new(mut configuration: ClaudeAdapterConfig) -> Result<Self, ClaudeAdapterConfigError> {
@@ -121,6 +124,7 @@ impl ClaudeAdapter {
             base_environment: configuration.base_environment,
             runners,
             local_environment: BTreeMap::new(),
+            active_memory: None,
             #[cfg(test)]
             test_permission_policy: None,
         })
@@ -178,7 +182,7 @@ impl ClaudeAdapter {
                 .scratch_text()
                 .map_err(|error| NodeRunnerError::DriverDetail(error.to_string()))?,
         );
-        Ok(ProcessSessionCommand {
+        let mut command = ProcessSessionCommand {
             program: self.executable.clone(),
             argv,
             environment,
@@ -187,7 +191,18 @@ impl ClaudeAdapter {
                 mode: access,
             },
             deadline: None,
-        })
+        };
+        if let Some(memory) = &self.active_memory {
+            memory.configure(
+                crate::active_memory::hooks::Harness::Claude,
+                &mut command,
+                crate::active_memory::hooks::HookInstallation {
+                    invocation,
+                    home: input.files.home(),
+                },
+            );
+        }
+        Ok(command)
     }
 
     fn process_environment(

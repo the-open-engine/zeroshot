@@ -2,8 +2,8 @@
 use std::os::unix::fs::PermissionsExt as _;
 
 use openengine_cluster_protocol::{
-    CodexProvider, DeclaredConnections, DeclaredEnvironment, ModelId, NodeName, NodeRuntimeBinding,
-    RunSize, SessionScope,
+    DeclaredConnections, DeclaredEnvironment, ModelId, NodeName, NodeRuntimeBinding, RunSize,
+    SessionScope,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
@@ -45,10 +45,9 @@ fn runtime(fields: &[&str]) -> RuntimePlan {
     let environment =
         DeclaredEnvironment::new(fields.iter().map(|name| field(name))).assert_value();
     let connections = DeclaredConnections::single("provider", environment).assert_value();
-    RuntimePlan::Codex {
-        provider: CodexProvider::OpenAi,
-        size: RunSize::Small,
-        nodes: BTreeMap::from([(
+    crate::native_v2_candidate::test_support::codex_runtime(
+        RunSize::Small,
+        BTreeMap::from([(
             NodeName::new("worker").assert_value(),
             NodeRuntimeBinding::Agent {
                 lane: None,
@@ -58,7 +57,7 @@ fn runtime(fields: &[&str]) -> RuntimePlan {
                 connections,
             },
         )]),
-    }
+    )
 }
 
 #[test]

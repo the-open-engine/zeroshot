@@ -155,6 +155,11 @@ pub trait NodeSession: Any + Send + Sync {
     async fn close(&self);
 }
 
+/// Optional run-global work is a runner lifecycle contract, independent of graph execution.
+pub use crate::active_memory::postmortem::{
+    PostmortemError, PostmortemReport, PostmortemRequest, RunPostmortem,
+};
+
 /// Returned error details enter user logs; implementations must redact owned credentials.
 #[async_trait]
 pub trait SessionFactory: Send + Sync {
@@ -270,12 +275,75 @@ pub trait NodeDriver: Send + Sync {
 
 #[async_trait]
 pub trait NodeRunner: Send + Sync {
+    /// Optional host-owned global work, separate from reducer executions and checkpoints.
+    fn postmortem(&self) -> Option<Arc<dyn RunPostmortem>> {
+        None
+    }
+
     /// Reserves execution and returns ownership before asynchronous provider startup.
     /// This future must be cancellation-safe: dropping it before a handle is returned
     /// leaves no running work behind. Once returned, cancel and drain the handle to
     /// retain cleanup and durable metadata, including failures during startup.
     async fn start(&self, request: NodeRunRequest) -> Result<NodeHandle, NodeRunnerError>;
     async fn close_run(&self, run_id: &RunId);
+}
+
+/// Run-owned capability to create isolated built-in global-agent sessions on the same adapters.
+#[async_trait]
+pub trait AuxiliaryRunnerFactory: Send + Sync {
+    fn fork(&self, admitted: &AdmittedRun) -> Result<Arc<dyn NodeRunner>, NodeRunnerError>;
+    async fn close_run(&self, _run_id: &RunId) {}
+}
+
+struct NativeAuxiliaryRunnerFactory {
+    driver: Arc<dyn NodeDriver>,
+    sessions: Arc<dyn SessionFactory>,
+    state: std::sync::Mutex<AuxiliaryRunners>,
+}
+
+#[derive(Default)]
+struct AuxiliaryRunners {
+    closed: bool,
+    runners: Vec<Arc<dyn NodeRunner>>,
+}
+
+pub(crate) const AUXILIARY_PROVIDER_SLOT_OFFSET: u64 =
+    openengine_cluster_server::graph_verifier::FULL_V1_MAX_NODE_EXECUTIONS;
+
+#[async_trait]
+impl AuxiliaryRunnerFactory for NativeAuxiliaryRunnerFactory {
+    fn fork(&self, admitted: &AdmittedRun) -> Result<Arc<dyn NodeRunner>, NodeRunnerError> {
+        let runner: Arc<dyn NodeRunner> = Arc::new(NativeNodeRunner {
+            driver: self.driver.clone(),
+            sessions: SessionPool::new(self.sessions.clone()),
+            roles: NodeRolePlan::from_admitted(admitted)?
+                .offset_provider_slots(AUXILIARY_PROVIDER_SLOT_OFFSET)?,
+            activity: ActivityRegistry::default(),
+        });
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.closed {
+            return Err(NodeRunnerError::RunClosed);
+        }
+        state.runners.push(runner.clone());
+        Ok(runner)
+    }
+
+    async fn close_run(&self, run_id: &RunId) {
+        let runners = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            state.closed = true;
+            state.runners.clone()
+        };
+        for runner in runners {
+            runner.close_run(run_id).await;
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -287,6 +355,14 @@ pub struct NativeNodeRunner {
 }
 
 impl NativeNodeRunner {
+    #[must_use]
+    pub fn auxiliary_factory(&self) -> Arc<dyn AuxiliaryRunnerFactory> {
+        Arc::new(NativeAuxiliaryRunnerFactory {
+            driver: self.driver.clone(),
+            sessions: self.sessions.factory(),
+            state: std::sync::Mutex::default(),
+        })
+    }
     pub fn new(
         admitted: &AdmittedRun,
         driver: Arc<dyn NodeDriver>,

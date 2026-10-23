@@ -308,6 +308,8 @@ async fn runner_with_command(
         command,
     } = configuration;
     let runtime = RuntimePlan::Claude {
+        active_memory: Default::default(),
+        global_agents: Default::default(),
         provider,
         size: RunSize::Medium,
         nodes: BTreeMap::from([(NodeName::new("agent").assert_value(), binding)]),

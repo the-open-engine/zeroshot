@@ -266,7 +266,8 @@ fn retry_shell_script() -> String {
         KEYRING_PREAMBLE,
         LOOPBACK_TARGET_PREAMBLE,
         r#"
-result=$("$1" run --target prod --title "Provider retry acceptance" \
+result=$("$1" run --target prod --repository open-engine/zeroshot --branch main \
+  --title "Provider retry acceptance" \
   --runtime-config "$4" --graph "$5" --input "$6" --submission-key "$7" -d) || exit $?
 run_id=$(printf '%s' "$result" | sed -n 's/.*"runId":"\([^"]*\)".*/\1/p' | head -1)
 test -n "$run_id" || exit 91

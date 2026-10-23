@@ -30,6 +30,15 @@ pub(super) struct NodeRolePlan {
 }
 
 impl NodeRolePlan {
+    pub(super) fn offset_provider_slots(mut self, offset: u64) -> Result<Self, NodeRunnerError> {
+        for node in Arc::make_mut(&mut self.nodes).values_mut() {
+            node.provider_session_slot = node
+                .provider_session_slot
+                .checked_add(offset)
+                .ok_or(NodeRunnerError::InvalidRole)?;
+        }
+        Ok(self)
+    }
     pub(super) fn from_admitted(admitted: &AdmittedRun) -> Result<Self, NodeRunnerError> {
         let mut nodes = BTreeMap::new();
         collect_planned_nodes(&admitted.graph.root, admitted.runtime.nodes(), &mut nodes)?;

@@ -30,7 +30,21 @@ pub(super) fn validate_executable_bindings(
     runtime: &RuntimePlan,
     delivery_policy: DeliveryPolicy,
 ) -> Result<(), NativeV2AdmissionError> {
+    runtime
+        .active_memory()
+        .validate()
+        .map_err(|error| NativeV2AdmissionError::InvalidEnvironment(error.to_string()))?;
+    runtime
+        .global_agents()
+        .postmortem
+        .validate()
+        .map_err(|error| NativeV2AdmissionError::InvalidEnvironment(error.to_string()))?;
     let bindings = runtime.nodes();
+    if let Some(node) = &runtime.global_agents().postmortem.source_node {
+        if !matches!(bindings.get(node), Some(NodeRuntimeBinding::Agent { .. })) {
+            return Err(NativeV2AdmissionError::MissingRuntimeBinding { node: node.clone() });
+        }
+    }
     validate_attempts(declarations)?;
     validate_binding_coverage(declarations, bindings)?;
     validate_binding_kinds(declarations, bindings)?;

@@ -115,6 +115,8 @@ class UniformRuntime:
         connections: Connection keys mapped to the exact environment field names their agent nodes
             need. None selects the executable-owned provider defaults; an empty mapping declares no
             connections.
+        active_memory: Optional native repository/graph recall and collection controls.
+        global_agents: Optional native built-in global-agent settings, including postmortem.
     """
 
     harness: str
@@ -124,6 +126,8 @@ class UniformRuntime:
     size: str = "medium"
     session_scope: str = "execution"
     connections: Mapping[str, tuple[str, ...]] | None = None
+    active_memory: Mapping[str, JsonValue] | None = None
+    global_agents: Mapping[str, JsonValue] | None = None
 
     def to_dict(self) -> dict[str, JsonValue]:
         """Encode the declarative uniform runtime consumed and validated by Zeroshot."""
@@ -140,6 +144,10 @@ class UniformRuntime:
             value["connections"] = {
                 key: list(environment) for key, environment in self.connections.items()
             }
+        if self.active_memory is not None:
+            value["activeMemory"] = deepcopy(dict(self.active_memory))
+        if self.global_agents is not None:
+            value["globalAgents"] = deepcopy(dict(self.global_agents))
         return value
 
 

@@ -224,11 +224,36 @@ pub(crate) fn submission_digest(
         .map_err(|_| NativeV2CloudError::SubmissionIdentity)
 }
 
-pub(super) async fn append_runtime_lost(
+pub(super) async fn append_interrupted(
     ledger: &dyn RunLedger,
     stored: &StoredRun,
+    reason: &str,
 ) -> Result<(), RunLedgerError> {
-    append_terminal_failure(ledger, stored, "runtime_lost").await
+    let Some(primary) = &stored.snapshot.primary_graph else {
+        return append_terminal_failure(ledger, stored, reason).await;
+    };
+    if stored.snapshot.terminal.is_some() {
+        return Ok(());
+    }
+    let mut events = Vec::new();
+    if primary.auxiliary_pending {
+        // Preserve observed counts, but a lost controller cannot account for every billed turn.
+        events.push(RunEvent::RunTokenUsageObserved { usage: None });
+        events.push(RunEvent::SafeLog {
+            execution: None,
+            timestamp: crate::native_v2_runner::current_timestamp(),
+            stream: crate::v2_run_ledger::SafeLogStream::System,
+            line: crate::v2_run_ledger::SafeLogLine::new(
+                "Active Memory postmortem interrupted before finalization; primary graph result preserved; auxiliary token usage is incomplete",
+            )?,
+            diagnostic: None,
+        });
+    }
+    events.extend(crate::native_v2_supervisor::logging::terminal_events(
+        primary.result.clone(),
+    )?);
+    ledger.append(&stored.snapshot.run_id, events).await?;
+    Ok(())
 }
 
 pub(super) async fn append_terminal_failure(

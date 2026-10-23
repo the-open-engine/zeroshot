@@ -87,16 +87,22 @@ pub(super) fn runtime(kind: RuntimePlanKind) -> RuntimePlan {
         | RuntimePlanKind::ClaudeOverride
         | RuntimePlanKind::ClaudeReviewer
         | RuntimePlanKind::CopilotReviewer => RuntimePlan::Codex {
+            active_memory: Default::default(),
+            global_agents: Default::default(),
             provider: CodexProvider::OpenAi,
             size: RunSize::Medium,
             nodes,
         },
         RuntimePlanKind::Claude => RuntimePlan::Claude {
+            active_memory: Default::default(),
+            global_agents: Default::default(),
             provider: ClaudeProvider::Anthropic,
             size: RunSize::Medium,
             nodes,
         },
         RuntimePlanKind::Pi => RuntimePlan::Pi {
+            active_memory: Default::default(),
+            global_agents: Default::default(),
             provider: crate::native_v2_contract::PiProvider::Anthropic,
             size: RunSize::Medium,
             nodes,
@@ -221,6 +227,7 @@ pub(super) fn candidate_config(
     github: Arc<ScriptedGitHub>,
 ) -> NativeV2CandidateConfig {
     NativeV2CandidateConfig {
+        active_memory: None,
         lanes: runtime(kind)
             .lanes()
             .into_iter()

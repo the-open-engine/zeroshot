@@ -19,12 +19,15 @@ use crate::native_v2_claude::ClaudeProcessEnvironment;
 use crate::native_v2_pi::PiProcessEnvironment;
 use crate::native_v2_cloud::CapsuleAllocationUnavailable;
 use crate::native_v2_contract::{
-    ClaudeProvider, CodexProvider, EnvironmentVariableName, NodeRuntimeBinding, RunSubmission,
+    ClaudeProvider, EnvironmentVariableName, NodeRuntimeBinding, RunSubmission,
 };
 use crate::worker_catalog::{self, ReasoningEffort};
 
 use super::super::ProductionHostingConfig;
-use super::super::allocator::ProductionCapsuleConfig;
+use super::super::allocator::ProductionCapsuleAllocator;
+use super::super::ProductionHostingError;
+use crate::native_v2_target_authority::OperatorDiagnosticStore;
+use std::sync::Arc;
 
 pub(super) struct RepositoryFixture {
     _root: TestDirectory,
@@ -85,6 +88,7 @@ impl RepositoryFixture {
 
 pub(super) fn hosting_config(storage_root: PathBuf) -> ProductionHostingConfig {
     ProductionHostingConfig {
+        memory_storage: None,
         operator_diagnostic_output: None,
         workspace_storage: None,
         storage_root,
@@ -103,27 +107,21 @@ pub(super) fn hosting_config(storage_root: PathBuf) -> ProductionHostingConfig {
     }
 }
 
-pub(super) fn capsule_config(storage_root: PathBuf) -> ProductionCapsuleConfig {
-    let config = hosting_config(storage_root.clone());
-    ProductionCapsuleConfig {
-        workspace_storage: config.workspace_storage,
-        storage_root,
-        copilot_executable: config.copilot_executable,
-        codex_executable: config.codex_executable,
-        claude_executable: config.claude_executable,
-        claude_prefix_arguments: config.claude_prefix_arguments,
-        claude_process_environment: config.claude_process_environment,
-        pi_executable: config.pi_executable,
-        pi_prefix_arguments: config.pi_prefix_arguments,
-        pi_process_environment: config.pi_process_environment,
-        executable_search_path: config.executable_search_path,
-        git_program: config.git_program,
-        gh_program: config.gh_program,
-        process_pool: allocator_process_pool(),
-        operator_diagnostics: std::sync::Arc::new(
-            crate::native_v2_target_authority::OperatorDiagnosticStore::default(),
-        ),
-    }
+pub(in crate::native_v2_hosting) fn capsule_config(
+    storage_root: PathBuf,
+) -> ProductionHostingConfig {
+    let mut config = hosting_config(storage_root);
+    config.process_pool = allocator_process_pool();
+    config
+}
+
+pub(in crate::native_v2_hosting) fn capsule_allocator(
+    config: ProductionHostingConfig,
+) -> Result<ProductionCapsuleAllocator, ProductionHostingError> {
+    let diagnostics = Arc::new(OperatorDiagnosticStore::new(
+        config.operator_diagnostic_output.clone(),
+    ));
+    ProductionCapsuleAllocator::new(Arc::new(config), diagnostics)
 }
 
 pub(super) fn submission(runtime: RuntimePlan, revision: &str, key: &str) -> RunSubmission {
@@ -153,10 +151,9 @@ pub(super) fn runtime(environment: BTreeSet<EnvironmentVariableName>) -> Runtime
         )
         .assert_value_with("declared connection")
     };
-    RuntimePlan::Codex {
-        provider: CodexProvider::OpenAi,
-        size: RunSize::Small,
-        nodes: BTreeMap::from([(
+    crate::native_v2_candidate::test_support::codex_runtime(
+        RunSize::Small,
+        BTreeMap::from([(
             NodeName::new("work").assert_value_with("node"),
             NodeRuntimeBinding::Agent {
                 lane: None,
@@ -166,11 +163,13 @@ pub(super) fn runtime(environment: BTreeSet<EnvironmentVariableName>) -> Runtime
                 connections,
             },
         )]),
-    }
+    )
 }
 
 pub(super) fn claude_runtime() -> RuntimePlan {
     RuntimePlan::Claude {
+        active_memory: Default::default(),
+        global_agents: Default::default(),
         provider: ClaudeProvider::Anthropic,
         size: RunSize::Small,
         nodes: BTreeMap::from([(

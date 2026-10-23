@@ -184,11 +184,28 @@ impl NativeV2CloudController {
                 continue;
             }
             let _claim = self.allocator.claim_controller(&summary.run_id).await?;
-            self.allocator
-                .destroy_or_confirm_absent(&summary.run_id, RunRuntimeExit::RuntimeLost)
-                .await
-                .map_err(|_| NativeV2SupervisorError::RuntimeCleanup(RuntimeCleanupUnavailable))?;
-            append_runtime_lost(self.ledger.as_ref(), &stored).await?;
+            self.finish_lost_runtime(&stored).await?;
+        }
+        Ok(())
+    }
+
+    async fn finish_lost_runtime(&self, stored: &StoredRun) -> Result<(), NativeV2CloudError> {
+        let run_id = &stored.snapshot.run_id;
+        // Quarantine interrupted work and retain checkpoints until terminal publication succeeds.
+        self.allocator
+            .destroy_or_confirm_absent(run_id, RunRuntimeExit::RuntimeLost)
+            .await
+            .map_err(|_| NativeV2SupervisorError::RuntimeCleanup(RuntimeCleanupUnavailable))?;
+        append_interrupted(self.ledger.as_ref(), stored, "runtime_lost").await?;
+        if stored
+            .snapshot
+            .primary_graph
+            .as_ref()
+            .is_some_and(|primary| matches!(primary.result, TerminalResult::Succeeded { .. }))
+        {
+            // A confirmed, successful lineage no longer needs the retained target workspace.
+            // Garbage collection stays best effort and strictly after durable terminal truth.
+            let _ = self.allocator.discard_workspace(run_id).await;
         }
         Ok(())
     }
@@ -549,11 +566,7 @@ impl NativeV2CloudController {
             .allocator
             .claim_controller(&stored.snapshot.run_id)
             .await?;
-        self.allocator
-            .destroy_or_confirm_absent(&stored.snapshot.run_id, RunRuntimeExit::RuntimeLost)
-            .await
-            .map_err(|_| NativeV2SupervisorError::RuntimeCleanup(RuntimeCleanupUnavailable))?;
-        append_runtime_lost(self.ledger.as_ref(), &stored).await?;
+        self.finish_lost_runtime(&stored).await?;
         Ok(())
     }
 
@@ -716,7 +729,7 @@ impl NativeV2CloudController {
             .get(run_id)
             .await?
             .ok_or(RunLedgerError::RunNotFound)?;
-        append_terminal_failure(self.ledger.as_ref(), &stored, "force_stopped").await?;
+        append_interrupted(self.ledger.as_ref(), &stored, "force_stopped").await?;
         Ok(())
     }
 
@@ -799,6 +812,6 @@ fn resume_secret_envelope(
 
 mod backend;
 mod source;
-use backend::{append_runtime_lost, append_terminal_failure};
+use backend::{append_interrupted, append_terminal_failure};
 pub(crate) use backend::submission_digest;
 use source::source_credentials;

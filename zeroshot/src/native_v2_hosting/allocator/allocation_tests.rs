@@ -52,26 +52,17 @@ exec /usr/bin/git "$@"
         let marker = root.write("git-wrapper.pid", "");
         std::fs::set_permissions(marker, std::fs::Permissions::from_mode(0o666)).assert_value();
         let uid = NEXT_IDENTITY.fetch_add(1_000_000, Ordering::Relaxed);
-        let unused_harness = PathBuf::from("/usr/bin/false");
-        let allocator = ProductionCapsuleAllocator::new(ProductionCapsuleConfig {
-            workspace_storage: None,
-            storage_root: root.path().to_owned(),
-            copilot_executable: unused_harness.clone(),
-            codex_executable: unused_harness.clone(),
-            claude_executable: unused_harness.to_string_lossy().into_owned(),
-            claude_prefix_arguments: Vec::new(),
-            claude_process_environment: ClaudeProcessEnvironment::default(),
-            pi_executable: unused_harness.to_string_lossy().into_owned(),
-            pi_prefix_arguments: Vec::new(),
-            pi_process_environment: PiProcessEnvironment::default(),
-            executable_search_path: "/usr/local/bin:/usr/bin:/bin".to_owned(),
-            git_program: program,
-            gh_program: PathBuf::from("/usr/bin/false"),
-            process_pool: HostedProcessPool::new(uid - 1, uid - 1, uid).assert_value(),
-            operator_diagnostics: Arc::new(OperatorDiagnosticStore::default()),
-        })
-        .assert_value()
-        .with_test_filesystem_and_source(root.child("unused-remote.git"), production_filesystem);
+        let mut config =
+            crate::native_v2_hosting::tests::fixtures::capsule_config(root.path().to_owned());
+        config.git_program = program;
+        config.executable_search_path = "/usr/local/bin:/usr/bin:/bin".to_owned();
+        config.process_pool = HostedProcessPool::new(uid - 1, uid - 1, uid).assert_value();
+        let allocator = crate::native_v2_hosting::tests::fixtures::capsule_allocator(config)
+            .assert_value()
+            .with_test_filesystem_and_source(
+                root.child("unused-remote.git"),
+                production_filesystem,
+            );
         let lease = allocator.process_pools.acquire().assert_value();
         let identity = lease
             .process_pool()

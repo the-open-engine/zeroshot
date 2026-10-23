@@ -1,6 +1,6 @@
 # Install Zeroshot
 
-Install the `zeroshot` command and its agent skill through the npm delivery package, which requires
+Install the `zeroshot` command and its agent skills through the npm delivery package, which requires
 Node.js 18 or newer. The installer selects the release target declared for the current system and
 checks the downloaded archive against `SHA256SUMS` before writing the native executable.
 
@@ -8,8 +8,8 @@ checks the downloaded archive against `SHA256SUMS` before writing the native exe
 npm install --global @the-open-engine-company/zeroshot
 ```
 
-A canonical CLI release can update its executable and managed agent skill in place. The command
-selects the newest GitHub release for the current platform, verifies its archive and skill asset
+A canonical CLI release can update its executable and managed agent skills in place. The command
+selects the newest GitHub release for the current platform, verifies its archive and skill assets
 against that release's `SHA256SUMS`, and verifies the new executable before replacing the old one:
 
 ```console
@@ -21,14 +21,22 @@ Unchanged managed skill copies are installed or refreshed for Codex, GitHub Copi
 Code. A user-edited or conflicting skill is preserved, and the command fails with its exact path
 after completing any safe updates.
 
+An older updater that only installs the `zeroshot` skill needs a second `zeroshot update` after
+replacing the executable to install `zeroshot-memory-init`. The new updater refreshes skills even
+when the executable version is already current.
+
 Release builds cover Linux x64 and arm64, macOS x64 and arm64, and Windows x64. Node.js is only an
 installer dependency; the command itself is a Rust executable.
 
-The package installs one managed skill for Codex, GitHub Copilot, and Pi under `$HOME/.agents/skills`,
-and for Claude Code under `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills`. No agent selection or
+The package installs the `zeroshot` and `zeroshot-memory-init` skills for Codex, GitHub Copilot, and
+Pi under `$HOME/.agents/skills/<name>`, and for Claude Code under
+`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/<name>`. No agent selection or
 per-project installation is needed. npm 7 and newer do not run uninstall hooks; after removing the
-package, delete its two skill directories manually only if their `SKILL.md` files remain unmodified.
-When set, `CLAUDE_CONFIG_DIR` must be absolute so the global skill has one stable location.
+package, remove only unmodified managed skill directories from these locations.
+When set, `CLAUDE_CONFIG_DIR` must be absolute so the global skills have stable locations.
+
+See [Active Memory storage and backups](../guides/active-memory.md#persistence-and-run-completion)
+for the local lesson database and how to preserve it when moving or reinstalling Zeroshot.
 
 On Windows, the CLI and local in-process runs work natively from PowerShell or Command Prompt.
 Install Git for Windows and put Git and your chosen harness on `PATH`; npm-installed `.cmd`
@@ -125,8 +133,8 @@ lists the automatic requirements and explains the separation.
 ## Other installation paths
 
 Each [GitHub release](https://github.com/the-open-engine/zeroshot/releases) includes native archives,
-the canonical `zeroshot-skill.md`, and `SHA256SUMS`; archive names contain the release version and
-target triple.
+the canonical `zeroshot-skill.md` and `zeroshot-memory-init-skill.md`, and `SHA256SUMS`; archive
+names contain the release version and target triple.
 
 The Python SDK requires Python 3.11 or newer and ships the matching executable inside each platform
 wheel. Download the wheel for your [OS and CPU](../guides/python-sdk.md#install-and-run) from [Python SDK releases](https://github.com/the-open-engine/zeroshot/releases?q=zeroshot-python-v).

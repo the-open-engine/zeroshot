@@ -2,8 +2,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
 use openengine_cluster_protocol::{
-    CodexProvider, DeclaredConnections, DeclaredEnvironment, ModelId, NodeName, RunSize,
-    SessionScope,
+    DeclaredConnections, DeclaredEnvironment, ModelId, NodeName, RunSize, SessionScope,
 };
 use openengine_cluster_testkit::assertions::AssertValue;
 
@@ -53,14 +52,13 @@ async fn same_environment_name_can_resolve_from_different_keys_on_different_node
     let name = EnvironmentVariableName::new("TOKEN").assert_value();
     let first = binding("first", &name);
     let second = binding("second", &name);
-    let runtime = RuntimePlan::Codex {
-        provider: CodexProvider::OpenAi,
-        size: RunSize::Small,
-        nodes: BTreeMap::from([
+    let runtime = crate::native_v2_candidate::test_support::codex_runtime(
+        RunSize::Small,
+        BTreeMap::from([
             (NodeName::new("one").assert_value(), first.clone()),
             (NodeName::new("two").assert_value(), second.clone()),
         ]),
-    };
+    );
     let connection = |value: &str| {
         StaticConnectionValues::new(BTreeMap::from([(name.clone(), value.to_owned())]))
             .assert_value()
@@ -130,10 +128,10 @@ fn dynamic_environment(
 ) -> (EnvironmentVariableName, NodeRuntimeBinding, RunEnvironment) {
     let name = EnvironmentVariableName::new("GH_TOKEN").assert_value();
     let node = binding("github", &name);
-    let runtime = crate::native_v2_candidate::test_support::codex_runtime(BTreeMap::from([(
-        NodeName::new("deliver").assert_value(),
-        node.clone(),
-    )]));
+    let runtime = crate::native_v2_candidate::test_support::codex_runtime(
+        openengine_cluster_protocol::RunSize::Small,
+        BTreeMap::from([(NodeName::new("deliver").assert_value(), node.clone())]),
+    );
     let key = ConnectionKey::new("github").assert_value();
     let environment = RunEnvironment::with_resolver(
         &runtime,
@@ -203,11 +201,10 @@ async fn rebind_uses_admitted_public_variables_without_replacing_connection_valu
     let token = EnvironmentVariableName::new("TOKEN").assert_value();
     let setting = EnvironmentVariableName::new("NODE_ENV").assert_value();
     let node = binding("registry", &token);
-    let runtime = RuntimePlan::Codex {
-        provider: CodexProvider::OpenAi,
-        size: RunSize::Small,
-        nodes: BTreeMap::from([(NodeName::new("agent").assert_value(), node.clone())]),
-    };
+    let runtime = crate::native_v2_candidate::test_support::codex_runtime(
+        RunSize::Small,
+        BTreeMap::from([(NodeName::new("agent").assert_value(), node.clone())]),
+    );
     let definition = |value: &str| RuntimeEnvironment {
         variables: BTreeMap::from([(setting.clone(), value.to_owned())]),
         ..Default::default()

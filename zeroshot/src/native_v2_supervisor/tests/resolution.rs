@@ -198,8 +198,7 @@ async fn force_stop_and_runtime_loss_cancel_initial_resolution_without_late_star
     for lost in [false, true] {
         let resolver = Resolver::new("worker", [Reply::Pending]);
         let harness = with_resolver(worker_graph(None), resolver.clone()).await;
-        let supervisor = harness.supervisor.clone();
-        let drive = tokio::spawn(async move { supervisor.drive().await });
+        let drive = harness.spawn_drive();
         resolver.wait_for_call().await;
         if lost {
             harness.supervisor.runtime_lost().await;

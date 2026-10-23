@@ -61,8 +61,8 @@ impl Cli {
 impl CliCommand {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         match self {
-            Self::Acp(args) => args.into_command(),
-            Self::Ui { listen, target } => ui_command(listen, target),
+            Self::Memory { command } => Ok(NativeV2CliCommand::Memory(command)),
+            Self::Interface(command) => command.into_command(),
             Self::Target { command } => command.into_command(),
             command => command.into_execution_command(),
         }
@@ -78,6 +78,15 @@ impl CliCommand {
             Self::Run(args) => args.into_command(),
             Self::Utility(command) => command.into_command(),
             _ => Err(usage("expected an execution or management command")),
+        }
+    }
+}
+
+impl super::InterfaceCommand {
+    fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
+        match self {
+            Self::Acp(args) => args.into_command(),
+            Self::Ui { listen, target } => ui_command(listen, target),
         }
     }
 }

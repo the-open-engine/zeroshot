@@ -51,7 +51,10 @@ pub(super) fn status_from_snapshot(
 pub(super) fn changes_public_status(event: &RunEvent) -> bool {
     !matches!(
         event,
-        RunEvent::SafeLog { .. } | RunEvent::TokenUsageObserved { .. }
+        RunEvent::SafeLog { .. }
+            | RunEvent::TokenUsageObserved { .. }
+            | RunEvent::RunTokenUsageObserved { .. }
+            | RunEvent::PrimaryGraphCompleted { .. }
     )
 }
 

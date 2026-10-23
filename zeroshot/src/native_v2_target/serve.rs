@@ -138,6 +138,7 @@ async fn prepare_target(
     TargetServeError,
 > {
     let hosting = ProductionHostingConfig {
+        memory_storage: Some(config.storage.join("active-memory").join("lessons.sqlite3")),
         storage_root: config.storage.clone(),
         operator_diagnostic_output: output,
         ..ProductionHostingConfig::default()

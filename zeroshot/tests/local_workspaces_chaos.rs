@@ -55,7 +55,9 @@ impl WorkspaceFixture {
         write_json(&launch.join("input.json"), &Value::Null);
         write_json(
             &launch.join("runtime.json"),
+            // Workspace admission and recovery assertions count only graph worker calls.
             &json!({"harness":"codex","provider":"openai","size":"small",
+                "activeMemory":{"repository":false,"graph":false},
                 "nodes":{"worker":{"kind":"agent","model":"opaque/test-model:owned@v1",
                     "connections":{"fixture":["OPENAI_API_KEY","FIXTURE_MODE"]}}}}),
         );

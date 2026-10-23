@@ -126,6 +126,7 @@ fi
 
 const RESUMED_USAGE_SCRIPT: &str = r#"#!/bin/sh
 set -eu
+/usr/bin/cat > /dev/null
 resumed=false
 for argument in "$@"; do
   if [ "$argument" = "resume" ]; then
@@ -263,6 +264,8 @@ async fn admitted(binding: NodeRuntimeBinding, provider: CodexProvider) -> Admit
         graph,
         initial_input: Value::Null,
         runtime: RuntimePlan::Codex {
+            active_memory: Default::default(),
+            global_agents: Default::default(),
             provider,
             size: RunSize::Medium,
             nodes: BTreeMap::from([(NodeName::new("work").assert_value(), binding)]),
@@ -579,10 +582,12 @@ async fn node_instance_session_reports_per_turn_codex_usage_deltas() {
 
     let mut first_handle = start(&runtime, &admitted, 1, &values).await;
     let mut first_output = first_handle.take_initial_output().assert_value();
-    assert!(matches!(
-        first_handle.completion().await.assert_value().outcome,
-        WorkerOutcome::Verified { output, .. } if output == json!({"answer":42})
-    ));
+    let first = first_handle.completion().await.assert_value();
+    assert!(
+        matches!(&first.outcome, WorkerOutcome::Verified { output, .. } if output == &json!({"answer":42})),
+        "unexpected first completion: {:?}",
+        first.outcome
+    );
     assert_eq!(
         first_output
             .recv_usage()

@@ -217,3 +217,26 @@ fn wave9_cli_contract_skill_install_guard_matches_effective_sudo_identity() {
             .is_some_and(|user| user != OsStr::new("root"));
     assert_eq!(reject_sudo_install().is_err(), should_refuse);
 }
+
+#[test]
+fn memory_skill_is_installed_independently_and_edited_copies_are_preserved() {
+    let (root, home, main) = fixture(FIRST);
+    assert!(main.install_for(&home, None).unwrap());
+    let source = FIRST.replace("name: zeroshot\n", "name: zeroshot-memory-init\n");
+    let memory = prepare_named("zeroshot-memory-init", source.as_bytes().to_vec()).unwrap();
+    assert!(memory.install_for(&home, None).unwrap());
+    let shared = home.join(".agents/skills/zeroshot-memory-init/SKILL.md");
+    let claude = home.join(".claude/skills/zeroshot-memory-init/SKILL.md");
+    assert_source(&shared, source.as_bytes());
+    assert_source(&claude, source.as_bytes());
+    fs::write(&shared, b"user edited memory skill").unwrap();
+    let next = prepare_named(
+        "zeroshot-memory-init",
+        source.replace("Version one", "Version two").into_bytes(),
+    )
+    .unwrap();
+    assert!(next.install_for(&home, None).is_err());
+    assert_eq!(fs::read(shared).unwrap(), b"user edited memory skill");
+    assert_source(&destinations(&home).0, FIRST.as_bytes());
+    assert!(root.path().is_dir());
+}

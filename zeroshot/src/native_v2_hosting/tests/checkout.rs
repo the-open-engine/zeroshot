@@ -72,9 +72,8 @@ exec /usr/bin/git "$@"
         config.git_program = program;
         config.workspace_storage = storage;
         let (output, diagnostic_receiver) = OperatorDiagnosticOutput::channel();
-        config.operator_diagnostics = Arc::new(OperatorDiagnosticStore::new(Some(output)));
-        let diagnostics = config.operator_diagnostics.clone();
-        let allocator = ProductionCapsuleAllocator::new(config)
+        let diagnostics = Arc::new(OperatorDiagnosticStore::new(Some(output)));
+        let allocator = ProductionCapsuleAllocator::new(Arc::new(config), diagnostics.clone())
             .assert_value()
             .with_test_filesystem_and_source(repository.remote.clone(), portable_filesystem);
         let admitted = admit(submission(

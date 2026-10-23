@@ -4,9 +4,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    CodexProvider, ConnectionKey, DeclaredConnections, DeclaredEnvironment, ModelId, NodeName,
-    RunConnectionRequirements, RunConnectionValues, RunSize, RuntimePlan, SessionScope,
-    StaticConnectionValues,
+    ConnectionKey, DeclaredConnections, DeclaredEnvironment, ModelId, NodeName,
+    RunConnectionRequirements, RunConnectionValues, RunSize, SessionScope, StaticConnectionValues,
 };
 use openengine_cluster_testkit::assertions::AssertValue;
 
@@ -56,11 +55,10 @@ async fn source_checkout_resolves_again_instead_of_reusing_an_earlier_token() {
         )
         .assert_value(),
     };
-    let runtime = RuntimePlan::Codex {
-        provider: CodexProvider::OpenAi,
-        size: RunSize::Small,
-        nodes: BTreeMap::from([(NodeName::new("deliver").assert_value(), node)]),
-    };
+    let runtime = crate::native_v2_candidate::test_support::codex_runtime(
+        RunSize::Small,
+        BTreeMap::from([(NodeName::new("deliver").assert_value(), node)]),
+    );
     let environment = RunEnvironment::with_resolver(
         &runtime,
         None,

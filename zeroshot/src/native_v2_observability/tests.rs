@@ -4,15 +4,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    IdempotencyKey, NodeName, PositiveInteger, RunAttachParams, RunId, RunLogsParams, RunStatus,
-    RunStatusParams, RunWatchEventNotification, RunWatchParams, Sha256Digest, TerminalResult,
-    TokenCount, WorkerOutcome,
+    IdempotencyKey, NodeName, RunAttachParams, RunId, RunLogsParams, RunStatus, RunStatusParams,
+    RunWatchEventNotification, RunWatchParams, Sha256Digest, TerminalResult, TokenCount,
+    WorkerOutcome,
 };
 use serde_json::Value;
 use tokio::sync::{Barrier, Notify};
 
 use super::*;
-use crate::full_v1_reducer::StructuralOccurrence;
 use crate::native_v2_contract::{
     AdmittedRun, ExecutionRef, NodeCompletion, NodeInvocation, TokenUsageDelta,
 };
@@ -62,15 +61,7 @@ fn public_reference(reference: &ExecutionRef) -> PublicExecutionRef {
 }
 
 fn started(reference: &ExecutionRef) -> RunEvent {
-    RunEvent::NodeStarted {
-        reference: reference.clone(),
-        occurrence: StructuralOccurrence {
-            node: reference.node.clone(),
-            map_indices: Vec::new(),
-        },
-        attempt: PositiveInteger::new(1).assert_value(),
-        input: Value::Null,
-    }
+    crate::native_v2_runner::test_support::node_started(reference, Value::Null)
 }
 
 fn completed(reference: &ExecutionRef, output: Value) -> RunEvent {

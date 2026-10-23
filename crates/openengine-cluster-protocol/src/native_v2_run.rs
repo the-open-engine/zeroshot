@@ -42,6 +42,8 @@ impl std::error::Error for NativeV2RunValueError {}
 
 mod environment;
 pub use environment::*;
+mod active_memory;
+pub use active_memory::*;
 
 mod string_kind_sealed {
     pub trait Sealed {}

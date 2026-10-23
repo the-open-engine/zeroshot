@@ -5,29 +5,35 @@
 
 ## Canonical identity
 
-| Release item         | Identity                                                                 |
-| -------------------- | ------------------------------------------------------------------------ |
-| Git tag and release  | `vX.Y.Z`                                                                 |
-| Executables          | `zeroshot` and `restic` (`.exe` on Windows)                              |
-| Native archives      | `zeroshot-vX.Y.Z-<target>.tar.gz`                                        |
-| Target manifest      | `distribution/zeroshot-targets.json`                                     |
-| npm package          | `@the-open-engine-company/zeroshot`                                      |
-| Agent skill          | npm `skills/zeroshot/SKILL.md`; release asset `zeroshot-skill.md`        |
-| Target image         | `ghcr.io/the-open-engine/zeroshot-target`                                |
-| Python wheel release | `zeroshot-python-vX.Y.Z_1`                                               |
-| Python package       | `the-open-engine-zeroshot==X.Y.Z.post1` when PyPI publication is enabled |
-| Minor documentation  | `vX.Y/` at its newest patch, including Python SDK revision `1`           |
+| Release item         | Identity                                                                                  |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| Git tag and release  | `vX.Y.Z`                                                                                  |
+| Executables          | `zeroshot` and `restic` (`.exe` on Windows)                                               |
+| Native archives      | `zeroshot-vX.Y.Z-<target>.tar.gz`                                                         |
+| Target manifest      | `distribution/zeroshot-targets.json`                                                      |
+| npm package          | `@the-open-engine-company/zeroshot`                                                       |
+| Run skill            | npm `skills/zeroshot/SKILL.md`; release asset `zeroshot-skill.md`                         |
+| Memory init skill    | npm `skills/zeroshot-memory-init/SKILL.md`; release asset `zeroshot-memory-init-skill.md` |
+| Target image         | `ghcr.io/the-open-engine/zeroshot-target`                                                 |
+| Python wheel release | `zeroshot-python-vX.Y.Z_1`                                                                |
+| Python package       | `the-open-engine-zeroshot==X.Y.Z.post1` when PyPI publication is enabled                  |
+| Minor documentation  | `vX.Y/` at its newest patch, including Python SDK revision `1`                            |
 
 The workflow publishes no alternate tag prefix, package, image, executable alias, source-build
 fallback, or compatibility artifact.
 
-The npm installer copies the same managed skill to `$HOME/.agents/skills/zeroshot` for Codex, GitHub
-Copilot, and Pi, and to `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/zeroshot` for Claude Code. These
-fixed user scopes are installed unconditionally so agents added later need no Zeroshot reinstall.
+The npm installer copies both managed skills to `$HOME/.agents/skills/<skill-name>` for Codex,
+GitHub Copilot, and Pi, and to `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/<skill-name>` for Claude
+Code. Each skill has one canonical source across hosts. These fixed user scopes are installed
+unconditionally so agents added later need no Zeroshot reinstall.
 Package updates and `zeroshot update` replace only an unchanged managed copy. An edited or
 conflicting skill is preserved and fails installation visibly. npm 7 and newer provide no uninstall
 lifecycle, so users remove unchanged managed copies from these documented paths when they uninstall
 the package.
+
+When upgrading through an older updater that only installs the `zeroshot` skill, run
+`zeroshot update` again after the executable update to install `zeroshot-memory-init`. The current
+updater installs or refreshes both skills even when the executable version is already current.
 
 ## Targets
 
@@ -36,8 +42,8 @@ target table must match it exactly. The installer stops on any other host.
 
 Every archive contains exactly the Zeroshot executable and its pinned Restic sidecar. npm, Python
 wheels, self-update, and the target image install the pair together. `SHA256SUMS` covers each archive
-and the exact `zeroshot-skill.md` copied from the npm package's canonical skill. The workflow also
-rejects a Linux Zeroshot release binary that has a dynamic interpreter.
+and the exact `zeroshot-skill.md` and `zeroshot-memory-init-skill.md` copied from their canonical npm
+sources. The workflow also rejects a Linux Zeroshot release binary that has a dynamic interpreter.
 
 ## Version staging
 

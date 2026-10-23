@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use openengine_cluster_protocol::{
-    CodexProvider, DeclaredConnections, EnumLabel, FieldName, IdempotencyKey, NodeName,
-    PositiveInteger, RunId, RunSize, RunTitle, SessionScope, SourceBranchId, SourceRepositoryId,
-    SourceRevisionId, ResolvedSource, TerminalResult, WorkerOutcome,
+    DeclaredConnections, EnumLabel, FieldName, IdempotencyKey, NodeName, PositiveInteger, RunId,
+    RunSize, RunTitle, SessionScope, SourceBranchId, SourceRepositoryId, SourceRevisionId,
+    ResolvedSource, TerminalResult, WorkerOutcome,
 };
 use serde_json::{Value, json};
 
@@ -57,10 +57,9 @@ async fn admitted_with_delivery() -> AdmittedRun {
         git_delivery_node(),
         success_node(),
     ]);
-    let runtime = RuntimePlan::Codex {
-        provider: CodexProvider::OpenAi,
-        size: RunSize::Medium,
-        nodes: BTreeMap::from([
+    let runtime = crate::native_v2_candidate::test_support::codex_runtime(
+        RunSize::Medium,
+        BTreeMap::from([
             (NodeName::new("worker").assert_value(), agent_binding()),
             (
                 NodeName::new("deliver").assert_value(),
@@ -71,7 +70,7 @@ async fn admitted_with_delivery() -> AdmittedRun {
             ),
             (NodeName::new("verify").assert_value(), agent_binding()),
         ]),
-    };
+    );
     NativeV2Admission
         .admit_with_policy(
             RunSubmission {
@@ -96,11 +95,10 @@ async fn admitted_without_delivery() -> AdmittedRun {
             title: RunTitle::new("Local optional run").assert_value(),
             graph: full_graph(vec![success_node()]),
             initial_input: Value::Null,
-            runtime: RuntimePlan::Codex {
-                provider: CodexProvider::OpenAi,
-                size: RunSize::Medium,
-                nodes: BTreeMap::new(),
-            },
+            runtime: crate::native_v2_candidate::test_support::codex_runtime(
+                RunSize::Medium,
+                BTreeMap::new(),
+            ),
             source: Some(source()),
             submission_key: IdempotencyKey::new("optional-delivery-gate").assert_value(),
         })

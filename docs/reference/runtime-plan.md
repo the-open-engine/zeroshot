@@ -12,7 +12,7 @@ machine-readable contract.
 
 ## Document fields
 
-`RuntimePlan` is a closed JSON object. All four fields are required, and unknown fields are rejected.
+`RuntimePlan` is a closed JSON object. The following four fields are required; unknown fields are rejected.
 
 | Field      | Value                                                                              |
 | ---------- | ---------------------------------------------------------------------------------- |
@@ -20,6 +20,11 @@ machine-readable contract.
 | `provider` | Provider of the default lane, supported by the selected harness                    |
 | `size`     | `small`, `medium`, or `large`                                                      |
 | `nodes`    | Object mapping each executable graph node name to a [node binding](#node-bindings) |
+
+Optional `activeMemory` controls repository and graph recall/collection independently, and
+`globalAgents.postmortem` configures the built-in after-run specialists. Both default to enabled
+on local CLI runs and direct targets. The same sections are accepted by uniform runtime files.
+See [Active Memory](../guides/active-memory.md) for budgets, provider inheritance and opt-out examples.
 
 `harness` and `provider` form the default lane. Every agent node runs on it unless its binding
 carries its own [`lane`](#per-node-lanes). `size` applies to the whole run. Model, effort, session

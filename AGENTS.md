@@ -28,8 +28,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   profile UI. The UI is served by Rust and never needs a production Node server.
 - Canonical releases are explicit `vX.Y.Z` tags with major version 8 or newer.
 - The npm package is `@the-open-engine-company/zeroshot`.
-- That package owns one canonical skill and installs managed copies for Codex, GitHub Copilot, Pi, and
-  Claude Code at their user scopes. Do not fork the skill by host.
+- That package owns the canonical `zeroshot` and `zeroshot-memory-init` skills and installs managed
+  copies for Codex, GitHub Copilot, Pi, and Claude Code at their user scopes. Do not fork skills by host.
 - The target image is `ghcr.io/the-open-engine/zeroshot-target`.
 - The Python distribution is `the-open-engine-zeroshot`; its import package remains `zeroshot`.
 - Python SDK tags are `zeroshot-python-vZEROSHOT_SDK` and package versions are
@@ -41,7 +41,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Checked-in Cargo/npm versions are development placeholders. Tags, registry metadata, and GitHub
   Releases are authoritative. Never commit a staged release version to `main`.
 - `zeroshot update` resolves the newest canonical GitHub Release, verifies the declared host archive
-  and canonical `zeroshot-skill.md` asset through that release's `SHA256SUMS`, smoke-checks the
+  and canonical skill assets through that release's `SHA256SUMS`, smoke-checks the
   staged executable, and replaces the running executable in place without privilege escalation. It
   installs or refreshes only unchanged managed skill copies and preserves conflicts.
   Development-placeholder builds refuse self-update.
@@ -49,6 +49,62 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   exact version and source commit.
 
 ## Runtime invariants
+
+- Active Memory is host-owned opt-out state, separate from the checkout. Local CLI runs use one
+  database under local state; direct targets use one persistent target-wide database with repository
+  scopes. Generic hosting embedders explicitly select a namespace; Cloud and ACP integration are
+  not enabled implicitly. Runtime `activeMemory` independently controls repository and graph
+  collection/recall; `globalAgents.postmortem` controls the built-in after-run agent and inherits an
+  existing agent node's provider/model/connections. Four isolated verifier specialists separately maintain
+  graph lessons, maintain repository lessons, discover graph procedures, and discover repository
+  lessons. Maintenance contexts and mutation authority are partitioned by lesson scope, including
+  repository-qualified graph lessons; each scope's opt-out disables its maintenance and discovery.
+  Adaptation provenance names the responsible scoped maintenance specialist. Maintenance uses
+  complete byte-bounded batches and requires exactly one decision per supplied ID/revision; omitted
+  or duplicate decisions cannot count as completed reconciliation. Maintenance consolidates redundant
+  paraphrases only within the same repository or exact graph/node/repository-qualified scope, retaining
+  one canonical recommendation and all useful detail while deciding every supplied ID. Discovery has no findings count
+  quota: impact, recurrence, current evidence and usefulness determine admission. Shared transactions
+  are bounded by serialized bytes and store capacity rather than a mutation count quota. Their work runs
+  before runner closure/cleanup, preserves the durably latched primary outcome and its failure
+  diagnostics on ordinary failure or controller restart after confirmed cleanup, and
+  stays outside reducer/checkpoint history. All usage remains part of the run. Never turn incomplete
+  supplied-memory evidence into an empty manifest. Graph guidance supplements only private provider
+  invocations after plan validation; it never mutates authored instructions or graph hashes. Hooks
+  retrieve complete cards from a frozen resident index with relevance ranking and a cumulative
+  session byte budget. Shared store mutations use expected revisions and retained deletion tombstones.
+  Codex trusts only the exact normalized hash of the product-owned session hook; never bypass trust
+  for unrelated native hooks or write user trust configuration. Callback receipts acknowledge returned
+  context, not model compliance. Missing carrier acknowledgement, failed provider startup or bounded
+  transport failure makes maintenance evidence unknown. Callback frames have absolute I/O deadlines
+  so a stalled child cannot keep the resident broker or run cleanup alive indefinitely.
+  Interrupted auxiliary work marks run usage incomplete. New lessons require observed costly main
+  work; a routine response-format correction alone cannot qualify. Bounded in-memory native tool
+  receipts support this check across all harnesses without retaining arguments or tool results.
+  Review-cost proof counts distinct complete rejected rounds in one map scope and attributes them
+  to participating serial-prefix workers. Supported inner loops are checked independently; nested
+  wrapper loops, seeded history and ambiguous rounds abstain. Error-exit absence requires every
+  durable visit of that node to be settled without error; missing controls are never assumed false.
+  The dedicated `zeroshot-memory-init` product skill initializes local history through one
+  resumable `memory init --directory DIR` command: isolated per-run discovery stays staged until
+  separate graph/repository maintenance has covered every card against its recorded current checkout.
+  Initialization inventories all local repositories independently of the invoking directory; it has no
+  `--cwd` flag. Persisted `--ignore-repos`/`--ignore-graphs` lists match exact inventory aliases and graph
+  names/hashes. Per-run repository scopes partition discovery and maintenance; shared unqualified
+  graph cards reconcile once, and all selected checkouts are fingerprinted before one atomic publication.
+  Source-only historical admissions match repository IDs independently resolved from the current
+  checkout/registered remote; historical or folder aliases never prove identity, and remote-bearing
+  admissions retain their stronger remote-derived proof.
+  The file bridge exports the runtime prompts and reuses its admission validators, never recovers old
+  controllers, resolves provider credentials, or writes historical run ledgers. Digest-bound responses,
+  source fingerprints, complete coverage, expected revisions and retained tombstones gate publication.
+  Session locks serialize advancement; an atomic database receipt recovers interrupted publication
+  before checking for new work, and completed sessions return their saved result without replay.
+  Historical tool receipts are unavailable; never synthesize exploration evidence from elapsed time.
+  The implementation stays internal under `active_memory`; the CLI callback, candidate recall
+  capability, and runner lifecycle contracts are exposed only through their owning modules.
+  Capsule allocation reuses the resolved
+  `ProductionHostingConfig`; instantiated diagnostic storage remains separate from configuration.
 
 - Protocol Rust types are the source of truth. Generated files under
   `protocol/openengine-cluster/v1/` must be regenerated through the Rust testkit, not hand-edited.
@@ -847,7 +903,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Use existing patterns; do not add parallel registries, provider lists, runtime model catalogs, or release
   authorities.
 - Keep optional developer and agent analysis tools external to the repository. The npm-delivered
-  Zeroshot product skill is the sole product-owned exception; do not add package dependencies,
+  Zeroshot product skills are the sole product-owned exception; do not add package dependencies,
   hooks, CI gates, other skills, or checked-in state for personal analysis tooling.
 - New Rust APIs must respect the four-parameter Clippy ceiling; use request structs rather than
   raising or bypassing the limit.

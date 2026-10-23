@@ -1,3 +1,4 @@
+mod active_memory;
 pub mod execution;
 pub mod full_v1_reducer;
 pub mod issue_provider;

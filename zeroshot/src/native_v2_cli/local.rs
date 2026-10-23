@@ -319,6 +319,11 @@ impl LocalCliBackend {
         let checkpoint_repository = self.checkpoint_repository(&prepared.delivery_run_id)?;
         let bootstrap_path = storage.join(BOOTSTRAP_FILE);
         let bootstrap = PortableControllerBootstrap {
+            memory_storage: Some(
+                self.state_root
+                    .join("active-memory")
+                    .join("lessons.sqlite3"),
+            ),
             checkpoint,
             run_id: prepared.run_id.clone(),
             delivery_run_id: prepared.delivery_run_id,

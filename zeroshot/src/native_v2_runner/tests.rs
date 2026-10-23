@@ -12,6 +12,10 @@ use tokio::sync::watch;
 #[path = "tests/backpressure.rs"]
 mod backpressure;
 
+#[cfg(target_os = "linux")]
+#[path = "tests/auxiliary_identity.rs"]
+mod auxiliary_identity;
+
 use super::*;
 use super::test_support::{
     admitted, binding, owner_runner, request, runner, BurstDriver, FakeDriver, FakeFactory,

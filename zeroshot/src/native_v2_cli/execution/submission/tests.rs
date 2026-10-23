@@ -31,6 +31,49 @@ fn uniform(harness: UniformHarness, provider: UniformProvider) -> UniformRuntime
         effort: None,
         session_scope: None,
         connections: None,
+        active_memory: Default::default(),
+        global_agents: Default::default(),
+    }
+}
+
+#[test]
+fn uniform_runtime_preserves_authored_memory_controls_for_every_harness() {
+    let graph = BuiltinGraphTemplate::SingleWorker
+        .materialize(TemplateDelivery::None)
+        .assert_value();
+    for (harness, provider) in [
+        ("codex", "openai"),
+        ("claude", "anthropic"),
+        ("copilot", "github"),
+        ("pi", "bedrock"),
+    ] {
+        let authored = serde_json::json!({
+            "harness": harness,
+            "provider": provider,
+            "model": "provider-owned-model",
+            "activeMemory": {"repository": false, "graph": true, "budgetBytes": 512},
+            "globalAgents": {"postmortem": {"enabled": false, "sourceNode": "worker", "timeoutMs": 1000}}
+        });
+        let plan: UniformRuntimePlan = serde_json::from_value(authored.clone()).assert_value();
+        let runtime = plan
+            .materialize(&graph, PullRequestFeedback::Consider, None)
+            .assert_value();
+        let serialized = serde_json::to_value(runtime).assert_value();
+        assert_eq!(
+            serialized["activeMemory"], authored["activeMemory"],
+            "{harness}"
+        );
+        assert_eq!(
+            serialized["globalAgents"], authored["globalAgents"],
+            "{harness}"
+        );
+
+        let defaults: UniformRuntimePlan = serde_json::from_value(serde_json::json!({
+            "harness": harness, "provider": provider, "model": "provider-owned-model"
+        }))
+        .assert_value();
+        assert_eq!(defaults.active_memory, ActiveMemoryConfig::default());
+        assert_eq!(defaults.global_agents, GlobalAgentsConfig::default());
     }
 }
 

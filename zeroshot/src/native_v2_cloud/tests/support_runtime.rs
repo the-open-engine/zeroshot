@@ -333,26 +333,30 @@ pub(super) async fn seed_controller_reconstructed_run(
     ledger: &Arc<FakeRunLedger>,
     run_id: &str,
 ) -> RunId {
-    let request = request(Value::Null);
-    let submission = request.submission;
+    let mut request = request(Value::Null);
+    request.run_id = RunId::new(run_id);
+    persist_request(ledger.as_ref(), &request).await;
+    request.run_id
+}
+
+pub(super) async fn persist_request(ledger: &dyn RunLedger, request: &RunSubmitParams) {
     let admitted = NativeV2Admission
-        .admit(submission.clone())
+        .admit(request.submission.clone())
         .await
         .assert_value_with("admitted");
-    let run_id = RunId::new(run_id);
     assert!(matches!(
         ledger
             .create_or_get(CreateRun {
-                run_id: run_id.clone(),
-                submission_key: submission.submission_key.clone(),
-                submission_digest: submission_digest(&submission).assert_value_with("digest"),
+                run_id: request.run_id.clone(),
+                submission_key: request.submission.submission_key.clone(),
+                submission_digest: submission_digest(&request.submission)
+                    .assert_value_with("digest"),
                 admitted,
             })
             .await
             .assert_value_with("create"),
         CreateRunOutcome::Created(_)
     ));
-    run_id
 }
 
 use openengine_cluster_testkit::assertions::{AssertValue};

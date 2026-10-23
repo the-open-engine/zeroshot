@@ -1,4 +1,6 @@
 use std::collections::BTreeSet;
+use std::path::PathBuf;
+use std::sync::Arc;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use openengine_cluster_protocol::{FailureDiagnosticKind, WorkerOutcome};
@@ -87,6 +89,8 @@ pub(super) struct CopilotRpc<'a> {
     pub(super) redactions: Vec<String>,
     authentication: auth::CopilotAuthentication<'a>,
     provider: Option<&'a provider::LocalProvider>,
+    active_memory: Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
+    workspace: PathBuf,
 }
 
 pub(super) struct CopilotRpcNative<'a> {
@@ -123,7 +127,19 @@ impl<'a> CopilotRpc<'a> {
             redactions,
             authentication: native.authentication,
             provider: native.provider,
+            active_memory: None,
+            workspace: PathBuf::new(),
         }
+    }
+
+    pub(super) fn with_active_memory(
+        mut self,
+        memory: Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
+        workspace: PathBuf,
+    ) -> Self {
+        self.active_memory = memory;
+        self.workspace = workspace;
+        self
     }
 
     pub(super) async fn run(
@@ -153,7 +169,7 @@ impl<'a> CopilotRpc<'a> {
         self.session_id = resume
             .clone()
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-        let params = command::session_parameters(
+        let mut params = command::session_parameters(
             self.invocation,
             files,
             &self.session_id,
@@ -162,6 +178,9 @@ impl<'a> CopilotRpc<'a> {
                 local: self.provider,
             },
         )?;
+        if self.active_memory.is_some() {
+            params["hooks"] = json!(true);
+        }
         let method = if resume.is_some() {
             "session.resume"
         } else {
@@ -299,10 +318,29 @@ impl<'a> CopilotRpc<'a> {
         match dispatch_action(message) {
             DispatchAction::Event => events::receive(self, &message["params"]).await,
             DispatchAction::AcquireToken => self.acquire_token(message).await,
+            DispatchAction::MemoryHook => self.memory_hook(message),
             DispatchAction::Reject => self.queue(json!({"jsonrpc":"2.0", "id":message["id"],
                 "error":{"code":-32601,"message":"Method not supported by Zeroshot"}})),
             DispatchAction::Ignore => Ok(()),
         }
+    }
+
+    fn memory_hook(&self, message: &Value) -> Result<(), NodeRunnerError> {
+        let params = &message["params"];
+        let context = if params["sessionId"].as_str() == Some(&self.session_id)
+            && params["hookType"].as_str() == Some("preToolUse")
+        {
+            self.active_memory
+                .as_ref()
+                .map(|memory| {
+                    memory.copilot_context(self.invocation, &params["input"], &self.workspace)
+                })
+                .filter(|value| !value.is_empty())
+        } else {
+            None
+        };
+        let output = context.map_or(Value::Null, |context| json!({"additionalContext":context}));
+        self.queue(json!({"jsonrpc":"2.0","id":message["id"],"result":{"output":output}}))
     }
 
     async fn acquire_token(&mut self, message: &Value) -> Result<(), NodeRunnerError> {
@@ -383,6 +421,7 @@ impl<'a> CopilotRpc<'a> {
 enum DispatchAction {
     Event,
     AcquireToken,
+    MemoryHook,
     Reject,
     Ignore,
 }
@@ -391,6 +430,7 @@ fn dispatch_action(message: &Value) -> DispatchAction {
     match message["method"].as_str() {
         Some("session.event") => DispatchAction::Event,
         Some("gitHubToken.getToken") if message.get("id").is_some() => DispatchAction::AcquireToken,
+        Some("hooks.invoke") if message.get("id").is_some() => DispatchAction::MemoryHook,
         _ if message.get("id").is_some() => DispatchAction::Reject,
         _ => DispatchAction::Ignore,
     }

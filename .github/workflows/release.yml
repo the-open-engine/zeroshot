@@ -453,6 +453,7 @@ jobs:
           path: |
             release-assets/*.tar.gz
             release-assets/zeroshot-skill.md
+            release-assets/zeroshot-memory-init-skill.md
             release-assets/SHA256SUMS
           if-no-files-found: error
 
@@ -799,6 +800,7 @@ jobs:
           gh release download "$RELEASE_TAG" \
             --pattern 'SHA256SUMS' \
             --pattern 'zeroshot-skill.md' \
+            --pattern 'zeroshot-memory-init-skill.md' \
             --pattern "zeroshot-v${RELEASE_VERSION}-*.tar.gz" \
             --dir release-assets
 
@@ -830,7 +832,7 @@ jobs:
           const path = require('node:path');
           const [packageRoot, releaseDirectory] = process.argv.slice(2);
           const { install } = require(path.join(packageRoot, 'lib', 'install'));
-          const { managedSource } = require(path.join(packageRoot, 'lib', 'skills'));
+          const { SKILL_NAMES, managedSource } = require(path.join(packageRoot, 'lib', 'skills'));
           const installRoot = path.resolve(packageRoot, '..', '..', '..');
           const homeDirectory = path.join(installRoot, 'home');
           const options = {
@@ -846,13 +848,15 @@ jobs:
             };
           (async () => {
             await install(options);
-            const skillFiles = [
-              path.join(homeDirectory, '.agents', 'skills', 'zeroshot', 'SKILL.md'),
-              path.join(homeDirectory, '.claude', 'skills', 'zeroshot', 'SKILL.md'),
-            ];
+            const skillFiles = SKILL_NAMES.flatMap((name) => [
+              path.join(homeDirectory, '.agents', 'skills', name, 'SKILL.md'),
+              path.join(homeDirectory, '.claude', 'skills', name, 'SKILL.md'),
+            ]);
             const installed = skillFiles.map((filename) => fs.readFileSync(filename, 'utf8'));
-            assert.equal(installed[0], installed[1]);
-            assert.match(managedSource(installed[0]), /^---\nname: zeroshot\n/);
+            SKILL_NAMES.forEach((name, index) => {
+              assert.equal(installed[index * 2], installed[index * 2 + 1]);
+              assert.ok(managedSource(installed[index * 2]).startsWith(`---\nname: ${name}\n`));
+            });
             await install(options);
             assert.deepEqual(
               skillFiles.map((filename) => fs.readFileSync(filename, 'utf8')),

@@ -16,7 +16,7 @@ use tokio::sync::watch;
 
 use super::*;
 use crate::execution::SessionScope;
-use crate::native_v2_contract::{CodexProvider, GIT_DELIVERY_PR_WORKER_REF, NodeInvocation};
+use crate::native_v2_contract::{GIT_DELIVERY_PR_WORKER_REF, NodeInvocation};
 use crate::native_v2_delivery::{DELIVERY_OPENED_LABEL, DELIVERY_SIGNAL_FIELD};
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NativeNodeRunner, NodeDriver,
@@ -409,6 +409,8 @@ mod runtime_failure;
 #[path = "tests/initialization.rs"]
 mod initialization;
 
+#[path = "tests/primary_restart.rs"]
+mod primary_restart;
 #[path = "tests/restart_logs.rs"]
 mod restart_logs;
 

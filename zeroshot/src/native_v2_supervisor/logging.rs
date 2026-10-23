@@ -64,7 +64,7 @@ pub(super) fn runtime_failure_log(cause: &str) -> Result<RunEvent, RunLedgerErro
     )
 }
 
-pub(super) fn terminal_events(result: TerminalResult) -> Result<Vec<RunEvent>, RunLedgerError> {
+pub(crate) fn terminal_events(result: TerminalResult) -> Result<Vec<RunEvent>, RunLedgerError> {
     let mut events = Vec::new();
     if let TerminalResult::Failed { reason, .. } = &result {
         events.push(error_log(

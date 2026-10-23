@@ -16,18 +16,14 @@ const {
 
 const repositoryRoot = path.resolve(__dirname, '../..');
 const targetManifestPath = path.join(repositoryRoot, 'distribution', 'zeroshot-targets.json');
-const skillSourcePath = path.join(
-  repositoryRoot,
-  'npm',
-  'zeroshot',
-  'skills',
-  'zeroshot',
-  'SKILL.md'
-);
+const { SKILL_NAMES } = require('../../npm/zeroshot/lib/skills');
+const skillAssets = SKILL_NAMES.map((name) => ({
+  filename: `${name}-skill.md`,
+  source: path.join(repositoryRoot, 'npm', 'zeroshot', 'skills', name, 'SKILL.md'),
+}));
 const targets = Object.freeze(JSON.parse(fs.readFileSync(targetManifestPath, 'utf8')));
 const RELEASE_TAG_PREFIX = 'v';
 const MINIMUM_RELEASE_MAJOR = 8;
-const SKILL_ASSET_NAME = 'zeroshot-skill.md';
 const RESTIC_VERSION = '0.19.1';
 
 function normalizeVersion(tag) {
@@ -121,8 +117,12 @@ function packageTarget({ target, version, binaryPath, resticPath, outputDirector
 }
 
 function createManifest({ version, directory }) {
-  fs.copyFileSync(skillSourcePath, path.join(directory, SKILL_ASSET_NAME));
-  const names = [...targets.map(({ target }) => archiveName(version, target)), SKILL_ASSET_NAME];
+  for (const skill of skillAssets)
+    fs.copyFileSync(skill.source, path.join(directory, skill.filename));
+  const names = [
+    ...targets.map(({ target }) => archiveName(version, target)),
+    ...skillAssets.map(({ filename }) => filename),
+  ];
   const entries = names.map((filename) => {
     const contents = fs.readFileSync(path.join(directory, filename));
     return `${sha256(contents)}  ${filename}`;
@@ -134,7 +134,10 @@ function createManifest({ version, directory }) {
 }
 
 function verifyDistribution({ version, directory }) {
-  const expected = [...targets.map(({ target }) => archiveName(version, target)), SKILL_ASSET_NAME];
+  const expected = [
+    ...targets.map(({ target }) => archiveName(version, target)),
+    ...skillAssets.map(({ filename }) => filename),
+  ];
   const manifest = parseChecksumManifest(
     fs.readFileSync(path.join(directory, 'SHA256SUMS'), 'utf8')
   );
@@ -149,10 +152,12 @@ function verifyDistribution({ version, directory }) {
     verifyChecksum(filename, archive, manifest);
     extractExecutables(archive, [declaration.executable, declaration.resticExecutable]);
   }
-  const skill = fs.readFileSync(path.join(directory, SKILL_ASSET_NAME));
-  verifyChecksum(SKILL_ASSET_NAME, skill, manifest);
-  if (!skill.equals(fs.readFileSync(skillSourcePath))) {
-    throw new Error('DISTRIBUTION_INCOMPLETE: release skill differs from the canonical npm skill');
+  for (const { filename, source } of skillAssets) {
+    const skill = fs.readFileSync(path.join(directory, filename));
+    verifyChecksum(filename, skill, manifest);
+    if (!skill.equals(fs.readFileSync(source))) {
+      throw new Error(`DISTRIBUTION_INCOMPLETE: ${filename} differs from its canonical npm skill`);
+    }
   }
   return true;
 }
@@ -164,7 +169,7 @@ function runGh(args) {
 function publishAssets({ tag, directory, invokeGh = runGh }) {
   const names = [
     ...targets.map(({ target }) => archiveName(tag, target)),
-    SKILL_ASSET_NAME,
+    ...skillAssets.map(({ filename }) => filename),
     'SHA256SUMS',
     releaseNotesName(tag),
   ];

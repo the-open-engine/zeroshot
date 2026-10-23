@@ -286,3 +286,79 @@ async fn escaped_failure_text_is_bounded_without_losing_the_explanation() {
         );
     }
 }
+
+#[tokio::test]
+async fn primary_failure_retains_its_diagnostics_across_auxiliary_interruption() {
+    for ledger in ledgers() {
+        let request = create("primary-context", "primary-context-key", 'a');
+        let run_id = request.run_id.clone();
+        ledger.create_or_get(request).await.assert_value();
+        let worker = reference(&run_id, 1);
+        let latched = ledger
+            .append(
+                &run_id,
+                vec![
+                    RunEvent::RunStarted,
+                    started(worker.clone()),
+                    diagnostic(
+                        Some(worker.execution),
+                        "primary failure",
+                        FailureDiagnosticKind::Failure,
+                    ),
+                    completed(worker, Value::Null),
+                    RunEvent::PrimaryGraphCompleted {
+                        result: TerminalResult::Failed {
+                            reason: "work_rejected".parse().assert_value(),
+                            context: None,
+                        },
+                        auxiliary_pending: true,
+                    },
+                ],
+            )
+            .await
+            .assert_value();
+        let primary = latched.snapshot.primary_graph.assert_value().result;
+        let TerminalResult::Failed {
+            context: Some(context),
+            ..
+        } = &primary
+        else {
+            panic!("primary failure must retain diagnostics before optional work");
+        };
+        assert_eq!(context.recorded[0].message.as_str(), "primary failure");
+        let interrupted = ledger
+            .append(
+                &run_id,
+                vec![
+                    RunEvent::SafeLog {
+                        execution: None,
+                        timestamp: UnixTimestampMillis::MIN,
+                        stream: SafeLogStream::Error,
+                        line: SafeLogLine::new("postmortem unavailable").assert_value(),
+                        diagnostic: None,
+                    },
+                    RunEvent::RunTokenUsageObserved { usage: None },
+                    RunEvent::Terminal {
+                        result: primary.clone(),
+                    },
+                ],
+            )
+            .await
+            .assert_value();
+        assert_eq!(interrupted.snapshot.terminal, Some(primary.clone()));
+        let retained = interrupted.snapshot.primary_graph.assert_value();
+        assert_eq!(retained.result, primary);
+        assert!(!retained.auxiliary_pending);
+        assert!(!interrupted.snapshot.token_usage.assert_value().complete);
+        assert_eq!(
+            ledger
+                .get(&run_id)
+                .await
+                .assert_value()
+                .assert_value()
+                .snapshot
+                .terminal,
+            Some(primary)
+        );
+    }
+}

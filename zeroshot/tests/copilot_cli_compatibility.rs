@@ -149,7 +149,10 @@ impl CopilotFixture {
         );
         write_json(
             &fixture.runtime,
-            &json!({"harness": "copilot", "provider": "github", "model": "auto"}),
+            // This fixture counts the main node's accepted answer; optional global work has
+            // separate lifecycle and live-harness coverage.
+            &json!({"harness": "copilot", "provider": "github", "model": "auto",
+                "activeMemory":{"repository":false,"graph":false}}),
         );
         fixture
     }

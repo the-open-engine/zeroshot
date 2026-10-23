@@ -25,6 +25,9 @@ use crate::native_v2_runner::{NodeHandle, NodeRunRequest, NodeRunnerError};
 use crate::native_v2_supervisor::RunRuntimeExit;
 use crate::v2_run_ledger::{CreateRun, CreateRunOutcome, RunLedger};
 
+#[path = "tests/primary_restart.rs"]
+mod primary_restart;
+
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(1);
 
 struct TestDirectory(PathBuf);
@@ -136,7 +139,10 @@ pub(super) fn submission(key: &str) -> RunSubmission {
         title: RunTitle::new("Portable controller test").assert_value_with("title"),
         graph: full_graph(vec![success_node()]),
         initial_input: Value::Null,
-        runtime: crate::native_v2_candidate::test_support::codex_runtime(BTreeMap::new()),
+        runtime: crate::native_v2_candidate::test_support::codex_runtime(
+            openengine_cluster_protocol::RunSize::Small,
+            BTreeMap::new(),
+        ),
         source: Some(ResolvedSource {
             remote: None,
 
@@ -163,6 +169,7 @@ pub(super) fn bootstrap(
     )
     .assert_value_with("exact empty environment");
     PortableControllerBootstrap {
+        memory_storage: None,
         git_credentials: None,
 
         checkpoint: None,

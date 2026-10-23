@@ -23,7 +23,7 @@ use crate::native_v2_candidate::test_support::{
     TestGitRepository, full_graph, git, git_output, success_node,
 };
 use crate::native_v2_contract::{
-    self, CodexProvider, DeclaredConnections, DeclaredEnvironment, ExecutionRef, NodeInvocation,
+    self, DeclaredConnections, DeclaredEnvironment, ExecutionRef, NodeInvocation,
     NodeRuntimeBinding, PullRequestFeedback, RunSize, RunSubmission, RunTitle, RuntimePlan,
     SourceBranchId, SourceRepositoryId, SourceRevisionId, ResolvedSource,
 };
@@ -1138,11 +1138,10 @@ async fn admitted_with_feedback(
 }
 
 fn delivery_runtime(binding: NodeRuntimeBinding) -> RuntimePlan {
-    RuntimePlan::Codex {
-        provider: CodexProvider::OpenAi,
-        size: RunSize::Medium,
-        nodes: BTreeMap::from([(NodeName::new("deliver").assert_value(), binding)]),
-    }
+    crate::native_v2_candidate::test_support::codex_runtime(
+        RunSize::Medium,
+        BTreeMap::from([(NodeName::new("deliver").assert_value(), binding)]),
+    )
 }
 
 fn target(repo: &TempRepo) -> DeliveryTarget {

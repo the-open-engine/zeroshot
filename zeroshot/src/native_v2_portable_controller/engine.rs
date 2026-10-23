@@ -54,6 +54,7 @@ impl PortableRunEngine {
             observability,
             operator_diagnostics,
         } = bootstrap;
+        let postmortem = runtime.runner.postmortem();
         let supervisor = Arc::new(
             crate::native_v2_supervisor::NativeV2Supervisor::new(
                 run_id.clone(),
@@ -61,6 +62,7 @@ impl PortableRunEngine {
                 runtime.runner,
                 Arc::new(environment),
             )
+            .with_postmortem(postmortem)
             .with_checkpoints(runtime.checkpoints)
             .with_delivery_policy(delivery_policy)
             .with_live_output(Arc::new(observability.clone()))

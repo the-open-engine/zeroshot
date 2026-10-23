@@ -1,10 +1,9 @@
 use super::*;
 
 pub(super) fn runtime() -> RuntimePlan {
-    RuntimePlan::Codex {
-        provider: CodexProvider::OpenAi,
-        size: RunSize::Small,
-        nodes: BTreeMap::from([
+    crate::native_v2_candidate::test_support::codex_runtime(
+        RunSize::Small,
+        BTreeMap::from([
             (
                 NodeName::new("worker").assert_value_with("node"),
                 NodeRuntimeBinding::Agent {
@@ -27,7 +26,7 @@ pub(super) fn runtime() -> RuntimePlan {
                 delivery_binding(),
             ),
         ]),
-    }
+    )
 }
 
 pub(super) fn request(input: Value) -> RunSubmitParams {
@@ -208,10 +207,9 @@ pub(super) fn complex_runtime() -> RuntimePlan {
         session_scope,
         connections: DeclaredConnections::empty(),
     };
-    RuntimePlan::Codex {
-        provider: CodexProvider::OpenAi,
-        size: RunSize::Small,
-        nodes: BTreeMap::from([
+    crate::native_v2_candidate::test_support::codex_runtime(
+        RunSize::Small,
+        BTreeMap::from([
             (
                 NodeName::new("worker").assert_value_with("node"),
                 binding(SessionScope::Execution),
@@ -237,7 +235,7 @@ pub(super) fn complex_runtime() -> RuntimePlan {
                 delivery_binding(),
             ),
         ]),
-    }
+    )
 }
 
 fn delivery_binding() -> NodeRuntimeBinding {

@@ -112,6 +112,10 @@ pub struct RunSnapshot {
     pub executions: BTreeMap<ExecutionId, NodeSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
+    /// The delivery-checked main outcome is durable before optional run-global work starts.
+    /// This does not make the run terminal: cleanup and any auxiliary usage still precede that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_graph: Option<PrimaryGraphCompletion>,
     pub terminal: Option<TerminalResult>,
     pub token_usage: Option<TokenUsage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -156,6 +160,7 @@ impl RunSnapshot {
             force_stop_requested: false,
             executions: BTreeMap::new(),
             execution_seed: Vec::new(),
+            primary_graph: None,
             terminal: None,
             token_usage: None,
             failure_context: None,
@@ -167,6 +172,14 @@ impl RunSnapshot {
             .values()
             .filter(|node| matches!(node.state, NodeState::Active))
     }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct PrimaryGraphCompletion {
+    pub result: TerminalResult,
+    /// Until terminal finalization, a controller crash may hide unreported auxiliary usage.
+    pub auxiliary_pending: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -238,6 +251,15 @@ pub enum RunEvent {
     TokenUsageObserved {
         execution: ExecutionId,
         usage: Option<TokenUsageDelta>,
+    },
+    /// Provider usage from a run-global agent, outside reducer execution history.
+    RunTokenUsageObserved {
+        usage: Option<TokenUsageDelta>,
+    },
+    /// Irrevocable main outcome, separate from optional global work and runtime cleanup.
+    PrimaryGraphCompleted {
+        result: TerminalResult,
+        auxiliary_pending: bool,
     },
     ForceStopRequested,
     Terminal {

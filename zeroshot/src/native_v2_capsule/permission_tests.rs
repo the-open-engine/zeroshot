@@ -220,12 +220,16 @@ async fn admission(harness: &str, verifier: bool, binding: NodeRuntimeBinding) -
     let nodes = BTreeMap::from([(NodeName::new("work").assert_value(), binding)]);
     let runtime = if harness == "codex" {
         RuntimePlan::Codex {
+            active_memory: Default::default(),
+            global_agents: Default::default(),
             provider: CodexProvider::OpenAi,
             size: RunSize::Medium,
             nodes,
         }
     } else {
         RuntimePlan::Claude {
+            active_memory: Default::default(),
+            global_agents: Default::default(),
             provider: ClaudeProvider::Anthropic,
             size: RunSize::Medium,
             nodes,

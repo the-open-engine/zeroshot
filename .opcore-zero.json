@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "documentation": {
+    "bindings": [
+      {
+        "source": "zeroshot/src/active_memory/postmortem/initialize.rs",
+        "document": "docs/guides/active-memory.md"
+      },
+      {
+        "source": "zeroshot/src/active_memory.rs",
+        "document": "docs/guides/active-memory.md"
+      },
+      {
+        "source": "zeroshot/src/active_memory/postmortem.rs",
+        "document": "docs/guides/active-memory.md"
+      }
+    ]
+  }
+}

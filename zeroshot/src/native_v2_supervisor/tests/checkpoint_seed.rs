@@ -143,8 +143,7 @@ async fn selected_seed_preserves_outputs_routes_and_replays_without_prior_dispat
     )
     .await;
     let history = import_prerequisites(&harness).await;
-    let supervisor = harness.supervisor.clone();
-    let drive = tokio::spawn(async move { supervisor.drive().await });
+    let drive = harness.spawn_drive();
     record_successor_usage(&harness).await;
     release.wait().await;
     assert!(matches!(

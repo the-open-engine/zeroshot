@@ -56,6 +56,8 @@ struct PortableBootstrapDocument {
     workspace: PathBuf,
     workspace_lease: PathBuf,
     checkpoint_repository: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    memory_storage: Option<PathBuf>,
     storage: PathBuf,
     delivery_policy: DeliveryPolicy,
 }
@@ -101,6 +103,7 @@ impl PortableBootstrapDocument {
             workspace: self.workspace,
             workspace_lease: self.workspace_lease,
             checkpoint_repository: self.checkpoint_repository,
+            memory_storage: self.memory_storage,
             storage: self.storage,
             delivery_policy: self.delivery_policy,
         })
@@ -186,6 +189,7 @@ async fn start_controller_process(
     let delivery_validator = bootstrap.delivery_validator.clone();
     let git_credentials = bootstrap.git_credentials.clone();
     let native_environment = bootstrap.native_environment.clone();
+    let memory_storage = bootstrap.memory_storage.clone();
     let controller = Arc::new(
         PortableRunController::start(bootstrap, move |admitted| {
             crate::native_v2_local::build_local_process_candidate(
@@ -195,6 +199,7 @@ async fn start_controller_process(
                     adopt_existing_delivery,
                     workspace: &workspace,
                     storage: &storage,
+                    memory_storage: memory_storage.as_deref(),
                     github_token,
                     github_token_file,
                     delivery_validator,
@@ -264,6 +269,7 @@ fn encode_bootstrap(
         workspace: bootstrap.workspace.clone(),
         workspace_lease: bootstrap.workspace_lease.clone(),
         checkpoint_repository: bootstrap.checkpoint_repository.clone(),
+        memory_storage: bootstrap.memory_storage.clone(),
         storage: bootstrap.storage.clone(),
         delivery_policy: bootstrap.delivery_policy,
     };

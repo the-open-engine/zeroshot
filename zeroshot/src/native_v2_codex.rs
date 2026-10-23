@@ -70,9 +70,12 @@ pub struct NativeV2CodexAdapter {
     config: NativeV2CodexConfig,
     runners: ProviderProcessRunners,
     local_environment: BTreeMap<String, String>,
+    active_memory: Option<std::sync::Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
     #[cfg(test)]
     test_permission_policy: Option<crate::native_v2_capsule::provider_process::PermissionPolicy>,
 }
+
+crate::active_memory::hooks::impl_active_memory_adapter!(NativeV2CodexAdapter);
 
 impl NativeV2CodexAdapter {
     #[must_use]
@@ -86,6 +89,7 @@ impl NativeV2CodexAdapter {
             #[cfg(test)]
             test_permission_policy: None,
             local_environment: BTreeMap::new(),
+            active_memory: None,
         }
     }
 
@@ -102,6 +106,7 @@ impl NativeV2CodexAdapter {
             #[cfg(test)]
             test_permission_policy: None,
             local_environment,
+            active_memory: None,
         }
     }
 
@@ -157,7 +162,7 @@ impl NativeV2CodexAdapter {
                 .scratch_text()
                 .map_err(|error| NodeRunnerError::DriverDetail(error.to_string()))?,
         );
-        Ok(ProcessSessionCommand {
+        let mut command = ProcessSessionCommand {
             program: executable,
             argv,
             environment,
@@ -166,7 +171,29 @@ impl NativeV2CodexAdapter {
                 mode: access,
             },
             deadline: None,
-        })
+        };
+        self.configure_memory(
+            &mut command,
+            crate::active_memory::hooks::HookInstallation {
+                invocation,
+                home: input.files.home(),
+            },
+        );
+        Ok(command)
+    }
+
+    fn configure_memory(
+        &self,
+        command: &mut ProcessSessionCommand,
+        installation: crate::active_memory::hooks::HookInstallation<'_>,
+    ) {
+        if let Some(memory) = &self.active_memory {
+            memory.configure(
+                crate::active_memory::hooks::Harness::Codex,
+                command,
+                installation,
+            );
+        }
     }
 
     fn provider_environment(

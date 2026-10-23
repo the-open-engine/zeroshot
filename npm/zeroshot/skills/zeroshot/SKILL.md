@@ -242,3 +242,9 @@ configuration, issues, or logs.
 After an uncertain submission response, reconcile by submission key before retrying. Do not create a
 second logical run. Report submitted, running, verified, delivered, failed, and stopped states
 accurately; submission alone is not completion.
+
+## Initialize Active Memory
+
+For initialization or backfill from local run history, use the separate `zeroshot-memory-init`
+skill. It orchestrates isolated discovery followed by graph and repository maintenance through the
+resumable `zeroshot memory init` command.

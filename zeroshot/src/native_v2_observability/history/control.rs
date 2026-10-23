@@ -246,7 +246,10 @@ impl ControlReplay {
 
     fn project_event(&mut self, event: RunEvent) -> Result<(), &'static str> {
         match event {
-            RunEvent::SafeLog { .. } | RunEvent::TokenUsageObserved { .. } => Ok(()),
+            RunEvent::SafeLog { .. }
+            | RunEvent::TokenUsageObserved { .. }
+            | RunEvent::RunTokenUsageObserved { .. }
+            | RunEvent::PrimaryGraphCompleted { .. } => Ok(()),
             RunEvent::ForceStopRequested | RunEvent::Terminal { .. } => self.stop_pending(None),
             _ if self.snapshot.force_stop_requested => Ok(()),
             _ if self.snapshot.phase == RunPhase::Running => self.reduce(),

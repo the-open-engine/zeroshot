@@ -130,6 +130,7 @@ pub struct LocalProcessCandidateRequest<'a> {
     pub adopt_existing_delivery: bool,
     pub workspace: &'a Path,
     pub storage: &'a Path,
+    pub memory_storage: Option<&'a Path>,
     pub github_token: Option<String>,
     pub github_token_file: Option<TrustedGitHubTokenFile>,
     pub delivery_validator: Option<TrustedDeliveryValidator>,
@@ -298,6 +299,14 @@ fn pi_agent_directory_path(
     }
 }
 
+/// A branch-independent identity proof for retrospective local history selection.
+/// Runtime source admission still requires an exact attached source when delivery needs one.
+pub(crate) fn local_memory_remote(
+    workspace: &Path,
+) -> Option<openengine_cluster_protocol::GitRemoteUrl> {
+    source::select_remote(workspace, Path::new("git"), None).ok()
+}
+
 pub(crate) fn local_resolved_source(
     current_directory: &Path,
     git_program: &Path,
@@ -349,18 +358,37 @@ fn git_output(
 pub fn build_local_process_candidate(
     request: LocalProcessCandidateRequest<'_>,
 ) -> Result<Arc<dyn NodeRunner>, LocalCompositionError> {
-    build_local_candidate_config(request, false).map(|candidate| Arc::new(candidate) as _)
+    let admitted = request.admitted;
+    let prepared = crate::active_memory::runtime::PreparedActiveMemory::prepare(
+        crate::active_memory::runtime::MemoryPreparation {
+            admitted,
+            workspace: request.workspace,
+            storage: request.memory_storage,
+        },
+    );
+    let hooks = prepared
+        .as_ref()
+        .ok()
+        .and_then(|memory| memory.as_ref())
+        .map(|memory| memory.hooks.clone());
+    let runner = build_local_candidate_config(request, false, hooks)?;
+    Ok(match prepared {
+        Ok(Some(memory)) => memory.wrap(admitted, runner),
+        Ok(None) => Arc::new(runner),
+        Err(_) => crate::active_memory::runtime::unavailable_memory(Arc::new(runner)),
+    })
 }
 
 pub(crate) fn build_local_owner_process_candidate(
     request: LocalProcessCandidateRequest<'_>,
 ) -> Result<Arc<NativeNodeRunner>, LocalCompositionError> {
-    build_local_candidate_config(request, true).map(Arc::new)
+    build_local_candidate_config(request, true, None).map(Arc::new)
 }
 
 fn build_local_candidate_config(
     request: LocalProcessCandidateRequest<'_>,
     owner_scoped: bool,
+    active_memory: Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
 ) -> Result<NativeNodeRunner, LocalCompositionError> {
     validate_local_environment(request.admitted.environment.as_ref())?;
     let LocalProcessCandidateRequest {
@@ -369,6 +397,7 @@ fn build_local_candidate_config(
         adopt_existing_delivery,
         workspace,
         storage,
+        memory_storage: _,
         github_token,
         github_token_file,
         delivery_validator,
@@ -425,6 +454,7 @@ fn build_local_candidate_config(
         })
     };
     let config = NativeV2CandidateConfig {
+        active_memory,
         lanes,
         workspace: workspace.to_owned(),
         delivery,

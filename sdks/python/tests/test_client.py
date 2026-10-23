@@ -38,6 +38,24 @@ def runtime() -> UniformRuntime:
     )
 
 
+def test_uniform_runtime_preserves_memory_controls_without_aliasing() -> None:
+    settings = {"postmortem": {"enabled": False}}
+    selected = UniformRuntime(
+        harness="pi",
+        provider="bedrock",
+        model="caller-model",
+        active_memory={"repository": False, "graph": True, "budgetBytes": 512},
+        global_agents=settings,
+    )
+    encoded = selected.to_dict()
+    assert encoded["activeMemory"] == {"repository": False, "graph": True, "budgetBytes": 512}
+    assert encoded["globalAgents"] == settings
+    settings["postmortem"]["enabled"] = True
+    assert encoded["globalAgents"] == {"postmortem": {"enabled": False}}
+    assert "activeMemory" not in runtime().to_dict()
+    assert "globalAgents" not in runtime().to_dict()
+
+
 def test_uniform_runtime_requires_an_explicit_harness() -> None:
     with pytest.raises(TypeError, match="harness"):
         UniformRuntime(provider="openrouter", model="gpt-5.6-luna")  # type: ignore[call-arg]

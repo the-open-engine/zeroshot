@@ -13,7 +13,6 @@ use tokio::sync::{broadcast, watch};
 
 use super::*;
 use crate::native_v2_candidate::test_support::full_graph;
-use crate::native_v2_contract::{CodexProvider, RuntimePlan};
 use crate::worker_catalog::ReasoningEffort;
 
 impl DurableOutput {
@@ -138,11 +137,10 @@ pub(crate) fn admitted() -> AdmittedRun {
             },
         },
         initial_input: Value::Null,
-        runtime: RuntimePlan::Codex {
-            provider: CodexProvider::OpenAi,
-            size: RunSize::Medium,
-            nodes: runtime_nodes,
-        },
+        runtime: crate::native_v2_candidate::test_support::codex_runtime(
+            RunSize::Medium,
+            runtime_nodes,
+        ),
         source: Some(source()),
     }
 }
@@ -180,6 +178,40 @@ pub(crate) fn request(run: &str, node: &str, identity: (u64, u64)) -> NodeRunReq
             binding: binding.clone(),
         },
         environment: ResolvedEnvironment::exact(&binding, BTreeMap::new()).assert_value(),
+    }
+}
+
+pub(crate) fn node_started(
+    reference: &ExecutionRef,
+    input: Value,
+) -> crate::v2_run_ledger::RunEvent {
+    crate::v2_run_ledger::RunEvent::NodeStarted {
+        reference: reference.clone(),
+        occurrence: crate::full_v1_reducer::StructuralOccurrence {
+            node: reference.node.clone(),
+            map_indices: Vec::new(),
+        },
+        attempt: PositiveInteger::new(1).assert_value(),
+        input,
+    }
+}
+
+pub(crate) struct CountingSession {
+    pub(crate) closed: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl NodeSession for CountingSession {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    async fn is_live(&self) -> bool {
+        true
+    }
+
+    async fn close(&self) {
+        self.closed.fetch_add(1, Ordering::SeqCst);
     }
 }
 
