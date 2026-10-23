@@ -90,7 +90,7 @@ async fn rejected_seed_cleans_allocated_capsule_before_publishing_failure() {
     let result = harness.controller.start_allocated(start).await;
     assert!(matches!(
         result,
-        Err(NativeV2CloudError::Ledger(RunLedgerError::EventTooLarge))
+        Err(NativeV2PlatformError::Ledger(RunLedgerError::EventTooLarge))
     ));
     assert_failed_cleanup(
         &harness,
@@ -110,7 +110,7 @@ async fn observation_initialization_failure_also_cleans_allocated_capsule() {
     // Simulate a ledger projection that cannot be represented as a runtime observation.
     start.stored.snapshot.phase = RunPhase::Finished;
     let result = harness.controller.start_allocated(start).await;
-    assert!(matches!(result, Err(NativeV2CloudError::Observation(_))));
+    assert!(matches!(result, Err(NativeV2PlatformError::Observation(_))));
     assert_failed_cleanup(
         &harness,
         &run_id,
@@ -130,7 +130,7 @@ async fn rejected_seed_waits_for_confirmed_cleanup_before_terminalization() {
     let result = harness.controller.start_allocated(start).await;
     assert!(matches!(
         result,
-        Err(NativeV2CloudError::Supervisor(
+        Err(NativeV2PlatformError::Supervisor(
             NativeV2SupervisorError::RuntimeCleanup(_)
         ))
     ));
@@ -139,7 +139,7 @@ async fn rejected_seed_waits_for_confirmed_cleanup_before_terminalization() {
     assert_not_launched(&harness, &run_id, false).await;
 
     let replacement =
-        NativeV2CloudController::new(harness.ledger.clone(), harness.allocator.clone())
+        NativeV2PlatformController::new(harness.ledger.clone(), harness.allocator.clone())
             .await
             .assert_value();
     assert_eq!(
@@ -189,7 +189,7 @@ impl CapsuleAllocator for InvalidSeedAllocator {
 #[tokio::test]
 async fn asynchronous_initialization_failure_releases_preparation_and_controller_authority() {
     let harness = harness(Behavior::Complete).await;
-    let controller = NativeV2CloudController::new(
+    let controller = NativeV2PlatformController::new(
         harness.ledger.clone(),
         Arc::new(InvalidSeedAllocator(harness.allocator.clone())),
     )

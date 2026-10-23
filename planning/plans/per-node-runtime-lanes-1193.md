@@ -26,7 +26,7 @@ The restriction is not an auth, capsule, or session constraint. It has two sourc
   `zeroshot/src/native_v2_hosting/allocator.rs`).
 
 Everything downstream is already keyed per node: session pool keys, provider private homes, hosted
-UID markers, admission rules, status and observation, Cloud submission, the Python SDK, and the
+UID markers, admission rules, status and observation, Platform submission, the Python SDK, and the
 target image, which installs all three CLIs at fixed paths.
 
 ## Decisions
@@ -43,7 +43,7 @@ target image, which installs all three CLIs at fixed paths.
 6. In the UI, changing the run-level harness clears every per-node override. Changing the
    run-level provider leaves them.
 7. The run-level pair stays. Dropping it would be a breaking wire change for profiles, ledgers,
-   history, fixtures, docs, and Cloud. This design is a stepping stone: a later major version may
+   history, fixtures, docs, and Platform. This design is a stepping stone: a later major version may
    make the run-level pair optional when every agent node carries a lane, without undoing any of
    this work.
 
@@ -163,7 +163,7 @@ pub struct TargetNodeRuntimeLanesDiscovery {
 
 `TargetDiscoveryExtensions` gains `node_runtime_lanes: Option<TargetNodeRuntimeLanesDiscovery>`
 with `skip_serializing_if = "Option::is_none"`. Targets built from this change always advertise
-it. Cloud is a hosted target behind the same discovery document, so it is covered once it serves
+it. Platform is a hosted target behind the same discovery document, so it is covered once it serves
 the marker and is refused cleanly until then.
 
 The marker's shape is frozen at exactly `{"kind": ...}`. Like its sibling markers it denies unknown

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { workspaceStorageKeys } from './workspace-storage';
+import { upgradePlatformWorkspaceStorage, workspaceStorageKeys } from './workspace-storage';
 import { RunHistoryView } from './RunHistoryView';
 import { RunHistoryBoundary } from './RunHistoryBoundary';
 import { createEmbeddedFetch } from './embedded-fetch';
@@ -99,7 +99,7 @@ function useHostedServices(configuration?: WorkspaceInit, host?: WorkspaceBridge
       .then((bootstrap) => {
         if (controller.signal.aborted) return;
         if (
-          bootstrap.workspace.kind !== 'cloud' ||
+          bootstrap.workspace.kind !== 'platform' ||
           bootstrap.workspace.id !== configuration.workspaceId
         )
           throw new ApiError(
@@ -110,6 +110,7 @@ function useHostedServices(configuration?: WorkspaceInit, host?: WorkspaceBridge
         const collection = configuration.environmentApi
           ? new URL(configuration.environmentApi, window.location.origin)
           : undefined;
+        if (collection) upgradePlatformWorkspaceStorage(collection, bootstrap.workspace);
         const environmentStore = collection
           ? createEnvironmentStore(
               collection,

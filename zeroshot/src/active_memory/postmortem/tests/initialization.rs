@@ -702,7 +702,7 @@ fn memory_cli_exposes_only_the_resumable_init_contract() {
             "--directory",
             "session",
             "--target",
-            "cloud",
+            "platform",
         ],
     ] {
         assert!(parse(&args).is_err());

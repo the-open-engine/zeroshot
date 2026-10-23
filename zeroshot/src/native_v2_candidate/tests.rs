@@ -34,10 +34,10 @@ use crate::native_v2_cli::{
     NativeV2CliCommand, NativeV2CliError, NeverDetach, RunCommand, RunGraph, TargetAdd,
     PreparedRunRequest,
 };
-use crate::native_v2_cloud::{
+use crate::native_v2_platform::{
     AllocatedCapsule, CapsuleAllocationUnavailable, CapsuleAllocator, CapsuleCleanup,
     CapsuleCleanupUnavailable, CapsuleDestroyed, ControllerClaimUnavailable,
-    ExclusiveControllerClaim, NativeV2CloudController,
+    ExclusiveControllerClaim, NativeV2PlatformController,
 };
 use crate::native_v2_contract::{
     ClaudeProvider, CodexProvider, DeclaredConnections, DeclaredEnvironment,
@@ -385,9 +385,9 @@ impl CapsuleAllocator for CandidateAllocator {
 
     async fn allocate(
         &self,
-        request: crate::native_v2_cloud::CapsuleAllocationRequest<'_>,
+        request: crate::native_v2_platform::CapsuleAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
-        let crate::native_v2_cloud::CapsuleAllocationRequest {
+        let crate::native_v2_platform::CapsuleAllocationRequest {
             run_id: _run_id,
             admitted,
             github_token: _github_token,
@@ -446,7 +446,7 @@ impl CapsuleAllocator for CandidateAllocator {
 }
 
 #[tokio::test]
-async fn cloud_oecp_candidate_runs_worker_and_trusted_merge_entirely_through_v2() {
+async fn platform_oecp_candidate_runs_worker_and_trusted_merge_entirely_through_v2() {
     let repository = TempRepository::candidate();
     let target = DeliveryTarget::new("acme/project", "main", repository.base.clone())
         .assert_value_with("delivery target");
@@ -464,7 +464,7 @@ async fn cloud_oecp_candidate_runs_worker_and_trusted_merge_entirely_through_v2(
     });
     let ledger = Arc::new(FakeRunLedger::new());
     let controller = Arc::new(
-        NativeV2CloudController::new(ledger, allocator)
+        NativeV2PlatformController::new(ledger, allocator)
             .await
             .assert_value_with("controller"),
     );
@@ -517,7 +517,7 @@ async fn cloud_oecp_candidate_runs_worker_and_trusted_merge_entirely_through_v2(
 }
 
 #[tokio::test]
-async fn cloud_oecp_candidate_runs_each_agent_node_on_its_own_lane_and_provider_access() {
+async fn platform_oecp_candidate_runs_each_agent_node_on_its_own_lane_and_provider_access() {
     let repository = TempRepository::candidate();
     let target = DeliveryTarget::new("acme/project", "main", repository.base.clone())
         .assert_value_with("delivery target");
@@ -535,7 +535,7 @@ async fn cloud_oecp_candidate_runs_each_agent_node_on_its_own_lane_and_provider_
         cleanup: cleanup.clone(),
     });
     let controller = Arc::new(
-        NativeV2CloudController::new(Arc::new(FakeRunLedger::new()), allocator)
+        NativeV2PlatformController::new(Arc::new(FakeRunLedger::new()), allocator)
             .await
             .assert_value_with("controller"),
     );
@@ -653,7 +653,7 @@ fn available_environment(values: &[(&str, &str)]) -> BTreeMap<EnvironmentVariabl
 
 async fn submit_through_cli(
     repository: &TempRepository,
-    controller: Arc<NativeV2CloudController>,
+    controller: Arc<NativeV2PlatformController>,
     kind: RuntimePlanKind,
     environment: BTreeMap<EnvironmentVariableName, String>,
 ) -> RunSubmitResult {
@@ -686,7 +686,7 @@ async fn submit_through_cli(
             source_connection: None,
 
             environment: None,
-            target: Some("candidate-cloud".to_owned()),
+            target: Some("candidate-platform".to_owned()),
             title: RunTitle::new("Candidate end to end").assert_value_with("title"),
             selection: crate::native_v2_cli::RunSelection::Inline {
                 graph: RunGraph::File(graph_path),

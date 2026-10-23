@@ -25,7 +25,7 @@ use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission, NativeV2Admi
 use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
 use crate::native_v2_cli::local::{create_local_run_storage, local_workspace_lease_path};
 use crate::native_v2_cli::{default_local_state_root, LocalRunProfileStore, NativeV2CliError};
-use crate::native_v2_cloud::{submission_digest, NativeV2CloudError};
+use crate::native_v2_platform::{submission_digest, NativeV2PlatformError};
 use crate::native_v2_contract::NodeRuntimeBinding;
 use crate::native_v2_local::{
     build_local_owner_process_candidate, local_resolved_source, LocalCompositionError,
@@ -63,7 +63,7 @@ pub enum AcpServeError {
     #[error(transparent)]
     Environment(#[from] RunEnvironmentError),
     #[error(transparent)]
-    Cloud(#[from] NativeV2CloudError),
+    Platform(#[from] NativeV2PlatformError),
     #[error(transparent)]
     Ledger(#[from] RunLedgerError),
     #[error(transparent)]

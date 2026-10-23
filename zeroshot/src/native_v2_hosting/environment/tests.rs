@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use openengine_cluster_testkit::assertions::AssertValue;
 use crate::execution::process::{HostedProcessPool, HostedProcessScope};
 use crate::native_v2_candidate::test_support::TestDirectory;
-use crate::native_v2_cloud::PreparationProgress;
+use crate::native_v2_platform::PreparationProgress;
 
 static NEXT_UID: AtomicU32 = AtomicU32::new(50_000_000);
 

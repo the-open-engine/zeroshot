@@ -26,7 +26,7 @@ use openengine_cluster_server::identity::ConnectionIdentity;
 use thiserror::Error;
 use tokio::sync::Mutex;
 
-use crate::native_v2_cloud::NativeV2CloudController;
+use crate::native_v2_platform::NativeV2PlatformController;
 pub use operator_diagnostics::{OperatorDiagnosticJsonLines, OperatorDiagnosticOutput};
 pub(crate) use operator_diagnostics::{
     MAX_OPERATOR_DIAGNOSTIC_TEXT_BYTES, NewOperatorDiagnostic, OperatorDiagnosticStore,
@@ -127,11 +127,11 @@ pub trait TargetControllerFactory: Send + Sync {
         false
     }
 
-    async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError>;
+    async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError>;
 
     async fn submit(
         &self,
-        controller: &NativeV2CloudController,
+        controller: &NativeV2PlatformController,
         request: TargetRunRequest,
     ) -> Result<TargetRunReceipt, TargetAuthorityError>;
 }
@@ -158,7 +158,7 @@ pub trait TargetSessionAuthority: Send + Sync {
 }
 
 struct AuthorityState {
-    controller: Option<Arc<NativeV2CloudController>>,
+    controller: Option<Arc<NativeV2PlatformController>>,
 }
 
 /// One target-wide state machine shared by every HTTP and OECP connection.
@@ -233,7 +233,9 @@ impl NativeV2TargetAuthority {
     }
 
     /// Activates exactly one controller and returns the same authority for every target session.
-    pub async fn controller(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
+    pub async fn controller(
+        &self,
+    ) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
         let mut state = self.state.lock().await;
         if let Some(controller) = &state.controller {
             return Ok(controller.clone());

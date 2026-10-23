@@ -133,7 +133,7 @@ async fn prepare_target(
 ) -> Result<
     (
         Arc<zeroshot_engine::native_v2_target_authority::NativeV2TargetAuthority>,
-        Arc<zeroshot_engine::native_v2_cloud::NativeV2CloudController>,
+        Arc<zeroshot_engine::native_v2_platform::NativeV2PlatformController>,
     ),
     TargetServeError,
 > {
@@ -154,7 +154,7 @@ fn with_ui(
     server: NativeV2TargetServer,
     config: &TargetServe,
     public_origin: &str,
-    controller: &zeroshot_engine::native_v2_cloud::NativeV2CloudController,
+    controller: &zeroshot_engine::native_v2_platform::NativeV2PlatformController,
 ) -> Result<NativeV2TargetServer, TargetServeError> {
     let ui = zeroshot_engine::profile_ui::UiService::for_target(
         std::fs::canonicalize(&config.storage)?,

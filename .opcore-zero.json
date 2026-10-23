@@ -13,6 +13,18 @@
       {
         "source": "zeroshot/src/active_memory/postmortem.rs",
         "document": "docs/guides/active-memory.md"
+      },
+      {
+        "source": "ui/src/api.ts",
+        "document": "ui/README.md"
+      },
+      {
+        "source": "ui/src/workspace-storage.ts",
+        "document": "ui/README.md"
+      },
+      {
+        "source": "zeroshot/src/native_v2_platform.rs",
+        "document": "docs/concepts/targets.md"
       }
     ]
   }

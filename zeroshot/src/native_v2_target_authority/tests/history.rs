@@ -24,9 +24,9 @@ struct HistoryFactory {
 
 #[async_trait]
 impl TargetControllerFactory for HistoryFactory {
-    async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
+    async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
         self.creates.fetch_add(1, Ordering::SeqCst);
-        NativeV2CloudController::new(self.ledger.clone(), Arc::new(NoAllocation))
+        NativeV2PlatformController::new(self.ledger.clone(), Arc::new(NoAllocation))
             .await
             .map(Arc::new)
             .map_err(|error| TargetAuthorityError::unavailable(error.to_string()))
@@ -34,7 +34,7 @@ impl TargetControllerFactory for HistoryFactory {
 
     async fn submit(
         &self,
-        _controller: &NativeV2CloudController,
+        _controller: &NativeV2PlatformController,
         _request: TargetRunRequest,
     ) -> Result<TargetRunReceipt, TargetAuthorityError> {
         Err(TargetAuthorityError::invalid(

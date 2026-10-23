@@ -345,7 +345,9 @@ struct FakeControllerClaim {
     run_id: RunId,
 }
 
-fn exact_test_environment(request: &RunSubmitParams) -> Result<RunEnvironment, NativeV2CloudError> {
+fn exact_test_environment(
+    request: &RunSubmitParams,
+) -> Result<RunEnvironment, NativeV2PlatformError> {
     let available = BTreeMap::from([
         (
             EnvironmentVariableName::new("NODE_TOKEN").assert_value_with("environment name"),
@@ -364,9 +366,9 @@ fn exact_test_environment(request: &RunSubmitParams) -> Result<RunEnvironment, N
 }
 
 async fn submit_test_request(
-    controller: &NativeV2CloudController,
+    controller: &NativeV2PlatformController,
     request: RunSubmitParams,
-) -> Result<CloudRunReceipt, NativeV2CloudError> {
+) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
     let environment = exact_test_environment(&request)?;
     controller
         .submit_with_exact_environment(request, environment)

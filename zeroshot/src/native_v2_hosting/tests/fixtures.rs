@@ -17,7 +17,7 @@ use crate::native_v2_candidate::test_support::{TestDirectory, full_graph, succes
 use crate::native_v2_capsule::CapsuleFilesystem;
 use crate::native_v2_claude::ClaudeProcessEnvironment;
 use crate::native_v2_pi::PiProcessEnvironment;
-use crate::native_v2_cloud::CapsuleAllocationUnavailable;
+use crate::native_v2_platform::CapsuleAllocationUnavailable;
 use crate::native_v2_contract::{
     ClaudeProvider, EnvironmentVariableName, NodeRuntimeBinding, RunSubmission,
 };

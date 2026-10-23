@@ -5,7 +5,7 @@ use crate::execution::process::HostedProcessPool;
 use crate::native_v2_candidate::NativeV2HarnessConfig;
 use crate::native_v2_capsule::{CapsuleFilesystem, HarnessProcessEnvironment};
 use crate::native_v2_claude::ClaudeAdapterConfig;
-use crate::native_v2_cloud::CapsuleAllocationUnavailable;
+use crate::native_v2_platform::CapsuleAllocationUnavailable;
 use crate::native_v2_codex::NativeV2CodexConfig;
 use crate::native_v2_contract::{AdmittedRun, RuntimeLane};
 use crate::native_v2_hosting::environment;

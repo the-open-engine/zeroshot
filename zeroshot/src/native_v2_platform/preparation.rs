@@ -91,11 +91,11 @@ impl PreparationProgress for LedgerPreparationProgress {
     }
 }
 
-impl NativeV2CloudController {
+impl NativeV2PlatformController {
     pub(super) async fn start_preparation(
         &self,
         start: PreparationStart,
-    ) -> Result<(), NativeV2CloudError> {
+    ) -> Result<(), NativeV2PlatformError> {
         self.observability.track_runtime(&start.stored.snapshot)?;
         let run_id = start.stored.snapshot.run_id.clone();
         let task = Arc::new(PreparationTask {
@@ -222,7 +222,7 @@ impl NativeV2CloudController {
         &self,
         run_id: &RunId,
         runtime: RuntimeSlot,
-    ) -> Result<(), NativeV2CloudError> {
+    ) -> Result<(), NativeV2PlatformError> {
         if let RuntimeSlot::Preparing(task) = runtime {
             if task.is_finished() {
                 return self.retry_preparation_cleanup(run_id, &task, false).await;
@@ -236,7 +236,7 @@ impl NativeV2CloudController {
         run_id: &RunId,
         task: &PreparationTask,
         force: bool,
-    ) -> Result<(), NativeV2CloudError> {
+    ) -> Result<(), NativeV2PlatformError> {
         let _turn = task.cleanup_turn.lock().await;
         if self
             .ledger
@@ -272,7 +272,7 @@ impl NativeV2CloudController {
         &self,
         run_id: &RunId,
         task: &PreparationTask,
-    ) -> Result<(), NativeV2CloudError> {
+    ) -> Result<(), NativeV2PlatformError> {
         task.cancellation.send_replace(true);
         task.wait().await;
         let runtime = self.runtimes.lock().await.get(run_id).cloned();

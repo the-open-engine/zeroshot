@@ -56,12 +56,12 @@ graphs follow the same protocol contracts.
 
     [Understand targets](concepts/targets.md)
 
-- **Zeroshot Cloud**
+- **Zeroshot Platform**
 
-    Cloud accepts the same graph and runtime plan through a managed target. Its documentation covers
+    Platform accepts the same graph and runtime plan through a managed target. Its documentation covers
     accounts, organization policy, and queue behavior.
 
-    [Open the Cloud docs](https://cloud.zeroshot.sh/docs)
+    [Open the Platform docs](https://cloud.zeroshot.sh/docs)
 
 </div>
 
@@ -74,7 +74,7 @@ the checkout and run ledger on your infrastructure, but a harness using an exter
 sends that provider the code and context it needs. Self-hosting zeroshot does not make model
 processing local. Check the selected provider's data-handling terms before using client code.
 
-For Cloud-hosted execution, see the [Cloud privacy notice](https://cloud.zeroshot.sh/legal/privacy)
+For Platform-hosted execution, see the [Platform privacy notice](https://cloud.zeroshot.sh/legal/privacy)
 for data locations and [retention](https://cloud.zeroshot.sh/legal/privacy#retention).
 [Runtime connections](concepts/runtimes-and-connections.md) describe how to select providers and
 supply credentials.

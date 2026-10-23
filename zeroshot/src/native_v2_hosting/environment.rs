@@ -16,7 +16,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::execution::process::{HostedProcessIdentity, platform};
-use crate::native_v2_cloud::{
+use crate::native_v2_platform::{
     CapsuleAllocationUnavailable, CapsuleCleanupUnavailable, CapsulePreparation,
 };
 use crate::native_v2_capsule::provider_process::safe_provider_text;

@@ -11,7 +11,7 @@ use super::fixtures::*;
 use super::hosted_authority::*;
 
 #[tokio::test]
-async fn hosted_lifecycle_stays_cloud_owned_from_queue_through_completion() {
+async fn hosted_lifecycle_stays_platform_owned_from_queue_through_completion() {
     let root = temp_root();
     let (backend, dialer, server) = hosted_backend(&root, 32).await;
     let run_id = RunId::new("run-hosted");
@@ -22,7 +22,7 @@ async fn hosted_lifecycle_stays_cloud_owned_from_queue_through_completion() {
     assert_force_while_queued(&backend, &run_id).await;
 
     assert!(dialer.sessions.lock().assert_value().is_empty());
-    assert_cloud_requests(&server.await.assert_value());
+    assert_platform_requests(&server.await.assert_value());
 }
 
 async fn assert_queued<B>(backend: &B, run_id: &RunId)
@@ -115,7 +115,7 @@ where
     assert!(matches!(forced.status, CliRunStatus::Queued(_)));
 }
 
-fn assert_cloud_requests(requests: &[CapturedHttpRequest]) {
+fn assert_platform_requests(requests: &[CapturedHttpRequest]) {
     assert_eq!(requests.len(), 32);
     assert_eq!(
         requests

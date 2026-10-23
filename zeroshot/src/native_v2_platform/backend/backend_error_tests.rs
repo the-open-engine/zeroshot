@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn source_checkout_failure_is_a_public_application_error() {
-    let error = cloud_backend_error(NativeV2CloudError::Allocation(
+    let error = platform_backend_error(NativeV2PlatformError::Allocation(
         CapsuleAllocationUnavailable::SourceCheckout,
     ));
     assert_eq!(error.code, "source_checkout_unavailable");
@@ -21,7 +21,7 @@ fn attach_lookup_failures_are_public_application_errors() {
         (NativeV2ObservationError::ExecutionNotActive, GONE),
         (NativeV2ObservationError::ExecutionNotLive, GONE),
     ] {
-        let error = cloud_backend_error(NativeV2CloudError::Observation(source));
+        let error = platform_backend_error(NativeV2PlatformError::Observation(source));
         assert_eq!(error.code, code);
         assert!(error.details.is_none());
     }
@@ -29,7 +29,7 @@ fn attach_lookup_failures_are_public_application_errors() {
 
 #[test]
 fn backend_errors_preserve_public_refusals_and_hide_internal_failures() {
-    let admission = cloud_backend_error(NativeV2CloudError::Admission(
+    let admission = platform_backend_error(NativeV2PlatformError::Admission(
         NativeV2AdmissionError::UnsupportedGraphProfile,
     ));
     assert_eq!(admission.code, GRAPH_INVALID);
@@ -37,7 +37,7 @@ fn backend_errors_preserve_public_refusals_and_hide_internal_failures() {
     assert!(admission.details.is_none());
 
     let existing_run_id = RunId::new("existing-run");
-    let conflict = cloud_backend_error(NativeV2CloudError::Ledger(
+    let conflict = platform_backend_error(NativeV2PlatformError::Ledger(
         RunLedgerError::SubmissionConflict {
             existing_run_id: existing_run_id.clone(),
         },
@@ -49,16 +49,20 @@ fn backend_errors_preserve_public_refusals_and_hide_internal_failures() {
     );
 
     for source in [
-        NativeV2CloudError::Observation(NativeV2ObservationError::Ledger(RunLedgerError::Storage)),
-        NativeV2CloudError::Observation(NativeV2ObservationError::Ledger(RunLedgerError::Corrupt)),
+        NativeV2PlatformError::Observation(NativeV2ObservationError::Ledger(
+            RunLedgerError::Storage,
+        )),
+        NativeV2PlatformError::Observation(NativeV2ObservationError::Ledger(
+            RunLedgerError::Corrupt,
+        )),
     ] {
-        let error = cloud_backend_error(source);
+        let error = platform_backend_error(source);
         assert_eq!(error.code, "SOURCE_UNAVAILABLE");
         assert!(error.message.contains("history is unavailable"));
         assert!(error.details.is_none());
     }
 
-    let internal = cloud_backend_error(NativeV2CloudError::SubmissionIdentity);
+    let internal = platform_backend_error(NativeV2PlatformError::SubmissionIdentity);
     assert_eq!(internal.code, INTERNAL_ERROR_CODE);
     assert_eq!(internal.message, "native-v2 operation failed");
     assert!(internal.details.is_none());

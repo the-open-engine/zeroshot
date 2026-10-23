@@ -14,5 +14,7 @@ mod hosted_lifecycle;
 mod hosted_recovery;
 #[path = "tests/integration.rs"]
 mod integration;
+#[path = "tests/platform_upgrade.rs"]
+mod platform_upgrade;
 #[path = "tests/transport.rs"]
 mod transport;

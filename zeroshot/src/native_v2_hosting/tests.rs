@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::native_v2_candidate::test_support::{TestDirectory, admit, environment_name};
-use crate::native_v2_cloud::CapsuleAllocator;
+use crate::native_v2_platform::CapsuleAllocator;
 use crate::native_v2_contract::{self, ExecutionRef, NodeInvocation};
 use crate::native_v2_runner::{NodeRunRequest, ResolvedEnvironment};
 use crate::native_v2_portable_controller::WorkspaceIdentity;
@@ -146,7 +146,7 @@ fn run_environment_is_exact_and_request_debug_is_redacted() {
 
 #[test]
 fn graph_rejection_projects_its_first_safe_diagnostic() {
-    let projected = project_cloud_error(NativeV2CloudError::Admission(
+    let projected = project_platform_error(NativeV2PlatformError::Admission(
         crate::native_v2_admission::NativeV2AdmissionError::GraphVerification(
             VerificationError::Rejected {
                 diagnostics: vec![GraphDiagnostic {
@@ -169,38 +169,38 @@ fn graph_rejection_projects_its_first_safe_diagnostic() {
 }
 
 #[test]
-fn cloud_failures_map_to_stable_target_error_classes() {
+fn platform_failures_map_to_stable_target_error_classes() {
     let cases = [
         (
-            NativeV2CloudError::SubmissionIdentity,
+            NativeV2PlatformError::SubmissionIdentity,
             TargetAuthorityErrorKind::Invalid,
         ),
         (
-            NativeV2CloudError::Ledger(RunLedgerError::AdmittedRunTooLarge),
+            NativeV2PlatformError::Ledger(RunLedgerError::AdmittedRunTooLarge),
             TargetAuthorityErrorKind::Invalid,
         ),
         (
-            NativeV2CloudError::Ledger(RunLedgerError::SubmissionConflict {
+            NativeV2PlatformError::Ledger(RunLedgerError::SubmissionConflict {
                 existing_run_id: RunId::new("existing-run"),
             }),
             TargetAuthorityErrorKind::Conflict,
         ),
         (
-            NativeV2CloudError::Ledger(RunLedgerError::RunIdConflict),
+            NativeV2PlatformError::Ledger(RunLedgerError::RunIdConflict),
             TargetAuthorityErrorKind::Conflict,
         ),
         (
-            NativeV2CloudError::Ledger(RunLedgerError::Storage),
+            NativeV2PlatformError::Ledger(RunLedgerError::Storage),
             TargetAuthorityErrorKind::Unavailable,
         ),
         (
-            NativeV2CloudError::ResumeCredentials,
+            NativeV2PlatformError::ResumeCredentials,
             TargetAuthorityErrorKind::Unavailable,
         ),
     ];
     for (source, expected) in cases {
         let message = source.to_string();
-        let projected = project_cloud_error(source);
+        let projected = project_platform_error(source);
         assert_eq!(projected.kind(), expected);
         assert_eq!(projected.message(), message);
     }

@@ -260,7 +260,7 @@ struct FailureHarness {
     diagnostic_receiver: std::sync::Mutex<
         tokio::sync::broadcast::Receiver<openengine_cluster_protocol::TargetOperatorDiagnostic>,
     >,
-    controller: NativeV2CloudController,
+    controller: NativeV2PlatformController,
     ledger: Arc<FaultLedger>,
     driver: Arc<FaultDriver>,
     cleanup: Arc<FakeCleanup>,
@@ -280,7 +280,7 @@ impl FailureHarness {
         let cleanup = Arc::new(FakeCleanup::new(inner));
         let allocator = Arc::new(FakeAllocator::new(driver.clone(), cleanup.clone()));
         let (output, diagnostic_receiver) = OperatorDiagnosticOutput::channel();
-        let controller = NativeV2CloudController::new(ledger.clone(), allocator)
+        let controller = NativeV2PlatformController::new(ledger.clone(), allocator)
             .await
             .assert_value_with("fault-injection controller startup")
             .with_operator_diagnostics(Arc::new(OperatorDiagnosticStore::new(Some(output))));
@@ -681,7 +681,7 @@ async fn supervisor_panic_waits_for_peer_output_before_cleanup_and_durable_failu
         gate: gate.clone(),
     });
     let allocator = Arc::new(FakeAllocator::new(driver, cleanup.clone()));
-    let controller = NativeV2CloudController::new(ledger.clone(), allocator)
+    let controller = NativeV2PlatformController::new(ledger.clone(), allocator)
         .await
         .assert_value_with("peer panic controller startup");
     let receipt = submit_test_request(&controller, complex_request())

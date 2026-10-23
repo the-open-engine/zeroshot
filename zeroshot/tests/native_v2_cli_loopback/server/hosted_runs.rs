@@ -9,7 +9,7 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
-use zeroshot_engine::native_v2_cloud::NativeV2CloudController;
+use zeroshot_engine::native_v2_platform::NativeV2PlatformController;
 use zeroshot_engine::native_v2_target_authority::NativeV2TargetAuthority;
 
 use super::{read_request, write_json_response};
@@ -86,7 +86,7 @@ struct RunRoute<'a> {
 
 async fn serve_list(
     stream: &mut TcpStream,
-    controller: &NativeV2CloudController,
+    controller: &NativeV2PlatformController,
     state: &HostedRunState,
 ) -> io::Result<()> {
     let queued = state.observe_queue();
@@ -112,7 +112,7 @@ async fn serve_list(
 
 async fn serve_run_operation(
     stream: &mut TcpStream,
-    controller: &Arc<NativeV2CloudController>,
+    controller: &Arc<NativeV2PlatformController>,
     state: &Arc<HostedRunState>,
     route: RunRoute<'_>,
 ) -> io::Result<()> {
@@ -170,7 +170,7 @@ struct HostedWatchRoute<'a> {
 
 async fn serve_hosted_watch(
     stream: &mut TcpStream,
-    controller: Arc<NativeV2CloudController>,
+    controller: Arc<NativeV2PlatformController>,
     route: HostedWatchRoute<'_>,
 ) -> io::Result<()> {
     let from_cursor = query_value(route.query, "from_cursor").map(Cursor::new);
@@ -228,7 +228,7 @@ fn queued_status(status: impl serde::Serialize) -> serde_json::Value {
 
 async fn serve_hosted_logs(
     stream: &mut TcpStream,
-    controller: Arc<NativeV2CloudController>,
+    controller: Arc<NativeV2PlatformController>,
     run_id: RunId,
     query: &str,
 ) -> io::Result<()> {

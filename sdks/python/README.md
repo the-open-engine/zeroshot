@@ -111,7 +111,7 @@ async def run_plan() -> None:
         submission_key="checkout-release-1",
     )
 
-    async with Client(target=HostedTarget("cloud")) as client:
+    async with Client(target=HostedTarget("platform")) as client:
         plan = await client.submit_plan(request)
         status = await plan.wait(wait_timeout=21_600)
 
@@ -120,12 +120,12 @@ async def run_plan() -> None:
 ```
 
 Plan input is static JSON. A dependency controls when a node may start; it doesn't copy output into
-another node. Run IDs are assigned once during atomic submission. After dependencies merge, Cloud
+another node. Run IDs are assigned once during atomic submission. After dependencies merge, Platform
 materializes a node against an exact source revision. When materialization completes, `readyAt` is
 set and the node's queue deadline is the earlier of plan expiry and seven days after `readyAt`. A
 merge conflict is repaired by the conflicting run itself in the same checkout and delivery loop. A
 descendant cannot repair a failed predecessor; it ends as `dependency_failed`. `MergePlan.watch()`
-polls the aggregate Cloud status and emits changed snapshots because the v1 plan API has no
+polls the aggregate Platform status and emits changed snapshots because the v1 plan API has no
 streaming endpoint.
 
 ## Exact graph and runtime control

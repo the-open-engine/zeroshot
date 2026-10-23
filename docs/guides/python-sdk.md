@@ -119,7 +119,7 @@ async def submit_release_plan() -> None:
         submission_key="checkout-release-1",
     )
 
-    async with Client(target=HostedTarget("cloud")) as client:
+    async with Client(target=HostedTarget("platform")) as client:
         plan = await client.submit_plan(request)
         status = await plan.wait(wait_timeout=21_600)
 
@@ -128,7 +128,7 @@ async def submit_release_plan() -> None:
 ```
 
 Submission is atomic, and every node receives a stable run ID. `needs` gates readiness only; plan
-nodes have no output interpolation or shared mutable input. After dependencies merge, Cloud
+nodes have no output interpolation or shared mutable input. After dependencies merge, Platform
 materializes the node against an exact source revision. When materialization completes, `readyAt`
 is set and the node's queue deadline is the earlier of plan expiry and seven days after `readyAt`.
 A merge conflict is repaired by the conflicting run itself in the same checkout and delivery loop.

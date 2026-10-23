@@ -208,7 +208,7 @@ pub(super) type FakeAllocator = TestAllocator<ImmediateAllocation>;
 pub(super) type GatedAllocator = TestAllocator<GatedAllocation>;
 
 pub(super) struct Harness {
-    pub(super) controller: NativeV2CloudController,
+    pub(super) controller: NativeV2PlatformController,
     pub(super) ledger: Arc<FakeRunLedger>,
     pub(super) driver: Arc<FakeDriver>,
     pub(super) cleanup: Arc<FakeCleanup>,
@@ -216,7 +216,7 @@ pub(super) struct Harness {
 }
 
 pub(super) struct GatedHarness {
-    pub(super) controller: NativeV2CloudController,
+    pub(super) controller: NativeV2PlatformController,
     pub(super) ledger: Arc<FakeRunLedger>,
     pub(super) cleanup: Arc<FakeCleanup>,
     pub(super) allocator: Arc<GatedAllocator>,
@@ -227,7 +227,7 @@ pub(super) async fn gated_harness() -> GatedHarness {
     let driver = Arc::new(FakeDriver::new(Behavior::Hang));
     let cleanup = Arc::new(FakeCleanup::new(ledger.clone()));
     let allocator = Arc::new(GatedAllocator::new(driver, cleanup.clone()));
-    let controller = NativeV2CloudController::new(ledger.clone(), allocator.clone())
+    let controller = NativeV2PlatformController::new(ledger.clone(), allocator.clone())
         .await
         .assert_value_with("controller startup");
     GatedHarness {
@@ -238,12 +238,19 @@ pub(super) async fn gated_harness() -> GatedHarness {
     }
 }
 
-pub(super) async fn harness(behavior: Behavior) -> Harness {
+pub(super) fn runtime_parts(
+    driver: Arc<dyn NodeDriver>,
+) -> (Arc<FakeRunLedger>, Arc<FakeCleanup>, Arc<FakeAllocator>) {
     let ledger = Arc::new(FakeRunLedger::new());
-    let driver = Arc::new(FakeDriver::new(behavior));
     let cleanup = Arc::new(FakeCleanup::new(ledger.clone()));
-    let allocator = Arc::new(FakeAllocator::new(driver.clone(), cleanup.clone()));
-    let controller = NativeV2CloudController::new(ledger.clone(), allocator.clone())
+    let allocator = Arc::new(FakeAllocator::new(driver, cleanup.clone()));
+    (ledger, cleanup, allocator)
+}
+
+pub(super) async fn harness(behavior: Behavior) -> Harness {
+    let driver = Arc::new(FakeDriver::new(behavior));
+    let (ledger, cleanup, allocator) = runtime_parts(driver.clone());
+    let controller = NativeV2PlatformController::new(ledger.clone(), allocator.clone())
         .await
         .assert_value_with("controller startup");
     Harness {
@@ -255,7 +262,7 @@ pub(super) async fn harness(behavior: Behavior) -> Harness {
     }
 }
 
-pub(super) async fn started_harness(behavior: Behavior) -> (Harness, CloudRunReceipt) {
+pub(super) async fn started_harness(behavior: Behavior) -> (Harness, PlatformRunReceipt) {
     let harness = harness(behavior).await;
     let receipt = submit_test_request(&harness.controller, request(Value::Null))
         .await
@@ -282,7 +289,7 @@ pub(super) async fn assert_failed_cleanup(
 }
 
 pub(super) async fn terminal(
-    controller: &NativeV2CloudController,
+    controller: &NativeV2PlatformController,
     run_id: &RunId,
 ) -> TerminalResult {
     tokio::time::timeout(Duration::from_secs(2), async {

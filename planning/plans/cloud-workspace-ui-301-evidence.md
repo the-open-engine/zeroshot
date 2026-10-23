@@ -1,4 +1,4 @@
-# Cloud workspace campaign 301 evidence
+# Platform workspace campaign 301 evidence
 
 The implementation and release order are defined in
 [the approved plan](cloud-workspace-ui-301.md). This record separates executed
@@ -31,7 +31,7 @@ Executed checks:
 - Full Zeroshot UI-feature suite: 1,068 passed; 10 existing ignored tests.
 - Rebuilt native UI binary and packaged HTTP/static-asset/shutdown smoke: passed.
 
-Cloud's first dependency build exposed a catalog helper still gated on `ui` or
+Platform's first dependency build exposed a catalog helper still gated on `ui` or
 `test`. Its gate now follows `workspace`, and CI explicitly checks the non-test
 library with only that feature enabled. That library check and all 44 authoring
 tests pass after the correction.
@@ -42,9 +42,9 @@ and template payloads, and validates the template before discarding a draft.
 Senior review approved the follow-up; the 340-test UI suite, build and rebuilt
 native UI smoke pass.
 
-## Local Cloud validation
+## Local Platform validation
 
-The local Cloud static, unit, integration, interface and full-stack API/CLI e2e
+The local Platform static, unit, integration, interface and full-stack API/CLI e2e
 ladder passed. Nine editor browser cases passed, including stale-save CAS 409,
 late edits during a delayed save acknowledgement, unresolved edits during
 navigation, and import authority scope.
@@ -76,7 +76,7 @@ message. Incomplete-history coverage displayed the incomplete banner, retained
 all five events and four controls, supported replay, and returned HTTP 503 for the
 unavailable tail. The original archive and chunk rows were restored exactly; the
 restored replay matched the baseline and no longer displayed the banner. Final
-Cloud validation also passed all 107 real-auth HTTPS browser tests and fresh
+Platform validation also passed all 107 real-auth HTTPS browser tests and fresh
 production frontend/target builds. Local browser evidence is retained under
 `campaign301-browser/evidence/local-typed-*`, `campaign301-browser/editor/`, and
 `campaign301-browser/failures/01a0c5c9-cf38-7953-8c83-6fd7ecf5be3b/` in the host cache.

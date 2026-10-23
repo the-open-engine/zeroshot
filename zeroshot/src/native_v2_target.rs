@@ -106,6 +106,10 @@ pub enum TargetConnectorError {
     AlreadyExists(String),
     #[error("target {0:?} not found")]
     NotFound(String),
+    #[error(
+        "cannot rename the built-in target to \"platform\": that name is already configured; rename the existing \"platform\" entry in targets.json and retry"
+    )]
+    PlatformTargetUpgradeConflict,
     #[error("target registry path cannot be resolved: {0}")]
     RegistryPath(&'static str),
     #[error("target registry I/O failed: {0}")]
@@ -489,7 +493,7 @@ where
     ) -> Result<RunConnectionRequirements, NativeV2CliError> {
         let target = self.target(name)?;
         if !matches!(target.access, TargetAccess::Direct) {
-            // Cloud resolves the admitted connection references with fresh hosted credentials.
+            // Platform resolves the admitted connection references with fresh hosted credentials.
             return Ok(RunConnectionRequirements::new());
         }
         let trusted = self

@@ -31,7 +31,7 @@ use crate::native_v2_capsule::{
     CapsuleFilesystem, CapsuleFilesystemSpec, NativeCapsuleNodeEndpoint, RemoteCapsuleNodeRunner,
     prepare_capsule_filesystem,
 };
-use crate::native_v2_cloud::{
+use crate::native_v2_platform::{
     AllocatedCapsule, CapsuleAllocationRequest, CapsuleAllocationUnavailable, CapsuleAllocator,
     CapsuleCleanup, CapsulePreparation, CapsuleCleanupUnavailable, CapsuleDestroyed,
     ControllerClaimUnavailable, ExclusiveControllerClaim, RetainedAllocationRequest,

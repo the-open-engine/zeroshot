@@ -12,7 +12,7 @@ const KEY_BYTES: usize = 32;
 const NONCE_BYTES: usize = 12;
 const TOKEN_BYTES: usize = 64;
 const TAG_BYTES: usize = 16;
-// Zero Cloud already uses this purpose-bound envelope. Keeping the exact domain lets the native
+// Zero Platform already uses this purpose-bound envelope. Keeping the exact domain lets the native
 // target replace the capsule agent without a second task-key scheme.
 const AAD: &[u8] = b"zeroshot-capsule-bootstrap-v1";
 

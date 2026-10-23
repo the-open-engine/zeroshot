@@ -248,8 +248,9 @@ async fn history_rejects_absent_or_unsafe_discovered_capabilities_explicitly() {
         })
         .await;
         let (_, authority) = test_authority(&root);
-        let transport = TargetRunHistoryTransport::new(authority, hosted_target("cloud", origin))
-            .assert_value();
+        let transport =
+            TargetRunHistoryTransport::new(authority, hosted_target("platform", origin))
+                .assert_value();
         assert_eq!(
             transport
                 .get(RunHistoryRequest::list(None))
@@ -265,7 +266,7 @@ async fn history_rejects_absent_or_unsafe_discovered_capabilities_explicitly() {
 #[cfg(feature = "ui")]
 async fn history_transport(root: &TempRoot, origin: String) -> TargetRunHistoryTransport {
     let (credentials, authority) = test_authority(root);
-    let target = hosted_target("cloud", origin);
+    let target = hosted_target("platform", origin);
     credentials
         .set(&target.id, "refresh-0")
         .await

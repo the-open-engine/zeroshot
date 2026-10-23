@@ -66,12 +66,12 @@ These are the local browser BFF routes. A selected target is read server-side th
 contracts.
 Omit `after` to begin. SSE resumes from `Last-Event-ID` and closes after the terminal cursor drains.
 
-## Cloud integration
+## Platform integration
 
-Build `ui/dist` from Cloud's exact pinned Zeroshot source revision and mount it on the
-Cloud origin independently of run containers. The shell-less entry is `embed.html`;
+Build `ui/dist` from Platform's exact pinned Zeroshot source revision and mount it on the
+Platform origin independently of run containers. The shell-less entry is `embed.html`;
 `index.html` retains the standalone toolbar. Both entries use the same editor and viewer.
-Cloud must permit its same-origin frame and the workspace's bundled assets/ELK worker in CSP.
+Platform must permit its same-origin frame and the workspace's bundled assets/ELK worker in CSP.
 
 The API-gateway can call `zeroshot_engine::workspace::{catalog, author, data, validate_profile}`
 with Cargo's `workspace` feature; this does not embed UI assets. Authenticated private targets
@@ -98,10 +98,16 @@ same origin and expected parent/iframe window. The iframe first sends
 ```
 
 The authenticated bootstrap must return `version: 1` and
-`workspace: {kind: "cloud", id: workspaceId}`. Bind this ID to user, organization and profile
+`workspace: {kind: "platform", id: workspaceId}`. Bind this ID to user, organization and profile
 scope. Recreating the iframe binds a different authority; protect the old draft before doing so.
+For the tag upgrade, bootstrap may identify the previous pinned UI asset path through
+`legacyWorkspaceMount`. The editor upgrades browser state only for the same origin and workspace,
+preferring the current mount before that explicit predecessor. Completed upgrades retain a marker
+so saved or discarded drafts cannot reappear; storage failures keep unhandled old values for retry.
+Platform storage normalizes pinned asset mounts to `/workspace/`, keeping later UI revisions in the
+same browser namespace while preserving origin and workspace authority isolation.
 Optional CSRF configuration contains names only. The iframe reads the existing cookie for each
-service write and rejects missing/duplicate cookies. Cloud omits this configuration only for its
+service write and rejects missing/duplicate cookies. Platform omits this configuration only for its
 server-selected local authentication mode. Credentials never enter messages.
 
 After `init`, every message carries `version`, `workspaceId`, `documentId`, `generation` and
@@ -120,7 +126,7 @@ The workspace rejects stale document generations. A document switch may change b
 
 `templateId: "blank"` creates an empty profile using the existing editor factory; otherwise use a
 bootstrap template's `id` (or `name` when it has no ID). Template opens cannot carry a profile or
-revision. New/imported full documents omit revision. Cloud never constructs graph bindings.
+revision. New/imported full documents omit revision. Platform never constructs graph bindings.
 
 Dirty or unresolved drafts refuse switches with `unsaved_changes`; an explicit host confirmation
 may resend with `discard: true`. Pending saves refuse switches even with discard. The host waits
@@ -147,18 +153,18 @@ profile-specific bridge commands are unavailable. Failed writes preserve the dra
 `apiBase` must be a same-origin absolute path ending with `/`. The embedded workspace uses these
 paths beneath it; its profile load/save work passes through the host bridge instead:
 
-| Request                              | Response                                                                 |
-| ------------------------------------ | ------------------------------------------------------------------------ |
-| `GET environmentApi` | `{environments: [{id, name, revision}]}`. |
-| `GET environmentApi/{id}` | `{id, name, definition, revision}`. |
-| `POST environmentApi` | Save `{id?, name, definition, expectedRevision: string or null}`; returns the saved resource. |
-| `DELETE environmentApi/{id}` | Delete with `{expectedRevision}`; returns `{deleted: true}`. |
-| `GET bootstrap`                      | Existing workspace bootstrap with templates, workers and runtime schema. |
-| `POST validate`                      | Native validation of `{graph, runtime}`.                                 |
-| `POST authoring`, `POST data`        | Native draft transform of `{graph, runtime, action}`.                    |
-| `GET runs/{id}`                      | Version 1 admitted definition with projection version 1.                 |
-| `GET runs/{id}/history?after=CURSOR` | Existing ordered native history page.                                    |
-| `GET runs/{id}/events?after=CURSOR`  | SSE `history` pages and structured `history_error` problems.             |
+| Request                              | Response                                                                                      |
+| ------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `GET environmentApi`                 | `{environments: [{id, name, revision}]}`.                                                     |
+| `GET environmentApi/{id}`            | `{id, name, definition, revision}`.                                                           |
+| `POST environmentApi`                | Save `{id?, name, definition, expectedRevision: string or null}`; returns the saved resource. |
+| `DELETE environmentApi/{id}`         | Delete with `{expectedRevision}`; returns `{deleted: true}`.                                  |
+| `GET bootstrap`                      | Existing workspace bootstrap with templates, workers and runtime schema.                      |
+| `POST validate`                      | Native validation of `{graph, runtime}`.                                                      |
+| `POST authoring`, `POST data`        | Native draft transform of `{graph, runtime, action}`.                                         |
+| `GET runs/{id}`                      | Version 1 admitted definition with projection version 1.                                      |
+| `GET runs/{id}/history?after=CURSOR` | Existing ordered native history page.                                                         |
+| `GET runs/{id}/events?after=CURSOR`  | SSE `history` pages and structured `history_error` problems.                                  |
 
 Environment writes carry the pinned `X-Zeroshot-Workspace` bootstrap identity. The generic hosted
 manager preserves the explicit collection URL's query parameters for CRUD and draft recovery;
@@ -177,8 +183,8 @@ Definition wrappers and pages may carry
 `observation: {state: "active" | "collecting" | "complete" | "incomplete" | "expired" | "unavailable", code?}`.
 This metadata describes retained observation; current run termination remains separate.
 A `finished` run can still follow `active` or `collecting` observation. Completion closes the stream
-only after `page.complete` drains the observed head. Cloud retains these execution cursors and native
-control records across archive handoff; Cloud status cursors never enter graph playback.
+only after `page.complete` drains the observed head. Platform retains these execution cursors and native
+control records across archive handoff; Platform status cursors never enter graph playback.
 
 ## Verification
 

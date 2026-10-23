@@ -5,7 +5,7 @@ use std::sync::{Arc, Weak};
 use openengine_cluster_protocol::RunId;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
-use crate::native_v2_cloud::{CapsuleAllocationUnavailable, RetainedAllocationUnavailable};
+use crate::native_v2_platform::{CapsuleAllocationUnavailable, RetainedAllocationUnavailable};
 use super::{
     ProductionCapsuleAllocator, RetainedAllocationClaim, RetainedAllocationPaths,
     retained_claim_failure,

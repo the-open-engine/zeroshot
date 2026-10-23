@@ -15,13 +15,13 @@ delivery runs in an ordinary folder, including a Git checkout without a remote. 
 push use shared Git transport. GitHub remains the maintained forge integration for PRs, feedback,
 required checks, and merges.
 
-| Placement and graph                            | Admission requirement                                                               |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Local without delivery                         | Existing folder; repository source is optional.                                     |
-| Local with push                                | Git worktree, committed candidate basis, target branch, and selected Git remote.    |
-| Local with PR or merge                         | Git worktree and a GitHub repository supporting the requested forge operations.     |
-| Docker or Cloud without delivery, or with push | Git repository and exact source revision reachable through supported Git transport. |
-| Docker or Cloud with PR or merge               | Git repository plus the maintained GitHub forge integration.                        |
+| Placement and graph                               | Admission requirement                                                               |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Local without delivery                            | Existing folder; repository source is optional.                                     |
+| Local with push                                   | Git worktree, committed candidate basis, target branch, and selected Git remote.    |
+| Local with PR or merge                            | Git worktree and a GitHub repository supporting the requested forge operations.     |
+| Docker or Platform without delivery, or with push | Git repository and exact source revision reachable through supported Git transport. |
+| Docker or Platform with PR or merge               | Git repository plus the maintained GitHub forge integration.                        |
 
 Existing target delivery policy remains authoritative; accepting a Git source doesn't waive a
 target's requirement for a delivery node.
@@ -179,7 +179,7 @@ changes. Deterministic fixtures prove failure cases; authorized Codex and Claude
 
 This campaign ships local-folder execution, generic Git checkout/push, and the usable provider
 boundary. GitLab and Forgejo PR/check/merge implementations, additional GitHub Enterprise feature
-coverage, runtime plugin loading, non-Git contained sources, and Cloud product deployments are
+coverage, runtime plugin loading, non-Git contained sources, and Platform product deployments are
 separate work. Existing per-node model/harness selection and authored runtime configuration remain
 caller-owned. Make no changes to `CLAUDE.md`.
 

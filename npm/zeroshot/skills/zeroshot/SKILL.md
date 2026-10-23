@@ -1,6 +1,6 @@
 ---
 name: zeroshot
-description: Use Zeroshot to prepare, run, observe, or troubleshoot explicit multi-agent software work locally or on Zeroshot Cloud. Apply when the user names Zeroshot, including 'zeroshot this' or 'zeroshot it' (this orchestrator, not one-shot prompting), or asks about its CLI; do not route ordinary local work into Zeroshot without that intent.
+description: Use Zeroshot to prepare, run, observe, or troubleshoot explicit multi-agent software work locally or on Zeroshot Platform. Apply when the user names Zeroshot, including 'zeroshot this' or 'zeroshot it' (this orchestrator, not one-shot prompting), or asks about its CLI; do not route ordinary local work into Zeroshot without that intent.
 ---
 
 # Zeroshot
@@ -26,7 +26,7 @@ Suggest separate tasks only for independently useful outcomes or real prerequisi
 
 Never start a Zeroshot run merely because the skill is available. The user must ask to use Zeroshot.
 A worker already executing inside a Zeroshot run should perform its assigned work directly, not start
-another run. A failed Cloud run does not authorize silently implementing the task locally.
+another run. A failed Platform run does not authorize silently implementing the task locally.
 
 ## Choose the target
 
@@ -34,11 +34,13 @@ another run. A failed Cloud run does not authorize silently implementing the tas
   Git worktrees use their root. File arguments stay relative to the invoking folder. Runs without
   Git delivery need no repository. Keep workspace and active Zeroshot state disjoint; use an external
   `ZEROSHOT_STATE_DIR` when necessary.
-- Zeroshot Cloud is built in. Sign in once with `zeroshot target login cloud`, then use
-  `--target cloud` explicitly on Cloud commands. Cloud setup (organizations, GitHub App,
+- Zeroshot Platform is built in. Sign in once with `zeroshot target login platform`, then use
+  `--target platform` explicitly on Platform commands. Platform setup (organizations, GitHub App,
   connections) is documented at https://cloud.zeroshot.sh/docs.
-- Do not add or set up the built-in Cloud target. Named targets store endpoints and login identity,
+- Do not add or set up the built-in Platform target. Named targets store endpoints and login identity,
   not repository configuration.
+- The CLI upgrades the previous built-in `cloud` target to `platform` and reuses its stored login.
+  It preserves customized targets; an existing `platform` target causes an upgrade conflict.
 
 ## Reuse profiles and connections
 
@@ -49,11 +51,11 @@ when a run names no profile, graph, or runtime:
 ```console
 zeroshot profile list
 zeroshot profile show NAME
-zeroshot profile list --target cloud --scope user
-zeroshot profile list --target cloud --scope org
-zeroshot profile show NAME --target cloud --scope org
-zeroshot connection list --target cloud --scope user
-zeroshot connection list --target cloud --scope org
+zeroshot profile list --target platform --scope user
+zeroshot profile list --target platform --scope org
+zeroshot profile show NAME --target platform --scope org
+zeroshot connection list --target platform --scope user
+zeroshot connection list --target platform --scope org
 ```
 
 Inspect saved profiles to see their delivery behavior. New `software-change` templates default to
@@ -62,7 +64,7 @@ or `--ship` when merge delivery is intended. Custom graphs and saved profiles ow
 
 ## Run locally without a profile
 
-When no saved profile fits and the user has not asked for Cloud, run the built-in
+When no saved profile fits and the user has not asked for Platform, run the built-in
 `software-change` graph locally. Its default publishes a PR. For local-only work, use
 `--delivery none` as shown below; that mode needs only the harness's native login.
 
@@ -150,7 +152,7 @@ one from scratch:
 ## Prepare the execution environment
 
 Environments belong to a run, independently of its profile. A `local:NAME` profile can run on a
-Docker target with its own environment. For Docker or Cloud, pass
+Docker target with its own environment. For Docker or Platform, pass
 `--environment environment.json` with a flat definition such as:
 
 ```json
@@ -161,8 +163,8 @@ Docker target with its own environment. For Docker or Cloud, pass
 }
 ```
 
-Cloud resolves an omitted environment from the repository's User default, then Org default, then
-Base. `--no-environment` bypasses defaults. Choose saved environments through Cloud's UI or API;
+Platform resolves an omitted environment from the repository's User default, then Org default, then
+Base. `--no-environment` bypasses defaults. Choose saved environments through Platform's UI or API;
 the CLI accepts a concrete JSON file. Local runs use the invoking machine and reject setup/startup
 and hook connections.
 
@@ -213,23 +215,23 @@ submission key for safe retries:
 
 ```console
 zeroshot run --title "TASK" --profile org:NAME --input input.json \
-  --target cloud --submission-key KEY --validate-only
+  --target platform --submission-key KEY --validate-only
 
 zeroshot run --title "TASK" --profile org:NAME --input input.json \
-  --target cloud --submission-key KEY
+  --target platform --submission-key KEY
 ```
 
-`--validate-only` materializes and validates without starting a run. A named Cloud profile must
-still be fetched from the target first, so this command requires Cloud access. It does not prove
+`--validate-only` materializes and validates without starting a run. A named Platform profile must
+still be fetched from the target first, so this command requires Platform access. It does not prove
 connection availability.
 
 For named targets, `--cwd` selects the client Git checkout. Zeroshot prefers its attached upstream,
-then a unique eligible HTTPS/SSH remote. Docker and Cloud still require an exact committed Git
+then a unique eligible HTTPS/SSH remote. Docker and Platform still require an exact committed Git
 source. Detached worktrees require repository and branch overrides. `--repository` accepts GitHub
 `owner/name` or a credential-free HTTPS/SSH clone URL. Override source only when needed:
 
 ```console
---target cloud --repository OWNER/REPOSITORY --branch BRANCH --revision SHA
+--target platform --repository OWNER/REPOSITORY --branch BRANCH --revision SHA
 ```
 
 Git push uses shared transport and needs no GitHub API. PR and merge require a registered forge;
@@ -246,13 +248,13 @@ profile, and delivery intent reported for the run.
 Keep the run ID and target:
 
 ```console
-zeroshot status RUN_ID --target cloud
-zeroshot watch RUN_ID --target cloud
-zeroshot logs RUN_ID --target cloud
+zeroshot status RUN_ID --target platform
+zeroshot watch RUN_ID --target platform
+zeroshot logs RUN_ID --target platform
 ```
 
 A foreground run streams events. Ctrl-C detaches observation without stopping the run. Use
-`zeroshot force-stop RUN_ID --target cloud` only when the user explicitly intends to stop it.
+`zeroshot force-stop RUN_ID --target platform` only when the user explicitly intends to stop it.
 
 For command errors, check `zeroshot --version` and the relevant `--help`; do not revive removed
 commands such as `target setup`. If login cannot retain credentials, fix the credential store before

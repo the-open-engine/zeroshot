@@ -9,6 +9,7 @@ import {
 import type { Document } from './domain';
 import type { NodeDataAction } from './node-data';
 import { createRunHistorySource, type RunHistorySource } from './run-history-source';
+import { upgradePlatformWorkspaceStorage } from './workspace-storage';
 
 export type ProfileContent = Pick<Document, 'graph' | 'runtime'>;
 export type SaveProfile = ProfileContent & { name: string; expectedRevision: string | null };
@@ -73,6 +74,7 @@ export function createWorkspaceServices(
           'This workspace changed. Reload before saving. Your draft is unchanged.'
         );
       workspaceId ??= value.workspace.id;
+      upgradePlatformWorkspaceStorage(mount, value.workspace, value.legacyWorkspaceMount);
       return value;
     },
     profiles: {

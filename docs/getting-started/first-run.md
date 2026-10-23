@@ -34,7 +34,7 @@ with an identifier accepted by the selected provider.
 
 Zeroshot passes model identifiers to the provider unchanged and does not keep its own model catalog.
 For this local run, Zeroshot reuses the installed Codex CLI's login and provider configuration; no
-placeholder API key or `openai` connection is required. A Docker or cloud run instead derives the
+placeholder API key or `openai` connection is required. A Docker or Platform run instead derives the
 canonical `OPENAI_API_KEY` requirement and resolves it from the submission environment or the
 target's connection store because it cannot inherit host login state.
 

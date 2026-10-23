@@ -1,6 +1,6 @@
 //! Composition root for the integrated native-v2 capsule candidate.
 //!
-//! The cloud controller owns admission, durability, observation, and runtime allocation. Inside
+//! The platform controller owns admission, durability, observation, and runtime allocation. Inside
 //! one allocated capsule this module binds one agent adapter per runtime lane together with the
 //! trusted Git delivery lane and hands the resulting runner to the private capsule transport.
 

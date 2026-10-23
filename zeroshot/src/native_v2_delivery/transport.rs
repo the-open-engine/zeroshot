@@ -513,7 +513,7 @@ pub(crate) const fn object_format(revision: &str) -> &'static str {
 }
 
 /// Repository-selection controls never override an engine-selected workspace. Native Git
-/// configuration and authentication settings continue to apply inside that workspace. Cloud's
+/// configuration and authentication settings continue to apply inside that workspace. Platform's
 /// machine credential belongs only to target HTTP and is excluded from every Git subprocess.
 pub(crate) fn remove_repository_environment(command: &mut std::process::Command) {
     for variable in [

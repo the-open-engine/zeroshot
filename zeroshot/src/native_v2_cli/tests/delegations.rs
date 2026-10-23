@@ -8,7 +8,7 @@ fn delegation_creation_has_human_owner_and_bounded_key_expiry() {
     assert_eq!(
         parse_native_v2_args(args(&["delegation", "create", "CI"])).assert_value(),
         NativeV2CliCommand::Delegation(DelegationCommand {
-            target: "cloud".to_owned(),
+            target: "platform".to_owned(),
             action: DelegationAction::Create(DelegationCreateRequest {
                 name: "CI".to_owned(),
                 owner: DelegationOwner::User,
@@ -64,13 +64,13 @@ fn delegation_parser_rejects_unbounded_keys_and_ambiguous_owners() {
 #[test]
 fn omitted_resource_scopes_remain_distinct_from_explicit_user_scope() {
     let command =
-        parse_native_v2_args(args(&["connection", "list", "--target", "cloud"])).assert_value();
+        parse_native_v2_args(args(&["connection", "list", "--target", "platform"])).assert_value();
     assert!(matches!(
         command,
         NativeV2CliCommand::ConnectionList(ConnectionRoute { scope: None, .. })
     ));
     let command = parse_native_v2_args(args(&[
-        "profile", "list", "--target", "cloud", "--scope", "user",
+        "profile", "list", "--target", "platform", "--scope", "user",
     ]))
     .assert_value();
     assert!(matches!(

@@ -81,7 +81,7 @@ def test_submission_keeps_opening_folder_after_chdir(
     target = {
         "local": LocalTarget(workspace),
         "direct": DirectTarget("http://127.0.0.1:8080", workspace=workspace),
-        "hosted": HostedTarget("cloud"),
+        "hosted": HostedTarget("platform"),
     }[target_kind]
     monkeypatch.chdir(launcher)
 
@@ -466,7 +466,7 @@ def test_hosted_plan_submission_uses_one_strict_manifest(
     )
 
     async def exercise() -> None:
-        async with Client(target=HostedTarget("cloud")) as client:
+        async with Client(target=HostedTarget("platform")) as client:
             plan = await client.submit_plan(request)
             assert plan.id == "01900000-0000-7000-8000-000000000010"
 
@@ -489,14 +489,14 @@ def test_hosted_plan_submission_uses_one_strict_manifest(
     }
     assert all(item["plan"] == expected for item in invocations)
     submitted = invocations[1]["args"]
-    assert submitted[submitted.index("--target") + 1] == "cloud"
+    assert submitted[submitted.index("--target") + 1] == "platform"
     assert submitted[submitted.index("--submission-key") + 1] == submission_key
     assert "--detach" in submitted
 
 
 def test_hosted_plan_handle_observes_waits_and_force_stops(fake_native: Path) -> None:
     async def exercise() -> None:
-        async with Client(target=HostedTarget("cloud")) as client:
+        async with Client(target=HostedTarget("platform")) as client:
             plan = client.get_plan("01900000-0000-7000-8000-000000000010")
             status = await plan.status()
             assert status.state == "queued"
@@ -510,7 +510,7 @@ def test_hosted_plan_handle_observes_waits_and_force_stops(fake_native: Path) ->
 
     asyncio.run(exercise())
     arguments = [item["args"] for item in read_invocations(fake_native)]
-    assert all(args[args.index("--target") + 1] == "cloud" for args in arguments)
+    assert all(args[args.index("--target") + 1] == "platform" for args in arguments)
     assert any(args[:2] == ["plan", "status"] for args in arguments)
     assert any(args[:2] == ["plan", "watch"] for args in arguments)
     assert any(args[:2] == ["plan", "force-stop"] for args in arguments)
@@ -525,7 +525,7 @@ def test_hosted_plan_watch_accepts_terminal_status_before_cli_failure(
     monkeypatch.setenv("FAKE_PLAN_WATCH_TERMINAL", state)
 
     async def exercise() -> None:
-        async with Client(target=HostedTarget("cloud")) as client:
+        async with Client(target=HostedTarget("platform")) as client:
             plan = client.get_plan("01900000-0000-7000-8000-000000000010")
             statuses = [status.state async for status in plan.watch()]
             assert statuses == ["running", state]
@@ -541,7 +541,7 @@ def test_hosted_plan_watch_propagates_preterminal_cli_failure(
 
     async def exercise() -> None:
         observed = []
-        async with Client(target=HostedTarget("cloud")) as client:
+        async with Client(target=HostedTarget("platform")) as client:
             plan = client.get_plan("01900000-0000-7000-8000-000000000010")
             with pytest.raises(TargetError, match="failed before terminal") as caught:
                 async for status in plan.watch():
@@ -560,7 +560,7 @@ def test_hosted_plan_watch_propagates_unexpected_failure_after_success(
 
     async def exercise() -> None:
         observed = []
-        async with Client(target=HostedTarget("cloud")) as client:
+        async with Client(target=HostedTarget("platform")) as client:
             plan = client.get_plan("01900000-0000-7000-8000-000000000010")
             with pytest.raises(TargetError, match="finished unsuccessfully"):
                 async for status in plan.watch():

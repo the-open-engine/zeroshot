@@ -66,6 +66,18 @@ test('incompatible or unidentified workspaces fail before profile data can be re
   }
 });
 
+test('bootstrap accepts the platform workspace tag and rejects its retired spelling', () => {
+  const value = {
+    ...bootstrap(),
+    workspace: { kind: 'platform', id: 'cloud:user-a:org-a:user' },
+  };
+  assert.deepEqual(readBootstrap(value), value);
+  assert.throws(
+    () => readBootstrap({ ...value, workspace: { ...value.workspace, kind: 'cloud' } }),
+    (cause: unknown) => cause instanceof ApiError && cause.code === 'invalid_bootstrap'
+  );
+});
+
 test('profile and history services remain on the injected mount and forward cancellation', async () => {
   const requests: { url: string; init?: RequestInit }[] = [];
   const fetcher: typeof fetch = async (url, init) => {

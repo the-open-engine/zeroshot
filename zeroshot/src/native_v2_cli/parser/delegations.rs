@@ -28,7 +28,7 @@ pub(super) enum DelegationCliCommand {
 #[derive(Debug, Args)]
 struct RouteArgs {
     /// Configured hosted target.
-    #[arg(long, default_value = "cloud", value_name = "NAME")]
+    #[arg(long, default_value = "platform", value_name = "NAME")]
     target: String,
 }
 

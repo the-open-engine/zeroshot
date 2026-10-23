@@ -30,7 +30,7 @@ use super::{
     SESSION_PATH, TargetAuthentication, TargetAuthorityError, TargetDiscoveryDocument,
     TargetOecpSession, TargetRunRequest, TargetSessionAuthority,
 };
-use crate::native_v2_cloud::NativeV2CloudController;
+use crate::native_v2_platform::NativeV2PlatformController;
 use super::private_access::{PrivateTargetAccess, TargetBootstrapKey};
 
 #[path = "transport_history.rs"]
@@ -161,7 +161,7 @@ impl NativeV2TargetServer {
         Ok(self)
     }
 
-    /// Serves a supplied listener. Cloud hosting may instead call [`Self::serve_connection`] from
+    /// Serves a supplied listener. Platform hosting may instead call [`Self::serve_connection`] from
     /// its existing listener/TLS lifecycle.
     pub async fn serve(self: Arc<Self>, listener: TcpListener) -> io::Result<()> {
         self.serve_until(listener, std::future::pending()).await
@@ -568,7 +568,7 @@ enum BearerPurpose {
 /// accepts an initial caller-assigned run identity, exact source, and bounded environment. Recovery
 /// also accepts the fresh successor identity used to create a linked run.
 struct TargetOecpBackend {
-    controller: Arc<NativeV2CloudController>,
+    controller: Arc<NativeV2PlatformController>,
     workspace_recovery: bool,
     workspace_checkpoints: bool,
 }

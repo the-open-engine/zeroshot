@@ -6,7 +6,7 @@ use openengine_cluster_protocol::RunId;
 use tokio::sync::watch;
 
 use crate::native_v2_admission::DeliveryPolicy;
-use crate::native_v2_cloud::{
+use crate::native_v2_platform::{
     CapsuleCleanup, CapsuleCleanupUnavailable, CapsuleDestroyed, ExclusiveControllerClaim,
 };
 use crate::native_v2_runner::NodeRunner;

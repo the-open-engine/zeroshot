@@ -92,8 +92,8 @@ async fn stored_primary(ledger: &FakeRunLedger, run_id: &RunId) -> StoredRun {
     ledger.get(run_id).await.assert_value().assert_value()
 }
 
-async fn restart(fixture: &Harness) -> NativeV2CloudController {
-    NativeV2CloudController::new(fixture.ledger.clone(), fixture.allocator.clone())
+async fn restart(fixture: &Harness) -> NativeV2PlatformController {
+    NativeV2PlatformController::new(fixture.ledger.clone(), fixture.allocator.clone())
         .await
         .assert_value()
 }
@@ -151,7 +151,7 @@ async fn primary_restart_waits_for_confirmed_cleanup_before_terminal_publication
     let request = seed_tail(&fixture.ledger, "primary-cleanup", false, true).await;
     fixture.cleanup.fail_next();
     assert!(
-        NativeV2CloudController::new(fixture.ledger.clone(), fixture.allocator.clone())
+        NativeV2PlatformController::new(fixture.ledger.clone(), fixture.allocator.clone())
             .await
             .is_err()
     );
@@ -175,7 +175,7 @@ async fn primary_restart_waits_for_confirmed_cleanup_before_terminal_publication
 async fn exact_resubmission_preserves_orphaned_primary_result_without_dispatch() {
     let fixture = harness(Behavior::Complete).await;
     // The seeded graph has no delivery node, matching a local controller's admission policy.
-    let controller = NativeV2CloudController::new_with_delivery_policy(
+    let controller = NativeV2PlatformController::new_with_delivery_policy(
         fixture.ledger.clone(),
         fixture.allocator.clone(),
         DeliveryPolicy::Optional,

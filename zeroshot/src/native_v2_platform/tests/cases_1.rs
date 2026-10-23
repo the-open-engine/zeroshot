@@ -6,7 +6,7 @@ struct RetainedCleanupFailureAllocator {
 }
 
 async fn assert_reconstructed_discard_contracts(
-    controller: &NativeV2CloudController,
+    controller: &NativeV2PlatformController,
     successor_run_id: RunId,
 ) {
     assert!(matches!(
@@ -15,7 +15,7 @@ async fn assert_reconstructed_discard_contracts(
                 run_id: RunId::new("missing-run"),
             })
             .await,
-        Err(NativeV2CloudError::Ledger(RunLedgerError::RunNotFound))
+        Err(NativeV2PlatformError::Ledger(RunLedgerError::RunNotFound))
     ));
     assert!(matches!(
         controller
@@ -25,7 +25,7 @@ async fn assert_reconstructed_discard_contracts(
                 limit: None,
             })
             .await,
-        Err(NativeV2CloudError::Ledger(RunLedgerError::RunNotFound))
+        Err(NativeV2PlatformError::Ledger(RunLedgerError::RunNotFound))
     ));
     let discarded = controller
         .discard_workspace(RunDiscardWorkspaceParams {
@@ -170,11 +170,11 @@ async fn wave8_cli_contract_submission_rejects_missing_secrets_and_invalid_graph
     let harness = harness(Behavior::Complete).await;
     assert!(matches!(
         harness.controller.submit(request(Value::Null)).await,
-        Err(NativeV2CloudError::Environment(_))
+        Err(NativeV2PlatformError::Environment(_))
     ));
     assert!(matches!(
         submit_test_request(&harness.controller, request(json!({}))).await,
-        Err(NativeV2CloudError::Admission(_))
+        Err(NativeV2PlatformError::Admission(_))
     ));
     assert_eq!(harness.allocator.allocation_count(), 0);
     assert!(
@@ -206,7 +206,7 @@ async fn wave8_cli_contract_submission_rejects_missing_secrets_and_invalid_graph
     })
     .err()
     .expect("insecure resolver authority must fail closed");
-    assert!(matches!(error, NativeV2CloudError::ResumeCredentials));
+    assert!(matches!(error, NativeV2PlatformError::ResumeCredentials));
 }
 
 #[tokio::test]
@@ -216,7 +216,7 @@ async fn startup_reconciles_every_persisted_nonterminal_before_status_is_visible
     let driver = Arc::new(FakeDriver::new(Behavior::Complete));
     let cleanup = Arc::new(FakeCleanup::new(ledger.clone()));
     let allocator = Arc::new(FakeAllocator::new(driver, cleanup.clone()));
-    let controller = NativeV2CloudController::new(ledger, allocator.clone())
+    let controller = NativeV2PlatformController::new(ledger, allocator.clone())
         .await
         .assert_value_with("reconciled startup");
 
@@ -255,7 +255,7 @@ async fn wave8_cli_contract_retained_cleanup_and_discard_fail_closed_across_reco
         .await
         .assert_value_with("source failure");
     let allocator = Arc::new(RetainedCleanupFailureAllocator::new());
-    let controller = NativeV2CloudController::new(ledger.clone(), allocator.clone())
+    let controller = NativeV2PlatformController::new(ledger.clone(), allocator.clone())
         .await
         .assert_value_with("initial controller");
     let successor_run_id = RunId::new("resume-successor");
@@ -284,7 +284,7 @@ async fn wave8_cli_contract_retained_cleanup_and_discard_fail_closed_across_reco
         vec![(successor_run_id.clone(), RunRuntimeExit::RuntimeLost)]
     );
     drop(controller);
-    let replacement = NativeV2CloudController::new(ledger, allocator.clone())
+    let replacement = NativeV2PlatformController::new(ledger, allocator.clone())
         .await
         .assert_value();
     assert_reconstructed_discard_contracts(&replacement, successor_run_id).await;
@@ -474,7 +474,7 @@ async fn assert_recoverable_source_resume(
         runtime: FakeAllocator::new(harness.driver.clone(), harness.cleanup.clone()),
         resumed_credentials: StdMutex::new(Vec::new()),
     });
-    let controller = NativeV2CloudController::new(ledger.clone(), allocator.clone())
+    let controller = NativeV2PlatformController::new(ledger.clone(), allocator.clone())
         .await
         .assert_value();
     let status = controller

@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 use tokio::io::{AsyncRead, AsyncReadExt};
-use crate::native_v2_cloud::{PreparationProgress, CapsuleAllocationUnavailable};
+use crate::native_v2_platform::{PreparationProgress, CapsuleAllocationUnavailable};
 use super::safe_provider_text;
 
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;

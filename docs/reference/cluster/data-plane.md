@@ -93,9 +93,9 @@ OpenSSL build dependency that breaks cross-compilation and static-musl builds. T
 enabled only by the dialing client; `openengine-cluster-server::serve_websocket` remains a
 plaintext, accepted-stream binding whose production TLS termination stays in its front proxy.
 
-## Cloud HTTP boundary
+## Hosted HTTP boundary
 
-The crate has no cloud HTTP listener, certificate provisioning, or HTTP server. A later binding can
+The crate has no hosted HTTP listener, certificate provisioning, or HTTP server. A later binding can
 use the same rustls/tokio-rustls stack inside `openengine-cluster-server`: accept TCP, perform the
 TLS handshake with a server `rustls` configuration, and hand the resulting asynchronous stream to
 an HTTP server implementation. `reqwest` is an HTTP client and cannot serve this binding; selecting

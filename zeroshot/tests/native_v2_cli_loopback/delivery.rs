@@ -365,7 +365,7 @@ impl CapsuleAllocator for DeliveryAllocator {
 
     async fn allocate(
         &self,
-        request: zeroshot_engine::native_v2_cloud::CapsuleAllocationRequest<'_>,
+        request: zeroshot_engine::native_v2_platform::CapsuleAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         let run_id = request.run_id;
         let admitted = request.admitted;

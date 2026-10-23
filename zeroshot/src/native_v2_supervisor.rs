@@ -78,7 +78,7 @@ pub enum RunRuntimeExit {
     RuntimeLost,
 }
 
-/// Optional runtime cleanup seam used by the cloud controller.
+/// Optional runtime cleanup seam used by the platform controller.
 ///
 /// Returning success is an acknowledgement that the disposable runtime is gone. The supervisor
 /// never appends a terminal event before this acknowledgement.

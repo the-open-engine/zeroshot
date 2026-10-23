@@ -51,7 +51,7 @@ matched a larger model's score at a median 58% of its cost. More examples on zer
 and [a research run](https://zeroshot.sh/#not-just-coding).
 
 The CLI is free and MIT licensed. Run locally, [self-host](#self-hosted-run-the-docker-target), or
-use [zeroshot Cloud](https://cloud.zeroshot.sh/docs).
+use [Zeroshot Platform](https://cloud.zeroshot.sh/docs).
 
 <div align="center">
   <a href="https://zeroshot.sh/#topology">
@@ -160,10 +160,10 @@ A failed run with a recoverable workspace can be
 
 For other harnesses and providers, see [Runtimes and connections](docs/concepts/runtimes-and-connections.md).
 
-### Run in the cloud
+### Run on Zeroshot Platform
 
 Connect GitHub and bring your own model API keys.
-[Cloud setup guide →](https://cloud.zeroshot.sh/docs)
+[Platform setup guide →](https://cloud.zeroshot.sh/docs)
 
 ## Build your own graph
 
@@ -289,7 +289,7 @@ ignore it.
 
 Push needs a committed Git checkout and an HTTPS or SSH remote. PR and ship additionally need a
 forge adapter; GitHub is maintained today. Local GitHub PR and ship runs also need the GitHub CLI
-(`gh`) on `PATH`. Docker and cloud runs require an exact Git source.
+(`gh`) on `PATH`. Docker and Platform runs require an exact Git source.
 See [targets and source credentials](docs/concepts/targets.md) for setup.
 
 ### Self-hosted: run the Docker target

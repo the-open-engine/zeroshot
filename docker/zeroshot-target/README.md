@@ -55,7 +55,7 @@ for HTTPS/SSH checkout and push, source connections, and GitHub PR/merge support
 Closing the browser leaves runs active.
 Stopping the container stops its runtime; on restart, interrupted runs are reconciled as lost,
 not restarted automatically. When recovery data is available, start a successor with
-`zeroshot resume RUN_ID --target local`. Completed histories remain readable. Private cloud target
+`zeroshot resume RUN_ID --target local`. Completed histories remain readable. Private Platform target
 containers do not expose the unauthenticated standalone UI.
 
 If the browser uses another port or an HTTPS reverse proxy, set `--public-origin` to that exact
@@ -101,7 +101,7 @@ The image includes Docker CLI, Buildx and Compose. To use Docker, provide access
 daemon, for example by mounting a socket with permissions that allow the run's workspace
 user to connect. A mounted daemon controls the machine hosting it; use a disposable or
 dedicated daemon. Workspace bind mounts in sibling containers require the workspace to
-exist at the same absolute path on that daemon's host. Cloud supplies this arrangement
+exist at the same absolute path on that daemon's host. Platform supplies this arrangement
 inside its disposable run machine.
 
 ## Build

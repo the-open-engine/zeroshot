@@ -67,7 +67,7 @@ impl<C> NamedTargetCliBackend<C> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RunLocation {
     Direct,
-    Cloud,
+    Platform,
     Task,
 }
 
@@ -92,7 +92,7 @@ where
         Ok(match status {
             None => RunLocation::Direct,
             Some(status) if task_is_active(&status.status) => RunLocation::Task,
-            Some(_) => RunLocation::Cloud,
+            Some(_) => RunLocation::Platform,
         })
     }
 }
@@ -340,7 +340,7 @@ where
     ) -> Result<Self::Watch, NativeV2CliError> {
         let target = require_named_target(target)?;
         let params = match self.run_location(target, &params.run_id).await? {
-            RunLocation::Cloud => {
+            RunLocation::Platform => {
                 return self
                     .connector
                     .hosted_run_watch(target, params)
@@ -371,7 +371,7 @@ where
     ) -> Result<Self::Logs, NativeV2CliError> {
         let target = require_named_target(target)?;
         let params = match self.run_location(target, &params.run_id).await? {
-            RunLocation::Cloud => {
+            RunLocation::Platform => {
                 return self
                     .connector
                     .hosted_run_logs(target, params)
@@ -415,7 +415,7 @@ where
     ) -> Result<CliRunForceResult, NativeV2CliError> {
         let target = require_named_target(target)?;
         match self.run_location(target, &params.run_id).await? {
-            RunLocation::Cloud => {
+            RunLocation::Platform => {
                 return self
                     .connector
                     .hosted_run_force(target, params)

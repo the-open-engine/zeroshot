@@ -1,18 +1,18 @@
 use super::*;
 
 async fn assert_active_submission_conflicts(
-    controller: &NativeV2CloudController,
+    controller: &NativeV2PlatformController,
     ledger: &FakeRunLedger,
     allocator: &FakeAllocator,
-    first: &CloudRunReceipt,
+    first: &PlatformRunReceipt,
 ) {
-    let exact = submit_test_request(controller, request_with_key(Value::Null, "cloud-first"))
+    let exact = submit_test_request(controller, request_with_key(Value::Null, "platform-first"))
         .await
         .assert_value();
     assert!(exact.deduped);
     assert_eq!(exact.run_id, first.run_id);
 
-    let mut conflicting_reuse = request_with_key(Value::Null, "cloud-first");
+    let mut conflicting_reuse = request_with_key(Value::Null, "platform-first");
     let mut graph = serde_json::to_value(&conflicting_reuse.submission.graph).assert_value();
     *graph
         .pointer_mut("/root/children/0/timeoutMs")
@@ -23,7 +23,7 @@ async fn assert_active_submission_conflicts(
         .assert_error();
     assert!(matches!(
         conflict,
-        NativeV2CloudError::Ledger(RunLedgerError::SubmissionConflict { existing_run_id })
+        NativeV2PlatformError::Ledger(RunLedgerError::SubmissionConflict { existing_run_id })
             if existing_run_id == first.run_id
     ));
 
@@ -34,8 +34,8 @@ async fn assert_active_submission_conflicts(
 async fn gated_controller(
     ledger: Arc<FakeRunLedger>,
     allocator: Arc<GatedAllocator>,
-) -> NativeV2CloudController {
-    NativeV2CloudController::new(ledger, allocator)
+) -> NativeV2PlatformController {
+    NativeV2PlatformController::new(ledger, allocator)
         .await
         .assert_value_with("controller startup")
 }
@@ -47,8 +47,8 @@ async fn distinct_nonterminal_runs_are_both_admitted() {
     let cleanup = Arc::new(FakeCleanup::new(ledger.clone()));
     let allocator = Arc::new(GatedAllocator::new(driver, cleanup));
     let controller = gated_controller(ledger.clone(), allocator.clone()).await;
-    let first_request = request_with_key(Value::Null, "cloud-first");
-    let second_request = request_with_key(Value::Null, "cloud-second");
+    let first_request = request_with_key(Value::Null, "platform-first");
+    let second_request = request_with_key(Value::Null, "platform-second");
 
     let first_controller = controller.clone();
     let first =
@@ -104,7 +104,7 @@ async fn exact_retry_dedupes_and_changed_retry_conflicts() {
     let harness = harness(Behavior::Hang).await;
     let first = submit_test_request(
         &harness.controller,
-        request_with_key(Value::Null, "cloud-first"),
+        request_with_key(Value::Null, "platform-first"),
     )
     .await
     .assert_value_with("first submission");
@@ -127,7 +127,7 @@ async fn exact_retry_dedupes_and_changed_retry_conflicts() {
 #[tokio::test]
 async fn exact_source_revision_participates_in_retry_identity() {
     let harness = harness(Behavior::Hang).await;
-    let request = request_with_key(Value::Null, "cloud-branch");
+    let request = request_with_key(Value::Null, "platform-branch");
     let digest = submission_digest(&request.submission).assert_value_with("submission digest");
     let environment = exact_test_environment(&request).assert_value_with("branch test environment");
     let first = harness
@@ -154,7 +154,7 @@ async fn exact_source_revision_participates_in_retry_identity() {
             .controller
             .resolve_submission(&request.submission.submission_key, &changed)
             .await,
-        Err(NativeV2CloudError::Ledger(
+        Err(NativeV2PlatformError::Ledger(
             RunLedgerError::SubmissionConflict { .. }
         ))
     ));
@@ -219,7 +219,7 @@ async fn wave9_cli_contract_settled_allocation_refusal_cleans_up_before_terminal
     harness
         .allocator
         .fail_next_allocation(CapsuleAllocationUnavailable::Runtime);
-    let request = request_with_key(Value::Null, "cloud-wave9-allocation-refusal");
+    let request = request_with_key(Value::Null, "platform-wave9-allocation-refusal");
     let run_id = request.run_id.clone();
     submit_test_request(&harness.controller, request)
         .await

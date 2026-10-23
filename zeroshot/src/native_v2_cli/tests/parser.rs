@@ -822,7 +822,7 @@ fn target_add_requires_an_explicit_direct_flag() {
     let hosted = parse_native_v2_args(args(&[
         "target",
         "add",
-        "cloud",
+        "platform",
         "--url",
         "https://target.example",
     ]))

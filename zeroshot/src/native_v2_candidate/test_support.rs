@@ -324,14 +324,14 @@ pub(crate) fn allocation_request<'a>(
     run_id: &'a RunId,
     admitted: &'a AdmittedRun,
     github_token: Option<&'a str>,
-) -> crate::native_v2_cloud::CapsuleAllocationRequest<'a> {
-    crate::native_v2_cloud::CapsuleAllocationRequest {
+) -> crate::native_v2_platform::CapsuleAllocationRequest<'a> {
+    crate::native_v2_platform::CapsuleAllocationRequest {
         git_credentials: None,
 
         run_id,
         admitted,
         github_token,
-        preparation: crate::native_v2_cloud::CapsulePreparation::quiet(&admitted.runtime)
+        preparation: crate::native_v2_platform::CapsulePreparation::quiet(&admitted.runtime)
             .assert_value(),
     }
 }

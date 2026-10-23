@@ -33,7 +33,7 @@ use super::{
 };
 use crate::execution::platform::{ControllerChild as Child, FileAccess, private_file};
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
-use crate::native_v2_cloud::submission_digest;
+use crate::native_v2_platform::submission_digest;
 use crate::native_v2_local::{PreparedLocalRun, prepare_local_run};
 use crate::native_v2_supervisor::RunEnvironment;
 use crate::native_v2_portable_controller::{

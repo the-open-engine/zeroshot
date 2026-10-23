@@ -26,7 +26,7 @@ async def main() -> None:
         submission_key="checkout-release-1",
     )
 
-    async with Client(target=HostedTarget("cloud")) as client:
+    async with Client(target=HostedTarget("platform")) as client:
         plan = await client.submit_plan(request)
         status = await plan.wait(wait_timeout=21_600)
 

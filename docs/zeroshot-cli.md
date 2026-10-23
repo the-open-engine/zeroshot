@@ -140,7 +140,7 @@ Options:
 ```text
 Manage named targets or serve a direct target.
 
-The built-in `cloud` target points to https://api.cloud.zeroshot.sh. Run `zeroshot target login cloud` to sign in. For unattended access, set ZEROSHOT_API_KEY instead of logging in. See https://cloud.zeroshot.sh/docs for Cloud setup.
+The built-in `platform` target points to https://api.cloud.zeroshot.sh. Run `zeroshot target login platform` to sign in. For unattended access, set ZEROSHOT_API_KEY instead of logging in. See https://cloud.zeroshot.sh/docs for Platform setup.
 
 Usage: zeroshot target <COMMAND>
 
@@ -274,7 +274,7 @@ Options:
       --target <NAME>
           Configured hosted target
 
-          [default: cloud]
+          [default: platform]
 
       --owner <OWNER>
           Delegate your user or an organization
@@ -304,7 +304,7 @@ Options:
       --target <NAME>
           Configured hosted target
 
-          [default: cloud]
+          [default: platform]
 
       --owner <OWNER>
           Delegate your user or an organization
@@ -339,7 +339,7 @@ Options:
       --target <NAME>
           Configured hosted target
 
-          [default: cloud]
+          [default: platform]
 
   -h, --help
           Print help
@@ -360,7 +360,7 @@ Options:
       --target <NAME>
           Configured hosted target
 
-          [default: cloud]
+          [default: platform]
 
   -h, --help
           Print help
@@ -399,7 +399,7 @@ Options:
       --target <NAME>
           Configured hosted target
 
-          [default: cloud]
+          [default: platform]
 
   -h, --help
           Print help
@@ -420,7 +420,7 @@ Options:
       --target <NAME>
           Configured hosted target
 
-          [default: cloud]
+          [default: platform]
 
       --name <NAME>
           Optional label for this key
@@ -452,7 +452,7 @@ Options:
       --target <NAME>
           Configured hosted target
 
-          [default: cloud]
+          [default: platform]
 
   -h, --help
           Print help
@@ -925,7 +925,7 @@ The JSON manifest is strict and self-contained:
 Every run uses the same source and profile. The profile must contain exactly one current Git merge delivery node;
 pull-request delivery is rejected. Agent bindings must not declare `GH_TOKEN`; only the Git delivery
 binding may declare it. `needs` gates readiness but does not pass output between runs.
-Cloud assigns every run ID atomically at submission. After a node's dependencies succeed, Cloud
+Platform assigns every run ID atomically at submission. After a node's dependencies succeed, Platform
 materializes it against an exact source revision. Once materialization completes, `readyAt` is set
 and the node's queue deadline is the earlier of `expiresAt` and seven days after `readyAt`.
 `expiresAt` must be in the future and no more than
@@ -1204,7 +1204,7 @@ RUNTIME CONFIGURATION
     their canonical connection requirements.
 
 ENVIRONMENT PREPARATION
-    For Docker or Cloud targets, pass --environment environment.json with a separate, flat JSON
+    For Docker or Platform targets, pass --environment environment.json with a separate, flat JSON
     definition (not a profile field or an "environment" wrapper):
 
       {

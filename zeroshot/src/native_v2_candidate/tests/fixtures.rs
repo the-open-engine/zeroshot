@@ -312,7 +312,7 @@ pub(super) fn harness_config(
 }
 
 pub(super) async fn wait_for_terminal(
-    controller: &NativeV2CloudController,
+    controller: &NativeV2PlatformController,
     run_id: &RunId,
 ) -> TerminalResult {
     tokio::time::timeout(Duration::from_secs(5), async {

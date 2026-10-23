@@ -183,7 +183,7 @@ tool matches no card. Receipts contain the node, tool name, time and a few assoc
 paths; they exclude arguments and results and do not claim that a tool succeeded. The first and
 latest receipts survive a fixed 512-record cap. Hidden reasoning is not required or inspected.
 
-Local and target stores do not synchronize automatically. Cloud integration and ACP integration
+Local and target stores do not synchronize automatically. Platform integration and ACP integration
 are outside this version. Embedders must explicitly select a host-owned memory namespace; the
 generic hosting configuration does not create an organization-wide store implicitly.
 
@@ -254,7 +254,7 @@ the filesystem and database cannot share a transaction. The CLI does not pull or
 Historical exploration receipts were not persisted, so backfill cannot reconstruct them from
 elapsed time. Unreadable, unfinished, opted-out and unprovable-repository runs remain explicit
 exclusions. Old ledgers are read-only; initialization usage belongs to the host session.
-Cloud and Docker target history are outside this workflow.
+Platform and Docker target history are outside this workflow.
 
 Inventory can prove an attached run's repository from a unique eligible remote even when its
 recorded checkout now has detached HEAD. Publication uses that checkout's current runtime namespace,

@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use super::*;
 use super::controller::PortableCheckpointCleanup;
 use crate::native_v2_candidate::test_support::{full_graph, success_node};
-use crate::native_v2_cloud::CapsuleCleanup;
+use crate::native_v2_platform::CapsuleCleanup;
 use crate::native_v2_contract::{
     RunSubmission, RunTitle, SourceBranchId, SourceRepositoryId, SourceRevisionId, ResolvedSource,
 };

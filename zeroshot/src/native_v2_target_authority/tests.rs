@@ -24,7 +24,7 @@ use tokio_tungstenite::tungstenite::http::header::{AUTHORIZATION, HeaderValue};
 
 use super::*;
 use super::private_access::encode_lower;
-use crate::native_v2_cloud::{
+use crate::native_v2_platform::{
     AllocatedCapsule, CapsuleAllocationUnavailable, CapsuleAllocator, CapsuleCleanupUnavailable,
     CapsuleDestroyed, ControllerClaimUnavailable, ExclusiveControllerClaim,
 };
@@ -60,9 +60,9 @@ impl CapsuleAllocator for NoAllocation {
 
     async fn allocate(
         &self,
-        request: crate::native_v2_cloud::CapsuleAllocationRequest<'_>,
+        request: crate::native_v2_platform::CapsuleAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
-        let crate::native_v2_cloud::CapsuleAllocationRequest {
+        let crate::native_v2_platform::CapsuleAllocationRequest {
             run_id: _run_id,
             admitted: _admitted,
             github_token: _github_token,
@@ -80,8 +80,8 @@ impl CapsuleAllocator for NoAllocation {
     }
 }
 
-async fn test_controller() -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
-    NativeV2CloudController::new(Arc::new(FakeRunLedger::new()), Arc::new(NoAllocation))
+async fn test_controller() -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
+    NativeV2PlatformController::new(Arc::new(FakeRunLedger::new()), Arc::new(NoAllocation))
         .await
         .map(Arc::new)
         .map_err(|error| TargetAuthorityError::unavailable(error.to_string()))
@@ -106,14 +106,14 @@ impl TargetControllerFactory for FakeFactory {
         self.workspace_checkpoints
     }
 
-    async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
+    async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
         self.controllers.fetch_add(1, Ordering::SeqCst);
         test_controller().await
     }
 
     async fn submit(
         &self,
-        _controller: &NativeV2CloudController,
+        _controller: &NativeV2PlatformController,
         request: TargetRunRequest,
     ) -> Result<TargetRunReceipt, TargetAuthorityError> {
         let active = self.active_submissions.fetch_add(1, Ordering::SeqCst) + 1;
@@ -134,13 +134,13 @@ struct RejectingFactory;
 
 #[async_trait]
 impl TargetControllerFactory for RejectingFactory {
-    async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
+    async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
         test_controller().await
     }
 
     async fn submit(
         &self,
-        _controller: &NativeV2CloudController,
+        _controller: &NativeV2PlatformController,
         _request: TargetRunRequest,
     ) -> Result<TargetRunReceipt, TargetAuthorityError> {
         Err(TargetAuthorityError::invalid(

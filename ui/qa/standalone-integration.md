@@ -27,15 +27,15 @@ Source: `the-open-engine/zeroshot-matrix-demo-20260812-3ebd`, exact revision
 Codex/OpenAI `gpt-6-astra`; Docker runs used fresh target checkouts and the image's
 pinned Codex/OpenAI `gpt-5.4`. No code was pushed or delivered.
 
-| Host | Process | Run ID | Recorded result |
-| --- | --- | --- | --- |
-| Local | Retry-After implementation and two reviews | `01a0b402-3637-7200-8587-5c097ea4022b` | Succeeded, `v2:62` |
-| Local | UI-built parallel deployment/rollback writers | `01a0b405-aee4-7752-a3f1-c2cb726bfa6d` | Succeeded, `v2:112` |
-| Local | Release packet summary from generated files | `01a0b419-3ba0-7bb3-8e0a-6c9befce4328` | Succeeded, `v2:25` |
-| Docker | Retry-After implementation and two reviews | `01a0b40c-33c5-7111-842f-ea4aa2f101f7` | Succeeded, `v2:125` |
-| Docker | Release-readiness audit | `01a0b40f-e75a-7511-a7a3-2c95d2527a21` | Succeeded, `v2:94` |
-| Docker | Coding run stopped during its first test command | `01a0b411-e4d3-7f41-a527-9fc88c11f93e` | Reconciled as `runtime_lost`, `v2:44` |
-| Docker | UI-built release-checklist profile | `01a0b420-c961-7750-bcbe-5c46fcfd2971` | Succeeded, `v2:76`; returned `checklistPath` |
+| Host   | Process                                          | Run ID                                 | Recorded result                              |
+| ------ | ------------------------------------------------ | -------------------------------------- | -------------------------------------------- |
+| Local  | Retry-After implementation and two reviews       | `01a0b402-3637-7200-8587-5c097ea4022b` | Succeeded, `v2:62`                           |
+| Local  | UI-built parallel deployment/rollback writers    | `01a0b405-aee4-7752-a3f1-c2cb726bfa6d` | Succeeded, `v2:112`                          |
+| Local  | Release packet summary from generated files      | `01a0b419-3ba0-7bb3-8e0a-6c9befce4328` | Succeeded, `v2:25`                           |
+| Docker | Retry-After implementation and two reviews       | `01a0b40c-33c5-7111-842f-ea4aa2f101f7` | Succeeded, `v2:125`                          |
+| Docker | Release-readiness audit                          | `01a0b40f-e75a-7511-a7a3-2c95d2527a21` | Succeeded, `v2:94`                           |
+| Docker | Coding run stopped during its first test command | `01a0b411-e4d3-7f41-a527-9fc88c11f93e` | Reconciled as `runtime_lost`, `v2:44`        |
+| Docker | UI-built release-checklist profile               | `01a0b420-c961-7750-bcbe-5c46fcfd2971` | Succeeded, `v2:76`; returned `checklistPath` |
 
 The final Docker run used the saved editor graph and runtime unchanged except for
 declaring its named provider credential. Its writing Agent received `task` and
@@ -103,6 +103,6 @@ local macOS behavior was checked with the real providers and browser above.
 
 Two independent implementation reviews checked the standalone boundaries against
 [zero-cloud #301](https://github.com/the-open-engine/zero-cloud/issues/301).
-Injected services and the selected-run viewer are implemented. Cloud menus, the
+Injected services and the selected-run viewer are implemented. Platform menus, the
 shell-less editor entry point/bridge, authenticated adapters and archive expansion
 remain the work described in that issue.

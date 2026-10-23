@@ -24,7 +24,7 @@ impl Drop for TestDirectory {
 }
 
 #[test]
-fn git_metadata_commands_exclude_the_cloud_machine_credential() {
+fn git_metadata_commands_exclude_the_platform_machine_credential() {
     let command = git_command(None);
     assert!(
         command

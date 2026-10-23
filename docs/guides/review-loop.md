@@ -183,7 +183,7 @@ The graph state still carries the feedback explicitly either way.
 Replace `YOUR_MODEL_ID` with a model the provider accepts. Nodes can use different models, effort
 values, or [harnesses and providers](#cross-vendor-review); size applies to the whole run. The
 bindings omit `connections`, so a local Codex run reuses the Codex CLI's login, and a Docker or
-cloud target derives the canonical `OPENAI_API_KEY` requirement. See
+Platform target derives the canonical `OPENAI_API_KEY` requirement. See
 the [RuntimePlan reference](../reference/runtime-plan.md) for every field.
 
 ## 7. Validate, then run
@@ -220,8 +220,8 @@ zeroshot run \
 
 [Observe and control runs](observe-and-control.md) covers status, logs, and stopping.
 
-The same files run on a target with `--target cloud` (see
-[Connect Zeroshot Cloud](../getting-started/install.md#connect-zeroshot-cloud)) or the name of a
+The same files run on a target with `--target platform` (see
+[Connect Zeroshot Platform](../getting-started/install.md#connect-zeroshot-platform)) or the name of a
 [direct target](../concepts/targets.md#direct-target). A target requires an exact Git source selected from
 the checkout or [source overrides](../concepts/targets.md#direct-target), and resolves `OPENAI_API_KEY` from the submission
 environment or its connection store. The graph has no delivery node, so a target run does not push

@@ -84,7 +84,7 @@ For an invalid response, correct only the named task using its existing contract
 failure persists, stop and report the error and session directory rather than retry indefinitely.
 Report exclusions and incomplete work alongside the command's publication/defer counts.
 
-This workflow reads local native Rust run history, not Cloud or Docker target history. Never read
+This workflow reads local native Rust run history, not Platform or Docker target history. Never read
 controller bootstrap files, provider homes or credentials to recover evidence. Do not fetch code or
 switch branches to interpret “newest”; use the recorded checkouts. Current maintenance citations must
 refer to tracked or nonignored source, which the CLI fingerprints before publication.

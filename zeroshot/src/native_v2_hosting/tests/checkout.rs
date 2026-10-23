@@ -9,7 +9,7 @@ use openengine_cluster_protocol::{CheckpointId, NodeName, RunCheckpointsParams, 
 use crate::full_v1_reducer::ExecutionBoundary;
 use crate::execution::process::HostedProcessPool;
 use crate::native_v2_capsule::CapsuleFilesystem;
-use crate::native_v2_cloud::{
+use crate::native_v2_platform::{
     AllocatedCapsule, CapsuleAllocationUnavailable, RetainedAllocationRequest,
     RetainedAllocationUnavailable,
 };
@@ -139,8 +139,10 @@ exec /usr/bin/git "$@"
             run_id,
             admitted: &self.admitted,
             github_token: Some(CHECKOUT_TOKEN),
-            preparation: crate::native_v2_cloud::CapsulePreparation::quiet(&self.admitted.runtime)
-                .assert_value(),
+            preparation: crate::native_v2_platform::CapsulePreparation::quiet(
+                &self.admitted.runtime,
+            )
+            .assert_value(),
         }
     }
 
@@ -715,7 +717,7 @@ async fn checkpoint_restore_survives_workspace_move_and_discard_removes_lineage_
             selection: CheckpointRestoreSelection::Checkpoint {
                 checkpoint_id: checkpoint_id.clone(),
             },
-            preparation: crate::native_v2_cloud::CapsulePreparation::quiet(
+            preparation: crate::native_v2_platform::CapsulePreparation::quiet(
                 &fixture.admitted.runtime,
             )
             .assert_value(),

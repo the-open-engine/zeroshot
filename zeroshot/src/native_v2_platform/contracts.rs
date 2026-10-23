@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CloudRunReceipt {
+pub struct PlatformRunReceipt {
     pub run_id: RunId,
     pub deduped: bool,
 }

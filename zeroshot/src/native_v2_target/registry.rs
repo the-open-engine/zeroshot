@@ -378,17 +378,37 @@ pub(super) fn lock_registry(lock: &File, exclusive: bool) -> Result<(), TargetCo
 
 fn initialize_registry(path: &Path) -> Result<(RegistryState, bool), TargetConnectorError> {
     let mut state = read_registry(path)?;
-    let missing_cloud = !state.targets.contains_key("cloud");
-    let initialized = state.version == LEGACY_REGISTRY_VERSION || missing_cloud;
-    if missing_cloud {
-        let cloud = prepare_target(TargetAdd {
-            name: "cloud".to_owned(),
+    let upgraded = upgrade_platform_target(&mut state)?;
+    let missing_platform = !state.targets.contains_key("platform");
+    let initialized = state.version == LEGACY_REGISTRY_VERSION || upgraded || missing_platform;
+    if missing_platform {
+        let platform = prepare_target(TargetAdd {
+            name: "platform".to_owned(),
             url: "https://api.cloud.zeroshot.sh".to_owned(),
             direct: false,
         })?;
-        state.targets.insert(cloud.name.clone(), cloud);
+        state.targets.insert(platform.name.clone(), platform);
     }
     Ok((state, initialized))
+}
+
+fn upgrade_platform_target(state: &mut RegistryState) -> Result<bool, TargetConnectorError> {
+    let legacy_builtin = state.targets.get("cloud").is_some_and(|target| {
+        target.origin == "https://api.cloud.zeroshot.sh"
+            && matches!(target.access, TargetAccess::Hosted { .. })
+    });
+    if !legacy_builtin {
+        return Ok(false);
+    }
+    if state.targets.contains_key("platform") {
+        return Err(TargetConnectorError::PlatformTargetUpgradeConflict);
+    }
+    let Some(mut platform) = state.targets.remove("cloud") else {
+        return Ok(false);
+    };
+    platform.name = "platform".to_owned();
+    state.targets.insert(platform.name.clone(), platform);
+    Ok(true)
 }
 
 fn read_registry(path: &Path) -> Result<RegistryState, TargetConnectorError> {

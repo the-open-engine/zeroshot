@@ -57,7 +57,7 @@ fn run_as(uid: u32, gid: u32, program: &str, arguments: &[&Path]) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-/// Run this exact test as root (the cloud capsule's launch identity) to exercise real UID checks.
+/// Run this exact test as root (the platform capsule's launch identity) to exercise real UID checks.
 #[test]
 #[cfg(target_os = "linux")]
 fn root_capsule_permissions_share_workspace_and_keep_distinct_session_homes() {

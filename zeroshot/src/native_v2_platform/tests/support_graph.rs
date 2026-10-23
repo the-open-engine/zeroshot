@@ -30,7 +30,7 @@ pub(super) fn runtime() -> RuntimePlan {
 }
 
 pub(super) fn request(input: Value) -> RunSubmitParams {
-    request_with_key(input, "cloud-test")
+    request_with_key(input, "platform-test")
 }
 
 pub(super) fn request_with_key(input: Value, submission_key: &str) -> RunSubmitParams {
@@ -38,7 +38,7 @@ pub(super) fn request_with_key(input: Value, submission_key: &str) -> RunSubmitP
         run_id: RunId::new(format!("run-{submission_key}")),
         submission: RunSubmission {
             environment: None,
-            title: RunTitle::new("Cloud test run").assert_value_with("title"),
+            title: RunTitle::new("Platform test run").assert_value_with("title"),
             graph: graph(),
             initial_input: valid_input_or(input),
             runtime: runtime(),
@@ -165,7 +165,7 @@ fn worker_node() -> Value {
         "kind": "step",
         "name": "worker",
         "worker": "agent.worker@1",
-        "instructions": "Implement the cloud test change.",
+        "instructions": "Implement the platform test change.",
         "input": {"kind": "null"},
         "output": {"kind": "null"},
         "inputBindings": [],
@@ -302,15 +302,15 @@ fn complex_graph() -> GraphSpec {
 
 pub(super) fn complex_request() -> RunSubmitParams {
     RunSubmitParams {
-        run_id: RunId::new("run-cloud-complex"),
+        run_id: RunId::new("run-platform-complex"),
         submission: RunSubmission {
             environment: None,
-            title: RunTitle::new("Complex cloud test").assert_value_with("title"),
+            title: RunTitle::new("Complex platform test").assert_value_with("title"),
             graph: complex_graph(),
             initial_input: valid_input_or(Value::Null),
             runtime: complex_runtime(),
             source: Some(source()),
-            submission_key: IdempotencyKey::new("cloud-complex")
+            submission_key: IdempotencyKey::new("platform-complex")
                 .assert_value_with("submission key"),
         },
     }

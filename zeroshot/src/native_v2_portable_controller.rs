@@ -203,7 +203,7 @@ pub enum PortableControllerError {
     #[error(transparent)]
     Ledger(#[from] crate::v2_run_ledger::RunLedgerError),
     #[error(transparent)]
-    Controller(#[from] crate::native_v2_cloud::NativeV2CloudError),
+    Controller(#[from] crate::native_v2_platform::NativeV2PlatformError),
     #[error("portable controller I/O failed")]
     Io(#[source] io::Error),
 }

@@ -24,7 +24,7 @@ use zeroshot_engine::native_v2_cli::{
 
 use super::{TargetAuthorityError, TargetOecpAccess, TargetRecord};
 
-/// The external contract which hosting must implement before the native-v2 CLI can reach cloud.
+/// The external contract which hosting must implement before the native-v2 CLI can reach Platform.
 #[async_trait]
 pub trait TargetControlAuthority: Send + Sync {
     fn redact_error(&self, error: TargetAuthorityError) -> TargetAuthorityError {

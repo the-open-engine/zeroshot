@@ -4,7 +4,7 @@ use crate::native_v2_contract::{ExecutionRef, NodeCompletion};
 use openengine_cluster_protocol::{LogLevel, PositiveInteger, RunLogEventNotification};
 
 async fn read_logs(
-    controller: &NativeV2CloudController,
+    controller: &NativeV2PlatformController,
     params: RunLogsParams,
 ) -> Vec<RunLogEventNotification> {
     tokio::time::timeout(Duration::from_secs(2), async {
@@ -101,7 +101,7 @@ async fn restarted_active_nodes_keep_public_failure_logs_and_replay_without_dupl
     } = harness(Behavior::Complete).await;
     let run_id = interrupted_parallel_run(&ledger).await;
     drop(controller);
-    let controller = NativeV2CloudController::new(ledger.clone(), allocator.clone())
+    let controller = NativeV2PlatformController::new(ledger.clone(), allocator.clone())
         .await
         .assert_value();
     let params = || RunLogsParams {
@@ -165,7 +165,7 @@ async fn restarted_active_nodes_keep_public_failure_logs_and_replay_without_dupl
         .await
         .assert_value();
     drop(controller);
-    let reconstructed = NativeV2CloudController::new(ledger, allocator.clone())
+    let reconstructed = NativeV2PlatformController::new(ledger, allocator.clone())
         .await
         .assert_value();
     let after = reconstructed

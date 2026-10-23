@@ -25,18 +25,18 @@ type ServerRequest = tokio_tungstenite::tungstenite::handshake::server::Request;
 type ServerResponse = tokio_tungstenite::tungstenite::handshake::server::Response;
 
 #[test]
-fn file_registry_initializes_cloud_with_a_stable_hosted_identity() {
+fn file_registry_initializes_platform_with_a_stable_hosted_identity() {
     let root = temp_root();
     let path = root.path("config/targets.json");
-    let cloud = FileTargetRegistry::new(path.clone())
-        .get("cloud")
+    let platform = FileTargetRegistry::new(path.clone())
+        .get("platform")
         .assert_value();
-    assert_eq!(cloud.name, "cloud");
-    assert_eq!(cloud.origin, "https://api.cloud.zeroshot.sh");
-    assert!(matches!(cloud.access, TargetAccess::Hosted { .. }));
+    assert_eq!(platform.name, "platform");
+    assert_eq!(platform.origin, "https://api.cloud.zeroshot.sh");
+    assert!(matches!(platform.access, TargetAccess::Hosted { .. }));
     assert_eq!(
-        FileTargetRegistry::new(path).get("cloud").assert_value(),
-        cloud
+        FileTargetRegistry::new(path).get("platform").assert_value(),
+        platform
     );
     assert!(matches!(
         FileTargetRegistry::new(root.path("other/targets.json")).get("unknown"),
@@ -117,7 +117,7 @@ fn file_registry_rejects_malformed_records_and_noncanonical_recovery_authority()
         std::fs::create_dir_all(path.parent().assert_value()).assert_value();
         std::fs::write(&path, serde_json::to_vec(&state).assert_value()).assert_value();
         assert!(matches!(
-            FileTargetRegistry::new(path).get("cloud"),
+            FileTargetRegistry::new(path).get("platform"),
             Err(TargetConnectorError::RegistryJson(_))
         ));
     }
@@ -126,14 +126,14 @@ fn file_registry_rejects_malformed_records_and_noncanonical_recovery_authority()
     std::fs::create_dir_all(oversized.parent().assert_value()).assert_value();
     std::fs::write(&oversized, vec![b' '; 1024 * 1024 + 1]).assert_value();
     assert!(matches!(
-        FileTargetRegistry::new(oversized).get("cloud"),
+        FileTargetRegistry::new(oversized).get("platform"),
         Err(TargetConnectorError::RegistryTooLarge)
     ));
 
     let directory = root.path("directory/targets.json");
     std::fs::create_dir_all(&directory).assert_value();
     assert!(matches!(
-        FileTargetRegistry::new(directory).get("cloud"),
+        FileTargetRegistry::new(directory).get("platform"),
         Err(TargetConnectorError::RegistryIo(_))
     ));
 

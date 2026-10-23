@@ -19,10 +19,10 @@ pub(crate) use tokio::io::{AsyncReadExt, AsyncWriteExt};
 pub(crate) use tokio::net::{TcpListener, TcpStream};
 pub(crate) use tokio::sync::watch;
 pub(crate) use zeroshot_engine::execution::process::HostedProcessPool;
-pub(crate) use zeroshot_engine::native_v2_cloud::{
+pub(crate) use zeroshot_engine::native_v2_platform::{
     AllocatedCapsule, CapsuleAllocationUnavailable, CapsuleAllocator, CapsuleCleanup,
     CapsuleCleanupUnavailable, CapsuleDestroyed, ControllerClaimUnavailable,
-    ExclusiveControllerClaim, NativeV2CloudController,
+    ExclusiveControllerClaim, NativeV2PlatformController,
 };
 pub(crate) use zeroshot_engine::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
 pub(crate) use zeroshot_engine::native_v2_cli::TargetRunIntent;
@@ -114,7 +114,7 @@ impl CapsuleAllocator for ImmediateAllocator {
 
     async fn allocate(
         &self,
-        request: zeroshot_engine::native_v2_cloud::CapsuleAllocationRequest<'_>,
+        request: zeroshot_engine::native_v2_platform::CapsuleAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         let admitted = request.admitted;
         let runner = NativeNodeRunner::new(
@@ -199,13 +199,13 @@ pub(crate) struct TestControllerFactory;
 
 #[async_trait]
 impl TargetControllerFactory for TestControllerFactory {
-    async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
+    async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
         test_controller(Arc::new(ImmediateAllocator::default())).await
     }
 
     async fn submit(
         &self,
-        controller: &NativeV2CloudController,
+        controller: &NativeV2PlatformController,
         request: TargetRunRequest,
     ) -> Result<TargetRunReceipt, TargetAuthorityError> {
         submit_test_run(controller, request).await
@@ -219,13 +219,13 @@ pub(crate) struct FixedAllocatorFactory {
 
 #[async_trait]
 impl TargetControllerFactory for FixedAllocatorFactory {
-    async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
+    async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
         test_controller_with_policy(self.allocator.clone(), self.delivery_policy).await
     }
 
     async fn submit(
         &self,
-        controller: &NativeV2CloudController,
+        controller: &NativeV2PlatformController,
         request: TargetRunRequest,
     ) -> Result<TargetRunReceipt, TargetAuthorityError> {
         submit_test_run(controller, request).await
@@ -234,15 +234,15 @@ impl TargetControllerFactory for FixedAllocatorFactory {
 
 async fn test_controller(
     allocator: Arc<dyn CapsuleAllocator>,
-) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
+) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
     test_controller_with_policy(allocator, DeliveryPolicy::Required).await
 }
 
 async fn test_controller_with_policy(
     allocator: Arc<dyn CapsuleAllocator>,
     delivery_policy: DeliveryPolicy,
-) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
-    NativeV2CloudController::new_with_delivery_policy(
+) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
+    NativeV2PlatformController::new_with_delivery_policy(
         Arc::new(FakeRunLedger::new()),
         allocator,
         delivery_policy,
@@ -253,7 +253,7 @@ async fn test_controller_with_policy(
 }
 
 pub(crate) async fn submit_test_run(
-    controller: &NativeV2CloudController,
+    controller: &NativeV2PlatformController,
     request: TargetRunRequest,
 ) -> Result<TargetRunReceipt, TargetAuthorityError> {
     let TargetRunRequest {

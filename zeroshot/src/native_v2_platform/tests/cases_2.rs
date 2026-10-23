@@ -49,11 +49,9 @@ async fn internal_submission_and_oecp_listing_share_the_same_public_run_identity
 
 #[tokio::test]
 async fn one_capsule_drives_worker_parallel_verifiers_and_loop() {
-    let ledger = Arc::new(FakeRunLedger::new());
     let driver = Arc::new(GraphDriver::default());
-    let cleanup = Arc::new(FakeCleanup::new(ledger.clone()));
-    let allocator = Arc::new(FakeAllocator::new(driver.clone(), cleanup.clone()));
-    let controller = NativeV2CloudController::new(ledger, allocator.clone())
+    let (ledger, cleanup, allocator) = runtime_parts(driver.clone());
+    let controller = NativeV2PlatformController::new(ledger, allocator.clone())
         .await
         .assert_value_with("controller startup");
     let receipt = submit_test_request(&controller, complex_request())

@@ -1,4 +1,4 @@
-//! Transport-neutral cloud controller for one native-v2 run per disposable capsule.
+//! Transport-neutral platform controller for one native-v2 run per disposable capsule.
 //!
 //! Admission, durable graph truth, supervision, observation, environment selection, and terminal
 //! policy remain controller-owned. The allocator supplies exactly one opaque node runner, one
@@ -47,7 +47,7 @@ use crate::v2_run_ledger::{
 };
 
 #[cfg(test)]
-#[path = "native_v2_cloud/tests.rs"]
+#[path = "native_v2_platform/tests.rs"]
 mod tests;
 
 mod contracts;
@@ -56,16 +56,16 @@ use preparation::{PreparationTask, PreparationStart, ResumePreparation};
 pub use contracts::{
     AllocatedCapsule, CapsuleAllocationRequest, CapsuleAllocationUnavailable, CapsuleAllocator,
     CapsuleCleanup, CapsulePreparation, PreparationProgress, CapsuleCleanupUnavailable,
-    CapsuleDestroyed, CloudRunReceipt, ControllerClaimUnavailable, ExclusiveControllerClaim,
+    CapsuleDestroyed, PlatformRunReceipt, ControllerClaimUnavailable, ExclusiveControllerClaim,
     RetainedAllocationRequest, RetainedAllocationUnavailable, RunSourceCredentials,
 };
 pub use crate::native_v2_supervisor::RunEnvironment;
 
 /// Compatibility name for the protocol-owned submission while downstream callers migrate.
-pub type CloudRunSubmission = RunSubmission;
+pub type PlatformRunSubmission = RunSubmission;
 
 #[derive(Debug, Error)]
-pub enum NativeV2CloudError {
+pub enum NativeV2PlatformError {
     #[error(transparent)]
     ControllerClaim(#[from] ControllerClaimUnavailable),
     #[error(transparent)]
@@ -89,7 +89,7 @@ pub enum NativeV2CloudError {
 }
 
 #[derive(Clone)]
-pub struct NativeV2CloudController {
+pub struct NativeV2PlatformController {
     ledger: Arc<dyn RunLedger>,
     allocator: Arc<dyn CapsuleAllocator>,
     observability: NativeV2Observability,
@@ -134,13 +134,13 @@ struct AllocatedRunStart {
     capsule: AllocatedCapsule,
 }
 
-impl NativeV2CloudController {
+impl NativeV2PlatformController {
     /// Claims exclusive target authority, reconciles durable nonterminal runs, then constructs
     /// the target adapter. Each submitted run carries its own immutable runtime plan.
     pub async fn new(
         ledger: Arc<dyn RunLedger>,
         allocator: Arc<dyn CapsuleAllocator>,
-    ) -> Result<Self, NativeV2CloudError> {
+    ) -> Result<Self, NativeV2PlatformError> {
         Self::new_with_delivery_policy(ledger, allocator, DeliveryPolicy::Required).await
     }
 
@@ -148,7 +148,7 @@ impl NativeV2CloudController {
         ledger: Arc<dyn RunLedger>,
         allocator: Arc<dyn CapsuleAllocator>,
         delivery_policy: DeliveryPolicy,
-    ) -> Result<Self, NativeV2CloudError> {
+    ) -> Result<Self, NativeV2PlatformError> {
         let controller = Self {
             observability: NativeV2Observability::new(ledger.clone()),
             ledger,
@@ -173,7 +173,7 @@ impl NativeV2CloudController {
 
     /// Reconciles durable nonterminal truth before this controller can serve any OECP method.
     /// A replacement runtime is never allocated during startup.
-    async fn reconcile_persisted_runs(&self) -> Result<(), NativeV2CloudError> {
+    async fn reconcile_persisted_runs(&self) -> Result<(), NativeV2PlatformError> {
         for summary in self.ledger.list().await? {
             let stored = self
                 .ledger
@@ -189,7 +189,7 @@ impl NativeV2CloudController {
         Ok(())
     }
 
-    async fn finish_lost_runtime(&self, stored: &StoredRun) -> Result<(), NativeV2CloudError> {
+    async fn finish_lost_runtime(&self, stored: &StoredRun) -> Result<(), NativeV2PlatformError> {
         let run_id = &stored.snapshot.run_id;
         // Quarantine interrupted work and retain checkpoints until terminal publication succeeds.
         self.allocator
@@ -215,7 +215,7 @@ impl NativeV2CloudController {
     pub async fn submit(
         &self,
         request: RunSubmitParams,
-    ) -> Result<CloudRunReceipt, NativeV2CloudError> {
+    ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
         let environment =
             RunEnvironment::exact_for_submission(&request.submission, BTreeMap::new())?;
         self.submit_inner(request, environment, RunSourceCredentials::default())
@@ -227,7 +227,7 @@ impl NativeV2CloudController {
         &self,
         request: RunSubmitParams,
         environment: RunEnvironment,
-    ) -> Result<CloudRunReceipt, NativeV2CloudError> {
+    ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
         self.submit_inner(request, environment, RunSourceCredentials::default())
             .await
     }
@@ -239,7 +239,7 @@ impl NativeV2CloudController {
         request: RunSubmitParams,
         environment: RunEnvironment,
         github_token: Option<String>,
-    ) -> Result<CloudRunReceipt, NativeV2CloudError> {
+    ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
         self.submit_inner(
             request,
             environment,
@@ -257,7 +257,7 @@ impl NativeV2CloudController {
         request: RunSubmitParams,
         environment: RunEnvironment,
         credentials: RunSourceCredentials,
-    ) -> Result<CloudRunReceipt, NativeV2CloudError> {
+    ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
         self.submit_inner(request, environment, credentials).await
     }
 
@@ -266,7 +266,7 @@ impl NativeV2CloudController {
         request: RunSubmitParams,
         environment: RunEnvironment,
         source_credentials: RunSourceCredentials,
-    ) -> Result<CloudRunReceipt, NativeV2CloudError> {
+    ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
         let _turn = self.submission_turn.lock().await;
         let RunSubmitParams { run_id, submission } = request;
         let digest = submission_digest(&submission)?;
@@ -288,7 +288,7 @@ impl NativeV2CloudController {
         match created {
             CreateRunOutcome::Existing(stored) => {
                 self.fail_orphaned_runtime(&stored).await?;
-                Ok(CloudRunReceipt {
+                Ok(PlatformRunReceipt {
                     run_id: stored.snapshot.run_id,
                     deduped: true,
                 })
@@ -311,7 +311,7 @@ impl NativeV2CloudController {
         &self,
         submission_key: &openengine_cluster_protocol::IdempotencyKey,
         submission_digest: &Sha256Digest,
-    ) -> Result<Option<CloudRunReceipt>, NativeV2CloudError> {
+    ) -> Result<Option<PlatformRunReceipt>, NativeV2PlatformError> {
         let _turn = self.submission_turn.lock().await;
         let Some(stored) = self.ledger.get_by_submission_key(submission_key).await? else {
             return Ok(None);
@@ -323,7 +323,7 @@ impl NativeV2CloudController {
             .into());
         }
         self.fail_orphaned_runtime(&stored).await?;
-        Ok(Some(CloudRunReceipt {
+        Ok(Some(PlatformRunReceipt {
             run_id: stored.snapshot.run_id,
             deduped: true,
         }))
@@ -333,7 +333,7 @@ impl NativeV2CloudController {
         &self,
         stored: StoredRun,
         secrets: RunSecretEnvelope,
-    ) -> Result<CloudRunReceipt, NativeV2CloudError> {
+    ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
         let run_id = stored.snapshot.run_id.clone();
         let controller_claim = self.allocator.claim_controller(&run_id).await?;
         self.start_preparation(PreparationStart {
@@ -343,7 +343,7 @@ impl NativeV2CloudController {
             resume: None,
         })
         .await?;
-        Ok(CloudRunReceipt {
+        Ok(PlatformRunReceipt {
             run_id,
             deduped: false,
         })
@@ -352,7 +352,7 @@ impl NativeV2CloudController {
     async fn start_allocated(
         &self,
         start: AllocatedRunStart,
-    ) -> Result<CloudRunReceipt, NativeV2CloudError> {
+    ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
         let AllocatedRunStart {
             mut stored,
             environment,
@@ -395,7 +395,7 @@ impl NativeV2CloudController {
             .await
             .insert(run_id.clone(), RuntimeSlot::Running(engine.clone()));
         self.remove_finished_runtime(run_id.clone(), engine);
-        Ok(CloudRunReceipt {
+        Ok(PlatformRunReceipt {
             run_id,
             deduped: false,
         })
@@ -405,7 +405,7 @@ impl NativeV2CloudController {
         &self,
         stored: &mut StoredRun,
         execution_seed: Vec<crate::full_v1_reducer::DurableExecution>,
-    ) -> Result<(), NativeV2CloudError> {
+    ) -> Result<(), NativeV2PlatformError> {
         if !execution_seed.is_empty() {
             let events = execution_seed
                 .into_iter()
@@ -424,7 +424,7 @@ impl NativeV2CloudController {
     pub async fn resume(
         &self,
         params: RunResumeParams,
-    ) -> Result<RunResumeResult, NativeV2CloudError> {
+    ) -> Result<RunResumeResult, NativeV2PlatformError> {
         let _turn = self.submission_turn.lock().await;
         let RunResumeParams {
             from,
@@ -477,7 +477,7 @@ impl NativeV2CloudController {
     async fn recoverable_resume_source(
         &self,
         run_id: &RunId,
-    ) -> Result<StoredRun, NativeV2CloudError> {
+    ) -> Result<StoredRun, NativeV2PlatformError> {
         let source = self
             .ledger
             .get(run_id)
@@ -496,7 +496,7 @@ impl NativeV2CloudController {
     async fn create_resume_successor(
         &self,
         request: CreateRun,
-    ) -> Result<StoredRun, NativeV2CloudError> {
+    ) -> Result<StoredRun, NativeV2PlatformError> {
         let created = self.ledger.create_or_get(request).await?;
         match created {
             CreateRunOutcome::Created(stored) => Ok(stored),
@@ -507,7 +507,7 @@ impl NativeV2CloudController {
     pub async fn checkpoints(
         &self,
         params: openengine_cluster_protocol::RunCheckpointsParams,
-    ) -> Result<openengine_cluster_protocol::RunCheckpointsResult, NativeV2CloudError> {
+    ) -> Result<openengine_cluster_protocol::RunCheckpointsResult, NativeV2PlatformError> {
         if self.ledger.get(&params.run_id).await?.is_none() {
             return Err(RunLedgerError::RunNotFound.into());
         }
@@ -517,7 +517,7 @@ impl NativeV2CloudController {
     pub async fn discard_workspace(
         &self,
         params: RunDiscardWorkspaceParams,
-    ) -> Result<RunDiscardWorkspaceResult, NativeV2CloudError> {
+    ) -> Result<RunDiscardWorkspaceResult, NativeV2PlatformError> {
         if self.ledger.get(&params.run_id).await?.is_none() {
             return Err(RunLedgerError::RunNotFound.into());
         }
@@ -541,7 +541,7 @@ impl NativeV2CloudController {
         });
     }
 
-    async fn fail_orphaned_runtime(&self, stored: &StoredRun) -> Result<(), NativeV2CloudError> {
+    async fn fail_orphaned_runtime(&self, stored: &StoredRun) -> Result<(), NativeV2PlatformError> {
         let _turn = self.reconstructed_turn.lock().await;
         let stored = self
             .ledger
@@ -574,7 +574,7 @@ impl NativeV2CloudController {
         &self,
         run_id: &RunId,
         code: &str,
-    ) -> Result<(), NativeV2CloudError> {
+    ) -> Result<(), NativeV2PlatformError> {
         let stored = self
             .ledger
             .get(run_id)
@@ -585,14 +585,14 @@ impl NativeV2CloudController {
         Ok(())
     }
 
-    pub async fn list(&self) -> Result<Vec<RunSummary>, NativeV2CloudError> {
+    pub async fn list(&self) -> Result<Vec<RunSummary>, NativeV2PlatformError> {
         Ok(self.ledger.list().await?)
     }
 
     pub async fn status(
         &self,
         params: RunStatusParams,
-    ) -> Result<RunStatusResult, NativeV2CloudError> {
+    ) -> Result<RunStatusResult, NativeV2PlatformError> {
         let mut result = self.observability.status(params).await?;
         let failed = matches!(
             result.status,
@@ -626,28 +626,28 @@ impl NativeV2CloudController {
     pub async fn watch(
         &self,
         params: RunWatchParams,
-    ) -> Result<(RunWatchResult, RunWatchSubscription), NativeV2CloudError> {
+    ) -> Result<(RunWatchResult, RunWatchSubscription), NativeV2PlatformError> {
         Ok(self.observability.watch(params).await?)
     }
 
     pub async fn logs(
         &self,
         params: RunLogsParams,
-    ) -> Result<(RunLogsResult, RunLogsSubscription), NativeV2CloudError> {
+    ) -> Result<(RunLogsResult, RunLogsSubscription), NativeV2PlatformError> {
         Ok(self.observability.logs(params).await?)
     }
 
     pub async fn attach(
         &self,
         params: RunAttachParams,
-    ) -> Result<(RunAttachResult, RunAttachSubscription), NativeV2CloudError> {
+    ) -> Result<(RunAttachResult, RunAttachSubscription), NativeV2PlatformError> {
         Ok(self.observability.attach(params).await?)
     }
 
     pub async fn force(
         &self,
         params: RunForceParams,
-    ) -> Result<RunForceResult, NativeV2CloudError> {
+    ) -> Result<RunForceResult, NativeV2PlatformError> {
         match self.prepare_force(&params.run_id).await? {
             ForceTarget::Terminal => {}
             ForceTarget::Preparing(task) => {
@@ -675,7 +675,7 @@ impl NativeV2CloudController {
             })
     }
 
-    async fn prepare_force(&self, run_id: &RunId) -> Result<ForceTarget, NativeV2CloudError> {
+    async fn prepare_force(&self, run_id: &RunId) -> Result<ForceTarget, NativeV2PlatformError> {
         // An existing runtime owns cancellation independently of submission and storage.
         if let Some(target) = self.live_force_target(run_id).await {
             return Ok(target);
@@ -701,7 +701,7 @@ impl NativeV2CloudController {
         &self,
         run_id: &RunId,
         engine: &PortableRunEngine,
-    ) -> Result<(), NativeV2CloudError> {
+    ) -> Result<(), NativeV2PlatformError> {
         // `drive` is internally serialized. Usually this waits behind the live driving turn; if
         // that turn stopped on cleanup error, this is the one retry that can finish cleanup.
         engine.force_stop().await?;
@@ -709,7 +709,7 @@ impl NativeV2CloudController {
         Ok(())
     }
 
-    async fn force_reconstructed(&self, run_id: &RunId) -> Result<(), NativeV2CloudError> {
+    async fn force_reconstructed(&self, run_id: &RunId) -> Result<(), NativeV2PlatformError> {
         let _turn = self.reconstructed_turn.lock().await;
         let stored = self
             .ledger
@@ -733,7 +733,7 @@ impl NativeV2CloudController {
         Ok(())
     }
 
-    async fn force_result(&self, run_id: &RunId) -> Result<RunForceResult, NativeV2CloudError> {
+    async fn force_result(&self, run_id: &RunId) -> Result<RunForceResult, NativeV2PlatformError> {
         let RunStatusResult {
             run_id,
             title,
@@ -763,12 +763,12 @@ impl NativeV2CloudController {
 fn retained_submission_identity(
     source_run_id: &RunId,
     successor_run_id: &RunId,
-) -> Result<(openengine_cluster_protocol::IdempotencyKey, Sha256Digest), NativeV2CloudError> {
+) -> Result<(openengine_cluster_protocol::IdempotencyKey, Sha256Digest), NativeV2PlatformError> {
     let submission_key = openengine_cluster_protocol::IdempotencyKey::new(format!(
         "resume-{}",
         successor_run_id.as_str()
     ))
-    .map_err(|_| NativeV2CloudError::SubmissionIdentity)?;
+    .map_err(|_| NativeV2PlatformError::SubmissionIdentity)?;
     let submission_digest = Sha256Digest::new(format!(
         "{:x}",
         Sha256::digest(format!(
@@ -777,13 +777,13 @@ fn retained_submission_identity(
             successor_run_id.as_str()
         ))
     ))
-    .map_err(|_| NativeV2CloudError::SubmissionIdentity)?;
+    .map_err(|_| NativeV2PlatformError::SubmissionIdentity)?;
     Ok((submission_key, submission_digest))
 }
 
 fn resume_secret_envelope(
     request: ResumeSecretRequest<'_>,
-) -> Result<RunSecretEnvelope, NativeV2CloudError> {
+) -> Result<RunSecretEnvelope, NativeV2PlatformError> {
     let ResumeSecretRequest {
         admitted,
         successor_run_id,
@@ -797,7 +797,7 @@ fn resume_secret_envelope(
             admitted,
             connections,
             crate::native_v2_hosting::build_connection_resolver(successor_run_id.clone(), wire)
-                .map_err(|_| NativeV2CloudError::ResumeCredentials)?,
+                .map_err(|_| NativeV2PlatformError::ResumeCredentials)?,
         ),
         None => RunEnvironment::exact_for_admitted(admitted, connections),
     }?;

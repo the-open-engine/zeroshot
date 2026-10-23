@@ -29,7 +29,7 @@ impl HostedWorkspaceStorage for ExternalStorage {
         }
         fs::write(
             request.workspace.join("restored.txt"),
-            b"durable cloud bytes",
+            b"durable platform bytes",
         )?;
         Ok(HostedWorkspace {
             comment_publications: self.comment_publications.clone(),
@@ -48,7 +48,7 @@ impl HostedWorkspaceStorage for ExternalStorage {
                 },
             )),
             execution_seed: Vec::new(),
-            delivery_run_id: Some(RunId::new("original-cloud-delivery")),
+            delivery_run_id: Some(RunId::new("original-platform-delivery")),
         })
     }
 }
@@ -70,7 +70,7 @@ async fn external_workspace_restore_precedes_dispatch_and_preserves_delivery_lin
         .join("workspace");
     assert_eq!(
         fs::read(workspace.join("restored.txt")).assert_value(),
-        b"durable cloud bytes"
+        b"durable platform bytes"
     );
     assert!(capsule.checkpoints.is_some());
     capsule
@@ -80,7 +80,7 @@ async fn external_workspace_restore_precedes_dispatch_and_preserves_delivery_lin
         .assert_value();
     assert_eq!(
         fixture.allocator.recovery_delivery_run_id(&fixture.run_id),
-        Some(RunId::new("original-cloud-delivery"))
+        Some(RunId::new("original-platform-delivery"))
     );
 }
 

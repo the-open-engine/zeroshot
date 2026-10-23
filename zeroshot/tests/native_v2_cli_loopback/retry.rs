@@ -76,9 +76,9 @@ impl CapsuleAllocator for RetryAllocator {
 
     async fn allocate(
         &self,
-        request: zeroshot_engine::native_v2_cloud::CapsuleAllocationRequest<'_>,
+        request: zeroshot_engine::native_v2_platform::CapsuleAllocationRequest<'_>,
     ) -> AllocationResult {
-        let zeroshot_engine::native_v2_cloud::CapsuleAllocationRequest {
+        let zeroshot_engine::native_v2_platform::CapsuleAllocationRequest {
             run_id: _run_id,
             admitted,
             github_token: _github_token,

@@ -28,9 +28,9 @@ use crate::execution::process::HostedProcessPool;
 use crate::native_v2_admission::DeliveryPolicy;
 use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
 use crate::native_v2_claude::ClaudeProcessEnvironment;
-use crate::native_v2_cloud::{NativeV2CloudController, NativeV2CloudError};
+use crate::native_v2_platform::{NativeV2PlatformController, NativeV2PlatformError};
 use crate::native_v2_pi::PiProcessEnvironment;
-use crate::native_v2_cloud::submission_digest;
+use crate::native_v2_platform::submission_digest;
 use crate::native_v2_target_authority::{
     NativeV2TargetAuthority, OperatorDiagnosticOutput, OperatorDiagnosticStore,
     TargetAuthorityError, TargetControllerFactory, TargetRunReceipt, TargetRunRequest,
@@ -69,7 +69,7 @@ pub async fn build_production_target_authority(
 /// Host-owned non-secret capabilities used to compose one installed target.
 #[derive(Clone)]
 pub struct ProductionHostingConfig {
-    /// A host-owned namespace. Cloud embedders select their own tenant-scoped storage.
+    /// A host-owned namespace. Platform embedders select their own tenant-scoped storage.
     pub memory_storage: Option<PathBuf>,
     /// Private diagnostics collection; the host owns the receiver and durable storage.
     pub operator_diagnostic_output: Option<OperatorDiagnosticOutput>,
@@ -123,7 +123,7 @@ impl ProductionTargetControllerFactory {
 
     pub async fn create_controller(
         &self,
-    ) -> Result<Arc<NativeV2CloudController>, ProductionHostingError> {
+    ) -> Result<Arc<NativeV2PlatformController>, ProductionHostingError> {
         let root = prepare_storage_root(&self.config.storage_root)?;
         let ledger_path = root.join("runs.sqlite3");
         prepare_production_ledger(&ledger_path)?;
@@ -136,7 +136,7 @@ impl ProductionTargetControllerFactory {
             Arc::new(capsule_config),
             self.operator_diagnostics.clone(),
         )?);
-        let controller = NativeV2CloudController::new_with_delivery_policy(
+        let controller = NativeV2PlatformController::new_with_delivery_policy(
             ledger,
             allocator,
             DeliveryPolicy::Optional,
@@ -196,7 +196,7 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
         true
     }
 
-    async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
+    async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
         self.create_controller()
             .await
             .map_err(|error| TargetAuthorityError::unavailable(error.to_string()))
@@ -204,7 +204,7 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
 
     async fn submit(
         &self,
-        controller: &NativeV2CloudController,
+        controller: &NativeV2PlatformController,
         request: TargetRunRequest,
     ) -> Result<TargetRunReceipt, TargetAuthorityError> {
         let TargetRunRequest {
@@ -221,7 +221,7 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
         if let Some(receipt) = controller
             .resolve_submission(&submission.submission_key, &digest)
             .await
-            .map_err(project_cloud_error)?
+            .map_err(project_platform_error)?
         {
             return Ok(TargetRunReceipt {
                 run_id: receipt.run_id,
@@ -239,13 +239,13 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
             .submit_with_exact_environment_and_source_credentials(
                 RunSubmitParams { run_id, submission },
                 environment,
-                crate::native_v2_cloud::RunSourceCredentials {
+                crate::native_v2_platform::RunSourceCredentials {
                     github_token,
                     git_credentials,
                 },
             )
             .await
-            .map_err(project_cloud_error)?;
+            .map_err(project_platform_error)?;
         Ok(TargetRunReceipt {
             run_id: receipt.run_id,
         })
@@ -264,16 +264,16 @@ fn prepare_contained_submission(
         .map_err(|error| TargetAuthorityError::invalid(error.to_string()))
 }
 
-fn project_cloud_error(error: NativeV2CloudError) -> TargetAuthorityError {
+fn project_platform_error(error: NativeV2PlatformError) -> TargetAuthorityError {
     let message = error.to_string();
     match error {
-        NativeV2CloudError::Admission(_)
-        | NativeV2CloudError::Environment(_)
-        | NativeV2CloudError::SubmissionIdentity
-        | NativeV2CloudError::Ledger(RunLedgerError::AdmittedRunTooLarge) => {
+        NativeV2PlatformError::Admission(_)
+        | NativeV2PlatformError::Environment(_)
+        | NativeV2PlatformError::SubmissionIdentity
+        | NativeV2PlatformError::Ledger(RunLedgerError::AdmittedRunTooLarge) => {
             TargetAuthorityError::invalid(message)
         }
-        NativeV2CloudError::Ledger(
+        NativeV2PlatformError::Ledger(
             RunLedgerError::SubmissionConflict { .. } | RunLedgerError::RunIdConflict,
         ) => TargetAuthorityError::conflict(message),
         _ => TargetAuthorityError::unavailable(message),

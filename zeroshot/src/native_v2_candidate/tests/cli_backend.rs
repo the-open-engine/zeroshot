@@ -13,7 +13,7 @@ where
 }
 
 pub(super) struct InProcessCliBackend {
-    pub(super) controller: Arc<NativeV2CloudController>,
+    pub(super) controller: Arc<NativeV2PlatformController>,
 }
 
 fn cli_protocol_error(error: impl std::fmt::Display) -> NativeV2CliError {
@@ -22,7 +22,7 @@ fn cli_protocol_error(error: impl std::fmt::Display) -> NativeV2CliError {
 
 impl InProcessCliBackend {
     fn target(&self, target: Option<&str>) -> Result<(), NativeV2CliError> {
-        if target == Some("candidate-cloud") {
+        if target == Some("candidate-platform") {
             Ok(())
         } else {
             Err(NativeV2CliError::Target("unknown test target".to_owned()))
