@@ -20,11 +20,16 @@ use openengine_cluster_protocol::WorkerOutcome;
 use crate::execution::process::HostedProcessPool;
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderExecution, ProviderFilesystemConfig, ProviderProcessRunners,
-    ProviderExecutionFiles, ProviderProcess, open_provider_process, require_process_cleanup,
-    provider_failure_diagnostic, redact_provider_error, report_cleanup_failure,
+    ProviderProcess, open_provider_process, require_process_cleanup, provider_failure_diagnostic,
+    redact_provider_error, report_cleanup_failure,
 };
-use crate::native_v2_runner::{DriverControl, DriverInvocation, NodeRunnerError, ResolvedEnvironment};
+use crate::native_v2_runner::{
+    AgentResponseState, DriverControl, DriverInvocation, LiveOutput, LiveOutputStream,
+    NodeRunnerError, ResolvedEnvironment, render_agent_prompt,
+};
 use session::CopilotSession;
+
+const MAX_GRAMMAR_RATE_LIMIT_RETRIES: usize = 3;
 
 /// Host-owned launch capabilities; credentials belong to each invocation's resolved connection.
 #[derive(Clone, Eq, PartialEq)]
@@ -115,59 +120,108 @@ impl CopilotAdapter {
         control: &DriverControl,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
         let _turn = session.core.turn.lock().await;
-        let mut redactions = self.provider_redactions(&invocation.environment, None);
-        redactions.extend(self.local_token.iter().cloned());
-        let result = async {
-            session.core.ensure_live(ClosedSessionFailure::Driver)?;
-            let authentication = auth::CopilotAuthentication::new(
-                &invocation.environment,
-                self.local_token.as_deref(),
-                self.config.local_user.is_some(),
-                &self.config.base_environment,
-            )?;
-            let local_provider = self.provider_configuration(
-                &invocation.environment,
-                &authentication,
-                command::agent_model(invocation)?,
-            )?;
-            redactions.extend(
-                local_provider
-                    .iter()
-                    .flat_map(provider::LocalProvider::redactions),
-            );
-            let execution = ProviderExecution::new(
-                ProviderFilesystemConfig {
-                    runners: self.runners,
-                    root: &self.config.runtime_home,
-                    workspace: &self.config.workspace,
-                },
-                invocation,
-                &session.core,
-            );
-            let files = execution
-                .prepare(control)
-                .await
-                .map_err(rpc::process_error)?;
-            let command =
-                command::command(&self.config, invocation, &files, local_provider.as_ref())?;
-            let mut process = open_provider_process(files.clone(), command, control)
-                .await?
-                .map_err(rpc::process_error)?;
-            let mut connection = rpc::CopilotRpc::new(
-                process.detach_stdout(),
-                invocation,
-                control,
-                rpc::CopilotRpcNative {
-                    authentication,
-                    provider: local_provider.as_ref(),
-                    redactions: redactions.clone(),
-                },
-            );
-            let outcome = exchange_rpc(&mut connection, &process, session, &files).await;
-            finish_rpc(&mut connection, &mut process, control, outcome).await
+        let prompt = render_agent_prompt(
+            invocation.agent_instructions()?,
+            &invocation.node.input,
+            &invocation.response,
+        )?;
+        let mut response = AgentResponseState::new(prompt);
+        let mut retries = 0;
+        loop {
+            let mut redactions = self.provider_redactions(&invocation.environment, None);
+            redactions.extend(self.local_token.iter().cloned());
+            let result = async {
+                session.core.ensure_live(ClosedSessionFailure::Driver)?;
+                let authentication = auth::CopilotAuthentication::new(
+                    &invocation.environment,
+                    self.local_token.as_deref(),
+                    self.config.local_user.is_some(),
+                    &self.config.base_environment,
+                )?;
+                let local_provider = self.provider_configuration(
+                    &invocation.environment,
+                    &authentication,
+                    command::agent_model(invocation)?,
+                )?;
+                redactions.extend(
+                    local_provider
+                        .iter()
+                        .flat_map(provider::LocalProvider::redactions),
+                );
+                let execution = ProviderExecution::new(
+                    ProviderFilesystemConfig {
+                        runners: self.runners,
+                        root: &self.config.runtime_home,
+                        workspace: &self.config.workspace,
+                    },
+                    invocation,
+                    &session.core,
+                );
+                let files = execution
+                    .prepare(control)
+                    .await
+                    .map_err(rpc::process_error)?;
+                let command =
+                    command::command(&self.config, invocation, &files, local_provider.as_ref())?;
+                let mut process = open_provider_process(files.clone(), command, control)
+                    .await?
+                    .map_err(rpc::process_error)?;
+                let mut connection = rpc::CopilotRpc::new(
+                    process.detach_stdout(),
+                    invocation,
+                    control,
+                    rpc::CopilotRpcNative {
+                        authentication,
+                        provider: local_provider.as_ref(),
+                        redactions: redactions.clone(),
+                    },
+                );
+                let outcome = exchange_rpc(
+                    &mut connection,
+                    &process,
+                    rpc::CopilotRpcTurn {
+                        session,
+                        files: &files,
+                        agent_response: &mut response,
+                    },
+                )
+                .await;
+                finish_rpc(&mut connection, &mut process, control, outcome).await
+            }
+            .await
+            .map_err(|error| redact_provider_error(error, &redactions));
+
+            match result {
+                Err(NodeRunnerError::DriverDetail(message))
+                    if rpc::is_grammar_compilation_rate_limit(&message)
+                        && retries < MAX_GRAMMAR_RATE_LIMIT_RETRIES =>
+                {
+                    let session_id = session.id.lock().await.clone().unwrap_or_default();
+                    let delay = rpc::grammar_rate_limit_retry_delay(retries, &session_id);
+                    control
+                        .emit(LiveOutput::new(
+                            LiveOutputStream::System,
+                            format!(
+                                "Copilot grammar compilation rate limited; retrying ({}/{}) in {} ms.",
+                                retries + 1,
+                                MAX_GRAMMAR_RATE_LIMIT_RETRIES,
+                                delay.as_millis(),
+                            ),
+                        )?)
+                        .await?;
+                    rpc::wait_for_grammar_rate_limit_retry(control, delay).await?;
+                    retries += 1;
+                }
+                Err(NodeRunnerError::DriverDetail(message))
+                    if rpc::is_grammar_compilation_rate_limit(&message) =>
+                {
+                    return Err(rpc::failure(format!(
+                        "Copilot grammar compilation rate limit persisted after {retries} retries: {message}"
+                    )));
+                }
+                result => return result,
+            }
         }
-        .await;
-        result.map_err(|error| redact_provider_error(error, &redactions))
     }
 
     fn provider_configuration(
@@ -238,12 +292,11 @@ async fn rpc_cleanup_failure(
 async fn exchange_rpc(
     connection: &mut rpc::CopilotRpc<'_>,
     process: &ProviderProcess,
-    session: &CopilotSession,
-    files: &ProviderExecutionFiles,
+    turn: rpc::CopilotRpcTurn<'_>,
 ) -> Result<WorkerOutcome, NodeRunnerError> {
     let (sender, receiver) = tokio::sync::mpsc::channel(16);
     let mut cancellation = connection.control.cancellation();
-    let exchange = connection.run(sender, session, files);
+    let exchange = connection.run(sender, turn);
     let writer = rpc::write_messages(process, receiver);
     tokio::pin!(exchange, writer);
     tokio::select! {

@@ -777,11 +777,113 @@ async fn malformed_output_receives_only_two_corrections_in_the_same_session() {
 }
 
 #[tokio::test]
+async fn grammar_compilation_rate_limit_retries_after_backoff_and_resumes_the_session() {
+    let fixture = Fixture::new("grammar_rate_limit_once").await;
+    let (events, outcome) = complete(fixture.start(1).await).await;
+    verified(outcome);
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        DurableNodeEvent::Output { output, .. }
+            if output.text.contains("Copilot grammar compilation rate limited; retrying")
+    )));
+    let capture = fixture.capture();
+    assert_eq!(
+        capture
+            .iter()
+            .filter(|message| message["method"] == "session.create")
+            .count(),
+        1
+    );
+    assert_eq!(
+        capture
+            .iter()
+            .filter(|message| message["method"] == "session.resume")
+            .count(),
+        1
+    );
+    assert_eq!(
+        capture
+            .iter()
+            .filter(|message| message["method"] == "session.send")
+            .count(),
+        2
+    );
+    assert_eq!(
+        capture
+            .iter()
+            .find(|message| message["method"] == "session.create")
+            .assert_value()["params"]["sessionId"],
+        capture
+            .iter()
+            .find(|message| message["method"] == "session.resume")
+            .assert_value()["params"]["sessionId"]
+    );
+}
+
+#[tokio::test]
+async fn grammar_compilation_retry_preserves_the_current_correction_prompt() {
+    let fixture = Fixture::new("correction_rate_limit_once").await;
+    let (_, outcome) = complete(fixture.start(1).await).await;
+    verified(outcome);
+
+    let capture = fixture.capture();
+    let sends = capture
+        .iter()
+        .filter(|message| message["method"] == "session.send")
+        .collect::<Vec<_>>();
+    assert_eq!(sends.len(), 3);
+    assert_ne!(sends[0]["params"]["prompt"], sends[1]["params"]["prompt"]);
+    assert_eq!(sends[1]["params"]["prompt"], sends[2]["params"]["prompt"]);
+}
+
+#[tokio::test]
+async fn grammar_compilation_rate_limit_retry_exhaustion_preserves_provider_error() {
+    let fixture = Fixture::new("grammar_rate_limit_always").await;
+    let (events, outcome) = complete(fixture.start(1).await).await;
+    let Err(NodeRunnerError::DriverDetail(error)) = outcome else {
+        panic!("expected the exhausted provider retry to fail: {outcome:?}");
+    };
+    assert!(error.contains("persisted after 3 retries"), "{error}");
+    assert!(
+        error.contains("Grammar compilation rate limit exceeded"),
+        "{error}"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                DurableNodeEvent::Output { output, .. }
+                    if output.text.contains("Copilot grammar compilation rate limited; retrying")
+            ))
+            .count(),
+        3
+    );
+    let capture = fixture.capture();
+    assert_eq!(
+        capture
+            .iter()
+            .filter(|message| message["method"] == "session.send")
+            .count(),
+        4
+    );
+    assert_eq!(
+        capture
+            .iter()
+            .filter(|message| message["method"] == "session.resume")
+            .count(),
+        3
+    );
+}
+
+#[tokio::test]
 async fn fails_closed_on_protocol_identity_and_provider_errors() {
     for (mode, detail) in [
         ("version", "is incompatible; install CLI 1.0.86"),
         ("identity", "Copilot returned a different session"),
         ("error", "rejected [REDACTED]"),
+        ("http_400", "HTTP 400: Invalid JSON schema"),
     ] {
         let fixture = Fixture::new(mode).await;
         let (events, outcome) = complete(fixture.start(1).await).await;
@@ -797,6 +899,17 @@ async fn fails_closed_on_protocol_identity_and_provider_errors() {
             assert!(error.contains("stderr: launch note: [REDACTED]"));
         }
         assert!(!format!("{events:?} {error}").contains("gho_fake-secret"));
+        if mode == "http_400" {
+            assert_eq!(
+                fixture
+                    .capture()
+                    .iter()
+                    .filter(|message| message["method"] == "session.send")
+                    .count(),
+                1,
+                "ordinary HTTP 400 responses must not be retried"
+            );
+        }
     }
 }
 

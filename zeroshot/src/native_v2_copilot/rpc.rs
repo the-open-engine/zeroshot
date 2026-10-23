@@ -1,4 +1,7 @@
 use std::collections::BTreeSet;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::time::Duration;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use openengine_cluster_protocol::{FailureDiagnosticKind, WorkerOutcome};
@@ -11,9 +14,39 @@ use crate::native_v2_capsule::provider_process::{
 };
 use crate::native_v2_runner::{
     AgentResponseState, DriverControl, DriverInvocation, NodeRunnerError, ProviderSchemaDialect,
-    render_agent_prompt, resolve_agent_response_with_dialect,
+    resolve_agent_response_with_dialect,
 };
 use super::{auth, command, events, framing::Frames, provider, session::CopilotSession};
+
+const GRAMMAR_COMPILATION_RATE_LIMIT_MESSAGE: &str = "grammar compilation rate limit exceeded";
+
+pub(super) fn is_grammar_compilation_rate_limit(message: &str) -> bool {
+    message
+        .to_ascii_lowercase()
+        .contains(GRAMMAR_COMPILATION_RATE_LIMIT_MESSAGE)
+}
+
+pub(super) fn grammar_rate_limit_retry_delay(retry_index: usize, session_id: &str) -> Duration {
+    let base_millis = 1_000_u64
+        .checked_shl(retry_index.min(3) as u32)
+        .unwrap_or(8_000)
+        .min(8_000);
+    let mut hasher = DefaultHasher::new();
+    session_id.hash(&mut hasher);
+    retry_index.hash(&mut hasher);
+    Duration::from_millis(base_millis + hasher.finish() % 1_000)
+}
+
+pub(super) async fn wait_for_grammar_rate_limit_retry(
+    control: &DriverControl,
+    delay: Duration,
+) -> Result<(), NodeRunnerError> {
+    let mut cancellation = control.cancellation();
+    tokio::select! {
+        () = cancellation.cancelled() => Err(NodeRunnerError::Cancelled),
+        () = tokio::time::sleep(delay) => Ok(()),
+    }
+}
 
 pub(super) fn failure(message: impl Into<String>) -> NodeRunnerError {
     NodeRunnerError::DriverDetail(message.into())
@@ -89,6 +122,12 @@ pub(super) struct CopilotRpc<'a> {
     provider: Option<&'a provider::LocalProvider>,
 }
 
+pub(super) struct CopilotRpcTurn<'a> {
+    pub(super) session: &'a CopilotSession,
+    pub(super) files: &'a ProviderExecutionFiles,
+    pub(super) agent_response: &'a mut AgentResponseState,
+}
+
 pub(super) struct CopilotRpcNative<'a> {
     pub authentication: auth::CopilotAuthentication<'a>,
     pub provider: Option<&'a provider::LocalProvider>,
@@ -129,11 +168,10 @@ impl<'a> CopilotRpc<'a> {
     pub(super) async fn run(
         &mut self,
         sender: mpsc::Sender<Value>,
-        session: &CopilotSession,
-        files: &ProviderExecutionFiles,
+        turn: CopilotRpcTurn<'_>,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
         self.sender = Some(sender);
-        let result = self.run_session(session, files).await;
+        let result = self.run_session(turn).await;
         self.sender.take();
         result.map_err(|error| match error {
             NodeRunnerError::DriverDetail(message) => {
@@ -145,17 +183,16 @@ impl<'a> CopilotRpc<'a> {
 
     async fn run_session(
         &mut self,
-        session: &CopilotSession,
-        files: &ProviderExecutionFiles,
+        turn: CopilotRpcTurn<'_>,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
         self.connect().await?;
-        let resume = session.id.lock().await.clone();
+        let resume = turn.session.id.lock().await.clone();
         self.session_id = resume
             .clone()
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let params = command::session_parameters(
             self.invocation,
-            files,
+            turn.files,
             &self.session_id,
             command::SessionProvider {
                 authentication: &self.authentication,
@@ -169,8 +206,8 @@ impl<'a> CopilotRpc<'a> {
         };
         let created = self.request(method, params).await?;
         validate_session_identity(&created, &self.session_id)?;
-        *session.id.lock().await = Some(self.session_id.clone());
-        let outcome = self.run_response().await?;
+        *turn.session.id.lock().await = Some(self.session_id.clone());
+        let outcome = self.run_response(turn.agent_response).await?;
         self.detach().await?;
         Ok(outcome)
     }
@@ -207,17 +244,14 @@ impl<'a> CopilotRpc<'a> {
         validate_protocol_version(&connected)
     }
 
-    async fn run_response(&mut self) -> Result<WorkerOutcome, NodeRunnerError> {
-        let prompt = render_agent_prompt(
-            self.invocation.agent_instructions()?,
-            &self.invocation.node.input,
-            &self.invocation.response,
-        )?;
-        let mut response = AgentResponseState::new(prompt);
+    async fn run_response(
+        &mut self,
+        state: &mut AgentResponseState,
+    ) -> Result<WorkerOutcome, NodeRunnerError> {
         loop {
             self.response = None;
             self.request("session.send", json!({
-                "sessionId":self.session_id, "prompt":response.prompt(), "wait":true,
+                "sessionId":self.session_id, "prompt":state.prompt(), "wait":true,
                 "responseFormat":{"type":"json_schema", "jsonSchema":{
                     "name":"zeroshot_response", "strict":true,
                     "schema":self.invocation.response.provider_schema(ProviderSchemaDialect::OpenAiStrict),
@@ -227,7 +261,7 @@ impl<'a> CopilotRpc<'a> {
                 .response
                 .take()
                 .ok_or_else(|| failure("Copilot completed without an assistant response"))?;
-            if let Some(outcome) = self.accept_response(&mut response, &text).await? {
+            if let Some(outcome) = self.accept_response(state, &text).await? {
                 return Ok(outcome);
             }
         }

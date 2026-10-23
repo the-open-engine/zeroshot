@@ -174,6 +174,7 @@ while (message := read()) is not None:
         result = {"sessionId": "wrong" if mode == "identity" else session}
     elif method == "session.send":
         turn += 1
+        rate_limit_attempt = None
         if mode in ("refresh", "refresh_error"):
             send({"id": "auth-refresh", "method": "gitHubToken.getToken", "params": {
                 "registrationId": registration, "host": github_host,
@@ -183,6 +184,33 @@ while (message := read()) is not None:
             assert auth["result"]["expiresIn"] > 3600
         assert params["responseFormat"]["jsonSchema"]["strict"] is True
         assert params["sessionId"] == session
+        if mode in (
+            "grammar_rate_limit_once",
+            "grammar_rate_limit_always",
+            "correction_rate_limit_once",
+        ):
+            attempts_path = os.environ["CAPTURE_PATH"] + ".grammar-rate-limit-attempts"
+            try:
+                with open(attempts_path, encoding="utf-8") as attempts_file:
+                    attempts = int(attempts_file.read())
+            except FileNotFoundError:
+                attempts = 0
+            rate_limit_attempt = attempts
+            with open(attempts_path, "w", encoding="utf-8") as attempts_file:
+                attempts_file.write(str(attempts + 1))
+            should_rate_limit = (
+                mode == "grammar_rate_limit_always"
+                or (mode == "grammar_rate_limit_once" and attempts == 0)
+                or (mode == "correction_rate_limit_once" and attempts == 1)
+            )
+            if should_rate_limit:
+                event("session.error", {
+                    "message": "400 Grammar compilation rate limit exceeded. You can try again later."
+                })
+                continue
+        if mode == "http_400":
+            event("session.error", {"message": "HTTP 400: Invalid JSON schema"})
+            continue
         event("future.event", {"invalid": [1, 2, 3]})
         usage = {"inputTokens": 7, "outputTokens": 3}
         if mode == "permission":
@@ -228,7 +256,11 @@ while (message := read()) is not None:
         if mode == "duplex":
             for _ in range(80):
                 event("future.event", {"padding": "x" * 1048576})
-        answer = "invalid" if mode in ("malformed", "closed_input_invalid") or (mode == "correction" and turn == 1) else 42
+        answer = "invalid" if (
+            mode in ("malformed", "closed_input_invalid")
+            or (mode == "correction" and turn == 1)
+            or (mode == "correction_rate_limit_once" and rate_limit_attempt == 0)
+        ) else 42
         response = {"response": {"answer": answer}}
         if mode in ("validation_secret", "validation_secret_long"):
             padding = ""
