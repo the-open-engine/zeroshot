@@ -70,12 +70,13 @@ pub(super) fn write(path: &Path, value: &impl Serialize) -> Result<()> {
         .parent()
         .ok_or_else(|| invalid("missing session directory"))?;
     private_directory(parent)?;
-    let mut staged = tempfile::NamedTempFile::new_in(parent)?;
-    #[cfg(windows)]
-    drop(crate::execution::platform::private_file(
-        staged.path(),
-        crate::execution::platform::FileAccess::ReadWrite,
-    )?);
+    let temporary = parent.join(format!(".memory-{}.tmp", uuid::Uuid::now_v7()));
+    let file = crate::execution::platform::private_file(
+        &temporary,
+        crate::execution::platform::FileAccess::CreateNew,
+    )?;
+    let temporary = tempfile::TempPath::try_from_path(temporary)?;
+    let mut staged = tempfile::NamedTempFile::from_parts(file, temporary);
     staged.write_all(&bytes)?;
     staged.as_file().sync_all()?;
     let temporary = staged.into_temp_path();

@@ -24,6 +24,14 @@ fn repository_lesson() -> crate::active_memory::Lesson {
     .into_lesson(1)
 }
 
+fn workspace() -> PathBuf {
+    if cfg!(windows) {
+        "C:/workspace".into()
+    } else {
+        "/workspace".into()
+    }
+}
+
 fn source(budget: usize) -> RunMemorySource {
     RunMemorySource {
         index: MemoryIndex::new(MemorySnapshot {
@@ -31,7 +39,7 @@ fn source(budget: usize) -> RunMemorySource {
             lessons: vec![repository_lesson()],
         })
         .unwrap(),
-        workspace: PathBuf::from("/workspace"),
+        workspace: workspace(),
         budget,
         repository_enabled: true,
         graph_enabled: false,
@@ -47,8 +55,8 @@ fn query(session: &str) -> HookQuery {
         execution_id: 1,
         native_session_id: None,
         tool_name: "exec_command".into(),
-        tool_input: json!({"cmd":"cat guard.rs", "workdir":"/workspace/src"}),
-        cwd: PathBuf::from("/workspace"),
+        tool_input: json!({"cmd":"cat guard.rs", "workdir":workspace().join("src")}),
+        cwd: workspace(),
     }
 }
 
@@ -81,7 +89,7 @@ fn carrier_preserves_shell_cd_signals_and_decodes_native_json_arguments() {
     );
     command.session_key = "two".into();
     command.tool_input =
-        Value::String(json!({"cmd":"cat guard.rs", "workdir":"/workspace/src"}).to_string());
+        Value::String(json!({"cmd":"cat guard.rs", "workdir":workspace().join("src")}).to_string());
     assert!(
         source
             .tool_context(&command)
@@ -473,7 +481,7 @@ fn tool_input_depth_and_field_limits_preserve_bounded_callback_work() {
     assert_eq!(fields, MAX_QUERY_FIELDS);
     assert!(query.paths.is_empty());
     let mut query = RetrievalQuery {
-        workspace: PathBuf::from("/workspace"),
+        workspace: workspace(),
         ..Default::default()
     };
     let mut fields = 0;
@@ -483,7 +491,7 @@ fn tool_input_depth_and_field_limits_preserve_bounded_callback_work() {
         &mut fields,
         0,
     );
-    assert_eq!(query.tool_cwd.unwrap(), PathBuf::from("/workspace/subdir"));
+    assert_eq!(query.tool_cwd.unwrap(), workspace().join("subdir"));
     assert_eq!(query.paths, ["one.rs", "two.rs"]);
 }
 #[async_trait]

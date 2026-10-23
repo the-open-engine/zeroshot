@@ -399,3 +399,26 @@ fn windows_find_executable_preserves_rusts_system_directory_fallback() {
         "cmd.exe"
     );
 }
+
+#[cfg(windows)]
+#[test]
+fn windows_inherited_private_children_are_pinned_and_public_acls_are_rejected() {
+    let root = TemporaryDirectory::for_test("inherited-acl");
+    let directory = root.path("private");
+    private_directory(&directory).unwrap();
+    let child = directory.join("sqlite-child");
+    fs::write(&child, b"fixture").unwrap();
+    private_inherited_file(&child).unwrap();
+    drop(private_file(&child, FileAccess::Read).unwrap());
+    assert!(
+        std::process::Command::new("icacls.exe")
+            .arg(&child)
+            .args(["/grant", "*S-1-1-0:R"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert!(private_inherited_file(&child).is_err());
+    assert!(private_file(&child, FileAccess::Read).is_err());
+}

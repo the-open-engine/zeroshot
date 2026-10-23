@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier};
 
 use super::*;
@@ -19,14 +19,33 @@ fn native_windows_paths_match_portable_repository_associations() {
     assert!(normalize_path(root, root, r"C:\outside\guard.rs").is_none());
 }
 
-fn private_root() -> tempfile::TempDir {
-    let root = tempfile::tempdir().unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+struct PrivateRoot {
+    _directory: tempfile::TempDir,
+    path: PathBuf,
+}
+
+impl PrivateRoot {
+    fn path(&self) -> &Path {
+        &self.path
     }
-    root
+}
+
+fn private_root() -> PrivateRoot {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("private");
+    crate::execution::platform::create_private_directory(&path).unwrap();
+    PrivateRoot {
+        _directory: directory,
+        path,
+    }
+}
+
+fn workspace() -> PathBuf {
+    if cfg!(windows) {
+        "C:/workspace/repo".into()
+    } else {
+        "/workspace/repo".into()
+    }
 }
 
 fn draft(id: &str) -> LessonDraft {
@@ -78,7 +97,7 @@ fn index(drafts: Vec<LessonDraft>) -> MemoryIndex {
 
 fn query(text: &str, paths: &[&str]) -> RetrievalQuery {
     RetrievalQuery {
-        workspace: "/workspace/repo".into(),
+        workspace: workspace(),
         paths: paths.iter().map(|path| (*path).to_owned()).collect(),
         text: text.into(),
         ..Default::default()
@@ -396,7 +415,10 @@ fn any_associated_file_matches_independently() {
 fn path_normalization_handles_tool_cwd_absolute_paths_and_simple_cd() {
     let index = index(vec![draft("path")]);
     for mut query in [
-        query("", &["/workspace/repo/zeroshot/src/claude.rs"]),
+        query(
+            "",
+            &[&workspace().join("zeroshot/src/claude.rs").to_string_lossy()],
+        ),
         query("cd zeroshot && cat src/claude.rs", &[]),
         query("cat ./src/claude.rs", &[]),
     ] {
@@ -410,21 +432,10 @@ fn path_normalization_handles_tool_cwd_absolute_paths_and_simple_cd() {
         );
     }
     assert_eq!(
-        normalize_path(
-            Path::new("/workspace/repo"),
-            Path::new("/workspace/repo/zeroshot"),
-            "../src/a.rs"
-        ),
+        normalize_path(&workspace(), &workspace().join("zeroshot"), "../src/a.rs"),
         Some("src/a.rs".into())
     );
-    assert!(
-        normalize_path(
-            Path::new("/workspace/repo"),
-            Path::new("/workspace/repo"),
-            "../other/src/a.rs"
-        )
-        .is_none()
-    );
+    assert!(normalize_path(&workspace(), &workspace(), "../other/src/a.rs").is_none());
     assert!(
         index
             .retrieve(&query("python3 .edit.py", &[]), 2048, &BTreeSet::new())

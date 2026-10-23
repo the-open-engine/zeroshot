@@ -10,7 +10,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
     GetFileInformationByHandle, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-    OPEN_ALWAYS, OPEN_EXISTING, READ_CONTROL, WRITE_DAC,
+    OPEN_ALWAYS, OPEN_EXISTING, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
 };
 
 use super::FileAccess;
@@ -79,6 +79,20 @@ pub(crate) fn private_file(path: &Path, access: FileAccess) -> io::Result<File> 
     }
     validate_private_file(&file)?;
     Ok(file)
+}
+
+/// Normalize a SQLite child only after its parent has been verified private.
+pub(crate) fn private_inherited_file(path: &Path) -> io::Result<()> {
+    let file = open(
+        path,
+        FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC | WRITE_OWNER,
+        OPEN_EXISTING,
+        None,
+    )?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::other("private child is not a regular file"));
+    }
+    security::protect_inherited(file.as_raw_handle())
 }
 
 pub(crate) fn validate_private_file(file: &File) -> io::Result<()> {

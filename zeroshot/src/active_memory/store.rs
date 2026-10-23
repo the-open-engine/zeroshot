@@ -527,13 +527,8 @@ fn check_sidecars(path: &Path) -> Result<(), ActiveMemoryError> {
         if let Some(metadata) = optional_metadata(&sidecar)? {
             check_private(&metadata, false)?;
             #[cfg(windows)]
-            drop(
-                crate::execution::platform::private_file(
-                    &sidecar,
-                    crate::execution::platform::FileAccess::Read,
-                )
-                .map_err(|_| ActiveMemoryError::UnsafeStorage)?,
-            );
+            crate::execution::platform::private_inherited_file(&sidecar)
+                .map_err(|_| ActiveMemoryError::UnsafeStorage)?;
         }
     }
     Ok(())

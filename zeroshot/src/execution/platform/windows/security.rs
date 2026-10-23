@@ -7,8 +7,9 @@ use std::ptr::{null, null_mut};
 use windows_sys::Win32::Foundation::{HANDLE, LocalFree};
 use windows_sys::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce,
-    GetSecurityDescriptorDacl, GetTokenInformation, OWNER_SECURITY_INFORMATION,
-    PROTECTED_DACL_SECURITY_INFORMATION, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, GetTokenInformation,
+    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, SECURITY_ATTRIBUTES,
+    TOKEN_INFORMATION_CLASS, TOKEN_OWNER, TOKEN_QUERY, TOKEN_USER, TokenOwner, TokenUser,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo,
@@ -70,12 +71,16 @@ impl PrivateSecurity {
 }
 
 fn current_sid() -> io::Result<String> {
+    token_sid(TokenUser)
+}
+
+fn token_sid(class: TOKEN_INFORMATION_CLASS) -> io::Result<String> {
     let mut token = null_mut();
     check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) })?;
     let token = unsafe { OwnedHandle::from_raw_handle(token) };
     let mut size = 0;
     unsafe {
-        GetTokenInformation(token.as_raw_handle(), TokenUser, null_mut(), 0, &mut size);
+        GetTokenInformation(token.as_raw_handle(), class, null_mut(), 0, &mut size);
     }
     if size == 0 {
         return Err(io::Error::last_os_error());
@@ -84,14 +89,20 @@ fn current_sid() -> io::Result<String> {
     check(unsafe {
         GetTokenInformation(
             token.as_raw_handle(),
-            TokenUser,
+            class,
             storage.as_mut_ptr().cast(),
             size,
             &mut size,
         )
     })?;
-    let user = unsafe { &*storage.as_ptr().cast::<TOKEN_USER>() };
-    sid_string(user.User.Sid)
+    let sid = if class == TokenUser {
+        unsafe { (*storage.as_ptr().cast::<TOKEN_USER>()).User.Sid }
+    } else if class == TokenOwner {
+        unsafe { (*storage.as_ptr().cast::<TOKEN_OWNER>()).Owner }
+    } else {
+        return Err(denied());
+    };
+    sid_string(sid)
 }
 
 fn sid_string(sid: *mut std::ffi::c_void) -> io::Result<String> {
@@ -128,15 +139,22 @@ fn descriptor(handle: HANDLE) -> io::Result<(PrivateSecurity, String)> {
         return Err(io::Error::from_raw_os_error(result as i32));
     }
     let security = PrivateSecurity(security);
-    let sid = current_sid()?;
-    if owner.is_null() || sid_string(owner)? != sid {
+    if owner.is_null() {
         return Err(denied());
     }
-    Ok((security, sid))
+    Ok((security, sid_string(owner)?))
 }
 
 pub(crate) fn validate(handle: HANDLE) -> io::Result<()> {
-    let (descriptor, sid) = descriptor(handle)?;
+    let (descriptor, owner) = descriptor(handle)?;
+    let sid = current_sid()?;
+    if owner != sid {
+        return Err(denied());
+    }
+    validate_acl(&descriptor, &sid)
+}
+
+fn validate_acl(descriptor: &PrivateSecurity, sid: &str) -> io::Result<()> {
     let acl = descriptor.dacl()?;
     for index in 0..unsafe { (*acl).AceCount } {
         let mut ace = null_mut();
@@ -158,14 +176,43 @@ pub(crate) fn validate(handle: HANDLE) -> io::Result<()> {
 }
 
 pub(crate) fn protect(handle: HANDLE) -> io::Result<()> {
-    descriptor(handle)?;
+    let (_, owner) = descriptor(handle)?;
+    if owner != current_sid()? {
+        return Err(denied());
+    }
+    install(handle, false)
+}
+
+/// SQLite creates children with the token's default owner, which can be Administrators
+/// for an elevated user. Accept that owner only with an already private inherited ACL,
+/// then pin the owner and protected ACL to the current user. Callers verify the parent.
+pub(crate) fn protect_inherited(handle: HANDLE) -> io::Result<()> {
+    let (descriptor, owner) = descriptor(handle)?;
+    let sid = current_sid()?;
+    if owner != sid && owner != token_sid(TokenOwner)? {
+        return Err(denied());
+    }
+    validate_acl(&descriptor, &sid)?;
+    install(handle, true)
+}
+
+fn install(handle: HANDLE, set_owner: bool) -> io::Result<()> {
     let security = PrivateSecurity::new()?;
+    let mut owner = null_mut();
+    let information = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
+    let information = if set_owner {
+        let mut defaulted = 0;
+        check(unsafe { GetSecurityDescriptorOwner(security.0, &mut owner, &mut defaulted) })?;
+        information | OWNER_SECURITY_INFORMATION
+    } else {
+        information
+    };
     let result = unsafe {
         SetSecurityInfo(
             handle,
             SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            null_mut(),
+            information,
+            owner,
             null_mut(),
             security.dacl()?,
             null(),
