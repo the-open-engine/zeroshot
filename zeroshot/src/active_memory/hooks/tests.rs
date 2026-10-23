@@ -389,3 +389,154 @@ fn unknown_native_events_and_oversized_context_do_not_control_tools() {
     assert!(callback(cap, &cap.token, json!({"hook_event_name":"FutureEvent"})).is_empty());
     assert!(source.queries.lock().assert_value().is_empty());
 }
+
+fn capability_file(fixture: &BrokerFixture, directory: &Path) -> std::path::PathBuf {
+    let path = directory.join("capability.json");
+    std::fs::write(&path, serde_json::to_vec(&fixture.capability).unwrap()).unwrap();
+    path
+}
+
+#[test]
+fn helper_returns_native_context_and_acknowledges_only_after_output_is_flushed() {
+    let fixture = BrokerFixture::new();
+    let directory = tempfile::tempdir().unwrap();
+    let path = capability_file(&fixture, directory.path());
+    let event = serde_json::to_vec(&json!({"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"schema.json"}})).unwrap();
+    let mut output = Vec::new();
+    super::broker::run_helper_io(&path, event.as_slice(), &mut output).unwrap();
+    let output: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(output["hookSpecificOutput"]["hookEventName"], "PreToolUse");
+    assert!(
+        output["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .contains("generated schema")
+    );
+    callback(
+        &fixture.capability,
+        &fixture.capability.token,
+        json!({"tool_name":"Read"}),
+    );
+    assert!(fixture.source.unavailable.lock().unwrap().is_empty());
+}
+
+#[test]
+fn helper_failures_return_empty_context_without_running_or_controlling_a_tool() {
+    let fixture = BrokerFixture::new();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("capability.json");
+    for contents in [
+        b"not json".to_vec(),
+        vec![b'x'; 16 * 1024 + 1],
+        serde_json::to_vec(&json!({"endpoint":"203.0.113.1:9", "token":"unused"})).unwrap(),
+    ] {
+        std::fs::write(&path, contents).unwrap();
+        let mut output = Vec::new();
+        super::broker::run_helper_io(&path, b"{}".as_slice(), &mut output).unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&output).unwrap(), json!({}));
+    }
+    let path = capability_file(&fixture, directory.path());
+    for input in [
+        b"not json".to_vec(),
+        vec![b'x'; 256 * 1024 + 1],
+        b"{}".to_vec(),
+    ] {
+        let mut output = Vec::new();
+        super::broker::run_helper_io(&path, input.as_slice(), &mut output).unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&output).unwrap(), json!({}));
+    }
+    assert!(fixture.source.queries.lock().unwrap().is_empty());
+}
+
+struct FailingFlush;
+impl Write for FailingFlush {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Err(std::io::ErrorKind::BrokenPipe.into())
+    }
+}
+
+#[test]
+fn full_authored_instructions_and_failed_hook_setup_preserve_the_primary_invocation() {
+    let source = Arc::new(Source::default());
+    let hooks = ActiveMemoryHooks::new(source.clone()).unwrap();
+    let mut original = invocation();
+    original.node.instructions = Some(
+        openengine_cluster_protocol::NodeInstructions::new(
+            "x".repeat(openengine_cluster_protocol::MAX_NODE_INSTRUCTIONS_BYTES),
+        )
+        .unwrap(),
+    );
+    let supplemented = hooks.invocation(original.clone());
+    assert_eq!(supplemented.node.instructions, original.node.instructions);
+    assert!(source.unavailable.lock().unwrap()[0].contains("instruction bounds"));
+    let invalid_home = tempfile::NamedTempFile::new().unwrap();
+    for harness in [Harness::Codex, Harness::Claude, Harness::Pi] {
+        let mut command = command(invalid_home.path().parent().unwrap());
+        let arguments = command.argv.clone();
+        hooks.configure(
+            harness,
+            &mut command,
+            HookInstallation {
+                invocation: &original,
+                home: invalid_home.path(),
+            },
+        );
+        assert_eq!(command.argv, arguments);
+    }
+    hooks.execution_failed();
+    assert_eq!(source.unavailable.lock().unwrap().len(), 5);
+}
+
+#[test]
+fn a_helper_output_failure_does_not_acknowledge_undelivered_context() {
+    let fixture = BrokerFixture::new();
+    let directory = tempfile::tempdir().unwrap();
+    let path = capability_file(&fixture, directory.path());
+    let event = serde_json::to_vec(&json!({"tool_name":"Read"})).unwrap();
+    assert!(super::broker::run_helper_io(&path, event.as_slice(), FailingFlush).is_err());
+    callback(
+        &fixture.capability,
+        &fixture.capability.token,
+        json!({"tool_name":"Read"}),
+    );
+    let failures = fixture.source.unavailable.lock().unwrap();
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].contains("acknowledge"));
+}
+
+#[test]
+fn helper_rejects_invalid_utf8_and_oversized_callback_frames() {
+    for (length, body) in [
+        (1_u32, vec![0xff]),
+        ((native::MAX_CONTEXT_BYTES + 1) as u32, vec![]),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let endpoint = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                .unwrap();
+            let mut header = [0; 4];
+            stream.read_exact(&mut header).unwrap();
+            let mut request = vec![0; u32::from_be_bytes(header) as usize];
+            stream.read_exact(&mut request).unwrap();
+            stream.write_all(&length.to_be_bytes()).unwrap();
+            stream.write_all(&body).unwrap();
+        });
+        let path = directory.path().join("capability.json");
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&json!({"endpoint":endpoint,"token":"fixture"})).unwrap(),
+        )
+        .unwrap();
+        let mut output = Vec::new();
+        super::broker::run_helper_io(&path, b"{}".as_slice(), &mut output).unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&output).unwrap(), json!({}));
+        server.join().unwrap();
+    }
+}

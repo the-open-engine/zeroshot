@@ -190,19 +190,26 @@ fn response(
 }
 
 pub(super) fn run_helper(path: &Path) -> io::Result<()> {
-    let (output, callback) = helper_output(path).unwrap_or_else(|_| (json!({}), None));
-    let mut stdout = io::stdout().lock();
-    serde_json::to_writer(&mut stdout, &output)?;
-    stdout.flush()?;
+    run_helper_io(path, io::stdin().lock(), io::stdout().lock())
+}
+
+pub(super) fn run_helper_io(
+    path: &Path,
+    input: impl Read,
+    mut output: impl Write,
+) -> io::Result<()> {
+    let (context, callback) = helper_output(path, input).unwrap_or_else(|_| (json!({}), None));
+    serde_json::to_writer(&mut output, &context)?;
+    output.flush()?;
     if let Some(mut callback) = callback {
         callback.write_all(&[1])?;
     }
     Ok(())
 }
 
-fn helper_output(path: &Path) -> io::Result<(Value, Option<TcpStream>)> {
+fn helper_output(path: &Path, input: impl Read) -> io::Result<(Value, Option<TcpStream>)> {
     let capability = read_capability(path)?;
-    let bytes = read_bounded(io::stdin().lock(), MAX_EVENT_BYTES as u64)?;
+    let bytes = read_bounded(input, MAX_EVENT_BYTES as u64)?;
     let event: Value = serde_json::from_slice(&bytes)?;
     let name = event["hook_event_name"]
         .as_str()

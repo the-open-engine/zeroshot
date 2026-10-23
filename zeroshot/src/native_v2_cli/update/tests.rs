@@ -775,3 +775,24 @@ fn truncated_response(declared_length: usize, body: &[u8]) -> Vec<u8> {
     response.extend_from_slice(body);
     response
 }
+
+#[tokio::test]
+async fn a_verified_but_invalid_memory_skill_aborts_release_preparation() {
+    let canonical = b"---\nname: zeroshot\n---\n";
+    let invalid = [0xff];
+    let manifest = format!(
+        "{:x}  {SKILL_ASSET}\n{:x}  zeroshot-memory-init-skill.md\n",
+        Sha256::digest(canonical),
+        Sha256::digest(invalid)
+    );
+    let server = TestServer::start(vec![
+        fixed_response("200 OK", manifest.as_bytes()),
+        fixed_response("200 OK", canonical),
+        fixed_response("200 OK", &invalid),
+    ]);
+    let client = http_client().unwrap();
+    let latest = ReleaseVersion([8, 2, 1]);
+    let result = download_release_at(&client, latest, latest, &server.base_url).await;
+    assert!(result.err().unwrap().to_string().contains("not UTF-8"));
+    server.finish();
+}

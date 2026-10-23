@@ -326,3 +326,244 @@ fn fresh_execution_sessions_receive_graph_guidance_again() {
         );
     }
 }
+
+#[test]
+fn preparation_requires_host_storage_and_rejects_invalid_or_checkout_owned_paths() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = directory.path().join("checkout");
+    std::fs::create_dir(&workspace).unwrap();
+    let storage = directory.path().join("memory").join("lessons.sqlite3");
+    let mut admitted = crate::native_v2_runner::test_support::admitted();
+    assert!(
+        PreparedActiveMemory::prepare(MemoryPreparation {
+            admitted: &admitted,
+            workspace: &workspace,
+            storage: None
+        })
+        .unwrap()
+        .is_none()
+    );
+    for budget in [0, crate::active_memory::MAX_INJECTION_BYTES as u32 + 1] {
+        admitted.runtime.active_memory_mut().budget_bytes = budget;
+        assert!(matches!(
+            PreparedActiveMemory::prepare(MemoryPreparation {
+                admitted: &admitted,
+                workspace: &workspace,
+                storage: Some(&storage)
+            }),
+            Err(ActiveMemoryError::Invalid(_))
+        ));
+    }
+    admitted.runtime.active_memory_mut().budget_bytes = 2048;
+    let unsafe_path = workspace.join("memory.sqlite3");
+    assert!(matches!(
+        PreparedActiveMemory::prepare(MemoryPreparation {
+            admitted: &admitted,
+            workspace: &workspace,
+            storage: Some(&unsafe_path)
+        }),
+        Err(ActiveMemoryError::UnsafeStorage)
+    ));
+    admitted.runtime.active_memory_mut().repository = false;
+    admitted.runtime.active_memory_mut().graph = false;
+    assert!(
+        PreparedActiveMemory::prepare(MemoryPreparation {
+            admitted: &admitted,
+            workspace: &workspace,
+            storage: Some(&storage)
+        })
+        .unwrap()
+        .is_none()
+    );
+    assert!(!storage.exists());
+}
+
+#[test]
+fn prepared_memory_keeps_a_frozen_snapshot_after_another_run_updates_the_store() {
+    let directory = tempfile::tempdir().unwrap();
+    let workspace = directory.path().join("checkout");
+    std::fs::create_dir(&workspace).unwrap();
+    let storage = directory.path().join("memory").join("lessons.sqlite3");
+    let mut admitted = crate::native_v2_runner::test_support::admitted();
+    admitted.source = None;
+    let mut draft = repository_lesson().draft();
+    if let LessonScope::Repository { repository, .. } = &mut draft.scope {
+        *repository = repository_key(&admitted, &workspace);
+    }
+    let mut store = ActiveMemoryStore::open(&storage).unwrap();
+    store
+        .apply_batch(&[crate::active_memory::LessonMutation::Upsert {
+            expected_revision: None,
+            draft: Box::new(draft.clone()),
+        }])
+        .unwrap();
+    let first = PreparedActiveMemory::prepare(MemoryPreparation {
+        admitted: &admitted,
+        workspace: &workspace,
+        storage: Some(&storage),
+    })
+    .unwrap()
+    .unwrap();
+    draft.recommendation =
+        "Verify the updated credential guard matrix before accepting this change.".into();
+    store
+        .apply_batch(&[crate::active_memory::LessonMutation::Upsert {
+            expected_revision: Some(1),
+            draft: Box::new(draft),
+        }])
+        .unwrap();
+    let next = PreparedActiveMemory::prepare(MemoryPreparation {
+        admitted: &admitted,
+        workspace: &workspace,
+        storage: Some(&storage),
+    })
+    .unwrap()
+    .unwrap();
+    let call = json!({"tool_name":"Read", "tool_input":{"file_path":"src/guard.rs"}});
+    let invoked = invocation(crate::execution::SessionScope::Execution, 2);
+    let old_context = first.hooks.copilot_context(&invoked, &call, &workspace);
+    let new_context = next.hooks.copilot_context(&invoked, &call, &workspace);
+    assert!(old_context.contains("Check every credential selector"));
+    assert!(!old_context.contains("updated credential guard"));
+    assert!(new_context.contains("updated credential guard"));
+    assert_eq!(first.snapshot.lessons[0].revision, 1);
+    assert_eq!(next.snapshot.lessons[0].revision, 2);
+}
+
+struct NoModelStartup;
+
+#[test]
+fn session_capacity_and_poisoned_state_abstain_without_claiming_complete_delivery() {
+    let source = source(2048);
+    {
+        let mut state = source.state.lock().unwrap();
+        state.sessions = (0..MAX_SESSIONS)
+            .map(|index| (format!("used-{index}"), SessionExposure::default()))
+            .collect();
+    }
+    assert!(source.tool_context(&query("new-session")).is_empty());
+    assert!(source.manifest().is_none());
+    assert!(
+        source
+            .tool_context(&query("used-0"))
+            .contains("Preserve sibling guards")
+    );
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _locked = source.state.lock().unwrap();
+        panic!("simulate a failed callback while its state is locked");
+    }));
+    assert!(source.tool_context(&query("used-1")).is_empty());
+    assert!(source.manifest().is_none());
+}
+
+#[test]
+fn tool_input_depth_and_field_limits_preserve_bounded_callback_work() {
+    let mut nested = json!({"file_path":"src/guard.rs"});
+    for _ in 0..10 {
+        nested = json!({"nested":nested});
+    }
+    let mut query = RetrievalQuery::default();
+    let mut fields = 0;
+    collect_tool_input(&nested, &mut query, &mut fields, 0);
+    assert!(query.paths.is_empty());
+    let mut values = vec![Value::Null; MAX_QUERY_FIELDS];
+    values.push(json!({"file_path":"src/guard.rs"}));
+    let mut fields = 0;
+    collect_tool_input(&json!(values), &mut query, &mut fields, 0);
+    assert_eq!(fields, MAX_QUERY_FIELDS);
+    assert!(query.paths.is_empty());
+    let mut query = RetrievalQuery {
+        workspace: PathBuf::from("/workspace"),
+        ..Default::default()
+    };
+    let mut fields = 0;
+    collect_tool_input(
+        &json!({"cwd":"subdir", "files":[{"file":"one.rs"},{"filename":"two.rs"}], "flag":true, "attempt":3}),
+        &mut query,
+        &mut fields,
+        0,
+    );
+    assert_eq!(query.tool_cwd.unwrap(), PathBuf::from("/workspace/subdir"));
+    assert_eq!(query.paths, ["one.rs", "two.rs"]);
+}
+#[async_trait]
+impl crate::native_v2_runner::NodeDriver for NoModelStartup {
+    async fn run(
+        &self,
+        _: crate::native_v2_runner::DriverInvocation,
+        _: crate::native_v2_runner::DriverControl,
+    ) -> Result<openengine_cluster_protocol::WorkerOutcome, NodeRunnerError> {
+        panic!("host setup and cleanup must not start a model")
+    }
+}
+#[async_trait]
+impl crate::native_v2_runner::SessionFactory for NoModelStartup {
+    async fn open(
+        &self,
+        _: &crate::native_v2_contract::NodeInvocation,
+        _: &crate::native_v2_runner::ResolvedEnvironment,
+    ) -> Result<Arc<dyn crate::native_v2_runner::NodeSession>, NodeRunnerError> {
+        panic!("host setup and cleanup must not open a provider session")
+    }
+}
+
+#[tokio::test]
+async fn wrappers_preserve_runner_admission_and_postmortem_opt_out_without_model_startup() {
+    for enabled in [true, false] {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = directory.path().join("checkout");
+        std::fs::create_dir(&workspace).unwrap();
+        let storage = directory.path().join("memory").join("lessons.sqlite3");
+        let mut admitted = crate::native_v2_runner::test_support::admitted();
+        admitted.runtime.global_agents_mut().postmortem.enabled = enabled;
+        let prepared = PreparedActiveMemory::prepare(MemoryPreparation {
+            admitted: &admitted,
+            workspace: &workspace,
+            storage: Some(&storage),
+        })
+        .unwrap()
+        .unwrap();
+        let backend = Arc::new(NoModelStartup);
+        let inner = NativeNodeRunner::new(&admitted, backend.clone(), backend).unwrap();
+        let wrapped = prepared.wrap(&admitted, inner);
+        assert_eq!(wrapped.postmortem().is_some(), enabled);
+        let mut request =
+            crate::native_v2_runner::test_support::request("memory-wrapper", "worker", (1, 2));
+        request.invocation.reference.node =
+            openengine_cluster_protocol::NodeName::new("not_admitted").unwrap();
+        assert!(matches!(
+            wrapped.start(request.clone()).await,
+            Err(NodeRunnerError::InvalidRole)
+        ));
+        let unavailable = unavailable_memory(wrapped);
+        let postmortem = unavailable.postmortem().unwrap();
+        let (_, cancellation) = tokio::sync::watch::channel(false);
+        let run_id = request.invocation.reference.run_id;
+        let result = postmortem
+            .run(
+                PostmortemRequest {
+                    run_id: run_id.clone(),
+                    snapshot: crate::v2_run_ledger::RunSnapshot::admitted(
+                        run_id.clone(),
+                        &admitted,
+                    ),
+                    admitted: admitted.clone(),
+                    primary_terminal: openengine_cluster_protocol::TerminalResult::Succeeded {
+                        output: Value::Null,
+                    },
+                    environment: Arc::new(
+                        crate::native_v2_supervisor::RunEnvironment::exact_for_admitted(
+                            &admitted,
+                            BTreeMap::new(),
+                        )
+                        .unwrap(),
+                    ),
+                    ledger: Arc::new(crate::v2_run_ledger::fake::FakeRunLedger::new()),
+                },
+                cancellation,
+            )
+            .await;
+        assert!(matches!(result, Err(PostmortemError::Unavailable(_))));
+        unavailable.close_run(&run_id).await;
+    }
+}
