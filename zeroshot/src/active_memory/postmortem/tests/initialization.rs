@@ -136,7 +136,7 @@ async fn case() -> Case {
 
 fn write_history(state: &Path, workspace: &Path, stored: &StoredRun) {
     let directory = state.join("runs").join(stored.snapshot.run_id.as_str());
-    std::fs::create_dir_all(&directory).assert_value();
+    crate::execution::platform::private_directory(&directory).assert_value();
     let path = directory.join("runs.sqlite3");
     drop(SqliteRunLedger::open(&path).assert_value());
     let connection = rusqlite::Connection::open(&path).assert_value();

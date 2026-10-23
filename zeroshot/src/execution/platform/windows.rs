@@ -81,7 +81,7 @@ pub(crate) fn private_file(path: &Path, access: FileAccess) -> io::Result<File> 
     Ok(file)
 }
 
-/// Normalize a SQLite child only after its parent has been verified private.
+/// Normalize an inherited child only after its parent has been verified private.
 pub(crate) fn private_inherited_file(path: &Path) -> io::Result<()> {
     let file = open(
         path,

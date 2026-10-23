@@ -92,7 +92,7 @@ pub(super) fn read<T: DeserializeOwned>(path: &Path) -> Result<T> {
     }
     let mut file = crate::execution::platform::open_readonly_file(path)?;
     #[cfg(windows)]
-    crate::execution::platform::validate_private_file(&file)?;
+    validate_input_file(path, &file)?;
     let mut bytes = Vec::new();
     Read::by_ref(&mut file)
         .take(MAX_STORE_BYTES as u64 + 1)
@@ -101,6 +101,20 @@ pub(super) fn read<T: DeserializeOwned>(path: &Path) -> Result<T> {
         return Err(invalid("initialization file exceeds byte budget"));
     }
     Ok(serde_json::from_slice(&bytes)?)
+}
+
+#[cfg(windows)]
+fn validate_input_file(path: &Path, file: &File) -> Result<()> {
+    if crate::execution::platform::validate_private_file(file).is_ok() {
+        return Ok(());
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| invalid("missing session directory"))?;
+    private_directory(parent)?;
+    crate::execution::platform::private_inherited_file(path)?;
+    crate::execution::platform::validate_private_file(file)?;
+    Ok(())
 }
 
 pub(super) fn digest(value: &impl Serialize) -> Result<String> {

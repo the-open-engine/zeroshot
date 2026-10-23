@@ -27,3 +27,34 @@ fn windows_initialization_creates_private_files_and_rejects_a_public_session_dir
     );
     assert!(private_directory(&directory).is_err());
 }
+
+#[cfg(windows)]
+#[test]
+fn windows_reads_inherited_agent_responses_and_rejects_public_response_acls() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("session");
+    create_directory(&directory).unwrap();
+    let response = directory.join("agent.response.json");
+    std::fs::write(&response, br#"{"lessons":[]}"#).unwrap();
+    assert_eq!(
+        read::<serde_json::Value>(&response).unwrap(),
+        serde_json::json!({"lessons":[]})
+    );
+    drop(
+        crate::execution::platform::private_file(
+            &response,
+            crate::execution::platform::FileAccess::Read,
+        )
+        .unwrap(),
+    );
+    assert!(
+        std::process::Command::new("icacls.exe")
+            .arg(&response)
+            .args(["/grant", "*S-1-1-0:R"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert!(read::<serde_json::Value>(&response).is_err());
+}

@@ -183,7 +183,7 @@ pub(crate) fn protect(handle: HANDLE) -> io::Result<()> {
     install(handle, false)
 }
 
-/// SQLite creates children with the token's default owner, which can be Administrators
+/// SQLite and external tools create children with the token's default owner, which can be Administrators
 /// for an elevated user. Accept that owner only with an already private inherited ACL,
 /// then pin the owner and protected ACL to the current user. Callers verify the parent.
 pub(crate) fn protect_inherited(handle: HANDLE) -> io::Result<()> {

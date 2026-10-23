@@ -75,8 +75,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   session byte budget. Execution-scoped conversations receive fresh recall budgets; reused
   node-instance conversations retain theirs. Windows memory storage and initialization use shared
   private-state helpers, including validation of SQLite sidecars. SQLite-created Windows children
-  may inherit the token's default owner only with an already private ACL; normalize them to explicit
-  current-user ownership before use. Initialization creates temporary files with private security at
+  and externally written initialization responses may inherit the token's default owner only with
+  an already private ACL and verified private parent; normalize them to explicit current-user
+  ownership before use. Initialization creates temporary files with private security at
   creation rather than repairing default-owned files afterward.
   Shared store mutations use expected revisions and retained deletion tombstones.
   Codex trusts only the exact normalized hash of the product-owned session hook; never bypass trust
