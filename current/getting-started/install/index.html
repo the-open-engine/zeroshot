@@ -683,6 +683,8 @@
       
         
       
+        
+      
     
     
     
@@ -743,6 +745,34 @@
     
   
     Prepare a runtime environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/active-memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Active Memory
   
 
     
@@ -1785,13 +1815,13 @@
 
 
 <h1 id="install-zeroshot">Install Zeroshot<a class="headerlink" href="#install-zeroshot" title="Permanent link">&para;</a></h1>
-<p>Install the <code>zeroshot</code> command and its agent skill through the npm delivery package, which requires
+<p>Install the <code>zeroshot</code> command and its agent skills through the npm delivery package, which requires
 Node.js 18 or newer. The installer selects the release target declared for the current system and
 checks the downloaded archive against <code>SHA256SUMS</code> before writing the native executable.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="go">npm install --global @the-open-engine-company/zeroshot</span>
 </code></pre></div>
-<p>A canonical CLI release can update its executable and managed agent skill in place. The command
-selects the newest GitHub release for the current platform, verifies its archive and skill asset
+<p>A canonical CLI release can update its executable and managed agent skills in place. The command
+selects the newest GitHub release for the current platform, verifies its archive and skill assets
 against that release's <code>SHA256SUMS</code>, and verifies the new executable before replacing the old one:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="go">zeroshot update</span>
 </code></pre></div>
@@ -1799,13 +1829,19 @@ against that release's <code>SHA256SUMS</code>, and verifies the new executable 
 Unchanged managed skill copies are installed or refreshed for Codex, GitHub Copilot, Pi, and Claude
 Code. A user-edited or conflicting skill is preserved, and the command fails with its exact path
 after completing any safe updates.</p>
+<p>An older updater that only installs the <code>zeroshot</code> skill needs a second <code>zeroshot update</code> after
+replacing the executable to install <code>zeroshot-memory-init</code>. The new updater refreshes skills even
+when the executable version is already current.</p>
 <p>Release builds cover Linux x64 and arm64, macOS x64 and arm64, and Windows x64. Node.js is only an
 installer dependency; the command itself is a Rust executable.</p>
-<p>The package installs one managed skill for Codex, GitHub Copilot, and Pi under <code>$HOME/.agents/skills</code>,
-and for Claude Code under <code>${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills</code>. No agent selection or
+<p>The package installs the <code>zeroshot</code> and <code>zeroshot-memory-init</code> skills for Codex, GitHub Copilot, and
+Pi under <code>$HOME/.agents/skills/&lt;name&gt;</code>, and for Claude Code under
+<code>${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/&lt;name&gt;</code>. No agent selection or
 per-project installation is needed. npm 7 and newer do not run uninstall hooks; after removing the
-package, delete its two skill directories manually only if their <code>SKILL.md</code> files remain unmodified.
-When set, <code>CLAUDE_CONFIG_DIR</code> must be absolute so the global skill has one stable location.</p>
+package, remove only unmodified managed skill directories from these locations.
+When set, <code>CLAUDE_CONFIG_DIR</code> must be absolute so the global skills have stable locations.</p>
+<p>See <a href="../../guides/active-memory/#persistence-and-run-completion">Active Memory storage and backups</a>
+for the local lesson database and how to preserve it when moving or reinstalling Zeroshot.</p>
 <p>On Windows, the CLI and local in-process runs work natively from PowerShell or Command Prompt.
 Install Git for Windows and put Git and your chosen harness on <code>PATH</code>; npm-installed <code>.cmd</code>
 launchers are supported. Local configuration defaults to <code>%LOCALAPPDATA%\zeroshot</code> and run state
@@ -1871,8 +1907,8 @@ runtime declares that provider. <a href="../../concepts/runtimes-and-connections
 lists the automatic requirements and explains the separation.</p>
 <h2 id="other-installation-paths">Other installation paths<a class="headerlink" href="#other-installation-paths" title="Permanent link">&para;</a></h2>
 <p>Each <a href="https://github.com/the-open-engine/zeroshot/releases">GitHub release</a> includes native archives,
-the canonical <code>zeroshot-skill.md</code>, and <code>SHA256SUMS</code>; archive names contain the release version and
-target triple.</p>
+the canonical <code>zeroshot-skill.md</code> and <code>zeroshot-memory-init-skill.md</code>, and <code>SHA256SUMS</code>; archive
+names contain the release version and target triple.</p>
 <p>The Python SDK requires Python 3.11 or newer and ships the matching executable inside each platform
 wheel. Download the wheel for your <a href="../../guides/python-sdk/#install-and-run">OS and CPU</a> from <a href="https://github.com/the-open-engine/zeroshot/releases?q=zeroshot-python-v">Python SDK releases</a>.
 Replace <code>WHEEL_FILE</code> with its local path:</p>
@@ -1936,7 +1972,7 @@ without expiry metadata are supplied once when each provider process starts.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-19">19 October 2026</time>
+    Last updated <time datetime="2026-10-23">23 October 2026</time>
   </span>
 
     

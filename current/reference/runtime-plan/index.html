@@ -579,6 +579,8 @@
       
         
       
+        
+      
     
     
     
@@ -639,6 +641,34 @@
     
   
     Prepare a runtime environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/active-memory/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Active Memory
   
 
     
@@ -1974,7 +2004,7 @@ types in <code>openengine-cluster-protocol</code> are authoritative; the
 <a href="../cluster/schema.json#/$defs/RuntimePlan">generated protocol schema</a> is the
 machine-readable contract.</p>
 <h2 id="document-fields">Document fields<a class="headerlink" href="#document-fields" title="Permanent link">&para;</a></h2>
-<p><code>RuntimePlan</code> is a closed JSON object. All four fields are required, and unknown fields are rejected.</p>
+<p><code>RuntimePlan</code> is a closed JSON object. The following four fields are required; unknown fields are rejected.</p>
 <table>
 <thead>
 <tr>
@@ -2001,6 +2031,10 @@ machine-readable contract.</p>
 </tr>
 </tbody>
 </table>
+<p>Optional <code>activeMemory</code> controls repository and graph recall/collection independently, and
+<code>globalAgents.postmortem</code> configures the built-in after-run specialists. Both default to enabled
+on local CLI runs and direct targets. The same sections are accepted by uniform runtime files.
+See <a href="../../guides/active-memory/">Active Memory</a> for budgets, provider inheritance and opt-out examples.</p>
 <p><code>harness</code> and <code>provider</code> form the default lane. Every agent node runs on it unless its binding
 carries its own <a href="#per-node-lanes"><code>lane</code></a>. <code>size</code> applies to the whole run. Model, effort, session
 scope, and connections are chosen per node.</p>
@@ -2439,7 +2473,7 @@ with <code>zeroshot template show TEMPLATE</code> plus the same delivery flag.</
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-22">22 October 2026</time>
+    Last updated <time datetime="2026-10-23">23 October 2026</time>
   </span>
 
     
