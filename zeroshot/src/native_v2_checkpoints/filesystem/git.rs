@@ -71,7 +71,7 @@ fn git_directory(workspace: &Path, marker: &Path, metadata: &fs::Metadata) -> io
         .trim()
         .strip_prefix("gitdir: ")
         .ok_or_else(|| invalid("invalid Git directory marker"))?;
-    existing_directory(&workspace.join(target))
+    existing_directory(&workspace.join(target)).map_err(worktree_link_error)
 }
 
 fn common_directory(directory: &Path) -> io::Result<PathBuf> {
@@ -96,7 +96,7 @@ fn validate_layout(
     match (gitfile, directory == common) {
         (false, true) => Ok(()),
         (true, true) if modules.is_some_and(|root| directory.starts_with(root)) => Ok(()),
-        (true, false) => validate_linked_worktree(workspace, layout),
+        (true, false) => validate_linked_worktree(workspace, layout).map_err(worktree_link_error),
         _ => Err(invalid(
             "Git administrative path is outside this workspace or its linked worktree",
         )),
@@ -122,16 +122,46 @@ fn validate_linked_worktree(workspace: &Path, layout: &GitLayout) -> io::Result<
     Ok(())
 }
 
-pub(super) fn capture(workspace: &Path, tree: &Path) -> io::Result<bool> {
-    capture_tree(workspace, tree, None)
+// Moving a worktree or its main checkout leaves links that Git can still repair, but a snapshot
+// needs both to resolve. `git worktree repair` rewrites them; a stale checkout can be removed.
+fn worktree_link_error(error: io::Error) -> io::Error {
+    io::Error::new(
+        error.kind(),
+        format!(
+            "unresolved Git worktree link: {error}; run `git worktree repair` with this checkout's \
+             path from its main worktree, or remove the stale checkout"
+        ),
+    )
 }
 
-fn capture_tree(workspace: &Path, tree: &Path, modules: Option<&Path>) -> io::Result<bool> {
-    let layout = GitLayout::discover(workspace, modules)?;
+// Nested checkouts are named relative to the workspace; the workspace in the spelling Git accepts.
+fn checkout_error(root: &Path, checkout: &Path, error: io::Error) -> io::Error {
+    let path = match checkout.strip_prefix(root) {
+        Ok(nested) if !nested.as_os_str().is_empty() => nested,
+        _ => checkout,
+    };
+    io::Error::new(
+        error.kind(),
+        format!("Git checkout {:?}: {error}", git_path(path)),
+    )
+}
+
+pub(super) fn capture(workspace: &Path, tree: &Path) -> io::Result<bool> {
+    capture_tree(workspace, workspace, tree, None)
+}
+
+fn capture_tree(
+    root: &Path,
+    workspace: &Path,
+    tree: &Path,
+    modules: Option<&Path>,
+) -> io::Result<bool> {
+    let layout = GitLayout::discover(workspace, modules)
+        .map_err(|error| checkout_error(root, workspace, error))?;
     let own_modules = layout
         .as_ref()
         .map(|layout| layout.directory.join("modules"));
-    capture_nested(workspace, tree, own_modules.as_deref().or(modules))?;
+    capture_nested(root, workspace, tree, own_modules.as_deref().or(modules))?;
     let Some(layout) = layout else {
         return Ok(false);
     };
@@ -145,12 +175,22 @@ fn capture_tree(workspace: &Path, tree: &Path, modules: Option<&Path>) -> io::Re
     Ok(true)
 }
 
-fn capture_nested(workspace: &Path, tree: &Path, modules: Option<&Path>) -> io::Result<()> {
+fn capture_nested(
+    root: &Path,
+    workspace: &Path,
+    tree: &Path,
+    modules: Option<&Path>,
+) -> io::Result<()> {
     for entry in fs::read_dir(tree)? {
         let entry = entry?;
         let metadata = fs::symlink_metadata(entry.path())?;
         if entry.file_name() != ".git" && metadata.is_dir() && !metadata.file_type().is_symlink() {
-            capture_tree(&workspace.join(entry.file_name()), &entry.path(), modules)?;
+            capture_tree(
+                root,
+                &workspace.join(entry.file_name()),
+                &entry.path(),
+                modules,
+            )?;
         }
     }
     Ok(())
@@ -474,7 +514,8 @@ pub(super) fn restore_target(
         .map(snapshot_unborn_reference)
         .transpose()?
         .flatten();
-    let target = GitLayout::discover(workspace, None)?;
+    let target = GitLayout::discover(workspace, None)
+        .map_err(|error| checkout_error(workspace, workspace, error))?;
     if workspace.exists() {
         validate_nested_restore(workspace)?;
     }

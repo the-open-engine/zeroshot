@@ -796,6 +796,96 @@ fn gitfile_cannot_redirect_snapshot_authority_to_an_unrelated_repository() {
     assert_eq!(fs::read(unrelated.join(".git/HEAD")).assert_value(), head);
 }
 
+/// Returns the checkout location that precedes an unresolved worktree link and Git's repair.
+fn unresolved_worktree_checkout(error: &std::io::Error) -> String {
+    let message = error.to_string();
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{message}");
+    assert!(
+        message.ends_with(
+            "; run `git worktree repair` with this checkout's path from its main worktree, \
+             or remove the stale checkout"
+        ),
+        "{message}"
+    );
+    let (checkout, _) = message
+        .split_once(": unresolved Git worktree link: ")
+        .assert_value_with(&message);
+    checkout.to_owned()
+}
+
+#[test]
+fn unresolved_nested_worktree_links_name_the_relative_checkout() {
+    use openengine_cluster_testkit::assertions::AssertError;
+
+    // Moving the main checkout leaves the nested `.git` file naming a missing directory.
+    let dangling = Fixture::new();
+    let before = dangling._root.path().join("before");
+    initialize_git(&before);
+    git(
+        &before,
+        &["worktree", "add", "-b", "nested", "worktrees/nested"],
+    );
+    fs::remove_dir(&dangling.workspace).assert_value();
+    fs::rename(&before, &dangling.workspace).assert_value();
+    // Moving a linked worktree leaves its administrative backpointer naming the old path.
+    let moved = Fixture::new();
+    moved.initialize_git();
+    git(
+        &moved.workspace,
+        &["worktree", "add", "-b", "nested", "worktrees/nested"],
+    );
+    let worktrees = moved.workspace.join("worktrees");
+    fs::rename(worktrees.join("nested"), worktrees.join("moved")).assert_value();
+
+    for (fixture, checkout) in [(dangling, "nested"), (moved, "moved")] {
+        let error = capture(&fixture.workspace, &fixture.snapshots, &()).assert_error();
+        assert_eq!(
+            unresolved_worktree_checkout(&error),
+            format!("Git checkout {:?}", Path::new("worktrees").join(checkout))
+        );
+        assert_eq!(fs::read_dir(&fixture.snapshots).assert_value().count(), 0);
+    }
+}
+
+#[test]
+fn moved_linked_workspace_is_named_and_refused_by_capture_and_restore() {
+    use openengine_cluster_testkit::assertions::AssertError;
+
+    let fixture = Fixture::new();
+    fixture.initialize_git();
+    let linked = fixture._root.path().join("linked");
+    git(
+        &fixture.workspace,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "writer",
+            linked.to_str().assert_value(),
+        ],
+    );
+    let id = capture(&linked, &fixture.snapshots, &()).assert_value();
+    let moved = fixture._root.path().join("moved");
+    fs::rename(&linked, &moved).assert_value();
+    fs::write(moved.join("tracked"), "current edits").assert_value();
+
+    for error in [
+        capture(&moved, &fixture.snapshots, &()).assert_error(),
+        restore(&fixture.snapshots, &id, &moved).assert_error(),
+    ] {
+        let checkout = unresolved_worktree_checkout(&error);
+        assert!(
+            checkout.starts_with("Git checkout \"") && checkout.ends_with("moved\""),
+            "{checkout}"
+        );
+    }
+    assert_eq!(fs::read_dir(&fixture.snapshots).assert_value().count(), 1);
+    assert_eq!(
+        fs::read_to_string(moved.join("tracked")).assert_value(),
+        "current edits"
+    );
+}
+
 #[test]
 fn nested_repository_with_linked_peers_refuses_restore_before_mutating_any_files() {
     let fixture = Fixture::new();
