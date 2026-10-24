@@ -21,7 +21,7 @@ fn identity() -> SnapshotIdentity {
 async fn retry_cache_reuses_exact_source_and_refuses_changed_authored_configuration() {
     let directory = tempfile::tempdir().assert_value();
     let key = IdempotencyKey::new("same-submission").assert_value();
-    let digest = cache_key("cloud-login-one", &key).assert_value();
+    let digest = cache_key("platform-login-one", &key).assert_value();
     let cache = ReviewCache::open_at(directory.path().join("cache"), digest.clone(), identity())
         .await
         .assert_value();
@@ -76,7 +76,7 @@ fn run_and_profile() -> (RunCommand, super::super::ResolvedRunProfile) {
             "--title",
             "Review",
             "--target",
-            "cloud",
+            "platform",
             "--task-from",
             "https://github.com/acme/project/issues/42",
         ]

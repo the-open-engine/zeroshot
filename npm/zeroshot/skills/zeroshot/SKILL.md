@@ -116,7 +116,7 @@ zeroshot run --title "Review PR 123" --template pr-review \
 
 Use `issue-review` for an issue URL; its basic issue workflow is separate. PR intake captures linked
 issue text before execution. Local reviews require clean tracked files and, for a PR, a checkout already at its head. Comment
-publication uses the declared `github.GH_TOKEN` connection. Use `--target cloud` for hosted source
+publication uses the declared `github.GH_TOKEN` connection. Use `--target platform` for hosted source
 preparation and credential resolution. With a saved review profile, use `--profile` instead of the
 template/runtime/delivery flags. Validate first with `--validate-only`; retry uncertain submission
 using the same key and configuration. A successful review may report defects; success confirms

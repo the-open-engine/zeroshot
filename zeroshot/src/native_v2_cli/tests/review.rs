@@ -32,7 +32,7 @@ fn review_url_input_and_default_comment_delivery_are_unambiguous() {
             "--title",
             "Review",
             "--target",
-            "cloud",
+            "platform",
             "--task-from",
             "https://github.com/acme/project/issues/42",
         ];
@@ -154,7 +154,7 @@ fn remote_review_command(directory: &std::path::Path) -> NativeV2CliCommand {
         "--title",
         "Review",
         "--target",
-        "cloud",
+        "platform",
         "--cwd",
         directory.to_str().assert_value(),
         "--task-from",
@@ -190,7 +190,7 @@ async fn remote_review_resolves_context_and_source_without_a_client_git_checkout
     assert_eq!(outcome, CliOutcome::Detached);
     assert!(!output.is_empty());
     let calls = backend.calls();
-    assert!(matches!(&calls[0],Call::ResolveReview {target:Some(target),..} if target=="cloud"));
+    assert!(matches!(&calls[0],Call::ResolveReview {target:Some(target),..} if target=="platform"));
     let Call::Submit { input, runtime, .. } = &calls[1] else {
         panic!("expected prepared submission");
     };
@@ -271,7 +271,7 @@ async fn task_from_accepts_a_custom_profile_requiring_complete_pr_scope() {
         "--title",
         "Review",
         "--target",
-        "cloud",
+        "platform",
         "--task-from",
         "https://github.com/acme/project/pull/42",
         "--graph",

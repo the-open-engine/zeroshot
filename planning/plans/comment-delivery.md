@@ -1,7 +1,7 @@
 # Comment delivery for issue and PR reviews
 
 Status: native implementation rebased onto `origin/main`; final checks and release remain.
-Cloud integration is implemented and tested with external local native dependency patches.
+Platform integration is implemented and tested with external local native dependency patches.
 Its production runtime/SDK pins and deployment remain unchanged until the native release exists.
 
 ## Accepted architecture
@@ -35,10 +35,10 @@ Matching retries reuse the confirmed comment; changed content refuses. An uncert
 exact target, marker, author and body; unresolved publication never authorizes a blind repost.
 Terminal success contains the exact nested `receipt`, including its body hash and permalink.
 
-Cloud supplies scoped publication storage through `HostedWorkspace.comment_publications` and
+Platform supplies scoped publication storage through `HostedWorkspace.comment_publications` and
 resolves metadata with host-owned connection authority. Direct requests carry explicit temporary
 GitHub authority. Targets advertise separate comment-delivery and task-resolution capabilities.
-Cloud's lifecycle comments remain separate; the native engine posts the final report.
+Platform's lifecycle comments remain separate; the native engine posts the final report.
 
 ## Current graphs and defaults
 
@@ -93,7 +93,7 @@ resolver and Git transport fixtures cover fork materialization.
 
 Post-rebase checks passed native all-targets/UI compilation, 415 UI tests/build, 68 Python SDK
 tests with lint/types/docs, and 67 tooling tests with ESLint/distribution checks. Final Rust workspace,
-Clippy and documentation checks remain release gates. Cloud checks include PostgreSQL-backed
+Clippy and documentation checks remain release gates. Platform checks include PostgreSQL-backed
 resolver/CAS/migration tests and frontend integration using local native patches. PostgreSQL tests
 cover SQL. The legacy Sense scan reaches its fixed repository limit; structural coverage is incomplete.
 
@@ -103,7 +103,7 @@ cover SQL. The legacy Sense scan reaches its fixed repository limit; structural 
    with nonempty `## Summary`, then merge through required CI, including platform lanes.
 2. Publish the canonical native `vX.Y.Z` release from merged `main`; verify immutable binaries,
    target image and SDK outputs through the existing release workflow.
-3. Rebase Cloud, replace external test patches with that release's immutable runtime/SDK pins,
-   update Cargo lock/runtime lock/docs together, and rerun Cloud checks against those artifacts.
-4. Merge and deploy Cloud through its existing pipeline, then verify issue/PR URL intake and
+3. Rebase Platform, replace external test patches with that release's immutable runtime/SDK pins,
+   update Cargo lock/runtime lock/docs together, and rerun Platform checks against those artifacts.
+4. Merge and deploy Platform through its existing pipeline, then verify issue/PR URL intake and
    publication in the deployed placement. Record hosted/direct/fork coverage when completed.

@@ -40,13 +40,13 @@ impl TargetControllerFactory for TaskFactory {
             source: super::request().submission.source.unwrap(),
         })
     }
-    async fn create(&self) -> Result<Arc<NativeV2CloudController>, TargetAuthorityError> {
+    async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
         self.controllers.fetch_add(1, Ordering::SeqCst);
         test_controller().await
     }
     async fn submit(
         &self,
-        _controller: &NativeV2CloudController,
+        _controller: &NativeV2PlatformController,
         request: TargetRunRequest,
     ) -> Result<TargetRunReceipt, TargetAuthorityError> {
         Ok(TargetRunReceipt {
