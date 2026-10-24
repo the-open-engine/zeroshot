@@ -177,6 +177,7 @@ fn discovery(task: &Value) -> Value {
     }
     json!({"lessons":[finding]})
 }
+// Deliberately exercise compatibility with response files produced by earlier task schemas.
 fn maintenance(lesson: &Value, action: &str) -> Value {
     let references = match lesson["scope"]["kind"].as_str().assert_value() {
         "graph" => json!(["graph:worker", "node:worker"]),
@@ -770,3 +771,29 @@ mod global;
 
 #[path = "initialization/history_identity.rs"]
 mod history_identity;
+
+#[tokio::test]
+async fn legacy_response_revisions_cannot_select_a_newer_version_or_publish_partially() {
+    let case = case().await;
+    let review = case.stage().await;
+    let before = case
+        .store()
+        .snapshot(&case.fixture.query)
+        .assert_value()
+        .generation;
+    case.reconcile(&review, |lesson| {
+        let mut result = maintenance(lesson, "keep");
+        result["revision"] = json!(lesson["revision"].as_u64().assert_value() + 1);
+        result
+    });
+    assert!(initialize::commit(&case.session).await.is_err());
+    let after = case
+        .store()
+        .snapshot(&case.fixture.query)
+        .assert_value()
+        .generation;
+    assert_eq!(
+        after, before,
+        "a mismatched legacy precondition must not publish any scope"
+    );
+}

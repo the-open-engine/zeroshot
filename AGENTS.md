@@ -60,8 +60,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   lessons. Maintenance contexts and mutation authority are partitioned by lesson scope, including
   repository-qualified graph lessons; each scope's opt-out disables its maintenance and discovery.
   Adaptation provenance names the responsible scoped maintenance specialist. Maintenance uses
-  complete byte-bounded batches and requires exactly one decision per supplied ID/revision; omitted
-  or duplicate decisions cannot count as completed reconciliation. Maintenance consolidates redundant
+  complete byte-bounded batches and requires exactly one decision per supplied ID, bound by the host to its frozen revision; omitted
+  or duplicate decisions cannot count as completed reconciliation. The host owns revision preconditions
+  and increments; agents do not echo or propose revision counters, while prior initialization responses
+  with an explicit revision remain accepted only when it matches the frozen supplied version. Maintenance consolidates redundant
   paraphrases only within the same repository or exact graph/node/repository-qualified scope, retaining
   one canonical recommendation and all useful detail while deciding every supplied ID. Rejected discovery proposals report a validation stage and host-owned card field names without echoing
   proposal text. Repository advice admission detects common literal file:line positions for associated/cited source

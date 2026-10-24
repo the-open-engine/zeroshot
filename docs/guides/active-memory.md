@@ -16,7 +16,8 @@ the same run, using an existing node's model, provider and connections. It has f
 
 Each maintenance specialist keeps, adapts, retires or defers every lesson in its scope. Large
 manifests are processed in complete batches bounded by serialized context size; every batch
-requires exactly one decision per supplied ID and revision. Missing delivery evidence makes the
+requires exactly one decision per supplied ID. The host binds that ID to its frozen supplied
+revision and owns revision increments; agents do not manage version counters. Missing delivery evidence makes the
 specialists abstain. Missing or duplicate decisions fail that specialist's reconciliation instead
 of reporting success.
 

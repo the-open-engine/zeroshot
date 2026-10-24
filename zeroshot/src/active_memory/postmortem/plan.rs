@@ -56,6 +56,7 @@ impl Role {
             Self::RepositoryMaintenance => concat!(
                 "Maintain ONLY supplied repository lessons. Do not maintain graph procedures or discover new lessons. You MUST read current associated files before keep, adapt or retire. ",
                 "Follow folder/identifier associations to the authoritative source. Compare every concrete version, number, command and path against current source. A card repeated in a transcript or agent response is not corroboration. ",
+                "KEEP is inadmissible for legacy advice containing source-location pointers, even if the locations still happen to match. ADAPT must remove source positions from title and recommendation, including file:line, prose line numbers and #L links; preserve stable paths, identifiers and the useful procedure. Never merely renumber. ",
                 "Source line numbers are facts too: if a helper moved from file.js:120 to file.js:300, keep is invalid even if its behavior is unchanged. Adapt legacy file:line pointers away; use stable paths and identifiers, never merely renumber them. If you cannot verify the advice, defer. ",
                 "Check new conditional modes against unconditional advice; a new read-only preview may require qualifying guidance as applying only to real installation. ",
                 "Each keep/adapt/retire MUST cite repository:<root-relative-file> for current source actually read, and a nonempty reason explaining the comparison. Adapt fills the replacement repository associations while preserving the repository identity.",
@@ -89,7 +90,7 @@ impl Role {
 }
 
 const MAINTENANCE_INSTRUCTION: &str = concat!(
-    "Reconcile EVERY entry in supplied_lessons, returning exactly one decision for each supplied ID and revision. Do not reconcile lessons outside this batch or your assigned scope. ",
+    "Reconcile EVERY entry in supplied_lessons, returning exactly one decision for each supplied ID. Do not reconcile lessons outside this batch or your assigned scope. ",
     "The delivery manifest is authoritative: missing means unknown, so return no decisions if manifest_known is false. Do not discover new lessons. ",
     "If current authority cannot be verified, return defer. Keep requires the ENTIRE recommendation to remain valid, including every concrete operand. A still-useful general principle never excuses a stale command, version or path: adapt the invalid part, or defer if uncertain. Retire when current authority disproves continued usefulness. ",
     "Compare supplied cards for redundant advice, including different wording of the same cause and prevention. In the same repository scope or exact graph-hash/node/repository-qualifier scope, keep one concise canonical card when it fully covers the others. ",
@@ -97,7 +98,7 @@ const MAINTENANCE_INSTRUCTION: &str = concat!(
     "Never consolidate across repositories, graph hashes, nodes or different repository qualifiers. Preserve distinct failure causes or corrective operations. Return a decision for every supplied ID even when consolidating, and never mutate an ID outside the current batch. ",
     "Every adapt/retire also MUST cite at least one current MAIN-run reference from evidence.records or evidence.executions: v2:<sequence>, node:<node_id>, or hook:<seq>. ",
     "Use the supplied current-run references exactly. Historical references inside lesson.evidence describe its origin and are NOT accepted output citations; do not copy them. Repeated lesson text alone is not evidence. ",
-    "Every decision names its supplied ID and exact revision. For keep/defer, leave ONLY replacement title, recommendation, files, folders, identifiers and keyword_groups empty. Keep still REQUIRES nonempty references and reason; these are evidence, not replacements. Defer may have empty references. ",
+    "Every decision names its supplied ID. Do not return a revision field or propose a new revision: the host binds each ID to its exact frozen supplied revision, enforces compare-and-swap and owns increments. For keep/defer, leave ONLY replacement title, recommendation, files, folders, identifiers and keyword_groups empty. Keep still REQUIRES nonempty references and reason; these are evidence, not replacements. Defer may have empty references. ",
     "Adapt preserves the original scope identity and fills replacement title/recommendation; follow your scope-specific association rules. ",
     "The host delivers all supplied lessons in your scope in complete byte-bounded batches, identified by maintenance_batch.index and maintenance_batch.total. Check every lesson in this batch; use defer when evidence is insufficient. Return {decisions:[...]}; an empty array is valid only when supplied_lessons is empty or manifest_known is false.",
 );
@@ -233,7 +234,6 @@ fn decision_type() -> Value {
     let mut fields = lesson_fields();
     fields.extend([
         ("id", string()),
-        ("revision", json!({"kind":"integer"})),
         (
             "action",
             json!({"kind":"enum","values":["keep","adapt","retire","defer"]}),

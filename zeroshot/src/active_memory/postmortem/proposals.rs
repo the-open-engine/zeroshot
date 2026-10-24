@@ -353,7 +353,9 @@ impl<'a> ProposalContext<'a> {
             .supplied_lessons
             .get(&decision.id)
             .ok_or(ProposalRejection::Maintenance)?;
-        if original.revision != decision.revision
+        if decision
+            .legacy_revision
+            .is_some_and(|revision| revision != original.revision)
             || !role.accepts_scope(&original.scope)
             || !self.scope_enabled(&original.scope)
         {
@@ -558,8 +560,9 @@ fn validate_advice(draft: &LessonDraft) -> Result<(), crate::active_memory::Acti
             .iter()
             .filter_map(|reference| reference.strip_prefix("repository:")),
     );
-    let guidance = format!("{} {}", draft.title, draft.recommendation);
-    if paths.any(|path| source_position(&guidance, path)) {
+    if paths.any(|path| {
+        source_position(&draft.title, path) || source_position(&draft.recommendation, path)
+    }) {
         return Err(crate::active_memory::ActiveMemoryError::Invalid(
             "source line positions in repository advice; use stable paths and identifiers"
                 .to_owned(),
@@ -595,9 +598,14 @@ fn source_reference_boundary(before: &str) -> bool {
 }
 
 fn non_source_context(before: &str) -> bool {
-    let token = before.split_whitespace().next_back().unwrap_or_default();
+    let token = before
+        .rsplit(char::is_whitespace)
+        .next()
+        .unwrap_or_default();
+    let clause = before.rsplit([';', '\n']).next().unwrap_or_default();
+    let clause = clause.rsplit_once(". ").map_or(clause, |(_, tail)| tail);
     token.contains("://")
-        || before.split_whitespace().rev().take(4).any(|word| {
+        || clause.split_whitespace().rev().take(4).any(|word| {
             let word = word.trim_matches(|c: char| !c.is_ascii_alphanumeric());
             ["image", "docker", "podman", "tag"]
                 .into_iter()
@@ -670,7 +678,9 @@ struct MaintenanceOutput {
 #[serde(deny_unknown_fields)]
 struct MaintenanceDecision {
     id: String,
-    revision: u64,
+    // Prior initialization response files echoed the revision; preserve their precondition.
+    #[serde(default, rename = "revision")]
+    legacy_revision: Option<u64>,
     action: String,
     title: String,
     recommendation: String,

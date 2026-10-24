@@ -144,7 +144,6 @@ impl Driver {
             .map(|(id, lesson)| {
                 let mut output = decision(action);
                 output["id"] = json!(id);
-                output["revision"] = lesson["revision"].clone();
                 if lesson["scope"]["kind"] == "graph" {
                     output["references"] = json!(["node:worker", "graph:worker"]);
                     for key in ["files", "folders", "identifiers", "keyword_groups"] {
@@ -386,7 +385,7 @@ fn seed_lesson() -> LessonDraft {
 }
 
 fn decision(action: &str) -> Value {
-    json!({"id":"existing-provider-lesson","revision":1,"action":action,"title":"Updated provider lesson",
+    json!({"id":"existing-provider-lesson","action":action,"title":"Updated provider lesson",
         "recommendation":"Reject every cached OAuth credential before using the Bedrock lane.","files":["src/provider.rs"],"folders":[],"identifiers":[],"keyword_groups":[],
         "references":["node:worker","repository:src/provider.rs"],"reason":"Current source and this run show the old advice omitted a recurring cached OAuth credential failure."})
 }
@@ -573,7 +572,7 @@ async fn four_specialists_share_run_authority_and_publish_scoped_lessons_without
 }
 
 #[tokio::test]
-async fn maintenance_can_adapt_only_an_actually_supplied_revision() {
+async fn maintenance_binds_decision_ids_to_the_frozen_revision_and_the_host_increments_it() {
     let fixture = self::fixture(Default::default(), Some(seed_lesson()), true).await;
     fixture.output(
         "repository_maintenance",

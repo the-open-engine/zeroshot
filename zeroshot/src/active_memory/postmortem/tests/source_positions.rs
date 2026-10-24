@@ -141,3 +141,34 @@ async fn source_location_checks_do_not_reinterpret_urls_ports_or_image_tags() {
         );
     }
 }
+
+#[tokio::test]
+async fn unrelated_reference_context_does_not_exempt_source_locations() {
+    for (title, recommendation) in [
+        (
+            "Docker integration",
+            "Use the guard in src/provider.rs:42 before launch.",
+        ),
+        (
+            "Related guard",
+            "See https://example.com src/provider.rs:42 before launch.",
+        ),
+        (
+            "Related guard",
+            "Use docker image safely. Inspect src/provider.rs:42 before launch.",
+        ),
+        (
+            "Related guard",
+            "Use docker image; inspect src/provider.rs:42 before launch.",
+        ),
+    ] {
+        let fixture = fixture(Default::default(), None, true).await;
+        fixture.substantial_exploration();
+        let mut proposal = candidate("worker");
+        proposal["title"] = json!(title);
+        proposal["recommendation"] = json!(recommendation);
+        fixture.output("repository", json!({"lessons":[proposal]}));
+        fixture.drive().await;
+        assert!(fixture.lessons().await.is_empty(), "{recommendation}");
+    }
+}
