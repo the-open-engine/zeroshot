@@ -86,6 +86,14 @@ it('preserves explicit cross-lane ownership', () => {
       { native: false, python: false, tooling: false, npm: false, docs: true },
     ],
     ['package-lock.json', { native: false, python: false, tooling: true, npm: true, docs: false }],
+    [
+      'npm/zeroshot/package.json',
+      { native: false, python: false, tooling: false, npm: true, docs: true },
+    ],
+    [
+      'npm/zeroshot/README.md',
+      { native: false, python: false, tooling: false, npm: true, docs: true },
+    ],
   ]);
   for (const [pathname, expected] of cases) {
     assert.deepEqual(selections(classifyPaths([pathname])), expected, pathname);
