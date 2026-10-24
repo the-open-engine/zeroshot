@@ -196,7 +196,9 @@ recordings or built-in templates. The README links back to the interactive examp
 
 `docs/assets/product-graph-feature-{wide,mobile}.gif` preserves the feature graph's 16-second
 animation: review rejection, repair, end-to-end rejection, repair, then delivery. The exports
-have 240 frames at 15 fps and loop continuously. Desktop is 1280px wide; mobile is 780px wide.
+have 800 frames at 50 fps and loop continuously. Desktop is 1280px wide; mobile is 780px wide.
+The desktop export includes the page's key (writes, judges, built in, boots the stack); the
+page's mobile layout has no key.
 The risk-routing graph is static on the source page and remains a PNG in the README.
 
 The four `product-graph-{feature,danger}-{wide,mobile}.png` files are static exports. The feature
