@@ -84,6 +84,8 @@ fn agent_binding() -> NodeRuntimeBinding {
         lane: None,
         model: ModelId::new("gpt-5.6").assert_value(),
         effort: Some(ReasoningEffort::Max),
+        context_window: None,
+        max_tokens: None,
         session_scope: SessionScope::Execution,
         connections: DeclaredConnections::empty(),
     }

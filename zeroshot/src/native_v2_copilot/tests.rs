@@ -43,6 +43,8 @@ fn binding_for_model(names: impl Iterator<Item = String>, model: &str) -> NodeRu
         lane: None,
         model: crate::worker_catalog::ModelId::new(model).assert_value(),
         effort: None,
+        context_window: None,
+        max_tokens: None,
         session_scope: SessionScope::NodeInstance,
         connections: DeclaredConnections::single(
             "github",

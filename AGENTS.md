@@ -135,7 +135,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   durable replay. Final-round facts replace older facts when the loop returns to its parent.
 - Model identifiers are opaque provider-owned strings. Do not infer a harness from a provider/model,
   maintain runtime model catalogs, or validate provider availability. Admission may reject only known
-  incompatible harness/provider pairs.
+  incompatible harness/provider pairs. A caller may declare optional bounded `contextWindow` and
+  `maxTokens` on an agent binding; they are declarations rather than catalog knowledge, are written
+  only to the Pi gateway model entry when supplied, and stay absent so the provider keeps its own
+  defaults otherwise. Never infer either value from the model identifier.
 - Full-v1 loops may declare `maxIterationsInput` as an integer path in the initial input.
   Reusable profiles verify the authored default `maxIterations`; native-v2 run admission binds a
   present positive safe integer from caller input and re-verifies the concrete graph. An absent
@@ -361,7 +364,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   name the wire protocol (`openai-responses`, `openai-completions`, or `anthropic-messages`) and
   reach any endpoint Pi implements without probing it. The registered model entry carries the
   caller's identifier, the chosen protocol, and a `reasoning` flag mirroring the binding's authored
-  effort; context window, output limit, and cost stay Pi-owned defaults. The same file is Pi's only
+  effort. It carries `contextWindow` and `maxTokens` only when the caller declared them, so omitted
+  limits and cost stay Pi-owned defaults. The same file is Pi's only
   caller-owned-endpoint mechanism, which is why it also backs a declared or ambient
   `ANTHROPIC_BASE_URL` on the `anthropic` lane and `OPENAI_BASE_URL`/`OPENAI_API_BASE` on the
   `openai` lane: those overrides retarget the endpoint and keep each built-in provider's own

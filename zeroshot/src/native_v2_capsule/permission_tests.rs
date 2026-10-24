@@ -112,6 +112,8 @@ async fn hosted_case(harness: &str, verifier: bool, policy: &str, native: Option
         lane: None,
         model: ModelId::new("opaque-model").assert_value(),
         effort: None,
+        context_window: None,
+        max_tokens: None,
         session_scope: SessionScope::Execution,
         connections: DeclaredConnections::single(
             "provider",

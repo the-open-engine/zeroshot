@@ -52,6 +52,8 @@ fn agent_without_a_lane_serializes_without_a_lane_key() {
         lane: None,
         model: crate::ModelId::new("worker-model").unwrap(),
         effort: None,
+        context_window: None,
+        max_tokens: None,
         session_scope: SessionScope::Execution,
         connections: DeclaredConnections::empty(),
     };
@@ -61,6 +63,64 @@ fn agent_without_a_lane_serializes_without_a_lane_key() {
         serde_json::from_str::<NodeRuntimeBinding>(wire).unwrap(),
         binding
     );
+}
+
+#[test]
+fn caller_model_limits_are_optional_bounded_and_round_trip() {
+    let wire =
+        r#"{"kind":"agent","model":"worker-model","contextWindow":1000000,"maxTokens":32000}"#;
+    let binding: NodeRuntimeBinding = serde_json::from_str(wire).unwrap();
+    assert_eq!(binding.context_window(), Some(1_000_000));
+    assert_eq!(binding.max_tokens(), Some(32_000));
+    binding.validate_model_limits().unwrap();
+    assert_eq!(serde_json::to_string(&binding).unwrap(), wire);
+
+    // Absent limits keep every existing runtime file unchanged and delegate to Pi's defaults.
+    let absent: NodeRuntimeBinding =
+        serde_json::from_str(r#"{"kind":"agent","model":"worker-model"}"#).unwrap();
+    assert_eq!(absent.context_window(), None);
+    assert_eq!(absent.max_tokens(), None);
+    assert_eq!(
+        serde_json::to_string(&absent).unwrap(),
+        r#"{"kind":"agent","model":"worker-model"}"#
+    );
+
+    // Direct Rust construction must be inspected at admission rather than assumed valid.
+    let invalid = NodeRuntimeBinding::Agent {
+        lane: None,
+        model: crate::ModelId::new("worker-model").unwrap(),
+        effort: None,
+        context_window: Some(0),
+        max_tokens: Some(MAX_MODEL_MAX_TOKENS + 1),
+        session_scope: SessionScope::Execution,
+        connections: DeclaredConnections::empty(),
+    };
+    let error = invalid.validate_model_limits().unwrap_err();
+    assert!(
+        error.to_string().contains("contextWindow") && error.to_string().contains("1..=10000000"),
+        "{error}"
+    );
+
+    for (field, invalid_value) in [
+        ("contextWindow", serde_json::json!(0)),
+        (
+            "contextWindow",
+            serde_json::json!(MAX_MODEL_CONTEXT_WINDOW + 1),
+        ),
+        ("contextWindow", serde_json::json!(-1)),
+        ("maxTokens", serde_json::json!(0)),
+        ("maxTokens", serde_json::json!(MAX_MODEL_MAX_TOKENS + 1)),
+        ("maxTokens", serde_json::json!(-1)),
+    ] {
+        let mut wire = serde_json::json!({"kind": "agent", "model": "worker-model"});
+        wire[field] = invalid_value;
+        let error = serde_json::from_value::<NodeRuntimeBinding>(wire).unwrap_err();
+        assert!(error.to_string().contains(field), "{field}: {error}");
+        assert!(
+            error.to_string().contains("1..=10000000"),
+            "{field}: {error}"
+        );
+    }
 }
 
 #[test]

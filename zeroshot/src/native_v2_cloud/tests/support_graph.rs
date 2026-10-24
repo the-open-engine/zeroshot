@@ -11,6 +11,8 @@ pub(super) fn runtime() -> RuntimePlan {
                     model: crate::worker_catalog::ModelId::new("gpt-5.6")
                         .assert_value_with("model"),
                     effort: Some(ReasoningEffort::Max),
+                    context_window: None,
+                    max_tokens: None,
                     session_scope: SessionScope::Execution,
                     connections: DeclaredConnections::single(
                         "test",
@@ -204,6 +206,8 @@ pub(super) fn complex_runtime() -> RuntimePlan {
         lane: None,
         model: crate::worker_catalog::ModelId::new("gpt-5.6").assert_value_with("model"),
         effort: Some(ReasoningEffort::Max),
+        context_window: None,
+        max_tokens: None,
         session_scope,
         connections: DeclaredConnections::empty(),
     };

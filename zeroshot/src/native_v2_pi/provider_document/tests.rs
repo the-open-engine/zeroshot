@@ -33,6 +33,8 @@ fn resolved(fields: &[&str], values: &[(&str, &str)]) -> ResolvedEnvironment {
         lane: None,
         model: crate::worker_catalog::ModelId::new("provider-model").unwrap(),
         effort: None,
+        context_window: None,
+        max_tokens: None,
         session_scope: crate::execution::SessionScope::Execution,
         connections: if names.is_empty() {
             DeclaredConnections::empty()
@@ -75,6 +77,8 @@ fn the_gateway_registers_its_own_provider_with_the_caller_protocol() {
             api: Some("openai-completions"),
             model: Some("provider-model"),
             reasoning: true,
+            context_window: None,
+            max_tokens: None,
             api_key_field: Some(GATEWAY.api_key_field),
         },
     );
@@ -83,16 +87,48 @@ fn the_gateway_registers_its_own_provider_with_the_caller_protocol() {
     assert_eq!(provider["baseUrl"], "https://gateway.example/api/v1");
     // The key stays in the declared connection, never in the synthesized file.
     assert_eq!(provider["apiKey"], "$GATEWAY_API_KEY");
-    // The model entry binds the caller's identifier and nothing else, so Zeroshot owns no
-    // capability metadata and no catalog.
+    // The model entry binds the caller's identifier and only the limits the caller declared.
+    // Zeroshot owns no capability defaults and no catalog.
     let models = provider["models"].as_array().unwrap();
     assert_eq!(models.len(), 1);
     assert_eq!(models[0]["id"], "provider-model");
     assert_eq!(models[0]["api"], "openai-completions");
     assert!(models[0].get("contextWindow").is_none());
+    assert!(models[0].get("maxTokens").is_none());
     assert!(models[0].get("cost").is_none());
     // Reasoning mirrors the binding's authored effort so Pi cannot silently discard it.
     assert_eq!(models[0]["reasoning"], true);
+}
+
+#[test]
+fn caller_declared_model_limits_are_emitted_only_when_supplied() {
+    fn entry(context_window: Option<u32>, max_tokens: Option<u32>) -> serde_json::Value {
+        models_document(
+            GATEWAY,
+            EndpointDocument {
+                base_url: "https://gateway.example/api/v1",
+                api: Some("openai-responses"),
+                model: Some("provider-model"),
+                reasoning: false,
+                context_window,
+                max_tokens,
+                api_key_field: Some(GATEWAY.api_key_field),
+            },
+        )["providers"][GATEWAY.provider]["models"][0]
+            .clone()
+    }
+
+    let both = entry(Some(1_000_000), Some(32_000));
+    assert_eq!(both["contextWindow"], 1_000_000);
+    assert_eq!(both["maxTokens"], 32_000);
+
+    // Each field is independent; an omitted field stays absent rather than being defaulted.
+    let context_only = entry(Some(1_000_000), None);
+    assert_eq!(context_only["contextWindow"], 1_000_000);
+    assert!(context_only.get("maxTokens").is_none());
+    let output_only = entry(None, Some(32_000));
+    assert!(output_only.get("contextWindow").is_none());
+    assert_eq!(output_only["maxTokens"], 32_000);
 }
 
 #[test]
@@ -108,6 +144,8 @@ fn the_written_provider_file_holds_no_secret() {
             api: "openai-responses",
             model: "provider-model",
             reasoning: false,
+            context_window: None,
+            max_tokens: None,
         },
     )
     .unwrap();
@@ -141,6 +179,8 @@ fn the_gateway_document_is_written_and_validated() {
             api: "anthropic-messages",
             model: "provider-model",
             reasoning: true,
+            context_window: None,
+            max_tokens: None,
         },
     )
     .unwrap();
@@ -160,6 +200,8 @@ fn the_gateway_document_is_written_and_validated() {
                 api: "grpc",
                 model: "m",
                 reasoning: false,
+                context_window: None,
+                max_tokens: None,
             },
         )
         .is_err()
@@ -172,6 +214,8 @@ fn the_gateway_document_is_written_and_validated() {
                 api: "openai-responses",
                 model: "  ",
                 reasoning: false,
+                context_window: None,
+                max_tokens: None,
             },
         )
         .is_err()
@@ -192,6 +236,8 @@ fn the_written_provider_file_is_owner_only() {
                 api: "openai-responses",
                 model: "provider-model",
                 reasoning: false,
+                context_window: None,
+                max_tokens: None,
             },
         )
         .unwrap();
@@ -211,6 +257,8 @@ fn the_anthropic_document_keeps_pis_own_messages_protocol() {
             api: None,
             model: None,
             reasoning: false,
+            context_window: None,
+            max_tokens: None,
             api_key_field: Some(ANTHROPIC.api_key_field),
         },
     );
@@ -236,6 +284,8 @@ fn the_anthropic_endpoint_omits_api_key_when_only_a_token_is_available() {
             api: None,
             model: None,
             reasoning: false,
+            context_window: None,
+            max_tokens: None,
             api_key_field: None,
         },
     );
@@ -259,6 +309,8 @@ fn the_openai_document_keeps_pis_own_responses_protocol() {
             api: None,
             model: None,
             reasoning: false,
+            context_window: None,
+            max_tokens: None,
             api_key_field: Some(OPENAI.api_key_field),
         },
     );

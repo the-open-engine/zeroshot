@@ -9,11 +9,13 @@ use std::pin::Pin;
 
 use openengine_cluster_protocol::{
     ActiveMemoryConfig, ClaudeProvider, CodexProvider, DeclaredConnections, DeclaredEnvironment,
-    GlobalAgentsConfig, EnvironmentVariableName, GraphProfile, GraphSpec, IdempotencyKey, ModelId,
-    NodeName, NodeRuntimeBinding, PiProvider, ReasoningEffort, RunConnectionValues, RunSize,
-    RunSubmitResult, RunConnectionRequirements, RuntimePlan, SessionScope, StaticConnectionValues,
+    GlobalAgentsConfig, EnvironmentVariableName, GraphProfile, GraphSpec, IdempotencyKey,
+    MAX_MODEL_CONTEXT_WINDOW, MAX_MODEL_MAX_TOKENS, MIN_MODEL_CONTEXT_WINDOW, MIN_MODEL_MAX_TOKENS,
+    ModelId, NodeName, NodeRuntimeBinding, PiProvider, ReasoningEffort, RunConnectionValues,
+    RunSize, RunSubmitResult, RunConnectionRequirements, RuntimePlan, SessionScope,
+    StaticConnectionValues, deserialize_optional_model_limit,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use super::super::{
     BuiltinGraphTemplate, CliOutcome, NativeV2CliBackend, NativeV2CliCommand, NativeV2CliError,
@@ -599,6 +601,10 @@ struct UniformRuntimePlan {
     model: ModelId,
     #[serde(default)]
     effort: Option<ReasoningEffort>,
+    #[serde(default, deserialize_with = "deserialize_context_window")]
+    context_window: Option<u32>,
+    #[serde(default, deserialize_with = "deserialize_max_tokens")]
+    max_tokens: Option<u32>,
     #[serde(default)]
     session_scope: Option<SessionScope>,
     #[serde(default)]
@@ -611,6 +617,30 @@ struct UniformRuntimePlan {
 
 const fn medium_size() -> RunSize {
     RunSize::Medium
+}
+
+fn deserialize_context_window<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_optional_model_limit(
+        deserializer,
+        "contextWindow",
+        MIN_MODEL_CONTEXT_WINDOW,
+        MAX_MODEL_CONTEXT_WINDOW,
+    )
+}
+
+fn deserialize_max_tokens<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_optional_model_limit(
+        deserializer,
+        "maxTokens",
+        MIN_MODEL_MAX_TOKENS,
+        MAX_MODEL_MAX_TOKENS,
+    )
 }
 
 impl UniformRuntimePlan {
@@ -659,6 +689,8 @@ impl UniformRuntimePlan {
             lane: None,
             model: self.model.clone(),
             effort: self.effort,
+            context_window: self.context_window,
+            max_tokens: self.max_tokens,
             session_scope: self.session_scope.unwrap_or_else(|| {
                 template.map_or(SessionScope::Execution, |template| {
                     template.default_session_scope(name.as_str())

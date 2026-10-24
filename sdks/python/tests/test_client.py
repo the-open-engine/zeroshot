@@ -265,6 +265,23 @@ def test_uniform_runtime_encodes_exact_connection_requirements() -> None:
     }
 
 
+def test_uniform_runtime_encodes_model_limits_only_when_set() -> None:
+    selected = UniformRuntime(
+        harness="pi",
+        provider="gateway",
+        model="caller-model",
+        context_window=1_000_000,
+        max_tokens=32_000,
+    )
+
+    encoded = selected.to_dict()
+    assert encoded["contextWindow"] == 1_000_000
+    assert encoded["maxTokens"] == 32_000
+    defaults = runtime().to_dict()
+    assert "contextWindow" not in defaults
+    assert "maxTokens" not in defaults
+
+
 def test_custom_graph_and_runtime_are_forwarded_unchanged(fake_native: Path) -> None:
     graph = {"profile": "openengine.graph.full/v1", "root": {"kind": "succeed"}}
     runtime_plan = {"harness": "codex", "provider": "openai", "size": "tiny", "nodes": {}}

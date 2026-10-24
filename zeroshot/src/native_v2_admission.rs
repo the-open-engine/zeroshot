@@ -56,6 +56,8 @@ pub enum NativeV2AdmissionError {
     MissingRuntimeBinding { node: NodeName },
     #[error("runtime plan contains a binding for non-executable node {node}")]
     UnexpectedRuntimeBinding { node: NodeName },
+    #[error("invalid runtime binding for node {node}: {detail}")]
+    InvalidRuntimeBinding { node: NodeName, detail: String },
     #[error("agent-backed node {node} requires authored instructions")]
     MissingAgentInstructions { node: NodeName },
     #[error("Git delivery node {node} rejects authored instructions")]

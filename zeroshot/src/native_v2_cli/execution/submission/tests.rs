@@ -1,6 +1,7 @@
 use openengine_cluster_protocol::{
-    ConnectionKey, EnvironmentVariableName, GraphProfile, ModelId, NodeRuntimeBinding,
-    PullRequestFeedback, RunConnectionRequirements, RunSize, RunTitle, SessionScope,
+    ConnectionKey, EnvironmentVariableName, GraphProfile, MAX_MODEL_CONTEXT_WINDOW,
+    MAX_MODEL_MAX_TOKENS, ModelId, NodeRuntimeBinding, PullRequestFeedback,
+    RunConnectionRequirements, RunSize, RunTitle, SessionScope,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
@@ -29,6 +30,8 @@ fn uniform(harness: UniformHarness, provider: UniformProvider) -> UniformRuntime
         size: RunSize::Small,
         model: ModelId::new("provider-owned-model").assert_value(),
         effort: None,
+        context_window: None,
+        max_tokens: None,
         session_scope: None,
         connections: None,
         active_memory: Default::default(),
@@ -152,6 +155,8 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
             lane: None,
             model: ModelId::new("wrong-kind").assert_value(),
             effort: None,
+            context_window: None,
+            max_tokens: None,
             session_scope: SessionScope::Execution,
             connections: DeclaredConnections::empty(),
         },
@@ -182,6 +187,84 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
             .assert_value(),
         runtime
     );
+}
+
+#[test]
+fn uniform_runtime_threads_model_limits_into_each_agent_binding() {
+    let graph = BuiltinGraphTemplate::SoftwareChange
+        .materialize(TemplateDelivery::Merge)
+        .assert_value();
+    let authored = serde_json::json!({
+        "harness": "pi",
+        "provider": "gateway",
+        "model": "provider-owned-model",
+        "contextWindow": 1_000_000,
+        "maxTokens": 32_000
+    });
+    let plan: UniformRuntimePlan = serde_json::from_value(authored).assert_value();
+    let runtime = plan
+        .materialize(
+            &graph,
+            PullRequestFeedback::Consider,
+            Some(BuiltinGraphTemplate::SoftwareChange),
+        )
+        .assert_value();
+    let mut agents = 0;
+    for (name, binding) in runtime.nodes() {
+        if let NodeRuntimeBinding::Agent {
+            context_window,
+            max_tokens,
+            ..
+        } = binding
+        {
+            agents += 1;
+            assert_eq!(*context_window, Some(1_000_000), "{name}");
+            assert_eq!(*max_tokens, Some(32_000), "{name}");
+        }
+    }
+    assert!(agents > 0);
+
+    let defaults: UniformRuntimePlan = serde_json::from_value(serde_json::json!({
+        "harness": "pi", "provider": "gateway", "model": "provider-owned-model"
+    }))
+    .assert_value();
+    assert_eq!(defaults.context_window, None);
+    assert_eq!(defaults.max_tokens, None);
+    let defaults = defaults
+        .materialize(
+            &graph,
+            PullRequestFeedback::Consider,
+            Some(BuiltinGraphTemplate::SoftwareChange),
+        )
+        .assert_value();
+    assert!(defaults.nodes().values().all(|binding| matches!(
+        binding,
+        NodeRuntimeBinding::GitDelivery { .. }
+    ) || binding.context_window().is_none()
+        && binding.max_tokens().is_none()));
+
+    for (field, value) in [
+        ("contextWindow", serde_json::json!(0)),
+        (
+            "contextWindow",
+            serde_json::json!(MAX_MODEL_CONTEXT_WINDOW + 1),
+        ),
+        ("contextWindow", serde_json::json!(-1)),
+        ("maxTokens", serde_json::json!(0)),
+        ("maxTokens", serde_json::json!(MAX_MODEL_MAX_TOKENS + 1)),
+        ("maxTokens", serde_json::json!(-1)),
+    ] {
+        let mut invalid = serde_json::json!({
+            "harness": "pi", "provider": "gateway", "model": "provider-owned-model"
+        });
+        invalid[field] = value;
+        let error = serde_json::from_value::<UniformRuntimePlan>(invalid)
+            .expect_err("out-of-range model limit must be rejected");
+        assert!(
+            error.to_string().contains(field) && error.to_string().contains("1..=10000000"),
+            "{field}: {error}"
+        );
+    }
 }
 
 #[test]

@@ -109,6 +109,10 @@ class UniformRuntime:
         provider: Native provider name.
         model: Native model identifier.
         effort: Optional native reasoning effort.
+        context_window: Optional caller-declared model context window. None keeps the provider's
+            own default.
+        max_tokens: Optional caller-declared model output limit. None keeps the provider's own
+            default.
         size: Native small, medium, or large run size.
         session_scope: execution opens a fresh session for each execution; node_instance reuses a
             live session when that graph node instance runs again.
@@ -123,6 +127,8 @@ class UniformRuntime:
     provider: str
     model: str
     effort: str | None = None
+    context_window: int | None = None
+    max_tokens: int | None = None
     size: str = "medium"
     session_scope: str = "execution"
     connections: Mapping[str, tuple[str, ...]] | None = None
@@ -140,6 +146,10 @@ class UniformRuntime:
         value["harness"] = self.harness
         if self.effort is not None:
             value["effort"] = self.effort
+        if self.context_window is not None:
+            value["contextWindow"] = self.context_window
+        if self.max_tokens is not None:
+            value["maxTokens"] = self.max_tokens
         if self.connections is not None:
             value["connections"] = {
                 key: list(environment) for key, environment in self.connections.items()

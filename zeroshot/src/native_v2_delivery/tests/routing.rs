@@ -338,6 +338,8 @@ async fn admitted_routing_graph(base_revision: &str) -> crate::native_v2_contrac
         lane: None,
         model: crate::worker_catalog::ModelId::new("gpt-5.6").assert_value(),
         effort: Some(crate::worker_catalog::ReasoningEffort::Max),
+        context_window: None,
+        max_tokens: None,
         session_scope: crate::execution::SessionScope::Execution,
         connections: DeclaredConnections::empty(),
     };
