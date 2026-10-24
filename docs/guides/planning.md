@@ -20,7 +20,7 @@ a change, for example "plan this with zeroshot", and it:
 3. turns vague goals into checkable acceptance criteria, including what must keep working, and
    confirms them with you;
 4. proposes sub-plans when parts have different owners, blockers or outcomes;
-5. writes the plan to `.zeroshot/plans/<id>-<slug>.md`.
+5. writes the plan to `.zeroshot/plans/<id>.md`.
 
 A small, clear change gets a short plan with no questions. If the issue already has a plan in this
 format posted by a bot, the skill continues from it instead of starting over. The skill only plans:
@@ -88,20 +88,20 @@ Store the event id on each booking with a unique index; on conflict, return the 
 - Cleaning up existing duplicates: sub-plan GH-212.1.
 ```
 
-| Field or section                    | Meaning                                                                                                                               |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                                | The source issue (`GH-212`, `PROJ-123`) or an uppercase key and a number; sub-plans add a level (`GH-212.1`)                          |
-| `status`                            | `new`, `needs-input` (a blocking question is open) or `ready`                                                                         |
-| `parent`, `sub_plans`, `depends_on` | How plans split, and which must finish first                                                                                          |
-| `base_commit`                       | The commit the plan was researched against, to tell when it is stale                                                                  |
-| `source`                            | Where the request came from, such as an issue URL                                                                                     |
-| Goal                                | The outcome someone can observe or verify: behavior, a measured property, a document or an answer                                     |
-| Context                             | Files, entry points and evidence, summarized without personal data                                                                    |
-| Acceptance criteria                 | `AC-n` statements, each with a `Check:` naming how it is verified, or `Check (manual):` when it needs a person or another environment |
-| Constraints                         | Limits and non-goals the change must respect                                                                                          |
-| Decided approach                    | Only what was decided, not alternatives                                                                                               |
-| Open questions                      | `Q-n` items with a suggested answer and who decides                                                                                   |
-| Decisions                           | `D-n` records of what was decided, why, and by whom (or `assumed` for a reviewer to confirm)                                          |
+| Field or section                    | Meaning                                                                                                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                | The tracker key (`PROJ-123`, `ENG-42`, `GH-212` for a GitHub issue) or a short name from the title (`double-bookings`); sub-plans add a number (`PROJ-123.1`) |
+| `status`                            | `new`, `needs-input` (a blocking question is open) or `ready`                                                                                                 |
+| `parent`, `sub_plans`, `depends_on` | How plans split, and which must finish first                                                                                                                  |
+| `base_commit`                       | The commit the plan was researched against, to tell when it is stale                                                                                          |
+| `source`                            | Where the request came from, such as an issue URL                                                                                                             |
+| Goal                                | The outcome someone can observe or verify: behavior, a measured property, a document or an answer                                                             |
+| Context                             | Files, entry points and evidence, summarized without personal data                                                                                            |
+| Acceptance criteria                 | `AC-n` statements, each with a `Check:` naming how it is verified, or `Check (manual):` when it needs a person or another environment                         |
+| Constraints                         | Limits and non-goals the change must respect                                                                                                                  |
+| Decided approach                    | Only what was decided, not alternatives                                                                                                                       |
+| Open questions                      | `Q-n` items with a suggested answer and who decides                                                                                                           |
+| Decisions                           | `D-n` records of what was decided, why, and by whom (or `assumed` for a reviewer to confirm)                                                                  |
 
 Ids of criteria, questions and decisions never change once written. A plan is `ready` when no
 blocking question is open, every criterion has a check and one criterion covers what must keep

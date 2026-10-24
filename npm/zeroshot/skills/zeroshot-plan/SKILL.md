@@ -113,10 +113,11 @@ plans that must finish first. Order sub-plans by value, so the first one is usef
 
 ## Plan format
 
-Use the source issue as the plan id when there is one, such as `GH-212` or `PROJ-123`; otherwise use
-an uppercase key and a number no other plan uses, such as `WR-2`. Sub-plans add a level
-(`GH-212.1`). Number criteria `AC-1`, questions `Q-1` and decisions `D-1`; never renumber them once
-written.
+Give each plan an id. When the request comes from a tracker, use its key: `PROJ-123` in Jira,
+`ENG-42` in Linear, or `GH-212` for GitHub issue 212, since GitHub has no keys. Otherwise use a
+short name from the title in lowercase with hyphens, such as `double-bookings`, that no other plan
+in the folder uses. Sub-plans add a number (`PROJ-123.1`, `double-bookings.1`). Number criteria
+`AC-1`, questions `Q-1` and decisions `D-1` within each plan; never renumber them once written.
 
 Use exactly this structure. The minimum plan is Goal, Acceptance criteria and Constraints; leave out
 other sections, and the `parent`, `depends_on`, `sub_plans` and `source` fields, when they would be
@@ -125,7 +126,7 @@ empty.
 ```markdown
 ---
 schema: zeroshot.plan/v1
-id: <KEY>-<n>
+id: <tracker key, or a short name from the title>
 title: <short title>
 status: <new | needs-input | ready>
 owner: <who decides>
@@ -204,7 +205,7 @@ session; this skill writes a plan file that outlives the session, so another age
 can build from it later.
 
 - **Asking:** use the host's question tool when it has one, so each question offers choices.
-- **Storing:** save the plan as `.zeroshot/plans/<id>-<slug>.md` unless the repository already keeps
+- **Storing:** save the plan as `.zeroshot/plans/<id>.md` unless the repository already keeps
   plans elsewhere or the user asks otherwise. If `.zeroshot/plans/.gitignore` does not exist, create
   it containing `*`, so the folder ignores itself without changing anything else in the repository.
   Do not commit the plan file unless the user asks.
