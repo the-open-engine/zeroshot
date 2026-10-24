@@ -353,7 +353,8 @@ class PublicationTests(unittest.TestCase):
 
     def test_page_shows_its_last_change(self):
         page = SimpleNamespace(
-            file=SimpleNamespace(abs_src_path="docs/index.md", src_uri="index.md"), meta={}
+            file=SimpleNamespace(abs_src_path="docs/index.md", src_uri="index.md"),
+            meta={},
         )
         with patch.object(hook, "_last_change", return_value=date(2026, 10, 4)):
             hook.on_page_markdown("text", page=page)
@@ -365,6 +366,30 @@ class PublicationTests(unittest.TestCase):
         with patch.object(hook, "_last_change", return_value=None):
             self.assertEqual(hook.on_page_markdown("text", page=page), "text")
         self.assertNotIn("revision_date", page.meta)
+
+    def test_generated_references_receive_distinct_descriptions(self):
+        descriptions = []
+        for source in ("zeroshot-cli.md", "reference/cluster/api.md"):
+            with self.subTest(source=source):
+                page = SimpleNamespace(
+                    file=SimpleNamespace(abs_src_path=source, src_uri=source), meta={}
+                )
+                with patch.object(hook, "_last_change", return_value=None):
+                    self.assertEqual(
+                        hook.on_page_markdown("reference", page=page), "reference"
+                    )
+                descriptions.append(page.meta["description"])
+                self.assertGreater(len(descriptions[-1]), 40)
+        self.assertNotEqual(*descriptions)
+
+    def test_authored_description_is_preserved(self):
+        page = SimpleNamespace(
+            file=SimpleNamespace(abs_src_path="index.md", src_uri="index.md"),
+            meta={"description": 'A "quoted" description & more.'},
+        )
+        with patch.object(hook, "_last_change", return_value=None):
+            hook.on_page_markdown("text", page=page)
+        self.assertEqual(page.meta["description"], 'A "quoted" description & more.')
 
     def test_current_manifest_does_not_claim_a_release(self):
         with patch.dict(os.environ, {"ZEROSHOT_DOCS_COMMIT": COMMIT}, clear=True):

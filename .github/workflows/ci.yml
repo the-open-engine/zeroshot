@@ -449,6 +449,7 @@ jobs:
 
       - name: Build strict documentation
         run: |
+          python tests/docs/render_metadata.py
           python -m mkdocs build --strict
           test -f site/manifest.json
           grep -q 'id="zeroshot.Client"' site/reference/python/client/index.html
