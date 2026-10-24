@@ -106,24 +106,28 @@ Use the lines that match the kind of work and ignore the rest.
   that may be public.
 - Change across repositories: one plan per repository, linked with `depends_on` and `source`.
 
-## Split when parts are independent
+## Split only when needed
 
-Propose a sub-plan when parts have different owners, different blockers or separately useful
-outcomes, for example a cleanup that needs a decision from another team, or when one change would be
-too large to review well. Each sub-plan is its own plan with a `parent`, and `depends_on` lists
-plans that must finish first. Order sub-plans by value, so the first one is useful on its own.
+Start from one plan. Split only when one run or pull request would be too large to review well, or
+when parts have different owners or blockers, for example a cleanup that needs a decision from
+another team.
+
+When you split, the first part is the plan and is useful on its own. Each later part, in order of
+value, is a follow-up plan whose `depends_on` names the plans that must finish first. Do not create
+a plan that only holds shared rules: shared constraints go in the first plan, and follow-ups refer
+to it. List the follow-ups under Out of scope in the first plan.
 
 ## Plan format
 
 Give each plan an id. When the request comes from a tracker, use its key: `PROJ-123` in Jira,
 `ENG-42` in Linear, or `GH-212` for GitHub issue 212, since GitHub has no keys. Otherwise use a
 short name from the title in lowercase with hyphens, such as `double-bookings`, that no other plan
-in the folder uses. Sub-plans add a number (`PROJ-123.1`, `double-bookings.1`). Number criteria
-`AC-1`, questions `Q-1` and decisions `D-1` within each plan; never renumber them once written.
+in the folder uses. Follow-up plans add a number (`PROJ-123.1`, `double-bookings.1`). Number
+criteria `AC-1`, questions `Q-1` and decisions `D-1` within each plan; never renumber them once
+written.
 
 Use exactly this structure. The minimum plan is Goal, Acceptance criteria and Constraints; leave out
-other sections, and the `parent`, `depends_on`, `sub_plans` and `source` fields, when they would be
-empty.
+other sections, and the `depends_on` and `source` fields, when they would be empty.
 
 ```markdown
 ---
@@ -133,9 +137,7 @@ title: <short title>
 status: <new | needs-input | ready>
 owner: <who decides>
 base_commit: <commit the plan was researched against>
-parent: <parent plan id>
 depends_on: [<plan ids that must finish first>]
-sub_plans: [<sub-plan ids>]
 source: <issue URL or other origin>
 ---
 

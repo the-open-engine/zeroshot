@@ -19,7 +19,8 @@ a change, for example "plan this with zeroshot", and it:
    change what gets built or how it is judged;
 3. turns vague goals into checkable acceptance criteria, including what must keep working, and
    confirms them with you;
-4. proposes sub-plans when parts have different owners, blockers or outcomes;
+4. keeps one plan, and splits off follow-up plans only when the work would be too large to review
+   or parts have different owners or blockers;
 5. writes the plan to `.zeroshot/plans/<id>.md`.
 
 A small, clear change gets a short plan with no questions. If the issue already has a plan in this
@@ -44,7 +45,6 @@ status: ready
 owner: sam.k
 base_commit: 3f2c1a9
 depends_on: [GH-198]
-sub_plans: [GH-212.1]
 source: https://github.com/acme/bookings/issues/212
 ---
 
@@ -85,23 +85,23 @@ Store the event id on each booking with a unique index; on conflict, return the 
 
 ## Out of scope
 
-- Cleaning up existing duplicates: sub-plan GH-212.1.
+- Cleaning up existing duplicates: follow-up plan GH-212.1.
 ```
 
-| Field or section                    | Meaning                                                                                                                                                       |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                                | The tracker key (`PROJ-123`, `ENG-42`, `GH-212` for a GitHub issue) or a short name from the title (`double-bookings`); sub-plans add a number (`PROJ-123.1`) |
-| `status`                            | `new`, `needs-input` (a blocking question is open) or `ready`                                                                                                 |
-| `parent`, `sub_plans`, `depends_on` | How plans split, and which must finish first                                                                                                                  |
-| `base_commit`                       | The commit the plan was researched against, to tell when it is stale                                                                                          |
-| `source`                            | Where the request came from, such as an issue URL                                                                                                             |
-| Goal                                | The outcome someone can observe or verify: behavior, a measured property, a document or an answer                                                             |
-| Context                             | Files, entry points and evidence, summarized without personal data                                                                                            |
-| Acceptance criteria                 | `AC-n` statements, each with a `Check:` naming how it is verified, or `Check (manual):` when it needs a person or another environment                         |
-| Constraints                         | Limits and non-goals the change must respect                                                                                                                  |
-| Decided approach                    | Only what was decided, not alternatives                                                                                                                       |
-| Open questions                      | `Q-n` items with a suggested answer and who decides                                                                                                           |
-| Decisions                           | `D-n` records of what was decided, why, and by whom (or `assumed` for a reviewer to confirm)                                                                  |
+| Field or section    | Meaning                                                                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                | The tracker key (`PROJ-123`, `ENG-42`, `GH-212` for a GitHub issue) or a short name from the title (`double-bookings`); follow-up plans add a number (`PROJ-123.1`) |
+| `status`            | `new`, `needs-input` (a blocking question is open) or `ready`                                                                                                       |
+| `depends_on`        | Plans that must finish first, such as the plan a follow-up builds on                                                                                                |
+| `base_commit`       | The commit the plan was researched against, to tell when it is stale                                                                                                |
+| `source`            | Where the request came from, such as an issue URL                                                                                                                   |
+| Goal                | The outcome someone can observe or verify: behavior, a measured property, a document or an answer                                                                   |
+| Context             | Files, entry points and evidence, summarized without personal data                                                                                                  |
+| Acceptance criteria | `AC-n` statements, each with a `Check:` naming how it is verified, or `Check (manual):` when it needs a person or another environment                               |
+| Constraints         | Limits and non-goals the change must respect                                                                                                                        |
+| Decided approach    | Only what was decided, not alternatives                                                                                                                             |
+| Open questions      | `Q-n` items with a suggested answer and who decides                                                                                                                 |
+| Decisions           | `D-n` records of what was decided, why, and by whom (or `assumed` for a reviewer to confirm)                                                                        |
 
 Ids of criteria, questions and decisions never change once written. A plan is `ready` when no
 blocking question is open, every criterion has a check and one criterion covers what must keep
