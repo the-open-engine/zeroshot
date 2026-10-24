@@ -3586,6 +3586,22 @@
               "$ref": "#/$defs/DeclaredConnections"
             },
             "kind": {
+              "const": "comment_delivery",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connections": {
+              "$ref": "#/$defs/DeclaredConnections"
+            },
+            "kind": {
               "const": "git_delivery",
               "type": "string"
             },

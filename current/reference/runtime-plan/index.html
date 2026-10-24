@@ -581,6 +581,8 @@
       
         
       
+        
+      
     
     
     
@@ -697,6 +699,34 @@
     
   
     Build a review loop
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Review an issue or PR
   
 
     
@@ -1347,6 +1377,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#comment_delivery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        comment_delivery
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1886,6 +1927,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#comment_delivery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        comment_delivery
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2101,7 +2153,8 @@ native-login reuse, so the stored login is never sent to that host.</p>
 <p>Pi has no permission control of its own, so a contained <code>pi</code> run relies on the disposable capsule
 rather than a bypass argument.</p>
 <h2 id="node-bindings">Node bindings<a class="headerlink" href="#node-bindings" title="Permanent link">&para;</a></h2>
-<p><code>kind</code> selects one of two binding shapes. Fields that belong to the other kind are rejected.</p>
+<p><code>kind</code> selects an agent, Git delivery, or comment delivery binding. Fields belonging to another
+kind are rejected.</p>
 <h3 id="agent"><code>agent</code><a class="headerlink" href="#agent" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2238,6 +2291,15 @@ it, either as a <code>par</code> sibling or inside a <code>map</code> that can h
 may require exactly one delivery node; Zeroshot Cloud quick runs require one. See
 <a href="../../concepts/execution/#concurrent-workspace-changes">concurrent workspace changes</a>.</p>
 <p><code>ignore</code> skips pull-request discussion. CI, conflict, freshness, and merge-policy checks still apply.</p>
+<h3 id="comment_delivery"><code>comment_delivery</code><a class="headerlink" href="#comment_delivery" title="Permanent link">&para;</a></h3>
+<p>This binding accepts only <code>kind: "comment_delivery"</code> and optional <code>connections</code>. It has no model,
+lane, effort, or provider session. It binds a verifier using <code>builtin.comment-delivery.post@1</code>
+with that worker's fixed input/output, signal, and diagnostic contracts and no authored instructions.</p>
+<p>The node reads a required discussion <code>url</code> and report <code>body</code>, plus optional captured <code>reviewScope</code>.
+Its URL and present scope bind directly from required caller input; they cannot change before
+publication. A graph permits one trusted delivery node, and comment publication must follow all
+other executable work and cleanup, outside loops and maps. The exact confirmed receipt must appear
+in terminal output. See <a href="../../guides/review/">Review an issue or pull request</a>.</p>
 <h2 id="per-node-lanes">Per-node lanes<a class="headerlink" href="#per-node-lanes" title="Permanent link">&para;</a></h2>
 <p>A lane is one harness and provider pair. The plan's <code>harness</code> and <code>provider</code> are the default lane
 for every agent node, and an <code>agent</code> binding can carry its own <code>lane</code>. A node's effective lane is
@@ -2270,7 +2332,7 @@ model identifier and the reviewers need Anthropic ones.</p>
 <ul>
 <li><code>lane</code> accepts the same pairs as the run level, listed in
   <a href="#harness-and-provider">Harness and provider</a>. An invalid pair is rejected when the plan is read.</li>
-<li>A <code>git_delivery</code> binding cannot carry a <code>lane</code>.</li>
+<li>A <code>git_delivery</code> or <code>comment_delivery</code> binding cannot carry a <code>lane</code>.</li>
 <li>A <code>lane</code> equal to the run-level pair is accepted, and the node runs exactly as it would without
   one. It is still a <code>lane</code> field, so the <a href="#target-support">target support</a> check applies to it and
   older binaries reject it. Omit <code>lane</code> when a node should use the default lane.</li>
@@ -2439,15 +2501,16 @@ names and their desired scopes. Existing saved profiles keep their stored topolo
 the Python SDK's <code>UniformRuntime</code> can express <a href="#per-node-lanes">per-node lanes</a>; use an exact
 <code>--runtime-config</code> or an opaque <code>RuntimePlan</code> instead.</p>
 <h2 id="template-delivery-bindings">Template delivery bindings<a class="headerlink" href="#template-delivery-bindings" title="Permanent link">&para;</a></h2>
-<p>Built-in templates own their delivery nodes. With <code>software-change</code>, <code>--push</code>, <code>--pr</code>, and <code>--ship</code>
-add a delivery verifier named <code>deliver</code>. The existing <code>worker</code> handles delivery repairs. With
+<p>Built-in templates own their delivery nodes. <code>software-change</code> defaults to a pull-request delivery
+verifier named <code>deliver</code>; <code>--push</code> and <code>--ship</code> select push and merge delivery, and <code>--delivery none</code>
+omits delivery. The existing <code>worker</code> handles delivery repairs. With
 <code>auto-research</code>, <code>--push</code> adds only the trusted <code>checkpoint_delivery</code> node; the researcher and
 reviewer already handle the round records and delivery description.
 <code>single-worker</code> has no delivery modes.</p>
 <p>The CLI inserts a <code>git_delivery</code> binding with no forge connection for push, or
 <code>{"github": ["GH_TOKEN"]}</code> for PR and merge. Git transport uses the selected
 <a href="../../concepts/targets/#source-and-delivery-credentials">source credentials</a>.
-<code>--no-pr-feedback</code> (requires <code>--pr</code> or <code>--ship</code>) sets <code>pullRequestFeedback</code> to <code>ignore</code>.</p>
+<code>--no-pr-feedback</code> (requires pull-request or merge delivery) sets <code>pullRequestFeedback</code> to <code>ignore</code>.</p>
 <p>A uniform configuration binds the added agent nodes too. An exact <code>--runtime-config</code> must bind
 all agent nodes itself. Software-change uses <code>worker</code>, <code>acceptance</code>, and <code>code</code> with every delivery
 mode. It may omit the delivery node; if it includes it, the binding must be <code>git_delivery</code>. List the executable nodes
@@ -2473,7 +2536,7 @@ with <code>zeroshot template show TEMPLATE</code> plus the same delivery flag.</
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-23">23 October 2026</time>
+    Last updated <time datetime="2026-10-24">24 October 2026</time>
   </span>
 
     
