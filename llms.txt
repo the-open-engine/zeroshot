@@ -14,12 +14,12 @@
 - Start from the built-in `software-change` graph (implementation, then acceptance and code review in parallel, then bounded repair) and add the stages your team requires: adversarial bug-finding, end-to-end tests, or security review and a blast-radius map for changes to auth, payments, or migrations.
 - `zeroshot template show software-change --delivery none` prints the built-in graph as an editable `GraphSpec`; run your version with `--graph my-graph.json`.
 - Choose each node's harness, model, effort, and instructions, which steps run in parallel, and where failures route. Codex can implement while Claude Code reviews.
-- Save the graph with its runtime settings as a profile (`--profile`), locally or for your organization on Zeroshot Cloud, so everyone runs the same process. The browser UI (`zeroshot ui`) edits profiles and shows runs.
+- Save the graph with its runtime settings as a profile (`--profile`), locally or for your organization on Zeroshot Platform, so everyone runs the same process. The browser UI (`zeroshot ui`) edits profiles and shows runs.
 
 ## Also included
 
 - Delivery: `software-change` opens a pull request by default and addresses visible review feedback and required CI without merging. That needs a committed Git checkout with an HTTPS or SSH remote and, for GitHub, the `gh` CLI. `--delivery none` keeps the change local, `--push` pushes the run branch without a pull request, and `--ship` follows the repository's merge policy through to a merged revision.
-- Execution targets: local, a self-hosted Docker target, or Zeroshot Cloud (shared team queue, durable run history). Failed runs with a recoverable workspace can resume from a checkpoint.
+- Execution targets: local, a self-hosted Docker target, or Zeroshot Platform (shared team queue, durable run history). Failed runs with a recoverable workspace can resume from a checkpoint.
 - Every run records its events in a durable SQLite ledger.
 - An `auto-research` graph runs ten bounded experiment iterations with independent review of evidence, method, and progress.
 - Experimental: expose a graph as an ACP agent with `zeroshot acp`.
@@ -29,7 +29,7 @@
 - Your team wants one QA process that every agent-written change goes through.
 - A change should be checked by agents other than the one that wrote it.
 - You want the result delivered as a branch, a reviewed pull request, or a merge after CI.
-- You want the same review and repair setup reused across tasks, locally, self-hosted, or in the cloud.
+- You want the same review and repair setup reused across tasks, locally, self-hosted, or on Zeroshot Platform.
 
 ## When not to use it
 
@@ -66,7 +66,7 @@ The CLI is free and open source (MIT). Model calls go through your own harness l
 - [RuntimePlan reference](https://zeroshot.sh/docs/current/reference/runtime-plan/): every runtime binding field and admission limit
 - [Observe and control runs](https://zeroshot.sh/docs/current/guides/observe-and-control/): status, logs, resume
 - [CLI reference](https://zeroshot.sh/docs/current/zeroshot-cli/)
-- [Zeroshot Cloud docs](https://cloud.zeroshot.sh/docs): organizations, GitHub App, connections, profiles, and issue-triggered runs
+- [Zeroshot Platform docs](https://cloud.zeroshot.sh/docs): organizations, GitHub App, connections, profiles, and issue-triggered runs
 
 ## Optional
 
