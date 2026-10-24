@@ -94,12 +94,13 @@ fn decode_comment(
 ) -> Result<SourceComment, SourceDeliveryError> {
     let wire: CommentWire =
         serde_json::from_value(value).map_err(|_| SourceDeliveryError::Rejected)?;
-    let expected = format!(
-        "https://api.github.com/repos/{}/issues/{}",
-        destination.repository, destination.discussion_id
-    );
+    let suffix = format!("/issues/{}", destination.discussion_id);
+    let repository = wire
+        .issue_url
+        .strip_prefix("https://api.github.com/repos/")
+        .and_then(|value| value.strip_suffix(suffix.as_str()));
     if wire.id == 0
-        || wire.issue_url != expected
+        || !repository.is_some_and(|value| value.eq_ignore_ascii_case(&destination.repository))
         || wire.body.len() > 128 * 1024
         || wire.user.node_id.is_empty()
         || wire.user.node_id.len() > 256
@@ -305,7 +306,13 @@ impl SourceCommentAuthority for GhCliDeliveryAuthority {
                 .and_then(Value::as_str)
                 .filter(|value| !value.is_empty())
                 .ok_or(SourceDeliveryError::Rejected)?;
-            if value.pointer(pointer).and_then(Value::as_str) != Some(expected) {
+            let same_identity = value.pointer(pointer).and_then(Value::as_str).is_some_and(
+                |observed| match field {
+                    "baseRepository" | "headRepository" => observed.eq_ignore_ascii_case(expected),
+                    _ => observed == expected,
+                },
+            );
+            if !same_identity {
                 return Err(SourceDeliveryError::identity(
                     "review_scope_changed: captured PR comparison no longer matches",
                 ));

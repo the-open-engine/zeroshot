@@ -3,6 +3,12 @@ use std::sync::Mutex;
 use openengine_cluster_testkit::assertions::AssertValue;
 use super::*;
 
+#[path = "transport_tests.rs"]
+mod transport;
+
+#[path = "validation_tests.rs"]
+mod validation;
+
 struct Metadata {
     values: BTreeMap<String, Value>,
     calls: Mutex<Vec<String>>,
@@ -285,4 +291,52 @@ async fn linked_issue_count_and_combined_response_bytes_are_bounded() {
         .await,
         Err(ReviewResolveError::TooLarge)
     ));
+}
+
+#[tokio::test]
+async fn case_variant_discussion_requests_retain_canonical_github_identity() {
+    let issue_url = "https://github.com/Acme/Project/issues/42";
+    let issue_metadata = metadata(&[
+        (
+            "repos/acme/project/issues/42",
+            json!({"number":42,"html_url":issue_url,"title":"Issue","body":"Requirements"}),
+        ),
+        (
+            "repos/acme/project",
+            json!({"full_name":"Acme/Project","default_branch":"main"}),
+        ),
+        (
+            "repos/acme/project/commits/main",
+            json!({"sha":revision('a')}),
+        ),
+    ]);
+    let issue = resolve_with(request("issues"), &issue_metadata)
+        .await
+        .assert_value();
+    assert_eq!(issue.initial_input["url"], issue_url);
+    assert_eq!(issue.source.repository.as_str(), "Acme/Project");
+    let mut response = pull();
+    response["data"]["repository"]["pullRequest"]["url"] =
+        json!("https://github.com/Acme/Project/pull/42");
+    response["data"]["repository"]["pullRequest"]["baseRepository"]["nameWithOwner"] =
+        json!("Acme/Project");
+    let pr = resolve_with(request("pull"), &metadata(&[("graphql", response)]))
+        .await
+        .assert_value();
+    assert_eq!(
+        pr.initial_input["url"],
+        "https://github.com/Acme/Project/pull/42"
+    );
+    assert_eq!(pr.source.repository.as_str(), "Acme/Project");
+    for url in [
+        "https://github.com/Acme/Other/pull/42",
+        "https://github.com/Acme/Project/issues/42",
+        "https://github.com/Acme/Project/pull/43",
+        "https://github.com/Acme/Project/pull/42?redirect=1",
+    ] {
+        assert!(!matches_discussion_url(
+            &parse_url(&request("pull").url).assert_value(),
+            url
+        ));
+    }
 }

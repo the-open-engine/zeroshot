@@ -81,3 +81,267 @@ fn review_checkout_uses_the_publishers_bound_caller_paths_and_exact_source() {
         Err(ReviewResolveError::Identity)
     ));
 }
+
+#[test]
+fn repository_casing_does_not_relax_the_exact_branch_or_revision() {
+    let mut admitted = review();
+    admitted.initial_input["url"] = json!("https://github.com/ACME/Project/pull/17");
+    admitted.initial_input["context"]["reviewScope"]["baseRepository"] = json!("Acme/PROJECT");
+    assert_eq!(checkout_references(&admitted).assert_value().len(), 2);
+    admitted.initial_input["context"]["reviewScope"]["baseBranch"] = json!("Main");
+    assert!(checkout_references(&admitted).is_err());
+    admitted.initial_input["context"]["reviewScope"]["baseBranch"] = json!("main");
+    admitted.initial_input["context"]["reviewScope"]["headRevision"] = json!("c".repeat(40));
+    assert!(checkout_references(&admitted).is_err());
+}
+
+#[cfg(unix)]
+mod local_auth {
+    use std::collections::BTreeMap;
+    use openengine_cluster_protocol::{NodeName, RunId, RunSubmission};
+    use crate::native_v2_admission::DeliveryPolicy;
+    use crate::native_v2_candidate::test_support::{
+        TestGitRepository, commit_all, git, git_output, path_text,
+    };
+    use crate::native_v2_contract::NodeRuntimeBinding;
+    use crate::native_v2_supervisor::RunEnvironment;
+    use super::*;
+
+    const TOKEN: &str = "private-review-fixture";
+
+    fn bootstrap(
+        admitted: &AdmittedRun,
+        repository: &TestGitRepository,
+        declared: bool,
+    ) -> PortableControllerBootstrap {
+        let submission = RunSubmission {
+            title: admitted.title.clone(),
+            graph: BuiltinGraphTemplate::IssueReview
+                .materialize(TemplateDelivery::Comment)
+                .assert_value(),
+            initial_input: admitted.initial_input.clone(),
+            runtime: admitted.runtime.clone(),
+            environment: None,
+            source: admitted.source.clone(),
+            submission_key: openengine_cluster_protocol::IdempotencyKey::new("review-auth")
+                .assert_value(),
+        };
+        let mut values = if declared {
+            serde_json::from_value(json!({"github":{"GH_TOKEN":TOKEN}})).assert_value()
+        } else {
+            BTreeMap::new()
+        };
+        if let Some(key) = admitted
+            .source
+            .as_ref()
+            .and_then(|source| source.remote.as_ref())
+            .and_then(|remote| remote.connection.as_ref())
+        {
+            values.insert(
+                key.clone(),
+                GitTransportCredentials::Https {
+                    username: "x-access-token".to_owned(),
+                    password: TOKEN.to_owned(),
+                }
+                .connection_values()
+                .assert_value(),
+            );
+        }
+        let environment = RunEnvironment::exact_for_admitted(admitted, values).assert_value();
+        PortableControllerBootstrap {
+            checkpoint: None,
+            run_id: RunId::new("review-auth"),
+            delivery_run_id: RunId::new("review-auth"),
+            adopt_existing_delivery: false,
+            submission,
+            environment,
+            native_environment: BTreeMap::new(),
+            github_token: None,
+            github_token_file: None,
+            delivery_validator: None,
+            git_credentials: None,
+            workspace: repository.workspace.clone(),
+            workspace_lease: repository.root.child("workspace.lock"),
+            checkpoint_repository: repository.root.child("checkpoints"),
+            memory_storage: None,
+            storage: repository.root.child("storage"),
+            delivery_policy: DeliveryPolicy::Optional,
+        }
+    }
+
+    fn authenticated_git(
+        bootstrap: &mut PortableControllerBootstrap,
+        repository: &TestGitRepository,
+    ) {
+        let path = std::env::var("PATH").assert_value();
+        let executable = crate::execution::platform::find_executable(
+            "git",
+            &BTreeMap::from([("PATH".to_owned(), path)]),
+            &repository.workspace,
+        )
+        .assert_value();
+        let bin = repository.root.child("bin");
+        std::fs::create_dir(&bin).assert_value();
+        let script = r#"#!/bin/sh
+while test "$1" = -c || test "$1" = -C; do
+    shift 2
+done
+if test "$1" = fetch; then
+    if test "$REVIEW_FIXTURE_SOURCE_ONLY" = 1; then
+        test -z "$GH_TOKEN" || exit 71
+    else
+        test "$GH_TOKEN" = "private-review-fixture" || exit 71
+    fi
+    test "$GIT_CONFIG_COUNT" = 4 || exit 72
+    test "$GIT_CONFIG_KEY_0" = credential.helper && test -z "$GIT_CONFIG_VALUE_0" || exit 73
+    test "$GIT_CONFIG_VALUE_2" = "AUTHORIZATION: basic EXPECTED_BASIC" || exit 74
+    test -z "$GIT_ASKPASS" && test -z "$SSH_ASKPASS" || exit 75
+    test "$4" = "https://github.com/acme/project.git" || exit 76
+    printf 'authenticated-fetch\n' >> "$REVIEW_FIXTURE_MARKER"
+    exec "$REVIEW_FIXTURE_GIT" fetch --no-tags -- "$REVIEW_FIXTURE_REMOTE" "$5" "$6"
+fi
+exec "$REVIEW_FIXTURE_GIT" "$@"
+"#
+        .replace(
+            "EXPECTED_BASIC",
+            &crate::native_v2_delivery::git_auth::encode_basic_credential(TOKEN),
+        );
+        openengine_cluster_testkit::fixture::write_executable(&bin.join("git"), script, 0o700)
+            .assert_value();
+        bootstrap.native_environment = BTreeMap::from([
+            ("PATH".to_owned(), path_text(&bin).to_owned()),
+            (
+                "HOME".to_owned(),
+                path_text(repository.root.path()).to_owned(),
+            ),
+            (
+                "GIT_ASKPASS".to_owned(),
+                "/unavailable-native-helper".to_owned(),
+            ),
+            (
+                "SSH_ASKPASS".to_owned(),
+                "/unavailable-native-helper".to_owned(),
+            ),
+            (
+                "REVIEW_FIXTURE_GIT".to_owned(),
+                path_text(&executable).to_owned(),
+            ),
+            (
+                "REVIEW_FIXTURE_REMOTE".to_owned(),
+                path_text(&repository.remote).to_owned(),
+            ),
+            (
+                "REVIEW_FIXTURE_MARKER".to_owned(),
+                path_text(&repository.root.child("authenticated")).to_owned(),
+            ),
+        ]);
+    }
+
+    fn review_source(repository: &TestGitRepository, base: &str, authority: &str) -> AdmittedRun {
+        let mut admitted = review();
+        admitted.source.as_mut().unwrap().revision =
+            SourceRevisionId::new(repository.base.clone()).assert_value();
+        admitted.initial_input["context"]["reviewScope"]["headRevision"] = json!(repository.base);
+        admitted.initial_input["context"]["reviewScope"]["baseRevision"] = json!(base);
+        admitted.runtime.nodes_mut().clear();
+        admitted.runtime.nodes_mut().insert(
+            NodeName::new("deliver").assert_value(),
+            serde_json::from_value::<NodeRuntimeBinding>(
+                if matches!(authority, "declared" | "source") {
+                    json!({"kind":"comment_delivery","connections":{"github":["GH_TOKEN"]}})
+                } else {
+                    json!({"kind":"comment_delivery"})
+                },
+            )
+            .assert_value(),
+        );
+        if authority == "source" {
+            admitted.source.as_mut().unwrap().remote = Some(
+                serde_json::from_value(json!({
+                    "url":"https://github.com/acme/project.git", "connection":"review-source"
+                }))
+                .assert_value(),
+            );
+        }
+        admitted
+    }
+
+    #[tokio::test]
+    async fn private_missing_base_fetch_uses_declared_trusted_and_token_file_authority() {
+        for authority in ["declared", "trusted", "file", "source"] {
+            let repository = TestGitRepository::candidate();
+            git(
+                &repository.remote,
+                &["update-ref", "refs/pull/17/head", &repository.base],
+            );
+            let seed = repository.root.child("seed");
+            std::fs::write(seed.join("upstream"), "new comparison base").assert_value();
+            commit_all(&seed, "advance comparison base");
+            git(&seed, &["push", "origin", "main"]);
+            let base = git_output(&seed, &["rev-parse", "HEAD"]);
+            assert!(
+                !std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(&repository.workspace)
+                    .args(["cat-file", "-e", &format!("{base}^{{commit}}")])
+                    .output()
+                    .assert_value()
+                    .status
+                    .success()
+            );
+            let declared = matches!(authority, "declared" | "source");
+            let admitted = review_source(&repository, &base, authority);
+            let mut bootstrap = bootstrap(&admitted, &repository, declared);
+            authenticated_git(&mut bootstrap, &repository);
+            if authority == "source" {
+                bootstrap
+                    .native_environment
+                    .insert("REVIEW_FIXTURE_SOURCE_ONLY".to_owned(), "1".to_owned());
+                bootstrap.git_credentials = Some(GitTransportCredentials::Https {
+                    username: "trusted-must-not-win".to_owned(),
+                    password: "trusted-must-not-win".to_owned(),
+                });
+            }
+            if authority != "declared" {
+                bootstrap.github_token = Some(TOKEN.to_owned());
+            }
+            let token_path = repository.root.child("token");
+            if authority == "file" {
+                bootstrap.github_token = None;
+                use std::io::Write;
+                crate::execution::platform::private_file(
+                    &token_path,
+                    crate::execution::platform::FileAccess::CreateNew,
+                )
+                .assert_value()
+                .write_all(TOKEN.as_bytes())
+                .assert_value();
+            }
+            bootstrap.github_token_file = Some(
+                crate::native_v2_delivery::TrustedGitHubTokenFile::new(
+                    token_path,
+                    &repository.workspace,
+                )
+                .assert_value(),
+            );
+            prepare_local_checkout(&admitted, &bootstrap)
+                .await
+                .assert_value();
+            assert_eq!(
+                git_output(
+                    &repository.workspace,
+                    &["rev-parse", "refs/zeroshot/review/base"]
+                ),
+                base
+            );
+            assert_eq!(
+                git_output(&repository.workspace, &["rev-parse", "HEAD"]),
+                repository.base
+            );
+            assert_eq!(
+                std::fs::read_to_string(repository.root.child("authenticated")).assert_value(),
+                "authenticated-fetch\n"
+            );
+        }
+    }
+}

@@ -56,7 +56,7 @@ pub(super) async fn resolve_pull(
 
 fn prepare_pull(pull: Pull, target: &ReviewTarget) -> Result<ResolvedParts, ReviewResolveError> {
     if pull.number != target.number
-        || pull.url != target.url
+        || !matches_discussion_url(target, &pull.url)
         || !pull
             .base_repository
             .name_with_owner
@@ -72,6 +72,7 @@ fn prepare_pull(pull: Pull, target: &ReviewTarget) -> Result<ResolvedParts, Revi
         "headRepository":pull.head_repository.name_with_owner,"headBranch":pull.head_ref_name,"headRevision":pull.head_ref_oid});
     let issues = linked_issues(pull.closing_issues_references)?;
     Ok((
+        pull.url,
         json!({"title":pull.title,"body":pull.body,"reviewScope":scope,"linkedIssues":issues}),
         source,
     ))
@@ -114,7 +115,9 @@ fn validate_issue(issue: &LinkedIssue) -> Result<(), ReviewResolveError> {
     let identity = parse_url(&issue.url)?;
     if identity.kind != ReviewTargetKind::Issue
         || identity.number != issue.number
-        || identity.repository != issue.repository.name_with_owner
+        || !identity
+            .repository
+            .eq_ignore_ascii_case(&issue.repository.name_with_owner)
     {
         return Err(ReviewResolveError::Identity);
     }

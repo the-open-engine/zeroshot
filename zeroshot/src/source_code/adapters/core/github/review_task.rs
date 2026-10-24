@@ -38,6 +38,15 @@ pub(crate) fn parse_url(value: &str) -> Result<ReviewTarget, ReviewResolveError>
     })
 }
 
+fn matches_discussion_url(expected: &ReviewTarget, observed: &str) -> bool {
+    parse_url(observed).is_ok_and(|target| {
+        target.url == observed
+            && target.kind == expected.kind
+            && target.number == expected.number
+            && target.repository.eq_ignore_ascii_case(&expected.repository)
+    })
+}
+
 fn review_kind(kind: &str) -> Result<(ReviewTargetKind, &'static str), ReviewResolveError> {
     match kind {
         "issues" => Ok((ReviewTargetKind::Issue, "issues")),
@@ -111,8 +120,8 @@ pub(crate) async fn resolve_with(
     metadata: &dyn ReviewMetadata,
 ) -> Result<PreparedReview, ReviewResolveError> {
     let target = parse_url(&request.url)?;
-    let (context, source) = resolve_parts(&request, &target, metadata).await?;
-    let initial_input = json!({"url":target.url,"context":context});
+    let (url, context, source) = resolve_parts(&request, &target, metadata).await?;
+    let initial_input = json!({"url":url,"context":context});
     if serde_json::to_vec(&initial_input)
         .map_err(|_| ReviewResolveError::Identity)?
         .len()
@@ -142,7 +151,7 @@ async fn resolve_parts(
     }
 }
 
-type ResolvedParts = (Value, ResolvedSource);
+type ResolvedParts = (String, Value, ResolvedSource);
 
 fn validate_text(title: &str, body: &str) -> Result<(), ReviewResolveError> {
     if title.is_empty() || title.len() > 4096 || body.len() > MAX_BODY_BYTES {
@@ -161,7 +170,9 @@ async fn resolve_issue(
         &format!("repos/{}/issues/{}", target.repository, target.number),
     )
     .await?;
-    if issue.number != target.number || issue.html_url != target.url || issue.pull_request.is_some()
+    if issue.number != target.number
+        || !matches_discussion_url(target, &issue.html_url)
+        || issue.pull_request.is_some()
     {
         return Err(ReviewResolveError::Identity);
     }
@@ -169,6 +180,7 @@ async fn resolve_issue(
     let body = issue.body.unwrap_or_default();
     validate_text(&issue.title, &body)?;
     Ok((
+        issue.html_url,
         json!({"title":issue.title,"body":body,"reviewScope":{}}),
         source,
     ))
@@ -193,7 +205,7 @@ async fn issue_source(
     };
     let revision = issue_revision(metadata, target, request.revision.as_ref(), &branch).await?;
     Ok(ResolvedSource {
-        repository: SourceRepositoryId::new(target.repository.clone())
+        repository: SourceRepositoryId::new(repository.full_name)
             .map_err(|_| ReviewResolveError::Identity)?,
         branch,
         revision,

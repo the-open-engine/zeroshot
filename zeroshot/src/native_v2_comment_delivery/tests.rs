@@ -15,12 +15,17 @@ struct Forge {
     comments: Mutex<Vec<SourceComment>>,
     creates: AtomicUsize,
     actors: AtomicUsize,
+    scans: AtomicUsize,
     lose_response: AtomicBool,
     omit_publication: AtomicBool,
     stale_scope: AtomicBool,
     actor_switch: AtomicBool,
     reject_posts: AtomicBool,
     reject_reads: AtomicBool,
+    reject_actors: AtomicBool,
+    reject_scope: AtomicBool,
+    endless_pages: AtomicBool,
+    unclean_post: AtomicBool,
     cancel_after_create: Mutex<Option<tokio::sync::watch::Sender<bool>>>,
 }
 
@@ -34,6 +39,9 @@ impl SourceCommentAuthority for Forge {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<String, SourceDeliveryError> {
         self.actors.fetch_add(1, Ordering::SeqCst);
+        if self.reject_actors.swap(false, Ordering::SeqCst) {
+            return Err(SourceDeliveryError::api(Some(401), "expired actor"));
+        }
         Ok(
             if self.actor_switch.load(Ordering::SeqCst) && credential.expose() == "new-token" {
                 "DIFFERENT_ACTOR"
@@ -49,12 +57,13 @@ impl SourceCommentAuthority for Forge {
         _page: u32,
         _credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceCommentPage, SourceDeliveryError> {
+        self.scans.fetch_add(1, Ordering::SeqCst);
         if self.reject_reads.swap(false, Ordering::SeqCst) {
             return Err(SourceDeliveryError::api(Some(401), "expired"));
         }
         Ok(SourceCommentPage {
             comments: self.comments.lock().unwrap().clone(),
-            has_more: false,
+            has_more: self.endless_pages.load(Ordering::SeqCst),
         })
     }
     async fn create_comment(
@@ -79,6 +88,9 @@ impl SourceCommentAuthority for Forge {
         }
         if let Some(cancel) = self.cancel_after_create.lock().unwrap().as_ref() {
             let _ = cancel.send(true);
+        }
+        if self.unclean_post.load(Ordering::SeqCst) {
+            return Err(unclean_command());
         }
         if self.lose_response.load(Ordering::SeqCst) {
             return Err(SourceDeliveryError::api(None, "response lost"));
@@ -108,6 +120,9 @@ impl SourceCommentAuthority for Forge {
         _scope: &Value,
         _credential: SourceDeliveryCredential<'_>,
     ) -> Result<(), SourceDeliveryError> {
+        if self.reject_scope.swap(false, Ordering::SeqCst) {
+            return Err(SourceDeliveryError::api(Some(401), "expired scope"));
+        }
         if self.stale_scope.load(Ordering::SeqCst) {
             Err(SourceDeliveryError::identity("review_scope_changed"))
         } else {
@@ -130,24 +145,34 @@ impl crate::native_v2_runner::RuntimeEnvironmentRefresh for RotatedCredential {
 async fn run_with_refresh(
     adapter: &NativeV2CommentDeliveryAdapter,
 ) -> Result<WorkerOutcome, NodeRunnerError> {
-    let mut invocation = invocation(adapter, json!({"url":URL,"body":"report"})).await;
+    run_with_refreshed_input(adapter, json!({"url":URL,"body":"report"})).await
+}
+
+fn declared_environment(token: &str) -> (NodeRuntimeBinding, ResolvedEnvironment) {
     let binding: NodeRuntimeBinding = serde_json::from_value(
         json!({"kind":"comment_delivery","connections":{"github":["GH_TOKEN"]}}),
     )
     .unwrap();
-    let environment = |token: &str| {
-        ResolvedEnvironment::exact(
-            &binding,
-            BTreeMap::from([(
-                EnvironmentVariableName::new("GH_TOKEN").unwrap(),
-                token.to_owned(),
-            )]),
-        )
-        .unwrap()
-    };
+    let environment = ResolvedEnvironment::exact(
+        &binding,
+        BTreeMap::from([(
+            EnvironmentVariableName::new("GH_TOKEN").unwrap(),
+            token.to_owned(),
+        )]),
+    )
+    .unwrap();
+    (binding, environment)
+}
+
+async fn run_with_refreshed_input(
+    adapter: &NativeV2CommentDeliveryAdapter,
+    input: Value,
+) -> Result<WorkerOutcome, NodeRunnerError> {
+    let mut invocation = invocation(adapter, input).await;
+    let (binding, initial) = declared_environment("old-token");
     invocation.environment = crate::native_v2_runner::with_environment_refresh(
-        environment("old-token"),
-        Arc::new(RotatedCredential(environment("new-token"))),
+        initial,
+        Arc::new(RotatedCredential(declared_environment("new-token").1)),
     );
     invocation.node.binding = binding;
     let (_cancel, control, _durable) = crate::native_v2_runner::test_support::control();
@@ -156,26 +181,22 @@ async fn run_with_refresh(
 
 #[tokio::test]
 async fn renewed_post_authority_cannot_change_author_before_another_post() {
-    let temp = tempfile::tempdir().unwrap();
-    let forge = Arc::new(Forge::default());
+    let (_temp, forge, adapter) = fixture();
     forge.reject_posts.store(true, Ordering::SeqCst);
     forge.actor_switch.store(true, Ordering::SeqCst);
-    let adapter = adapter(temp.path().join("publication.json"), forge.clone());
     let error = run_with_refresh(&adapter).await.unwrap_err();
     assert!(error.to_string().contains("changed the publication author"));
     assert_eq!(forge.creates.load(Ordering::SeqCst), 1);
     assert!(matches!(
-        adapter.store.load().await.unwrap().unwrap().status,
+        publication_status(&adapter).await,
         PublicationStatus::Ready
     ));
 }
 
 #[tokio::test]
 async fn expired_scan_credential_renews_once_and_retains_author_identity() {
-    let temp = tempfile::tempdir().unwrap();
-    let forge = Arc::new(Forge::default());
+    let (_temp, forge, adapter) = fixture();
     forge.reject_reads.store(true, Ordering::SeqCst);
-    let adapter = adapter(temp.path().join("publication.json"), forge.clone());
     run_with_refresh(&adapter).await.unwrap();
     assert_eq!(forge.creates.load(Ordering::SeqCst), 1);
     assert_eq!(forge.actors.load(Ordering::SeqCst), 2);
@@ -183,9 +204,7 @@ async fn expired_scan_credential_renews_once_and_retains_author_identity() {
 
 #[tokio::test]
 async fn cancellation_after_publication_retains_confirmation_for_successor() {
-    let temp = tempfile::tempdir().unwrap();
-    let forge = Arc::new(Forge::default());
-    let adapter = adapter(temp.path().join("publication.json"), forge.clone());
+    let (_temp, forge, adapter) = fixture();
     let input = json!({"url":URL,"body":"report"});
     let invocation = invocation(&adapter, input.clone()).await;
     let (cancel, control, _durable) = crate::native_v2_runner::test_support::control();
@@ -195,7 +214,7 @@ async fn cancellation_after_publication_retains_confirmation_for_successor() {
         Err(NodeRunnerError::Cancelled)
     ));
     assert!(matches!(
-        adapter.store.load().await.unwrap().unwrap().status,
+        publication_status(&adapter).await,
         PublicationStatus::Confirmed { .. }
     ));
     run(&adapter, input).await.unwrap();
@@ -259,7 +278,7 @@ async fn run(
 #[tokio::test]
 async fn source_less_comment_confirms_before_receipt_and_survives_store_reopen() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("publication.json");
+    let path = private_root(&temp).join("publication.json");
     let forge = Arc::new(Forge::default());
     let first = adapter(path.clone(), forge.clone());
     let input = json!({"url":URL,"body":"Review found two defects."});
@@ -273,23 +292,21 @@ async fn source_less_comment_confirms_before_receipt_and_survives_store_reopen()
     assert_eq!(result, run(&second, input).await.unwrap());
     assert_eq!(forge.creates.load(Ordering::SeqCst), 1);
     assert!(matches!(
-        second.store.load().await.unwrap().unwrap().status,
+        publication_status(&second).await,
         PublicationStatus::Confirmed { .. }
     ));
 }
 
 #[tokio::test]
 async fn lost_post_response_reconciles_exact_author_marker_and_body() {
-    let temp = tempfile::tempdir().unwrap();
-    let forge = Arc::new(Forge::default());
+    let (_temp, forge, adapter) = fixture();
     forge.lose_response.store(true, Ordering::SeqCst);
-    let adapter = adapter(temp.path().join("publication.json"), forge.clone());
     run(&adapter, json!({"url":URL,"body":"A report"}))
         .await
         .unwrap();
     assert_eq!(forge.creates.load(Ordering::SeqCst), 1);
     assert!(matches!(
-        adapter.store.load().await.unwrap().unwrap().status,
+        publication_status(&adapter).await,
         PublicationStatus::Confirmed { .. }
     ));
 }
@@ -297,7 +314,7 @@ async fn lost_post_response_reconciles_exact_author_marker_and_body() {
 #[tokio::test]
 async fn uncertain_absent_post_is_never_blindly_repeated_after_restart() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("publication.json");
+    let path = private_root(&temp).join("publication.json");
     let forge = Arc::new(Forge::default());
     forge.lose_response.store(true, Ordering::SeqCst);
     forge.omit_publication.store(true, Ordering::SeqCst);
@@ -313,10 +330,7 @@ async fn uncertain_absent_post_is_never_blindly_repeated_after_restart() {
 
 #[tokio::test]
 async fn changed_initial_destination_fails_before_provider_or_publication_storage() {
-    let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("publication.json");
-    let forge = Arc::new(Forge::default());
-    let adapter = adapter(path.clone(), forge.clone());
+    let (temp, forge, adapter) = fixture();
     let error = run(
         &adapter,
         json!({"url":"https://github.com/acme/project/issues/18","body":"redirect"}),
@@ -325,14 +339,12 @@ async fn changed_initial_destination_fails_before_provider_or_publication_storag
     .unwrap_err();
     assert!(error.to_string().contains("changed after admission"));
     assert_eq!(forge.actors.load(Ordering::SeqCst), 0);
-    assert!(!path.exists());
+    assert!(!private_root(&temp).join("publication.json").exists());
 }
 
 #[tokio::test]
 async fn older_checkpoint_body_cannot_replace_a_delivered_report() {
-    let temp = tempfile::tempdir().unwrap();
-    let forge = Arc::new(Forge::default());
-    let adapter = adapter(temp.path().join("publication.json"), forge.clone());
+    let (_temp, forge, adapter) = fixture();
     run(&adapter, json!({"url":URL,"body":"newer report"}))
         .await
         .unwrap();
@@ -348,11 +360,8 @@ async fn older_checkpoint_body_cannot_replace_a_delivered_report() {
 
 #[tokio::test]
 async fn modified_confirmed_comment_is_not_an_authoritative_receipt() {
-    let temp = tempfile::tempdir().unwrap();
-    let forge = Arc::new(Forge::default());
-    let adapter = adapter(temp.path().join("publication.json"), forge.clone());
+    let (_temp, forge, adapter) = published_fixture().await;
     let input = json!({"url":URL,"body":"report"});
-    run(&adapter, input.clone()).await.unwrap();
     forge.comments.lock().unwrap()[0].body.push_str("tampered");
     assert!(
         run(&adapter, input)
@@ -366,10 +375,8 @@ async fn modified_confirmed_comment_is_not_an_authoritative_receipt() {
 
 #[tokio::test]
 async fn stale_scope_refuses_before_durable_create_intent() {
-    let temp = tempfile::tempdir().unwrap();
-    let forge = Arc::new(Forge::default());
+    let (_temp, forge, mut adapter) = fixture();
     forge.stale_scope.store(true, Ordering::SeqCst);
-    let mut adapter = adapter(temp.path().join("publication.json"), forge.clone());
     Arc::make_mut(&mut adapter.config).expected_review_scope = Some(json!({}));
     let error = run(
         &adapter,
@@ -385,15 +392,8 @@ async fn stale_scope_refuses_before_durable_create_intent() {
 #[tokio::test]
 async fn atomic_intent_cas_never_grants_create_twice() {
     let temp = tempfile::tempdir().unwrap();
-    let store = LocalCommentPublicationStore::new(temp.path().join("publication.json"));
-    let record = PublicationRecord {
-        version: 1,
-        url: URL.into(),
-        marker: marker(&RunId::new("root"), "deliver"),
-        body_hash: hash("report"),
-        author: "ACTOR_ID".into(),
-        status: PublicationStatus::Attempted,
-    };
+    let store = LocalCommentPublicationStore::new(private_root(&temp).join("publication.json"));
+    let record = publication_record();
     store.compare_and_set(None, &record).await.unwrap();
     assert!(matches!(
         store.compare_and_set(None, &record).await,
@@ -450,4 +450,558 @@ fn comments_without_complete_pr_comparison_keep_source_provenance() {
         assert_eq!(body.matches(&revision).count(), 1);
         assert!(body.contains(&format!("Source revision: `{revision}`")));
     }
+}
+
+#[test]
+fn case_variant_input_accepts_canonical_comment_permalink_without_relaxing_identity() {
+    let destination = "https://github.com/ACME/PROJECT/pull/17";
+    let mut value = json!({"receipt":{"version":"v1","mode":"comment","outcome":"posted","destinationUrl":destination,"repository":"ACME/PROJECT","discussionKind":"pull_request","discussionId":"17","commentId":"23","url":"https://github.com/Acme/Project/pull/17#issuecomment-23","bodyHash":hash("report")}});
+    assert!(is_matching_success_receipt(&value, destination, None));
+    for url in [
+        "https://github.com/Acme/Other/pull/17#issuecomment-23",
+        "https://github.com/Acme/Project/pull/18#issuecomment-23",
+        "https://github.com/Acme/Project/pull/17#issuecomment-24",
+        "https://github.com/Acme/Project/PULL/17#issuecomment-23",
+        "https://github.com/Acme/Project/pull/17#ISSUECOMMENT-23",
+        "https://github.com/Acme/Project/pull/17?redirect=1#issuecomment-23",
+        "https://github.com.evil.test/Acme/Project/pull/17#issuecomment-23",
+    ] {
+        value["receipt"]["url"] = json!(url);
+        assert!(!is_matching_success_receipt(&value, destination, None));
+    }
+}
+
+type PublicationFixture = (
+    tempfile::TempDir,
+    Arc<Forge>,
+    NativeV2CommentDeliveryAdapter,
+);
+
+fn fixture() -> PublicationFixture {
+    let temp = tempfile::tempdir().unwrap();
+    let forge = Arc::new(Forge::default());
+    let adapter = adapter(private_root(&temp).join("publication.json"), forge.clone());
+    (temp, forge, adapter)
+}
+
+fn private_root(temp: &tempfile::TempDir) -> std::path::PathBuf {
+    let root = temp.path().join("private");
+    crate::execution::platform::private_directory(&root).unwrap();
+    root
+}
+
+async fn published_fixture() -> PublicationFixture {
+    let (temp, forge, adapter) = fixture();
+    run(&adapter, json!({"url":URL,"body":"report"}))
+        .await
+        .unwrap();
+    (temp, forge, adapter)
+}
+
+async fn publication_status(adapter: &NativeV2CommentDeliveryAdapter) -> PublicationStatus {
+    adapter.store.load().await.unwrap().unwrap().status
+}
+
+fn assert_calls(forge: &Forge, creates: usize, actors: usize) {
+    assert_eq!(forge.creates.load(Ordering::SeqCst), creates);
+    assert_eq!(forge.actors.load(Ordering::SeqCst), actors);
+}
+
+#[derive(Default)]
+struct InterruptedStore {
+    record: Mutex<Option<PublicationRecord>>,
+    lose_claim_ack: AtomicBool,
+    reject_confirmation: AtomicBool,
+}
+
+#[async_trait]
+impl CommentPublicationStore for InterruptedStore {
+    async fn load(&self) -> Result<Option<PublicationRecord>, PublicationStoreError> {
+        Ok(self.record.lock().unwrap().clone())
+    }
+
+    async fn compare_and_set(
+        &self,
+        expected: Option<&PublicationRecord>,
+        next: &PublicationRecord,
+    ) -> Result<(), PublicationStoreError> {
+        let mut current = self.record.lock().unwrap();
+        if current.as_ref() != expected {
+            return Err(PublicationStoreError::Conflict);
+        }
+        if matches!(next.status, PublicationStatus::Confirmed { .. })
+            && self.reject_confirmation.swap(false, Ordering::SeqCst)
+        {
+            return Err(PublicationStoreError::Unavailable(
+                "confirmation failed".into(),
+            ));
+        }
+        *current = Some(next.clone());
+        if self.lose_claim_ack.swap(false, Ordering::SeqCst) {
+            return Err(PublicationStoreError::Unavailable(
+                "claim acknowledgement lost".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn confirmed_nonpublication_allows_one_post_retry_with_renewed_authority() {
+    let (_temp, forge, adapter) = fixture();
+    forge.reject_posts.store(true, Ordering::SeqCst);
+    run_with_refresh(&adapter).await.unwrap();
+    assert_eq!(forge.creates.load(Ordering::SeqCst), 2);
+    assert_eq!(forge.comments.lock().unwrap().len(), 1);
+    assert!(matches!(
+        publication_status(&adapter).await,
+        PublicationStatus::Confirmed { .. }
+    ));
+}
+
+#[tokio::test]
+async fn confirmed_comment_read_renews_without_reposting() {
+    let (_temp, forge, adapter) = published_fixture().await;
+    forge.reject_reads.store(true, Ordering::SeqCst);
+    run_with_refresh(&adapter).await.unwrap();
+    assert_calls(&forge, 1, 3);
+}
+
+#[tokio::test]
+async fn initial_actor_authentication_renews_before_publication_identity_is_captured() {
+    let (_temp, forge, adapter) = fixture();
+    forge.reject_actors.store(true, Ordering::SeqCst);
+    run_with_refresh(&adapter).await.unwrap();
+    assert_calls(&forge, 1, 2);
+}
+
+#[tokio::test]
+async fn captured_scope_read_can_renew_only_for_the_same_actor() {
+    let (_temp, forge, mut adapter) = fixture();
+    Arc::make_mut(&mut adapter.config).expected_review_scope = Some(json!({}));
+    forge.reject_scope.store(true, Ordering::SeqCst);
+    run_with_refreshed_input(
+        &adapter,
+        json!({"url":URL,"body":"report","reviewScope":{}}),
+    )
+    .await
+    .unwrap();
+    assert_calls(&forge, 1, 2);
+}
+
+#[tokio::test]
+async fn failed_confirmation_is_reconciled_by_a_successor_without_a_second_post() {
+    let (_temp, forge, mut adapter) = fixture();
+    let store = Arc::new(InterruptedStore::default());
+    store.reject_confirmation.store(true, Ordering::SeqCst);
+    adapter.store = store.clone();
+    let input = json!({"url":URL,"body":"report"});
+    assert!(
+        run(&adapter, input.clone())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("confirmation failed")
+    );
+    assert!(matches!(
+        publication_status(&adapter).await,
+        PublicationStatus::Attempted
+    ));
+    run(&adapter, input).await.unwrap();
+    assert!(matches!(
+        publication_status(&adapter).await,
+        PublicationStatus::Confirmed { .. }
+    ));
+    assert_eq!(forge.creates.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn uncertain_claim_acknowledgement_never_grants_a_post() {
+    let (_temp, forge, mut adapter) = fixture();
+    let store = Arc::new(InterruptedStore::default());
+    store.lose_claim_ack.store(true, Ordering::SeqCst);
+    adapter.store = store;
+    let input = json!({"url":URL,"body":"report"});
+    assert!(
+        run(&adapter, input.clone())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("acknowledgement lost")
+    );
+    assert!(
+        run(&adapter, input)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("prior create")
+    );
+    assert_eq!(forge.creates.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn bounded_scan_refuses_before_a_create_when_comments_never_end() {
+    let (_temp, forge, adapter) = fixture();
+    forge.endless_pages.store(true, Ordering::SeqCst);
+    let error = run(&adapter, json!({"url":URL,"body":"report"}))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("page bound"));
+    assert_eq!(
+        forge.scans.load(Ordering::SeqCst),
+        MAX_COMMENT_PAGES as usize
+    );
+    assert_eq!(forge.creates.load(Ordering::SeqCst), 0);
+    assert!(adapter.store.load().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn duplicate_remote_publication_identity_cannot_choose_an_arbitrary_receipt() {
+    let (_temp, forge, adapter) = published_fixture().await;
+    let input = json!({"url":URL,"body":"report"});
+    let mut duplicate = forge.comments.lock().unwrap()[0].clone();
+    duplicate.id = "24".into();
+    duplicate.url = format!("{URL}#issuecomment-24");
+    forge.comments.lock().unwrap().push(duplicate);
+    let mut successor = adapter.clone();
+    successor.store = Arc::new(InterruptedStore::default());
+    let error = run(&successor, input).await.unwrap_err();
+    assert!(error.to_string().contains("multiple comments"));
+    assert_eq!(forge.creates.load(Ordering::SeqCst), 1);
+    assert!(successor.store.load().await.unwrap().is_none());
+}
+
+fn unclean_command() -> SourceDeliveryError {
+    crate::source_code_provider::GitCommandFailure {
+        command: "gh api".into(),
+        working_directory: ".".into(),
+        exit_status: None,
+        stdout: String::new(),
+        stderr: "process cleanup was not confirmed".into(),
+        stdout_truncated: false,
+        stderr_truncated: false,
+        context: "comment transport".into(),
+        timed_out: false,
+        cleanup_unconfirmed: true,
+        classification: None,
+    }
+    .into()
+}
+
+#[tokio::test]
+async fn unconfirmed_transport_cleanup_retains_intent_and_never_scans_after_create() {
+    let (_temp, forge, adapter) = fixture();
+    forge.unclean_post.store(true, Ordering::SeqCst);
+    assert!(matches!(
+        run(&adapter, json!({"url":URL,"body":"report"})).await,
+        Err(NodeRunnerError::CleanupUnconfirmed)
+    ));
+    assert_eq!(forge.scans.load(Ordering::SeqCst), 1);
+    assert_eq!(forge.creates.load(Ordering::SeqCst), 1);
+    assert!(matches!(
+        publication_status(&adapter).await,
+        PublicationStatus::Attempted
+    ));
+}
+
+#[tokio::test]
+async fn invalid_or_oversized_comment_content_never_reaches_a_post() {
+    for input in [
+        Value::Null,
+        json!({"url":URL}),
+        json!({"url":URL,"body":"  "}),
+        json!({"url":URL,"body":"report <!-- zeroshot-comment:v1:forged -->"}),
+        json!({"url":URL,"body":"x".repeat(MAX_BODY_BYTES + 1)}),
+        json!({"url":URL,"body":"x".repeat(MAX_BODY_BYTES)}),
+    ] {
+        let (_temp, forge, adapter) = fixture();
+        assert!(run(&adapter, input).await.is_err());
+        assert_eq!(forge.creates.load(Ordering::SeqCst), 0);
+        assert!(adapter.store.load().await.unwrap().is_none());
+    }
+}
+
+#[tokio::test]
+async fn invalid_declared_credential_cannot_fall_back_to_trusted_authority() {
+    for token in [
+        String::new(),
+        "two words".into(),
+        "é".into(),
+        "x".repeat(4097),
+    ] {
+        let (_temp, forge, adapter) = fixture();
+        let adapter = adapter.with_trusted_github_token(Some(Arc::from("fallback-token")));
+        let mut invocation = invocation(&adapter, json!({"url":URL,"body":"report"})).await;
+        let (binding, environment) = declared_environment(&token);
+        invocation.node.binding = binding;
+        invocation.environment = environment;
+        let (_cancel, control, _durable) = crate::native_v2_runner::test_support::control();
+        let error = adapter.run(invocation, control).await.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("declared comment credential is invalid")
+        );
+        assert_eq!(forge.actors.load(Ordering::SeqCst), 0);
+        assert_eq!(forge.creates.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn closed_or_wrong_role_sessions_cannot_authorize_publication() {
+    for closed in [false, true] {
+        let (_temp, forge, adapter) = fixture();
+        let mut invocation = invocation(&adapter, json!({"url":URL,"body":"report"})).await;
+        if closed {
+            invocation.session.close().await;
+            assert!(!invocation.session.is_live().await);
+        } else {
+            invocation.role = NodeRole::Worker;
+        }
+        let (_cancel, control, _durable) = crate::native_v2_runner::test_support::control();
+        assert!(matches!(
+            adapter.run(invocation, control).await,
+            Err(NodeRunnerError::InvalidRole)
+        ));
+        assert_eq!(forge.actors.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn pr_receipt_retains_exact_source_revision_and_comparison_identity() {
+    let (_temp, forge, mut adapter) = fixture();
+    let url = "https://github.com/acme/project/pull/17";
+    let revision = "a".repeat(40);
+    let scope = json!({"baseRepository":"acme/project","baseBranch":"main","baseRevision":"b".repeat(40),
+        "headRepository":"acme/project","headBranch":"fix","headRevision":revision});
+    let config = Arc::make_mut(&mut adapter.config);
+    config.expected_url = url.into();
+    config.expected_review_scope = Some(scope.clone());
+    config.source_revision = Some(revision.clone());
+    let result = run(
+        &adapter,
+        json!({"url":url,"body":"report","reviewScope":scope}),
+    )
+    .await
+    .unwrap();
+    let WorkerOutcome::Verifier { output, .. } = result else {
+        panic!("expected receipt")
+    };
+    assert!(is_matching_success_receipt(&output, url, Some(&revision)));
+    assert_eq!(output["receipt"]["discussionKind"], "pull_request");
+    assert_eq!(forge.comments.lock().unwrap().len(), 1);
+}
+
+fn publication_record() -> PublicationRecord {
+    PublicationRecord {
+        version: 1,
+        url: URL.into(),
+        marker: marker(&RunId::new("root"), "deliver"),
+        body_hash: hash("report"),
+        author: "ACTOR_ID".into(),
+        status: PublicationStatus::Attempted,
+    }
+}
+
+fn write_private(path: &std::path::Path, bytes: &[u8]) {
+    use std::io::Write as _;
+    let mut file = crate::execution::platform::private_file(
+        path,
+        crate::execution::platform::FileAccess::CreateNew,
+    )
+    .unwrap();
+    file.write_all(bytes).unwrap();
+}
+
+fn token_file(temp: &tempfile::TempDir) -> (std::path::PathBuf, TrustedGitHubTokenFile) {
+    let root = private_root(temp);
+    let workspace = root.join("checkout");
+    crate::execution::platform::private_directory(&workspace).unwrap();
+    let path = root.join("token");
+    let file = TrustedGitHubTokenFile::new(path.clone(), &workspace).unwrap();
+    (path, file)
+}
+
+#[tokio::test]
+async fn trusted_file_rotation_is_bounded_and_declared_authority_wins() {
+    let (temp, _forge, adapter) = fixture();
+    let (path, file) = token_file(&temp);
+    write_private(&path, b"old-token\n");
+    let adapter = adapter
+        .with_trusted_github_token(Some(Arc::from("fallback-token")))
+        .with_trusted_github_token_file(Some(file));
+    let invocation = invocation(&adapter, json!({"url":URL,"body":"report"})).await;
+    let mut credentials = Credentials::new(&adapter, &invocation.environment).unwrap();
+    assert_eq!(credentials.current().expose(), "old-token");
+    std::fs::write(&path, b"new-token\n").unwrap();
+    assert!(credentials.refresh().await.unwrap());
+    assert_eq!(credentials.current().expose(), "new-token");
+    assert!(!credentials.refresh().await.unwrap());
+    let (_, declared) = declared_environment("declared-token");
+    let mut credentials = Credentials::new(&adapter, &declared).unwrap();
+    assert_eq!(credentials.current().expose(), "declared-token");
+    assert!(!credentials.refresh().await.unwrap());
+}
+
+#[tokio::test]
+async fn missing_or_unrotated_trusted_file_refuses_authority() {
+    let (temp, forge, adapter) = fixture();
+    let (path, file) = token_file(&temp);
+    let adapter = adapter.with_trusted_github_token_file(Some(file));
+    let input = json!({"url":URL,"body":"report"});
+    let error = run(&adapter, input.clone()).await.unwrap_err();
+    assert!(error.to_string().contains("credential file is unavailable"));
+    assert_eq!(forge.actors.load(Ordering::SeqCst), 0);
+    write_private(&path, b"unchanged-token");
+    let invocation = invocation(&adapter, input).await;
+    let mut credentials = Credentials::new(&adapter, &invocation.environment).unwrap();
+    assert!(
+        credentials
+            .refresh()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("refresh unavailable")
+    );
+    assert!(!credentials.refresh().await.unwrap());
+}
+
+struct UnavailableRefresh;
+
+#[async_trait]
+impl crate::native_v2_runner::RuntimeEnvironmentRefresh for UnavailableRefresh {
+    async fn refresh(
+        &self,
+    ) -> Result<ResolvedEnvironment, crate::native_v2_runner::EnvironmentRefreshError> {
+        Err(crate::native_v2_runner::EnvironmentRefreshError::Unavailable)
+    }
+}
+
+#[tokio::test]
+async fn failed_or_invalid_environment_refresh_cannot_reuse_rejected_authority() {
+    let (_temp, _forge, adapter) = fixture();
+    let empty = invocation(&adapter, json!({"url":URL,"body":"report"}))
+        .await
+        .environment;
+    let refreshers: Vec<Arc<dyn crate::native_v2_runner::RuntimeEnvironmentRefresh>> = vec![
+        Arc::new(UnavailableRefresh),
+        Arc::new(RotatedCredential(empty)),
+        Arc::new(RotatedCredential(declared_environment("invalid token").1)),
+    ];
+    for refresh in refreshers {
+        let initial = crate::native_v2_runner::with_environment_refresh(
+            declared_environment("old-token").1,
+            refresh,
+        );
+        let mut credentials = Credentials::new(&adapter, &initial).unwrap();
+        assert!(credentials.refresh().await.is_err());
+        assert!(!credentials.refresh().await.unwrap());
+    }
+}
+
+#[test]
+fn credential_errors_redact_authority_and_preserve_cleanup_failure() {
+    let (_temp, _forge, adapter) = fixture();
+    let (_, environment) = declared_environment("private-test-token");
+    let credentials = Credentials::new(&adapter, &environment).unwrap();
+    let error = credentials.failure(SourceDeliveryError::api(
+        None,
+        "rejected private-test-token",
+    ));
+    assert!(!error.to_string().contains("private-test-token"));
+    assert!(error.to_string().contains("[REDACTED]"));
+    assert!(matches!(
+        credentials.failure(unclean_command()),
+        NodeRunnerError::CleanupUnconfirmed
+    ));
+}
+
+#[test]
+fn retained_publication_cannot_adopt_another_destination_marker_author_or_body() {
+    let intended = publication_record();
+    for previous in [
+        PublicationRecord {
+            url: "https://github.com/acme/project/issues/18".into(),
+            ..intended.clone()
+        },
+        PublicationRecord {
+            marker: marker(&RunId::new("other"), "deliver"),
+            ..intended.clone()
+        },
+        PublicationRecord {
+            author: "OTHER_ACTOR".into(),
+            ..intended.clone()
+        },
+        PublicationRecord {
+            body_hash: hash("different report"),
+            ..intended.clone()
+        },
+        PublicationRecord {
+            version: 2,
+            ..intended.clone()
+        },
+    ] {
+        assert!(validate_previous(&previous, &intended).is_err());
+    }
+}
+
+#[tokio::test]
+async fn corrupt_oversized_or_invalid_publication_storage_fails_closed() {
+    let mut invalid_record = publication_record();
+    invalid_record.version = 2;
+    for bytes in [
+        b"not-json".to_vec(),
+        vec![b'x'; 16 * 1024 + 1],
+        serde_json::to_vec(&invalid_record).unwrap(),
+    ] {
+        let (temp, forge, adapter) = fixture();
+        write_private(&private_root(&temp).join("publication.json"), &bytes);
+        let error = run(&adapter, json!({"url":URL,"body":"report"}))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("publication record is invalid"));
+        assert_eq!(forge.creates.load(Ordering::SeqCst), 0);
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let path = private_root(&temp).join("parent");
+    std::fs::write(&path, "not a directory").unwrap();
+    let store = LocalCommentPublicationStore::new(path.join("publication.json"));
+    assert!(matches!(
+        store.load().await,
+        Err(PublicationStoreError::Unavailable(_))
+    ));
+    assert!(matches!(
+        store.compare_and_set(None, &publication_record()).await,
+        Err(PublicationStoreError::Unavailable(_))
+    ));
+    let store = LocalCommentPublicationStore::new(std::path::PathBuf::new());
+    assert!(matches!(
+        store.load().await,
+        Err(PublicationStoreError::InvalidRecord)
+    ));
+}
+
+#[tokio::test]
+async fn mismatched_response_contract_or_worker_refuses_before_authority() {
+    let (_temp, forge, adapter) = fixture();
+    let mut turn = invocation(&adapter, json!({"url":URL,"body":"report"})).await;
+    assert!(turn.session.as_any().is::<CommentSession>());
+    turn.response = NodeResponseContract::Worker {
+        output: openengine_cluster_protocol::PayloadType::Null,
+    };
+    let (_cancel, control, _durable) = crate::native_v2_runner::test_support::control();
+    assert!(matches!(
+        adapter.run(turn, control).await,
+        Err(NodeRunnerError::InvalidRole)
+    ));
+    let mut node = invocation(&adapter, json!({"url":URL,"body":"report"}))
+        .await
+        .node;
+    let (_, environment) = declared_environment("token");
+    node.worker = WorkerRef::new("builtin.other@1").unwrap();
+    assert!(matches!(
+        adapter.open(&node, &environment).await,
+        Err(NodeRunnerError::InvalidRole)
+    ));
+    assert_eq!(forge.actors.load(Ordering::SeqCst), 0);
 }

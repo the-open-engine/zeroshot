@@ -992,3 +992,6 @@ fn local_git_metadata_rejects_invalid_records_and_bounds_untrusted_output() {
         "valid-metadata"
     );
 }
+
+#[path = "tests/comments.rs"]
+mod comments;

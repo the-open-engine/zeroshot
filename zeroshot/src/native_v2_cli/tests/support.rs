@@ -244,7 +244,7 @@ pub(super) enum CursorCallKind {
 }
 
 impl FakeBackend {
-    pub(super) fn with_review(review: crate::native_v2_review::PreparedReview) -> Self {
+    pub(crate) fn with_review(review: crate::native_v2_review::PreparedReview) -> Self {
         Self {
             review: Some(review),
             ..Self::default()

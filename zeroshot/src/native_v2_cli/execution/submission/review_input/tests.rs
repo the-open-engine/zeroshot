@@ -22,27 +22,27 @@ async fn retry_cache_reuses_exact_source_and_refuses_changed_authored_configurat
     let directory = tempfile::tempdir().assert_value();
     let key = IdempotencyKey::new("same-submission").assert_value();
     let digest = cache_key("cloud-login-one", &key).assert_value();
-    let cache = ReviewCache::open_at(directory.path().to_owned(), digest.clone(), identity())
+    let cache = ReviewCache::open_at(directory.path().join("cache"), digest.clone(), identity())
         .await
         .assert_value();
     assert!(cache.read().assert_value().is_none());
     cache.write(&prepared()).assert_value();
     drop(cache);
-    let cache = ReviewCache::open_at(directory.path().to_owned(), digest.clone(), identity())
+    let cache = ReviewCache::open_at(directory.path().join("cache"), digest.clone(), identity())
         .await
         .assert_value();
     assert_eq!(cache.read().assert_value().assert_value(), prepared());
     drop(cache);
     let mut changed = identity();
     changed.authored_digest = "changed-runtime-or-title".into();
-    let cache = ReviewCache::open_at(directory.path().to_owned(), digest.clone(), changed)
+    let cache = ReviewCache::open_at(directory.path().join("cache"), digest.clone(), changed)
         .await
         .assert_value();
     assert!(cache.read().is_err());
     drop(cache);
     let mut changed = identity();
     changed.request.url = "https://github.com/acme/project/issues/43".into();
-    let cache = ReviewCache::open_at(directory.path().to_owned(), digest, changed)
+    let cache = ReviewCache::open_at(directory.path().join("cache"), digest, changed)
         .await
         .assert_value();
     assert!(cache.read().is_err());
@@ -255,7 +255,7 @@ async fn cached_local_source_cannot_follow_a_later_head() {
         .assert_value();
     let original = snapshot.source.revision.clone();
     let cache_dir = tempfile::tempdir().assert_value();
-    let cache = ReviewCache::open_at(cache_dir.path().to_owned(), "local".into(), identity())
+    let cache = ReviewCache::open_at(cache_dir.path().join("cache"), "local".into(), identity())
         .await
         .assert_value();
     cache.write(&snapshot).assert_value();
@@ -271,7 +271,7 @@ async fn cached_local_source_cannot_follow_a_later_head() {
             "later",
         ],
     );
-    let cache = ReviewCache::open_at(cache_dir.path().to_owned(), "local".into(), identity())
+    let cache = ReviewCache::open_at(cache_dir.path().join("cache"), "local".into(), identity())
         .await
         .assert_value();
     let mut saved = cache.read().assert_value().assert_value();
@@ -282,4 +282,211 @@ async fn cached_local_source_cannot_follow_a_later_head() {
         git(directory.path(), &["rev-parse", "HEAD"]),
         original.as_str()
     );
+}
+
+#[tokio::test]
+async fn retry_cache_keeps_its_snapshot_when_a_new_value_exceeds_the_bound() {
+    let directory = tempfile::tempdir().assert_value();
+    let cache = ReviewCache::open_at(directory.path().join("cache"), "bounded".into(), identity())
+        .await
+        .assert_value();
+    let original = prepared();
+    cache.write(&original).assert_value();
+    let original_bytes = std::fs::read(&cache.destination).assert_value();
+    let mut oversized = original.clone();
+    oversized.initial_input["context"]["body"] = json!("x".repeat(4 * 1024 * 1024));
+    let error = cache.write(&oversized).unwrap_err();
+    assert!(error.to_string().contains("exceeds its bound"));
+    assert_eq!(
+        std::fs::read(&cache.destination).assert_value(),
+        original_bytes
+    );
+    assert_eq!(cache.read().assert_value(), Some(original));
+    assert_eq!(std::fs::read_dir(&cache.root).assert_value().count(), 2);
+}
+
+#[tokio::test]
+async fn cached_preparation_never_refetches_or_silently_replaces_corrupted_state() {
+    let directory = tempfile::tempdir().assert_value();
+    let cache = ReviewCache::open_at(
+        directory.path().join("cache"),
+        "prepared".into(),
+        identity(),
+    )
+    .await
+    .assert_value();
+    let (run, profile) = run_and_profile();
+    let backend = crate::native_v2_cli::tests::support::FakeBackend::with_review(prepared());
+    let first = cache
+        .prepare(&run, &profile.runtime, &backend)
+        .await
+        .assert_value();
+    assert_eq!(backend.calls().len(), 1);
+    let unavailable = crate::native_v2_cli::tests::support::FakeBackend::default();
+    assert_eq!(
+        cache
+            .prepare(&run, &profile.runtime, &unavailable)
+            .await
+            .assert_value(),
+        first
+    );
+    assert!(unavailable.calls().is_empty());
+    for corrupt in ["{", r#"{"identity":null,"prepared":null}"#] {
+        std::fs::write(&cache.destination, corrupt).assert_value();
+        let error = cache
+            .prepare(&run, &profile.runtime, &backend)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("saved review input is invalid"));
+        assert_eq!(backend.calls().len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(&cache.destination).assert_value(),
+            corrupt
+        );
+    }
+}
+
+#[tokio::test]
+async fn failed_preparation_leaves_the_submission_key_available_for_a_valid_retry() {
+    let directory = tempfile::tempdir().assert_value();
+    let cache = ReviewCache::open_at(directory.path().join("cache"), "failed".into(), identity())
+        .await
+        .assert_value();
+    let (run, profile) = run_and_profile();
+    let unavailable = crate::native_v2_cli::tests::support::FakeBackend::default();
+    assert!(
+        cache
+            .prepare(&run, &profile.runtime, &unavailable)
+            .await
+            .is_err()
+    );
+    assert!(cache.read().assert_value().is_none());
+    let backend = crate::native_v2_cli::tests::support::FakeBackend::with_review(prepared());
+    let snapshot = cache
+        .prepare(&run, &profile.runtime, &backend)
+        .await
+        .assert_value();
+    assert_eq!(snapshot, prepared());
+    assert_eq!(cache.read().assert_value(), Some(snapshot));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn cache_files_cannot_redirect_reads_or_locks_to_another_file() {
+    use std::os::unix::fs::symlink;
+    let directory = tempfile::tempdir().assert_value();
+    let external = directory.path().join("external");
+    std::fs::write(&external, "caller-owned").assert_value();
+    let cache_root = directory.path().join("cache");
+    let cache = ReviewCache::open_at(cache_root.clone(), "symlink".into(), identity())
+        .await
+        .assert_value();
+    symlink(&external, &cache.destination).assert_value();
+    assert!(cache.read().is_err());
+    drop(cache);
+    std::fs::remove_file(cache_root.join("symlink.lock")).assert_value();
+    symlink(&external, cache_root.join("symlink.lock")).assert_value();
+    assert!(
+        ReviewCache::open_at(cache_root, "symlink".into(), identity())
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        std::fs::read_to_string(external).assert_value(),
+        "caller-owned"
+    );
+}
+
+#[tokio::test]
+async fn local_preparation_refuses_unborn_checkout_and_absent_admitted_source() {
+    let directory = tempfile::tempdir().assert_value();
+    initialize_repository(directory.path());
+    let (mut run, profile) = run_and_profile();
+    run.target = None;
+    run.cwd = Some(directory.path().to_owned());
+    let mut snapshot = prepared();
+    assert!(local_snapshot(&run, &mut snapshot, false).await.is_err());
+    let mut params = super::super::prepare_submission_with_environment(
+        &run,
+        profile,
+        |_| None,
+        super::super::SubmissionInput {
+            review: Some(snapshot),
+            environment: None,
+        },
+    )
+    .assert_value();
+    params.source = None;
+    assert!(
+        validate_local(&mut params)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("source is unavailable")
+    );
+    assert!(validate_local_repository(&json!({"url":null}), "").is_err());
+    assert!(
+        local_git(&directory.path().join("absent"), &["rev-parse", "HEAD"])
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn local_submission_reuses_frozen_input_and_refuses_changed_intent_before_fetching() {
+    let directory = tempfile::tempdir().assert_value();
+    initialize_repository(directory.path());
+    git(
+        directory.path(),
+        &[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "fixture",
+        ],
+    );
+    let (mut run, profile) = run_and_profile();
+    run.target = None;
+    run.cwd = Some(directory.path().to_owned());
+    let key = IdempotencyKey::new(format!("cache-test-{}", uuid::Uuid::now_v7())).assert_value();
+    run.submission_key = Some(key.clone());
+    let backend = crate::native_v2_cli::tests::support::FakeBackend::with_review(prepared());
+    let original = resolve(&run, &profile, &backend)
+        .await
+        .assert_value()
+        .review
+        .assert_value();
+    assert_eq!(backend.calls().len(), 1);
+    assert_eq!(
+        original.source.revision.as_str(),
+        git(directory.path(), &["rev-parse", "HEAD"])
+    );
+    let mut changed = prepared();
+    changed.initial_input["context"]["body"] = json!("edited after first resolution");
+    let backend = crate::native_v2_cli::tests::support::FakeBackend::with_review(changed);
+    assert_eq!(
+        resolve(&run, &profile, &backend)
+            .await
+            .assert_value()
+            .review,
+        Some(original)
+    );
+    assert!(backend.calls().is_empty());
+    run.title = openengine_cluster_protocol::RunTitle::new("Changed authored title").assert_value();
+    let error = resolve(&run, &profile, &backend).await.err().assert_value();
+    assert!(
+        error
+            .to_string()
+            .contains("different review input or authored configuration")
+    );
+    assert!(backend.calls().is_empty());
+    let digest = cache_key("local", &key).assert_value();
+    let root = crate::native_v2_cli::default_local_state_root()
+        .assert_value()
+        .join("review-inputs");
+    for extension in ["json", "lock"] {
+        std::fs::remove_file(root.join(format!("{digest}.{extension}"))).assert_value();
+    }
 }

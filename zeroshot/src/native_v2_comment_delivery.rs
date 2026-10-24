@@ -725,11 +725,11 @@ pub(crate) fn valid_comment_permalink(
         && id.bytes().all(|byte| byte.is_ascii_digit())
         && id != "0"
         && ["issues", "pull"].iter().any(|segment| {
+            let suffix = format!("/{segment}/{}#issuecomment-{id}", destination.discussion_id);
             value
-                == format!(
-                    "https://github.com/{}/{segment}/{}#issuecomment-{id}",
-                    destination.repository, destination.discussion_id
-                )
+                .strip_prefix("https://github.com/")
+                .and_then(|value| value.strip_suffix(suffix.as_str()))
+                .is_some_and(|repository| repository.eq_ignore_ascii_case(&destination.repository))
         })
 }
 

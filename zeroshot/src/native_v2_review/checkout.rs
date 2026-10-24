@@ -1,4 +1,6 @@
-use openengine_cluster_protocol::{ResolvedSource, SourceBranchId, SourceRevisionId};
+use openengine_cluster_protocol::{
+    GitTransportCredentials, ResolvedSource, SourceBranchId, SourceRevisionId,
+};
 use serde::Deserialize;
 use crate::native_v2_contract::AdmittedRun;
 use crate::native_v2_portable_controller::{PortableControllerBootstrap, PortableControllerError};
@@ -65,6 +67,7 @@ pub(crate) async fn prepare_local_checkout(
     .ok_or_else(|| {
         PortableControllerError::Io(std::io::Error::other("review checkout requires Git"))
     })?;
+    let (token, credentials) = local_checkout_authority(admitted, bootstrap).await?;
     let private = bootstrap.storage.join("review-source");
     crate::execution::platform::private_directory(&private).map_err(PortableControllerError::Io)?;
     let transport = GitTransport::new(
@@ -86,10 +89,7 @@ pub(crate) async fn prepare_local_checkout(
     transport
         .fetch_review_references(
             &references,
-            source_credential(
-                bootstrap.github_token.as_deref().unwrap_or(""),
-                bootstrap.git_credentials.as_ref(),
-            ),
+            source_credential(token.as_deref().unwrap_or(""), credentials.as_ref()),
         )
         .await
         .map_err(|_| {
@@ -99,24 +99,66 @@ pub(crate) async fn prepare_local_checkout(
         })
 }
 
+async fn local_checkout_authority(
+    admitted: &AdmittedRun,
+    bootstrap: &PortableControllerBootstrap,
+) -> Result<(Option<String>, Option<GitTransportCredentials>), PortableControllerError> {
+    use crate::native_v2_delivery::{github_git_token, resolved_git_credentials};
+    let publisher = crate::native_v2_admission::comment_node(&admitted.graph.root)
+        .ok_or(PortableControllerError::RuntimeUnavailable)?;
+    let binding = admitted
+        .runtime
+        .nodes()
+        .get(&publisher.name)
+        .filter(|binding| {
+            matches!(
+                binding,
+                crate::native_v2_contract::NodeRuntimeBinding::CommentDelivery { .. }
+            )
+        })
+        .ok_or(PortableControllerError::RuntimeUnavailable)?;
+    let environment = bootstrap
+        .environment
+        .resolve(binding)
+        .await?
+        .with_source_git_credentials(bootstrap.environment.resolve_git_source().await?);
+    let invalid = |_| {
+        PortableControllerError::Io(std::io::Error::other(
+            "review checkout credentials are unavailable or invalid",
+        ))
+    };
+    let token = github_git_token(&environment, bootstrap.github_token.as_deref())
+        .map_err(invalid)?
+        .map(str::to_owned);
+    let credentials = resolved_git_credentials(&environment, bootstrap.git_credentials.as_ref())
+        .map_err(invalid)?;
+    let token = if token.is_none() && credentials.is_none() {
+        bootstrap
+            .github_token_file
+            .as_ref()
+            .map(|file| file.read())
+            .transpose()
+            .map_err(invalid)?
+    } else {
+        token
+    };
+    Ok((token, credentials))
+}
+
 fn validate_scope(
     scope: &CheckoutScope,
     source: &ResolvedSource,
     target: &super::ReviewTarget,
 ) -> Result<(), ReviewResolveError> {
-    let captured = (
-        scope.base_repository.as_str(),
-        scope.base_branch.as_str(),
-        scope.head_revision.as_str(),
-    );
-    let admitted = (
-        source.repository.as_str(),
-        source.branch.as_str(),
-        source.revision.as_str(),
-    );
     if target.kind != ReviewTargetKind::PullRequest
-        || target.repository != source.repository.as_str()
-        || captured != admitted
+        || !target
+            .repository
+            .eq_ignore_ascii_case(source.repository.as_str())
+        || !scope
+            .base_repository
+            .eq_ignore_ascii_case(source.repository.as_str())
+        || scope.base_branch != source.branch
+        || scope.head_revision != source.revision
     {
         return Err(ReviewResolveError::Identity);
     }
