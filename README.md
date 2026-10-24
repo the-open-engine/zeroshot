@@ -42,25 +42,13 @@ zeroshot runs coding, independent review and repairs through the workflow you de
 Choose the agents and models, define what must pass, and decide where rejected work goes for
 repair.
 
-For example, give a security reviewer the job of checking that users cannot access another account’s
-data. A rejection sends its findings back to the worker for repair, followed by another review. Save
-that workflow as a profile and reuse it.
-
 The engine enforces the graph’s review gates and retry limits. Each agent can use its own model and
 harness (Pi, Claude Code, Codex or Copilot).
 
-Results so far:
-
-- On 20 ProgramBench tasks, [a small model in a review loop](https://theopenengine.com/blog/review-loop/)
-  matched a larger model's score at a median 58% of its cost.
-- Claude Code on Opus 5.5 built zeroshot’s landing page from its README. A design slop reviewer sent
-  the first draft back for running to ten screens; the accepted page is five. Given the reviewer’s
-  standards in its prompt, Claude Code alone shipped eight.
-  [Compare all three](https://zeroshot.sh/#design-reviewer).
-- In one auto-research run, 10 iterations made an exact geometry computation 21× faster on CPU.
-  [Watch the run](https://zeroshot.sh/#not-just-coding).
-- An arctic flight game built with Codex, before and after zeroshot runs with functionality, visual
-  and integrity reviewers. [Play both](https://zeroshot.sh/#flight-demo).
+On 20 ProgramBench tasks, [a small model in a zeroshot loop](https://theopenengine.com/blog/review-loop/)
+matched a larger model's score at a median 58% of its cost. More examples on zeroshot.sh:
+[a flight game](https://zeroshot.sh/#flight-demo), [a landing page](https://zeroshot.sh/#design-reviewer)
+and [a research run](https://zeroshot.sh/#not-just-coding).
 
 The CLI is free and MIT licensed. Run locally, [self-host](#self-hosted-run-the-docker-target), or
 use [zeroshot Cloud](https://cloud.zeroshot.sh/docs).
@@ -174,10 +162,8 @@ For other harnesses and providers, see [Runtimes and connections](docs/concepts/
 
 ### Run in the cloud
 
-Connect GitHub and bring your own model API keys. Then comment `@zeroshot-cloud run` on its own line
-in a GitHub issue to start a run with your organization’s default profile.
-[Cloud setup guide →](https://cloud.zeroshot.sh/docs) ·
-[Run from a GitHub issue →](https://cloud.zeroshot.sh/docs/github-commands)
+Connect GitHub and bring your own model API keys.
+[Cloud setup guide →](https://cloud.zeroshot.sh/docs)
 
 ## Build your own graph
 
