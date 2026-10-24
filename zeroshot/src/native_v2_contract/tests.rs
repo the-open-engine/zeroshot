@@ -74,7 +74,9 @@ fn canonical_submission_round_trips_without_changing_graph_spec() {
         .get(&NodeName::new("worker").assert_value())
         .and_then(|binding| match binding {
             NodeRuntimeBinding::Agent { session_scope, .. } => Some(session_scope),
-            NodeRuntimeBinding::GitDelivery { .. } => None,
+            NodeRuntimeBinding::GitDelivery { .. } | NodeRuntimeBinding::CommentDelivery { .. } => {
+                None
+            }
         })
         .assert_value_with("worker must be an agent binding");
     assert_eq!(*session_scope, SessionScope::Execution);

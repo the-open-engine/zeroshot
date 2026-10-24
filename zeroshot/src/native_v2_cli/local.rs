@@ -304,6 +304,12 @@ impl LocalCliBackend {
         }
         let adopt_existing_delivery = resumed_from.is_some();
         let paths = self.paths(&prepared.run_id)?;
+        let ready_timeout = self.ready_timeout.saturating_add(
+            crate::native_v2_admission::comment_node(&prepared.submission.graph.root)
+                .map_or(Duration::ZERO, |_| {
+                    crate::native_v2_review::LOCAL_CHECKOUT_TIMEOUT
+                }),
+        );
         let storage = self.create_run_storage(&prepared.run_id)?;
         self.write_recovery_document(
             &prepared.run_id,
@@ -350,7 +356,7 @@ impl LocalCliBackend {
             }
         };
         if let Err(error) =
-            wait_for_controller(&mut child, &paths, &prepared.run_id, self.ready_timeout).await
+            wait_for_controller(&mut child, &paths, &prepared.run_id, ready_timeout).await
         {
             let _ = child.kill().await;
             remove_private_bootstrap(&bootstrap_path);
@@ -942,3 +948,65 @@ mod recovery_claim_tests;
 #[cfg(test)]
 #[path = "local/tests.rs"]
 mod local_contract_tests;
+
+fn checked_review_token(value: String) -> Result<String, NativeV2CliError> {
+    if value.is_empty() || value.len() > 4096 || value.contains('\0') {
+        return Err(local_message("GitHub credential is invalid"));
+    }
+    Ok(value)
+}
+
+fn review_environment_token() -> Result<Option<String>, NativeV2CliError> {
+    for name in ["GH_TOKEN", "GITHUB_TOKEN"] {
+        if let Some(value) = std::env::var_os(name) {
+            let value = value
+                .into_string()
+                .map_err(|_| local_message("GitHub credential must be UTF-8"))?;
+            return checked_review_token(value).map(Some);
+        }
+    }
+    Ok(None)
+}
+
+async fn review_token(directory: &Path) -> Result<String, NativeV2CliError> {
+    if let Some(token) = review_environment_token()? {
+        return Ok(token);
+    }
+    let environment =
+        crate::native_v2_local::capture_local_native_environment(directory).map_err(local_error)?;
+    let executable = crate::execution::platform::find_executable("gh", &environment, directory)
+        .ok_or_else(|| local_message("review resolution requires GitHub CLI on PATH"))?;
+    let mut command = Command::new(executable);
+    command
+        .env_clear()
+        .current_dir(directory)
+        .args(["auth", "token", "--hostname", "github.com"]);
+    for name in [
+        "HOME",
+        "PATH",
+        "GH_CONFIG_DIR",
+        "XDG_CONFIG_HOME",
+        "APPDATA",
+        "USERPROFILE",
+        "SystemRoot",
+    ] {
+        if let Some(value) = environment.get(name) {
+            command.env(name, value);
+        }
+    }
+    let result = crate::native_v2_delivery::command::capture_sensitive(
+        &mut command,
+        Duration::from_secs(10),
+        &[],
+    )
+    .await
+    .map_err(|_| {
+        local_message("GitHub login is unavailable; sign in with gh or supply GH_TOKEN")
+    })?;
+    if result.stdout_truncated() || result.diagnostic().exit_status != Some(0) {
+        return Err(local_message(
+            "GitHub login is unavailable; sign in with gh or supply GH_TOKEN",
+        ));
+    }
+    checked_review_token(result.stdout().trim().to_owned())
+}

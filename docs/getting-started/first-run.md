@@ -1,6 +1,7 @@
 # Run a first task
 
 This example runs the built-in `software-change` graph in a local folder, with Git delivery disabled.
+The template normally creates a PR; this example explicitly uses `--delivery none`.
 Git is optional. Add `--cwd FOLDER` to select another folder; input files stay relative to the invoking folder.
 
 !!! warning "The worker edits the selected folder"
@@ -45,7 +46,7 @@ initial input. It does not contact a target or start a run.
 ```console
 zeroshot run \
   --title "Add JSON status output" \
-  --template software-change \
+  --template software-change --delivery none \
   --input input.json \
   --uniform-runtime-config runtime.json \
   --validate-only
@@ -61,7 +62,7 @@ Remove `--validate-only`:
 ```console
 zeroshot run \
   --title "Add JSON status output" \
-  --template software-change \
+  --template software-change --delivery none \
   --input input.json \
   --uniform-runtime-config runtime.json
 ```
@@ -92,7 +93,7 @@ its error lists the latest of those records, followed by the `zeroshot logs` com
 zeroshot template show single-worker
 ```
 
-`zeroshot template show software-change` prints the exact graph behind the first example as the same
+`zeroshot template show software-change --delivery none` prints the exact graph behind the first example as the same
 `GraphSpec` accepted by `--graph` and the Python SDK.
 
 `zeroshot template show auto-research` prints the research graph with its default of ten iterations.

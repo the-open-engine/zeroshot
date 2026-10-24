@@ -232,7 +232,7 @@ function Activity({ data, selected }: NodeProps<Node<ActivityData>>) {
         {data.observation && <ObservationBadge observation={data.observation} />}
         <div className="workflow-card-heading">
           <Icon size={18} />
-          <span>{activity && presentation.delivery ? 'Git delivery' : item.label}</span>
+          <span>{activity && presentation.delivery ? presentation.label : item.label}</span>
         </div>
         {activity && executable(node) && (
           <small className={!presentation.detail ? 'needs-value' : ''}>

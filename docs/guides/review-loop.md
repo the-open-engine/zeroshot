@@ -225,8 +225,8 @@ The same files run on a target with `--target cloud` (see
 [direct target](../concepts/targets.md#direct-target). A target requires an exact Git source selected from
 the checkout or [source overrides](../concepts/targets.md#direct-target), and resolves `OPENAI_API_KEY` from the submission
 environment or its connection store. The graph has no delivery node, so a target run does not push
-the accepted change. Add a Git delivery verifier after the loop, or use the `software-change` template with
-`--push`, `--pr`, or `--ship`, when the result must leave the target.
+the accepted change. Add a Git delivery verifier after the loop, or use the `software-change` template,
+which defaults to a PR. Choose `--push` for branch publication or `--ship` for merge delivery.
 
 ## Cross-vendor review
 

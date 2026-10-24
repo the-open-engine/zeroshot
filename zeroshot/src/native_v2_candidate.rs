@@ -16,6 +16,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use thiserror::Error;
 
+use crate::native_v2_comment_delivery::{
+    NativeV2CommentDeliveryAdapter, NativeV2CommentDeliveryConfig, CommentPublicationStore,
+};
+use crate::source_code_provider::SourceCommentAuthority;
 use crate::native_v2_claude::{ClaudeAdapter, ClaudeAdapterConfig, ClaudeAdapterConfigError};
 use crate::native_v2_codex::{NativeV2CodexAdapter, NativeV2CodexConfig};
 use crate::native_v2_copilot::{CopilotAdapter, CopilotConfig};
@@ -85,6 +89,13 @@ pub struct NativeV2CandidateConfig {
     pub lanes: Vec<NativeV2HarnessConfig>,
     pub workspace: PathBuf,
     pub delivery: Option<NativeV2CandidateDelivery>,
+    pub comment_delivery: Option<NativeV2CandidateCommentDelivery>,
+}
+
+pub struct NativeV2CandidateCommentDelivery {
+    pub config: NativeV2CommentDeliveryConfig,
+    pub authority: Arc<dyn SourceCommentAuthority>,
+    pub store: Arc<dyn CommentPublicationStore>,
 }
 
 /// All delivery authority is present together, only when the graph declares delivery.
@@ -237,19 +248,39 @@ fn build_candidate(
         lanes,
         delivery,
         active_memory,
+        comment_delivery,
         ..
     } = config;
     let delivery = delivery.map(|delivery| {
         Arc::new(
             NativeV2DeliveryAdapter::new(delivery.config, delivery.authority)
-                .with_trusted_github_token(trusted.token)
-                .with_trusted_github_token_file(trusted.token_file)
+                .with_trusted_github_token(trusted.token.clone())
+                .with_trusted_github_token_file(trusted.token_file.clone())
                 .with_trusted_delivery_validator(trusted.validator)
                 .with_git_credentials(delivery.git_credentials),
         )
     });
     let agents = lane_agents(lanes, placement, active_memory)?;
-    assemble_runner(admitted, agents, delivery, placement)
+    let comment_delivery = comment_delivery.map(|delivery| {
+        Arc::new(
+            NativeV2CommentDeliveryAdapter::new(
+                delivery.config,
+                delivery.authority,
+                delivery.store,
+            )
+            .with_trusted_github_token(trusted.token)
+            .with_trusted_github_token_file(trusted.token_file),
+        )
+    });
+    assemble_runner(
+        admitted,
+        agents,
+        CandidateDeliveries {
+            git: delivery,
+            comment: comment_delivery,
+        },
+        placement,
+    )
 }
 
 fn lane_agents(
@@ -341,7 +372,14 @@ fn validate_config(
         .nodes()
         .values()
         .any(|binding| matches!(binding, NodeRuntimeBinding::GitDelivery { .. }));
-    if declares_delivery != config.delivery.is_some() {
+    let declares_comment = admitted
+        .runtime
+        .nodes()
+        .values()
+        .any(|binding| matches!(binding, NodeRuntimeBinding::CommentDelivery { .. }));
+    if declares_delivery != config.delivery.is_some()
+        || declares_comment != config.comment_delivery.is_some()
+    {
         return Err(NativeV2CandidateError::RuntimeMismatch);
     }
     Ok(())
@@ -350,13 +388,14 @@ fn validate_config(
 fn assemble_runner(
     admitted: &AdmittedRun,
     agents: BTreeMap<RuntimeLane, CandidateAgents>,
-    delivery: Option<Arc<NativeV2DeliveryAdapter>>,
+    deliveries: CandidateDeliveries,
     placement: CandidatePlacement,
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
     let routes = Arc::new(CandidateNodeLane {
         default_lane: admitted.runtime.lane(),
         agents,
-        delivery,
+        delivery: deliveries.git,
+        comment_delivery: deliveries.comment,
     });
     Ok(match placement.session_boundary() {
         SessionBoundary::Run => NativeNodeRunner::new(admitted, routes.clone(), routes)?,
@@ -364,6 +403,11 @@ fn assemble_runner(
             NativeNodeRunner::new_owner_scoped(admitted, routes.clone(), routes)?
         }
     })
+}
+
+struct CandidateDeliveries {
+    git: Option<Arc<NativeV2DeliveryAdapter>>,
+    comment: Option<Arc<NativeV2CommentDeliveryAdapter>>,
 }
 
 struct CandidateAgents {
@@ -391,6 +435,7 @@ struct CandidateNodeLane {
     default_lane: RuntimeLane,
     agents: BTreeMap<RuntimeLane, CandidateAgents>,
     delivery: Option<Arc<NativeV2DeliveryAdapter>>,
+    comment_delivery: Option<Arc<NativeV2CommentDeliveryAdapter>>,
 }
 
 impl CandidateNodeLane {
@@ -403,7 +448,9 @@ impl CandidateNodeLane {
                 .agents
                 .get(&lane.unwrap_or(self.default_lane))
                 .ok_or(NodeRunnerError::Driver),
-            NodeRuntimeBinding::GitDelivery { .. } => Err(NodeRunnerError::Driver),
+            NodeRuntimeBinding::GitDelivery { .. } | NodeRuntimeBinding::CommentDelivery { .. } => {
+                Err(NodeRunnerError::Driver)
+            }
         }
     }
 }
@@ -419,6 +466,13 @@ impl SessionFactory for CandidateNodeLane {
             NodeRuntimeBinding::Agent { .. } => {
                 self.agents_for(&invocation.binding)?
                     .sessions
+                    .open(invocation, environment)
+                    .await
+            }
+            NodeRuntimeBinding::CommentDelivery { .. } => {
+                self.comment_delivery
+                    .as_ref()
+                    .ok_or(NodeRunnerError::Driver)?
                     .open(invocation, environment)
                     .await
             }
@@ -455,6 +509,13 @@ impl NodeDriver for CandidateNodeLane {
                     }
                 }
                 result
+            }
+            NodeRuntimeBinding::CommentDelivery { .. } => {
+                self.comment_delivery
+                    .as_ref()
+                    .ok_or(NodeRunnerError::Driver)?
+                    .run(invocation, control)
+                    .await
             }
             NodeRuntimeBinding::GitDelivery { .. } => {
                 self.delivery

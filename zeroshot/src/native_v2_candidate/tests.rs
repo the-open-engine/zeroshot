@@ -326,7 +326,7 @@ impl NodeDriver for ScriptedAgent {
                 diagnostic: Value::Null,
                 artifacts: Vec::new(),
             }),
-            NodeRole::GitDelivery => Err(NodeRunnerError::InvalidRole),
+            NodeRole::GitDelivery | NodeRole::CommentDelivery => Err(NodeRunnerError::InvalidRole),
         }
     }
 }
@@ -418,7 +418,10 @@ impl CapsuleAllocator for CandidateAllocator {
         let local = assemble_runner(
             admitted,
             agents,
-            Some(delivery),
+            CandidateDeliveries {
+                git: Some(delivery),
+                comment: None,
+            },
             CandidatePlacement::Capsule,
         )
         .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
@@ -595,7 +598,10 @@ async fn node_instance_session_reused_through_a_loop_stays_on_its_lane() {
             (CODEX_OPENAI, CandidateAgents::new(codex.clone())),
             (CLAUDE_ANTHROPIC, CandidateAgents::new(claude.clone())),
         ]),
-        Some(routing_delivery(root.path())),
+        CandidateDeliveries {
+            git: Some(routing_delivery(root.path())),
+            comment: None,
+        },
         CandidatePlacement::Local(SessionBoundary::Run),
     )
     .assert_value_with("candidate runner");
@@ -686,7 +692,7 @@ async fn submit_through_cli(
                 graph: RunGraph::File(graph_path),
                 runtime: crate::native_v2_cli::RunRuntime::Exact(runtime_path),
             },
-            input: input_path,
+            input: input_path.into(),
             repository: Some(crate::native_v2_cli::RunRepository::GitHub(
                 SourceRepositoryId::new("acme/project").assert_value(),
             )),
@@ -1004,6 +1010,7 @@ fn candidate_node_lane_routes_each_agent_binding_only_to_its_own_lane() {
     let codex_agent = Arc::as_ptr(&codex).cast::<()>();
     let claude_agent = Arc::as_ptr(&claude).cast::<()>();
     let routes = CandidateNodeLane {
+        comment_delivery: None,
         default_lane: CODEX_OPENAI,
         agents: BTreeMap::from([
             (CODEX_OPENAI, CandidateAgents::new(codex)),
@@ -1037,6 +1044,7 @@ fn candidate_node_lane_routes_each_agent_binding_only_to_its_own_lane() {
     );
 
     let claude_only = CandidateNodeLane {
+        comment_delivery: None,
         default_lane: CODEX_OPENAI,
         agents: BTreeMap::from([(CLAUDE_ANTHROPIC, CandidateAgents::new(claude))]),
         delivery: Some(routing_delivery(&workspace)),

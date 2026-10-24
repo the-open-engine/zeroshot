@@ -127,6 +127,19 @@ impl NativeV2CliBackend for LocalCliBackend {
     type Logs = ChannelSubscription<RunLogEventNotification>;
     type Attach = ChannelSubscription<RunAttachEventNotification>;
 
+    async fn resolve_review(
+        &self,
+        target: Option<&str>,
+        request: crate::native_v2_review::ReviewResolutionRequest,
+        _runtime: &openengine_cluster_protocol::RuntimePlan,
+    ) -> Result<crate::native_v2_review::PreparedReview, NativeV2CliError> {
+        require_local(target)?;
+        let token = super::review_token(&self.current_directory).await?;
+        crate::native_v2_review::resolve_review(request, &token)
+            .await
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))
+    }
+
     async fn target_add(&self, _request: TargetAdd) -> Result<(), NativeV2CliError> {
         Err(local_message(
             "target commands are not local run operations",

@@ -1,3 +1,4 @@
+mod comment;
 mod environment_hooks;
 use environment_hooks::HookContext;
 mod identity_leases;
@@ -22,7 +23,8 @@ use tokio::sync::{Mutex, watch};
 use crate::execution::process::{HostedProcessIdentity, HostedProcessPool, HostedProcessScope};
 use crate::native_v2_admission::writer_nodes;
 use crate::native_v2_candidate::{
-    NativeV2CandidateConfig, NativeV2CandidateDelivery, build_native_v2_candidate_with_github_token,
+    NativeV2CandidateConfig, NativeV2CandidateCommentDelivery, NativeV2CandidateDelivery,
+    build_native_v2_candidate_with_github_token,
 };
 use crate::source_code_provider::adapters::core::{SourceDeliveryFactoryRequest, delivery_authority};
 use crate::native_v2_capsule::{
@@ -361,6 +363,7 @@ impl ProductionCapsuleAllocator {
         prepared: PreparedCapsule,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
         let delivery = self.candidate_delivery(request, &pending, &prepared)?;
+        let comment_delivery = self.candidate_comment_delivery(request, &pending, &prepared)?;
         let PendingCapsule {
             run_id,
             state,
@@ -388,6 +391,7 @@ impl ProductionCapsuleAllocator {
             request.admitted,
             NativeV2CandidateConfig {
                 active_memory: hooks,
+                comment_delivery,
                 lanes: self.lanes(request.admitted, &filesystem, active_process_pool)?,
                 workspace: filesystem.workspace.clone(),
                 delivery,
@@ -516,6 +520,7 @@ impl ProductionCapsuleAllocator {
             return Ok(prepared);
         }
         Ok(HostedWorkspace {
+            comment_publications: None,
             checkpoints: Arc::new(
                 ResticCheckpointStore::new(
                     directory.clone(),
@@ -573,7 +578,10 @@ impl ProductionCapsuleAllocator {
             return Ok(());
         }
         let source = self.repository_source(resolved);
+        let references = crate::native_v2_review::checkout_references(request.admitted)
+            .map_err(|_| CapsuleAllocationUnavailable::SourceCheckout)?;
         install_repository(RepositoryInstall {
+            checkout_references: &references,
             git_program: &self.config.git_program,
             source: &source,
             resolved,

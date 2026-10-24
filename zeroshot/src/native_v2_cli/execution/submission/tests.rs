@@ -343,7 +343,7 @@ async fn wave8_cli_contract_validate_only_preflight_materializes_without_backend
             },
             runtime: RunRuntime::Exact(runtime),
         },
-        input,
+        input: input.into(),
         repository: None,
         branch: None,
         revision: None,

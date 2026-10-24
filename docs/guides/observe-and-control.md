@@ -22,7 +22,7 @@ return after submission:
 ```console
 zeroshot run \
   --title "Update parser" \
-  --template software-change \
+  --template software-change --delivery none \
   --input input.json \
   --uniform-runtime-config runtime.json \
   --detach

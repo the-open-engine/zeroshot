@@ -61,13 +61,13 @@ class Preset:
 
     Args:
         name: Exact name returned by Client.list_presets().
-        delivery: Native delivery selector: none, push, pull_request, or merge.
+        delivery: Native delivery selector. None uses the executable-owned template default.
         pull_request_feedback: Whether pull-request feedback is considered or ignored for
             pull_request and merge delivery.
     """
 
     name: str
-    delivery: str = field(default="none", kw_only=True)
+    delivery: str | None = field(default=None, kw_only=True)
     pull_request_feedback: str = field(default="consider", kw_only=True)
 
 

@@ -4,6 +4,51 @@ use crate::source_code_provider::SourceGitCredential;
 
 const GIT_FIXTURE_BUDGET: Duration = Duration::from_secs(60);
 
+#[tokio::test]
+async fn review_checkout_fetches_pr_head_and_retains_diverged_base() {
+    let repository = Repository::new();
+    git(&repository.workspace, &["checkout", "-b", "review-head"]);
+    std::fs::write(repository.workspace.join("change"), "reviewed change").assert_value();
+    git(&repository.workspace, &["add", "--all"]);
+    git(&repository.workspace, &["commit", "-m", "review head"]);
+    let head = git(&repository.workspace, &["rev-parse", "HEAD"]);
+    let remote = repository.remote.to_str().assert_value();
+    git(
+        &repository.workspace,
+        &["push", remote, "HEAD:refs/pull/17/head"],
+    );
+    git(&repository.workspace, &["checkout", "main"]);
+    std::fs::write(repository.workspace.join("upstream"), "new base").assert_value();
+    git(&repository.workspace, &["add", "--all"]);
+    git(&repository.workspace, &["commit", "-m", "advance base"]);
+    let base = git(&repository.workspace, &["rev-parse", "HEAD"]);
+    git(&repository.workspace, &["push", remote, "main"]);
+    let checkout = repository.root.path().join("review-checkout");
+    std::fs::create_dir(&checkout).assert_value();
+    let transport = repository
+        .transport(Path::new("git"), &checkout, repository.remote.as_os_str())
+        .with_checkout_references(vec!["refs/pull/17/head".to_owned(), base.clone()])
+        .assert_value();
+    transport
+        .checkout("main", &head, SourceDeliveryCredential::token(""))
+        .await
+        .assert_value();
+    assert_eq!(git(&checkout, &["rev-parse", "HEAD"]), head);
+    assert_eq!(
+        git(&checkout, &["rev-parse", "refs/zeroshot/review/base"]),
+        base
+    );
+    assert_eq!(
+        git(&checkout, &["merge-base", "HEAD", &base]),
+        repository.base
+    );
+    assert!(
+        transport
+            .with_checkout_references(vec!["--upload-pack=unexpected".to_owned()])
+            .is_err()
+    );
+}
+
 struct Repository {
     root: tempfile::TempDir,
     workspace: PathBuf,

@@ -132,13 +132,35 @@ pub struct RunCommand {
     pub title: RunTitle,
     pub selection: RunSelection,
     pub environment: Option<RunEnvironmentInput>,
-    pub input: PathBuf,
+    pub input: RunInput,
     pub repository: Option<RunRepository>,
     pub branch: Option<SourceBranchId>,
     pub revision: Option<SourceRevisionId>,
     pub detach: bool,
     pub validate_only: bool,
     pub submission_key: Option<IdempotencyKey>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RunInput {
+    File(PathBuf),
+    TaskFrom(String),
+}
+
+impl From<PathBuf> for RunInput {
+    fn from(path: PathBuf) -> Self {
+        Self::File(path)
+    }
+}
+impl From<&str> for RunInput {
+    fn from(path: &str) -> Self {
+        Self::File(path.into())
+    }
+}
+impl From<String> for RunInput {
+    fn from(path: String) -> Self {
+        Self::File(path.into())
+    }
 }
 
 /// An explicit CLI source locator, before assigning a bounded repository identity.
@@ -519,6 +541,26 @@ pub trait NativeV2CliBackend: Send + Sync {
 
     async fn target_add(&self, request: TargetAdd) -> Result<(), NativeV2CliError>;
     async fn target_login(&self, name: &str) -> Result<(), NativeV2CliError>;
+
+    /// A secret-free namespace separating retry snapshots by execution authority.
+    /// Backends without a stable identity leave snapshots uncached.
+    async fn review_cache_namespace(
+        &self,
+        target: Option<&str>,
+    ) -> Result<Option<String>, NativeV2CliError> {
+        Ok(target.is_none().then(|| "local".to_owned()))
+    }
+
+    async fn resolve_review(
+        &self,
+        _target: Option<&str>,
+        _request: crate::native_v2_review::ReviewResolutionRequest,
+        _runtime: &openengine_cluster_protocol::RuntimePlan,
+    ) -> Result<crate::native_v2_review::PreparedReview, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise task resolution".to_owned(),
+        ))
+    }
 
     async fn default_resource_scope(
         &self,

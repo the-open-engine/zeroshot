@@ -30,6 +30,7 @@ pub(super) struct RepositoryInstall<'a> {
     pub git_program: &'a Path,
     pub source: &'a OsStr,
     pub resolved: &'a ResolvedSource,
+    pub checkout_references: &'a [String],
     pub workspace: &'a Path,
     pub process_pool: HostedProcessPool,
     pub github_token: Option<&'a str>,
@@ -97,7 +98,10 @@ async fn install_once(
     git: &GitProcess<'_>,
     request: &RepositoryInstall<'_>,
 ) -> Result<DeliveryTarget, RepositoryInstallError> {
-    let transport = git.transport(request.workspace)?;
+    let transport = git
+        .transport(request.workspace)?
+        .with_checkout_references(request.checkout_references.to_vec())
+        .map_err(RepositoryInstallError::Source)?;
     let remote = crate::source_code_provider::adapters::core::source_remote(request.resolved);
     let target = GitMaterializationTarget::new(
         &transport,

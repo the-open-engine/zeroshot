@@ -488,7 +488,7 @@ fn resolved_environment_requires_exact_names_and_redacts_values() {
     let mut binding = binding(SessionScope::Execution);
     let connections = match &mut binding {
         NodeRuntimeBinding::Agent { connections, .. } => Some(connections),
-        NodeRuntimeBinding::GitDelivery { .. } => None,
+        NodeRuntimeBinding::GitDelivery { .. } | NodeRuntimeBinding::CommentDelivery { .. } => None,
     };
     let connections = connections.assert_value_with("fixture binding must be an agent");
     *connections = DeclaredConnections::single(

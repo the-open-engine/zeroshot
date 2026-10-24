@@ -33,7 +33,7 @@ grammar, checks, policy, and authoritative merge result. Git effects reuse the s
 A custom API token never acquires GitHub Git authentication authority. Provider credentials are
 available only through the admitted delivery connection or private source capability.
 
-No new delivery node family or closed forge enum is needed. Embedders can register adapters in
+Adding a forge needs no new delivery node family or closed forge enum. Embedders can register adapters in
 `SourceCodeProviderRegistry` and use registry-aware admission. The contribution acceptance test
 admits an opaque nested repository and review ID, uses its own token field and credential refresh,
 and drives the existing PR and merge nodes through the supervisor and ledger.
@@ -64,3 +64,9 @@ SourceCodeProvider.delivery_authority. Its descriptor advertises the operations 
 supports. The older inspect_operation/operate contract remains available for callers of atomic
 operations; maintained adapters currently return an explicit unavailable error through that seam.
 Forge credential selection has one authority: SourceDeliveryAuthority.forge_credential_field.
+
+Conversation comments are a separate operation exposed through the same registry's optional
+comment authority. Pure URL identification and capability admission do not require a Git source.
+The native publisher owns bounded create/reconciliation and a durable lineage publication store;
+the forge supplies actor, comment identity, paginated reads, creation, and exact review-scope checks.
+Comment authority does not acquire Git transport access or a model session.

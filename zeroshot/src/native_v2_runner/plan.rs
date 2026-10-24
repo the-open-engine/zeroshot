@@ -5,6 +5,7 @@ pub enum NodeRole {
     Worker,
     Verifier,
     GitDelivery,
+    CommentDelivery,
 }
 
 pub(super) struct ResolvedNodePlan {
@@ -199,5 +200,9 @@ fn planned_verifier_role<'a>(
             Ok((NodeRole::GitDelivery, None))
         }
         NodeRuntimeBinding::GitDelivery { .. } => Err(NodeRunnerError::InvalidRole),
+        NodeRuntimeBinding::CommentDelivery { .. } if verifier.instructions.is_none() => {
+            Ok((NodeRole::CommentDelivery, None))
+        }
+        NodeRuntimeBinding::CommentDelivery { .. } => Err(NodeRunnerError::InvalidRole),
     }
 }

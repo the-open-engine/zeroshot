@@ -62,6 +62,8 @@ pub(super) struct ControllerDescriptor {
     pub(super) workspace_checkpoints: bool,
     pub(super) node_runtime_lanes: bool,
     pub(super) git_transport: bool,
+    pub(super) comment_delivery: bool,
+    pub(super) task_resolution: Option<Url>,
 }
 
 pub(super) fn build_controller_descriptor(
@@ -78,6 +80,18 @@ pub(super) fn build_controller_descriptor(
         .git_transport
         .as_ref()
         .is_some_and(|marker| marker.kind == openengine_cluster_protocol::GIT_TRANSPORT_KIND);
+    let comment_delivery = wire
+        .extensions
+        .comment_delivery
+        .as_ref()
+        .is_some_and(|marker| marker.kind == openengine_cluster_protocol::COMMENT_DELIVERY_KIND);
+    let task_resolution = wire
+        .extensions
+        .task_resolution
+        .as_ref()
+        .filter(|routes| routes.kind == openengine_cluster_protocol::TASK_RESOLUTION_KIND)
+        .map(|routes| same_origin_path(origin, &routes.resolve))
+        .transpose()?;
     Ok(ControllerDescriptor {
         run_url: same_origin_path(origin, &wire.run_path)?,
         session_url: same_origin_path(origin, &wire.session_path)?,
@@ -86,6 +100,8 @@ pub(super) fn build_controller_descriptor(
         workspace_checkpoints,
         node_runtime_lanes,
         git_transport,
+        comment_delivery,
+        task_resolution,
     })
 }
 

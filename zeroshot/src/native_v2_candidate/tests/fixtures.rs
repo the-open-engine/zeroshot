@@ -228,6 +228,7 @@ pub(super) fn candidate_config(
 ) -> NativeV2CandidateConfig {
     NativeV2CandidateConfig {
         active_memory: None,
+        comment_delivery: None,
         lanes: runtime(kind)
             .lanes()
             .into_iter()

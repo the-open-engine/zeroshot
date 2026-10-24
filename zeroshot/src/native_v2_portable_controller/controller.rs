@@ -300,14 +300,8 @@ where
     if !workspace_identity.is_current(&bootstrap.workspace) {
         return Err(PortableControllerError::Workspace);
     }
-    let execution_seed = match &bootstrap.checkpoint {
-        Some(selection) => {
-            crate::native_v2_supervisor::checkpoints::restore(selection, &bootstrap.workspace)
-                .await
-                .map_err(|error| PortableControllerError::Io(error.0))?
-        }
-        None => Vec::new(),
-    };
+    let execution_seed = restore_execution_seed(bootstrap).await?;
+    crate::native_v2_review::prepare_local_checkout(&prepared.admitted, bootstrap).await?;
     let mut runtime = runtime_factory(&prepared.admitted)
         .map_err(|_| PortableControllerError::RuntimeUnavailable)?;
     runtime.execution_seed = execution_seed;
@@ -330,6 +324,19 @@ where
         workspace_identity: Some(workspace_identity),
         workspace_lease: Some(workspace_lease),
     })
+}
+
+async fn restore_execution_seed(
+    bootstrap: &PortableControllerBootstrap,
+) -> Result<Vec<crate::full_v1_reducer::DurableExecution>, PortableControllerError> {
+    match &bootstrap.checkpoint {
+        Some(selection) => {
+            crate::native_v2_supervisor::checkpoints::restore(selection, &bootstrap.workspace)
+                .await
+                .map_err(|error| PortableControllerError::Io(error.0))
+        }
+        None => Ok(Vec::new()),
+    }
 }
 
 pub(super) struct PortableCheckpointCleanup {

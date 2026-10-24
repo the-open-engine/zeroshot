@@ -103,6 +103,10 @@ async fn reconcile_indeterminate_operation(
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 pub enum SourceRegistryError {
+    #[error("no registered source provider recognizes this comment URL")]
+    UnsupportedCommentUrl,
+    #[error("multiple source providers recognize this comment URL")]
+    AmbiguousCommentUrl,
     #[error("multiple source providers recognize the selected Git remote")]
     AmbiguousRemote,
     #[error("source provider {provider:?} profile {profile:?} has no configured delivery adapter")]
@@ -175,6 +179,42 @@ pub struct SourceCodeProviderRegistry {
 }
 
 impl SourceCodeProviderRegistry {
+    pub fn comment_destination(
+        &self,
+        url: &str,
+    ) -> Result<SourceCommentDestination, SourceRegistryError> {
+        let mut selected = None;
+        for provider in self.providers.values().flat_map(BTreeMap::values) {
+            if let Some(destination) = provider.comment_destination_from_url(url) {
+                if selected.is_some() {
+                    return Err(SourceRegistryError::AmbiguousCommentUrl);
+                }
+                selected = Some(destination);
+            }
+        }
+        let destination = selected.ok_or(SourceRegistryError::UnsupportedCommentUrl)?;
+        self.capability(
+            &destination.provider,
+            &SourceProfileId::new("default").expect("static profile"),
+            SourceCapability::Comment,
+        )?;
+        Ok(destination)
+    }
+
+    pub fn comment_authority(
+        &self,
+        destination: &SourceCommentDestination,
+    ) -> Result<Arc<dyn SourceCommentAuthority>, SourceRegistryError> {
+        let profile = SourceProfileId::new("default").expect("static profile");
+        self.capability(&destination.provider, &profile, SourceCapability::Comment)?;
+        self.lookup(&destination.provider)?
+            .comment_authority()
+            .ok_or_else(|| SourceRegistryError::UnavailableDelivery {
+                provider: destination.provider.clone(),
+                profile,
+            })
+    }
+
     #[must_use]
     pub fn new() -> Self {
         Self::default()

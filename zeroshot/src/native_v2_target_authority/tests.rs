@@ -41,6 +41,9 @@ mod lifecycle;
 #[path = "tests/history.rs"]
 mod history;
 
+#[path = "tests/tasks.rs"]
+mod tasks;
+
 struct Claim;
 impl ExclusiveControllerClaim for Claim {}
 

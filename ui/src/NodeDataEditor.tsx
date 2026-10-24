@@ -1,3 +1,4 @@
+import { isDeliveryKind } from './workers';
 import { useEffect, useRef, useState } from 'react';
 import { Braces, Plus, Trash2 } from 'lucide-react';
 import { useAuthoring } from './AuthoringProvider';
@@ -59,7 +60,7 @@ export function NodeDataEditor({
 }) {
   const authoring = useAuthoring();
   const root = node.name === document.graph.root.name;
-  const fixed = document.runtime.nodes[node.name]?.kind === 'git_delivery';
+  const fixed = isDeliveryKind(document.runtime.nodes[node.name]?.kind);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   usePendingText(busy);

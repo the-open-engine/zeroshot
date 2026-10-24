@@ -61,7 +61,7 @@ fn delivery_choices_use_native_contracts_and_preserve_legacy_identities() {
 #[tokio::test]
 async fn template_variants_keep_exact_factory_graphs_and_admit_with_factory_bindings() {
     let templates = templates().assert_value();
-    assert_eq!(templates.len(), 7);
+    assert_eq!(templates.len(), 10);
     for template in templates {
         let kind =
             BuiltinGraphTemplate::parse(template["name"].as_str().assert_value()).assert_value();
@@ -69,6 +69,7 @@ async fn template_variants_keep_exact_factory_graphs_and_admit_with_factory_bind
             "pull_request" => TemplateDelivery::PullRequest,
             "push" => TemplateDelivery::Push,
             "merge" => TemplateDelivery::Merge,
+            "comment" => TemplateDelivery::Comment,
             _ => TemplateDelivery::None,
         };
         assert_eq!(
@@ -99,6 +100,23 @@ async fn template_variants_keep_exact_factory_graphs_and_admit_with_factory_bind
         super::super::validate_profile(&graph, &runtime)
             .await
             .assert_value();
+    }
+}
+
+#[test]
+fn first_template_choices_use_their_default_delivery_bindings() {
+    let choices = templates().assert_value();
+    for (template, kind) in [
+        (BuiltinGraphTemplate::IssueReview, "comment_delivery"),
+        (BuiltinGraphTemplate::PrReview, "comment_delivery"),
+        (BuiltinGraphTemplate::SoftwareChange, "git_delivery"),
+    ] {
+        let choice = choices
+            .iter()
+            .find(|choice| choice["name"] == template.name())
+            .assert_value();
+        assert_eq!(choice["delivery"], template.default_delivery().name());
+        assert_eq!(choice["runtimeBindings"]["deliver"]["kind"], kind);
     }
 }
 

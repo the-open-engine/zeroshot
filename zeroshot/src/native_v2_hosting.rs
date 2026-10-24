@@ -150,6 +150,40 @@ impl ProductionTargetControllerFactory {
 
 #[async_trait]
 impl TargetControllerFactory for ProductionTargetControllerFactory {
+    fn supports_comment_delivery(&self) -> bool {
+        true
+    }
+
+    fn supports_task_resolution(
+        &self,
+        authentication: openengine_cluster_protocol::TargetAuthentication,
+    ) -> bool {
+        !matches!(
+            authentication,
+            openengine_cluster_protocol::TargetAuthentication::HostedOauth
+        )
+    }
+
+    async fn resolve_task(
+        &self,
+        request: crate::native_v2_review::ReviewResolutionRequest,
+        github_token: Option<String>,
+    ) -> Result<crate::native_v2_review::PreparedReview, TargetAuthorityError> {
+        let token = github_token.ok_or_else(|| {
+            TargetAuthorityError::invalid(
+                "review resolution requires an explicit GitHub credential",
+            )
+        })?;
+        crate::native_v2_review::resolve_review(request, &token)
+            .await
+            .map_err(|error| match error {
+                crate::native_v2_review::ReviewResolveError::Transport => {
+                    TargetAuthorityError::unavailable(error.to_string())
+                }
+                _ => TargetAuthorityError::invalid(error.to_string()),
+            })
+    }
+
     fn supports_workspace_recovery(&self) -> bool {
         true
     }

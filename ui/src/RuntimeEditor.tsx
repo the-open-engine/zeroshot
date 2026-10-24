@@ -1,3 +1,4 @@
+import { isDeliveryKind } from './workers';
 import { useState } from 'react';
 import { allNodes, bindingFor, clone, executable, type Document, type Runtime } from './domain';
 import { Field } from './Field';
@@ -88,7 +89,7 @@ export function RuntimeEditor(p: {
   };
   // With one shared model, only nodes that still need a worker get their own row.
   const rows = nodes.filter(
-    (n) => perAgent || !['agent', 'git_delivery'].includes(kind(n.name) ?? '')
+    (n) => perAgent || !['agent', 'git_delivery', 'comment_delivery'].includes(kind(n.name) ?? '')
   );
   return (
     <>
@@ -157,8 +158,10 @@ export function RuntimeEditor(p: {
       {rows.map((n) => (
         <div key={n.name} className="runtime-node">
           <span className="mono">{n.name}</span>
-          {kind(n.name) === 'git_delivery' ? (
-            <small>Git delivery</small>
+          {isDeliveryKind(kind(n.name)) ? (
+            <small>
+              {kind(n.name) === 'comment_delivery' ? 'Comment delivery' : 'Git delivery'}
+            </small>
           ) : kind(n.name) === 'agent' ? (
             picker([n.name], `Model for ${n.name}`)
           ) : (

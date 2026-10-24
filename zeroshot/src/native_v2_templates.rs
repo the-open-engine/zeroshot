@@ -26,6 +26,10 @@ mod auto_research;
 use auto_research::auto_research_graph;
 #[path = "native_v2_templates/catalog.rs"]
 mod catalog;
+#[path = "native_v2_templates/pr_review.rs"]
+mod pr_review;
+#[path = "native_v2_templates/review.rs"]
+mod review;
 pub use catalog::{BuiltinGraphTemplate, TemplateDelivery};
 pub(crate) use catalog::BuiltinTemplateError;
 #[path = "native_v2_templates/values.rs"]
@@ -367,6 +371,10 @@ fn accepted_change(
         TemplateDelivery::Push => push_delivery(state),
         TemplateDelivery::PullRequest => pull_request_delivery(state),
         TemplateDelivery::Merge => merge_delivery(state),
+        TemplateDelivery::Comment => Err(BuiltinTemplateError::UnsupportedDelivery {
+            template: "software-change",
+            delivery,
+        }),
     }
 }
 
@@ -612,7 +620,7 @@ fn verdict_labels() -> Result<NonEmptyEnumSet, BuiltinTemplateError> {
 
 fn delivery_mode(delivery: TemplateDelivery) -> Option<DeliveryMode> {
     match delivery {
-        TemplateDelivery::None => None,
+        TemplateDelivery::None | TemplateDelivery::Comment => None,
         TemplateDelivery::Push => Some(DeliveryMode::Push),
         TemplateDelivery::PullRequest => Some(DeliveryMode::PullRequestV2),
         TemplateDelivery::Merge => Some(DeliveryMode::MergeV3),

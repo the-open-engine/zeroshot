@@ -418,7 +418,7 @@ impl NodeDriver for FakeDriver {
                         diagnostic: Value::Null,
                         artifacts: Vec::new(),
                     },
-                    NodeRole::Worker | NodeRole::GitDelivery => WorkerOutcome::Verified {
+                    NodeRole::Worker | NodeRole::GitDelivery | NodeRole::CommentDelivery => WorkerOutcome::Verified {
                         output: Value::Null,
                         artifacts: Vec::new(),
                     },

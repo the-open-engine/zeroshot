@@ -323,12 +323,12 @@ class Client:
             raise ProtocolError("Zeroshot returned a malformed template catalog")
         return tuple(value)
 
-    async def get_preset(self, name: str, *, delivery: str = "none") -> GraphSpec:
+    async def get_preset(self, name: str, *, delivery: str | None = None) -> GraphSpec:
         """Read one built-in preset from the bundled executable.
 
         Args:
             name: Exact native preset name.
-            delivery: Native delivery selector, such as none, push, pull_request, or merge.
+            delivery: Native delivery selector. None uses the executable-owned template default.
 
         Returns:
             The GraphSpec emitted by Zeroshot, copied without changes.
@@ -337,9 +337,10 @@ class Client:
             InvalidRequestError: If Zeroshot rejects the name or delivery combination.
             ProtocolError: If Zeroshot emits a malformed graph document.
         """
-        value = await self._native(static=True).json(
-            ["template", "show", name, "--delivery", delivery]
-        )
+        arguments = ["template", "show", name]
+        if delivery is not None:
+            arguments.extend(["--delivery", delivery])
+        value = await self._native(static=True).json(arguments)
         if not isinstance(value, dict):
             raise ProtocolError("Zeroshot returned a malformed GraphSpec")
         return GraphSpec.from_dict(value)
@@ -395,7 +396,9 @@ class Client:
             graph_path = _write_json(root / "graph.json", selected.to_dict())
             arguments.extend(["--graph", str(graph_path)])
             return
-        arguments.extend(["--template", selected.name, "--delivery", selected.delivery])
+        arguments.extend(["--template", selected.name])
+        if selected.delivery is not None:
+            arguments.extend(["--delivery", selected.delivery])
         if selected.pull_request_feedback == "ignore":
             arguments.append("--no-pr-feedback")
         elif selected.pull_request_feedback != "consider":

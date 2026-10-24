@@ -207,6 +207,7 @@ digest_type!(
 #[serde(rename_all = "snake_case")]
 pub enum SourceCapability {
     Read,
+    Comment,
     Branch,
     Commit,
     Push,
@@ -292,9 +293,11 @@ pub use operation::*;
 pub use registry::*;
 pub use repository::*;
 
+mod comment;
 mod delivery;
 mod delivery_error;
 mod git_diagnostic;
 pub use delivery::*;
+pub use comment::*;
 pub use delivery_error::*;
 pub use git_diagnostic::GitCommandFailure;

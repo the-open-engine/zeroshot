@@ -50,6 +50,15 @@ const REQUEST_HEAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 const CONNECTION_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const MAX_CONNECTIONS: usize = 256;
 
+/// The optional forge secret is invocation-only and intentionally has no Debug implementation.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct DirectTaskResolutionRequest {
+    request: crate::native_v2_review::ReviewResolutionRequest,
+    #[serde(default)]
+    github_token: Option<String>,
+}
+
 /// Concrete target-wide HTTP/WebSocket binding. Hosted access consumes bearer authority supplied
 /// by its host. Explicit direct access uses one static target identity and no Authorization.
 pub struct NativeV2TargetServer {
@@ -262,16 +271,65 @@ impl NativeV2TargetServer {
             ("GET", DISCOVERY_PATH) if request.body.is_empty() => {
                 HttpResponse::json(200, &self.discovery_document())
             }
-            ("POST", TARGET_PRIVATE_BOOTSTRAP_PATH) => self.handle_private_bootstrap(request).await,
             ("GET", path) if is_operator_diagnostics_path(path) => {
                 self.handle_operator_diagnostics(request).await
             }
-            ("POST", history::DEFINITION_PATH | history::PAGE_PATH) => {
-                self.handle_history(request).await
-            }
-            ("POST", RUN_PATH) => self.handle_run(request).await,
-            ("POST", SESSION_PATH) => self.handle_session(request).await,
+            ("POST", _) => self.handle_post_http(request).await,
             _ => not_found_response(),
+        }
+    }
+
+    async fn handle_post_http(&self, request: HttpRequest) -> HttpResponse {
+        match request.path.as_str() {
+            TARGET_PRIVATE_BOOTSTRAP_PATH => self.handle_private_bootstrap(request).await,
+            history::DEFINITION_PATH | history::PAGE_PATH => self.handle_history(request).await,
+            RUN_PATH => self.handle_run(request).await,
+            openengine_cluster_protocol::TARGET_TASK_RESOLUTION_PATH => {
+                self.handle_task_resolution(request).await
+            }
+            SESSION_PATH => self.handle_session(request).await,
+            _ => not_found_response(),
+        }
+    }
+
+    async fn handle_task_resolution(&self, request: HttpRequest) -> HttpResponse {
+        if !self
+            .target
+            .supports_task_resolution(self.access.authentication())
+        {
+            return not_found_response();
+        }
+        if let Err(error) = self.authenticate_control(&request.head).await {
+            return authority_error_response(error);
+        }
+        let envelope = match self.decode_task_resolution(&request.body) {
+            Ok(envelope) => envelope,
+            Err(_) => return invalid_request_response("task resolution request is malformed"),
+        };
+        match self
+            .target
+            .resolve_task(envelope.request, envelope.github_token)
+            .await
+        {
+            Ok(prepared) => HttpResponse::private_json(200, &prepared),
+            Err(error) => authority_error_response(error),
+        }
+    }
+
+    fn decode_task_resolution(
+        &self,
+        body: &[u8],
+    ) -> Result<DirectTaskResolutionRequest, serde_json::Error> {
+        match &self.access {
+            TargetServerAccess::Hosted(_) => {
+                serde_json::from_slice(body).map(|request| DirectTaskResolutionRequest {
+                    request,
+                    github_token: None,
+                })
+            }
+            TargetServerAccess::Direct(_) | TargetServerAccess::Private { .. } => {
+                serde_json::from_slice(body)
+            }
         }
     }
 
@@ -409,6 +467,15 @@ impl NativeV2TargetServer {
             TargetDiscoveryDocument::direct(self.access.authentication()).with_node_runtime_lanes();
         if self.target.supports_git_transport() {
             document = document.with_git_transport();
+        }
+        if self.target.supports_comment_delivery() {
+            document = document.with_comment_delivery();
+        }
+        if self
+            .target
+            .supports_task_resolution(self.access.authentication())
+        {
+            document = document.with_task_resolution();
         }
         if self.workspace_recovery() {
             document = document.with_workspace_recovery();

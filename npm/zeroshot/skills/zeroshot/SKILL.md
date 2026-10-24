@@ -56,13 +56,15 @@ zeroshot connection list --target cloud --scope user
 zeroshot connection list --target cloud --scope org
 ```
 
-Do not assume a profile creates a pull request. `--pr` requests pull-request delivery and `--ship`
-requests merge delivery when materializing a compatible template; use either only when intended.
+Inspect saved profiles to see their delivery behavior. New `software-change` templates default to
+pull-request delivery. Use `--delivery none` for local-only changes, `--push` for branch publication,
+or `--ship` when merge delivery is intended. Custom graphs and saved profiles own their delivery.
 
 ## Run locally without a profile
 
 When no saved profile fits and the user has not asked for Cloud, run the built-in
-`software-change` graph locally. It needs no login beyond the harness you are running in.
+`software-change` graph locally. Its default publishes a PR. For local-only work, use
+`--delivery none` as shown below; that mode needs only the harness's native login.
 
 1. The worker edits the selected folder in place. Stop if it has uncommitted changes, and start
    from a fresh branch when the folder is a Git repository.
@@ -79,11 +81,11 @@ When no saved profile fits and the user has not asked for Cloud, run the built-i
    { "harness": "codex", "provider": "openai", "model": "MODEL_ID", "effort": "high" }
    ```
 
-4. Validate, then submit the same command without `--validate-only`. Add `--pr` or `--ship` only
-   when the user asked for delivery:
+4. Validate, then submit the same command without `--validate-only`. This example keeps the work
+   local; omit `--delivery none` for PR delivery, or use `--ship` when the user asks to merge:
 
    ```console
-   zeroshot run --title "TASK" --template software-change \
+   zeroshot run --title "TASK" --template software-change --delivery none \
      --input INPUT.json --uniform-runtime-config RUNTIME.json --validate-only
    ```
 
@@ -94,9 +96,32 @@ When no saved profile fits and the user has not asked for Cloud, run the built-i
 7. Offer to save the setup as the default, so later requests need no files:
 
    ```console
-   zeroshot profile set NAME --template software-change \
+   zeroshot profile set NAME --template software-change --delivery none \
      --uniform-runtime-config RUNTIME.json --default
    ```
+
+## Review an issue or pull request
+
+The `pr-review` and `issue-review` templates post reports as comments by default.
+PR review classifies whether reproduction is necessary, runs required full-stack checks (including
+a browser for UI changes), then checks the diff and linked issue coverage. Its final report is concise. PR review uses comment delivery; issue review also supports `--delivery none` for a report without publication. Supply an issue or PR URL through `--task-from`, which resolves
+title/body and pins source before execution:
+
+```console
+zeroshot run --title "Review PR 123" --template pr-review \
+  --task-from https://github.com/OWNER/REPOSITORY/pull/123 \
+  --uniform-runtime-config RUNTIME.json --cwd /path/to/pr-checkout \
+  --submission-key review-pr-123
+```
+
+Use `issue-review` for an issue URL; its basic issue workflow is separate. PR intake captures linked
+issue text before execution. Local reviews require clean tracked files and, for a PR, a checkout already at its head. Comment
+publication uses the declared `github.GH_TOKEN` connection. Use `--target cloud` for hosted source
+preparation and credential resolution. With a saved review profile, use `--profile` instead of the
+template/runtime/delivery flags. Validate first with `--validate-only`; retry uncertain submission
+using the same key and configuration. A successful review may report defects; success confirms
+publication. Ordinary `--input FILE` passes the graph's JSON input unchanged and excludes
+`--task-from`. Worker nodes have no mandatory `task` field.
 
 ## Adapt the graph
 

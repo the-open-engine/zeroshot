@@ -12,6 +12,7 @@ mod git;
 pub(crate) mod github;
 mod provider;
 pub use github::{GhCliAuthorityConfig, GhCliDeliveryAuthority};
+pub use github::validate_comment_review_scope;
 pub use git::GitDeliveryAuthority;
 use provider::{CoreSourceProvider, ProviderKind};
 
@@ -59,7 +60,7 @@ pub fn forge_identity(
     remote: &openengine_cluster_protocol::GitRemoteUrl,
 ) -> Result<Option<openengine_cluster_protocol::SourceForgeIdentity>, SourceDeliveryFactoryError> {
     let selected = SourceProviderRef::new(SourceProviderId::new(GIT_PROVIDER_ID)?, 1)?;
-    let registry = maintained_registry(None, None, &selected, None)?;
+    let registry = maintained_registry(None, SourceAuthorities::default(), &selected, None)?;
     forge_identity_with_registry(remote.as_str(), &registry)
 }
 
@@ -127,24 +128,32 @@ fn provider_ref_parts(
     Ok(SourceProviderRef::new(SourceProviderId::new(id)?, 1)?)
 }
 
+#[derive(Default)]
+struct SourceAuthorities {
+    delivery: Option<Arc<dyn SourceDeliveryAuthority>>,
+    comment: Option<Arc<dyn SourceCommentAuthority>>,
+}
+
 fn maintained_registry(
     source: Option<&ResolvedSource>,
-    authority: Option<Arc<dyn SourceDeliveryAuthority>>,
+    authorities: SourceAuthorities,
     selected: &SourceProviderRef,
     transport: Option<&GitTransport>,
 ) -> Result<SourceCodeProviderRegistry, SourceDeliveryFactoryError> {
     let mut registry = SourceCodeProviderRegistry::new();
     for kind in [ProviderKind::Git, ProviderKind::GitHub] {
         let adapter = if selected.id().as_str() == kind.id() {
-            authority.clone()
+            authorities.delivery.clone()
         } else {
             None
         };
-        registry.register(Arc::new(CoreSourceProvider::new(
-            kind,
-            source.cloned(),
-            adapter,
-        )?))?;
+        let comment = (selected.id().as_str() == kind.id())
+            .then(|| authorities.comment.clone())
+            .flatten();
+        registry.register(Arc::new(
+            CoreSourceProvider::new(kind, source.cloned(), adapter)?
+                .with_comment_authority(comment),
+        ))?;
     }
     super::contributed::register(
         &mut registry,
@@ -160,7 +169,8 @@ pub fn validate_delivery_source(
     required: &[SourceCapability],
 ) -> Result<(), SourceDeliveryFactoryError> {
     let selected = provider_ref(source, required)?;
-    let registry = maintained_registry(Some(source), None, &selected, None)?;
+    let registry =
+        maintained_registry(Some(source), SourceAuthorities::default(), &selected, None)?;
     validate_delivery_source_with_registry(source, required, &registry)
 }
 
@@ -174,7 +184,7 @@ pub fn validate_delivery_repository(
         return Ok(());
     }
     let selected = provider_ref_parts(repository, remote, required)?;
-    let registry = maintained_registry(None, None, &selected, None)?;
+    let registry = maintained_registry(None, SourceAuthorities::default(), &selected, None)?;
     let profile = SourceProfileId::new("default")?;
     for capability in required {
         registry.capability(&selected, &profile, *capability)?;
@@ -244,8 +254,15 @@ pub(crate) fn delivery_authority(
         } else {
             None
         };
-    let registry =
-        maintained_registry(Some(request.source), authority, &selected, Some(&transport))?;
+    let registry = maintained_registry(
+        Some(request.source),
+        SourceAuthorities {
+            delivery: authority,
+            comment: None,
+        },
+        &selected,
+        Some(&transport),
+    )?;
     delivery_authority_with_registry(request, &registry)
 }
 
@@ -333,7 +350,12 @@ pub(crate) async fn materialize_source(
     destination: SourceMaterializationDestination<'_>,
 ) -> Result<SourceMaterializationReceipt, SourceDeliveryFactoryError> {
     let identify = materialization_identity(source)?;
-    let registry = maintained_registry(Some(source), None, identify.provider(), None)?;
+    let registry = maintained_registry(
+        Some(source),
+        SourceAuthorities::default(),
+        identify.provider(),
+        None,
+    )?;
     let repository = registry.identify_repository(&identify).await?;
     let request = SourceMaterializeRequest::new(
         repository,
@@ -341,6 +363,34 @@ pub(crate) async fn materialize_source(
         SourceRevisionId::new(source.revision.as_str())?,
     )?;
     Ok(registry.materialize(&request, destination).await?)
+}
+
+/// Pure destination/capability selection through the existing source registry.
+pub fn comment_destination(
+    url: &str,
+) -> Result<SourceCommentDestination, SourceDeliveryFactoryError> {
+    let selected = SourceProviderRef::new(SourceProviderId::new(GITHUB_PROVIDER_ID)?, 1)?;
+    let registry = maintained_registry(None, SourceAuthorities::default(), &selected, None)?;
+    Ok(registry.comment_destination(url)?)
+}
+
+/// Constructs only forge authority; source-less comments allocate no Git transport.
+pub fn comment_authority(
+    config: GhCliAuthorityConfig,
+    url: &str,
+) -> Result<Arc<dyn SourceCommentAuthority>, SourceDeliveryFactoryError> {
+    let destination = comment_destination(url)?;
+    let authority: Arc<dyn SourceCommentAuthority> = Arc::new(GhCliDeliveryAuthority::new(config));
+    let registry = maintained_registry(
+        None,
+        SourceAuthorities {
+            delivery: None,
+            comment: Some(authority),
+        },
+        &destination.provider,
+        None,
+    )?;
+    Ok(registry.comment_authority(&destination)?)
 }
 
 #[cfg(test)]

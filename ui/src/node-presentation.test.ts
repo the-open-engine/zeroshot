@@ -62,3 +62,14 @@ test('unfamiliar delivery bindings still have delivery presentation', () => {
   assert.equal(nodePresentation(doc, leaf, workers).Icon, nodeIcons.git_delivery);
   assert.deepEqual(doc, before);
 });
+
+test('comment publication has a distinct native delivery label and icon', () => {
+  const leaf = { ...deliver(), worker: 'builtin.comment-delivery.post@1' };
+  const doc = document(seq('root', [leaf]));
+  doc.runtime.nodes.deliver = { kind: 'comment_delivery' };
+  const presentation = nodePresentation(doc, leaf, workers);
+  assert.equal(presentation.label, 'Comment delivery');
+  assert.equal(presentation.detail, 'Conversation comment');
+  assert.equal(presentation.Icon, nodeIcons.comment_delivery);
+  assert.equal(presentation.delivery, true);
+});

@@ -23,12 +23,16 @@ use crate::native_v2_delivery::{
 };
 
 mod api;
+mod comment;
+pub(crate) use comment::comment_destination;
+pub use comment::validate_comment_review_scope;
 mod conflict;
 mod feedback;
 mod metadata;
 mod observation;
 mod push;
 mod queue;
+pub(crate) mod review_task;
 mod target;
 
 #[cfg(all(test, target_os = "linux"))]

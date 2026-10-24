@@ -12,6 +12,9 @@ use crate::native_v2_contract::{
     GIT_DELIVERY_PR_WORKER_REF, GIT_DELIVERY_PUSH_WORKER_REF,
 };
 use crate::native_v2_delivery::{validate_delivery_contract, DeliveryMode};
+use crate::native_v2_comment_delivery::{
+    COMMENT_DELIVERY_WORKER_REF, comment_input_schema, validate_comment_contract,
+};
 use crate::native_v2_runner::NodeResponseContract;
 
 pub(super) fn validate_graph_input(
@@ -78,7 +81,7 @@ pub(super) fn executable_runtime_roles(root: &GraphNode) -> Vec<(NodeName, bool)
     executable_declarations(root)
         .into_iter()
         .map(|declaration| {
-            let delivery = is_git_delivery_worker(&declaration.worker);
+            let delivery = is_trusted_delivery_worker(&declaration.worker);
             (declaration.name, delivery)
         })
         .collect()
@@ -191,10 +194,28 @@ fn validate_binding_kind(
     binding: &NodeRuntimeBinding,
 ) -> Result<(), NativeV2AdmissionError> {
     if declaration.kind == LeafKind::Step
-        && matches!(binding, NodeRuntimeBinding::GitDelivery { .. })
+        && matches!(
+            binding,
+            NodeRuntimeBinding::GitDelivery { .. } | NodeRuntimeBinding::CommentDelivery { .. }
+        )
     {
         return Err(NativeV2AdmissionError::DeliveryMustBeVerifier {
             node: declaration.name.clone(),
+        });
+    }
+    if declaration.worker.as_str() == COMMENT_DELIVERY_WORKER_REF {
+        if !matches!(binding, NodeRuntimeBinding::CommentDelivery { .. }) {
+            return Err(NativeV2AdmissionError::DeliveryWorkerRequiresBinding {
+                node: declaration.name.clone(),
+                worker: declaration.worker.clone(),
+            });
+        }
+        return validate_comment_declaration(declaration);
+    }
+    if matches!(binding, NodeRuntimeBinding::CommentDelivery { .. }) {
+        return Err(NativeV2AdmissionError::UnsupportedDeliveryWorker {
+            node: declaration.name.clone(),
+            worker: declaration.worker.clone(),
         });
     }
     match (is_git_delivery_worker(&declaration.worker), binding) {
@@ -227,11 +248,12 @@ fn validate_instructions(
                 node: declaration.name.clone(),
             })
         }
-        (NodeRuntimeBinding::GitDelivery { .. }, Some(_)) => {
-            Err(NativeV2AdmissionError::DeliveryInstructionsForbidden {
-                node: declaration.name.clone(),
-            })
-        }
+        (
+            NodeRuntimeBinding::GitDelivery { .. } | NodeRuntimeBinding::CommentDelivery { .. },
+            Some(_),
+        ) => Err(NativeV2AdmissionError::DeliveryInstructionsForbidden {
+            node: declaration.name.clone(),
+        }),
         _ => Ok(()),
     }
 }
@@ -242,7 +264,7 @@ fn validate_delivery_policy(
 ) -> Result<(), NativeV2AdmissionError> {
     let found = declarations
         .iter()
-        .filter(|declaration| is_git_delivery_worker(&declaration.worker))
+        .filter(|declaration| is_trusted_delivery_worker(&declaration.worker))
         .count();
     let accepted = match policy {
         DeliveryPolicy::Optional => found <= 1,
@@ -252,6 +274,10 @@ fn validate_delivery_policy(
         return Err(NativeV2AdmissionError::DeliveryNodeCount { policy, found });
     }
     Ok(())
+}
+
+fn is_trusted_delivery_worker(worker: &WorkerRef) -> bool {
+    worker.as_str() == COMMENT_DELIVERY_WORKER_REF || is_git_delivery_worker(worker)
 }
 
 fn is_git_delivery_worker(worker: &WorkerRef) -> bool {
@@ -341,4 +367,32 @@ pub(super) fn validate_declared_environment(
         });
     }
     Ok(())
+}
+
+fn validate_comment_declaration(
+    declaration: &ExecutableDeclaration,
+) -> Result<(), NativeV2AdmissionError> {
+    if comment_input_schema().ok().as_ref() != Some(&declaration.contract.input) {
+        return Err(NativeV2AdmissionError::InvalidDeliveryContract {
+            node: declaration.name.clone(),
+            worker: declaration.worker.clone(),
+        });
+    }
+    let verifier = declaration.contract.verifier.as_ref().ok_or_else(|| {
+        NativeV2AdmissionError::InvalidDeliveryContract {
+            node: declaration.name.clone(),
+            worker: declaration.worker.clone(),
+        }
+    })?;
+    let response = NodeResponseContract::Verifier {
+        output: declaration.contract.output.clone(),
+        signals: verifier.signals.clone(),
+        diagnostic: verifier.diagnostic.clone(),
+    };
+    validate_comment_contract(&response).map_err(|_| {
+        NativeV2AdmissionError::InvalidDeliveryContract {
+            node: declaration.name.clone(),
+            worker: declaration.worker.clone(),
+        }
+    })
 }

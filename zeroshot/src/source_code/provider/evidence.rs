@@ -312,6 +312,15 @@ impl SourceProviderFailure {
 pub trait SourceCodeProvider: Send + Sync {
     fn descriptor(&self) -> &SourceProviderDescriptor;
 
+    /// Pure discussion-URL identification; implementations never read credentials or the network.
+    fn comment_destination_from_url(&self, _url: &str) -> Option<SourceCommentDestination> {
+        None
+    }
+
+    fn comment_authority(&self) -> Option<Arc<dyn SourceCommentAuthority>> {
+        None
+    }
+
     /// Pure identification of a credential-free Git locator. Return only this provider's opaque
     /// repository identity; no filesystem, credentials, processes, or network effects are allowed.
     fn repository_from_remote(&self, _remote: &str) -> Option<SourceRepositoryId> {

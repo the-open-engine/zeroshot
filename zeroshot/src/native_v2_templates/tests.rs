@@ -29,6 +29,8 @@ fn catalog_and_template_inputs_are_closed() {
             BuiltinGraphTemplate::SingleWorker,
             BuiltinGraphTemplate::SoftwareChange,
             BuiltinGraphTemplate::AutoResearch,
+            BuiltinGraphTemplate::IssueReview,
+            BuiltinGraphTemplate::PrReview,
         ]
     );
     assert_eq!(

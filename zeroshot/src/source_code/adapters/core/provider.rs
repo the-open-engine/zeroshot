@@ -22,6 +22,7 @@ impl ProviderKind {
             Self::Git => vec![Read, Push],
             Self::GitHub => vec![
                 Read,
+                Comment,
                 Push,
                 PullRequest,
                 Checks,
@@ -37,6 +38,7 @@ pub(super) struct CoreSourceProvider {
     descriptor: SourceProviderDescriptor,
     source: Option<ResolvedSource>,
     authority: Option<Arc<dyn SourceDeliveryAuthority>>,
+    comment_authority: Option<Arc<dyn SourceCommentAuthority>>,
     kind: ProviderKind,
 }
 impl CoreSourceProvider {
@@ -59,8 +61,17 @@ impl CoreSourceProvider {
             descriptor,
             source,
             authority,
+            comment_authority: None,
             kind,
         })
+    }
+
+    pub(super) fn with_comment_authority(
+        mut self,
+        authority: Option<Arc<dyn SourceCommentAuthority>>,
+    ) -> Self {
+        self.comment_authority = authority;
+        self
     }
 }
 use std::collections::BTreeMap;
@@ -77,6 +88,14 @@ fn unavailable() -> SourceProviderFailure {
 impl SourceCodeProvider for CoreSourceProvider {
     fn descriptor(&self) -> &SourceProviderDescriptor {
         &self.descriptor
+    }
+    fn comment_destination_from_url(&self, url: &str) -> Option<SourceCommentDestination> {
+        matches!(self.kind, ProviderKind::GitHub)
+            .then(|| super::github::comment_destination(url))
+            .flatten()
+    }
+    fn comment_authority(&self) -> Option<Arc<dyn SourceCommentAuthority>> {
+        self.comment_authority.clone()
     }
     fn repository_from_remote(&self, remote: &str) -> Option<SourceRepositoryId> {
         if matches!(self.kind, ProviderKind::GitHub) {

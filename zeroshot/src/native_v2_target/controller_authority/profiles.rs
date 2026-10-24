@@ -6,7 +6,7 @@ use openengine_cluster_protocol::{
 use reqwest::header::{ACCEPT, CACHE_CONTROL};
 
 use super::contract::{RunProfilesDescriptor, authority_error};
-use super::{TargetHttpControlAuthority, require_node_runtime_lanes, require_git_transport};
+use super::{TargetHttpControlAuthority, require_runtime_capabilities, require_git_transport};
 use super::access::AccessToken;
 use crate::native_v2_target::{TargetAccess, TargetAuthorityError, TargetRecord};
 
@@ -84,7 +84,7 @@ impl TargetHttpControlAuthority {
             authority_error("hosted target does not advertise profile management")
         })?;
         if let Some(runtime) = input.stored_runtime() {
-            require_node_runtime_lanes(&controller, runtime)?;
+            require_runtime_capabilities(&controller, runtime)?;
         }
         require_git_transport(&controller, input.requires_git_transport())?;
         let access = self

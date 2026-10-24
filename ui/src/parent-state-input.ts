@@ -1,3 +1,4 @@
+import { isDeliveryKind } from './workers';
 import {
   assertDocument,
   bindingFor,
@@ -57,7 +58,7 @@ function parentFieldBinding(name: string, field: any, maps: GraphNode[], existin
 
 /** Explicit input replacement only; ordinary schema edits never infer mappings. */
 export function parentStateInput(document: Document, node: GraphNode): ParentStateInput {
-  if (!executable(node) || bindingFor(document.runtime, node.name)?.kind === 'git_delivery')
+  if (!executable(node) || isDeliveryKind(bindingFor(document.runtime, node.name)?.kind))
     throw new Error('Choose an Agent or Verifier with an editable input contract.');
   const { state, stateName } = bindingContext(document, node);
   const fields = recordFields(state);

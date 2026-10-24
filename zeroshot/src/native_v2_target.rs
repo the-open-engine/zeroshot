@@ -165,6 +165,28 @@ where
 {
     type Transport = D::Transport;
 
+    async fn review_cache_namespace(&self, name: &str) -> Result<Option<String>, NativeV2CliError> {
+        let target = self.target(name)?;
+        self.authority
+            .review_cache_namespace(&target)
+            .await
+            .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+    }
+
+    async fn resolve_review(
+        &self,
+        name: &str,
+        request: zeroshot_engine::native_v2_review::ReviewResolutionRequest,
+        runtime: &openengine_cluster_protocol::RuntimePlan,
+    ) -> Result<zeroshot_engine::native_v2_review::PreparedReview, NativeV2CliError> {
+        validate_target_name(name).map_err(cli_target_error)?;
+        let target = self.registry.get(name).map_err(cli_target_error)?;
+        self.authority
+            .resolve_review(&target, request, runtime)
+            .await
+            .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+    }
+
     async fn add(&self, request: TargetAdd) -> Result<(), NativeV2CliError> {
         let target = prepare_target(request).map_err(cli_target_error)?;
         self.authority

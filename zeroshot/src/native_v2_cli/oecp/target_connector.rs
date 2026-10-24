@@ -22,6 +22,24 @@ use crate::native_v2_cli::{
 pub trait TargetConnector: Send + Sync {
     type Transport: SubscriptionTransport + Send + Sync + 'static;
 
+    async fn review_cache_namespace(
+        &self,
+        _name: &str,
+    ) -> Result<Option<String>, NativeV2CliError> {
+        Ok(None)
+    }
+
+    async fn resolve_review(
+        &self,
+        _name: &str,
+        _request: crate::native_v2_review::ReviewResolutionRequest,
+        _runtime: &openengine_cluster_protocol::RuntimePlan,
+    ) -> Result<crate::native_v2_review::PreparedReview, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise task resolution".to_owned(),
+        ))
+    }
+
     async fn add(&self, request: TargetAdd) -> Result<(), NativeV2CliError>;
     async fn login(&self, name: &str) -> Result<(), NativeV2CliError>;
     async fn default_resource_scope(

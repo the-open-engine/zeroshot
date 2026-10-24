@@ -20,6 +20,9 @@ pub struct HostedWorkspaceRequest<'a> {
 
 /// Restored execution authority and the store that owns subsequent engine barriers.
 pub struct HostedWorkspace {
+    /// Durable comment effects, independent of restored workspace bytes.
+    pub comment_publications:
+        Option<Arc<dyn crate::native_v2_comment_delivery::CommentPublicationStore>>,
     pub checkpoints: Arc<dyn RunCheckpointStore>,
     pub execution_seed: Vec<DurableExecution>,
     /// The original delivery identity, when restoring a successor in an existing lineage.

@@ -80,6 +80,22 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         self.machine_default_scope(target).await
     }
 
+    async fn review_cache_namespace(
+        &self,
+        target: &TargetRecord,
+    ) -> Result<Option<String>, TargetAuthorityError> {
+        self.review_snapshot_namespace(target).await.map(Some)
+    }
+
+    async fn resolve_review(
+        &self,
+        target: &TargetRecord,
+        request: zeroshot_engine::native_v2_review::ReviewResolutionRequest,
+        runtime: &openengine_cluster_protocol::RuntimePlan,
+    ) -> Result<zeroshot_engine::native_v2_review::PreparedReview, TargetAuthorityError> {
+        self.resolve_review_request(target, request, runtime).await
+    }
+
     async fn discover(&self, target: &TargetRecord) -> Result<(), TargetAuthorityError> {
         match target.access {
             TargetAccess::Hosted { .. } => self.descriptors(target).await.map(|_| ()),
@@ -105,6 +121,7 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
             &controller.audience
         };
         let _refresh_guard = self.lock_refresh_family(&target.id).await?;
+        self.review_login_generation(&target.id, true)?;
         self.login_inner(HostedLogin {
             target_id: &target.id,
             device_token,

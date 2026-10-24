@@ -18,14 +18,18 @@ pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
         let deliveries = match template {
             BuiltinGraphTemplate::SingleWorker => &[TemplateDelivery::None][..],
             BuiltinGraphTemplate::SoftwareChange => &[
+                TemplateDelivery::PullRequest,
                 TemplateDelivery::None,
                 TemplateDelivery::Push,
-                TemplateDelivery::PullRequest,
                 TemplateDelivery::Merge,
             ][..],
             BuiltinGraphTemplate::AutoResearch => {
                 &[TemplateDelivery::None, TemplateDelivery::Push][..]
             }
+            BuiltinGraphTemplate::IssueReview => {
+                &[TemplateDelivery::Comment, TemplateDelivery::None][..]
+            }
+            BuiltinGraphTemplate::PrReview => &[TemplateDelivery::Comment][..],
         };
         for delivery in deliveries {
             let graph = materialize(*template, *delivery)?;
@@ -119,6 +123,18 @@ pub(super) fn workers() -> Result<Vec<Value>, ApiError> {
             "runtimeBinding":binding,
         }));
     }
+    let template = BuiltinGraphTemplate::IssueReview;
+    let delivery = TemplateDelivery::Comment;
+    let graph = materialize(template, delivery)?;
+    let (name, binding) = template
+        .delivery_runtime_binding(delivery)
+        .map_err(internal)?
+        .ok_or_else(|| ApiError::internal("Missing comment delivery binding.".into()))?;
+    result.push(json!({
+        "id":"comment_delivery", "label":"Comment delivery", "runtimeKind":"comment_delivery",
+        "workerRefs":[crate::native_v2_comment_delivery::COMMENT_DELIVERY_WORKER_REF],
+        "node":named_node(&graph,name.as_str())?, "runtimeBinding":binding,
+    }));
     Ok(result)
 }
 
@@ -141,19 +157,38 @@ fn named_node<'a>(graph: &'a GraphSpec, name: &str) -> Result<&'a GraphNode, Api
 }
 
 fn template_label(template: BuiltinGraphTemplate, delivery: TemplateDelivery) -> &'static str {
-    match (template, delivery) {
-        (BuiltinGraphTemplate::SingleWorker, _) => "Single worker",
-        (BuiltinGraphTemplate::SoftwareChange, TemplateDelivery::None) => "Software change",
-        (BuiltinGraphTemplate::SoftwareChange, TemplateDelivery::Push) => "Software change · push",
-        (BuiltinGraphTemplate::SoftwareChange, TemplateDelivery::PullRequest) => {
-            "Software change · pull request"
+    match template {
+        BuiltinGraphTemplate::SingleWorker => "Single worker",
+        BuiltinGraphTemplate::SoftwareChange => software_change_label(delivery),
+        BuiltinGraphTemplate::AutoResearch => {
+            if delivery == TemplateDelivery::Push {
+                "Auto research · push"
+            } else {
+                "Auto research"
+            }
         }
-        (BuiltinGraphTemplate::SoftwareChange, TemplateDelivery::Merge) => {
-            "Software change · merge"
+        BuiltinGraphTemplate::IssueReview => {
+            if delivery == TemplateDelivery::Comment {
+                "Issue review · comment"
+            } else {
+                "Issue review"
+            }
         }
-        (BuiltinGraphTemplate::AutoResearch, TemplateDelivery::None) => "Auto research",
-        (BuiltinGraphTemplate::AutoResearch, TemplateDelivery::Push) => "Auto research · push",
-        (BuiltinGraphTemplate::AutoResearch, _) => "Auto research",
+        BuiltinGraphTemplate::PrReview => {
+            if delivery == TemplateDelivery::Comment {
+                "PR review · comment"
+            } else {
+                "PR review"
+            }
+        }
+    }
+}
+fn software_change_label(delivery: TemplateDelivery) -> &'static str {
+    match delivery {
+        TemplateDelivery::Push => "Software change · push",
+        TemplateDelivery::PullRequest => "Software change · pull request",
+        TemplateDelivery::Merge => "Software change · merge",
+        _ => "Software change",
     }
 }
 

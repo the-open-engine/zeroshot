@@ -128,6 +128,26 @@ where
     type Logs = BoxedSubscription<RunLogEventNotification>;
     type Attach = BoxedSubscription<RunAttachEventNotification>;
 
+    async fn review_cache_namespace(
+        &self,
+        target: Option<&str>,
+    ) -> Result<Option<String>, NativeV2CliError> {
+        self.connector
+            .review_cache_namespace(require_named_target(target)?)
+            .await
+    }
+
+    async fn resolve_review(
+        &self,
+        target: Option<&str>,
+        request: crate::native_v2_review::ReviewResolutionRequest,
+        runtime: &openengine_cluster_protocol::RuntimePlan,
+    ) -> Result<crate::native_v2_review::PreparedReview, NativeV2CliError> {
+        self.connector
+            .resolve_review(require_named_target(target)?, request, runtime)
+            .await
+    }
+
     async fn target_add(&self, request: TargetAdd) -> Result<(), NativeV2CliError> {
         self.connector.add(request).await
     }

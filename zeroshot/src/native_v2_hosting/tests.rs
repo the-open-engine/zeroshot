@@ -546,6 +546,7 @@ async fn repository_resolution_and_installation_preserve_the_exact_revision() {
     let workspace = root.path().join("workspace");
     writable_directory(&workspace);
     let installed = install_repository(RepositoryInstall {
+        checkout_references: &[],
         git_credentials: None,
         private_directory: root.path(),
         git_program: Path::new("/usr/bin/git"),

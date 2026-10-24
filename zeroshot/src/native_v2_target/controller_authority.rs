@@ -8,6 +8,7 @@ mod history;
 mod hosted_runs;
 mod machine;
 mod profiles;
+mod review;
 
 #[cfg(feature = "ui")]
 pub use history::TargetRunHistoryTransport;
@@ -72,6 +73,7 @@ pub struct TargetHttpControlAuthority {
 struct RequestCapabilities<'a> {
     runtime: Option<&'a RuntimePlan>,
     git_transport: bool,
+    task_resolution: bool,
 }
 
 impl TargetHttpControlAuthority {
@@ -457,6 +459,7 @@ impl TargetHttpControlAuthority {
             RequestCapabilities {
                 runtime: Some(&request.submission.runtime),
                 git_transport: request.requires_git_transport(),
+                task_resolution: false,
             },
         )
         .await
@@ -575,7 +578,12 @@ fn require_request_capabilities(
     capabilities: RequestCapabilities<'_>,
 ) -> Result<(), TargetAuthorityError> {
     if let Some(runtime) = capabilities.runtime {
-        require_node_runtime_lanes(controller, runtime)?;
+        require_runtime_capabilities(controller, runtime)?;
+    }
+    if capabilities.task_resolution && controller.task_resolution.is_none() {
+        return Err(authority_error(
+            "target does not advertise task resolution (openengine.task-resolution/v1)",
+        ));
     }
     require_git_transport(controller, capabilities.git_transport)
 }
@@ -587,6 +595,25 @@ fn require_git_transport(
     if required && !controller.git_transport {
         return Err(authority_error(
             "target does not support generic Git transport (openengine.git-transport/v1)",
+        ));
+    }
+    Ok(())
+}
+
+fn require_runtime_capabilities(
+    controller: &ControllerDescriptor,
+    runtime: &RuntimePlan,
+) -> Result<(), TargetAuthorityError> {
+    require_node_runtime_lanes(controller, runtime)?;
+    if runtime.nodes().values().any(|binding| {
+        matches!(
+            binding,
+            openengine_cluster_protocol::NodeRuntimeBinding::CommentDelivery { .. }
+        )
+    }) && !controller.comment_delivery
+    {
+        return Err(authority_error(
+            "target does not support comment delivery (openengine.comment-delivery/v1)",
         ));
     }
     Ok(())

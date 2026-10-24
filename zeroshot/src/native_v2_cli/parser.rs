@@ -401,11 +401,17 @@ enum TemplateName {
 
     /// Research with ten iterations by default and independent evidence gates.
     AutoResearch,
+
+    /// Inspect an issue proposal and post a review report.
+    IssueReview,
+
+    /// Review a PR diff, conditionally reproduce behavior, and post a concise report.
+    PrReview,
 }
 
 #[derive(Debug, Args)]
 struct DeliveryArgs {
-    /// Materialize this template-owned delivery mode.
+    /// Template delivery mode. Defaults to pull_request for software-change, comment for issue-review and pr-review, otherwise none.
     #[arg(long, value_name = "MODE", conflicts_with_all = ["push", "pr", "ship"])]
     delivery: Option<String>,
 
@@ -491,7 +497,7 @@ struct TemplateShowArgs {
 
     The run-level harness and provider are the default lane. An agent binding may add
     "lane": {"harness": "claude", "provider": "anthropic"} to run that node on another accepted
-    pair; git_delivery bindings cannot. --uniform-runtime-config applies one lane to every agent
+    pair; git_delivery and comment_delivery bindings cannot. --uniform-runtime-config applies one lane to every agent
     node. Named targets must advertise per-node lane support (openengine.node-runtime-lanes/v1), and
     a local run first checks that each lane's executable (codex, claude, or copilot) is on PATH.
 
@@ -548,8 +554,17 @@ struct RunArgs {
     template: Option<TemplateName>,
 
     /// Load the graph's initial input from this JSON file.
-    #[arg(long, value_name = "FILE")]
-    input: PathBuf,
+    #[arg(
+        long,
+        value_name = "FILE",
+        required_unless_present = "task_from",
+        conflicts_with = "task_from"
+    )]
+    input: Option<PathBuf>,
+
+    /// Resolve a GitHub issue or pull-request URL into review input before starting.
+    #[arg(long, value_name = "URL", required_unless_present = "input")]
+    task_from: Option<String>,
 
     /// Load an exact secret-free runtime plan from this JSON file.
     #[arg(long, value_name = "FILE")]

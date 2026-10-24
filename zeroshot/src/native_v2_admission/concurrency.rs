@@ -31,7 +31,10 @@ fn possible_writers(node: &GraphNode) -> Result<PossibleWriters<'_>, NativeV2Adm
             delivery: None,
         }),
         GraphNode::Verifier(verifier) => {
-            let delivery = DeliveryMode::from_worker(&verifier.worker).map(|_| &verifier.name);
+            let delivery = (DeliveryMode::from_worker(&verifier.worker).is_some()
+                || verifier.worker.as_str()
+                    == crate::native_v2_comment_delivery::COMMENT_DELIVERY_WORKER_REF)
+                .then_some(&verifier.name);
             Ok(PossibleWriters {
                 writer: Some(&verifier.name),
                 delivery,

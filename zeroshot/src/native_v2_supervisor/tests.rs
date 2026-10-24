@@ -193,10 +193,12 @@ impl NodeDriver for FakeDriver {
 
 fn success_for(role: NodeRole) -> WorkerOutcome {
     match role {
-        NodeRole::Worker | NodeRole::GitDelivery => WorkerOutcome::Verified {
-            output: Value::Null,
-            artifacts: Vec::new(),
-        },
+        NodeRole::Worker | NodeRole::GitDelivery | NodeRole::CommentDelivery => {
+            WorkerOutcome::Verified {
+                output: Value::Null,
+                artifacts: Vec::new(),
+            }
+        }
         NodeRole::Verifier => verifier_outcome("accepted"),
     }
 }

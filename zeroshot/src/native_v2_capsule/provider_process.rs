@@ -77,7 +77,7 @@ pub(crate) fn agent_workspace_access(
 ) -> Result<WorkspaceAccessMode, NodeRunnerError> {
     match role {
         NodeRole::Worker | NodeRole::Verifier => Ok(WorkspaceAccessMode::ReadWrite),
-        NodeRole::GitDelivery => Err(NodeRunnerError::Driver),
+        NodeRole::GitDelivery | NodeRole::CommentDelivery => Err(NodeRunnerError::Driver),
     }
 }
 
@@ -328,7 +328,7 @@ pub(crate) fn process_scope(
         (NodeRole::Verifier, SessionScope::Execution) => {
             Ok(HostedProcessScope::VerifierExecution(execution))
         }
-        (NodeRole::GitDelivery, _) => Err(NodeRunnerError::Driver),
+        (NodeRole::GitDelivery | NodeRole::CommentDelivery, _) => Err(NodeRunnerError::Driver),
     }
 }
 

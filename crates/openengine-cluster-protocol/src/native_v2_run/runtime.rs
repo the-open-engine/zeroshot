@@ -224,6 +224,10 @@ pub enum NodeRuntimeBinding {
         #[serde(default, skip_serializing_if = "DeclaredConnections::is_empty")]
         connections: DeclaredConnections,
     },
+    CommentDelivery {
+        #[serde(default, skip_serializing_if = "DeclaredConnections::is_empty")]
+        connections: DeclaredConnections,
+    },
     GitDelivery {
         #[serde(default, skip_serializing_if = "DeclaredConnections::is_empty")]
         connections: DeclaredConnections,
@@ -244,7 +248,9 @@ impl NodeRuntimeBinding {
     #[must_use]
     pub const fn declared_connections(&self) -> &DeclaredConnections {
         match self {
-            Self::Agent { connections, .. } | Self::GitDelivery { connections, .. } => connections,
+            Self::Agent { connections, .. }
+            | Self::GitDelivery { connections, .. }
+            | Self::CommentDelivery { connections } => connections,
         }
     }
 }

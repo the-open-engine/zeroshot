@@ -182,7 +182,9 @@ impl RuntimePlan {
                 lane: Some(lane), ..
             } => Some(*lane),
             NodeRuntimeBinding::Agent { lane: None, .. } => Some(self.lane()),
-            NodeRuntimeBinding::GitDelivery { .. } => None,
+            NodeRuntimeBinding::GitDelivery { .. } | NodeRuntimeBinding::CommentDelivery { .. } => {
+                None
+            }
         }
     }
 

@@ -87,7 +87,8 @@ rather than a bypass argument.
 
 ## Node bindings
 
-`kind` selects one of two binding shapes. Fields that belong to the other kind are rejected.
+`kind` selects an agent, Git delivery, or comment delivery binding. Fields belonging to another
+kind are rejected.
 
 ### `agent`
 
@@ -144,6 +145,18 @@ may require exactly one delivery node; Zeroshot Cloud quick runs require one. Se
 
 `ignore` skips pull-request discussion. CI, conflict, freshness, and merge-policy checks still apply.
 
+### `comment_delivery`
+
+This binding accepts only `kind: "comment_delivery"` and optional `connections`. It has no model,
+lane, effort, or provider session. It binds a verifier using `builtin.comment-delivery.post@1`
+with that worker's fixed input/output, signal, and diagnostic contracts and no authored instructions.
+
+The node reads a required discussion `url` and report `body`, plus optional captured `reviewScope`.
+Its URL and present scope bind directly from required caller input; they cannot change before
+publication. A graph permits one trusted delivery node, and comment publication must follow all
+other executable work and cleanup, outside loops and maps. The exact confirmed receipt must appear
+in terminal output. See [Review an issue or pull request](../guides/review.md).
+
 ## Per-node lanes
 
 A lane is one harness and provider pair. The plan's `harness` and `provider` are the default lane
@@ -181,7 +194,7 @@ model identifier and the reviewers need Anthropic ones.
 
 - `lane` accepts the same pairs as the run level, listed in
   [Harness and provider](#harness-and-provider). An invalid pair is rejected when the plan is read.
-- A `git_delivery` binding cannot carry a `lane`.
+- A `git_delivery` or `comment_delivery` binding cannot carry a `lane`.
 - A `lane` equal to the run-level pair is accepted, and the node runs exactly as it would without
   one. It is still a `lane` field, so the [target support](#target-support) check applies to it and
   older binaries reject it. Omit `lane` when a node should use the default lane.
@@ -319,8 +332,9 @@ the Python SDK's `UniformRuntime` can express [per-node lanes](#per-node-lanes);
 
 ## Template delivery bindings
 
-Built-in templates own their delivery nodes. With `software-change`, `--push`, `--pr`, and `--ship`
-add a delivery verifier named `deliver`. The existing `worker` handles delivery repairs. With
+Built-in templates own their delivery nodes. `software-change` defaults to a pull-request delivery
+verifier named `deliver`; `--push` and `--ship` select push and merge delivery, and `--delivery none`
+omits delivery. The existing `worker` handles delivery repairs. With
 `auto-research`, `--push` adds only the trusted `checkpoint_delivery` node; the researcher and
 reviewer already handle the round records and delivery description.
 `single-worker` has no delivery modes.
@@ -328,7 +342,7 @@ reviewer already handle the round records and delivery description.
 The CLI inserts a `git_delivery` binding with no forge connection for push, or
 `{"github": ["GH_TOKEN"]}` for PR and merge. Git transport uses the selected
 [source credentials](../concepts/targets.md#source-and-delivery-credentials).
-`--no-pr-feedback` (requires `--pr` or `--ship`) sets `pullRequestFeedback` to `ignore`.
+`--no-pr-feedback` (requires pull-request or merge delivery) sets `pullRequestFeedback` to `ignore`.
 
 A uniform configuration binds the added agent nodes too. An exact `--runtime-config` must bind
 all agent nodes itself. Software-change uses `worker`, `acceptance`, and `code` with every delivery

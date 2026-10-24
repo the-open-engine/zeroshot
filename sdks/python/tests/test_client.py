@@ -322,12 +322,35 @@ def test_presets_are_read_from_executable(fake_native: Path) -> None:
     ] in arguments
 
 
+@pytest.mark.parametrize("delivery", [None, "none", "push", "pull_request", "merge"])
+def test_preset_defaults_are_native_and_explicit_delivery_is_preserved(
+    fake_native: Path, delivery: str | None
+) -> None:
+    async def exercise() -> None:
+        async with Client(
+            preset=Preset("software-change", delivery=delivery), runtime=runtime()
+        ) as client:
+            await client.get_preset("software-change", delivery=delivery)
+            await client.submit("inspect it")
+
+    asyncio.run(exercise())
+    arguments = [item["args"] for item in read_invocations(fake_native)]
+    selected = [
+        item for item in arguments if item[:2] == ["template", "show"] or item[:1] == ["run"]
+    ]
+    assert len(selected) == 3
+    for item in selected:
+        if delivery is None:
+            assert "--delivery" not in item
+        else:
+            assert item[item.index("--delivery") + 1] == delivery
+
+
 def test_preset_can_disable_pull_request_feedback(fake_native: Path) -> None:
     async def exercise() -> None:
         async with Client(
             preset=Preset(
                 "software-change",
-                delivery="pull_request",
                 pull_request_feedback="ignore",
             ),
             runtime=runtime(),

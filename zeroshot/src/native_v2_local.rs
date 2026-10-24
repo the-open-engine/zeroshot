@@ -16,8 +16,8 @@ use thiserror::Error;
 
 use crate::execution::process::HostedProcessPool;
 use crate::native_v2_candidate::{
-    NativeV2CandidateConfig, NativeV2CandidateDelivery, NativeV2CandidateError,
-    NativeV2HarnessConfig, TrustedDeliveryCapabilities,
+    NativeV2CandidateConfig, NativeV2CandidateCommentDelivery, NativeV2CandidateDelivery,
+    NativeV2CandidateError, NativeV2HarnessConfig, TrustedDeliveryCapabilities,
     build_local_native_v2_candidate_with_authority, build_local_owner_native_v2_candidate,
 };
 use crate::native_v2_claude::{ClaudeAdapterConfig, ClaudeAdapterConfigError};
@@ -441,7 +441,7 @@ fn build_local_candidate_config(
         .map_err(|_| LocalCompositionError::ResolvedSource)?;
         Some(NativeV2CandidateDelivery {
             config: NativeV2DeliveryConfig {
-                delivery_run_id,
+                delivery_run_id: delivery_run_id.clone(),
                 adopt_existing_delivery,
                 git_identity: None,
                 workspace: workspace.to_owned(),
@@ -453,8 +453,17 @@ fn build_local_candidate_config(
             git_credentials,
         })
     };
+    let comment_delivery = local_comment_delivery(LocalCommentRequest {
+        admitted,
+        delivery_run_id: &delivery_run_id,
+        storage,
+        environment: native_environment,
+        workspace,
+        runtime_home: &runtime_home,
+    })?;
     let config = NativeV2CandidateConfig {
         active_memory,
+        comment_delivery,
         lanes,
         workspace: workspace.to_owned(),
         delivery,
@@ -661,6 +670,11 @@ pub(crate) fn check_delivery_executables(
     native_environment: &BTreeMap<String, String>,
     working_directory: &Path,
 ) -> Result<(), LocalCompositionError> {
+    if crate::native_v2_admission::comment_node(&submission.graph.root).is_some()
+        && find_local_executable("gh", native_environment, working_directory).is_none()
+    {
+        return Err(LocalCompositionError::MissingDeliveryExecutable { executable: "gh" });
+    }
     let required = crate::native_v2_admission::delivery_capabilities(&submission.graph.root);
     match &submission.source {
         Some(source) if !required.is_empty() => {
@@ -714,3 +728,59 @@ fn prepare_private_directory(path: &Path) -> Result<(), LocalCompositionError> {
 #[cfg(test)]
 #[path = "native_v2_local/tests.rs"]
 mod contract_tests;
+
+struct LocalCommentRequest<'a> {
+    admitted: &'a AdmittedRun,
+    delivery_run_id: &'a RunId,
+    storage: &'a Path,
+    environment: &'a BTreeMap<String, String>,
+    workspace: &'a Path,
+    runtime_home: &'a Path,
+}
+
+fn local_comment_delivery(
+    request: LocalCommentRequest<'_>,
+) -> Result<Option<NativeV2CandidateCommentDelivery>, LocalCompositionError> {
+    let LocalCommentRequest {
+        admitted,
+        delivery_run_id,
+        storage,
+        environment,
+        workspace,
+        runtime_home,
+    } = request;
+    use crate::native_v2_comment_delivery::{
+        LocalCommentPublicationStore, NativeV2CommentDeliveryConfig,
+    };
+    use crate::source_code_provider::adapters::core::{GhCliAuthorityConfig, comment_authority};
+    let Some(input) = crate::native_v2_admission::admitted_comment_input(admitted)? else {
+        return Ok(None);
+    };
+    let gh = find_local_executable("gh", environment, workspace)
+        .ok_or(LocalCompositionError::MissingDeliveryExecutable { executable: "gh" })?;
+    let mut config = GhCliAuthorityConfig::hosted(runtime_home.to_owned());
+    config.gh_program = gh;
+    let authority =
+        comment_authority(config, &input.url).map_err(|_| LocalCompositionError::ResolvedSource)?;
+    let state = storage
+        .parent()
+        .and_then(Path::parent)
+        .ok_or(LocalCompositionError::Workspace)?
+        .join("comment-publications");
+    prepare_private_directory(&state)?;
+    Ok(Some(NativeV2CandidateCommentDelivery {
+        config: NativeV2CommentDeliveryConfig {
+            delivery_run_id: delivery_run_id.clone(),
+            expected_url: input.url,
+            expected_review_scope: input.review_scope,
+            source_revision: admitted
+                .source
+                .as_ref()
+                .map(|source| source.revision.as_str().to_owned()),
+        },
+        authority,
+        store: Arc::new(LocalCommentPublicationStore::new(
+            state.join(format!("{}.json", delivery_run_id.as_str())),
+        )),
+    }))
+}

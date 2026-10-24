@@ -25,6 +25,7 @@ impl HostedWorkspaceStorage for ExternalStorage {
             b"durable cloud bytes",
         )?;
         Ok(HostedWorkspace {
+            comment_publications: None,
             checkpoints: Arc::new(ResticCheckpointStore::with_program(
                 ResticCheckpointStoreTestConfig {
                     directory: request.checkpoint_directory.to_owned(),

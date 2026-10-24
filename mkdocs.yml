@@ -57,6 +57,7 @@ nav:
       - Prepare a runtime environment: guides/runtime-environments.md
       - Active Memory: guides/active-memory.md
       - Build a review loop: guides/review-loop.md
+      - Review an issue or PR: guides/review.md
       - Observe and control runs: guides/observe-and-control.md
       - Use a local graph as an ACP agent: guides/acp.md
       - Python SDK: guides/python-sdk.md

@@ -56,6 +56,7 @@ impl std::fmt::Debug for GitTransportConfig {
 pub struct GitTransport {
     config: Arc<GitTransportConfig>,
     remote: OsString,
+    checkout_references: Vec<String>,
     diagnostics: Option<(
         openengine_cluster_protocol::RunId,
         Arc<OperatorDiagnosticStore>,
@@ -73,6 +74,7 @@ impl GitTransport {
         Self {
             config: Arc::new(config),
             remote: remote.as_ref().to_owned(),
+            checkout_references: Vec::new(),
             diagnostics: None,
         }
     }
@@ -85,6 +87,21 @@ impl GitTransport {
     ) -> Self {
         self.diagnostics = Some((run_id, store));
         self
+    }
+
+    pub(crate) fn with_checkout_references(
+        mut self,
+        references: Vec<String>,
+    ) -> Result<Self, SourceDeliveryError> {
+        if references.len() > 2
+            || references
+                .iter()
+                .any(|reference| !valid_checkout_reference(reference))
+        {
+            return Err(SourceDeliveryError::Rejected);
+        }
+        self.checkout_references = references;
+        Ok(self)
     }
 
     #[must_use]
@@ -195,6 +212,35 @@ impl GitTransport {
     ) -> Result<(), SourceDeliveryError> {
         let CheckoutRequest { branch, revision } = source;
         require_identity(branch, revision)?;
+        self.initialize_checkout(revision, credential, deadline)
+            .await?;
+        let branch_ref = format!("refs/heads/{branch}");
+        let mut references = vec!["fetch", "--no-tags", "--", "origin", &branch_ref, revision];
+        references.extend(self.checkout_references.iter().map(String::as_str));
+        self.success_before(&references, credential, deadline)
+            .await?;
+        self.retain_review_base(&self.checkout_references, credential, deadline)
+            .await?;
+        self.success_before(&["checkout", "--detach", revision], credential, deadline)
+            .await?;
+        let head = self
+            .success_before(&["rev-parse", "HEAD"], credential, deadline)
+            .await?;
+        if head.stdout_truncated() || head.stdout().trim() != revision {
+            return Err(SourceDeliveryError::identity(format!(
+                "checkout revision mismatch: expected {revision}, observed {}",
+                head.diagnostic().stdout.trim()
+            )));
+        }
+        Ok(())
+    }
+
+    async fn initialize_checkout(
+        &self,
+        revision: &str,
+        credential: SourceDeliveryCredential<'_>,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), SourceDeliveryError> {
         self.success_before(
             &["init", "--quiet", object_format(revision)],
             credential,
@@ -212,29 +258,46 @@ impl GitTransport {
             deadline,
         )
         .await?;
-        self.success_before(
-            &[
-                "fetch",
-                "--no-tags",
-                "--",
-                "origin",
-                &format!("refs/heads/{branch}"),
-                revision,
-            ],
-            credential,
-            deadline,
-        )
-        .await?;
-        self.success_before(&["checkout", "--detach", revision], credential, deadline)
+        Ok(())
+    }
+
+    pub(crate) async fn fetch_review_references(
+        &self,
+        references: &[String],
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<(), SourceDeliveryError> {
+        if references.len() > 2
+            || references
+                .iter()
+                .any(|reference| !valid_checkout_reference(reference))
+        {
+            return Err(SourceDeliveryError::Rejected);
+        }
+        let deadline = tokio::time::Instant::now() + self.config.deadline;
+        let remote = self.remote.to_str().ok_or(SourceDeliveryError::Rejected)?;
+        let mut args = vec!["fetch", "--no-tags", "--", remote];
+        args.extend(references.iter().map(String::as_str));
+        self.success_before(&args, credential, deadline).await?;
+        self.retain_review_base(references, credential, deadline)
+            .await
+    }
+
+    async fn retain_review_base(
+        &self,
+        references: &[String],
+        credential: SourceDeliveryCredential<'_>,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), SourceDeliveryError> {
+        if let Some(revision) = references
+            .iter()
+            .find(|reference| super::valid_revision(reference))
+        {
+            self.success_before(
+                &["update-ref", "refs/zeroshot/review/base", revision],
+                credential,
+                deadline,
+            )
             .await?;
-        let head = self
-            .success_before(&["rev-parse", "HEAD"], credential, deadline)
-            .await?;
-        if head.stdout_truncated() || head.stdout().trim() != revision {
-            return Err(SourceDeliveryError::identity(format!(
-                "checkout revision mismatch: expected {revision}, observed {}",
-                head.diagnostic().stdout.trim()
-            )));
         }
         Ok(())
     }
@@ -467,4 +530,19 @@ pub(crate) fn remove_repository_environment(command: &mut std::process::Command)
     ] {
         command.env_remove(variable);
     }
+}
+
+fn valid_checkout_reference(value: &str) -> bool {
+    if super::valid_revision(value) {
+        return true;
+    }
+    value
+        .strip_prefix("refs/pull/")
+        .and_then(|value| value.strip_suffix("/head"))
+        .is_some_and(|number| {
+            !number.starts_with('0')
+                && !number.is_empty()
+                && number.len() <= 20
+                && number.bytes().all(|byte| byte.is_ascii_digit())
+        })
 }

@@ -20,11 +20,18 @@ pub enum BuiltinGraphTemplate {
     SingleWorker,
     SoftwareChange,
     AutoResearch,
+    IssueReview,
+    PrReview,
 }
 
 impl BuiltinGraphTemplate {
-    pub(crate) const ALL: [Self; 3] =
-        [Self::SingleWorker, Self::SoftwareChange, Self::AutoResearch];
+    pub(crate) const ALL: [Self; 5] = [
+        Self::SingleWorker,
+        Self::SoftwareChange,
+        Self::AutoResearch,
+        Self::IssueReview,
+        Self::PrReview,
+    ];
 
     #[must_use]
     pub(crate) const fn all() -> &'static [Self] {
@@ -37,6 +44,8 @@ impl BuiltinGraphTemplate {
             Self::SingleWorker => "single-worker",
             Self::SoftwareChange => "software-change",
             Self::AutoResearch => "auto-research",
+            Self::IssueReview => "issue-review",
+            Self::PrReview => "pr-review",
         }
     }
 
@@ -46,7 +55,17 @@ impl BuiltinGraphTemplate {
             "single-worker" => Some(Self::SingleWorker),
             "software-change" => Some(Self::SoftwareChange),
             "auto-research" => Some(Self::AutoResearch),
+            "issue-review" => Some(Self::IssueReview),
+            "pr-review" => Some(Self::PrReview),
             _ => None,
+        }
+    }
+
+    pub(crate) const fn default_delivery(self) -> TemplateDelivery {
+        match self {
+            Self::SoftwareChange => TemplateDelivery::PullRequest,
+            Self::IssueReview | Self::PrReview => TemplateDelivery::Comment,
+            _ => TemplateDelivery::None,
         }
     }
 
@@ -69,6 +88,8 @@ impl BuiltinGraphTemplate {
             Self::SingleWorker => single_worker_graph(),
             Self::SoftwareChange => software_change_graph(delivery),
             Self::AutoResearch => auto_research_graph(delivery),
+            Self::IssueReview => super::review::issue_review_graph(delivery),
+            Self::PrReview => super::pr_review::pr_review_graph(delivery),
         }
     }
 
@@ -95,13 +116,19 @@ impl BuiltinGraphTemplate {
         let connections = delivery_connections(delivery)?;
         let name = match self {
             Self::AutoResearch => "checkpoint_delivery",
-            Self::SingleWorker | Self::SoftwareChange => DELIVERY_NODE,
+            Self::SingleWorker | Self::SoftwareChange | Self::IssueReview | Self::PrReview => {
+                DELIVERY_NODE
+            }
         };
         Ok(Some((
             node_name(name)?,
-            NodeRuntimeBinding::GitDelivery {
-                connections,
-                pull_request_feedback,
+            if delivery == TemplateDelivery::Comment {
+                NodeRuntimeBinding::CommentDelivery { connections }
+            } else {
+                NodeRuntimeBinding::GitDelivery {
+                    connections,
+                    pull_request_feedback,
+                }
             },
         )))
     }
@@ -109,10 +136,14 @@ impl BuiltinGraphTemplate {
     fn validate_delivery(self, delivery: TemplateDelivery) -> Result<(), BuiltinTemplateError> {
         let supported = match self {
             Self::SingleWorker => delivery == TemplateDelivery::None,
-            Self::SoftwareChange => true,
+            Self::SoftwareChange => delivery != TemplateDelivery::Comment,
             Self::AutoResearch => {
                 matches!(delivery, TemplateDelivery::None | TemplateDelivery::Push)
             }
+            Self::IssueReview => {
+                matches!(delivery, TemplateDelivery::None | TemplateDelivery::Comment)
+            }
+            Self::PrReview => delivery == TemplateDelivery::Comment,
         };
         if supported {
             Ok(())
@@ -132,6 +163,7 @@ pub enum TemplateDelivery {
     Push,
     PullRequest,
     Merge,
+    Comment,
 }
 
 impl TemplateDelivery {
@@ -142,6 +174,7 @@ impl TemplateDelivery {
             Self::Push => "push",
             Self::PullRequest => "pull_request",
             Self::Merge => "merge",
+            Self::Comment => "comment",
         }
     }
 }

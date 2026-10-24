@@ -1,5 +1,22 @@
 use super::*;
 
+#[cfg(unix)]
+#[tokio::test]
+async fn private_input_and_early_output_drain_concurrently() {
+    let mut command = Command::new("/usr/bin/python3");
+    command.args(["-c", "import sys; sys.stdout.write('x'*262144); sys.stdout.flush(); data=sys.stdin.buffer.read(); print(len(data))"]);
+    let input = vec![b'p'; 262144];
+    let output = capture_sensitive_with_input(&mut command, Duration::from_secs(5), &[], &input)
+        .await
+        .unwrap()
+        .require_success()
+        .unwrap();
+    assert!(!output.stdout_truncated());
+    assert!(output.stdout().starts_with(&"x".repeat(262144)));
+    assert!(output.stdout().ends_with("262144\n"));
+    assert!(output.diagnostic().stdout_truncated);
+}
+
 fn failure(stderr: impl Into<String>) -> GitCommandFailure {
     GitCommandFailure {
         command: "git fetch".into(),

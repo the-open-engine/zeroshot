@@ -518,8 +518,9 @@ fn enforce_delivery_terminal(
     snapshot: &RunSnapshot,
     terminal: TerminalResult,
 ) -> Result<TerminalResult, NativeV2SupervisorError> {
-    let requires_delivery_receipt =
-        policy == DeliveryPolicy::Required || sole_delivery_node(admitted).is_some();
+    let requires_delivery_receipt = policy == DeliveryPolicy::Required
+        || sole_delivery_node(admitted).is_some()
+        || crate::native_v2_admission::comment_node(&admitted.graph.root).is_some();
     let accepted = match &terminal {
         TerminalResult::Succeeded { output } if requires_delivery_receipt => {
             has_required_delivery_receipt(admitted, snapshot, output)
@@ -541,13 +542,13 @@ fn has_required_delivery_receipt(
     snapshot: &RunSnapshot,
     terminal_output: &Value,
 ) -> bool {
-    let Some((node, mode)) = sole_delivery_node(admitted) else {
-        return false;
-    };
-    let Some(source) = &admitted.source else {
-        return false;
-    };
-    let Ok(target) = crate::native_v2_delivery::source_target(source, mode) else {
+    let node = sole_delivery_node(admitted)
+        .map(|(node, _)| node)
+        .or_else(|| {
+            crate::native_v2_admission::comment_node(&admitted.graph.root)
+                .map(|node| node.name.clone())
+        });
+    let Some(node) = node else {
         return false;
     };
     let writers = writer_nodes(admitted);
@@ -593,8 +594,29 @@ fn has_required_delivery_receipt(
         }
     });
     writers_settled
-        && is_matching_success_receipt(output, mode, &target)
+        && receipt_matches_admission(admitted, output)
         && contains_exact_value(terminal_output, output)
+}
+
+fn receipt_matches_admission(admitted: &AdmittedRun, output: &Value) -> bool {
+    if let Some((_, mode)) = sole_delivery_node(admitted) {
+        return admitted
+            .source
+            .as_ref()
+            .and_then(|source| crate::native_v2_delivery::source_target(source, mode).ok())
+            .is_some_and(|target| is_matching_success_receipt(output, mode, &target));
+    }
+    let Ok(Some(comment)) = crate::native_v2_admission::admitted_comment_input(admitted) else {
+        return false;
+    };
+    crate::native_v2_comment_delivery::is_matching_success_receipt(
+        output,
+        &comment.url,
+        admitted
+            .source
+            .as_ref()
+            .map(|source| source.revision.as_str()),
+    )
 }
 
 fn contains_exact_value(container: &Value, expected: &Value) -> bool {

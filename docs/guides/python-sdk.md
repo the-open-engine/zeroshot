@@ -42,7 +42,10 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-Opening a client captures the current folder; the default preset is `Preset("software-change", delivery="none")`.
+Opening a client captures the current folder; the default preset is `Preset("software-change")`.
+An omitted delivery selector uses the native template default: a PR for `software-change`, a comment
+for `pr-review` and `issue-review`. PR publication requires a Git checkout, GitHub access, and the declared `github.GH_TOKEN`
+connection. Use `Preset("software-change", delivery="none")` for local changes without publication.
 Per-run `cwd=` paths resolve from that captured folder, or `LocalTarget.workspace` when supplied.
 Local graphs without Git delivery accept plain folders. Push needs committed Git and a remote;
 PR and merge need a supported forge (GitHub today). Choose the harness, provider, and model.

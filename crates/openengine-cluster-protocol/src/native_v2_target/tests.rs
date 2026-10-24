@@ -3,6 +3,27 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use super::*;
 
 #[test]
+fn comment_capability_is_a_frozen_marker_and_task_resolution_owns_its_route() {
+    let document = TargetDiscoveryDocument::direct(TargetAuthentication::None)
+        .with_comment_delivery()
+        .with_task_resolution();
+    assert!(!document.extensions.is_empty());
+    let mut value = serde_json::to_value(document).assert_value();
+    assert_eq!(
+        value["extensions"]["comment_delivery"],
+        serde_json::json!({"kind":COMMENT_DELIVERY_KIND})
+    );
+    assert_eq!(
+        value["extensions"]["task_resolution"],
+        serde_json::json!({"kind":TASK_RESOLUTION_KIND,"resolve":TARGET_TASK_RESOLUTION_PATH})
+    );
+    value["extensions"]["future"] = serde_json::json!({"arbitrary":true});
+    serde_json::from_value::<TargetDiscoveryDocument>(value.clone()).assert_value();
+    value["extensions"]["comment_delivery"]["resolve"] = serde_json::json!("/unexpected");
+    assert!(serde_json::from_value::<TargetDiscoveryDocument>(value).is_err());
+}
+
+#[test]
 fn supported_non_hosted_target_discovery_advertises_workspace_recovery() {
     let direct =
         TargetDiscoveryDocument::direct(TargetAuthentication::None).with_workspace_recovery();

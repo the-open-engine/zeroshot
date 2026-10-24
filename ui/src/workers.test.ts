@@ -46,6 +46,15 @@ const pr: WorkerOption = {
   node: { ...deliveryNode, worker: 'builtin.git-delivery.pr@1' },
 };
 const workers = [agent, pr, merge];
+const comment: WorkerOption = {
+  ...merge,
+  id: 'comment_delivery',
+  label: 'Comment delivery',
+  runtimeKind: 'comment_delivery',
+  workerRefs: ['builtin.comment-delivery.post@1'],
+  node: { ...deliveryNode, worker: 'builtin.comment-delivery.post@1' },
+  runtimeBinding: { kind: 'comment_delivery', connections: { github: ['GH_TOKEN'] } },
+};
 function document(): Document {
   return {
     name: 'custom',
@@ -89,6 +98,22 @@ function document(): Document {
     },
   };
 }
+
+test('comment delivery uses a fixed native contract and excludes a second publisher', () => {
+  const next = applyWorker(document(), 'custom_worker', comment, [...workers, comment]);
+  assert.equal(next.runtime.nodes.custom_worker.kind, 'comment_delivery');
+  assert.equal(
+    workerOption(findNode(next.graph.root, 'custom_worker')!, next.runtime.nodes.custom_worker, [
+      comment,
+    ]),
+    comment
+  );
+  assert.equal(findNode(next.graph.root, 'custom_worker')!.instructions, undefined);
+  const peer = structuredClone(findNode(next.graph.root, 'custom_worker')!);
+  peer.name = 'peer';
+  next.graph.root.children.push(peer);
+  assert.throws(() => applyWorker(next, 'peer', merge, [...workers, comment]), /only one delivery/);
+});
 
 test('ordinary Agent selection preserves caller-authored contract identity and runtime', () => {
   const doc = document();
@@ -149,7 +174,7 @@ test('a second delivery worker is rejected without changing either node', () => 
   doc.graph.root.children.push({ kind: 'verifier', name: 'peer', worker: 'agent.peer@1' });
   doc.runtime.nodes.peer = { kind: 'agent', model: 'peer' };
   const before = structuredClone(doc);
-  assert.throws(() => applyWorker(doc, 'peer', pr, workers), /only one Git delivery/);
+  assert.throws(() => applyWorker(doc, 'peer', pr, workers), /only one delivery/);
   assert.deepEqual(doc, before);
 });
 

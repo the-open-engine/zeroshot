@@ -169,7 +169,7 @@ pub(super) async fn command_json(
     })
 }
 
-fn command_failure(
+pub(super) fn command_failure(
     failure: crate::native_v2_delivery::command::GitCommandFailure,
     credential: SourceDeliveryCredential<'_>,
 ) -> SourceDeliveryError {

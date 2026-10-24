@@ -359,7 +359,7 @@ function WorkflowActionContent({ model }: { model: AppModel }) {
                     </option>
                   ))}
                 {bootstrap?.workers
-                  ?.filter((w) => w.runtimeKind === 'git_delivery')
+                  ?.filter((w) => ['git_delivery', 'comment_delivery'].includes(w.runtimeKind))
                   .map((w) => (
                     <option key={w.id} value={`worker:${w.id}`}>
                       {w.label}

@@ -120,7 +120,7 @@ Start the run. Add `--validate-only` to check the graph, runtime configuration, 
 ```bash
 zeroshot run \
   --title "Add JSON status output" \
-  --template software-change \
+  --template software-change --delivery none \
   --input input.json \
   --uniform-runtime-config runtime.json
 ```
@@ -248,14 +248,19 @@ review and exploration rules.
 
 ## Choose delivery and execution
 
-Runs keep the work local unless you pass a delivery flag:
+`software-change` defaults to PR delivery; `pr-review` and `issue-review` default to posting a comment.
+[PR review](docs/guides/review.md) classifies reproduction needs, exercises the full local stack when
+required, and checks code and linked issue coverage before posting a concise report.
+Use `--delivery none` to keep a software change local or return an issue review report without publication.
+For `software-change`:
 
-| Delivery         | Behavior                                         |
-| ---------------- | ------------------------------------------------ |
-| No delivery flag | Keep the work local                              |
-| `--push`         | Push the managed branch                          |
-| `--pr`           | Prepare a mergeable pull request without merging |
-| `--ship`         | Proceed through PR, CI, and merge                |
+| Delivery          | Behavior                                         |
+| ----------------- | ------------------------------------------------ |
+| No delivery flag  | Prepare a mergeable pull request without merging |
+| `--delivery none` | Keep the work local                              |
+| `--push`          | Push the managed branch                          |
+| `--pr`            | Prepare a mergeable pull request without merging |
+| `--ship`          | Proceed through PR, CI, and merge                |
 
 PR and ship runs address visible pull request review feedback by default; pass `--no-pr-feedback` to
 ignore it.

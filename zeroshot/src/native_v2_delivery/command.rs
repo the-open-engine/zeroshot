@@ -6,7 +6,7 @@ use crate::execution::process::platform::{
 };
 use std::time::Duration;
 
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
 const MAX_DIAGNOSTIC_BYTES: usize =
@@ -98,33 +98,49 @@ pub(crate) async fn capture_sensitive(
     deadline: Duration,
     private_secrets: &[String],
 ) -> Result<GitCommandOutput, GitCommandFailure> {
+    capture_exchange(command, deadline, private_secrets, None).await
+}
+
+/// Sends bounded private request bytes concurrently with output and confirmed process cleanup.
+pub(crate) async fn capture_sensitive_with_input(
+    command: &mut Command,
+    deadline: Duration,
+    private_secrets: &[String],
+    input: &[u8],
+) -> Result<GitCommandOutput, GitCommandFailure> {
+    capture_exchange(command, deadline, private_secrets, Some(input)).await
+}
+
+async fn capture_exchange(
+    command: &mut Command,
+    deadline: Duration,
+    private_secrets: &[String],
+    input: Option<&[u8]>,
+) -> Result<GitCommandOutput, GitCommandFailure> {
     let mut secrets = command_secrets(command);
     secrets.extend_from_slice(private_secrets);
     let mut diagnostic = command_diagnostic(command, &secrets);
-    command
-        .kill_on_drop(true)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    configure_capture(command, input.is_some());
     let (mut child, process_group) = spawn_contained(command).map_err(|error| {
         diagnostic.context = format!("could not start contained command: {error}").into_boxed_str();
         diagnostic.clone()
     })?;
-    let Some(stdout) = child.stdout.take() else {
-        return Err(diagnostic);
-    };
-    let Some(stderr) = child.stderr.take() else {
-        return Err(diagnostic);
-    };
+    let (stdout, stderr, stdin) = take_pipes(&mut child).ok_or_else(|| diagnostic.clone())?;
     let mut captured_stdout = CapturedBytes::default();
     let mut captured_stderr = CapturedBytes::default();
     let retain = MAX_DIAGNOSTIC_BYTES + secrets.iter().map(String::len).max().unwrap_or(0);
+    // The input exchange serves bounded forge JSON, whose private protocol bytes can be
+    // larger than printable diagnostics. Existing Git captures retain their prior bound.
+    let stdout_retain = input.map_or(retain, |_| 8 * 1024 * 1024);
     let result = tokio::time::timeout(deadline, async {
         let completion = wait_and_cleanup(&mut child, &process_group, &mut diagnostic);
-        let (status, (), ()) = tokio::join!(
+        let (status, (), (), sent) = tokio::join!(
             completion,
-            drain(stdout, &mut captured_stdout, retain),
+            drain(stdout, &mut captured_stdout, stdout_retain),
             drain(stderr, &mut captured_stderr, retain),
+            send_input(stdin, input),
         );
+        sent?;
         status
     })
     .await;
@@ -161,6 +177,42 @@ pub(crate) async fn capture_sensitive(
             Err(diagnostic)
         }
     }
+}
+
+fn configure_capture(command: &mut Command, sends_input: bool) {
+    command
+        .kill_on_drop(true)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if sends_input {
+        command.stdin(Stdio::piped());
+    }
+}
+
+fn take_pipes(
+    child: &mut tokio::process::Child,
+) -> Option<(
+    tokio::process::ChildStdout,
+    tokio::process::ChildStderr,
+    Option<tokio::process::ChildStdin>,
+)> {
+    Some((
+        child.stdout.take()?,
+        child.stderr.take()?,
+        child.stdin.take(),
+    ))
+}
+
+async fn send_input(
+    stdin: Option<tokio::process::ChildStdin>,
+    input: Option<&[u8]>,
+) -> std::io::Result<()> {
+    if let Some(input) = input {
+        let mut stdin = stdin.ok_or_else(|| std::io::Error::other("command stdin unavailable"))?;
+        stdin.write_all(input).await?;
+        stdin.shutdown().await?;
+    }
+    Ok(())
 }
 
 async fn wait_and_cleanup(

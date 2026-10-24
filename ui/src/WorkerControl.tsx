@@ -46,7 +46,7 @@ export function WorkerControl({
         <div className="control-confirm" role="alert">
           <p>Change this node to {replacement.label}?</p>
           <p className="helper">
-            {replacement.runtimeKind === 'git_delivery'
+            {['git_delivery', 'comment_delivery'].includes(replacement.runtimeKind)
               ? 'This resets the node’s inputs, outputs, instructions, and runtime settings.'
               : 'This replaces the delivery implementation with an agent.'}
           </p>
