@@ -106,10 +106,6 @@ pub enum TargetConnectorError {
     AlreadyExists(String),
     #[error("target {0:?} not found")]
     NotFound(String),
-    #[error(
-        "cannot rename the built-in target to \"platform\": that name is already configured; rename the existing \"platform\" entry in targets.json and retry"
-    )]
-    PlatformTargetUpgradeConflict,
     #[error("target registry path cannot be resolved: {0}")]
     RegistryPath(&'static str),
     #[error("target registry I/O failed: {0}")]

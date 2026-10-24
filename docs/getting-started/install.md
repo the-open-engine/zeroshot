@@ -60,11 +60,6 @@ Platform runs use `--target platform`. Omit `--target` for local execution. The
 [Zeroshot Platform docs](https://cloud.zeroshot.sh/docs) cover organizations, the GitHub App, and saved
 connections.
 
-The CLI automatically renames the previous built-in `cloud` target to `platform`, retaining its
-endpoint and stored login. Customized targets named `cloud` stay unchanged. If that rename would
-collide with an existing `platform` target, the CLI reports an upgrade conflict and preserves both
-records. Update commands and scripts to use `--target platform`.
-
 ## Open the workspace UI
 
 ```console

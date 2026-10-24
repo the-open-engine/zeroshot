@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { upgradePlatformWorkspaceStorage, workspaceStorageKeys } from './workspace-storage';
+import { workspaceStorageKeys } from './workspace-storage';
 import { RunHistoryView } from './RunHistoryView';
 import { RunHistoryBoundary } from './RunHistoryBoundary';
 import { createEmbeddedFetch } from './embedded-fetch';
@@ -110,7 +110,6 @@ function useHostedServices(configuration?: WorkspaceInit, host?: WorkspaceBridge
         const collection = configuration.environmentApi
           ? new URL(configuration.environmentApi, window.location.origin)
           : undefined;
-        if (collection) upgradePlatformWorkspaceStorage(collection, bootstrap.workspace);
         const environmentStore = collection
           ? createEnvironmentStore(
               collection,

@@ -100,12 +100,7 @@ same origin and expected parent/iframe window. The iframe first sends
 The authenticated bootstrap must return `version: 1` and
 `workspace: {kind: "platform", id: workspaceId}`. Bind this ID to user, organization and profile
 scope. Recreating the iframe binds a different authority; protect the old draft before doing so.
-For the tag upgrade, bootstrap may identify the previous pinned UI asset path through
-`legacyWorkspaceMount`. The editor upgrades browser state only for the same origin and workspace,
-preferring the current mount before that explicit predecessor. Completed upgrades retain a marker
-so saved or discarded drafts cannot reappear; storage failures keep unhandled old values for retry.
-Platform storage normalizes pinned asset mounts to `/workspace/`, keeping later UI revisions in the
-same browser namespace while preserving origin and workspace authority isolation.
+The `platform` kind starts a new browser storage namespace for drafts and preferences.
 Optional CSRF configuration contains names only. The iframe reads the existing cookie for each
 service write and rejects missing/duplicate cookies. Platform omits this configuration only for its
 server-selected local authentication mode. Credentials never enter messages.

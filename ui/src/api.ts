@@ -66,7 +66,6 @@ export type Bootstrap = {
   runtimeSchema: any;
   version: number;
   workspace: WorkspaceIdentity;
-  legacyWorkspaceMount?: string;
 };
 
 export function readBootstrap(value: unknown): Bootstrap {

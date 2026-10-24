@@ -39,8 +39,6 @@ another run. A failed Platform run does not authorize silently implementing the 
   connections) is documented at https://cloud.zeroshot.sh/docs.
 - Do not add or set up the built-in Platform target. Named targets store endpoints and login identity,
   not repository configuration.
-- The CLI upgrades the previous built-in `cloud` target to `platform` and reuses its stored login.
-  It preserves customized targets; an existing `platform` target causes an upgrade conflict.
 
 ## Reuse profiles and connections
 

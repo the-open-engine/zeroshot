@@ -225,9 +225,6 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   configured, and unavailable inspection results. Codex browser/computer access controls and explicit
   approval-review features count as authored policy.
 - The local target registry initializes `platform` at `https://api.cloud.zeroshot.sh` with a persistent hosted device identity.
-  On upgrade, the recognized built-in `cloud` record is renamed under the registry lock while
-  preserving its UUID, device token, origin and credential custody. A conflicting `platform` record
-  stops the upgrade without rewriting the file; customized `cloud` records remain caller-owned.
 - Local runs select an optional `--cwd` workspace, defaulting to the invoking folder. File arguments
   stay relative to the invoking folder. A Git checkout uses its canonical root; plain, unborn, and
   detached folders are allowed when the graph has no Git delivery. Workspace and active Zeroshot
@@ -889,14 +886,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Drafts/layout are scoped to workspace identity. Saves acknowledge only their captured document
   generation; imports carry no foreign revision. Pending numeric text belongs to the document,
   survives inspector navigation, and commits only when valid. Navigation must preserve unsaved work.
-  Hosted workspaces use the `platform` kind with their existing opaque workspace IDs. After an
-  authenticated bootstrap, browser recovery copies legacy `cloud` storage entries for the same
-  origin, workspace and mount (including the explicitly identified previous UI asset mount).
-  Existing new entries win; a completion marker prevents discarded drafts from returning. Legacy
-  values remain available if storage is blocked or full. Environment drafts
-  receive the same upgrade at their own service mount.
-  Platform asset mounts normalize to `/workspace/` for storage, so future source revisions preserve
-  the upgraded namespace without changing origin or workspace authority.
+  Hosted workspaces use the `platform` kind with their existing opaque workspace IDs. The tag
+  rename starts a new browser storage namespace; earlier drafts and preferences are not imported.
 - The structured graph is canonical; React Flow/ELK provide presentation only. Flattening sequences
   or folding standard error routes must preserve scopes, identities, priority, conditions, and
   runtime bindings. Custom/unfamiliar routes stay visible. Layout and themes stay out of profiles.
