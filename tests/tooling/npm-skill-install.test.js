@@ -71,17 +71,21 @@ after(() => {
 });
 
 describe('npm Zeroshot skill installation', () => {
-  it('installs every managed skill for Codex, Copilot, Pi, and Claude Code', () => {
+  it('installs all three managed skills for Codex, Copilot, Pi, and Claude Code', () => {
     const fixture = makeFixture();
     const results = install(fixture);
     const files = destinations(fixture);
 
     assert.deepEqual(
       results.map(({ id, status }) => [id, status]),
-      SKILL_NAMES.flatMap(() => [
+      [
         ['agents', 'installed'],
         ['claude', 'installed'],
-      ])
+        ['agents', 'installed'],
+        ['claude', 'installed'],
+        ['agents', 'installed'],
+        ['claude', 'installed'],
+      ]
     );
     for (const skill of SKILL_NAMES) {
       const shared = path.join(fixture.homeDirectory, '.agents', 'skills', skill, 'SKILL.md');
@@ -106,7 +110,7 @@ describe('npm Zeroshot skill installation', () => {
 
     assert.deepEqual(
       results.map(({ status }) => status),
-      SKILL_NAMES.flatMap(() => ['unchanged', 'unchanged'])
+      ['unchanged', 'unchanged', 'unchanged', 'unchanged', 'unchanged', 'unchanged']
     );
     assert.deepEqual(fs.readFileSync(files.agents), before);
     for (const filename of Object.values(files)) {
@@ -127,7 +131,7 @@ describe('npm Zeroshot skill installation', () => {
 
     assert.deepEqual(
       results.map(({ status }) => status),
-      ['updated', 'updated', ...SKILL_NAMES.slice(1).flatMap(() => ['unchanged', 'unchanged'])]
+      ['updated', 'updated', 'unchanged', 'unchanged', 'unchanged', 'unchanged']
     );
     assert.equal(managedSource(fs.readFileSync(destinations(fixture).agents, 'utf8')), next);
   });
@@ -209,7 +213,7 @@ describe('npm Zeroshot skill installation boundaries', () => {
     let results = install(fixture, { homeDirectory: 'relative-home' });
     assert.deepEqual(
       results.map(({ status }) => status),
-      SKILL_NAMES.flatMap(() => ['failed', 'failed'])
+      ['failed', 'failed', 'failed', 'failed', 'failed', 'failed']
     );
 
     results = install(fixture, { environment: { CLAUDE_CONFIG_DIR: 'relative-claude' } });
@@ -223,7 +227,7 @@ describe('npm Zeroshot skill installation boundaries', () => {
 
     assert.deepEqual(
       results.map(({ status }) => status),
-      SKILL_NAMES.flatMap(() => ['failed', 'failed'])
+      ['failed', 'failed', 'failed', 'failed', 'failed', 'failed']
     );
     assert.equal(fs.existsSync(destinations(fixture).agents), false);
     assert.match(resultFor(results, 'agents').message, /user-owned npm prefix/);

@@ -149,17 +149,21 @@ it('packs and installs the published npm surface on the current host', async (t)
   );
   assert.deepEqual(
     skillRuns[0].map(({ id, status }) => [id, status]),
-    skills.SKILL_NAMES.flatMap(() => [
+    [
       ['agents', 'installed'],
       ['claude', 'installed'],
-    ])
+      ['agents', 'installed'],
+      ['claude', 'installed'],
+      ['agents', 'installed'],
+      ['claude', 'installed'],
+    ]
   );
   const agentSkill = path.join(homeDirectory, '.agents', 'skills', 'zeroshot', 'SKILL.md');
   const before = fs.readFileSync(agentSkill);
   assert.equal(await installed.install(installOptions), destination);
   assert.deepEqual(
     skillRuns[1].map(({ status }) => status),
-    skills.SKILL_NAMES.flatMap(() => ['unchanged', 'unchanged'])
+    ['unchanged', 'unchanged', 'unchanged', 'unchanged', 'unchanged', 'unchanged']
   );
   assert.deepEqual(fs.readFileSync(agentSkill), before);
 
@@ -168,11 +172,7 @@ it('packs and installs the published npm surface on the current host', async (t)
   await assert.rejects(installed.install(installOptions), /SKILL_INSTALL_INCOMPLETE/);
   assert.deepEqual(
     skillRuns[2].map(({ status }) => status),
-    [
-      'conflict',
-      'unchanged',
-      ...skills.SKILL_NAMES.slice(1).flatMap(() => ['unchanged', 'unchanged']),
-    ]
+    ['conflict', 'unchanged', 'unchanged', 'unchanged', 'unchanged', 'unchanged']
   );
   assert.deepEqual(fs.readFileSync(agentSkill), edited);
   assert.deepEqual(
