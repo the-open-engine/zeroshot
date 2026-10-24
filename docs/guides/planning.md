@@ -24,6 +24,10 @@ a change, for example "plan this with zeroshot", and it:
 A small, clear change gets a short plan with no questions. The skill only plans: it does not edit
 code or start runs.
 
+The skill is not your agent's plan mode. A plan mode prepares the edit the agent is about to make in
+the current session; the skill writes a plan file that outlives the session, so another agent, a
+teammate or a Zeroshot run can build from it later.
+
 ## Plan format
 
 A plan has YAML frontmatter and fixed sections. Goal, Acceptance criteria and Constraints are
@@ -80,23 +84,28 @@ Store the event id on each booking with a unique index; on conflict, return the 
 - Cleaning up existing duplicates: sub-plan WR-2.1.
 ```
 
-| Field or section                    | Meaning                                                                                     |
-| ----------------------------------- | ------------------------------------------------------------------------------------------- |
-| `id`                                | Short unique id: an uppercase key and a number; sub-plans add a level (`WR-2.1`)            |
-| `status`                            | `new`, `needs-input` (a blocking question is open), `ready`, `running`, `done` or `dropped` |
-| `parent`, `sub_plans`, `depends_on` | How plans split, and which must finish first                                                |
-| `source`                            | Where the request came from, such as an issue URL                                           |
-| Goal                                | The outcome, as behavior someone can observe                                                |
-| Context                             | Files, entry points and evidence, summarized without personal data                          |
-| Acceptance criteria                 | `AC-n` statements, each with a `Check:` naming how it is verified                           |
-| Constraints                         | Limits and non-goals the change must respect                                                |
-| Decided approach                    | Only what was decided, not alternatives                                                     |
-| Open questions                      | `Q-n` items with a suggested answer and who decides                                         |
-| Decisions                           | `D-n` records of what was decided and by whom                                               |
+| Field or section                    | Meaning                                                                          |
+| ----------------------------------- | -------------------------------------------------------------------------------- |
+| `id`                                | Short unique id: an uppercase key and a number; sub-plans add a level (`WR-2.1`) |
+| `status`                            | `new`, `needs-input` (a blocking question is open) or `ready`                    |
+| `parent`, `sub_plans`, `depends_on` | How plans split, and which must finish first                                     |
+| `source`                            | Where the request came from, such as an issue URL                                |
+| Goal                                | The outcome, as behavior someone can observe                                     |
+| Context                             | Files, entry points and evidence, summarized without personal data               |
+| Acceptance criteria                 | `AC-n` statements, each with a `Check:` naming how it is verified                |
+| Constraints                         | Limits and non-goals the change must respect                                     |
+| Decided approach                    | Only what was decided, not alternatives                                          |
+| Open questions                      | `Q-n` items with a suggested answer and who decides                              |
+| Decisions                           | `D-n` records of what was decided and by whom                                    |
 
 Ids of criteria, questions and decisions never change once written. A plan is `ready` when no
 blocking question is open and every criterion has a check. Team standards stay in your agent
 guidance files instead of being copied into each plan.
+
+A plan file describes work still to do. Commit it with the change that implements it, or on its own
+in a pull request when others should agree on it first. The change that completes the plan deletes
+the file; git history keeps it. Whether work is running or done is tracked by the run, issue or pull
+request, not in the file.
 
 ## Run a plan
 

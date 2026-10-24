@@ -1,6 +1,6 @@
 ---
 name: zeroshot-plan
-description: Plan software work before it is built, turning a request, issue or idea into an implementation-ready plan with checkable acceptance criteria and asking only questions that change the outcome. Use when the user asks to plan, spec, scope or clarify work, or says "plan this with zeroshot"; not for running Zeroshot (use the zeroshot skill) or for small edits the user asked to make directly.
+description: Plan software work before it is built, turning a request, issue or idea into an implementation-ready plan with checkable acceptance criteria and asking only questions that change the outcome. Use when the user asks to plan, spec, scope or clarify work, or says "plan this with zeroshot". Unlike a built-in plan mode, which plans the next edit in this session, it writes a plan file that outlives the session. Not for running Zeroshot (use the zeroshot skill) or for small edits the user asked to make directly.
 ---
 
 # Plan with Zeroshot
@@ -10,7 +10,12 @@ separate worker could implement it and an independent verifier could judge the r
 asking anyone. The plan is useful on its own: any coding agent or person can work from it, with or
 without Zeroshot.
 
-Plan only. Do not edit code, open pull requests or start runs while planning.
+This is not the host's plan mode. A plan mode prepares the edit you are about to make in this
+session; this skill writes a plan file that outlives the session, so another agent, a teammate or a
+Zeroshot run can build from it later.
+
+Plan only: do not edit code or start runs. Commit the plan or open a pull request for it only when
+the user asks.
 
 ## Research first
 
@@ -74,7 +79,7 @@ empty.
 schema: zeroshot.plan/v1
 id: <KEY>-<n>
 title: <short title>
-status: <new | needs-input | ready | running | done | dropped>
+status: <new | needs-input | ready>
 owner: <who decides>
 parent: <parent plan id>
 depends_on: [<plan ids that must finish first>]
@@ -120,8 +125,9 @@ source: <issue URL or other origin>
 
 Rules for the content:
 
-- `status` is `new`, `needs-input` (a blocking question is open), `ready`, `running`, `done` or
-  `dropped`. Set `ready` only when no blocking question is open and every criterion has a check.
+- `status` is `new` (being drafted), `needs-input` (a blocking question is open) or `ready` (no
+  blocking question is open and every criterion has a check). Whether work is running or done is
+  tracked by the run, issue or pull request, not in the file.
 - Context points to files, entry points and evidence. Summarize evidence and say where it lives;
   never copy customer names, emails, raw database rows or log lines with personal data into a plan.
   Plans in public repositories are public.
@@ -140,3 +146,8 @@ handoff; a person decides when to build it.
 
 When the plan changes later, edit the same file: keep ids stable, add new criteria, questions and
 decisions with the next free number, and update `status`.
+
+A plan file describes work still to do. Commit it with the change that implements it, or on its own
+in a pull request when others should agree on it first. The change that completes the plan deletes
+the file, and dropping a plan deletes it too; git history keeps it. Keep finished plans only when the
+repository already does.
