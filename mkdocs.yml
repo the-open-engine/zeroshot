@@ -54,6 +54,7 @@ nav:
       - Runtimes and connections: concepts/runtimes-and-connections.md
       - Targets: concepts/targets.md
   - Guides:
+      - Plan work before running it: guides/planning.md
       - Prepare a runtime environment: guides/runtime-environments.md
       - Active Memory: guides/active-memory.md
       - Build a review loop: guides/review-loop.md
