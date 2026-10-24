@@ -25,8 +25,8 @@ A small, clear change gets a short plan with no questions. The skill only plans:
 code or start runs.
 
 The skill is not your agent's plan mode. A plan mode prepares the edit the agent is about to make in
-the current session; the skill writes a plan file that outlives the session, so another agent, a
-teammate or a Zeroshot run can build from it later.
+the current session; the skill writes a plan file that outlives the session, so another agent or a
+Zeroshot run can build from it later.
 
 ## Plan format
 
@@ -102,10 +102,8 @@ Ids of criteria, questions and decisions never change once written. A plan is `r
 blocking question is open and every criterion has a check. Team standards stay in your agent
 guidance files instead of being copied into each plan.
 
-A plan file describes work still to do. Commit it with the change that implements it, or on its own
-in a pull request when others should agree on it first. The change that completes the plan deletes
-the file; git history keeps it. Whether work is running or done is tracked by the run, issue or pull
-request, not in the file.
+Plan files are working files and are not committed by default. Whether work is running or done is
+tracked by the run, issue or pull request, not in the file.
 
 ## Run a plan
 

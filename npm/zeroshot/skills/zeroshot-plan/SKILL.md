@@ -11,11 +11,10 @@ asking anyone. The plan is useful on its own: any coding agent or person can wor
 without Zeroshot.
 
 This is not the host's plan mode. A plan mode prepares the edit you are about to make in this
-session; this skill writes a plan file that outlives the session, so another agent, a teammate or a
-Zeroshot run can build from it later.
+session; this skill writes a plan file that outlives the session, so another agent or a Zeroshot run
+can build from it later.
 
-Plan only: do not edit code or start runs. Commit the plan or open a pull request for it only when
-the user asks.
+Plan only: do not edit code, start runs, or commit the plan file unless the user asks.
 
 ## Research first
 
@@ -146,8 +145,3 @@ handoff; a person decides when to build it.
 
 When the plan changes later, edit the same file: keep ids stable, add new criteria, questions and
 decisions with the next free number, and update `status`.
-
-A plan file describes work still to do. Commit it with the change that implements it, or on its own
-in a pull request when others should agree on it first. The change that completes the plan deletes
-the file, and dropping a plan deletes it too; git history keeps it. Keep finished plans only when the
-repository already does.
