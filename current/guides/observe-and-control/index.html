@@ -1725,7 +1725,7 @@
   <span class="md-ellipsis">
     
   
-    Zeroshot Cloud
+    Zeroshot Platform
   
 
     
@@ -1955,9 +1955,9 @@ target loss can precede the next snapshot boundary, so the last writer may run a
 must be idle while they are restored.</p>
 <p>Local and Docker targets deduplicate checkpoints in a private Restic repository beside their run
 storage and advertise <code>openengine.workspace-checkpoints/v1</code>. They retain that repository only for a
-failed recovery lineage and delete it after a successful run. Cloud exposes recovery through
+failed recovery lineage and delete it after a successful run. Platform exposes recovery through
 authenticated hosted run routes, so failed-run checkpoints remain available for 30 days after the
-original capsule is removed. Cloud resolves declared connections from their original references.
+original capsule is removed. Platform resolves declared connections from their original references.
 Direct-target resume reuses the original source connection authorization and resolves fresh values;
 export <code>GH_TOKEN</code> again when the run uses it for checkout or GitHub delivery.</p>
 <h2 id="stop-only-with-explicit-intent">Stop only with explicit intent<a class="headerlink" href="#stop-only-with-explicit-intent" title="Permanent link">&para;</a></h2>

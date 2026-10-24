@@ -1758,7 +1758,7 @@
   <span class="md-ellipsis">
     
   
-    Zeroshot Cloud
+    Zeroshot Platform
   
 
     
@@ -2518,7 +2518,7 @@ The graph state still carries the feedback explicitly either way.</p>
 <p>Replace <code>YOUR_MODEL_ID</code> with a model the provider accepts. Nodes can use different models, effort
 values, or <a href="#cross-vendor-review">harnesses and providers</a>; size applies to the whole run. The
 bindings omit <code>connections</code>, so a local Codex run reuses the Codex CLI's login, and a Docker or
-cloud target derives the canonical <code>OPENAI_API_KEY</code> requirement. See
+Platform target derives the canonical <code>OPENAI_API_KEY</code> requirement. See
 the <a href="../../reference/runtime-plan/">RuntimePlan reference</a> for every field.</p>
 <h2 id="7-validate-then-run">7. Validate, then run<a class="headerlink" href="#7-validate-then-run" title="Permanent link">&para;</a></h2>
 <p>The input supplies only the task:</p>
@@ -2544,8 +2544,8 @@ termination, runtime coverage, and the initial input:</p>
 <a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="go">  --input ~/review-loop/input.json</span>
 </code></pre></div>
 <p><a href="../observe-and-control/">Observe and control runs</a> covers status, logs, and stopping.</p>
-<p>The same files run on a target with <code>--target cloud</code> (see
-<a href="../../getting-started/install/#connect-zeroshot-cloud">Connect Zeroshot Cloud</a>) or the name of a
+<p>The same files run on a target with <code>--target platform</code> (see
+<a href="../../getting-started/install/#connect-zeroshot-platform">Connect Zeroshot Platform</a>) or the name of a
 <a href="../../concepts/targets/#direct-target">direct target</a>. A target requires an exact Git source selected from
 the checkout or <a href="../../concepts/targets/#direct-target">source overrides</a>, and resolves <code>OPENAI_API_KEY</code> from the submission
 environment or its connection store. The graph has no delivery node, so a target run does not push

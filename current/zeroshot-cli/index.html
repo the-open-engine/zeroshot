@@ -2340,7 +2340,7 @@
   <span class="md-ellipsis">
     
   
-    Zeroshot Cloud
+    Zeroshot Platform
   
 
     
@@ -3238,7 +3238,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <h3 id="zeroshot-target"><code>zeroshot target</code><a class="headerlink" href="#zeroshot-target" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Manage named targets or serve a direct target.
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>The built-in `cloud` target points to https://api.cloud.zeroshot.sh. Run `zeroshot target login cloud` to sign in. For unattended access, set ZEROSHOT_API_KEY instead of logging in. See https://cloud.zeroshot.sh/docs for Cloud setup.
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>The built-in `platform` target points to https://api.cloud.zeroshot.sh. Run `zeroshot target login platform` to sign in. For unattended access, set ZEROSHOT_API_KEY instead of logging in. See https://cloud.zeroshot.sh/docs for Platform setup.
 <a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
 <a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>Usage: zeroshot target &lt;COMMAND&gt;
 <a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
@@ -3354,7 +3354,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>      --target &lt;NAME&gt;
 <a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>          Configured hosted target
 <a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>
-<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>          [default: cloud]
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>          [default: platform]
 <a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>
 <a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>      --owner &lt;OWNER&gt;
 <a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>          Delegate your user or an organization
@@ -3381,7 +3381,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>      --target &lt;NAME&gt;
 <a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>          Configured hosted target
 <a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>
-<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>          [default: cloud]
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>          [default: platform]
 <a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>
 <a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a>      --owner &lt;OWNER&gt;
 <a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a>          Delegate your user or an organization
@@ -3413,7 +3413,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>      --target &lt;NAME&gt;
 <a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>          Configured hosted target
 <a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a>
-<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>          [default: cloud]
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>          [default: platform]
 <a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a>
 <a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a>  -h, --help
 <a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a>          Print help
@@ -3431,7 +3431,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>      --target &lt;NAME&gt;
 <a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a>          Configured hosted target
 <a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a>
-<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a>          [default: cloud]
+<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a>          [default: platform]
 <a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a>
 <a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a>  -h, --help
 <a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a>          Print help
@@ -3464,7 +3464,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a>      --target &lt;NAME&gt;
 <a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>          Configured hosted target
 <a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a>
-<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a>          [default: cloud]
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a>          [default: platform]
 <a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a>
 <a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a>  -h, --help
 <a id="__codelineno-17-16" name="__codelineno-17-16" href="#__codelineno-17-16"></a>          Print help
@@ -3482,7 +3482,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a>      --target &lt;NAME&gt;
 <a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a>          Configured hosted target
 <a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a>
-<a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a>          [default: cloud]
+<a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a>          [default: platform]
 <a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a>
 <a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a>      --name &lt;NAME&gt;
 <a id="__codelineno-18-16" name="__codelineno-18-16" href="#__codelineno-18-16"></a>          Optional label for this key
@@ -3511,7 +3511,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a>      --target &lt;NAME&gt;
 <a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a>          Configured hosted target
 <a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a>
-<a id="__codelineno-19-16" name="__codelineno-19-16" href="#__codelineno-19-16"></a>          [default: cloud]
+<a id="__codelineno-19-16" name="__codelineno-19-16" href="#__codelineno-19-16"></a>          [default: platform]
 <a id="__codelineno-19-17" name="__codelineno-19-17" href="#__codelineno-19-17"></a>
 <a id="__codelineno-19-18" name="__codelineno-19-18" href="#__codelineno-19-18"></a>  -h, --help
 <a id="__codelineno-19-19" name="__codelineno-19-19" href="#__codelineno-19-19"></a>          Print help
@@ -3927,7 +3927,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-38-32" name="__codelineno-38-32" href="#__codelineno-38-32"></a>Every run uses the same source and profile. The profile must contain exactly one current Git merge delivery node;
 <a id="__codelineno-38-33" name="__codelineno-38-33" href="#__codelineno-38-33"></a>pull-request delivery is rejected. Agent bindings must not declare `GH_TOKEN`; only the Git delivery
 <a id="__codelineno-38-34" name="__codelineno-38-34" href="#__codelineno-38-34"></a>binding may declare it. `needs` gates readiness but does not pass output between runs.
-<a id="__codelineno-38-35" name="__codelineno-38-35" href="#__codelineno-38-35"></a>Cloud assigns every run ID atomically at submission. After a node's dependencies succeed, Cloud
+<a id="__codelineno-38-35" name="__codelineno-38-35" href="#__codelineno-38-35"></a>Platform assigns every run ID atomically at submission. After a node's dependencies succeed, Platform
 <a id="__codelineno-38-36" name="__codelineno-38-36" href="#__codelineno-38-36"></a>materializes it against an exact source revision. Once materialization completes, `readyAt` is set
 <a id="__codelineno-38-37" name="__codelineno-38-37" href="#__codelineno-38-37"></a>and the node's queue deadline is the earlier of `expiresAt` and seven days after `readyAt`.
 <a id="__codelineno-38-38" name="__codelineno-38-38" href="#__codelineno-38-38"></a>`expiresAt` must be in the future and no more than
@@ -4185,7 +4185,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-45-153" name="__codelineno-45-153" href="#__codelineno-45-153"></a>    their canonical connection requirements.
 <a id="__codelineno-45-154" name="__codelineno-45-154" href="#__codelineno-45-154"></a>
 <a id="__codelineno-45-155" name="__codelineno-45-155" href="#__codelineno-45-155"></a>ENVIRONMENT PREPARATION
-<a id="__codelineno-45-156" name="__codelineno-45-156" href="#__codelineno-45-156"></a>    For Docker or Cloud targets, pass --environment environment.json with a separate, flat JSON
+<a id="__codelineno-45-156" name="__codelineno-45-156" href="#__codelineno-45-156"></a>    For Docker or Platform targets, pass --environment environment.json with a separate, flat JSON
 <a id="__codelineno-45-157" name="__codelineno-45-157" href="#__codelineno-45-157"></a>    definition (not a profile field or an "environment" wrapper):
 <a id="__codelineno-45-158" name="__codelineno-45-158" href="#__codelineno-45-158"></a>
 <a id="__codelineno-45-159" name="__codelineno-45-159" href="#__codelineno-45-159"></a>      {

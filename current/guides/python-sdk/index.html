@@ -1703,7 +1703,7 @@
   <span class="md-ellipsis">
     
   
-    Zeroshot Cloud
+    Zeroshot Platform
   
 
     
@@ -1945,7 +1945,7 @@ delivery binding may declare it.</p>
 <a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>        <span class="n">submission_key</span><span class="o">=</span><span class="s2">"checkout-release-1"</span><span class="p">,</span>
 <a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a>    <span class="p">)</span>
 <a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a>
-<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>    <span class="k">async</span> <span class="k">with</span> <span class="n">Client</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">HostedTarget</span><span class="p">(</span><span class="s2">"cloud"</span><span class="p">))</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a>    <span class="k">async</span> <span class="k">with</span> <span class="n">Client</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">HostedTarget</span><span class="p">(</span><span class="s2">"platform"</span><span class="p">))</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
 <a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>        <span class="n">plan</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">submit_plan</span><span class="p">(</span><span class="n">request</span><span class="p">)</span>
 <a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a>        <span class="n">status</span> <span class="o">=</span> <span class="k">await</span> <span class="n">plan</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">wait_timeout</span><span class="o">=</span><span class="mi">21_600</span><span class="p">)</span>
 <a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a>
@@ -1953,7 +1953,7 @@ delivery binding may declare it.</p>
 <a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a>        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"merge plan ended as </span><span class="si">{</span><span class="n">status</span><span class="o">.</span><span class="n">state</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 </code></pre></div>
 <p>Submission is atomic, and every node receives a stable run ID. <code>needs</code> gates readiness only; plan
-nodes have no output interpolation or shared mutable input. After dependencies merge, Cloud
+nodes have no output interpolation or shared mutable input. After dependencies merge, Platform
 materializes the node against an exact source revision. When materialization completes, <code>readyAt</code>
 is set and the node's queue deadline is the earlier of plan expiry and seven days after <code>readyAt</code>.
 A merge conflict is repaired by the conflicting run itself in the same checkout and delivery loop.

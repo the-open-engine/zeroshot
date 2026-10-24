@@ -1743,7 +1743,7 @@
   <span class="md-ellipsis">
     
   
-    Zeroshot Cloud
+    Zeroshot Platform
   
 
     
@@ -2096,20 +2096,20 @@ covers reverse proxies, Docker access for runs, and building the image.</p>
 </code></pre></div>
 <p>The hosting service owns login, source authorization, organization-scoped connections, queue policy,
 and capacity. Zeroshot's CLI and protocol do not prescribe those product policies.</p>
-<p>Follow the <a href="https://cloud.zeroshot.sh/docs">Cloud documentation</a> for Zeroshot Cloud. Its pages
+<p>Follow the <a href="https://cloud.zeroshot.sh/docs">Platform documentation</a> for Zeroshot Platform. Its pages
 should link to the version of these core docs that matches the deployed target, as described in
 <a href="../../project/versioning/">Documentation versions</a>.</p>
 <h3 id="api-keys">API keys<a class="headerlink" href="#api-keys" title="Permanent link">&para;</a></h3>
 <p>Hosted targets that advertise API key authentication support machine delegations. Sign in as a
 human to create one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot target login cloud</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot target login platform</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">zeroshot delegation create ci</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go">zeroshot delegation create release --owner org --organization ORGANIZATION_UUID</span>
 </code></pre></div>
 <p>Any user can delegate their own current permissions. Organization owners and admins can create
 organization delegations. Creation prints an <code>api_key</code> once; store it as <code>ZEROSHOT_API_KEY</code> in your
 CI secret store. Keys expire after 90 days by default; <code>--expires-in-days</code> accepts 1–365.</p>
-<p>With the key set, use the normal CLI with <code>--target cloud</code>, including connections, profiles, merge
+<p>With the key set, use the normal CLI with <code>--target platform</code>, including connections, profiles, merge
 plans, live sessions, and resume. For a user key, set <code>ZEROSHOT_ORGANIZATION</code> to the organization
 UUID when organization selection is needed. Organization keys stay in their own organization.
 Omitted connection and profile scopes follow the owner's scope.</p>
@@ -2166,7 +2166,7 @@ See <a href="../../project/source-code-adapters/">Source-code adapters</a> for t
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-21">21 October 2026</time>
+    Last updated <time datetime="2026-10-24">24 October 2026</time>
   </span>
 
     

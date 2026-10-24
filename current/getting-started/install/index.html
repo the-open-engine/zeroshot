@@ -415,10 +415,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#connect-zeroshot-cloud" class="md-nav__link">
+  <a href="#connect-zeroshot-platform" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Connect Zeroshot Cloud
+        Connect Zeroshot Platform
       
     </span>
   </a>
@@ -1703,7 +1703,7 @@
   <span class="md-ellipsis">
     
   
-    Zeroshot Cloud
+    Zeroshot Platform
   
 
     
@@ -1770,10 +1770,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#connect-zeroshot-cloud" class="md-nav__link">
+  <a href="#connect-zeroshot-platform" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Connect Zeroshot Cloud
+        Connect Zeroshot Platform
       
     </span>
   </a>
@@ -1880,12 +1880,12 @@ these with absolute paths. The hosted target image requires Linux.</p>
 <p>For Codex, complete its <a href="https://developers.openai.com/codex/windows">native Windows sandbox setup</a>
 if your Codex permission settings require it. Workers and reviewers use the same permission handling;
 Zeroshot does not install the sandbox.</p>
-<h2 id="connect-zeroshot-cloud">Connect Zeroshot Cloud<a class="headerlink" href="#connect-zeroshot-cloud" title="Permanent link">&para;</a></h2>
-<p>The Cloud target is built in. Sign in once; organization selection happens in the browser:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="go">zeroshot target login cloud</span>
+<h2 id="connect-zeroshot-platform">Connect Zeroshot Platform<a class="headerlink" href="#connect-zeroshot-platform" title="Permanent link">&para;</a></h2>
+<p>The Platform target is built in. Sign in once; organization selection happens in the browser:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="go">zeroshot target login platform</span>
 </code></pre></div>
-<p>Cloud runs use <code>--target cloud</code>. Omit <code>--target</code> for local execution. The
-<a href="https://cloud.zeroshot.sh/docs">Zeroshot Cloud docs</a> cover organizations, the GitHub App, and saved
+<p>Platform runs use <code>--target platform</code>. Omit <code>--target</code> for local execution. The
+<a href="https://cloud.zeroshot.sh/docs">Zeroshot Platform docs</a> cover organizations, the GitHub App, and saved
 connections.</p>
 <h2 id="open-the-workspace-ui">Open the workspace UI<a class="headerlink" href="#open-the-workspace-ui" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot ui</span>
@@ -1896,7 +1896,7 @@ active runs continue. Restart the command to reconnect.</p>
 <p>To inspect runs on a configured target while keeping profiles in the local CLI store:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot ui --target docker</span>
 </code></pre></div>
-<p>Use <code>--target cloud</code> after signing in to inspect Cloud runs through the same local UI.</p>
+<p>Use <code>--target platform</code> after signing in to inspect Platform runs through the same local UI.</p>
 <p><strong>Profiles</strong> edits graphs and runtime settings; the info icon explains authoring defaults.
 Saved profiles share the CLI's configuration store (<code>ZEROSHOT_CONFIG_DIR</code>); without <code>--target</code>,
 run history uses <code>ZEROSHOT_STATE_DIR</code>. Start a saved local profile from the CLI:</p>
@@ -1904,7 +1904,7 @@ run history uses <code>ZEROSHOT_STATE_DIR</code>. Start a saved local profile fr
 </code></pre></div>
 <p>Open <strong>Runs</strong> for <a href="../../guides/observe-and-control/#browser">live monitoring and replay</a>.
 The <a href="../../concepts/targets/#direct-target">Docker target</a> serves its own profiles and runs at <code>/ui/</code>.
-Cloud embedding remains tracked in <a href="https://github.com/the-open-engine/zero-cloud/issues/301">zero-cloud #301</a>.</p>
+Platform embedding remains tracked in <a href="https://github.com/the-open-engine/zero-cloud/issues/301">zero-cloud #301</a>.</p>
 <p>Release executables embed the UI. To build it from source:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="go">npm --prefix ui ci --ignore-scripts</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">npm --prefix ui run build</span>
@@ -2002,7 +2002,7 @@ without expiry metadata are supplied once when each provider process starts.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-23">23 October 2026</time>
+    Last updated <time datetime="2026-10-24">24 October 2026</time>
   </span>
 
     
