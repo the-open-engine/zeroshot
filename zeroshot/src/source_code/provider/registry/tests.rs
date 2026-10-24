@@ -52,6 +52,18 @@ impl SourceCodeProvider for ScriptedSourceProvider {
         &self.descriptor
     }
 
+    fn comment_destination_from_url(&self, url: &str) -> Option<SourceCommentDestination> {
+        (url == "https://comments.fixture.invalid/project/issues/17").then(|| {
+            SourceCommentDestination {
+                provider: self.descriptor.provider().clone(),
+                repository: "team/project".into(),
+                discussion_id: "17".into(),
+                kind: SourceDiscussionKind::Issue,
+                url: url.to_owned(),
+            }
+        })
+    }
+
     fn repository_from_remote(&self, remote: &str) -> Option<SourceRepositoryId> {
         (remote == "https://registry-matcher.invalid/nested/team/repo.git").then(|| {
             SourceRepositoryId::new(if self.substitute_evidence.load(Ordering::SeqCst) {
@@ -126,6 +138,55 @@ impl SourceCodeProvider for ScriptedSourceProvider {
     ) -> Result<SourceOperationReceipt, SourceProviderFailure> {
         Err(provider_failure("operate is not used by this fixture"))
     }
+}
+
+#[test]
+fn comment_routing_rejects_unsupported_missing_authority_and_ambiguous_providers() {
+    let url = "https://comments.fixture.invalid/project/issues/17";
+    let mut registry = SourceCodeProviderRegistry::new();
+    assert!(matches!(
+        registry.comment_destination(url),
+        Err(SourceRegistryError::UnsupportedCommentUrl)
+    ));
+    registry
+        .register(Arc::new(ScriptedSourceProvider::new()))
+        .assert_value();
+    assert!(matches!(
+        registry.comment_destination(url),
+        Err(SourceRegistryError::UnsupportedCapability {
+            capability: SourceCapability::Comment,
+            ..
+        })
+    ));
+    let mut registry = SourceCodeProviderRegistry::new();
+    for version in [1, 2] {
+        let mut provider = ScriptedSourceProvider::new();
+        provider.descriptor = SourceProviderDescriptor::new(
+            provider_ref(version),
+            BTreeMap::from([(
+                profile_id("default"),
+                SourceProfileDescriptor::new(
+                    BTreeSet::from([SourceCapability::Comment]),
+                    BTreeSet::new(),
+                )
+                .assert_value(),
+            )]),
+        )
+        .assert_value();
+        registry.register(Arc::new(provider)).assert_value();
+        if version == 1 {
+            let destination = registry.comment_destination(url).assert_value();
+            assert_eq!(destination.provider, provider_ref(1));
+            assert!(matches!(
+                registry.comment_authority(&destination),
+                Err(SourceRegistryError::UnavailableDelivery { .. })
+            ));
+        }
+    }
+    assert!(matches!(
+        registry.comment_destination(url),
+        Err(SourceRegistryError::AmbiguousCommentUrl)
+    ));
 }
 
 fn provider_failure(message: impl Into<String>) -> SourceProviderFailure {

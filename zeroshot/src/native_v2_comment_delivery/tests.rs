@@ -10,6 +10,55 @@ use super::*;
 
 const URL: &str = "https://github.com/acme/project/issues/17";
 
+#[tokio::test]
+async fn final_comment_size_includes_provenance_before_publication_authority_is_recorded() {
+    let (_temp, forge, adapter) = fixture();
+    let input = json!({"url":URL,"body":"x".repeat(MAX_BODY_BYTES)});
+    let error = run(&adapter, input).await.unwrap_err();
+    assert!(error.to_string().contains("final comment body exceeds"));
+    assert_eq!(forge.creates.load(Ordering::SeqCst), 0);
+    assert!(adapter.store.load().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn retained_ready_authority_cannot_change_destination_marker_actor_or_body() {
+    for changed in ["url", "marker", "author", "body"] {
+        let (_temp, forge, adapter) = fixture();
+        let input = json!({"url":URL,"body":"report"});
+        let invocation = invocation(&adapter, input.clone()).await;
+        let mut retained = adapter
+            .prepare_publication(
+                &invocation,
+                serde_json::from_value(input.clone()).unwrap(),
+                "ACTOR_ID".into(),
+            )
+            .unwrap()
+            .record;
+        retained.status = PublicationStatus::Ready;
+        match changed {
+            "url" => retained.url = "https://github.com/acme/project/issues/18".into(),
+            "marker" => {
+                retained.marker = format!("<!-- zeroshot-comment:v1:{} -->", "c".repeat(64))
+            }
+            "author" => retained.author = "OTHER_ACTOR".into(),
+            _ => retained.body_hash = "0".repeat(64),
+        }
+        adapter
+            .store
+            .compare_and_set(None, &retained)
+            .await
+            .unwrap();
+        let error = run(&adapter, input).await.unwrap_err();
+        assert!(error.to_string().contains(if changed == "body" {
+            "comment_already_delivered"
+        } else {
+            "publication identity differs"
+        }));
+        assert_eq!(forge.creates.load(Ordering::SeqCst), 0);
+        assert_eq!(adapter.store.load().await.unwrap(), Some(retained));
+    }
+}
+
 #[derive(Default)]
 struct Forge {
     comments: Mutex<Vec<SourceComment>>,
@@ -1004,4 +1053,106 @@ async fn mismatched_response_contract_or_worker_refuses_before_authority() {
         Err(NodeRunnerError::InvalidRole)
     ));
     assert_eq!(forge.actors.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn unavailable_renewal_never_authorizes_an_extra_comment_post() {
+    for operation in ["actor", "scan", "create", "receipt"] {
+        let (_temp, forge, adapter) = fixture();
+        let input = json!({"url":URL,"body":"report"});
+        match operation {
+            "actor" => forge.reject_actors.store(true, Ordering::SeqCst),
+            "scan" => forge.reject_reads.store(true, Ordering::SeqCst),
+            "create" => forge.reject_posts.store(true, Ordering::SeqCst),
+            _ => {
+                run(&adapter, input.clone()).await.unwrap();
+                forge.reject_reads.store(true, Ordering::SeqCst);
+            }
+        }
+        let error = run(&adapter, input).await.unwrap_err();
+        assert!(
+            error.to_string().contains("expired"),
+            "{operation}: {error}"
+        );
+        let expected_posts = usize::from(matches!(operation, "create" | "receipt"));
+        assert_eq!(forge.creates.load(Ordering::SeqCst), expected_posts);
+        let record = adapter.store.load().await.unwrap();
+        match operation {
+            "create" => assert_eq!(record.unwrap().status, PublicationStatus::Ready),
+            "receipt" => assert!(matches!(
+                record.unwrap().status,
+                PublicationStatus::Confirmed { .. }
+            )),
+            _ => assert!(record.is_none()),
+        }
+    }
+}
+
+#[tokio::test]
+async fn untrusted_forge_actor_and_confirmed_comment_identity_cannot_grant_a_receipt() {
+    let (_temp, forge, adapter) = fixture();
+    let input = json!({"url":URL,"body":"report"});
+    let turn = invocation(&adapter, input.clone()).await;
+    for author in [
+        String::new(),
+        "two actors".into(),
+        "é".into(),
+        "x".repeat(257),
+    ] {
+        let error = adapter
+            .prepare_publication(
+                &turn,
+                serde_json::from_value(input.clone()).unwrap(),
+                author,
+            )
+            .err()
+            .expect("invalid actor must refuse publication");
+        assert!(
+            error
+                .to_string()
+                .contains("invalid comment author identity")
+        );
+    }
+    let publication = adapter
+        .prepare_publication(
+            &turn,
+            serde_json::from_value(input).unwrap(),
+            "ACTOR_ID".into(),
+        )
+        .unwrap();
+    let mut credentials = Credentials::new(&adapter, &turn.environment).unwrap();
+    let (_cancel, control, _durable) = crate::native_v2_runner::test_support::control();
+    assert!(
+        !adapter
+            .retry_authentication(
+                &publication,
+                &SourceDeliveryError::api(Some(403), "permission denied"),
+                (&mut credentials, &control),
+            )
+            .await
+            .unwrap()
+    );
+    assert_eq!(forge.creates.load(Ordering::SeqCst), 0);
+    assert!(adapter.store.load().await.unwrap().is_none());
+
+    let corruptions: [fn(&mut SourceComment); 4] = [
+        |comment| comment.author = "OTHER_ACTOR".into(),
+        |comment| comment.discussion_url = "https://github.com/acme/project/issues/18".into(),
+        |comment| comment.url = "https://attacker.invalid/comment".into(),
+        |comment| comment.id = "deleted-comment".into(),
+    ];
+    for corrupt in corruptions {
+        let (_temp, forge, adapter) = published_fixture().await;
+        corrupt(&mut forge.comments.lock().unwrap()[0]);
+        assert!(
+            run(&adapter, json!({"url":URL,"body":"report"}))
+                .await
+                .is_err()
+        );
+        assert_eq!(forge.creates.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            publication_status(&adapter).await,
+            PublicationStatus::Confirmed { .. }
+        ));
+    }
 }

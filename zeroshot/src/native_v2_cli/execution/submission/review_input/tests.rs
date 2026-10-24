@@ -490,3 +490,65 @@ async fn local_submission_reuses_frozen_input_and_refuses_changed_intent_before_
         std::fs::remove_file(root.join(format!("{digest}.{extension}"))).assert_value();
     }
 }
+
+#[tokio::test]
+async fn ordinary_input_skips_metadata_and_unavailable_cache_authority_is_not_invented() {
+    let (mut run, profile) = run_and_profile();
+    let backend = crate::native_v2_cli::tests::support::FakeBackend::with_review(prepared());
+    run.input = RunInput::File("caller-owned-input.json".into());
+    assert!(
+        resolve(&run, &profile, &backend)
+            .await
+            .assert_value()
+            .review
+            .is_none()
+    );
+    assert!(backend.calls().is_empty());
+    run.input = RunInput::TaskFrom(identity().request.url);
+    run.submission_key = Some(IdempotencyKey::new("no-cache-authority").assert_value());
+    assert_eq!(
+        resolve(&run, &profile, &backend)
+            .await
+            .assert_value()
+            .review,
+        Some(prepared())
+    );
+    assert_eq!(backend.calls().len(), 1);
+}
+
+#[tokio::test]
+async fn invalid_workspace_and_blocked_cache_root_fail_before_metadata_resolution() {
+    let directory = tempfile::tempdir().assert_value();
+    let (mut run, profile) = run_and_profile();
+    let backend = crate::native_v2_cli::tests::support::FakeBackend::with_review(prepared());
+    run.target = None;
+    run.cwd = Some(directory.path().join("absent"));
+    run.submission_key = Some(IdempotencyKey::new("invalid-workspace").assert_value());
+    assert!(resolve(&run, &profile, &backend).await.is_err());
+    assert!(backend.calls().is_empty());
+    let blocked = directory.path().join("blocked-cache");
+    std::fs::write(&blocked, "caller-owned").assert_value();
+    assert!(
+        ReviewCache::open_at(blocked.clone(), "key".into(), identity())
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        std::fs::read_to_string(blocked).assert_value(),
+        "caller-owned"
+    );
+}
+
+#[tokio::test]
+async fn failed_cache_commit_preserves_the_destination_and_removes_temporary_state() {
+    let directory = tempfile::tempdir().assert_value();
+    let cache = ReviewCache::open_at(directory.path().join("cache"), "blocked".into(), identity())
+        .await
+        .assert_value();
+    std::fs::create_dir(&cache.destination).assert_value();
+    let sentinel = cache.destination.join("caller-owned");
+    std::fs::write(&sentinel, "preserve").assert_value();
+    assert!(cache.write(&prepared()).is_err());
+    assert_eq!(std::fs::read_to_string(sentinel).assert_value(), "preserve");
+    assert_eq!(std::fs::read_dir(&cache.root).assert_value().count(), 2);
+}
