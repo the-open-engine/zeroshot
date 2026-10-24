@@ -28,6 +28,8 @@ Infer what the user would almost always check after a code change. Ground the pr
 - For services, CLIs, libraries, or infrastructure, choose the corresponding integration, smoke, compatibility, or deployment validation supported by the repository.
 - Translate common manual verification into concrete agent actions when tools permit. If a required check needs unavailable services, credentials, or human judgment, surface that dependency and ask how to handle it. Missing evidence cannot count as a pass.
 
+For code-change graphs, ask: "How should runs deliver changes: leave them local, push a branch, open a PR, or merge?" Reuse any earlier choice and include delivery in the proposal.
+
 Propose a complete first draft using the evidence. Ask focused follow-ups only where the answer would change the graph; avoid making the user describe facts you can inspect.
 
 ## Keep the graph lean
