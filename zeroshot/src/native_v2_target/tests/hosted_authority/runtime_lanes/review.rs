@@ -131,3 +131,81 @@ async fn hosted_resolution_uses_target_authority_and_enforces_its_response_bound
         );
     }
 }
+
+#[tokio::test]
+async fn direct_resolution_uses_isolated_credentials_and_preserves_target_authority() {
+    const ORIGIN: &str = "ZEROSHOT_TEST_DIRECT_REVIEW_ORIGIN";
+    const MODE: &str = "ZEROSHOT_TEST_DIRECT_REVIEW_MODE";
+    const COMPLETE: &str = "direct review assertions completed";
+    if let Ok(origin) = std::env::var(ORIGIN) {
+        let root = temp_root();
+        let authority = test_http_authority(root.path("refresh-locks"));
+        let record = direct_target(origin);
+        let mode = std::env::var(MODE).assert_value();
+        let namespace = authority.review_cache_namespace(&record).await;
+        if mode == "missing" {
+            assert!(namespace.is_err());
+        } else {
+            assert_eq!(namespace.assert_value().assert_value().len(), 64);
+        }
+        let runtime = run_request(json!({"kind":"comment_delivery"}))
+            .submission
+            .runtime;
+        let resolved = authority
+            .resolve_review(&record, resolution_request(), &runtime)
+            .await;
+        if matches!(mode.as_str(), "missing" | "invalid") {
+            assert!(resolved.is_err());
+        } else {
+            assert_eq!(
+                resolved.assert_value().source.repository.as_str(),
+                "acme/project"
+            );
+        }
+        println!("{COMPLETE}");
+        return;
+    }
+    for mode in ["primary", "fallback", "missing", "invalid"] {
+        let target = RecordingTarget::spawn(|request, _, _| match (request.method.as_str(), request.path.as_str()) {
+            DISCOVERY => ("200 OK", serde_json::to_string(&TargetDiscoveryDocument::direct(TargetAuthentication::None).with_comment_delivery().with_task_resolution()).assert_value()),
+            ("POST", "/native-v2/tasks/resolve") => {
+                assert!(request.authorization.is_none());
+                let body: Value = serde_json::from_str(&request.body).assert_value();
+                assert_eq!(body, json!({"request":{"url":"https://github.com/acme/project/issues/42"},"githubToken":"direct-fixture-token"}));
+                ("200 OK", json!({"initialInput":{"url":"https://github.com/acme/project/issues/42","context":{}},"source":{"repository":"acme/project","branch":"main","revision":"a".repeat(40)}}).to_string())
+            }
+            _ => unexpected(),
+        }).await;
+        let mut child = tokio::process::Command::new(std::env::current_exe().assert_value());
+        child.args(["--exact", "native_v2_target::tests::hosted_authority::runtime_lanes::review::direct_resolution_uses_isolated_credentials_and_preserves_target_authority", "--nocapture"])
+            .env(ORIGIN, &target.origin).env(MODE, mode).env_remove("GH_TOKEN").env_remove("GITHUB_TOKEN");
+        match mode {
+            "primary" => {
+                child
+                    .env("GH_TOKEN", "direct-fixture-token")
+                    .env("GITHUB_TOKEN", "must-not-win");
+            }
+            "fallback" => {
+                child.env("GITHUB_TOKEN", "direct-fixture-token");
+            }
+            "invalid" => {
+                child.env("GH_TOKEN", "invalid\ncredential");
+            }
+            _ => {}
+        }
+        let output = child.output().await.assert_value();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains(COMPLETE));
+        let requests = target.stop();
+        let posts = requests
+            .iter()
+            .filter(|request| request.path == "/native-v2/tasks/resolve")
+            .count();
+        assert_eq!(posts, usize::from(matches!(mode, "primary" | "fallback")));
+    }
+}

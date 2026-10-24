@@ -149,14 +149,14 @@ async fn invalid_credential_or_discussion_never_reaches_metadata_transport() {
         "token\ninjection".into(),
     ] {
         assert!(matches!(
-            resolve(request("issues"), &token).await,
+            crate::native_v2_review::resolve_review(request("issues"), &token).await,
             Err(ReviewResolveError::Credential)
         ));
     }
     let mut invalid = request("issues");
     invalid.url = "not a discussion URL".into();
     assert!(matches!(
-        resolve(invalid, "fixture-authority").await,
+        crate::native_v2_review::resolve_review(invalid, "fixture-authority").await,
         Err(ReviewResolveError::InvalidUrl)
     ));
 }

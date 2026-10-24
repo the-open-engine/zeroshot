@@ -1,6 +1,6 @@
 use super::*;
 use crate::native_v2_cli::{BuiltinGraphTemplate, TemplateDelivery};
-use openengine_cluster_protocol::{NonEmptyVec, PayloadType, RecordField};
+use openengine_cluster_protocol::{NonEmptyVec, PayloadType, RecordField, VerifierNode};
 
 fn comment_submission() -> RunSubmission {
     let mut graph = BuiltinGraphTemplate::IssueReview
@@ -207,6 +207,175 @@ async fn parallel_publication_is_refused_in_both_branch_orders() {
                 )
                 .await,
             Err(NativeV2AdmissionError::ConcurrentDelivery { .. })
+        ));
+    }
+}
+
+fn publisher_mut(submission: &mut RunSubmission) -> &mut VerifierNode {
+    let GraphNode::Seq(root) = &mut submission.graph.root else {
+        panic!("comment fixture root")
+    };
+    let GraphNode::Verifier(publisher) = &mut root.children.as_mut_slice()[0] else {
+        panic!("comment fixture publisher")
+    };
+    publisher
+}
+
+async fn reject_comment_profile(submission: RunSubmission, expected: &str) {
+    match NativeV2Admission
+        .validate_profile(
+            &submission.graph,
+            &submission.runtime,
+            DeliveryPolicy::Required,
+        )
+        .await
+    {
+        Err(NativeV2AdmissionError::InvalidCommentDelivery(message)) => {
+            assert_eq!(message, expected)
+        }
+        other => panic!("expected comment admission rejection, received {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn publisher_destination_cannot_be_missing_or_selected_from_a_map_item() {
+    for missing in [false, true] {
+        let mut submission = comment_submission();
+        let bindings = &mut publisher_mut(&mut submission).input_bindings;
+        let expected = if missing {
+            bindings.retain(|binding| binding.target.segments()[0].as_str() != "url");
+            "comment URL requires a caller input binding"
+        } else {
+            bindings[0].value =
+                serde_json::from_value(json!({"source":"item","path":["url"]})).assert_value();
+            "comment destination and scope must bind directly from caller input"
+        };
+        reject_comment_profile(submission, expected).await;
+    }
+}
+
+#[tokio::test]
+async fn publisher_destination_cannot_select_an_undefined_or_non_record_input_path() {
+    for path in [vec!["notDeclared"], vec!["body", "url"]] {
+        let mut submission = comment_submission();
+        publisher_mut(&mut submission).input_bindings[0].value =
+            serde_json::from_value(json!({"source":"state","path":path})).assert_value();
+        reject_comment_profile(
+            submission,
+            "comment URL must select a required string in initial input",
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn captured_review_scope_requires_each_input_segment_and_cannot_use_a_map_item() {
+    for scope_path in ["context", "reviewScope", "item"] {
+        let mut submission = comment_submission();
+        let expected = if scope_path == "item" {
+            publisher_mut(&mut submission).input_bindings[2].value =
+                serde_json::from_value(json!({"source":"item","path":["reviewScope"]}))
+                    .assert_value();
+            "comment destination and scope must bind directly from caller input"
+        } else {
+            let mut input = serde_json::to_value(&submission.graph.initial_input).assert_value();
+            if scope_path == "context" {
+                input["fields"]["context"]["required"] = json!(false);
+            } else {
+                input["fields"]["context"]["type"]["fields"]["reviewScope"]["required"] =
+                    json!(false);
+            }
+            submission.graph.initial_input = serde_json::from_value(input).assert_value();
+            "comment reviewScope must select a required initial input value"
+        };
+        reject_comment_profile(submission, expected).await;
+    }
+}
+
+#[tokio::test]
+async fn custom_issue_publisher_can_omit_a_scope_binding_and_preserves_caller_input() {
+    let mut submission = comment_submission();
+    publisher_mut(&mut submission)
+        .input_bindings
+        .retain(|binding| binding.target.segments()[0].as_str() != "reviewScope");
+    let input = submission.initial_input.clone();
+    let admitted = NativeV2Admission.admit(submission).await.assert_value();
+    let destination = admitted_comment_input(&admitted)
+        .assert_value()
+        .assert_value();
+    assert_eq!(destination.url, input["url"].as_str().assert_value());
+    assert!(destination.review_scope.is_none());
+    assert_eq!(admitted.initial_input, input);
+}
+
+#[tokio::test]
+async fn publisher_cannot_execute_inside_a_loop_or_even_a_single_item_map() {
+    for kind in ["loop", "map"] {
+        let mut submission = comment_submission();
+        let mut graph = serde_json::to_value(&submission.graph).assert_value();
+        let items = json!({"type":{"kind":"array","items":{"kind":"null"}},"required":true});
+        graph["initialInput"]["fields"]["items"] = items.clone();
+        graph["root"]["state"]["fields"]["items"] = items;
+        let mut group = json!({
+            "kind":kind,"name":"repeated_publication","state":graph["root"]["state"],
+            "body":graph["root"]["children"][0],"promotedStatePaths":[]
+        });
+        if kind == "loop" {
+            group["maxIterations"] = json!(1);
+        } else {
+            group["maxItems"] = json!(1);
+            group["over"] = json!({"source":"state","path":["items"]});
+        }
+        graph["root"]["children"][0] = group;
+        submission.graph = serde_json::from_value(graph).assert_value();
+        submission.initial_input["items"] = json!([null]);
+        reject_comment_profile(
+            submission,
+            "comment delivery cannot execute inside a loop or map",
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn publication_cannot_precede_a_verifier_in_its_terminal_choice() {
+    let mut submission = comment_submission();
+    submission
+        .runtime
+        .nodes_mut()
+        .insert(named("late_check"), binding("review-model", None));
+    let GraphNode::Seq(root) = &mut submission.graph.root else {
+        panic!("comment fixture root")
+    };
+    let GraphNode::Choice(result) = &mut root.children.as_mut_slice()[1] else {
+        panic!("comment fixture terminal choice")
+    };
+    result.otherwise = Some(Box::new(
+        serde_json::from_value(null_verifier("late_check", "agent.late-check@1")).assert_value(),
+    ));
+    reject_comment_profile(
+        submission,
+        "comment delivery must be the final executable node",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn publisher_contract_cannot_redefine_its_input_receipt_signals_or_diagnostics() {
+    for field in ["input", "output", "signals", "diagnostic"] {
+        let mut submission = comment_submission();
+        let publisher = publisher_mut(&mut submission);
+        match field {
+            "input" => publisher.input = PayloadType::Null,
+            "output" => publisher.output = PayloadType::Null,
+            "signals" => publisher.signals.clear(),
+            _ => publisher.diagnostic = PayloadType::Null,
+        }
+        assert!(matches!(
+            NativeV2Admission.validate_profile(
+                &submission.graph, &submission.runtime, DeliveryPolicy::Required,
+            ).await,
+            Err(NativeV2AdmissionError::InvalidDeliveryContract { node, .. }) if node == named("deliver")
         ));
     }
 }

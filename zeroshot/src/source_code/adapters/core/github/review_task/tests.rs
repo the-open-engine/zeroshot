@@ -100,7 +100,7 @@ async fn issue_hydration_produces_ordinary_input_and_pins_the_default_branch() {
             json!({"sha":revision('a')}),
         ),
     ]);
-    let result = resolve_with(request("issues"), &metadata)
+    let result = crate::native_v2_review::resolve_review_with(request("issues"), &metadata)
         .await
         .assert_value();
     assert_eq!(

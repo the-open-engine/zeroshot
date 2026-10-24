@@ -266,6 +266,116 @@ exec "$REVIEW_FIXTURE_GIT" "$@"
         admitted
     }
 
+    fn assert_workspace_unchanged(repository: &TestGitRepository) {
+        assert_eq!(
+            git_output(&repository.workspace, &["rev-parse", "HEAD"]),
+            repository.base
+        );
+        assert!(git_output(&repository.workspace, &["status", "--porcelain"]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn scope_free_issue_comments_need_neither_git_nor_credentials() {
+        for absent in [true, false] {
+            let repository = TestGitRepository::candidate();
+            let mut admitted = review_source(&repository, &repository.base, "trusted");
+            admitted.initial_input["url"] = json!("https://github.com/acme/project/issues/17");
+            admitted.initial_input["context"]["reviewScope"] = json!({});
+            if absent {
+                let mut publisher = crate::native_v2_admission::comment_node(&admitted.graph.root)
+                    .assert_value()
+                    .clone();
+                publisher
+                    .input_bindings
+                    .retain(|binding| binding.target.segments()[0].as_str() != "reviewScope");
+                admitted.graph.root = GraphNode::Verifier(publisher);
+            }
+            let mut bootstrap = bootstrap(&admitted, &repository, false);
+            bootstrap.github_token = Some(format!("{TOKEN}\n"));
+            assert!(checkout_references(&admitted).assert_value().is_empty());
+            prepare_local_checkout(&admitted, &bootstrap)
+                .await
+                .assert_value();
+            assert!(!bootstrap.storage.exists());
+            assert_workspace_unchanged(&repository);
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_git_refuses_before_reading_credentials_or_mutating_the_checkout() {
+        let repository = TestGitRepository::candidate();
+        let admitted = review_source(&repository, &repository.base, "trusted");
+        let mut bootstrap = bootstrap(&admitted, &repository, false);
+        bootstrap.github_token = Some(format!("{TOKEN}\n"));
+        let Err(PortableControllerError::Io(error)) =
+            prepare_local_checkout(&admitted, &bootstrap).await
+        else {
+            panic!("missing Git must refuse preparation")
+        };
+        assert_eq!(error.to_string(), "review checkout requires Git");
+        assert!(!bootstrap.storage.exists());
+        assert_workspace_unchanged(&repository);
+    }
+
+    #[tokio::test]
+    async fn failed_authenticated_fetch_keeps_head_and_hides_transport_diagnostics() {
+        let repository = TestGitRepository::candidate();
+        let admitted = review_source(&repository, &repository.base, "declared");
+        let mut bootstrap = bootstrap(&admitted, &repository, true);
+        authenticated_git(&mut bootstrap, &repository);
+        bootstrap.native_environment.insert(
+            "REVIEW_FIXTURE_REMOTE".to_owned(),
+            path_text(&repository.root.child(TOKEN)).to_owned(),
+        );
+        let Err(PortableControllerError::Io(error)) =
+            prepare_local_checkout(&admitted, &bootstrap).await
+        else {
+            panic!("missing remote must refuse preparation")
+        };
+        assert_eq!(
+            error.to_string(),
+            "could not fetch captured PR head/base for review"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repository.root.child("authenticated")).assert_value(),
+            "authenticated-fetch\n"
+        );
+        assert_workspace_unchanged(&repository);
+    }
+
+    #[tokio::test]
+    async fn invalid_or_unavailable_authority_refuses_before_git_without_disclosing_it() {
+        for token_file in [false, true] {
+            let repository = TestGitRepository::candidate();
+            let admitted = review_source(&repository, &repository.base, "trusted");
+            let mut bootstrap = bootstrap(&admitted, &repository, false);
+            authenticated_git(&mut bootstrap, &repository);
+            if token_file {
+                bootstrap.github_token_file = Some(
+                    crate::native_v2_delivery::TrustedGitHubTokenFile::new(
+                        repository.root.child(TOKEN),
+                        &repository.workspace,
+                    )
+                    .assert_value(),
+                );
+            } else {
+                bootstrap.github_token = Some(format!("{TOKEN}\n"));
+            }
+            let Err(PortableControllerError::Io(error)) =
+                prepare_local_checkout(&admitted, &bootstrap).await
+            else {
+                panic!("invalid authority must refuse preparation")
+            };
+            assert_eq!(
+                error.to_string(),
+                "review checkout credentials are unavailable or invalid"
+            );
+            assert!(!repository.root.child("authenticated").exists());
+            assert!(!bootstrap.storage.exists());
+            assert_workspace_unchanged(&repository);
+        }
+    }
+
     #[tokio::test]
     async fn private_missing_base_fetch_uses_declared_trusted_and_token_file_authority() {
         for authority in ["declared", "trusted", "file", "source"] {
