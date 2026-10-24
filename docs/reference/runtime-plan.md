@@ -1,3 +1,7 @@
+---
+description: "RuntimePlan selects execution settings and supplies bindings for graph nodes. It names models and connection fields without containing secrets."
+---
+
 # RuntimePlan
 
 A `RuntimePlan` says how each executable node in a graph runs. It selects the run size and a default

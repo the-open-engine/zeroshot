@@ -1,3 +1,7 @@
+---
+description: "Python API reference for zeroshot exceptions, including invalid requests, target errors, failed runs, timeouts and submission conflicts."
+---
+
 # Exceptions
 
 ::: zeroshot

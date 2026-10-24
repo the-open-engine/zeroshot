@@ -1,3 +1,7 @@
+---
+description: "Install the zeroshot CLI and its agent skills, connect Cloud, open the workspace UI and prepare a local run."
+---
+
 # Install Zeroshot
 
 Install the `zeroshot` command and its agent skills through the npm delivery package, which requires

@@ -1,3 +1,7 @@
+---
+description: "The zeroshot distribution contract defines canonical releases, platform archives, npm delivery, checksums and release recovery."
+---
+
 # Zeroshot distribution contract
 
 `.github/workflows/release.yml` is the only Zeroshot release workflow. An operator supplies an

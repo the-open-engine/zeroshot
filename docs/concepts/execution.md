@@ -1,3 +1,7 @@
+---
+description: "Learn how zeroshot admits a graph, executes its nodes, checks typed output and chooses the next edge independently of model behavior."
+---
+
 # How execution works
 
 Zeroshot keeps control flow separate from model behavior through a caller-authored graph. After

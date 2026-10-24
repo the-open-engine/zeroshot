@@ -1,3 +1,7 @@
+---
+description: "Review a pull request with the pr-review template and publish its findings as a Markdown comment. Learn what the graph checks."
+---
+
 # Review a pull request
 
 The `pr-review` template checks a PR's implementation and posts a concise Markdown comment.

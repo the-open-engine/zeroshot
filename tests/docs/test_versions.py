@@ -353,7 +353,7 @@ class PublicationTests(unittest.TestCase):
 
     def test_page_shows_its_last_change(self):
         page = SimpleNamespace(
-            file=SimpleNamespace(abs_src_path="docs/index.md"), meta={}
+            file=SimpleNamespace(abs_src_path="docs/index.md", src_uri="index.md"), meta={}
         )
         with patch.object(hook, "_last_change", return_value=date(2026, 10, 4)):
             hook.on_page_markdown("text", page=page)

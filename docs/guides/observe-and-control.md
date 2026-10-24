@@ -1,3 +1,7 @@
+---
+description: "Observe durable run state in the browser or CLI, inspect node transcripts, reconnect to a run and stop work without changing its history."
+---
+
 # Observe and control runs
 
 Run state persists when an observation client leaves, and reconnecting does not change the run

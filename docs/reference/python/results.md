@@ -1,3 +1,7 @@
+---
+description: "Python API reference for run results, summaries, statuses, log events, execution details, source identity and failure diagnostics."
+---
+
 # Result models
 
 ::: zeroshot

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  {% if page %}
+    {% set title = page.title ~ " | zeroshot docs" %}
+    {% set description = page.meta.description | default(config.site_description, true) %}
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="zeroshot">
+    <meta property="og:title" content="{{ title | e }}">
+    <meta property="og:description" content="{{ description | e }}">
+    <meta property="og:url" content="{{ page.canonical_url | e }}">
+    <meta property="og:image" content="https://zeroshot.sh/og.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ title | e }}">
+    <meta name="twitter:description" content="{{ description | e }}">
+    <meta name="twitter:image" content="https://zeroshot.sh/og.jpg">
+    {% if not page.is_homepage %}
+      {% set breadcrumbs = {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {"@type": "ListItem", "position": 1, "name": "zeroshot docs", "item": config.site_url.rstrip("/") ~ "/"},
+          {"@type": "ListItem", "position": 2, "name": page.title, "item": page.canonical_url}
+        ]
+      } %}
+      <script type="application/ld+json">{{ breadcrumbs | tojson }}</script>
+    {% endif %}
+  {% endif %}
+{% endblock %}

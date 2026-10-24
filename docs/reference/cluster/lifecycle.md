@@ -1,3 +1,7 @@
+---
+description: "Reference for operational update and stop controls, capability negotiation and the durable state of admitted runs."
+---
+
 # Operational lifecycle
 
 This contract adds operational `update` and `stop` controls to an admitted run. The Rust protocol

@@ -1,3 +1,7 @@
+---
+description: "zeroshot enforces your team's QA process on coding agents through a graph of implementation, review, test, repair and delivery steps."
+---
+
 <p class="docs-kicker">Core documentation</p>
 
 # Build and review software through a graph

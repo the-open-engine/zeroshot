@@ -1,3 +1,7 @@
+---
+description: "Reference for durable run observation, retained events, opaque cursors, subscriptions and snapshot-tail reconnection."
+---
+
 # Durable watch
 
 The durable observation contract covers retained per-run events, opaque cursors, generic

@@ -1,3 +1,7 @@
+---
+description: "Current documentation follows main. Each release minor has its own documentation, updated to the latest patch with exact source provenance."
+---
+
 # Documentation versions
 
 **Current** follows `main` and is the default. It may describe changes that have not shipped yet.

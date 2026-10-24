@@ -1,3 +1,7 @@
+---
+description: "Run the built-in software-change graph in a local folder with Git delivery disabled. Validate the input and runtime plan before starting."
+---
+
 # Run a first task
 
 This example runs the built-in `software-change` graph in a local folder, with Git delivery disabled.

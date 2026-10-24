@@ -1,3 +1,7 @@
+---
+description: "Build a custom graph with one worker and two independent reviewers. Route rejected changes back for repair within a four-pass limit."
+---
+
 # Build a review loop
 
 This guide builds a custom graph that sends one coding task through a worker and two independent

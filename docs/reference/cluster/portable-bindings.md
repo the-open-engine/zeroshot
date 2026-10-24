@@ -1,3 +1,7 @@
+---
+description: "Resolve versioned worker references before admission and connect external worker protocols through portable bindings."
+---
+
 # Portable bindings
 
 Graphs identify executable workers with versioned `WorkerRef` values. Before admission, a backend

@@ -1,3 +1,7 @@
+---
+description: "Python API reference for Client, MergePlan and Run, covering submission, lookup, observation, stop operations and merge plans."
+---
+
 # Client and run handle
 
 ::: zeroshot

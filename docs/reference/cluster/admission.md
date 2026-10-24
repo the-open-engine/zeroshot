@@ -1,3 +1,7 @@
+---
+description: "Reference for the stateful plan, apply and get admission contract, including verification, idempotency and generation checks."
+---
+
 # Admission
 
 This document defines the stateful `plan`, `apply`, and `get` admission contract. The Rust wire

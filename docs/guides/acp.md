@@ -1,3 +1,7 @@
+---
+description: "Use zeroshot acp to expose a saved local profile as an experimental Agent Client Protocol agent, running the graph once per prompt."
+---
+
 # Use a local graph as an ACP agent
 
 `zeroshot acp` is an experimental stdio endpoint that presents one saved local profile as an

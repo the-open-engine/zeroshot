@@ -1,3 +1,7 @@
+---
+description: "Use the typed asynchronous zeroshot Python SDK with local, direct and hosted targets. Install a platform wheel and submit a run."
+---
+
 # Python SDK
 
 `the-open-engine-zeroshot` is a typed asynchronous client for local, direct, and named hosted

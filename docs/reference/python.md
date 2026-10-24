@@ -1,3 +1,7 @@
+---
+description: "Reference for the asynchronous zeroshot Python package, including clients, run handles, configuration, result models and exceptions."
+---
+
 # Python API
 
 The public package is `zeroshot`; the install distribution is `the-open-engine-zeroshot`. All I/O

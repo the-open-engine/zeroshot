@@ -1,3 +1,7 @@
+---
+description: "The graph contract defines node types, control flow, state, signals and bounds for the full-graph and single-worker protocol profiles."
+---
+
 # Graph contract
 
 This document is normative together with the public Rust types in

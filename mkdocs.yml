@@ -12,14 +12,14 @@ exclude_docs: |
   brand/README.md
   requirements.lock
   requirements.txt
+  overrides/
 
 theme:
   name: material
+  custom_dir: docs/overrides
   logo: brand/oec-crow.png
   favicon: brand/oec-favicon.svg
-  font:
-    text: Spline Sans
-    code: Roboto Mono
+  font: false
   features:
     - content.code.copy
     - navigation.footer
@@ -131,6 +131,7 @@ markdown_extensions:
       permalink: true
 
 extra_css:
+  - assets/fonts/fonts.css
   - stylesheets/extra.css
 
 extra:
@@ -149,4 +150,4 @@ extra:
     - icon: fontawesome/brands/linkedin
       link: https://www.linkedin.com/company/the-open-engine-company
     - icon: fontawesome/brands/x-twitter
-      link: https://x.com/OpenEngineHQ
+      link: https://x.com/OpenEngineCo

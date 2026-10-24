@@ -773,6 +773,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   so local validation and hosted rejection report the same cause.
 - Do not hand-edit `docs/zeroshot-cli.md` or `docs/zeroshot-cli.html`; regenerate with
   `cargo run -p zeroshot --example generate_cli_docs -- --write` and verify with `--check`.
+- Page descriptions live in Markdown front matter; generated reference descriptions live in
+  `scripts/docs_hook.py`. `docs/overrides/main.html` renders social metadata and breadcrumbs.
+  Fonts are self-hosted in `docs/assets/fonts/` with their licenses.
 - The public documentation site is the root `mkdocs.yml`. Python API pages are generated from the
   curated SDK exports and docstrings. Do not restore a second SDK-only MkDocs site.
 - Keep `docs/reference/python/*.md` out of Prettier; its Markdown formatter removes the indentation

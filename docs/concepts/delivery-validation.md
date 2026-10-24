@@ -1,3 +1,7 @@
+---
+description: "Configure a caller-owned local executable to validate delivery before pushing, during PR review and before requesting a merge."
+---
+
 # Caller-owned delivery validation
 
 Local callers may select `ZEROSHOT_DELIVERY_CHECK_COMMAND` as one absolute private executable outside

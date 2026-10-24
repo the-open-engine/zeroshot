@@ -1,3 +1,7 @@
+---
+description: "Understand local folders, Git transport and forge delivery as separate concerns, including exact source identity for contained runs."
+---
+
 # Source-code adapters
 
 Local folders, Git transport, and forge delivery are separate concerns. A local graph without

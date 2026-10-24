@@ -1,3 +1,7 @@
+---
+description: "Choose each agent node's harness, provider and model, and supply credentials through connections separately from the graph."
+---
+
 # Runtimes and connections
 
 A graph defines the work and its control flow; the runtime plan supplies execution details for each

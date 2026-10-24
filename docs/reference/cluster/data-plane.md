@@ -1,3 +1,7 @@
+---
+description: "Reference for the WebSocket binding of the Open Engine Cluster Protocol, including framing, close codes and cancellation."
+---
+
 # WebSocket data plane
 
 `openengine-cluster-server` carries the backend-neutral `Dispatcher` over one WebSocket connection.

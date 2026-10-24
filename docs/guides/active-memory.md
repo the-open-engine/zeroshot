@@ -1,3 +1,7 @@
+---
+description: "Active Memory preserves lessons about costly mistakes and recurring work. Learn how postmortems maintain graph and repository lessons."
+---
+
 # Active Memory
 
 Active Memory preserves concise lessons about costly mistakes and non-obvious work likely to

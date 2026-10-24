@@ -155,6 +155,19 @@ def on_config(config: Any, **_: Any) -> Any:
 
 def on_page_markdown(markdown: str, *, page: Any, **_: Any) -> str:
     """Show when each page last changed, under its content."""
+    # Generated references cannot carry hand-authored Markdown front matter.
+    descriptions = {
+        "zeroshot-cli.md": (
+            "zeroshot CLI reference for commands, options, graph templates, targets, "
+            "connections, profiles and delivery controls."
+        ),
+        "reference/cluster/api.md": (
+            "Open Engine Cluster Protocol API reference with method parameters, "
+            "results, transport capabilities and machine-readable schemas."
+        ),
+    }
+    if page.file.src_uri in descriptions:
+        page.meta["description"] = descriptions[page.file.src_uri]
     changed = _last_change(_content_sources(Path(page.file.abs_src_path), markdown))
     if changed is not None:
         page.meta["revision_date"] = (

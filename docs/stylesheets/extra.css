@@ -1,6 +1,5 @@
 /* Same paper, ink, marker pen and post-its as zeroshot.sh. Material's rem is
    20px where the landing page's is 16px, so its sizes are scaled by 0.8. */
-@import url('https://fonts.googleapis.com/css2?family=Reenie+Beanie&family=Spline+Sans:wght@400;500;600&display=swap');
 
 :root {
   --oe-paper: #faf7f1;

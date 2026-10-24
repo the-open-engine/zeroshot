@@ -1,3 +1,7 @@
+---
+description: "Run the same graph locally, on a self-hosted Docker target or on a managed target. Compare source preparation, connections and durable run state."
+---
+
 # Targets
 
 A target owns source preparation and the processes that execute graph nodes; it also stores durable
