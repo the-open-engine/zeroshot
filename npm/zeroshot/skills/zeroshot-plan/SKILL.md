@@ -66,57 +66,56 @@ the user asks otherwise. Give each plan a short, unique id: an uppercase key and
 never renumber them once written.
 
 Use exactly this structure. The minimum plan is Goal, Acceptance criteria and Constraints; leave out
-other sections when they would be empty.
+other sections, and the `parent`, `depends_on`, `sub_plans` and `source` fields, when they would be
+empty.
 
 ```markdown
 ---
 schema: zeroshot.plan/v1
-id: WR-2
-title: Double bookings on busy days
-status: ready
-owner: sam.k
-parent: WR
-depends_on: [WR-1]
-sub_plans: [WR-2.1]
-source: https://github.com/acme/bookings/issues/212
+id: <KEY>-<n>
+title: <short title>
+status: <new | needs-input | ready | running | done | dropped>
+owner: <who decides>
+parent: <parent plan id>
+depends_on: [<plan ids that must finish first>]
+sub_plans: [<sub-plan ids>]
+source: <issue URL or other origin>
 ---
 
-# Double bookings on busy days
+# <short title>
 
 ## Goal
 
-A repeated Stripe webhook event never creates a second booking.
+<The outcome, as behavior someone can observe.>
 
 ## Context
 
-- Entry point: `webhooks/stripe.ts` (`handleStripeEvent`); bookings are created in `bookings/create.ts`.
-- 14 duplicate bookings since 1 September, all from retries within 2 seconds (support ticket #212).
+- <A file, entry point or piece of evidence, and where it lives.>
 
 ## Acceptance criteria
 
-- **AC-1** WHEN the same event is delivered again THE SYSTEM SHALL NOT create a second booking.
-  Check: end-to-end test, replay one event 50 times, expect exactly one booking.
-- **AC-2** WHEN an event is replayed THE SYSTEM SHALL answer HTTP 200. Check: acceptance review.
+- **AC-1** WHEN <situation> THE SYSTEM SHALL <behavior>. Check: <test, command, end-to-end scenario
+  or acceptance review>.
 
 ## Constraints
 
-- Do not modify `refunds/`.
+- <A limit or non-goal the worker must respect.>
 
 ## Decided approach
 
-Store the event id on each booking with a unique index; on conflict, return the existing booking.
+<Only what was decided.>
 
 ## Open questions
 
-- **Q-1** (non-blocking) Should a peak-load criterion be added? Suggested: yes. Decides: sam.k.
+- **Q-1** (<blocking | non-blocking>) <question> Suggested: <default>. Decides: <who>.
 
 ## Decisions
 
-- **D-1** A replayed event returns 200. (sam.k)
+- **D-1** <what was decided>. (<who>)
 
 ## Out of scope
 
-- Cleaning up existing duplicates: sub-plan WR-2.1.
+- <What this plan leaves out, and where it goes instead.>
 ```
 
 Rules for the content:
