@@ -6,6 +6,10 @@ const { tmpdir } = require('node:os');
 const { resolve, join } = require('node:path');
 const { pathToFileURL } = require('node:url');
 
+// GIF delays are stored in hundredths of a second, so 50 fps (20 ms) plays evenly.
+const FPS = 50;
+const FRAMES = 16 * FPS;
+
 async function render() {
   const browser = await chromium.launch();
   const scratch = mkdtempSync(join(tmpdir(), 'zeroshot-graphs-'));
@@ -34,14 +38,14 @@ async function render() {
         });
       });
       const graph = page.locator('svg.custom-diagram');
-      for (let frame = 0; frame < 240; frame++) {
+      for (let frame = 0; frame < FRAMES; frame++) {
         await page.evaluate(
           (time) => {
             document.getAnimations().forEach((animation) => {
               animation.currentTime = time;
             });
           },
-          (frame * 1000) / 15
+          (frame * 1000) / FPS
         );
         await graph.screenshot({
           path: join(scratch, `${String(frame).padStart(4, '0')}.png`),
@@ -55,7 +59,7 @@ async function render() {
           '-v',
           'error',
           '-framerate',
-          '15',
+          String(FPS),
           '-i',
           join(scratch, '%04d.png'),
           '-filter_complex',
