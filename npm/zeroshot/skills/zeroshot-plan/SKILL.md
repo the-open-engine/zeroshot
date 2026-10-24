@@ -44,7 +44,8 @@ Ask when an unresolved choice would materially change what gets built or how it 
 
 ## Make criteria checkable
 
-Every acceptance criterion states observable behavior and how it will be checked.
+Every acceptance criterion states an outcome someone can observe or verify, and how it will be
+checked.
 
 - Rewrite vague goals into checkable criteria and confirm them with the user: "holds up when busy"
   becomes "a burst of 500 events in 10 seconds creates no duplicates and no errors".
@@ -59,7 +60,11 @@ Every acceptance criterion states observable behavior and how it will be checked
   is the main criterion.
 - If the repository has no way to run a check (for example no end-to-end setup), say that the worker
   must add the test, or choose a check that can run.
-- Flag criteria that cannot be checked instead of keeping them silently.
+- Some checks cannot run in the worker's environment: they need production, real devices or
+  hardware, credentials, paid services, or a person's judgment. Mark them `Check (manual):` and say
+  who checks what, and when, such as after deploy. A run verifies the other criteria and lists these
+  for a person; it never reports them as passed.
+- Flag criteria that cannot be checked at all instead of keeping them silently.
 
 ## Consider what the change touches
 
@@ -72,6 +77,22 @@ constraint. Skip the rest without mention.
 - Rollout: whether the change needs a flag or staged release, and how it is undone.
 - Observability: how anyone can tell in production that it works or fails.
 
+## Fit the criteria to the change
+
+Use the lines that match the kind of work and ignore the rest.
+
+- Bug: first a test that reproduces the bug and fails, then passes after the fix.
+- Investigation or spike: each question answered with evidence and a recommendation; no code change
+  unless the plan says so.
+- Performance or statistical behavior, such as a model: a threshold, how it is measured (benchmark,
+  dataset) and the variance allowed.
+- User interface: screenshots or a visual review against a reference, plus accessibility checks.
+- Documentation: accurate against the code, examples run, and the docs build.
+- Infrastructure or configuration: a dry run or plan diff, and a rollback that has been tried.
+- Security fix: describe the fix, not how to exploit the flaw; keep exploit details out of plans
+  that may be public.
+- Change across repositories: one plan per repository, linked with `depends_on` and `source`.
+
 ## Split when parts are independent
 
 Propose a sub-plan when parts have different owners, different blockers or separately useful
@@ -81,9 +102,10 @@ plans that must finish first.
 
 ## Plan format
 
-Use the source issue as the plan id when there is one, such as `GH-212`; otherwise use an uppercase
-key and a number no other plan uses, such as `WR-2`. Sub-plans add a level (`GH-212.1`). Number
-criteria `AC-1`, questions `Q-1` and decisions `D-1`; never renumber them once written.
+Use the source issue as the plan id when there is one, such as `GH-212` or `PROJ-123`; otherwise use
+an uppercase key and a number no other plan uses, such as `WR-2`. Sub-plans add a level
+(`GH-212.1`). Number criteria `AC-1`, questions `Q-1` and decisions `D-1`; never renumber them once
+written.
 
 Use exactly this structure. The minimum plan is Goal, Acceptance criteria and Constraints; leave out
 other sections, and the `parent`, `depends_on`, `sub_plans` and `source` fields, when they would be
@@ -107,7 +129,7 @@ source: <issue URL or other origin>
 
 ## Goal
 
-<The outcome, as behavior someone can observe.>
+<The outcome someone can observe or verify: behavior, a measured property, a document or an answer.>
 
 ## Context
 
@@ -117,6 +139,8 @@ source: <issue URL or other origin>
 
 - **AC-1** WHEN <event> THE SYSTEM SHALL <behavior>. Check: <test, command or end-to-end scenario>.
 - **AC-2** <Existing behavior> keeps working. Check: <existing tests or command>.
+- **AC-3** <Outcome only a person or another environment can confirm>. Check (manual): <who checks
+  what, and when>.
 
 ## Constraints
 
@@ -152,8 +176,9 @@ Rules for the content:
 
 ## Check before ready
 
-Set `ready` only when every criterion has a check, one criterion covers what must keep working, no
-blocking question is open, every assumption is recorded, and every id is unique.
+Set `ready` only when every criterion has a check (a manual one names who does it), one criterion
+covers what must keep working, no blocking question is open, every assumption is recorded, and every
+id is unique.
 
 When a plan changes later, keep ids stable, add new criteria, questions and decisions with the next
 free number, and update `status` and `base_commit`.
@@ -179,4 +204,4 @@ can build from it later.
   questions. The plan file is the handoff; a person decides when to build it. Any coding agent can
   implement it directly. To run it with Zeroshot, use the `zeroshot` skill and give the plan's Goal,
   Context, Acceptance criteria, Constraints, Decided approach and Decisions as the task. Start a run
-  only when the user asks.
+  only when the user asks. After the run, remind the user of the manual checks it could not perform.

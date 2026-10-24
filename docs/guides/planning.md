@@ -88,24 +88,30 @@ Store the event id on each booking with a unique index; on conflict, return the 
 - Cleaning up existing duplicates: sub-plan GH-212.1.
 ```
 
-| Field or section                    | Meaning                                                                                          |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `id`                                | The source issue (`GH-212`) or an uppercase key and a number; sub-plans add a level (`GH-212.1`) |
-| `status`                            | `new`, `needs-input` (a blocking question is open) or `ready`                                    |
-| `parent`, `sub_plans`, `depends_on` | How plans split, and which must finish first                                                     |
-| `base_commit`                       | The commit the plan was researched against, to tell when it is stale                             |
-| `source`                            | Where the request came from, such as an issue URL                                                |
-| Goal                                | The outcome, as behavior someone can observe                                                     |
-| Context                             | Files, entry points and evidence, summarized without personal data                               |
-| Acceptance criteria                 | `AC-n` statements, each with a `Check:` naming how it is verified                                |
-| Constraints                         | Limits and non-goals the change must respect                                                     |
-| Decided approach                    | Only what was decided, not alternatives                                                          |
-| Open questions                      | `Q-n` items with a suggested answer and who decides                                              |
-| Decisions                           | `D-n` records of what was decided, why, and by whom (or `assumed` for a reviewer to confirm)     |
+| Field or section                    | Meaning                                                                                                                               |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                | The source issue (`GH-212`, `PROJ-123`) or an uppercase key and a number; sub-plans add a level (`GH-212.1`)                          |
+| `status`                            | `new`, `needs-input` (a blocking question is open) or `ready`                                                                         |
+| `parent`, `sub_plans`, `depends_on` | How plans split, and which must finish first                                                                                          |
+| `base_commit`                       | The commit the plan was researched against, to tell when it is stale                                                                  |
+| `source`                            | Where the request came from, such as an issue URL                                                                                     |
+| Goal                                | The outcome someone can observe or verify: behavior, a measured property, a document or an answer                                     |
+| Context                             | Files, entry points and evidence, summarized without personal data                                                                    |
+| Acceptance criteria                 | `AC-n` statements, each with a `Check:` naming how it is verified, or `Check (manual):` when it needs a person or another environment |
+| Constraints                         | Limits and non-goals the change must respect                                                                                          |
+| Decided approach                    | Only what was decided, not alternatives                                                                                               |
+| Open questions                      | `Q-n` items with a suggested answer and who decides                                                                                   |
+| Decisions                           | `D-n` records of what was decided, why, and by whom (or `assumed` for a reviewer to confirm)                                          |
 
 Ids of criteria, questions and decisions never change once written. A plan is `ready` when no
 blocking question is open, every criterion has a check and one criterion covers what must keep
 working. Team standards stay in your agent guidance files instead of being copied into each plan.
+
+Criteria fit the kind of change: a bug starts with a test that reproduces it, an investigation is
+done when its questions are answered with evidence, performance work names a measured threshold, and
+interface work uses screenshots or a visual review. Checks that need production, real devices,
+credentials, paid services or a person's judgment are marked `Check (manual):` with who does them;
+a run verifies the other criteria and lists these for a person.
 
 Plan files live in `.zeroshot/plans/`, which ignores itself through its own `.gitignore`, so plans
 are not committed unless you choose to. Whether work is running or done is tracked by the run, issue
