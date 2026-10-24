@@ -22,8 +22,9 @@ a change, for example "plan this with zeroshot", and it:
 4. proposes sub-plans when parts have different owners, blockers or outcomes;
 5. writes the plan to `.zeroshot/plans/<id>-<slug>.md`.
 
-A small, clear change gets a short plan with no questions. The skill only plans: it does not edit
-code or start runs.
+A small, clear change gets a short plan with no questions. If the issue already has a plan in this
+format posted by a bot, the skill continues from it instead of starting over. The skill only plans:
+it does not edit code or start runs.
 
 The skill is not your agent's plan mode. A plan mode prepares the edit the agent is about to make in
 the current session; the skill writes a plan file that outlives the session, so another agent or a
