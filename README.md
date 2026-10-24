@@ -34,6 +34,9 @@
 
 Prompts are suggestions. Graphs are enforced.
 
+A skill can ask for a review, but the agent decides whether to listen. In a zeroshot graph, your QA
+process is enforced by code.
+
 zeroshot runs coding, independent review and repairs through the workflow you define.
 
 Choose the agents and models, define what must pass, and decide where rejected work goes for
@@ -46,8 +49,18 @@ that workflow as a profile and reuse it.
 The engine enforces the graph’s review gates and retry limits. Each agent can use its own model and
 harness (Pi, Claude Code, Codex or Copilot).
 
-On 20 ProgramBench tasks, [a small model in a review loop](https://theopenengine.com/blog/review-loop/)
-matched a larger model's score at a median 58% of its cost.
+Results so far:
+
+- On 20 ProgramBench tasks, [a small model in a review loop](https://theopenengine.com/blog/review-loop/)
+  matched a larger model's score at a median 58% of its cost.
+- Claude Code on Opus 5.5 built zeroshot’s landing page from its README. A design slop reviewer sent
+  the first draft back for running to ten screens; the accepted page is five. Given the reviewer’s
+  standards in its prompt, Claude Code alone shipped eight.
+  [Compare all three](https://zeroshot.sh/#design-reviewer).
+- In one auto-research run, 10 iterations made an exact geometry computation 21× faster on CPU.
+  [Watch the run](https://zeroshot.sh/#not-just-coding).
+- An arctic flight game built with Codex, before and after zeroshot runs with functionality, visual
+  and integrity reviewers. [Play both](https://zeroshot.sh/#flight-demo).
 
 The CLI is free and MIT licensed. Run locally, [self-host](#self-hosted-run-the-docker-target), or
 use [zeroshot Cloud](https://cloud.zeroshot.sh/docs).
@@ -64,6 +77,27 @@ use [zeroshot Cloud](https://cloud.zeroshot.sh/docs).
   <br>
   <em>Example custom workflow. <a href="https://zeroshot.sh/#topology">Explore the interactive graphs.</a></em>
 </div>
+
+## What users say
+
+> I used Zeroshot (my fork) for my last two contracts: a production line automation and control
+> system, and a multi-host sync and admin system for Webflow and Guesty. Very happy with it!
+>
+> — Mark Dingwall
+
+> Generally, I’m really happy with the results and the quality. I really like the mental models of
+> creating profiles.
+>
+> — Daniel Graungaard
+
+> Implemented support of pi.dev harness and it works pretty well (built with zeroshot BTW).
+>
+> — Andrey
+
+> you guys are solving this in a way that is more satisfying than the google ADK (to me) and it’s
+> fuckin google.
+>
+> — Fav
 
 ## Get started
 
@@ -140,8 +174,10 @@ For other harnesses and providers, see [Runtimes and connections](docs/concepts/
 
 ### Run in the cloud
 
-Connect GitHub and bring your own model API keys.
-[Cloud setup guide →](https://cloud.zeroshot.sh/docs)
+Connect GitHub and bring your own model API keys. Then comment `@zeroshot-cloud run` on its own line
+in a GitHub issue to start a run with your organization’s default profile.
+[Cloud setup guide →](https://cloud.zeroshot.sh/docs) ·
+[Run from a GitHub issue →](https://cloud.zeroshot.sh/docs/github-commands)
 
 ## Build your own graph
 
