@@ -4,8 +4,8 @@ A Zeroshot run builds and checks a change against the task you give it, so the r
 good as that task. A plan makes the task explicit before any build tokens are spent: what should
 change, how each part will be checked, and what must stay as it is.
 
-Plans are Markdown files in your repository. Any coding agent or person can work from them; Zeroshot
-is one way to build them.
+Plans are Markdown files in your repository, and a Zeroshot run builds them: its worker implements
+the plan and its verifiers judge the result against the criteria.
 
 ## Plan with your coding agent
 
