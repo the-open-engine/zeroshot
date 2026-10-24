@@ -48,11 +48,14 @@ limit on the number of questions, and no reason to ask one the research already 
 - Give every question a suggested default: the narrowest reasonable interpretation, so the person
   can simply agree. Name who should decide when it is someone other than the user.
 - Ask the questions with the largest effect on the outcome and the most uncertainty first. If the
-  host's question tool limits how many fit at once, ask the rest right after.
+  host's question tool limits how many fit in one call, ask the rest in another call right after.
+  Each decision is its own question: never pack separate decisions into one option, such as a "core
+  set", to fit the limit.
 - Never ask for approval, priorities, timelines or permission to proceed.
-- After an answer, ask only what it left open. When answers stop resolving anything, stop asking,
-  record the open questions in the plan and hand it over. If open questions keep multiplying,
-  propose a split.
+- After each round, check again before writing the plan: list the choices that still change the
+  build or its checks, including ones the answers raised, and ask another round if any remain. Ask
+  only what the answers left open. When answers stop resolving anything, stop asking, record the
+  open questions in the plan and hand it over. If open questions keep multiplying, propose a split.
 
 ## Make criteria checkable
 
