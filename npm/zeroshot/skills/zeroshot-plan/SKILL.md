@@ -21,9 +21,9 @@ GitHub, replaces that section with its own rules.
 Read the request, the repository's agent guidance (`AGENTS.md`, `CLAUDE.md` or similar), the
 relevant code, and any linked issue or evidence. Fill gaps from what you find and decide routine
 technical details yourself, such as names, paths and endpoints; do not list them as assumptions. Do
-not ask about anything the code, documentation or conversation already answers. Record each
-assumption a reviewer should confirm, about behavior, scope or environment, as a decision marked
-`assumed`. If the plan would conflict with or change a rule in the repository's agent guidance, ask
+not ask about anything the code, documentation or conversation already answers. Record the
+assumptions you make as decisions marked `assumed` (see the next section for when to assume and when
+to ask). If the plan would conflict with or change a rule in the repository's agent guidance, ask
 about it as a blocking question, even when the request implies the change; never record it as an
 assumption.
 
@@ -37,18 +37,22 @@ once. Do not invent sections, risks or questions to make a plan look thorough.
 
 ## Ask only what changes the outcome
 
-Ask when an unresolved choice would materially change what gets built or how it is judged.
+Ask about every unresolved choice that would change what gets built or how it is judged. There is no
+limit on the number of questions, and no reason to ask one the research already answers.
 
-- At most four questions per round, each one specific and answerable in a sentence or two. When
-  there are more candidates, ask those with the largest effect on the outcome and the most
-  uncertainty first, and keep the rest for the next round.
-- Add one sentence on why each question matters: what changes in the build or its checks.
+- Ask, do not assume, when a choice changes the build or its checks. Assume only when there is an
+  obvious default that a reviewer can cheaply correct later, such as following existing behavior or
+  a narrow scope edge, and record it as a decision marked `assumed`.
+- Make each question specific and answerable in a sentence or two, and add one sentence on why it
+  matters: what changes in the build or its checks.
 - Give every question a suggested default: the narrowest reasonable interpretation, so the person
   can simply agree. Name who should decide when it is someone other than the user.
+- Ask the questions with the largest effect on the outcome and the most uncertainty first. If the
+  host's question tool limits how many fit at once, ask the rest right after.
 - Never ask for approval, priorities, timelines or permission to proceed.
-- After an answer, ask only what it left open. There is no fixed number of rounds: keep going while
-  answers resolve questions. When a round resolves nothing new, stop asking, record the open
-  questions in the plan and hand it over. If open questions keep multiplying, propose a split.
+- After an answer, ask only what it left open. When answers stop resolving anything, stop asking,
+  record the open questions in the plan and hand it over. If open questions keep multiplying,
+  propose a split.
 
 ## Make criteria checkable
 
@@ -123,7 +127,8 @@ repair. Split when one of these holds:
   team.
 
 Keep one plan when the parts are small, connected, verified the same way and would be reviewed
-together, however many criteria that takes. The number of criteria is not the test.
+together, however many criteria that takes. The number of criteria is not the test. When one of the
+signals seems to apply but you keep one plan, say why in one sentence in the handoff summary.
 
 When you split, the first part is the plan and is useful on its own. Each later part, in order of
 value, is a follow-up plan whose `depends_on` names the plans that must finish first. Do not create
