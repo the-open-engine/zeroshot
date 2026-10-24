@@ -15,8 +15,8 @@ a change, for example "plan this with zeroshot", and it:
 
 1. reads the request, your repository's agent guidance (`AGENTS.md`, `CLAUDE.md`), the relevant code
    and any linked issue;
-2. asks at most three questions per round, each with a suggested default, and only about choices
-   that change what gets built or how it is judged;
+2. asks up to four questions per round, each with a suggested default, and only about choices that
+   change what gets built or how it is judged;
 3. turns vague goals into checkable acceptance criteria, including what must keep working, and
    confirms them with you;
 4. proposes sub-plans when parts have different owners, blockers or outcomes;

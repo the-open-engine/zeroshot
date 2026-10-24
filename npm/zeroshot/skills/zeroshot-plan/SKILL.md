@@ -37,15 +37,16 @@ once. Do not invent sections, risks or questions to make a plan look thorough.
 
 Ask when an unresolved choice would materially change what gets built or how it is judged.
 
-- At most three questions per round, each one specific and answerable in a sentence or two. When
+- At most four questions per round, each one specific and answerable in a sentence or two. When
   there are more candidates, ask those with the largest effect on the outcome and the most
-  uncertainty first.
+  uncertainty first, and keep the rest for the next round.
 - Add one sentence on why each question matters: what changes in the build or its checks.
 - Give every question a suggested default: the narrowest reasonable interpretation, so the person
   can simply agree. Name who should decide when it is someone other than the user.
 - Never ask for approval, priorities, timelines or permission to proceed.
-- After an answer, ask only what it left open. After three rounds without convergence, stop asking:
-  record the open questions in the plan and hand it over.
+- After an answer, ask only what it left open. There is no fixed number of rounds: keep going while
+  answers resolve questions. When a round resolves nothing new, stop asking, record the open
+  questions in the plan and hand it over. If open questions keep multiplying, propose a split.
 
 ## Make criteria checkable
 
