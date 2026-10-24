@@ -74,8 +74,9 @@ checked.
   must add the test, or choose a check that can run.
 - Some checks cannot run in the worker's environment: they need production, real devices or
   hardware, credentials, paid services, or a person's judgment. Mark them `Check (manual):` and say
-  who checks what, and when, such as after deploy. A run verifies the other criteria and lists these
-  for a person; it never reports them as passed.
+  who checks what, and when. Prefer before merge, such as a reviewer trying the change from its
+  branch; use after merge or after deploy only when the check needs that environment. A run verifies
+  the other criteria and lists these for a person; it never reports them as passed.
 - Flag criteria that cannot be checked at all instead of keeping them silently.
 
 ## Consider what the change touches
@@ -228,12 +229,13 @@ can build from it later.
 
 - **Asking:** use the host's question tool when it has one, so each question offers choices.
 - **Storing:** save the plan as `.zeroshot/plans/<id>.md`, even when the repository keeps other
-  plans or design notes elsewhere, unless the user asks for another place. If you are working in a
-  temporary git worktree, save it in the main checkout's `.zeroshot/plans/` instead
-  (`git worktree list` shows where that is), so the plan survives when the worktree is removed. If
-  `.zeroshot/plans/.gitignore` does not exist, create it containing `*`, so the folder ignores
-  itself without changing anything else in the repository. Do not commit the plan file unless the
-  user asks.
+  plans or design notes elsewhere, unless the user asks for another place. If the current checkout
+  is a linked git worktree (`git rev-parse --git-dir` differs from
+  `git rev-parse --git-common-dir`), save it in the main checkout's `.zeroshot/plans/` instead
+  (`git worktree list` shows where that is), so the plan survives when the worktree is removed, and
+  tell the user the path. If `.zeroshot/plans/.gitignore` does not exist, create it containing `*`,
+  so the folder ignores itself without changing anything else in the repository. Do not commit the
+  plan file unless the user asks.
 - **Existing plans:** when the user names an issue that already has a plan in this format posted by
   a bot account, such as a Zeroshot issue workflow, start from that plan instead of starting over.
   Save it under its id, check it against the current code, and continue from its open questions.
