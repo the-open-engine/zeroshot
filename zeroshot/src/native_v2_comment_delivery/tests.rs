@@ -10,6 +10,90 @@ use super::*;
 
 const URL: &str = "https://github.com/acme/project/issues/17";
 
+fn valid_issue_receipt() -> Value {
+    json!({"receipt":{"version":"v1","mode":"comment","outcome":"posted","destinationUrl":URL,"repository":"acme/project","discussionKind":"issue","discussionId":"17","commentId":"23","url":format!("{URL}#issuecomment-23"),"bodyHash":hash("report")}})
+}
+
+#[test]
+fn terminal_receipt_requires_the_exact_contract_and_discussion_identity() {
+    let original = valid_issue_receipt();
+    assert!(is_matching_success_receipt(&original, URL, None));
+    for (field, value) in [
+        ("version", json!("v2")),
+        ("mode", json!("pull_request")),
+        ("outcome", json!("unconfirmed")),
+        ("bodyHash", json!("g".repeat(64))),
+        (
+            "destinationUrl",
+            json!("https://github.com/acme/project/issues/18"),
+        ),
+        ("repository", json!("acme/other")),
+        ("discussionKind", json!("pull_request")),
+        ("discussionId", json!("18")),
+        ("commentId", json!("0")),
+        ("commentId", json!("not-numeric")),
+        ("sourceRevision", json!("a".repeat(40))),
+    ] {
+        let mut changed = original.clone();
+        changed["receipt"][field] = value;
+        assert!(
+            !is_matching_success_receipt(&changed, URL, None),
+            "accepted changed {field}"
+        );
+    }
+    assert!(!is_matching_success_receipt(&Value::Null, URL, None));
+    assert!(!is_matching_success_receipt(
+        &original,
+        "https://other-forge.invalid/issues/17",
+        None
+    ));
+    let mut unknown_field = original;
+    unknown_field["receipt"]["unexpected"] = json!(true);
+    assert!(!is_matching_success_receipt(&unknown_field, URL, None));
+}
+
+#[tokio::test]
+async fn changed_native_response_contract_is_refused_before_authentication_or_intent() {
+    let (_temp, forge, adapter) = fixture();
+    for field in ["output", "signals", "diagnostic"] {
+        let mut invocation = invocation(&adapter, json!({"url":URL,"body":"report"})).await;
+        let NodeResponseContract::Verifier {
+            output,
+            signals,
+            diagnostic,
+        } = &mut invocation.response
+        else {
+            panic!("expected native verifier");
+        };
+        match field {
+            "output" => *output = openengine_cluster_protocol::PayloadType::String,
+            "signals" => signals.clear(),
+            _ => *diagnostic = openengine_cluster_protocol::PayloadType::String,
+        }
+        assert_invalid_role_without_authority(&adapter, &forge, invocation).await;
+    }
+}
+
+async fn assert_invalid_role_without_authority(
+    adapter: &NativeV2CommentDeliveryAdapter,
+    forge: &Forge,
+    invocation: DriverInvocation,
+) {
+    let (_cancel, control, _durable) = crate::native_v2_runner::test_support::control();
+    assert!(matches!(
+        adapter.run(invocation, control).await,
+        Err(NodeRunnerError::InvalidRole)
+    ));
+    assert_eq!(
+        (
+            forge.actors.load(Ordering::SeqCst),
+            forge.creates.load(Ordering::SeqCst),
+            adapter.store.load().await.unwrap()
+        ),
+        (0, 0, None)
+    );
+}
+
 #[tokio::test]
 async fn final_comment_size_includes_provenance_before_publication_authority_is_recorded() {
     let (_temp, forge, adapter) = fixture();
@@ -453,7 +537,7 @@ async fn atomic_intent_cas_never_grants_create_twice() {
 
 #[test]
 fn forged_receipt_permalink_or_source_revision_is_rejected() {
-    let mut value = json!({"receipt":{"version":"v1","mode":"comment","outcome":"posted","destinationUrl":URL,"repository":"acme/project","discussionKind":"issue","discussionId":"17","commentId":"23","url":format!("{URL}#issuecomment-23"),"bodyHash":hash("report")}});
+    let mut value = valid_issue_receipt();
     assert!(is_matching_success_receipt(&value, URL, None));
     value["receipt"]["url"] = json!("https://attacker.invalid/comment");
     assert!(!is_matching_success_receipt(&value, URL, None));
@@ -807,12 +891,7 @@ async fn closed_or_wrong_role_sessions_cannot_authorize_publication() {
         } else {
             invocation.role = NodeRole::Worker;
         }
-        let (_cancel, control, _durable) = crate::native_v2_runner::test_support::control();
-        assert!(matches!(
-            adapter.run(invocation, control).await,
-            Err(NodeRunnerError::InvalidRole)
-        ));
-        assert_eq!(forge.actors.load(Ordering::SeqCst), 0);
+        assert_invalid_role_without_authority(&adapter, &forge, invocation).await;
     }
 }
 
