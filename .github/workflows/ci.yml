@@ -601,8 +601,8 @@ jobs:
           set -euo pipefail
           while true; do
             review_status="$(gh api --paginate --slurp \
-              "repos/$GITHUB_REPOSITORY/commits/$REVIEW_HEAD_SHA/check-runs?per_page=100" \
-              --jq '[.[].check_runs[] | select(.app.id == 867647 and .name == "Greptile Review")] | max_by(.id) | .status // "pending"')"
+              "repos/$GITHUB_REPOSITORY/commits/$REVIEW_HEAD_SHA/check-runs?per_page=100" |
+              jq -r '[.[].check_runs[] | select(.app.id == 867647 and .name == "Greptile Review")] | max_by(.id) | .status // "pending"')"
             if [[ "$review_status" == "completed" ]]; then
               break
             fi
