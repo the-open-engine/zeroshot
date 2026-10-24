@@ -108,9 +108,22 @@ Use the lines that match the kind of work and ignore the rest.
 
 ## Split only when needed
 
-Start from one plan. Split only when one run or pull request would be too large to review well, or
-when parts have different owners or blockers, for example a cleanup that needs a decision from
-another team.
+Start from one plan. A plan should be something one Zeroshot run can build and verify: its verifiers
+judge the whole change against every criterion, and a rejection sends the whole change back for
+repair. Split when one of these holds:
+
+- Parts are verified differently: one part's checks need something a run does not have, such as a
+  remote target, real devices or production, and another part's do not.
+- One part is a foundation the rest builds on, such as an API, data format or endpoint, and its
+  design may still change once it exists.
+- Parts carry separate risks in separate layers, so a failure in one would force repairs across all
+  of them.
+- A reviewer could not read the resulting pull request in one sitting.
+- Parts have different owners or blockers, for example a cleanup that needs a decision from another
+  team.
+
+Keep one plan when the parts are small, connected, verified the same way and would be reviewed
+together, however many criteria that takes. The number of criteria is not the test.
 
 When you split, the first part is the plan and is useful on its own. Each later part, in order of
 value, is a follow-up plan whose `depends_on` names the plans that must finish first. Do not create
@@ -210,7 +223,9 @@ can build from it later.
 
 - **Asking:** use the host's question tool when it has one, so each question offers choices.
 - **Storing:** save the plan as `.zeroshot/plans/<id>.md`, even when the repository keeps other
-  plans or design notes elsewhere, unless the user asks for another place. If
+  plans or design notes elsewhere, unless the user asks for another place. If you are working in a
+  temporary git worktree, save it in the main checkout's `.zeroshot/plans/` instead
+  (`git worktree list` shows where that is), so the plan survives when the worktree is removed. If
   `.zeroshot/plans/.gitignore` does not exist, create it containing `*`, so the folder ignores
   itself without changing anything else in the repository. Do not commit the plan file unless the
   user asks.

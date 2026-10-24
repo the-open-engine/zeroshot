@@ -19,8 +19,8 @@ a change, for example "plan this with zeroshot", and it:
    change what gets built or how it is judged;
 3. turns vague goals into checkable acceptance criteria, including what must keep working, and
    confirms them with you;
-4. keeps one plan, and splits off follow-up plans only when the work would be too large to review
-   or parts have different owners or blockers;
+4. keeps one plan, and splits off follow-up plans only when one Zeroshot run could not build and
+   verify everything well, for example when parts need different environments to check;
 5. writes the plan to `.zeroshot/plans/<id>.md`.
 
 A small, clear change gets a short plan with no questions. If the issue already has a plan in this
