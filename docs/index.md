@@ -3,8 +3,9 @@
 # Build and review software through a graph
 
 <p class="docs-lede">
-A Zeroshot graph records implementation, review, repair, and delivery as bounded execution steps.
-Its authored transitions determine which node runs next.
+Zeroshot enforces your team's QA process on coding agents. You define it as a graph of
+implementation, review, test, repair, and delivery steps; its authored transitions decide which
+node runs next, so no agent skips a step.
 </p>
 
 [Run a first task](getting-started/first-run.md){ .md-button .md-button--primary }

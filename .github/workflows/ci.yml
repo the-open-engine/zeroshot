@@ -417,6 +417,7 @@ jobs:
       - name: Test documentation and publication contracts
         run: >-
           node --test
+          tests/tooling/docs-agent-contract.test.js
           tests/tooling/docs-versions.test.js
           tests/tooling/release-contract.test.js
 

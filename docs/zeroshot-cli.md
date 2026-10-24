@@ -7,7 +7,7 @@ Regenerate it with `cargo run -p zeroshot --example generate_cli_docs -- --write
 ## `zeroshot`
 
 ```text
-Run multi-agent graphs locally or on named Zeroshot targets.
+Enforce your team's QA process on coding agents: run the graph you define locally or on named Zeroshot targets.
 
 Single-result commands write JSON. Foreground `run`, `watch`, `logs`, and `attach` stream newline-delimited JSON (NDJSON).
 

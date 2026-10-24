@@ -22,6 +22,8 @@ mod checkpoint_tests;
 mod connection_tests;
 #[path = "tests/delegations.rs"]
 mod delegation_tests;
+#[path = "tests/documented_examples.rs"]
+mod documented_example_tests;
 #[path = "tests/environment.rs"]
 mod environment_tests;
 #[path = "tests/lifecycle.rs"]

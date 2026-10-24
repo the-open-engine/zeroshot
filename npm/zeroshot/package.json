@@ -1,7 +1,7 @@
 {
   "name": "@the-open-engine-company/zeroshot",
   "version": "0.0.0-development",
-  "description": "Runs coding agents as a graph: one agent implements, independent agents review, failures go to repair, and nothing ships until the checks pass. Works with Codex, Claude Code, GitHub Copilot and Pi.",
+  "description": "Enforces your team's QA process on coding agents. Define the workflow as a graph of implementers, reviewers, tests and repair loops; every task runs through it and no agent can skip a step. Works with Codex, Claude Code, GitHub Copilot and Pi.",
   "keywords": [
     "claude-code",
     "codex",

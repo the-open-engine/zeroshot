@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "the-open-engine-zeroshot"
 dynamic = ["version"]
-description = "Async Python SDK for the Zeroshot run engine"
+description = "Async Python SDK for Zeroshot, which enforces your team's QA process on coding agents as a graph you define"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

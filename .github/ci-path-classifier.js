@@ -59,6 +59,7 @@ const MULTI_LANE_PATHS = new Map([
   ['package-lock.json', ['tooling', 'npm']],
   ['package.json', ['tooling', 'npm']],
   ['scripts/distribution.js', ['native', 'npm']],
+  ['tests/tooling/docs-agent-contract.test.js', ['tooling', 'docs']],
   ['tests/tooling/distribution.test.js', ['npm']],
   ['tests/tooling/npm-package-install.test.js', ['npm']],
   ['tests/tooling/npm-shim.test.js', ['npm']],

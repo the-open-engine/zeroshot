@@ -1,6 +1,11 @@
 # `@the-open-engine-company/zeroshot`
 
-Installer for the canonical `zeroshot` executable and agent skills. The package selects the release
+Zeroshot enforces your team's QA process on coding agents. You define the process as a graph:
+which agents implement, which reviewers and tests a change must pass, where failures go for repair,
+and where a run stops. Every task runs through it, and no agent can skip a step. It works with
+Codex, Claude Code, GitHub Copilot and Pi.
+
+This package is the installer for the canonical `zeroshot` executable and agent skills. The package selects the release
 archive for the current Node platform and architecture, verifies it against that release's
 `SHA256SUMS`, and installs the executable.
 

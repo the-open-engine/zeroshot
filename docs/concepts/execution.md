@@ -80,9 +80,9 @@ zeroshot template list
 zeroshot template show software-change
 ```
 
-`software-change` has four delivery choices. The default keeps the accepted change local. `--push`
-publishes the managed run branch without opening a pull request. `--pr` opens or updates a pull
-request, processes visible review feedback, waits for required CI and a conflict-free head, then
+`software-change` has four delivery choices and opens a pull request by default. `--delivery none`
+keeps the accepted change local. `--push` publishes the managed run branch without opening a pull
+request. `--pr`, the default, opens or updates a pull request, processes visible review feedback, waits for required CI and a conflict-free head, then
 stops without merging. `--ship` uses the same feedback loop before it follows the repository's merge
 policy and confirms the merged revision. Missing approval doesn't block `--pr`; it still blocks
 `--ship` when GitHub requires it.

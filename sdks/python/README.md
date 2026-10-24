@@ -7,7 +7,8 @@ Replace `WHEEL_FILE` with its local path and import the package as `zeroshot`:
 python -m pip install WHEEL_FILE
 ```
 
-`zeroshot` is a typed async client for the Zeroshot run engine. Each platform wheel contains the
+Zeroshot enforces your team's QA process on coding agents as a graph you define. `zeroshot` is a
+typed async client for its run engine. Each platform wheel contains the
 matching `zeroshot` executable. Python supplies async calls and typed result objects; the executable
 remains authoritative for graph validation, run state, template expansion, and runtime/provider
 rules.

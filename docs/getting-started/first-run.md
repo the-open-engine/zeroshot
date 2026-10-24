@@ -38,6 +38,37 @@ placeholder API key or `openai` connection is required. A Docker or cloud run in
 canonical `OPENAI_API_KEY` requirement and resolves it from the submission environment or the
 target's connection store because it cannot inherit host login state.
 
+For another harness, use its file instead. A local run reuses that CLI's own login in the same way.
+
+```json title="runtime.json for Claude Code"
+{
+  "harness": "claude",
+  "provider": "anthropic",
+  "model": "YOUR_MODEL_ID",
+  "effort": "high"
+}
+```
+
+```json title="runtime.json for GitHub Copilot"
+{
+  "harness": "copilot",
+  "provider": "github",
+  "model": "YOUR_MODEL_ID"
+}
+```
+
+```json title="runtime.json for Pi"
+{
+  "harness": "pi",
+  "provider": "anthropic",
+  "model": "YOUR_MODEL_ID",
+  "effort": "high"
+}
+```
+
+The [RuntimePlan reference](../reference/runtime-plan.md#harness-and-provider) lists every accepted
+pair, including the OpenRouter, Bedrock, and gateway lanes that need a connection.
+
 ## 3. Check the request without starting it
 
 `--validate-only` materializes the template and uniform runtime, then admits the request with its
