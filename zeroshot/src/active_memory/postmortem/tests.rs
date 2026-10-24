@@ -15,6 +15,7 @@ mod initialization;
 mod reconciliation;
 mod replay;
 mod scoped_maintenance;
+mod source_positions;
 use crate::active_memory::{
     LessonDraft, LessonEvidence, LessonMutation, LessonScope, ScopeQuery, ToolObservation,
 };

@@ -29,6 +29,9 @@ lessons is valid. A lesson needs evidence of expensive failure or substantial ex
 a concrete recommendation and a reason to expect reuse. Task summaries, generic advice and facts
 obvious from nearby code do not qualify. Titles have at most 96 UTF-8 bytes; recommendations have
 at most 640. The store keeps evidence pointers and provenance separately from the injected card.
+Use stable paths and identifiers in advice. Admission detects common literal root-relative `file:line` pointers; semantic maintenance
+also checks other positional forms. Legacy cards remain readable; maintenance must adapt
+them to stable guidance or defer, rather than keep or merely renumber their source positions.
 
 Discovery checks observed main-run cost before accepting a proposal. Two timeout/crash completions
 or two provably rejected review-loop visits can qualify. Repository discovery also accepts

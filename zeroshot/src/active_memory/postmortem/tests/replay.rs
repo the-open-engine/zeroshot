@@ -129,11 +129,38 @@ async fn paged_replay_retains_early_worker_evidence_and_stops_at_the_frozen_curs
 async fn cancellation_during_replay_drains_the_current_page_and_starts_no_next_read() {
     let (cancel, cancellation) = watch::channel(false);
     let (request, replay) = replay(Some(cancel)).await;
+    assert_cancelled(&request, &replay, &cancellation, 1).await;
+}
+
+#[tokio::test]
+async fn cancelled_or_closed_collection_never_starts_a_ledger_read() {
+    for initially_cancelled in [true, false] {
+        let (sender, cancellation) = watch::channel(initially_cancelled);
+        let _keep_open = initially_cancelled.then_some(sender);
+        let (request, replay) = replay(None).await;
+        assert_cancelled(&request, &replay, &cancellation, 0).await;
+    }
+}
+
+#[tokio::test]
+async fn cancellation_on_the_last_page_still_discards_the_collected_evidence() {
+    let (cancel, cancellation) = watch::channel(false);
+    let (mut request, replay) = replay(Some(cancel)).await;
+    request.snapshot.cursor = cursor_for(1);
+    assert_cancelled(&request, &replay, &cancellation, 1).await;
+}
+
+async fn assert_cancelled(
+    request: &PostmortemRequest,
+    replay: &Replay,
+    cancellation: &watch::Receiver<bool>,
+    expected_reads: usize,
+) {
     assert!(
-        evidence::collect_cancellable(&request, Vec::new(), &cancellation)
+        evidence::collect_cancellable(request, Vec::new(), cancellation)
             .await
             .assert_value()
             .is_none()
     );
-    assert_eq!(replay.reads.load(Ordering::SeqCst), 1);
+    assert_eq!(replay.reads.load(Ordering::SeqCst), expected_reads);
 }

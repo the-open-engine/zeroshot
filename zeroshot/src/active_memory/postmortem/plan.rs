@@ -56,6 +56,8 @@ impl Role {
             Self::RepositoryMaintenance => concat!(
                 "Maintain ONLY supplied repository lessons. Do not maintain graph procedures or discover new lessons. You MUST read current associated files before keep, adapt or retire. ",
                 "Follow folder/identifier associations to the authoritative source. Compare every concrete version, number, command and path against current source. A card repeated in a transcript or agent response is not corroboration. ",
+                "Source line numbers are facts too: if a helper moved from file.js:120 to file.js:300, keep is invalid even if its behavior is unchanged. Adapt legacy file:line pointers away; use stable paths and identifiers, never merely renumber them. If you cannot verify the advice, defer. ",
+                "Check new conditional modes against unconditional advice; a new read-only preview may require qualifying guidance as applying only to real installation. ",
                 "Each keep/adapt/retire MUST cite repository:<root-relative-file> for current source actually read, and a nonempty reason explaining the comparison. Adapt fills the replacement repository associations while preserving the repository identity.",
             ),
             Self::Graph => concat!(
@@ -107,7 +109,8 @@ const SHARED_INSTRUCTION: &str = concat!(
     "recurring knowledge qualifies. Return every distinct finding that meets the impact and usefulness criteria; there is no findings count quota. Zero new lessons is valid. Use the exact structured output contract. Evidence may be explicitly truncated: absence",
     " from truncated evidence is not proof of absence. Existing lessons are supplied for deduplication, not as proof of new findings. ",
     "Every title is at most 96 UTF-8 bytes, recommendation 640 bytes, and reason/costly_recurring_reason 512 bytes. Each is one line. Use one concise sentence for the reason. ",
-    "References contain at most eight exact pointers. These limits apply to maintenance too; long explanations are rejected. Do not reproduce credentials or secret values.",
+    "References contain at most eight exact pointers TOTAL, including repository pointers. Prefer the minimum proof set; do not list every tool call. Copy current references exactly; repository:path pointers have no line suffix. ",
+    "Use stable file paths and identifiers in advice, not volatile file:line locations. These limits apply to maintenance too; long explanations are rejected. Do not reproduce credentials or secret values.",
 );
 
 pub(super) fn specialist_instruction(role: Role) -> String {

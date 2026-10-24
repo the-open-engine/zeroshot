@@ -112,3 +112,44 @@ fn receipt_heavy_context_preserves_a_quiet_workers_transcript() {
             .any(|record| record["reference"] == "v2:1")
     );
 }
+
+#[test]
+fn escaped_transcripts_are_trimmed_within_each_execution_without_losing_quiet_workers() {
+    let event = crate::native_v2_runner::bounded_log_text(
+        json!({"kind":"safe_log","execution":2,"line":"\\\"".repeat(256)}).to_string(),
+        1024,
+    );
+    let mut records =
+        vec![json!({"execution":1,"reference":"v2:1","event":"worker experiment found the cause"})];
+    records.extend(
+        (2..32).map(
+            |sequence| json!({"execution":2,"reference":format!("v2:{sequence}"),"event":event}),
+        ),
+    );
+    let input = json!({"evidence":{"records":records,"executions":[],"tool_observations":[],"authored_graph":"node instructions ".repeat(800)}});
+    assert!(encoded_size(&input) > BASE_BYTES);
+    let document = base(input);
+    let retained = document["evidence"]["records"].as_array().unwrap();
+    assert!(retained.len() < 31);
+    assert!(retained.iter().any(|record| record["reference"] == "v2:1"));
+    assert!(retained.iter().any(|record| record["reference"] == "v2:31"));
+    assert_eq!(document["evidence"]["evidence_truncated"], true);
+    assert!(encoded_size(&document) <= BASE_BYTES);
+}
+
+#[test]
+fn unshrinkable_evidence_preserves_the_complete_nonempty_delivery_manifest() {
+    let supplied = json!({"card-1":{"id":"card-1","revision":7}});
+    let records = vec![
+        json!({"execution":1,"reference":"v2:1","event":"worker evidence"}),
+        json!({"execution":2,"reference":"v2:2","event":"reviewer evidence"}),
+    ];
+    let document = base(
+        json!({"manifest_known":true,"supplied_lessons":supplied,"evidence":{"records":records,"impact_episodes":{"oversized_metadata":"x".repeat(MAX_INPUT_BYTES)}}}),
+    );
+    assert_eq!(document["manifest_known"], true);
+    assert_eq!(document["supplied_lessons"], supplied);
+    assert_eq!(document["evidence"]["evidence_truncated"], true);
+    assert!(document["evidence"]["omitted_reason"].is_string());
+    assert!(encoded_size(&document) <= BASE_BYTES);
+}

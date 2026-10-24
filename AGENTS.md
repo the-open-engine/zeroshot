@@ -64,7 +64,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   or duplicate decisions cannot count as completed reconciliation. Maintenance consolidates redundant
   paraphrases only within the same repository or exact graph/node/repository-qualified scope, retaining
   one canonical recommendation and all useful detail while deciding every supplied ID. Rejected discovery proposals report a validation stage and host-owned card field names without echoing
-  proposal text. Postmortem transcript collection scans bounded ledger pages and reclaims its fixed
+  proposal text. Repository advice admission detects common literal file:line positions for associated/cited source
+  while preserving ambiguous endpoint, URL and image references;
+  legacy cards remain readable but scoped maintenance must adapt or defer them rather than keep
+  or renumber volatile positions. Postmortem transcript collection scans bounded ledger pages and reclaims its fixed
   byte budget from the largest execution tail, preserving earlier worker evidence under late reviewer
   output rather than using a global last-record window. Replay observes cancellation between bounded
   reads; final context trimming shrinks the largest arrays and retains per-execution transcript tails. Discovery has no findings count
