@@ -214,10 +214,17 @@ Rules for the content:
 
 ## Check before ready
 
-Set `ready` only when every criterion has a check (a manual one names who does it), one criterion
-covers what must keep working, no blocking question is open, every assumption is recorded, no two
-criteria duplicate or contradict each other, each concept has one name throughout, and every id is
-unique.
+Before setting `ready`, go through this list and fix the plan until every item holds:
+
+- Every criterion has a check, and a manual check names who does it and when.
+- Every part that needs an environment a run does not have, such as a remote target, real devices
+  or production, has a manual check.
+- One criterion covers what must keep working.
+- Every risk a question pointed out has a criterion or constraint that covers it.
+- Every change to a rule in the repository's agent guidance was asked as a question and answered.
+- No blocking question is open, and every assumption is recorded.
+- No two criteria duplicate or contradict each other, and each concept has one name throughout.
+- Every id is unique.
 
 When a plan changes later, keep ids stable, add new criteria, questions and decisions with the next
 free number, and update `status` and `base_commit`.
