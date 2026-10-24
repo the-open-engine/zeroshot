@@ -25,8 +25,8 @@ interpretation and ask one focused question. Do not submit while that decision r
 Suggest separate tasks only for independently useful outcomes or real prerequisites.
 
 When the work is vague or large enough to need agreed acceptance criteria, plan it first with the
-separate `zeroshot-plan` skill. When a plan file exists (`docs/plans/<id>-<slug>.md`), use its Goal,
-Context, Acceptance criteria, Constraints and Decided approach as the task.
+separate `zeroshot-plan` skill. When a plan file exists (`.zeroshot/plans/<id>-<slug>.md`), use its
+Goal, Context, Acceptance criteria, Constraints, Decided approach and Decisions as the task.
 
 Never start a Zeroshot run merely because the skill is available. The user must ask to use Zeroshot.
 A worker already executing inside a Zeroshot run should perform its assigned work directly, not start
