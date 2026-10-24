@@ -25,9 +25,10 @@ const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
 const MAX_SKILL_BYTES: usize = 1024 * 1024;
 const MAX_ARCHIVE_BYTES: usize = 256 * 1024 * 1024;
 const SKILL_ASSET: &str = "zeroshot-skill.md";
-const SKILL_ASSETS: [(&str, &str); 2] = [
+const SKILL_ASSETS: [(&str, &str); 3] = [
     ("zeroshot", SKILL_ASSET),
     ("zeroshot-memory-init", "zeroshot-memory-init-skill.md"),
+    ("zeroshot-graph-design", "zeroshot-graph-design-skill.md"),
 ];
 const RESTIC_VERSION: &str = "0.19.1";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);

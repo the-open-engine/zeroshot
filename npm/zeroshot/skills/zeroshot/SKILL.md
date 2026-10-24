@@ -42,6 +42,8 @@ another run. A failed Cloud run does not authorize silently implementing the tas
 
 ## Reuse profiles and connections
 
+For a guided interview to design or revise a graph, use the `zeroshot-graph-design` skill.
+
 Prefer a saved profile over inventing a graph or runtime. Inspect its input, runtime, and delivery
 behavior before constructing a run. Local profiles need no login; a local default profile applies
 when a run names no profile, graph, or runtime:

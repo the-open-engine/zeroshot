@@ -454,6 +454,7 @@ jobs:
             release-assets/*.tar.gz
             release-assets/zeroshot-skill.md
             release-assets/zeroshot-memory-init-skill.md
+            release-assets/zeroshot-graph-design-skill.md
             release-assets/SHA256SUMS
           if-no-files-found: error
 
@@ -801,6 +802,7 @@ jobs:
             --pattern 'SHA256SUMS' \
             --pattern 'zeroshot-skill.md' \
             --pattern 'zeroshot-memory-init-skill.md' \
+            --pattern 'zeroshot-graph-design-skill.md' \
             --pattern "zeroshot-v${RELEASE_VERSION}-*.tar.gz" \
             --dir release-assets
 

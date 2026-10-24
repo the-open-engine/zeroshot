@@ -7,6 +7,7 @@ const path = require('node:path');
 const { describe, it } = require('node:test');
 
 const distribution = require('../../scripts/distribution');
+const { SKILL_NAMES } = require('../../npm/zeroshot/lib/skills');
 
 function writeReleaseAssets(directory, version = 'v8.0.0') {
   for (const target of distribution.targets) {
@@ -15,8 +16,9 @@ function writeReleaseAssets(directory, version = 'v8.0.0') {
       'fixture'
     );
   }
-  fs.writeFileSync(path.join(directory, 'zeroshot-skill.md'), 'fixture');
-  fs.writeFileSync(path.join(directory, 'zeroshot-memory-init-skill.md'), 'memory fixture');
+  for (const skill of SKILL_NAMES) {
+    fs.writeFileSync(path.join(directory, `${skill}-skill.md`), 'fixture');
+  }
   fs.writeFileSync(path.join(directory, 'SHA256SUMS'), 'fixture');
   fs.writeFileSync(path.join(directory, distribution.releaseNotesName(version)), 'notes fixture');
 }
@@ -68,21 +70,17 @@ describe('canonical distribution', () => {
       }
       distribution.createManifest({ version: '8.0.0', directory });
       assert.equal(distribution.verifyDistribution({ version: 'v8.0.0', directory }), true);
-      assert.deepEqual(
-        fs.readFileSync(path.join(directory, 'zeroshot-skill.md')),
-        fs.readFileSync(path.join(__dirname, '../../npm/zeroshot/skills/zeroshot/SKILL.md'))
-      );
-      assert.deepEqual(
-        fs.readFileSync(path.join(directory, 'zeroshot-memory-init-skill.md')),
-        fs.readFileSync(
-          path.join(__dirname, '../../npm/zeroshot/skills/zeroshot-memory-init/SKILL.md')
-        )
-      );
-      fs.writeFileSync(path.join(directory, 'zeroshot-skill.md'), 'tampered');
-      assert.throws(
-        () => distribution.verifyDistribution({ version: 'v8.0.0', directory }),
-        /CHECKSUM_MISMATCH/
-      );
+      for (const skill of SKILL_NAMES) {
+        const source = path.join(__dirname, '../../npm/zeroshot/skills', skill, 'SKILL.md');
+        const asset = path.join(directory, `${skill}-skill.md`);
+        assert.deepEqual(fs.readFileSync(asset), fs.readFileSync(source));
+        fs.writeFileSync(asset, 'tampered');
+        assert.throws(
+          () => distribution.verifyDistribution({ version: 'v8.0.0', directory }),
+          /CHECKSUM_MISMATCH/
+        );
+        fs.copyFileSync(source, asset);
+      }
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }

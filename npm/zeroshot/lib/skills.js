@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const SKILL_NAMES = Object.freeze(['zeroshot', 'zeroshot-memory-init']);
+const SKILL_NAMES = Object.freeze(['zeroshot', 'zeroshot-memory-init', 'zeroshot-graph-design']);
 const MANAGED_MARKER = 'managed by @the-open-engine-company/zeroshot';
 const MANAGED_PATTERN =
   /^<!-- managed by @the-open-engine-company\/zeroshot; sha256=([a-f0-9]{64}) -->\n/;

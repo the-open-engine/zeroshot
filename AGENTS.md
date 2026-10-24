@@ -28,8 +28,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   profile UI. The UI is served by Rust and never needs a production Node server.
 - Canonical releases are explicit `vX.Y.Z` tags with major version 8 or newer.
 - The npm package is `@the-open-engine-company/zeroshot`.
-- That package owns the canonical `zeroshot` and `zeroshot-memory-init` skills and installs managed
-  copies for Codex, GitHub Copilot, Pi, and Claude Code at their user scopes. Do not fork skills by host.
+- That package owns the canonical `zeroshot`, `zeroshot-memory-init`, and `zeroshot-graph-design`
+  skills and installs managed copies for Codex, GitHub Copilot, Pi, and Claude Code at their user
+  scopes. Do not fork skills by host.
 - The target image is `ghcr.io/the-open-engine/zeroshot-target`.
 - The Python distribution is `the-open-engine-zeroshot`; its import package remains `zeroshot`.
 - Python SDK tags are `zeroshot-python-vZEROSHOT_SDK` and package versions are
@@ -1014,7 +1015,10 @@ python -m mkdocs build --strict
 ## Release convention
 
 - CI has native, Python, repository-tooling, npm-package, and strict-documentation lanes plus stable
-  aggregate `required`. Native changes also require macOS product and test compilation with the UI
+  aggregate `required`. On PRs, that aggregate waits for Greptile's latest review check on the exact
+  head to complete; findings remain review input for the worker rather than automatic CI failures.
+  Merge groups use the completed PR gate because Greptile does not review merge-group commits.
+  Native changes also require macOS product and test compilation with the UI
   feature, focused Unix controller socket regression tests, and APFS workspace clone tests that
   `ZEROSHOT_REQUIRE_APFS_CLONE` keeps from skipping. `.github/ci-path-classifier.js` owns
   fail-closed path routing and cross-lane
