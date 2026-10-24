@@ -81,7 +81,12 @@ async fn validate_task(
     );
     let validated = context
         .mutations(entry.task.role, &input, output.clone())
-        .map_err(|()| invalid(format!("invalid maintenance result: {}", entry.task.path)))?;
+        .map_err(|reason| {
+            invalid(format!(
+                "invalid maintenance result: {}: {reason}",
+                entry.task.path
+            ))
+        })?;
     Ok((output, validated))
 }
 

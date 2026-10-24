@@ -69,9 +69,11 @@ impl Role {
             Self::Repository => concat!(
                 "Find only high-impact repository lessons: an observed costly mistake or substantial non-obvious exploration/experiment, with a concrete corrective recommendation and a ",
                 "common future operation likely to need it. Exclude generic advice, task summaries, ordinary code reading, speculative tips, large output alone and facts readily obvious ",
-                "from nearby source. Admission requires either at least two impact_episodes failure_references for that node, or at least three distinct hook:<seq> tool observations spanning five minutes. Model waiting time and one ordinary output correction do not qualify. The cost must actually support this specific non-obvious ",
+                "from nearby source. Admission requires either at least two impact_episodes failure_references for that node, or at least three distinct hook:<seq> tool observations spanning five minutes. ",
+                "The references you cite must themselves contain that proof for node_id; the whole episode span is insufficient when your selected hooks cover less than five minutes. Model waiting time and one ordinary output correction do not qualify. The cost must actually support this specific non-obvious ",
                 "finding, not merely occur in the same run. Check current repository files before proposing a lesson. Include at least one literal root-relative file/folder association or exact identifier verified in a cited current file. Add multiple associations where useful,",
-                " or conjunctive keyword groups of 2..4 specific lowercase terms. Keep title <=96 UTF-8 bytes and recommendation <=640 bytes, both single-line. node_id names an agent node",
+                " or conjunctive keyword groups of 2..4 specific lowercase alphanumeric terms (no spaces or punctuation within a term). ",
+                "Identifiers are whole source identifiers of 3..128 ASCII letters, digits or underscores; commands such as format:check belong in prose, not identifiers. Keep title <=96 UTF-8 bytes and recommendation <=640 bytes, both single-line. node_id names an agent node",
                 " that actually executed. Cite the required failure or hook references for impact AND repository:<root-relative-file> after actually reading the associated authoritative source. Return {lessons:[...]}; zero ",
                 "lessons is valid.",
             ),

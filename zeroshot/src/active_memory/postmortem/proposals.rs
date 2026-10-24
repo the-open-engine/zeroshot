@@ -32,6 +32,27 @@ impl<'a> From<&'a BuiltinPostmortemConfig> for LessonContext<'a> {
     }
 }
 
+/// Only validation stages and host-owned field names enter diagnostics, never proposal text.
+#[derive(Debug, thiserror::Error)]
+pub(super) enum ProposalRejection {
+    #[error("invalid output shape or serialized size")]
+    Output,
+    #[error("incomplete or invalid maintenance reconciliation")]
+    Maintenance,
+    #[error("disabled scope or unknown executed node")]
+    Node,
+    #[error("invalid evidence references")]
+    References,
+    #[error("cited references do not prove the required main-run cost for this node")]
+    Cost,
+    #[error("current repository source does not verify the proposed associations")]
+    Source,
+    #[error("invalid lesson scope")]
+    Scope,
+    #[error("invalid lesson card: {0}")]
+    Card(crate::active_memory::ActiveMemoryError),
+}
+
 pub(super) struct ProposalContext<'a> {
     config: LessonContext<'a>,
     request: MainRunFacts<'a>,
@@ -180,14 +201,21 @@ impl<'a> ProposalContext<'a> {
         role: Role,
         input: &Value,
         output: Value,
-    ) -> Result<Vec<LessonMutation>, ()> {
-        if serde_json::to_vec(&output).map_err(|_| ())?.len() > MAX_STORE_BYTES {
-            return Err(());
+    ) -> Result<Vec<LessonMutation>, ProposalRejection> {
+        if serde_json::to_vec(&output)
+            .map_err(|_| ProposalRejection::Output)?
+            .len()
+            > MAX_STORE_BYTES
+        {
+            return Err(ProposalRejection::Output);
         }
         if role.is_maintenance() {
-            return self.maintenance_mutations(role, input, output);
+            return self
+                .maintenance_mutations(role, input, output)
+                .map_err(|()| ProposalRejection::Maintenance);
         }
-        let output: DiscoveryOutput = serde_json::from_value(output).map_err(|_| ())?;
+        let output: DiscoveryOutput =
+            serde_json::from_value(output).map_err(|_| ProposalRejection::Output)?;
         let mutations = output
             .lessons
             .into_iter()
@@ -237,11 +265,16 @@ impl<'a> ProposalContext<'a> {
         Ok(mutations)
     }
 
-    fn discovery(&self, role: Role, candidate: Candidate) -> Result<LessonMutation, ()> {
+    fn discovery(
+        &self,
+        role: Role,
+        candidate: Candidate,
+    ) -> Result<LessonMutation, ProposalRejection> {
         if !self.role_enabled(role) || !self.actual_nodes.contains(&candidate.node_id) {
-            return Err(());
+            return Err(ProposalRejection::Node);
         }
-        self.references(&candidate.references)?;
+        self.references(&candidate.references)
+            .map_err(|()| ProposalRejection::References)?;
         if !self
             .evidence
             .impact
@@ -249,14 +282,19 @@ impl<'a> ProposalContext<'a> {
             .get(&candidate.node_id)
             .is_some_and(|episode| episode.allows(role, &candidate.references))
         {
-            return Err(());
+            return Err(ProposalRejection::Cost);
         }
         if role == Role::Repository {
-            self.repository_discovery_source(&candidate)?;
+            self.repository_discovery_source(&candidate)
+                .map_err(|()| ProposalRejection::Source)?;
         }
-        let scope = canonical_scope(&self.discovery_scope(role, &candidate)?);
-        let encoded =
-            serde_json::to_vec(&(&scope, normalize(&candidate.recommendation))).map_err(|_| ())?;
+        let scope = canonical_scope(
+            &self
+                .discovery_scope(role, &candidate)
+                .map_err(|()| ProposalRejection::Scope)?,
+        );
+        let encoded = serde_json::to_vec(&(&scope, normalize(&candidate.recommendation)))
+            .map_err(|_| ProposalRejection::Output)?;
         let digest = Sha256::digest(encoded);
         let draft = LessonDraft {
             id: format!("lesson-{:x}", digest),
@@ -270,7 +308,7 @@ impl<'a> ProposalContext<'a> {
                 costly_recurring_reason: candidate.costly_recurring_reason,
             },
         };
-        draft.validate().map_err(|_| ())?;
+        draft.validate().map_err(ProposalRejection::Card)?;
         Ok(LessonMutation::Upsert {
             expected_revision: None,
             draft: Box::new(draft),

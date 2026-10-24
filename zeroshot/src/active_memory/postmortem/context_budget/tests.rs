@@ -91,3 +91,24 @@ fn oversized_graph_text_and_structured_input_have_explicit_bounded_fallbacks() {
     assert_eq!(input["supplied_lessons"], json!({}));
     assert!(encoded_size(&input) <= BASE_BYTES);
 }
+
+#[test]
+fn receipt_heavy_context_preserves_a_quiet_workers_transcript() {
+    let mut records =
+        vec![json!({"execution":1,"reference":"v2:1","event":"worker established the cause"})];
+    records.extend((2..52).map(|sequence| json!({"execution":2,"reference":format!("v2:{sequence}"),"event":"reviewer text".repeat(40)})));
+    let tools = (1..=512)
+        .map(|seq| json!({"seq":seq,"node_id":"worker","paths":vec!["a".repeat(256);4]}))
+        .collect::<Vec<_>>();
+    let document =
+        base(json!({"evidence":{"records":records,"executions":[],"tool_observations":tools}}));
+    assert_eq!(document["evidence"]["evidence_truncated"], true);
+    assert!(encoded_size(&document) <= BASE_BYTES);
+    assert!(
+        document["evidence"]["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|record| record["reference"] == "v2:1")
+    );
+}

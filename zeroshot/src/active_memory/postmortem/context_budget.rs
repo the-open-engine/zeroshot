@@ -15,9 +15,7 @@ pub(super) fn base(mut value: Value) -> Value {
     while encoded_size(&value) > BASE_BYTES {
         value["evidence"]["evidence_truncated"] = json!(true);
         let evidence = &mut value["evidence"];
-        if shrink_array(evidence, "records")
-            || shrink_array(evidence, "executions")
-            || shrink_array(evidence, "tool_observations")
+        if shrink_largest_array(evidence)
             || shrink_string(evidence, "authored_graph")
             || shrink_string(evidence, "initial_input")
         {
@@ -57,12 +55,58 @@ pub(super) fn add_object(document: &mut Value, key: &str, id: &str, item: Value)
     false
 }
 
+fn shrink_largest_array(document: &mut Value) -> bool {
+    let mut sizes = ["records", "executions", "tool_observations"]
+        .map(|key| (encoded_size(&document[key]), key));
+    sizes.sort_by_key(|item| std::cmp::Reverse(item.0));
+    sizes
+        .into_iter()
+        .any(|(_, key)| shrink_array(document, key))
+}
+
+fn shrink_records(items: &mut Vec<Value>) -> bool {
+    let mut counts = std::collections::BTreeMap::<u64, usize>::new();
+    for record in items.iter() {
+        let Some(execution) = record.get("execution").and_then(Value::as_u64) else {
+            return false;
+        };
+        *counts.entry(execution).or_default() += 1;
+    }
+    let mut remove = counts
+        .into_iter()
+        .map(|(execution, count)| (execution, count / 2))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let before = items.len();
+    items.retain(|record| {
+        let remaining = record
+            .get("execution")
+            .and_then(Value::as_u64)
+            .and_then(|execution| remove.get_mut(&execution));
+        if let Some(remaining) = remaining
+            && *remaining > 0
+        {
+            *remaining -= 1;
+            false
+        } else {
+            true
+        }
+    });
+    before != items.len()
+}
+
 fn shrink_array(document: &mut Value, key: &str) -> bool {
     let Some(items) = document.get_mut(key).and_then(Value::as_array_mut) else {
         return false;
     };
     if items.is_empty() {
         return false;
+    }
+    if key == "records"
+        && items
+            .iter()
+            .all(|record| record.get("execution").and_then(Value::as_u64).is_some())
+    {
+        return shrink_records(items);
     }
     if key == "tool_observations" {
         let quarter = items.len() / 4;

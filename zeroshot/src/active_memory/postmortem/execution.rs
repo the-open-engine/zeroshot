@@ -145,8 +145,12 @@ async fn run_role_batches(
         let output = run_role_inner(execution, &batch, cancellation).await?;
         match execution.context.mutations(role, input, output) {
             Ok(proposals) => mutations.extend(proposals),
-            Err(()) => {
-                let _ = log(execution.request, format!("Active Memory {} findings rejected by scope, evidence, card validation or incomplete reconciliation", role.name())).await;
+            Err(reason) => {
+                let _ = log(
+                    execution.request,
+                    format!("Active Memory {} findings rejected: {reason}", role.name()),
+                )
+                .await;
                 return Err(PostmortemError::Preparation);
             }
         }

@@ -165,8 +165,18 @@ impl RunPostmortem for BuiltinPostmortem {
             });
         }
         let plan = plan::build(&request.admitted).await?;
-        let evidence =
-            evidence::collect(&request, self.config.supplied.tool_observations()).await?;
+        let Some(evidence) = evidence::collect_cancellable(
+            &request,
+            self.config.supplied.tool_observations(),
+            &cancellation,
+        )
+        .await?
+        else {
+            return Ok(PostmortemReport {
+                cancelled: true,
+                ..Default::default()
+            });
+        };
         let supplied = self.config.supplied.manifest();
         execution::record_manifest(&request, self.config.snapshot.generation, supplied.as_ref())
             .await?;

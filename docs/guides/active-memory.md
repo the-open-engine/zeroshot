@@ -44,7 +44,14 @@ Repository discoveries also need a current file citation and a matching file, fo
 identifier association. These conservative checks establish cost;
 the specialist must still establish
 what was learned, why it recurs and whether current source supports it. Maintenance can update
-supplied lessons even when discovery has no eligible evidence.
+supplied lessons even when discovery has no eligible evidence. Rejected discovery proposals log the failed
+validation stage (including card field errors) without logging the proposed lesson text. Exploration
+proof must come from the cited hooks themselves, rather than uncited tools elsewhere in the run.
+Postmortem history is read in bounded pages; its fixed transcript budget reclaims old records
+from the execution consuming the most space, so a verbose late reviewer cannot displace all
+worker evidence. Reads stop between bounded pages on cancellation. Final context trimming shrinks
+the largest evidence array first and retains an excerpt per execution where the byte budget
+allows. Truncation remains explicit.
 
 ## Configuration
 

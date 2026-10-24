@@ -43,7 +43,9 @@ async fn validate_run(
         mutations.extend(
             context
                 .mutations(task.role, &input, output)
-                .map_err(|()| invalid(format!("invalid discovery result: {}", task.path)))?,
+                .map_err(|reason| {
+                    invalid(format!("invalid discovery result: {}: {reason}", task.path))
+                })?,
         );
     }
     Ok(mutations)

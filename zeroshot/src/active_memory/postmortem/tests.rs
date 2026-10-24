@@ -10,8 +10,10 @@ use serde_json::{Value, json};
 
 use super::*;
 
+mod diagnostics;
 mod initialization;
 mod reconciliation;
+mod replay;
 mod scoped_maintenance;
 use crate::active_memory::{
     LessonDraft, LessonEvidence, LessonMutation, LessonScope, ScopeQuery, ToolObservation,
