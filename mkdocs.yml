@@ -82,7 +82,7 @@ nav:
       - Documentation versions: project/versioning.md
       - Distribution contract: zeroshot-distribution.md
       - Source-code adapters: project/source-code-adapters.md
-  - Zeroshot Platform: https://cloud.zeroshot.sh/docs
+  - Zeroshot Platform: https://app.zeroshot.sh/docs
   - zeroshot.sh: https://zeroshot.sh/?utm_source=github&utm_medium=docs&utm_campaign=zeroshot
 
 plugins:

@@ -100,7 +100,7 @@ Ask whether the saved profile should become the default, naming the affected sco
 Inspect the effective runtime's required environment/connection fields and existing configuration. If values are missing, ask how the user wants to provide them:
 
 - Printed CLI setup commands: use `zeroshot connection set KEY --field FIELD` with repeated hidden prompts and the correct target/scope. Include every connection field because `set` replaces the connection.
-- Cloud UI: link to `https://cloud.zeroshot.sh/orgs/ORG_ID/connections?scope=SCOPE` using verified values, or link to [Cloud](https://cloud.zeroshot.sh) and direct the user to Connections.
+- Platform UI: link to `https://app.zeroshot.sh/orgs/ORG_ID/connections?scope=SCOPE` using verified values, or link to [Platform](https://app.zeroshot.sh) and direct the user to Connections.
 - At run startup: print a command that prompts without echo and supplies the required variables only to that run.
 
 Never request secret values in chat or embed them in printed commands. Skip this question when no values are missing.

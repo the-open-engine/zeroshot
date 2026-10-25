@@ -51,7 +51,7 @@ matched a larger model's score at a median 58% of its cost. More examples on zer
 and [a research run](https://zeroshot.sh/#not-just-coding).
 
 The CLI is free and MIT licensed. Run locally, [self-host](#self-hosted-run-the-docker-target), or
-use [Zeroshot Platform](https://cloud.zeroshot.sh/docs).
+use [Zeroshot Platform](https://app.zeroshot.sh/docs).
 
 <div align="center">
   <a href="https://zeroshot.sh/#topology">
@@ -163,7 +163,7 @@ For other harnesses and providers, see [Runtimes and connections](docs/concepts/
 ### Run on Zeroshot Platform
 
 Connect GitHub and bring your own model API keys.
-[Platform setup guide →](https://cloud.zeroshot.sh/docs)
+[Platform setup guide →](https://app.zeroshot.sh/docs)
 
 ## Build your own graph
 
@@ -234,7 +234,7 @@ zeroshot run \
 
 The CLI and UI share the same local profiles. See
 [UI setup](docs/getting-started/install.md#open-the-workspace-ui). For shared team configurations,
-see [organization profiles](https://cloud.zeroshot.sh/docs/connections-and-profiles).
+see [organization profiles](https://app.zeroshot.sh/docs/connections-and-profiles).
 
 ## What the built-in workflow does
 

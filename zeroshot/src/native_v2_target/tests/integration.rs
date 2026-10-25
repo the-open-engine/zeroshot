@@ -32,7 +32,7 @@ fn file_registry_initializes_platform_with_a_stable_hosted_identity() {
         .get("platform")
         .assert_value();
     assert_eq!(platform.name, "platform");
-    assert_eq!(platform.origin, "https://api.cloud.zeroshot.sh");
+    assert_eq!(platform.origin, "https://api.app.zeroshot.sh");
     assert!(matches!(platform.access, TargetAccess::Hosted { .. }));
     assert_eq!(
         FileTargetRegistry::new(path).get("platform").assert_value(),

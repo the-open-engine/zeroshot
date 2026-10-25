@@ -62,7 +62,7 @@ zeroshot target login platform
 ```
 
 Platform runs use `--target platform`. Omit `--target` for local execution. The
-[Zeroshot Platform docs](https://cloud.zeroshot.sh/docs) cover organizations, the GitHub App, and saved
+[Zeroshot Platform docs](https://app.zeroshot.sh/docs) cover organizations, the GitHub App, and saved
 connections.
 
 ## Open the workspace UI

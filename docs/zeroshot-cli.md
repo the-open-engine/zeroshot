@@ -140,7 +140,7 @@ Options:
 ```text
 Manage named targets or serve a direct target.
 
-The built-in `platform` target points to https://api.cloud.zeroshot.sh. Run `zeroshot target login platform` to sign in. For unattended access, set ZEROSHOT_API_KEY instead of logging in. See https://cloud.zeroshot.sh/docs for Platform setup.
+The built-in `platform` target points to https://api.app.zeroshot.sh. Run `zeroshot target login platform` to sign in. For unattended access, set ZEROSHOT_API_KEY instead of logging in. See https://app.zeroshot.sh/docs for Platform setup.
 
 Usage: zeroshot target <COMMAND>
 

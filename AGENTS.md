@@ -225,7 +225,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   policy parser and `apply_permission_default` entry point; `PermissionPolicy` distinguishes unset,
   configured, and unavailable inspection results. Codex browser/computer access controls and explicit
   approval-review features count as authored policy.
-- The local target registry initializes `platform` at `https://api.cloud.zeroshot.sh` with a persistent hosted device identity.
+- The local target registry initializes `platform` at `https://api.app.zeroshot.sh` with a persistent hosted device identity.
 - Local runs select an optional `--cwd` workspace, defaulting to the invoking folder. File arguments
   stay relative to the invoking folder. A Git checkout uses its canonical root; plain, unborn, and
   detached folders are allowed when the graph has no Git delivery. Workspace and active Zeroshot

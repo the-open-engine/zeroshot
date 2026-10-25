@@ -36,7 +36,7 @@ another run. A failed Platform run does not authorize silently implementing the 
   `ZEROSHOT_STATE_DIR` when necessary.
 - Zeroshot Platform is built in. Sign in once with `zeroshot target login platform`, then use
   `--target platform` explicitly on Platform commands. Platform setup (organizations, GitHub App,
-  connections) is documented at https://cloud.zeroshot.sh/docs.
+  connections) is documented at https://app.zeroshot.sh/docs.
 - Do not add or set up the built-in Platform target. Named targets store endpoints and login identity,
   not repository configuration.
 

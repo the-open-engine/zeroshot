@@ -383,7 +383,7 @@ fn initialize_registry(path: &Path) -> Result<(RegistryState, bool), TargetConne
     if missing_platform {
         let platform = prepare_target(TargetAdd {
             name: "platform".to_owned(),
-            url: "https://api.cloud.zeroshot.sh".to_owned(),
+            url: "https://api.app.zeroshot.sh".to_owned(),
             direct: false,
         })?;
         state.targets.insert(platform.name.clone(), platform);
