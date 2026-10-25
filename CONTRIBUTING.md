@@ -14,8 +14,13 @@ Node.js builds the UI and runs repository tooling; Rust serves the UI.
 
 - Rust 1.97.0 with `rustfmt` and `clippy`
 - Node.js 24 and npm for UI builds, repository tooling, and release scripts
+- On Linux and macOS, Bash, [GitHub CLI 2.48.0 or newer](https://github.com/cli/cli/releases/tag/v2.48.0),
+  and `jq` on `PATH` for the Greptile gate integration tests
 - Python 3.12 for SDK work
 - Docker for target-image changes
+
+The Greptile gate tests run with `npm test` on Linux and macOS. They use a local HTTP fixture;
+no GitHub login or token is required.
 
 ## Setup
 
