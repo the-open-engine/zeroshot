@@ -13,6 +13,8 @@ session = ""
 
 assert "--model" in sys.argv
 assert sys.argv[sys.argv.index("--model") + 1] == expected_model
+assert "--no-remote-export" not in sys.argv
+assert sys.argv[sys.argv.index("--sync-session") + 1] == "off"
 secret_environment = next(
     argument for argument in sys.argv if argument.startswith("--secret-env-vars=")
 )

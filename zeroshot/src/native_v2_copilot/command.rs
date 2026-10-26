@@ -46,7 +46,8 @@ pub(super) fn command(
         "--no-auto-login",
         "--disable-builtin-mcps",
         "--no-ask-user",
-        "--no-remote-export",
+        "--sync-session",
+        "off",
         "--log-level",
         "error",
     ]

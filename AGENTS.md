@@ -390,7 +390,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   gateway lane must name its protocol through `GATEWAY_API`. Local validation remains authoritative
   and corrections stay bounded to two turns.
 - Copilot uses the pinned CLI's headless JSON-RPC protocol 3, with provider `github` and
-  caller-owned model IDs. Structured output and corrections share one session; node-instance
+  caller-owned model IDs. Remote session synchronization is disabled with `--sync-session off`.
+  Structured output and corrections share one session; node-instance
   revisits resume from the current user's `COPILOT_HOME` locally and a private home when contained.
   Local runs reuse stored Copilot login, host/auth endpoint settings, and supported custom-provider
   environment. Static custom-provider configuration and ambient or declared GitHub tokens cross
