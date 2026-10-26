@@ -66,7 +66,7 @@ The CLI is free and open source (MIT). Model calls go through your own harness l
 - [RuntimePlan reference](https://zeroshot.sh/docs/current/reference/runtime-plan/): every runtime binding field and admission limit
 - [Observe and control runs](https://zeroshot.sh/docs/current/guides/observe-and-control/): status, logs, resume
 - [CLI reference](https://zeroshot.sh/docs/current/zeroshot-cli/)
-- [Zeroshot Platform docs](https://cloud.zeroshot.sh/docs): organizations, GitHub App, connections, profiles, and issue-triggered runs
+- [Zeroshot Platform docs](https://app.zeroshot.sh/docs): organizations, GitHub App, connections, profiles, and issue-triggered runs
 
 ## Optional
 
