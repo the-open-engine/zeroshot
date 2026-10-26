@@ -168,8 +168,15 @@ function checkDocsDelegation(releaseDocument, docsDocument) {
 }
 
 function checkPythonSdkDispatch(job) {
-  if (job?.env?.PUBLISH_PYPI !== '${{ inputs.publish_pypi }}') {
-    failIntegrity('release workflow must pass publish_pypi to the Python SDK dispatcher');
+  const expected = {
+    PUBLISH_PYPI: '${{ inputs.publish_pypi }}',
+    RELEASE_VERSION: '${{ needs.plan.outputs.version }}',
+    RELEASE_COMMIT: '${{ needs.plan.outputs.commit }}',
+  };
+  for (const [name, value] of Object.entries(expected)) {
+    if (job?.env?.[name] !== value) {
+      failIntegrity(`release workflow must bind Python SDK ${name} to its release plan`);
+    }
   }
   if (job.uses || job.permissions?.actions !== 'write' || job.permissions?.checks !== 'read') {
     failIntegrity('release workflow must dispatch and await a standalone Python SDK run');

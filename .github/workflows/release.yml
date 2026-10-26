@@ -953,7 +953,7 @@ jobs:
       needs.plan.result == 'success' &&
       needs.shim-publish.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 360
     permissions:
       actions: write
       checks: read

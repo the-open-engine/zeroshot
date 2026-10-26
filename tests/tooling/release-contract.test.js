@@ -116,9 +116,11 @@ describe('Python release publication contract', () => {
     assert.equal(releaseInput.required, true);
     const dispatch = release.jobs['python-sdk-release'];
     assert.equal(dispatch.env.PUBLISH_PYPI, '${{ inputs.publish_pypi }}');
+    assert.equal(dispatch.env.RELEASE_VERSION, '${{ needs.plan.outputs.version }}');
+    assert.equal(dispatch.env.RELEASE_COMMIT, '${{ needs.plan.outputs.commit }}');
     assert.deepEqual(dispatch.permissions, { actions: 'write', checks: 'read' });
     assert.equal(dispatch.uses, undefined);
-    assert.equal(dispatch['timeout-minutes'], 30);
+    assert.equal(dispatch['timeout-minutes'], 360);
     assert.deepEqual(dispatch.needs, ['plan', 'shim-publish']);
 
     const input = pythonRelease.on.workflow_dispatch.inputs.publish_pypi;
