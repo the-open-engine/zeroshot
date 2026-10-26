@@ -535,7 +535,7 @@ jobs:
         run: |
           docker run --rm --network none --read-only \
             --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 \
-            --tmpfs /work:rw,nosuid,nodev,exec,size=256m,mode=0700,uid=10001,gid=10001 \
+            --tmpfs /work:rw,nosuid,nodev,exec,size=512m,mode=0700,uid=10001,gid=10001 \
             --user 10001:10001 \
             --mount "type=bind,src=${PWD}/docker/zeroshot-target/smoke-toolchains.sh,dst=/smoke.sh,readonly" \
             --mount "type=bind,src=${PWD}/rust-toolchain.toml,dst=/rust-toolchain.toml,readonly" \
