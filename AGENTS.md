@@ -1046,7 +1046,10 @@ python -m mkdocs build --strict
   `@the-open-engine-company/zeroshot`, then invokes Python revision `1`.
 - Python revision `1` always produces its GitHub wheel release. PyPI publication is fail-closed by
   default and may be explicitly deferred with `publish_pypi: false`.
-- `.github/workflows/release-python.yml` may publish later SDK-only revisions.
+- The canonical release dispatches `.github/workflows/release-python.yml` on `main` as a standalone
+  run, binds the exact release commit/version and revision `1`, and waits for that returned run ID
+  before documentation. PyPI trusted publishing must remain in this standalone workflow, never in
+  a reusable workflow. The same entry point handles later SDK-only revisions and exact recovery.
 - `.github/workflows/docs.yml` publishes `main` as Current and canonical releases into `vX.Y/`
   after Python revision `1`; later SDK-only releases do not rebuild product documentation.
   The root always selects Current. Legacy `dev` and `stable` redirects stay outside the selector.

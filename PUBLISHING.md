@@ -36,6 +36,10 @@ explicit version and never commits it back to `main`.
    public after its first publication when anonymous pulls are required.
 
 Do not add long-lived npm or PyPI tokens. Publishing uses GitHub OIDC trusted publishing.
+The SDK workflow runs through `workflow_dispatch` because PyPI does not support trusted publishing
+inside reusable workflows. The canonical release records the SDK run link in its job summary and
+fails if that run fails; documentation waits for it. The existing `release-python.yml` PyPI publisher
+also covers these automatically dispatched runs.
 
 ## Run a dry run
 
@@ -63,8 +67,9 @@ not a blanket ignored failure. The workflow:
    immutable squash commits, then uploads exact artifacts, including the release-note Markdown;
 6. publishes immutable image tags and `latest` when this is the newest release;
 7. packs, installs, smokes, and publishes `@the-open-engine-company/zeroshot`;
-8. invokes the Python SDK workflow for revision `1`, always creating or verifying its immutable
-   GitHub wheel release and publishing the same wheels to PyPI when `publish_pypi` is enabled.
+8. dispatches the standalone Python SDK workflow on `main` with the exact source/version and
+   revision `1`, then waits for that specific run to succeed. It always creates or verifies the
+   immutable GitHub wheel release and publishes the same wheels to PyPI when `publish_pypi` is enabled.
 9. publishes the generated CLI, Cluster API, and Python API documentation from that exact source
    commit into `vX.Y/`, then advances the legacy `stable` redirect when this is the newest release.
    The site root continues to select Current from `main`.

@@ -167,21 +167,27 @@ function checkDocsDelegation(releaseDocument, docsDocument) {
   checkDocsWorkflowSettings(docsDocument);
 }
 
+function checkPythonSdkDispatch(job) {
+  if (job?.env?.PUBLISH_PYPI !== '${{ inputs.publish_pypi }}') {
+    failIntegrity('release workflow must pass publish_pypi to the Python SDK dispatcher');
+  }
+  if (job.uses || job.permissions?.actions !== 'write' || job.permissions?.checks !== 'read') {
+    failIntegrity('release workflow must dispatch and await a standalone Python SDK run');
+  }
+}
+
 function checkOptionalPyPiInputs(releaseDocument, pythonDocument) {
   const releaseInput = releaseDocument.on?.workflow_dispatch?.inputs?.publish_pypi;
   if (releaseInput?.type !== 'boolean' || releaseInput.default !== true) {
     failIntegrity('release workflow must default publish_pypi to true');
   }
-  const delegatedInput = releaseDocument.jobs?.['python-sdk-release']?.with?.publish_pypi;
-  if (delegatedInput !== '${{ inputs.publish_pypi }}') {
-    failIntegrity('release workflow must pass publish_pypi to the Python SDK workflow');
+  checkPythonSdkDispatch(releaseDocument.jobs?.['python-sdk-release']);
+  const input = pythonDocument.on?.workflow_dispatch?.inputs?.publish_pypi;
+  if (input?.type !== 'boolean' || input.default !== true) {
+    failIntegrity('release-python workflow_dispatch must default publish_pypi to true');
   }
-
-  for (const trigger of ['workflow_dispatch', 'workflow_call']) {
-    const input = pythonDocument.on?.[trigger]?.inputs?.publish_pypi;
-    if (input?.type !== 'boolean' || input.default !== true) {
-      failIntegrity(`release-python ${trigger} must default publish_pypi to true`);
-    }
+  if (pythonDocument.on && 'workflow_call' in pythonDocument.on) {
+    failIntegrity('release-python must publish from a standalone workflow for PyPI OIDC');
   }
 }
 
@@ -258,8 +264,12 @@ function checkReleaseFragments(workflow) {
     'cmp -- "$notes_file" "$published_notes"',
     'node scripts/distribution.js publish-assets --tag "$RELEASE_TAG" --dir release-assets',
     'npm publish --provenance --access public ./shim-release/*.tgz',
-    'uses: ./.github/workflows/release-python.yml',
-    'publish_pypi: ${{ inputs.publish_pypi }}',
+    'actions/workflows/release-python.yml/dispatches',
+    '-F return_run_details=true',
+    '-f ref=main',
+    "-f 'inputs[sdk_revision]=1'",
+    'PUBLISH_PYPI: ${{ inputs.publish_pypi }}',
+    'gh run watch "$run_id" --exit-status --interval 15',
     'uses: ./.github/workflows/docs.yml',
     'version: ${{ needs.plan.outputs.tag }}',
     'release_commit: ${{ needs.plan.outputs.commit }}',

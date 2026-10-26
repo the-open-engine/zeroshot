@@ -114,16 +114,17 @@ describe('Python release publication contract', () => {
     assert.equal(releaseInput.type, 'boolean');
     assert.equal(releaseInput.default, true);
     assert.equal(releaseInput.required, true);
-    assert.equal(
-      release.jobs['python-sdk-release'].with.publish_pypi,
-      '${{ inputs.publish_pypi }}'
-    );
+    const dispatch = release.jobs['python-sdk-release'];
+    assert.equal(dispatch.env.PUBLISH_PYPI, '${{ inputs.publish_pypi }}');
+    assert.deepEqual(dispatch.permissions, { actions: 'write', checks: 'read' });
+    assert.equal(dispatch.uses, undefined);
+    assert.equal(dispatch['timeout-minutes'], 30);
+    assert.deepEqual(dispatch.needs, ['plan', 'shim-publish']);
 
-    for (const trigger of ['workflow_dispatch', 'workflow_call']) {
-      const input = pythonRelease.on[trigger].inputs.publish_pypi;
-      assert.equal(input.type, 'boolean', trigger);
-      assert.equal(input.default, true, trigger);
-    }
+    const input = pythonRelease.on.workflow_dispatch.inputs.publish_pypi;
+    assert.equal(input.type, 'boolean');
+    assert.equal(input.default, true);
+    assert.equal(pythonRelease.on.workflow_call, undefined);
 
     const publishSteps = new Map(pythonRelease.jobs.publish.steps.map((step) => [step.name, step]));
     assert.equal(publishSteps.get('Setup Python 3.12').if, 'inputs.publish_pypi');

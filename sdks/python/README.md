@@ -1,11 +1,13 @@
 # Zeroshot Python SDK
 
-Download the wheel for your [OS and CPU](https://zeroshot.sh/docs/current/guides/python-sdk/#install-and-run) from [Python SDK releases](https://github.com/the-open-engine/zeroshot/releases?q=zeroshot-python-v).
-Replace `WHEEL_FILE` with its local path and import the package as `zeroshot`:
+Install from PyPI with Python 3.11 or newer:
 
 ```console
-python -m pip install WHEEL_FILE
+python -m pip install the-open-engine-zeroshot
 ```
+
+Import the package as `zeroshot`. Pip selects the wheel for your OS and CPU.
+See the [Python SDK guide](https://zeroshot.sh/docs/current/guides/python-sdk/) for setup and examples.
 
 Zeroshot enforces your team's QA process on coding agents as a graph you define. `zeroshot` is a
 typed async client for its run engine. Each platform wheel contains the

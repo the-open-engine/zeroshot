@@ -14,7 +14,7 @@ def test_sdk_release_is_manual_and_zeroshot_release_triggered() -> None:
     workflow = (_ROOT / ".github/workflows/release-python.yml").read_text(encoding="utf-8")
     zeroshot_workflow = (_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     assert "workflow_dispatch:" in workflow
-    assert "workflow_call:" in workflow
+    assert "workflow_call:" not in workflow
     assert 'name = "the-open-engine-zeroshot"' in package
     assert "glob(f'the_open_engine_zeroshot-{version}-py3-none-*.whl')" in workflow
     assert 'zeroshot_tag="v$ZEROSHOT_VERSION"' in workflow
@@ -33,8 +33,10 @@ def test_sdk_release_is_manual_and_zeroshot_release_triggered() -> None:
     assert 'echo "ZEROSHOT_RESTIC_BINARY=$restic_path"' in workflow
     assert "pypa/gh-action-pypi-publish@" in workflow
     assert "python-sdk-release:" in zeroshot_workflow
-    assert "sdk_revision: 1" in zeroshot_workflow
-    assert "uses: ./.github/workflows/release-python.yml" in zeroshot_workflow
+    assert "inputs[sdk_revision]=1" in zeroshot_workflow
+    assert "actions/workflows/release-python.yml/dispatches" in zeroshot_workflow
+    assert 'gh run watch "$run_id" --exit-status' in zeroshot_workflow
+    assert "uses: ./.github/workflows/release-python.yml" not in zeroshot_workflow
 
 
 def test_python_ci_is_selected_without_native_for_sdk_only_changes() -> None:

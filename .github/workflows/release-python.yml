@@ -29,24 +29,6 @@ on:
         required: true
         default: true
         type: boolean
-  workflow_call:
-    inputs:
-      action:
-        required: true
-        type: string
-      zeroshot_version:
-        required: true
-        type: string
-      sdk_revision:
-        required: true
-        type: number
-      release_commit:
-        required: true
-        type: string
-      publish_pypi:
-        required: false
-        default: true
-        type: boolean
 
 permissions:
   contents: read

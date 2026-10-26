@@ -71,4 +71,9 @@ those staged versions.
 | 8    | Publish that wheel set to PyPI; use `publish_pypi: false` only when trusted publishing is unavailable. |
 | 9    | Publish into `vX.Y/`; update the legacy `stable` redirect for the newest release.                      |
 
+The canonical release dispatches `release-python.yml` on `main` as a standalone workflow with
+the exact release source, version, revision `1`, and `publish_pypi` selection. It records the
+returned run ID and waits for success before publishing documentation. This keeps PyPI OIDC in
+its configured standalone publisher; reusable workflow publication is unsupported.
+
 `PUBLISHING.md` contains the operator setup and recovery rules.
