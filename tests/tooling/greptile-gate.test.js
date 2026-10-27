@@ -2,6 +2,8 @@
 
 const assert = require('node:assert/strict');
 const { it } = require('node:test');
+const fs = require('node:fs');
+const yaml = require('js-yaml');
 const { runWorkflowStep } = require('./workflow-http-fixture');
 
 const head = 'a'.repeat(40);
@@ -72,4 +74,13 @@ it('fails the real gh gate on API errors instead of waiting or succeeding', opti
   assert.equal(result.requests.length, 1);
   assert.match(result.stderr, /HTTP 403/);
   assert.doesNotMatch(result.stdout, /Waiting|sleep:/);
+});
+
+it('waits for Greptile only on non-draft pull requests and reruns when a draft is readied', () => {
+  const workflow = yaml.load(fs.readFileSync('.github/workflows/ci.yml', 'utf8'));
+  const required = workflow.jobs.required;
+  const gate = required.steps.find(({ name }) => name === 'Wait for Greptile review');
+  assert.ok(workflow.on.pull_request.types.includes('ready_for_review'));
+  assert.equal(gate.if, "github.event_name == 'pull_request' && !github.event.pull_request.draft");
+  assert.ok(required['timeout-minutes'] <= 30);
 });
