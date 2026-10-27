@@ -12,6 +12,9 @@ use tokio::sync::watch;
 #[path = "tests/backpressure.rs"]
 mod backpressure;
 
+#[path = "tests/host_context.rs"]
+mod host_context;
+
 #[cfg(target_os = "linux")]
 #[path = "tests/auxiliary_identity.rs"]
 mod auxiliary_identity;

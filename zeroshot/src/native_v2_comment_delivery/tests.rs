@@ -386,6 +386,7 @@ async fn invocation(adapter: &NativeV2CommentDeliveryAdapter, input: Value) -> D
     };
     let session = adapter.open(&node, &environment).await.unwrap();
     DriverInvocation {
+        host_context: None,
         node,
         role: NodeRole::CommentDelivery,
         response: NodeResponseContract::Verifier {

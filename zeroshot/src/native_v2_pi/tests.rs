@@ -112,6 +112,7 @@ fn invocation(
     environment: ResolvedEnvironment,
 ) -> DriverInvocation {
     DriverInvocation {
+        host_context: None,
         node: NodeInvocation {
             reference: execution_ref(),
             worker: WorkerRef::new("agent.pi@1").assert_value_with("worker"),

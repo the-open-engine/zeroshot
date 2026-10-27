@@ -221,6 +221,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   verifiers share the prepared workspace and can write files. Review instructions prohibit repairs
   and warn that other nodes may execute concurrently; this is an instructional boundary. Missing
   dependencies are reported with environment evidence rather than unrelated code repair requests.
+  Hosting embedders may attach an `AgentContextProvider` through `ProductionHostingConfig`.
+  The runner samples its nonsecret context for every agent execution, including node-instance
+  revisits and auxiliary agents, and all four harnesses prepend it through the shared invocation
+  prompt methods. Host context stays outside authored graphs, runtime plans, durable invocations,
+  and checkpoints. Default local/direct composition attaches no host context.
   Shared inspection owns bounded JSONL exchange and process cleanup. Each harness owns its native
   policy parser and `apply_permission_default` entry point; `PermissionPolicy` distinguishes unset,
   configured, and unavailable inspection results. Codex browser/computer access controls and explicit

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::native_v2_contract::ClaudeProvider;
 use crate::native_v2_capsule::gateway;
 use crate::native_v2_capsule::provider_process::{effort_token, with_driver_detail};
-use crate::native_v2_runner::{DriverInvocation, NodeRunnerError, render_agent_prompt};
+use crate::native_v2_runner::{DriverInvocation, NodeRunnerError};
 use crate::worker_catalog::ReasoningEffort;
 
 pub(super) const AWS_BEARER_TOKEN_BEDROCK: &str = "AWS_BEARER_TOKEN_BEDROCK";
@@ -118,12 +118,9 @@ pub(super) fn configure_openrouter(
 }
 
 pub(super) fn prompt(invocation: &DriverInvocation) -> Result<String, NodeRunnerError> {
-    render_agent_prompt(
-        invocation.agent_instructions()?,
-        &invocation.node.input,
-        &invocation.response,
-    )
-    .map_err(|error| with_driver_detail(error, "Claude prompt could not be serialized"))
+    invocation
+        .agent_prompt()
+        .map_err(|error| with_driver_detail(error, "Claude prompt could not be serialized"))
 }
 
 pub(super) fn configure_provider(

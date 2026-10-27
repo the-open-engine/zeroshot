@@ -76,6 +76,7 @@ impl NodeSession for Session {
 fn invocation() -> DriverInvocation {
     let request = crate::native_v2_runner::test_support::request("memory-hooks", "worker", (1, 2));
     DriverInvocation {
+        host_context: None,
         provider_session_slot: request.invocation.reference.node_instance,
         node: request.invocation,
         role: NodeRole::Worker,

@@ -32,8 +32,7 @@ use crate::native_v2_capsule::provider_process::{
 use crate::native_v2_contract::{NodeRuntimeBinding, PiProvider};
 use crate::native_v2_runner::{
     AgentResponse, DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeRunnerError,
-    ProviderSchemaDialect, ResolvedEnvironment, render_agent_prompt_with_schema,
-    resolve_agent_response_with_schema,
+    ProviderSchemaDialect, ResolvedEnvironment, resolve_agent_response_with_schema,
 };
 use command::{PiCommandRequest, command};
 use provider_document::{
@@ -75,13 +74,9 @@ fn prompt(
     dialect: ProviderSchemaDialect,
     invocation: &DriverInvocation,
 ) -> Result<String, NodeRunnerError> {
-    render_agent_prompt_with_schema(
-        invocation.agent_instructions()?,
-        &invocation.node.input,
-        &invocation.response,
-        dialect,
-    )
-    .map_err(|error| with_driver_detail(error, "Pi prompt could not be serialized"))
+    invocation
+        .agent_prompt_with_schema(dialect)
+        .map_err(|error| with_driver_detail(error, "Pi prompt could not be serialized"))
 }
 
 pub use crate::native_v2_capsule::HarnessProcessEnvironment as PiProcessEnvironment;

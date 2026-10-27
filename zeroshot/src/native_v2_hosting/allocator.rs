@@ -399,6 +399,7 @@ impl ProductionCapsuleAllocator {
             request.github_token.map(Arc::<str>::from),
         )
         .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
+        let candidate = candidate.with_agent_context(self.config.agent_context.clone());
         let candidate: Arc<dyn crate::native_v2_runner::NodeRunner> = match memory {
             Ok(Some(memory)) => memory.wrap(request.admitted, candidate),
             Ok(None) => Arc::new(candidate),

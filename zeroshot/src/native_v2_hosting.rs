@@ -69,6 +69,8 @@ pub async fn build_production_target_authority(
 /// Host-owned non-secret capabilities used to compose one installed target.
 #[derive(Clone)]
 pub struct ProductionHostingConfig {
+    /// Optional host facts sampled for each agent execution, including resumed attempts.
+    pub agent_context: Option<Arc<dyn crate::native_v2_runner::AgentContextProvider>>,
     /// A host-owned namespace. Platform embedders select their own tenant-scoped storage.
     pub memory_storage: Option<PathBuf>,
     /// Private diagnostics collection; the host owns the receiver and durable storage.
@@ -383,6 +385,7 @@ fn set_traversable_directory(_path: &std::path::Path) -> Result<(), std::io::Err
 impl Default for ProductionHostingConfig {
     fn default() -> Self {
         Self {
+            agent_context: None,
             memory_storage: None,
             operator_diagnostic_output: None,
             workspace_storage: None,
