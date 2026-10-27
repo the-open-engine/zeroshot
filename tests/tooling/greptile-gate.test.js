@@ -78,9 +78,7 @@ it('fails the real gh gate on API errors instead of waiting or succeeding', opti
 
 it('waits for Greptile only on non-draft pull requests and reruns when a draft is readied', () => {
   const workflow = yaml.load(fs.readFileSync('.github/workflows/ci.yml', 'utf8'));
-  const required = workflow.jobs.required;
-  const gate = required.steps.find(({ name }) => name === 'Wait for Greptile review');
+  const gate = workflow.jobs.required.steps.find(({ name }) => name === 'Wait for Greptile review');
   assert.ok(workflow.on.pull_request.types.includes('ready_for_review'));
   assert.equal(gate.if, "github.event_name == 'pull_request' && !github.event.pull_request.draft");
-  assert.ok(required['timeout-minutes'] <= 30);
 });

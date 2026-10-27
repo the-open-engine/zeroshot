@@ -533,7 +533,6 @@ jobs:
   required:
     name: required
     if: always()
-    timeout-minutes: 30
     needs:
       [
         classify,
