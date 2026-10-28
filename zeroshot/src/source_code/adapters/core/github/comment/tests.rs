@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use openengine_cluster_testkit::fixture::write_executable;
 use super::*;
+use crate::native_v2_candidate::test_support::python_script;
 
 fn authority(root: &std::path::Path, program: &str) -> GhCliDeliveryAuthority {
     GhCliDeliveryAuthority::new(super::super::GhCliAuthorityConfig {
@@ -16,12 +17,13 @@ fn authority(root: &std::path::Path, program: &str) -> GhCliDeliveryAuthority {
 #[tokio::test]
 async fn report_json_uses_stdin_and_preserves_large_utf8_body() {
     let root = tempfile::tempdir().unwrap();
-    let script = r##"#!/usr/bin/python3
-import json,sys
+    let script = python_script(
+        r##"import json,sys
 assert sys.argv[1:] == ['api','repos/acme/project/issues/17/comments','--method','POST','--input','-']
 body=json.load(sys.stdin)['body']
 print(json.dumps({'id':23,'html_url':'https://github.com/acme/project/issues/17#issuecomment-23','issue_url':'https://api.github.com/repos/acme/project/issues/17','body':body,'user':{'node_id':'ACTOR_ID'}}))
-"##;
+"##,
+    );
     write_executable(&root.path().join("gh"), script, 0o700).unwrap();
     let authority = authority(root.path(), "gh");
     let destination = comment_destination("https://github.com/acme/project/issues/17").unwrap();
@@ -60,10 +62,11 @@ async fn failed_post_preserves_http_authentication_and_redacts_credentials() {
 #[tokio::test]
 async fn comment_pages_keep_protocol_bytes_larger_than_diagnostic_limit() {
     let root = tempfile::tempdir().unwrap();
-    let script = r##"#!/usr/bin/python3
-import json
+    let script = python_script(
+        r##"import json
 print(json.dumps([{'id':n,'html_url':f'https://github.com/acme/project/issues/17#issuecomment-{n}','issue_url':'https://api.github.com/repos/acme/project/issues/17','body':'a'*4096,'user':{'node_id':'ACTOR_ID'}} for n in range(1,101)]))
-"##;
+"##,
+    );
     write_executable(&root.path().join("gh"), script, 0o700).unwrap();
     let destination = comment_destination("https://github.com/acme/project/issues/17").unwrap();
     let page = authority(root.path(), "gh")
@@ -169,7 +172,7 @@ async fn review_scope_repository_casing_does_not_relax_branch_or_revision_identi
 fn response_authority(root: &std::path::Path) -> GhCliDeliveryAuthority {
     write_executable(
         &root.join("gh"),
-        "#!/usr/bin/python3\nimport os,pathlib,sys\nassert sys.argv[1] == 'api'\nassert os.environ['GH_TOKEN'] == 'private-canary'\nsys.stdout.write(pathlib.Path(sys.argv[0] + '.response').read_text())\n",
+        python_script("import os,pathlib,sys\nassert sys.argv[1] == 'api'\nassert os.environ['GH_TOKEN'] == 'private-canary'\nsys.stdout.write(pathlib.Path(sys.argv[0] + '.response').read_text())\n"),
         0o700,
     ).unwrap();
     authority(root, "gh")

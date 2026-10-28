@@ -3,7 +3,7 @@ use super::*;
 #[cfg(unix)]
 #[tokio::test]
 async fn private_input_and_early_output_drain_concurrently() {
-    let mut command = Command::new("/usr/bin/python3");
+    let mut command = Command::new(crate::native_v2_candidate::test_support::python3());
     command.args(["-c", "import sys; sys.stdout.write('x'*262144); sys.stdout.flush(); data=sys.stdin.buffer.read(); print(len(data))"]);
     let input = vec![b'p'; 262144];
     let output = capture_sensitive_with_input(&mut command, Duration::from_secs(5), &[], &input)

@@ -1,5 +1,5 @@
 use super::*;
-use crate::native_v2_candidate::test_support::NodeRequestFixture;
+use crate::native_v2_candidate::test_support::{NodeRequestFixture, python_script};
 use crate::native_v2_cli::{BuiltinGraphTemplate, TemplateDelivery};
 use crate::native_v2_comment_delivery::{
     COMMENT_DELIVERY_WORKER_REF, CommentPublicationStore, LocalCommentPublicationStore,
@@ -103,8 +103,7 @@ async fn external_restore_failure_never_releases_an_allocated_capsule() {
 }
 
 const COMMENT_URL: &str = "https://github.com/acme/project/pull/17";
-const COMMENT_GH: &str = r#"#!/usr/bin/python3
-import json, os, pathlib, sys
+const COMMENT_GH: &str = r#"import json, os, pathlib, sys
 assert os.environ['GH_TOKEN'] == 'checkout-secret'
 assert sys.argv[1] == 'api'
 fixture = pathlib.Path(sys.argv[0])
@@ -174,7 +173,9 @@ async fn comment_fixture(
                    "linkedIssues":[]}
     });
     fixture.admitted = admit(request).await;
-    let program = fixture.root.write_executable("gh-fixture", COMMENT_GH);
+    let program = fixture
+        .root
+        .write_executable("gh-fixture", &python_script(COMMENT_GH));
     fs::write(
         program.with_extension("scope"),
         serde_json::to_vec(&json!({

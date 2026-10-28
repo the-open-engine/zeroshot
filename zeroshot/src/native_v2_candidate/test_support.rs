@@ -205,6 +205,45 @@ pub(crate) fn path_text(path: &Path) -> &str {
     path.to_str().assert_value_with("test path is UTF-8")
 }
 
+/// The interpreter that python3 on this test process's PATH runs: its `sys.executable`, not the
+/// PATH entry, which may be a version-manager shim. Product code launches Python test doubles with
+/// a pinned or cleared PATH, so they invoke this interpreter instead of assuming its location.
+#[cfg(unix)]
+pub(crate) fn python3() -> &'static Path {
+    use std::os::unix::ffi::OsStringExt;
+
+    static INTERPRETER: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    INTERPRETER.get_or_init(|| {
+        let output = Command::new("python3")
+            .args([
+                "-c",
+                "import os, sys; sys.stdout.buffer.write(os.fsencode(sys.executable))",
+            ])
+            .output()
+            .assert_value_with("python3 on the test PATH");
+        assert!(
+            output.status.success(),
+            "python3 on the test PATH failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let interpreter = PathBuf::from(std::ffi::OsString::from_vec(output.stdout));
+        assert!(
+            interpreter.is_absolute(),
+            "python3 on the test PATH reported no absolute sys.executable: {interpreter:?}"
+        );
+        interpreter
+    })
+}
+
+/// An executable Python test double using [`python3`], even when its path contains spaces.
+#[cfg(unix)]
+pub(crate) fn python_script(source: &str) -> String {
+    // The shell exec is a Python docstring, preserving the fixture's argv[0] and arguments.
+    let interpreter = path_text(python3()).replace('\'', "'\\''");
+    format!("#!/bin/sh\n'''exec' '{interpreter}' \"$0\" \"$@\"\n' '''\n{source}")
+}
+
 pub(crate) struct TestGitRepository {
     pub(crate) root: TestDirectory,
     pub(crate) remote: PathBuf,

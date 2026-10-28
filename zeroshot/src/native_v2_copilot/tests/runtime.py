@@ -1,4 +1,3 @@
-#!/usr/bin/python3
 """Deterministic Copilot RPC peer; never contacts a provider."""
 import json
 import os

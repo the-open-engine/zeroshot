@@ -10,7 +10,8 @@ use super::*;
 use crate::native_v2_runner::LiveOutputStream;
 use crate::execution::SessionScope;
 use crate::native_v2_candidate::test_support::{
-    NodeRequestFixture, TestDirectory, admit, environment_name, full_graph, success_node,
+    NodeRequestFixture, TestDirectory, admit, environment_name, full_graph, python_script,
+    success_node,
 };
 use crate::native_v2_contract::{
     AdmittedRun, CopilotProvider, DeclaredConnections, NodeRuntimeBinding, RunSubmission,
@@ -27,11 +28,13 @@ mod hosted;
 const INSTRUCTIONS: &str = "Return answer 42 using the required schema.";
 
 fn script() -> String {
-    std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/native_v2_copilot/tests/runtime.py"
-    ))
-    .unwrap()
+    python_script(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/native_v2_copilot/tests/runtime.py"
+        ))
+        .unwrap(),
+    )
 }
 
 fn binding(names: impl Iterator<Item = String>) -> NodeRuntimeBinding {

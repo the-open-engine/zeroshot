@@ -995,6 +995,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Unix tests that create executable fixtures use
   `openengine_cluster_testkit::fixture::write_executable`; its lock handoff covers writable
   descriptors inherited by concurrent process spawns.
+- Python test doubles invoke their interpreter with `native_v2_candidate::test_support::python_script`
+  (or `python3` for direct spawns), which resolve the interpreter that python3 on the test PATH
+  runs (its `sys.executable`). Product launches pin or clear PATH, so neither a `/usr/bin/python3`
+  nor a `/usr/bin/env python3` shebang works where Python lives only under `/usr/local`.
 - `.opcore.json` owns the full-source Opcore policy. `.github/workflows/opcore.yml` runs the Fast
   and native Rust providers on every PR and main commit. Its two exact PowerShell exclusions reflect
   unsupported parsing; the Windows native CI lane still runs those scripts.
