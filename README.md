@@ -24,7 +24,7 @@
 
 &nbsp;
 
-<a href="https://github.com/the-open-engine/zeroshot/stargazers"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/starred-by-dark.png"><img alt="Starred by engineers at 300+ companies, including Google, Microsoft, Amazon, NVIDIA, Meta, GitHub and Cloudflare" src="docs/brand/social/starred-by-light.png" width="435"></picture></a>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/starred-by-dark.png"><img alt="Starred by engineers at 300+ companies, including Google, Microsoft, Amazon, NVIDIA, Meta, GitHub and Cloudflare" src="docs/brand/social/starred-by-light.png" width="435"></picture>
 
 </div>
 
@@ -68,7 +68,7 @@ use [Zeroshot Platform](https://app.zeroshot.sh/docs).
 
 ## What users say
 
-> I used Zeroshot (my fork) for my last two contracts: a production line automation and control
+> I used Zeroshot for my last two contracts: a production line automation and control
 > system, and a multi-host sync and admin system for Webflow and Guesty. Very happy with it!
 >
 > — Mark Dingwall
