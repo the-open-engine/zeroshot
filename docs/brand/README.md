@@ -18,8 +18,9 @@ handwritten headings and diagrams, yellow notes, and the company mascot.
   duplicate sticky note. This is a raster asset, separate from the HTML exports.
 - `social/starred-by.html`: the "Starred by engineers at" strip under the README badges. Its
   companies come from the self-reported GitHub company field of zeroshot stargazers, each profile
-  checked by hand, so the copy says "engineers at", never "used by". Marks are Simple Icons (CC0);
-  brands that asked Simple Icons to remove their marks stay off. `starred-by-light.png` and
+  checked by hand, so the copy says "engineers at", never "used by". Marks are Simple Icons (CC0).
+  Simple Icons later removed Microsoft and Amazon over those companies' trademark terms; the strip
+  keeps their v11 marks on purpose. `starred-by-light.png` and
   `starred-by-dark.png` are its transparent 2× exports; re-render steps are below.
 - `assets/`: local fonts, font licenses, and the website mascot. Rendering needs
   no network requests.
