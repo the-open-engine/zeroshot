@@ -206,6 +206,15 @@ impl PullRequestFeedback {
     }
 }
 
+/// Smallest accepted caller-declared model context window.
+pub const MIN_MODEL_CONTEXT_WINDOW: u32 = 1;
+/// Largest accepted caller-declared model context window.
+pub const MAX_MODEL_CONTEXT_WINDOW: u32 = 10_000_000;
+/// Smallest accepted caller-declared model output limit.
+pub const MIN_MODEL_MAX_TOKENS: u32 = 1;
+/// Largest accepted caller-declared model output limit.
+pub const MAX_MODEL_MAX_TOKENS: u32 = 10_000_000;
+
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
 pub enum NodeRuntimeBinding {
@@ -215,6 +224,24 @@ pub enum NodeRuntimeBinding {
         model: super::ModelId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         effort: Option<ReasoningEffort>,
+        /// Caller-owned model context window. Absent means the harness provider's own default.
+        #[serde(
+            default,
+            rename = "contextWindow",
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_context_window"
+        )]
+        #[schemars(range(min = 1, max = 10_000_000))]
+        context_window: Option<u32>,
+        /// Caller-owned model output limit. Absent means the harness provider's own default.
+        #[serde(
+            default,
+            rename = "maxTokens",
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_max_tokens"
+        )]
+        #[schemars(range(min = 1, max = 10_000_000))]
+        max_tokens: Option<u32>,
         #[serde(
             default,
             rename = "sessionScope",
@@ -253,6 +280,196 @@ impl NodeRuntimeBinding {
             | Self::CommentDelivery { connections } => connections,
         }
     }
+
+    /// Caller-declared model context window, or `None` for the provider's own default.
+    #[must_use]
+    pub const fn context_window(&self) -> Option<u32> {
+        match self {
+            Self::Agent { context_window, .. } => *context_window,
+            Self::GitDelivery { .. } | Self::CommentDelivery { .. } => None,
+        }
+    }
+
+    /// Caller-declared model output limit, or `None` for the provider's own default.
+    #[must_use]
+    pub const fn max_tokens(&self) -> Option<u32> {
+        match self {
+            Self::Agent { max_tokens, .. } => *max_tokens,
+            Self::GitDelivery { .. } | Self::CommentDelivery { .. } => None,
+        }
+    }
+
+    /// Validates values built directly by Rust callers, without a serialization boundary.
+    pub fn validate_model_limits(&self) -> Result<(), NativeV2RunValueError> {
+        let Self::Agent {
+            context_window,
+            max_tokens,
+            ..
+        } = self
+        else {
+            return Ok(());
+        };
+        if let Some(value) = context_window {
+            validate_context_window(*value).map_err(NativeV2RunValueError)?;
+        }
+        if let Some(value) = max_tokens {
+            validate_max_tokens(*value).map_err(NativeV2RunValueError)?;
+        }
+        Ok(())
+    }
+}
+
+fn validate_context_window(value: u32) -> Result<(), &'static str> {
+    if (MIN_MODEL_CONTEXT_WINDOW..=MAX_MODEL_CONTEXT_WINDOW).contains(&value) {
+        Ok(())
+    } else {
+        Err("contextWindow must be in 1..=10000000")
+    }
+}
+
+fn validate_max_tokens(value: u32) -> Result<(), &'static str> {
+    if (MIN_MODEL_MAX_TOKENS..=MAX_MODEL_MAX_TOKENS).contains(&value) {
+        Ok(())
+    } else {
+        Err("maxTokens must be in 1..=10000000")
+    }
+}
+
+fn deserialize_context_window<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_optional_model_limit(
+        deserializer,
+        "contextWindow",
+        MIN_MODEL_CONTEXT_WINDOW,
+        MAX_MODEL_CONTEXT_WINDOW,
+    )
+}
+
+fn deserialize_max_tokens<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_optional_model_limit(
+        deserializer,
+        "maxTokens",
+        MIN_MODEL_MAX_TOKENS,
+        MAX_MODEL_MAX_TOKENS,
+    )
+}
+
+#[derive(Clone, Copy)]
+struct ModelLimitVisitor {
+    field: &'static str,
+    min: u32,
+    max: u32,
+}
+
+impl ModelLimitVisitor {
+    fn checked<E>(self, value: i128) -> Result<Option<u32>, E>
+    where
+        E: de::Error,
+    {
+        let min = i128::from(self.min);
+        let max = i128::from(self.max);
+        if (min..=max).contains(&value) {
+            Ok(Some(value as u32))
+        } else {
+            Err(E::custom(format_args!(
+                "{} must be in {}..={}",
+                self.field, self.min, self.max
+            )))
+        }
+    }
+}
+
+impl<'de> de::Visitor<'de> for ModelLimitVisitor {
+    type Value = Option<u32>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{} in {}..={}", self.field, self.min, self.max)
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(None)
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(None)
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_u32(self)
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.checked(i128::from(value))
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.checked(i128::from(value))
+    }
+
+    fn visit_u128<E>(self, value: u128) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        if value <= u128::from(u32::MAX) {
+            self.checked(value as i128)
+        } else {
+            self.checked(i128::from(self.max) + 1)
+        }
+    }
+
+    fn visit_i128<E>(self, value: i128) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        self.checked(value)
+    }
+
+    fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Err(E::custom(format_args!(
+            "{} must be in {}..={}",
+            self.field, self.min, self.max
+        )))
+    }
+}
+
+/// Deserializes an optional caller-declared model limit shared by every runtime shape.
+///
+/// The field name and bounds are used in the rejection so a uniform runtime configuration
+/// reports the same diagnostic as an exact agent binding.
+#[doc(hidden)]
+pub fn deserialize_optional_model_limit<'de, D>(
+    deserializer: D,
+    field: &'static str,
+    min: u32,
+    max: u32,
+) -> Result<Option<u32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserializer.deserialize_option(ModelLimitVisitor { field, min, max })
 }
 
 #[cfg(test)]

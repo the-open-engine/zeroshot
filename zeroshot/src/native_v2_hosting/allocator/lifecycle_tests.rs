@@ -620,3 +620,134 @@ fn hosted_pi_harness_builds_the_contained_lane_from_the_capsule() {
         )
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn environment_hooks_prepare_private_homes_without_starting_scripts() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    use crate::native_v2_candidate::test_support::admit;
+
+    let uid = unsafe { libc::geteuid() };
+    let gid = unsafe { libc::getegid() };
+    if uid == 0 {
+        return;
+    }
+    let pool = HostedProcessPool::new(uid, gid, uid.saturating_add(1_000)).assert_value();
+    let root = TestDirectory::new("host-environment-hooks");
+    let run_root = root.child("run");
+    std::fs::create_dir(&run_root).assert_value();
+    std::fs::set_permissions(&run_root, std::fs::Permissions::from_mode(0o700)).assert_value();
+    let runtime_home = root.child("runtime");
+    std::fs::create_dir(&runtime_home).assert_value();
+    std::fs::set_permissions(&runtime_home, std::fs::Permissions::from_mode(0o700)).assert_value();
+    let workspace = root.child("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+
+    let run_id = RunId::new("environment-hook-run");
+    let mut admitted = admit(
+        serde_json::from_value(serde_json::json!({
+            "title":"Environment hook fixture",
+            "graph":crate::native_v2_candidate::test_support::full_graph(vec![
+                serde_json::json!({
+                    "kind":"step","name":"work","worker":"agent.work@1",
+                    "instructions":"This node must never start.",
+                    "input":{"kind":"null"},"output":{"kind":"null"},
+                    "inputBindings":[],"writeBindings":[],"attempts":1
+                }),
+                crate::native_v2_candidate::test_support::success_node()
+            ]),
+            "initialInput":null,
+            "runtime":{
+                "harness":"codex","provider":"openai","size":"small",
+                "nodes":{"work":{
+                    "kind":"agent","model":"environment-hook-model","sessionScope":"execution",
+                    "connections":{}
+                }}
+            },
+            "source":{
+                "repository":"acme/project","branch":"main",
+                "revision":"2222222222222222222222222222222222222222"
+            },
+            "submissionKey":"environment-hook-fixture"
+        }))
+        .assert_value(),
+    )
+    .await;
+    admitted.environment = Some(openengine_cluster_protocol::RuntimeEnvironment {
+        setup: None,
+        startup: None,
+        variables: BTreeMap::new(),
+        connections: Default::default(),
+    });
+    let preparation = CapsulePreparation::quiet(&admitted.runtime).assert_value();
+    let request = CapsuleBuildRequest {
+        run_id: &run_id,
+        delivery_run_id: &run_id,
+        adopt_existing_delivery: false,
+        admitted: &admitted,
+        github_token: None,
+        git_credentials: None,
+        install_source: false,
+        transfer_retained_workspace: false,
+        preparation,
+        retained_restore: None,
+    };
+    let filesystem = CapsuleFilesystem {
+        workspace: workspace.clone(),
+        runtime_home: runtime_home.clone(),
+    };
+    let (loss_sender, _) = watch::channel(false);
+    let state = ProductionCapsuleState {
+        environment: EnvironmentProcesses::default(),
+        endpoint: OnceLock::new(),
+        run_root: run_root.clone(),
+        checkpoint_directory: root.child("checkpoints"),
+        checkpoint_repository: root.child("checkpoint-repository"),
+        run_root_identity: OnceLock::new(),
+        recovery_path: root.child("recovery.json"),
+        delivery_run_id: run_id.clone(),
+        restored_delivery_run_id: OnceLock::new(),
+        inherited_retained_workspace: false,
+        process_pool: Mutex::new(None),
+        portable_processes: false,
+        _loss_sender: loss_sender,
+        cleanup_turn: Mutex::new(false),
+    };
+    let allocator = test_allocator(root.path());
+    allocator
+        .run_environment_hook(
+            &request,
+            &filesystem,
+            HookContext {
+                state: &state,
+                process_pool: pool,
+                phase: HookPhase::Setup,
+            },
+        )
+        .await
+        .assert_value();
+    let setup_home = runtime_home.join("setup-home");
+    let metadata = std::fs::metadata(&setup_home).assert_value();
+    assert!(metadata.is_dir());
+    assert_eq!(metadata.uid(), uid);
+    assert_eq!(metadata.mode() & 0o777, 0o700);
+    allocator
+        .run_environment_hook(
+            &request,
+            &filesystem,
+            HookContext {
+                state: &state,
+                process_pool: pool,
+                phase: HookPhase::Startup,
+            },
+        )
+        .await
+        .assert_value();
+    assert!(
+        !std::fs::read_dir(&workspace)
+            .assert_value()
+            .next()
+            .is_some()
+    );
+}

@@ -113,6 +113,26 @@ fn lane_names_and_display_agree_with_the_serde_wire_names() {
 }
 
 #[test]
+fn pi_lanes_keep_the_provider_wire_names_of_their_declarations() {
+    for (provider, name) in [
+        (PiProvider::Anthropic, "anthropic"),
+        (PiProvider::OpenAi, "openai"),
+        (PiProvider::OpenRouter, "openrouter"),
+        (PiProvider::Gateway, "gateway"),
+        (PiProvider::Bedrock, "bedrock"),
+    ] {
+        let lane = RuntimeLane::Pi { provider };
+        assert_eq!(lane.harness_name(), "pi");
+        assert_eq!(lane.provider_name(), name);
+        assert_eq!(lane.to_string(), format!("pi/{name}"));
+        assert_eq!(
+            serde_json::to_value(lane).assert_value(),
+            serde_json::json!({"harness": "pi", "provider": name})
+        );
+    }
+}
+
+#[test]
 fn lanes_order_by_harness_then_provider_declaration() {
     let sorted = every_lane()
         .into_iter()

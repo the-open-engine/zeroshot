@@ -183,6 +183,12 @@ fn validate_binding_kinds(
 ) -> Result<(), NativeV2AdmissionError> {
     for declaration in declarations {
         let binding = &bindings[&declaration.name];
+        binding.validate_model_limits().map_err(|error| {
+            NativeV2AdmissionError::InvalidRuntimeBinding {
+                node: declaration.name.clone(),
+                detail: error.to_string(),
+            }
+        })?;
         validate_binding_kind(declaration, binding)?;
         validate_instructions(declaration, binding)?;
     }

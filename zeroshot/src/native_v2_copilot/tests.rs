@@ -10,8 +10,7 @@ use super::*;
 use crate::native_v2_runner::LiveOutputStream;
 use crate::execution::SessionScope;
 use crate::native_v2_candidate::test_support::{
-    NodeRequestFixture, TestDirectory, admit, environment_name, full_graph, python_script,
-    success_node,
+    NodeRequestFixture, TestDirectory, admit, environment_name, full_graph, success_node,
 };
 use crate::native_v2_contract::{
     AdmittedRun, CopilotProvider, DeclaredConnections, NodeRuntimeBinding, RunSubmission,
@@ -28,7 +27,7 @@ mod hosted;
 const INSTRUCTIONS: &str = "Return answer 42 using the required schema.";
 
 fn script() -> String {
-    python_script(
+    openengine_cluster_testkit::fixture::python3_script(
         &std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/src/native_v2_copilot/tests/runtime.py"
@@ -46,6 +45,8 @@ fn binding_for_model(names: impl Iterator<Item = String>, model: &str) -> NodeRu
         lane: None,
         model: crate::worker_catalog::ModelId::new(model).assert_value(),
         effort: None,
+        context_window: None,
+        max_tokens: None,
         session_scope: SessionScope::NodeInstance,
         connections: DeclaredConnections::single(
             "github",
@@ -490,6 +491,25 @@ fn custom_provider_environment() -> BTreeMap<String, String> {
 async fn native_local_login_and_context_need_no_declared_token() {
     let fixture = Fixture::native().await;
     verified(complete(fixture.start(1).await).await.1);
+}
+
+#[tokio::test]
+async fn unsupported_requests_and_memory_hooks_are_answered_without_failing_the_turn() {
+    let fixture = Fixture::new("dispatch").await;
+    verified(complete(fixture.start(1).await).await.1);
+    let replies = fixture
+        .directory
+        .read("capture.dispatch")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).assert_value())
+        .collect::<Vec<_>>();
+    assert_eq!(replies.len(), 3, "every dispatched request is answered");
+    assert_eq!(replies[0]["id"], 9001);
+    assert_eq!(replies[0]["error"]["code"], -32601);
+    for (reply, identifier) in replies[1..].iter().zip([9002, 9003]) {
+        assert_eq!(reply["id"], identifier);
+        assert!(reply["result"]["output"].is_null());
+    }
 }
 
 #[tokio::test]

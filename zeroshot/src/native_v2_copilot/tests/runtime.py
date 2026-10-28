@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Deterministic Copilot RPC peer; never contacts a provider."""
 import json
 import os
@@ -189,6 +190,23 @@ while (message := read()) is not None:
         if mode == "permission":
             usage.update({"cacheReadTokens": 2, "cacheWriteTokens": 1})
         event("assistant.usage", usage)
+        if mode == "dispatch":
+            send({"method": "future.notification", "params": {}})
+            send({"method": "future.request", "id": 9001, "params": {}})
+            send({"method": "hooks.invoke", "id": 9002, "params": {
+                "sessionId": "other-session", "hookType": "preToolUse", "input": {}}})
+            send({"method": "hooks.invoke", "id": 9003, "params": {
+                "sessionId": session, "hookType": "preToolUse", "input": {}}})
+            replies = [read()]
+            for identifier in (9002, 9003):
+                replies.append(read())
+            assert replies[0]["id"] == 9001
+            assert replies[0]["error"]["code"] == -32601
+            assert [reply["id"] for reply in replies[1:]] == [9002, 9003]
+            assert all(reply["result"]["output"] is None for reply in replies[1:])
+            with open(os.environ["CAPTURE_PATH"] + ".dispatch", "a", encoding="utf-8") as capture:
+                for reply in replies:
+                    capture.write(json.dumps(reply) + "\n")
         if mode == "cancel":
             event("tool.execution_start", {"toolName": "ready"})
             time.sleep(60)

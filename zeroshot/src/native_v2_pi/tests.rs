@@ -15,7 +15,7 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::Value;
 
 use super::command::{PiCommandInput, PiCommandRequest, pi_arguments};
-use super::provider_document::{MODELS_FILE, gateway_base_url};
+use super::provider_document::{GATEWAY, MODELS_FILE, gateway_base_url};
 use super::session::{PiSession, identity};
 use super::session_id::{observe_session, pi_session_id};
 use super::{PiAdapter, PiAdapterConfigError, PiConfig, PiProcessEnvironment};
@@ -75,6 +75,8 @@ fn agent_binding(
         lane: None,
         model: ModelId::new(model).assert_value(),
         effort,
+        context_window: None,
+        max_tokens: None,
         session_scope: scope,
         connections,
     }
@@ -870,6 +872,59 @@ fn coverage_contract_pi_gateway_writes_the_provider_document_before_launch() {
     assert!(written.contains("\"reasoning\": true"));
     assert!(written.contains("$GATEWAY_API_KEY"));
     assert!(!written.contains("declared"));
+}
+
+#[test]
+fn coverage_contract_pi_gateway_writes_caller_declared_model_limits() {
+    // The adapter must carry the caller's declared limits into the synthesized entry instead of
+    // falling back to Pi's 128,000-token default.
+    let directory = TestDirectory::new("pi-gateway-limits");
+    let files = files(&directory);
+    let agent_dir = files.home().to_path_buf();
+    let adapter = PiAdapter::new_local(adapter_configuration(
+        PiProvider::Gateway,
+        "pi",
+        BTreeMap::new(),
+    ))
+    .assert_value();
+    let fields = ["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "GATEWAY_API"];
+    let mut binding = agent_binding(
+        "provider-owned-model",
+        None,
+        SessionScope::Execution,
+        &fields,
+    );
+    let NodeRuntimeBinding::Agent {
+        context_window,
+        max_tokens,
+        ..
+    } = &mut binding
+    else {
+        unreachable!("fixture builds an agent binding")
+    };
+    *context_window = Some(1_000_000);
+    *max_tokens = Some(32_000);
+    let invocation = invocation(
+        binding,
+        NodeRole::Worker,
+        resolved(
+            &fields,
+            &[
+                ("GATEWAY_BASE_URL", "https://gateway.example/api/v1"),
+                ("GATEWAY_API_KEY", "declared"),
+                ("GATEWAY_API", "openai-responses"),
+            ],
+        ),
+    );
+    adapter
+        .command_for_test(&invocation, &files, "zs-fixed")
+        .assert_value_with("gateway limits launch");
+    let written: Value =
+        serde_json::from_str(&std::fs::read_to_string(agent_dir.join(MODELS_FILE)).assert_value())
+            .assert_value();
+    let model = &written["providers"][GATEWAY.provider]["models"][0];
+    assert_eq!(model["contextWindow"], 1_000_000);
+    assert_eq!(model["maxTokens"], 32_000);
 }
 
 #[test]

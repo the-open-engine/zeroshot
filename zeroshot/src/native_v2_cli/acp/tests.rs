@@ -212,6 +212,8 @@ fn runtime(harness: &str, scope: &str, connections: Value) -> RuntimePlan {
         lane: None,
         model: ModelId::new("provider-model").assert_value(),
         effort: None,
+        context_window: None,
+        max_tokens: None,
         session_scope: match scope {
             "node_instance" => SessionScope::NodeInstance,
             _ => SessionScope::Execution,

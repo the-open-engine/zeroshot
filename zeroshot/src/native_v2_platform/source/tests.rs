@@ -48,6 +48,8 @@ async fn source_checkout_resolves_again_instead_of_reusing_an_earlier_token() {
         lane: None,
         model: ModelId::new("gpt-5.6").assert_value(),
         effort: None,
+        context_window: None,
+        max_tokens: None,
         session_scope: SessionScope::Execution,
         connections: DeclaredConnections::single(
             key.as_str(),

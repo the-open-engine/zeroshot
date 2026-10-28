@@ -26,6 +26,8 @@ pub(super) fn request(run: &str, execution: u64) -> NodeRunRequest {
         lane: None,
         model: worker_catalog::ModelId::new("gpt-5.6").assert_value(),
         effort: Some(ReasoningEffort::Max),
+        context_window: None,
+        max_tokens: None,
         session_scope: SessionScope::Execution,
         connections: DeclaredConnections::empty(),
     };

@@ -47,6 +47,63 @@ fn profile_operations() -> (
     (target, selector, set, run)
 }
 
+#[tokio::test]
+async fn optional_control_authority_defaults_are_explicitly_unavailable() {
+    let authority = FakeAuthority::new("ws://127.0.0.1:8080/native-v2/oecp");
+    let target = direct_target("http://127.0.0.1:8080");
+    assert_eq!(
+        authority
+            .review_cache_namespace(&target)
+            .await
+            .assert_value(),
+        None
+    );
+    assert_eq!(
+        authority
+            .default_resource_scope(&target)
+            .await
+            .assert_value(),
+        ConnectionScope::User
+    );
+    let prepared = run_request();
+    let request = zeroshot_engine::native_v2_review::ReviewResolutionRequest {
+        url: "https://github.com/open-engine/zeroshot/issues/1".to_owned(),
+        branch: None,
+        revision: None,
+    };
+    assert!(
+        authority
+            .resolve_review(&target, request, &prepared.intent.runtime)
+            .await
+            .assert_error()
+            .to_string()
+            .contains("does not advertise task resolution")
+    );
+    assert!(
+        authority
+            .delegation(
+                &target,
+                zeroshot_engine::native_v2_cli::DelegationAction::List {
+                    owner: openengine_cluster_protocol::DelegationOwner::User,
+                    organization_id: None,
+                },
+            )
+            .await
+            .assert_error()
+            .to_string()
+            .contains("does not advertise delegation management")
+    );
+    let (_, _, _, run) = profile_operations();
+    assert!(
+        authority
+            .profile_run(&target, &run)
+            .await
+            .assert_error()
+            .to_string()
+            .contains("profile runs are unavailable")
+    );
+}
+
 #[test]
 fn profile_run_debug_exposes_routing_identity_and_redacts_every_secret_value() {
     let (_, _, _, mut run) = profile_operations();

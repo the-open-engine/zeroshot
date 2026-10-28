@@ -42,6 +42,8 @@ pub(crate) fn binding(scope: SessionScope) -> NodeRuntimeBinding {
         lane: None,
         model: crate::worker_catalog::ModelId::new("gpt-5.6").assert_value(),
         effort: Some(ReasoningEffort::Max),
+        context_window: None,
+        max_tokens: None,
         session_scope: scope,
         connections: DeclaredConnections::empty(),
     }

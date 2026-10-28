@@ -21,7 +21,7 @@ use super::*;
 use crate::execution::process::HostedProcessPool;
 use crate::execution::SessionScope;
 use crate::native_v2_candidate::test_support::{
-    TestDirectory, TestGitRepository, full_graph, git_output, python_script, success_node,
+    TestDirectory, TestGitRepository, full_graph, git_output, success_node,
 };
 use crate::native_v2_admission::NativeV2Admission;
 use crate::native_v2_capsule::{NativeCapsuleNodeEndpoint, RemoteCapsuleNodeRunner};
@@ -58,18 +58,6 @@ use crate::v2_run_ledger::fake::FakeRunLedger;
 use crate::worker_catalog::{self, ReasoningEffort};
 
 type TempRepository = TestGitRepository;
-
-#[test]
-fn python_fixture_runs_with_a_cleared_environment() {
-    let root = TestDirectory::new("python-fixture");
-    let script = root.write_executable("fixture", &python_script("print(42)\n"));
-    let output = std::process::Command::new(script)
-        .env_clear()
-        .output()
-        .assert_value_with("run Python fixture without an inherited environment");
-    assert!(output.status.success(), "{output:?}");
-    assert_eq!(output.stdout, b"42\n");
-}
 
 struct ScriptedGitHub {
     remote: PathBuf,

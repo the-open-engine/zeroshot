@@ -93,6 +93,18 @@ impl RunFailure {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn read_for_test(run_id: RunId, target: Option<&str>) -> Self {
+        Self {
+            run_id,
+            target: target.map(str::to_owned),
+            errors: VecDeque::new(),
+            omitted: 0,
+            complete: false,
+            context: None,
+        }
+    }
+
     pub(super) async fn read<B, D>(
         backend: &B,
         target: Option<&str>,

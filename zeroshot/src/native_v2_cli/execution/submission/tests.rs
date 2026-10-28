@@ -1,6 +1,7 @@
 use openengine_cluster_protocol::{
-    ConnectionKey, EnvironmentVariableName, GraphProfile, ModelId, NodeRuntimeBinding,
-    PullRequestFeedback, RunConnectionRequirements, RunSize, RunTitle, SessionScope,
+    ConnectionKey, EnvironmentVariableName, GraphProfile, MAX_MODEL_CONTEXT_WINDOW,
+    MAX_MODEL_MAX_TOKENS, ModelId, NodeRuntimeBinding, PullRequestFeedback,
+    RunConnectionRequirements, RunSize, RunTitle, SessionScope,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
@@ -29,6 +30,8 @@ fn uniform(harness: UniformHarness, provider: UniformProvider) -> UniformRuntime
         size: RunSize::Small,
         model: ModelId::new("provider-owned-model").assert_value(),
         effort: None,
+        context_window: None,
+        max_tokens: None,
         session_scope: None,
         connections: None,
         active_memory: Default::default(),
@@ -152,6 +155,8 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
             lane: None,
             model: ModelId::new("wrong-kind").assert_value(),
             effort: None,
+            context_window: None,
+            max_tokens: None,
             session_scope: SessionScope::Execution,
             connections: DeclaredConnections::empty(),
         },
@@ -182,6 +187,84 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
             .assert_value(),
         runtime
     );
+}
+
+#[test]
+fn uniform_runtime_threads_model_limits_into_each_agent_binding() {
+    let graph = BuiltinGraphTemplate::SoftwareChange
+        .materialize(TemplateDelivery::Merge)
+        .assert_value();
+    let authored = serde_json::json!({
+        "harness": "pi",
+        "provider": "gateway",
+        "model": "provider-owned-model",
+        "contextWindow": 1_000_000,
+        "maxTokens": 32_000
+    });
+    let plan: UniformRuntimePlan = serde_json::from_value(authored).assert_value();
+    let runtime = plan
+        .materialize(
+            &graph,
+            PullRequestFeedback::Consider,
+            Some(BuiltinGraphTemplate::SoftwareChange),
+        )
+        .assert_value();
+    let mut agents = 0;
+    for (name, binding) in runtime.nodes() {
+        if let NodeRuntimeBinding::Agent {
+            context_window,
+            max_tokens,
+            ..
+        } = binding
+        {
+            agents += 1;
+            assert_eq!(*context_window, Some(1_000_000), "{name}");
+            assert_eq!(*max_tokens, Some(32_000), "{name}");
+        }
+    }
+    assert!(agents > 0);
+
+    let defaults: UniformRuntimePlan = serde_json::from_value(serde_json::json!({
+        "harness": "pi", "provider": "gateway", "model": "provider-owned-model"
+    }))
+    .assert_value();
+    assert_eq!(defaults.context_window, None);
+    assert_eq!(defaults.max_tokens, None);
+    let defaults = defaults
+        .materialize(
+            &graph,
+            PullRequestFeedback::Consider,
+            Some(BuiltinGraphTemplate::SoftwareChange),
+        )
+        .assert_value();
+    assert!(defaults.nodes().values().all(|binding| matches!(
+        binding,
+        NodeRuntimeBinding::GitDelivery { .. }
+    ) || binding.context_window().is_none()
+        && binding.max_tokens().is_none()));
+
+    for (field, value) in [
+        ("contextWindow", serde_json::json!(0)),
+        (
+            "contextWindow",
+            serde_json::json!(MAX_MODEL_CONTEXT_WINDOW + 1),
+        ),
+        ("contextWindow", serde_json::json!(-1)),
+        ("maxTokens", serde_json::json!(0)),
+        ("maxTokens", serde_json::json!(MAX_MODEL_MAX_TOKENS + 1)),
+        ("maxTokens", serde_json::json!(-1)),
+    ] {
+        let mut invalid = serde_json::json!({
+            "harness": "pi", "provider": "gateway", "model": "provider-owned-model"
+        });
+        invalid[field] = value;
+        let error = serde_json::from_value::<UniformRuntimePlan>(invalid)
+            .expect_err("out-of-range model limit must be rejected");
+        assert!(
+            error.to_string().contains(field) && error.to_string().contains("1..=10000000"),
+            "{field}: {error}"
+        );
+    }
 }
 
 #[test]
@@ -382,4 +465,258 @@ async fn wave8_cli_contract_validate_only_preflight_materializes_without_backend
                 .is_none()
         );
     }
+}
+
+#[test]
+fn github_tokens_reject_empty_oversized_and_control_bearing_values() {
+    assert_eq!(
+        validate_github_token("ghp_token".to_owned()).assert_value(),
+        "ghp_token"
+    );
+    for rejected in [
+        String::new(),
+        "x".repeat(4_097),
+        "ghp_bad\0token".to_owned(),
+    ] {
+        assert!(matches!(
+            validate_github_token(rejected),
+            Err(NativeV2CliError::GitHubToken)
+        ));
+    }
+}
+
+#[test]
+fn run_environment_inputs_distinguish_empty_missing_and_malformed_files() {
+    assert!(matches!(read_run_environment(&None), Ok(None)));
+    assert!(matches!(
+        read_run_environment(&Some(crate::native_v2_cli::RunEnvironmentInput::Empty)),
+        Ok(Some(environment)) if environment == Default::default()
+    ));
+
+    let directory = tempfile::tempdir().assert_value();
+    let missing = directory.path().join("missing.json");
+    assert!(matches!(
+        read_run_environment(&Some(crate::native_v2_cli::RunEnvironmentInput::File(
+            missing
+        ))),
+        Err(NativeV2CliError::Read {
+            kind: "run environment",
+            ..
+        })
+    ));
+    let malformed = directory.path().join("malformed.json");
+    std::fs::write(&malformed, b"{not json").assert_value();
+    assert!(matches!(
+        read_run_environment(&Some(crate::native_v2_cli::RunEnvironmentInput::File(
+            malformed
+        ))),
+        Err(NativeV2CliError::Json {
+            kind: "run environment",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn connection_selection_keeps_present_utf8_fields_and_rejects_non_utf8_values() {
+    let selected = select_connection_requirements(
+        BTreeMap::from([(
+            ConnectionKey::new("provider").assert_value(),
+            [
+                EnvironmentVariableName::new("ABSENT").assert_value(),
+                EnvironmentVariableName::new("OPENAI_API_KEY").assert_value(),
+            ]
+            .into_iter()
+            .collect(),
+        )]),
+        |name| (name == "OPENAI_API_KEY").then(|| OsString::from("secret")),
+    )
+    .assert_value();
+    assert_eq!(selected.len(), 1);
+    assert_eq!(
+        selected
+            .values()
+            .next()
+            .assert_value()
+            .as_map()
+            .get(&EnvironmentVariableName::new("OPENAI_API_KEY").assert_value()),
+        Some(&"secret".to_owned())
+    );
+
+    #[cfg(unix)]
+    {
+        let error = select_connection_requirements(
+            BTreeMap::from([(
+                ConnectionKey::new("provider").assert_value(),
+                [EnvironmentVariableName::new("OPENAI_API_KEY").assert_value()]
+                    .into_iter()
+                    .collect(),
+            )]),
+            |_| {
+                use std::os::unix::ffi::OsStringExt as _;
+                Some(OsString::from_vec(vec![b'n', 0xff]))
+            },
+        )
+        .expect_err("non-UTF-8 environment values must not be submitted");
+        assert!(
+            matches!(error, NativeV2CliError::Environment(name) if name.as_str() == "OPENAI_API_KEY")
+        );
+    }
+}
+
+fn intent_command(selection: RunSelection) -> RunCommand {
+    RunCommand {
+        environment: None,
+        target: None,
+        cwd: None,
+        source_connection: None,
+        title: RunTitle::new("Intent validation").assert_value(),
+        input: "input.json".into(),
+        selection,
+        repository: None,
+        branch: None,
+        revision: None,
+        detach: false,
+        validate_only: false,
+        submission_key: None,
+    }
+}
+
+fn resolved_profile(profile: GraphProfile) -> ResolvedRunProfile {
+    let mut graph = BuiltinGraphTemplate::SingleWorker
+        .materialize(TemplateDelivery::None)
+        .assert_value();
+    graph.profile = profile;
+    let runtime = uniform(UniformHarness::Codex, UniformProvider::OpenAi)
+        .materialize(&graph, PullRequestFeedback::Consider, None)
+        .assert_value();
+    ResolvedRunProfile {
+        graph,
+        runtime,
+        remote_selector: None,
+    }
+}
+
+#[test]
+fn prepare_intent_rejects_non_full_profiles_and_mismatched_initial_input() {
+    let command = intent_command(RunSelection::Profile(None));
+    let profile = resolved_profile(GraphProfile::SingleWorker);
+    let error = prepare_intent(&command, profile, serde_json::json!({"task":"x"}), None)
+        .expect_err("non-full graph profile must be rejected");
+    assert!(
+        matches!(error, NativeV2CliError::Usage(message) if message.contains("openengine.graph.full/v1"))
+    );
+
+    let profile = resolved_profile(GraphProfile::Full);
+    let error = prepare_intent(&command, profile, serde_json::json!("not an object"), None)
+        .expect_err("initial input must match the authored schema");
+    assert!(matches!(error, NativeV2CliError::InitialInput(_)));
+}
+
+#[test]
+fn prepare_intent_preserves_an_explicit_submission_key() {
+    let mut command = intent_command(RunSelection::Profile(None));
+    command.submission_key = Some(IdempotencyKey::new("cli-retry-key").assert_value());
+    let intent = prepare_intent(
+        &command,
+        resolved_profile(GraphProfile::Full),
+        serde_json::json!({"task":"x"}),
+        Some(Default::default()),
+    )
+    .assert_value();
+    assert_eq!(intent.submission_key, command.submission_key.assert_value());
+    assert_eq!(intent.initial_input, serde_json::json!({"task":"x"}));
+}
+
+#[test]
+fn template_binding_insertion_owns_comment_and_git_delivery_nodes() {
+    let mut runtime = RuntimePlan::Pi {
+        provider: PiProvider::Anthropic,
+        size: RunSize::Small,
+        active_memory: Default::default(),
+        global_agents: Default::default(),
+        nodes: BTreeMap::new(),
+    };
+    let delivery = openengine_cluster_protocol::NodeName::new("delivery").assert_value();
+    let comment = openengine_cluster_protocol::NodeName::new("comment").assert_value();
+    let push = git_delivery_binding(
+        PullRequestFeedback::Consider,
+        crate::native_v2_delivery::DeliveryMode::Push,
+    )
+    .assert_value();
+    let merge = git_delivery_binding(
+        PullRequestFeedback::Consider,
+        crate::native_v2_delivery::DeliveryMode::MergeV3,
+    )
+    .assert_value();
+    let comment_binding = NodeRuntimeBinding::CommentDelivery {
+        connections: connection(
+            crate::native_v2_contract::GITHUB_CONNECTION_KEY,
+            &[GITHUB_TOKEN_ENV],
+        )
+        .assert_value(),
+    };
+
+    insert_template_binding(&mut runtime, delivery.clone(), push, false).assert_value();
+    let encoded =
+        serde_json::to_value(runtime.nodes().get(&delivery).assert_value()).assert_value();
+    assert!(
+        encoded.get("pullRequestFeedback").is_none(),
+        "consider is the implicit pull-request feedback default"
+    );
+    assert!(
+        encoded.get("connections").is_none(),
+        "push delivery needs no GitHub connection"
+    );
+
+    insert_template_binding(&mut runtime, delivery.clone(), merge, true).assert_value();
+    assert_eq!(
+        serde_json::to_value(runtime.nodes().get(&delivery).assert_value())
+            .assert_value()
+            .get("pullRequestFeedback"),
+        Some(&serde_json::json!("ignore"))
+    );
+    assert!(matches!(
+        runtime.nodes().get(&delivery).assert_value(),
+        NodeRuntimeBinding::GitDelivery {
+            pull_request_feedback: PullRequestFeedback::Ignore,
+            ..
+        }
+    ));
+
+    insert_template_binding(
+        &mut runtime,
+        comment.clone(),
+        comment_binding.clone(),
+        false,
+    )
+    .assert_value();
+    insert_template_binding(
+        &mut runtime,
+        comment.clone(),
+        comment_binding.clone(),
+        false,
+    )
+    .assert_value();
+    assert!(
+        insert_template_binding(&mut runtime, delivery.clone(), comment_binding, false)
+            .assert_error()
+            .to_string()
+            .contains("comment_delivery")
+    );
+    assert!(
+        insert_template_binding(
+            &mut runtime,
+            comment,
+            git_delivery_binding(
+                PullRequestFeedback::Consider,
+                crate::native_v2_delivery::DeliveryMode::MergeV3,
+            )
+            .assert_value(),
+            false,
+        )
+        .assert_error()
+        .to_string()
+        .contains("git_delivery")
+    );
 }

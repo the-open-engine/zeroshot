@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use openengine_cluster_protocol::EnumLabel;
+
 use super::*;
 use crate::native_v2_cli::tests::support::FakeBackend;
 
@@ -91,5 +93,76 @@ fn foreground_watch_keeps_the_terminal_context_and_ordinary_json_output() {
     assert_eq!(
         written,
         serde_json::to_value(event).expect("expected watch JSON")
+    );
+}
+
+fn error_log(cursor: &str, level: &str, message: &str) -> RunLogEventNotification {
+    serde_json::from_value(serde_json::json!({
+        "subscriptionId": "sub-logs",
+        "runId": "run-local",
+        "cursor": cursor,
+        "timestamp": 1_700_000_000_000_u64,
+        "record": {
+            "level": level,
+            "target": "worker",
+            "message": message
+        }
+    }))
+    .expect("valid log event")
+}
+
+#[test]
+fn failure_report_keeps_only_the_latest_bounded_error_records() {
+    let mut failure = RunFailure::read_for_test(RunId::new("run-local"), None);
+    for index in 0..7 {
+        failure
+            .log_event(error_log(
+                &format!("v2:{index}"),
+                "error",
+                &format!("error {index}"),
+            ))
+            .expect("record error");
+        failure
+            .log_event(error_log(&format!("v2:info{index}"), "info", "ignored"))
+            .expect("ignore non-errors");
+    }
+    let report = failure.to_string();
+    assert!(report.contains("run finished unsuccessfully"));
+    assert!(report.contains("Latest 5 of 7 error logs:"));
+    assert!(!report.contains("error 1\n"));
+    assert!(report.contains("  error 6"));
+    assert!(report.contains("Full run log: zeroshot logs run-local"));
+}
+
+#[test]
+fn failure_report_without_context_names_latest_retained_errors_and_target() {
+    let mut failure = RunFailure::read_for_test(RunId::new("run-local"), Some("cloud"));
+    for index in 0..7 {
+        failure
+            .log_event(error_log(
+                &format!("v2:{index}"),
+                "error",
+                &format!("error {index}"),
+            ))
+            .expect("record error");
+    }
+    assert_eq!(
+        failure.to_string(),
+        "run finished unsuccessfully\nLatest 5 of 7 error logs:\n  error 2\n  error 3\n  error 4\n  error 5\n  error 6\nThe run log could not be read completely.\nFull run log: zeroshot logs run-local --target cloud"
+    );
+
+    let no_errors = RunFailure::from_context(
+        RunId::new("run-local"),
+        None,
+        (
+            EnumLabel::new("delivery_failed").expect("reason"),
+            serde_json::from_value(serde_json::json!({"incomplete": false}))
+                .expect("empty failure context"),
+        ),
+    );
+    assert!(
+        no_errors
+            .to_string()
+            .contains("run finished unsuccessfully: delivery_failed")
     );
 }

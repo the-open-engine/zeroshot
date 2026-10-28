@@ -7,8 +7,7 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{Value, json};
 use crate::execution::{SessionScope, process::HostedProcessPool};
 use crate::native_v2_candidate::test_support::{
-    NodeRequestFixture, TestDirectory, admit, environment_name, full_graph, python_script,
-    success_node,
+    NodeRequestFixture, TestDirectory, admit, environment_name, full_graph, success_node,
 };
 use crate::native_v2_claude::{ClaudeAdapter, ClaudeAdapterConfig, ClaudeProcessEnvironment};
 use crate::native_v2_codex::{NativeV2CodexAdapter, NativeV2CodexConfig};
@@ -77,7 +76,10 @@ async fn hosted_case(harness: &str, verifier: bool, policy: &str, native: Option
         process_pool: pool,
     })
     .assert_value();
-    fixture.write_executable("harness", &python_script(SCRIPT));
+    fixture.write_executable(
+        "harness",
+        &openengine_cluster_testkit::fixture::python3_script(SCRIPT),
+    );
     let mut values = BTreeMap::from_iter(
         [
             ("HARNESS", harness.to_owned()),
@@ -113,6 +115,8 @@ async fn hosted_case(harness: &str, verifier: bool, policy: &str, native: Option
         lane: None,
         model: ModelId::new("opaque-model").assert_value(),
         effort: None,
+        context_window: None,
+        max_tokens: None,
         session_scope: SessionScope::Execution,
         connections: DeclaredConnections::single(
             "provider",
@@ -250,7 +254,8 @@ async fn admission(harness: &str, verifier: bool, binding: NodeRuntimeBinding) -
     .await
 }
 
-const SCRIPT: &str = r#"import json, os, pathlib, subprocess, sys
+const SCRIPT: &str = r#"#!/usr/bin/env python3
+import json, os, pathlib, subprocess, sys
 # These are supplied only to the test host, never declared by its node connection.
 for name in ['CODEX_BASE_URL','OPENAI_BASE_URL','ANTHROPIC_BASE_URL',
              'CLAUDE_CONFIG_DIR','CLAUDE_CODE_FORCE_SANDBOX']:

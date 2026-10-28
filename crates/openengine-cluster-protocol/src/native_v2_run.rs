@@ -597,7 +597,11 @@ pub enum SessionScope {
 }
 
 mod runtime;
-pub use runtime::{DeclaredConnections, DeclaredEnvironment, NodeRuntimeBinding, PullRequestFeedback};
+pub use runtime::{
+    DeclaredConnections, DeclaredEnvironment, MAX_MODEL_CONTEXT_WINDOW, MAX_MODEL_MAX_TOKENS,
+    MIN_MODEL_CONTEXT_WINDOW, MIN_MODEL_MAX_TOKENS, NodeRuntimeBinding, PullRequestFeedback,
+    deserialize_optional_model_limit,
+};
 
 mod checkpoints;
 pub use checkpoints::*;

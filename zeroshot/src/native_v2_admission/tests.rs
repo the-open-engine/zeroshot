@@ -6,7 +6,9 @@ use crate::native_v2_contract::{
 };
 use crate::native_v2_delivery::{DeliveryMode, GITHUB_TOKEN_ENV};
 use crate::native_v2_delivery::contract::{delivery_result_schema, delivery_signal_labels};
-use openengine_cluster_protocol::{IdempotencyKey, ReasoningEffort};
+use openengine_cluster_protocol::{
+    IdempotencyKey, MAX_MODEL_CONTEXT_WINDOW, MAX_MODEL_MAX_TOKENS, ReasoningEffort,
+};
 use serde_json::{json, Value};
 
 fn null_verifier(name: &str, worker: &str) -> Value {
@@ -77,6 +79,8 @@ fn binding(model: &str, effort: Option<ReasoningEffort>) -> NodeRuntimeBinding {
         lane: None,
         model: crate::worker_catalog::ModelId::new(model).assert_value(),
         effort,
+        context_window: None,
+        max_tokens: None,
         session_scope: SessionScope::Execution,
         connections: DeclaredConnections::empty(),
     }
@@ -87,6 +91,8 @@ fn binding_with_environment(names: impl IntoIterator<Item = String>) -> NodeRunt
         lane: None,
         model: crate::worker_catalog::ModelId::new("claude-sonnet-5").assert_value(),
         effort: None,
+        context_window: None,
+        max_tokens: None,
         session_scope: SessionScope::Execution,
         connections: DeclaredConnections::single(
             "test",
@@ -558,6 +564,61 @@ async fn environment_name_limit_counts_distinct_names_across_nodes_hooks_and_var
         );
         assert_eq!(NativeV2Admission.admit(request).await.map(|_| ()), expected);
     }
+}
+
+#[tokio::test]
+async fn rejects_invalid_caller_declared_model_limits_at_admission() {
+    fn test_graph() -> GraphSpec {
+        graph(vec![null_step("work", "agent.work@1"), succeed("done")])
+    }
+
+    fn with_limits(context_window: Option<u32>, max_tokens: Option<u32>) -> NodeRuntimeBinding {
+        let mut binding = binding("claude-sonnet-5", None);
+        let NodeRuntimeBinding::Agent {
+            context_window: binding_context_window,
+            max_tokens: binding_max_tokens,
+            ..
+        } = &mut binding
+        else {
+            unreachable!("fixture only builds agent bindings")
+        };
+        *binding_context_window = context_window;
+        *binding_max_tokens = max_tokens;
+        binding
+    }
+
+    for (field, context_window, max_tokens) in [
+        ("contextWindow", Some(0), None),
+        ("contextWindow", Some(MAX_MODEL_CONTEXT_WINDOW + 1), None),
+        ("maxTokens", None, Some(0)),
+        ("maxTokens", None, Some(MAX_MODEL_MAX_TOKENS + 1)),
+    ] {
+        let error = NativeV2Admission
+            .admit(submission(
+                test_graph(),
+                BTreeMap::from([(named("work"), with_limits(context_window, max_tokens))]),
+            ))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                NativeV2AdmissionError::InvalidRuntimeBinding { node, detail }
+                    if node == &named("work")
+                        && detail.contains(field)
+                        && detail.contains("1..=10000000")
+            ),
+            "{field}: {error:?}"
+        );
+    }
+
+    NativeV2Admission
+        .admit(submission(
+            test_graph(),
+            BTreeMap::from([(named("work"), with_limits(Some(1_000_000), Some(32_000)))]),
+        ))
+        .await
+        .assert_value();
 }
 
 #[path = "tests/comments.rs"]
