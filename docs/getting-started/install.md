@@ -1,5 +1,5 @@
 ---
-description: "Install the zeroshot CLI and its agent skills, connect Cloud, open the workspace UI and prepare a local run."
+description: 'Install the zeroshot CLI and its agent skills, connect Cloud, open the workspace UI and prepare a local run.'
 ---
 
 # Install Zeroshot
@@ -25,15 +25,16 @@ Unchanged managed skill copies are installed or refreshed for Codex, GitHub Copi
 Code. A user-edited or conflicting skill is preserved, and the command fails with its exact path
 after completing any safe updates.
 
-Older updaters install only the skills they know. If `zeroshot-graph-design` is missing after an
-executable upgrade, run `zeroshot update` again. The current updater refreshes all managed skills
-even when the executable version is already current.
+Older updaters install only the skills they know. If `zeroshot-graph-design` or `zeroshot-plan` is
+missing after an executable upgrade, run `zeroshot update` again. The current updater refreshes all
+managed skills even when the executable version is already current.
 
 Release builds cover Linux x64 and arm64, macOS x64 and arm64, and Windows x64. Node.js is only an
 installer dependency; the command itself is a Rust executable.
 
-The package installs the `zeroshot`, `zeroshot-memory-init`, and `zeroshot-graph-design` skills for
-Codex, GitHub Copilot, and Pi under `$HOME/.agents/skills/<name>`, and for Claude Code under
+The package installs the `zeroshot`, `zeroshot-memory-init`, `zeroshot-graph-design`, and
+[`zeroshot-plan`](../guides/planning.md) skills for Codex, GitHub Copilot, and Pi under
+`$HOME/.agents/skills/<name>`, and for Claude Code under
 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/<name>`. No agent selection or
 per-project installation is needed. npm 7 and newer do not run uninstall hooks; after removing the
 package, remove only unmodified managed skill directories from these locations.
@@ -138,8 +139,8 @@ lists the automatic requirements and explains the separation.
 ## Other installation paths
 
 Each [GitHub release](https://github.com/the-open-engine/zeroshot/releases) includes native archives,
-the canonical `zeroshot-skill.md`, `zeroshot-memory-init-skill.md`, and
-`zeroshot-graph-design-skill.md`, and `SHA256SUMS`; archive
+the canonical `zeroshot-skill.md`, `zeroshot-memory-init-skill.md`,
+`zeroshot-graph-design-skill.md`, and `zeroshot-plan-skill.md`, and `SHA256SUMS`; archive
 names contain the release version and target triple.
 
 The Python SDK requires Python 3.11 or newer and ships the matching executable inside each platform
