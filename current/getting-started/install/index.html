@@ -705,6 +705,8 @@
       
         
       
+        
+      
     
     
     
@@ -749,6 +751,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/planning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plan work before running it
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1877,13 +1907,14 @@ against that release's <code>SHA256SUMS</code>, and verifies the new executable 
 Unchanged managed skill copies are installed or refreshed for Codex, GitHub Copilot, Pi, and Claude
 Code. A user-edited or conflicting skill is preserved, and the command fails with its exact path
 after completing any safe updates.</p>
-<p>Older updaters install only the skills they know. If <code>zeroshot-graph-design</code> is missing after an
-executable upgrade, run <code>zeroshot update</code> again. The current updater refreshes all managed skills
-even when the executable version is already current.</p>
+<p>Older updaters install only the skills they know. If <code>zeroshot-graph-design</code> or <code>zeroshot-plan</code> is
+missing after an executable upgrade, run <code>zeroshot update</code> again. The current updater refreshes all
+managed skills even when the executable version is already current.</p>
 <p>Release builds cover Linux x64 and arm64, macOS x64 and arm64, and Windows x64. Node.js is only an
 installer dependency; the command itself is a Rust executable.</p>
-<p>The package installs the <code>zeroshot</code>, <code>zeroshot-memory-init</code>, and <code>zeroshot-graph-design</code> skills for
-Codex, GitHub Copilot, and Pi under <code>$HOME/.agents/skills/&lt;name&gt;</code>, and for Claude Code under
+<p>The package installs the <code>zeroshot</code>, <code>zeroshot-memory-init</code>, <code>zeroshot-graph-design</code>, and
+<a href="../../guides/planning/"><code>zeroshot-plan</code></a> skills for Codex, GitHub Copilot, and Pi under
+<code>$HOME/.agents/skills/&lt;name&gt;</code>, and for Claude Code under
 <code>${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/&lt;name&gt;</code>. No agent selection or
 per-project installation is needed. npm 7 and newer do not run uninstall hooks; after removing the
 package, remove only unmodified managed skill directories from these locations.
@@ -1956,8 +1987,8 @@ runtime declares that provider. <a href="../../concepts/runtimes-and-connections
 lists the automatic requirements and explains the separation.</p>
 <h2 id="other-installation-paths">Other installation paths<a class="headerlink" href="#other-installation-paths" title="Permanent link">&para;</a></h2>
 <p>Each <a href="https://github.com/the-open-engine/zeroshot/releases">GitHub release</a> includes native archives,
-the canonical <code>zeroshot-skill.md</code>, <code>zeroshot-memory-init-skill.md</code>, and
-<code>zeroshot-graph-design-skill.md</code>, and <code>SHA256SUMS</code>; archive
+the canonical <code>zeroshot-skill.md</code>, <code>zeroshot-memory-init-skill.md</code>,
+<code>zeroshot-graph-design-skill.md</code>, and <code>zeroshot-plan-skill.md</code>, and <code>SHA256SUMS</code>; archive
 names contain the release version and target triple.</p>
 <p>The Python SDK requires Python 3.11 or newer and ships the matching executable inside each platform
 wheel. Download the wheel for your <a href="../../guides/python-sdk/#install-and-run">OS and CPU</a> from <a href="https://github.com/the-open-engine/zeroshot/releases?q=zeroshot-python-v">Python SDK releases</a>.
@@ -2022,7 +2053,7 @@ without expiry metadata are supplied once when each provider process starts.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-26">26 October 2026</time>
+    Last updated <time datetime="2026-10-28">28 October 2026</time>
   </span>
 
     
