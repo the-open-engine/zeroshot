@@ -3540,6 +3540,16 @@
             "connections": {
               "$ref": "#/$defs/DeclaredConnections"
             },
+            "contextWindow": {
+              "description": "Caller-owned model context window. Absent means the harness provider's own default.",
+              "format": "uint32",
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "effort": {
               "anyOf": [
                 {
@@ -3562,6 +3572,16 @@
                 {
                   "type": "null"
                 }
+              ]
+            },
+            "maxTokens": {
+              "description": "Caller-owned model output limit. Absent means the harness provider's own default.",
+              "format": "uint32",
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
               ]
             },
             "model": {
