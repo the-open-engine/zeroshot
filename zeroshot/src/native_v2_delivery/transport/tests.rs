@@ -805,3 +805,49 @@ async fn redacted_http_status_preserves_refusal_and_retry_routing() {
         );
     }
 }
+
+#[tokio::test]
+async fn runtime_commit_identity_is_pinned_after_native_environment() {
+    let repository = Repository::new();
+    let configuration = repository.root.path().join("caller.gitconfig");
+    std::fs::write(&configuration, "").assert_value();
+    let environment = BTreeMap::from([
+        ("GIT_AUTHOR_NAME".to_owned(), "Caller Author".to_owned()),
+        (
+            "GIT_AUTHOR_EMAIL".to_owned(),
+            "author@example.invalid".to_owned(),
+        ),
+        (
+            "GIT_COMMITTER_NAME".to_owned(),
+            "Caller Committer".to_owned(),
+        ),
+        (
+            "GIT_COMMITTER_EMAIL".to_owned(),
+            "committer@example.invalid".to_owned(),
+        ),
+    ]);
+    let transport =
+        repository.native_transport(repository.remote.as_os_str(), &configuration, environment);
+    transport
+        .execute(
+            &[
+                "commit".into(),
+                "--allow-empty".into(),
+                "--message".into(),
+                "fixed identity".into(),
+            ],
+            SourceDeliveryCredential::token(""),
+            GIT_FIXTURE_BUDGET,
+        )
+        .await
+        .assert_value()
+        .require_success()
+        .assert_value();
+    assert_eq!(
+        git(
+            &repository.workspace,
+            &["show", "-s", "--format=%an <%ae>|%cn <%ce>"]
+        ),
+        "Zeroshot <delivery@zeroshot.invalid>|Zeroshot <delivery@zeroshot.invalid>"
+    );
+}

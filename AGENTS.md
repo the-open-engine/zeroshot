@@ -463,8 +463,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and dispatch waves. The supervisor captures only after all live executions and cleanup have settled;
   read-only boundaries reuse bytes. Local/direct storage normalizes Git into a temporary private
   filesystem stage, commits it to one deduplicated Restic repository per recovery lineage, and then
-  removes the full stage. Small catalogs atomically map logical checkpoint IDs to Restic snapshots;
-  versioned execution seeds live in separate files and are read only for selected continuation.
+  removes the full stage. Small catalogs atomically map logical checkpoint IDs to Restic snapshots.
+  Restic drains progress and private stderr completely with bounded memory, retaining only the
+  latest summary under a per-record size bound. Errors identify the operation and failure stage
+  or exit status without private child output; failed backups never replace a published checkpoint.
+  Versioned execution seeds live in separate files and are read only for selected continuation.
   Restart restores the latest published snapshot without importing a seed. Restore staging is a
   private sibling of the workspace so final replacement stays on one filesystem. Successful
   lineages delete their catalogs and repository only after durable terminal success; failed lineages
@@ -561,7 +564,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   it before deleting the workspace or releasing its identity lease; failed cleanup retains both.
   Allocation retains cleanup authority before checkout starts, including through startup errors and
   cancellation. Controllers confirm destruction before recording an allocation failure as terminal.
-  Local Git retains the caller identity.
+  Local Git retains the caller's OS identity, separately from fixed delivery commit authorship.
 - Delivery clears the environment of its Git and GitHub CLI processes, so local composition pins
   delivery Git and, when the GitHub adapter is selected, `gh` to the files `find_executable` finds
   on the captured search path. Local `run`/`resume` reject a missing one as a usage error with the
@@ -590,6 +593,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   resolution belongs to each supervised execution, so it observes the authored deadline and does
   not block parallel dispatch. Pending authorized head adoption survives repair.
 - Git diagnostics retain bounded, credential-redacted command/status/stdout/stderr details.
+  Capture and native transport share credential-name selection for tokens, passwords and API keys,
+  respecting operating-system case rules. Trusted Git commands pin author and committer identity
+  after applying native transport context and keep automatic GC foreground on old and current Git.
   Private Git protocol stdout stays separate from printable diagnostics; parsing and failure
   classification must preserve raw evidence before credential redaction. Final delivery feedback
   also redacts the invocation's source credentials and its current refreshed issuance;

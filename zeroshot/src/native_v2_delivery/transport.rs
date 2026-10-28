@@ -424,6 +424,7 @@ impl GitTransport {
                 .env("PATH", "/usr/bin:/bin");
         }
         remove_repository_environment(command.as_std_mut());
+        super::command::pin_delivery_identity(&mut command);
         command
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GCM_INTERACTIVE", "never")

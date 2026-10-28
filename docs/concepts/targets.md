@@ -143,6 +143,11 @@ runs increase peak disk usage and can fail with `no space left on device`.
 On tight disks, clean unnecessary build artifacts or keep large generated directories outside the
 workspace where practical.
 
+Restic progress streams are drained with bounded memory, retaining the final snapshot summary.
+Large progress output does not abort a backup. Failures identify the operation and failure stage
+or exit status without exposing private child output; the previous published checkpoint remains
+available when a later backup fails.
+
 ## Direct target
 
 A direct target exposes Zeroshot's HTTP and OECP contracts without application-level authentication.

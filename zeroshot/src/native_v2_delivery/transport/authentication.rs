@@ -75,12 +75,7 @@ impl GitAuthentication {
             self.secrets.extend(
                 environment
                     .iter()
-                    .filter(|(name, _)| {
-                        name.as_str() == "GIT_USERNAME"
-                            || name.ends_with("_TOKEN")
-                            || name.ends_with("_PASSWORD")
-                            || name.ends_with("_API_KEY")
-                    })
+                    .filter(|(name, _)| super::super::command::native_credential_name(name))
                     .map(|(_, value)| value.clone()),
             );
         }

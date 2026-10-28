@@ -260,17 +260,27 @@ fn command_diagnostic(command: &Command, secrets: &[String]) -> GitCommandFailur
     }
 }
 
+pub(super) fn native_credential_name(name: &str) -> bool {
+    #[cfg(windows)]
+    let name = name.to_ascii_uppercase();
+    name == "GIT_USERNAME"
+        || name.ends_with("_TOKEN")
+        || name.ends_with("_PASSWORD")
+        || name.ends_with("_API_KEY")
+}
+
 fn command_secrets(command: &Command) -> Vec<String> {
-    let token = command.as_std().get_envs().find_map(|(name, value)| {
-        (name == "GH_TOKEN")
-            .then_some(value)
-            .flatten()
-            .map(|v| v.to_string_lossy().into_owned())
-    });
-    match token {
-        Some(token) => vec![super::git_auth::encode_basic_credential(&token), token],
-        None => Vec::new(),
-    }
+    command
+        .as_std()
+        .get_envs()
+        .filter(|(name, _)| name.to_str().is_some_and(native_credential_name))
+        .filter_map(|(_, value)| value)
+        .filter(|value| !value.is_empty())
+        .flat_map(|value| {
+            let value = value.to_string_lossy().into_owned();
+            [super::git_auth::encode_basic_credential(&value), value]
+        })
+        .collect()
 }
 
 async fn drain(mut reader: impl AsyncRead + Unpin, captured: &mut CapturedBytes, retain: usize) {
@@ -356,6 +366,8 @@ pub(crate) fn local_git_command(program: &Path, workspace: &Path) -> Command {
         .arg("-c")
         .arg("maintenance.autoDetach=false")
         .arg("-c")
+        .arg("gc.autoDetach=false")
+        .arg("-c")
         .arg(format!("safe.directory={}", workspace.display()))
         .arg("-C")
         .arg(workspace)
@@ -363,7 +375,16 @@ pub(crate) fn local_git_command(program: &Path, workspace: &Path) -> Command {
     let mut environment = std::collections::BTreeMap::new();
     crate::execution::platform::process_environment(&mut environment);
     command.envs(environment);
+    pin_delivery_identity(&mut command);
     command
+}
+
+pub(super) fn pin_delivery_identity(command: &mut Command) {
+    command
+        .env("GIT_AUTHOR_NAME", "Zeroshot")
+        .env("GIT_AUTHOR_EMAIL", "delivery@zeroshot.invalid")
+        .env("GIT_COMMITTER_NAME", "Zeroshot")
+        .env("GIT_COMMITTER_EMAIL", "delivery@zeroshot.invalid");
 }
 
 /// Hosted Git writes as the allocated workspace owner, including on failed or cancelled operations.
