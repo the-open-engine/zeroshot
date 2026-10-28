@@ -82,7 +82,12 @@ async fn fetch_waits_for_automatic_maintenance() {
 
 async fn force_automatic_gc(program: &Path, workspace: &Path) {
     let git = git_process(program, Instant::now() + GIT_TIMEOUT);
-    for (key, value) in [("gc.auto", "1"), ("gc.autoDetach", "true")] {
+    // Keep manual maintenance on GC; Git 2.56 otherwise defaults to geometric repacking.
+    for (key, value) in [
+        ("gc.auto", "1"),
+        ("gc.autoDetach", "true"),
+        ("maintenance.strategy", "incremental"),
+    ] {
         git.run(
             Some(workspace),
             &["config".into(), key.into(), value.into()],

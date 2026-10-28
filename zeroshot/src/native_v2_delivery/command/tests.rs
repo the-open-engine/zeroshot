@@ -494,7 +494,8 @@ async fn fixed_identity_wins_over_global_and_environment_git_configuration() {
                     .env(format!("GIT_CONFIG_VALUE_{index}"), value);
             }
         } else {
-            let config = repository.root.write("caller.gitconfig", "[author]\nname=Caller Author\nemail=author@example.invalid\n[committer]\nname=Caller Committer\nemail=committer@example.invalid\n");
+            let config = repository.root.child("caller.gitconfig");
+            std::fs::write(&config, "[author]\nname=Caller Author\nemail=author@example.invalid\n[committer]\nname=Caller Committer\nemail=committer@example.invalid\n").unwrap();
             command.env("GIT_CONFIG_GLOBAL", config);
         }
         command.args(["commit", "--allow-empty", "--message", "fixed identity"]);
