@@ -254,11 +254,16 @@ where
     crate::native_v2_admission::materialize_delivery_access(&mut submission)
         .map_err(NativeV2CliError::InvalidRun)?;
     request.intent.runtime = submission.runtime.clone();
-    crate::native_v2_cli::local::native_forge::capture_environment(
-        &submission,
-        &mut request.connections,
-        available,
-    )?;
+    let missing = submission
+        .runtime
+        .connection_requirements()
+        .into_iter()
+        .filter(|(key, _)| !request.connections.contains_key(key))
+        .map(|(key, fields)| (key, fields.into_iter().collect()))
+        .collect();
+    request
+        .connections
+        .extend(select_connection_requirements(missing, available)?);
     Ok(())
 }
 

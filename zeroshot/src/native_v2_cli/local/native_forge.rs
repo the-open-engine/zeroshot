@@ -221,57 +221,6 @@ pub(super) fn materialize_local_access(
     Ok(())
 }
 
-/// Capture only absent forge connection keys, after their instance is known. Named targets
-/// use explicit caller environment values; this never uploads a native stored login.
-pub(crate) fn capture_environment<F>(
-    submission: &RunSubmission,
-    connections: &mut RunConnectionValues,
-    available: &F,
-) -> Result<(), NativeV2CliError>
-where
-    F: Fn(&str) -> Option<std::ffi::OsString>,
-{
-    let missing = submission
-        .connection_requirements()
-        .into_keys()
-        .filter(|key| !connections.contains_key(key))
-        .collect();
-    let selected = missing_forge_connections(submission, &missing)?;
-    for (key, forge) in selected {
-        let host = instance_hostname(base_url(&forge)?.as_str())?;
-        let environment = capture_token_environment(available)?;
-        let Some(token) = environment_token(forge.provider.as_str(), &host, &environment)? else {
-            continue;
-        };
-        connections.insert(key, native_values(&forge, token)?);
-    }
-    Ok(())
-}
-
-fn capture_token_environment<F>(available: &F) -> Result<BTreeMap<String, String>, NativeV2CliError>
-where
-    F: Fn(&str) -> Option<std::ffi::OsString>,
-{
-    let mut environment = BTreeMap::new();
-    for name in [
-        "GH_TOKEN",
-        "GITHUB_TOKEN",
-        "GH_ENTERPRISE_TOKEN",
-        "GITHUB_ENTERPRISE_TOKEN",
-        "GITLAB_TOKEN",
-        "GITLAB_ACCESS_TOKEN",
-        "OAUTH_TOKEN",
-    ] {
-        if let Some(value) = available(name) {
-            let value = value
-                .into_string()
-                .map_err(|_| local_message("forge credential must be UTF-8"))?;
-            environment.insert(name.to_owned(), value);
-        }
-    }
-    Ok(environment)
-}
-
 pub(super) async fn fill_missing(
     submission: &RunSubmission,
     connections: &mut RunConnectionValues,

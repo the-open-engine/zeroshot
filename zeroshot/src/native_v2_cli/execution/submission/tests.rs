@@ -722,8 +722,7 @@ fn template_binding_insertion_owns_comment_and_git_delivery_nodes() {
     );
 }
 
-#[test]
-fn named_source_less_comments_materialize_the_destination_connection() {
+fn named_comment_request(url: &str) -> (RunCommand, PreparedRunRequest) {
     let graph = BuiltinGraphTemplate::IssueReview
         .materialize(TemplateDelivery::Comment)
         .assert_value();
@@ -748,13 +747,13 @@ fn named_source_less_comments_materialize_the_destination_connection() {
     .assert_value() else {
         panic!("run command")
     };
-    let mut request = PreparedRunRequest {
+    let request = PreparedRunRequest {
         run_id: openengine_cluster_protocol::RunId::new("source-less-comment"),
         intent: TargetRunIntent {
             title: run.title.clone(),
             graph,
             initial_input: serde_json::json!({
-                "url":"https://ghe.example.test/team/project/issues/17",
+                "url":url,
                 "context":{"title":"Issue","body":"Review this","reviewScope":{}}
             }),
             runtime,
@@ -770,22 +769,115 @@ fn named_source_less_comments_materialize_the_destination_connection() {
         source: None,
         profile: None,
     };
+    (*run, request)
+}
+
+const NAMED_COMMENT_CASES: [(&str, &str, &str); 2] = [
+    (
+        "https://ghe.example.test/team/project/issues/17",
+        "github",
+        "GH_TOKEN",
+    ),
+    (
+        "https://gitlab.example.test/team/project/-/issues/17",
+        "gitlab",
+        "GITLAB_TOKEN",
+    ),
+];
+
+#[test]
+fn named_source_less_comments_materialize_the_canonical_connection_used_by_resume() {
+    for (url, key, field) in NAMED_COMMENT_CASES {
+        let (run, mut request) = named_comment_request(url);
+        let queried = std::cell::RefCell::new(Vec::new());
+        let available = |name: &str| {
+            queried.borrow_mut().push(name.to_owned());
+            Some(OsString::from(if name == field {
+                "canonical-token"
+            } else {
+                "unused-alias"
+            }))
+        };
+        materialize_named_delivery_access(&run, &mut request, &available).assert_value();
+        assert_eq!(queried.borrow().as_slice(), &[field]);
+        let key = ConnectionKey::new(key).assert_value();
+        let field = EnvironmentVariableName::new(field).assert_value();
+        let required = request.intent.runtime.connection_requirements();
+        assert_eq!(
+            required[&key],
+            std::collections::BTreeSet::from([field.clone()])
+        );
+        assert_eq!(
+            request.connections[&key].as_map()[&field],
+            "canonical-token"
+        );
+        let resumed = select_connection_requirements(
+            required
+                .into_iter()
+                .map(|(key, fields)| (key, fields.into_iter().collect()))
+                .collect(),
+            &available,
+        )
+        .assert_value();
+        assert_eq!(resumed, request.connections);
+        assert!(request.source.is_none());
+    }
+}
+
+#[test]
+fn named_delivery_does_not_upload_local_cli_token_aliases() {
+    for (url, _, field) in NAMED_COMMENT_CASES {
+        let (run, mut request) = named_comment_request(url);
+        let queried = std::cell::RefCell::new(Vec::new());
+        materialize_named_delivery_access(&run, &mut request, &|name: &str| {
+            queried.borrow_mut().push(name.to_owned());
+            [
+                "GH_ENTERPRISE_TOKEN",
+                "GITHUB_ENTERPRISE_TOKEN",
+                "GITLAB_ACCESS_TOKEN",
+                "OAUTH_TOKEN",
+            ]
+            .contains(&name)
+            .then(|| OsString::from("local-only-token"))
+        })
+        .assert_value();
+        assert_eq!(queried.borrow().as_slice(), &[field]);
+        assert!(request.connections.is_empty());
+    }
+}
+
+#[test]
+fn named_delivery_preserves_explicit_values_and_does_not_repair_partial_connections() {
+    let (run, mut request) = named_comment_request(NAMED_COMMENT_CASES[0].0);
+    let key = ConnectionKey::new("company-ghe").assert_value();
+    let binding = request
+        .intent
+        .runtime
+        .nodes_mut()
+        .values_mut()
+        .find(|binding| matches!(binding, NodeRuntimeBinding::CommentDelivery { .. }))
+        .assert_value();
+    *binding = serde_json::from_value(serde_json::json!({
+        "kind":"comment_delivery","connections":{key.as_str():["GH_TOKEN","OTHER"]}
+    }))
+    .assert_value();
+    let provided = StaticConnectionValues::new(BTreeMap::from([(
+        EnvironmentVariableName::new("GH_TOKEN").assert_value(),
+        "explicit-token".to_owned(),
+    )]))
+    .assert_value();
+    request.connections.insert(key.clone(), provided.clone());
     materialize_named_delivery_access(&run, &mut request, &|name| {
-        (name == "GH_ENTERPRISE_TOKEN").then(|| OsString::from("enterprise-inline-token"))
+        panic!("explicit connection unexpectedly read {name}")
     })
     .assert_value();
-    let key = ConnectionKey::new("github").assert_value();
-    let required = request.intent.runtime.connection_requirements();
-    assert_eq!(
-        required[&key],
-        std::collections::BTreeSet::from(
-            [EnvironmentVariableName::new("GH_TOKEN").assert_value(),]
+    assert_eq!(request.connections[&key], provided);
+    let submission = crate::native_v2_local::local_submission(&request.intent, None);
+    assert!(
+        crate::native_v2_supervisor::RunEnvironment::exact_for_submission(
+            &submission,
+            request.connections,
         )
+        .is_err()
     );
-    assert_eq!(
-        request.connections[&key].as_map()
-            [&EnvironmentVariableName::new("GH_TOKEN").assert_value()],
-        "enterprise-inline-token",
-    );
-    assert!(request.source.is_none());
 }

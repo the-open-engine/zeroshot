@@ -76,6 +76,8 @@ The source connection supplies `GIT_USERNAME` / `GIT_PASSWORD` for HTTPS, or
 ```
 
 Default API connections are `github.GH_TOKEN` and `gitlab.GITLAB_TOKEN`; explicit bindings keep their names.
+Named targets read the declared field names for both submission and resume. Native CLI aliases such
+as `GH_ENTERPRISE_TOKEN` and `GITLAB_ACCESS_TOKEN` apply only to local runs.
 One static connection can hold both transport and API fields; inline run values work too. GitHub uses
 `GH_TOKEN`. An API field alone does not authorize a private clone or push. Agents receive only the
 connection fields their own bindings declare.

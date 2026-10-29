@@ -31,23 +31,35 @@ pub(crate) fn checkout_references(
     if scope.as_object().is_some_and(serde_json::Map::is_empty) {
         return Ok(Vec::new());
     }
-    // Checkout preparation belongs to the existing GitHub.com review resolver. Generic
-    // conversation publishers verify their captured scope through the selected forge API.
+    // Every source-bearing scoped review must inspect the captured head before agents run.
     let Some(source) = admitted.source.as_ref() else {
         return Ok(Vec::new());
     };
+    let scope = source_scope(scope, source)?;
+    // Only the existing GitHub.com resolver prepares provider-specific comparison refs.
+    // Other publishers still verify the captured scope through their forge API.
     let destination = &input.destination;
     if !github_com_review(destination, source) {
         return Ok(Vec::new());
     }
-    let scope: CheckoutScope =
-        serde_json::from_value(scope).map_err(|_| ReviewResolveError::Identity)?;
     let target = parse_review_url(&input.url)?;
     validate_scope(&scope, source, &target)?;
     Ok(vec![
         format!("refs/pull/{}/head", target.number),
         scope.base_revision.as_str().to_owned(),
     ])
+}
+
+fn source_scope(
+    value: serde_json::Value,
+    source: &ResolvedSource,
+) -> Result<CheckoutScope, ReviewResolveError> {
+    let scope: CheckoutScope =
+        serde_json::from_value(value).map_err(|_| ReviewResolveError::Identity)?;
+    if scope.head_revision != source.revision {
+        return Err(ReviewResolveError::Identity);
+    }
+    Ok(scope)
 }
 
 fn github_com_review(
@@ -185,7 +197,6 @@ fn validate_scope(
             .base_repository
             .eq_ignore_ascii_case(source.repository.as_str())
         || scope.base_branch != source.branch
-        || scope.head_revision != source.revision
     {
         return Err(ReviewResolveError::Identity);
     }

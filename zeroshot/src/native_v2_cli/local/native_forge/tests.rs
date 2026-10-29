@@ -126,7 +126,10 @@ async fn two_native_logins_are_ambiguous_instead_of_guessing_a_provider() {
     let root = tempfile::tempdir().assert_value();
     for (program, response) in [
         ("gh", "printf 'github-token\\n'"),
-        ("glab", "printf 'password=gitlab-token\\n\\n'"),
+        (
+            "glab",
+            "/bin/cat >/dev/null; printf 'password=gitlab-token\\n\\n'",
+        ),
     ] {
         openengine_cluster_testkit::fixture::write_executable(
             &root.path().join(program),
@@ -146,7 +149,7 @@ async fn two_native_logins_are_ambiguous_instead_of_guessing_a_provider() {
     )
     .await
     .assert_error();
-    assert!(error.to_string().contains("both gh and glab"));
+    assert!(error.to_string().contains("both gh and glab"), "{error}");
 }
 
 fn comment_submission(host: &str, fields: &[&str]) -> RunSubmission {
@@ -165,6 +168,27 @@ fn comment_submission(host: &str, fields: &[&str]) -> RunSubmission {
         "submissionKey":"native-comment"
     }))
     .assert_value()
+}
+
+async fn native_connections(
+    submission: &RunSubmission,
+    store: &LocalConnectionStore,
+    directory: &Path,
+    environment: &BTreeMap<String, String>,
+) -> RunConnectionValues {
+    let mut supplied = RunConnectionValues::new();
+    fill_missing(
+        submission,
+        &mut supplied,
+        store,
+        NativeContext {
+            environment,
+            directory,
+        },
+    )
+    .await
+    .assert_value();
+    supplied
 }
 
 fn values(token: &str) -> StaticConnectionValues {
@@ -254,18 +278,7 @@ async fn source_less_comments_and_resumes_read_fresh_credentials_for_the_destina
             0o700,
         )
         .assert_value();
-        let mut supplied = RunConnectionValues::new();
-        fill_missing(
-            &submission,
-            &mut supplied,
-            &store,
-            NativeContext {
-                environment: &environment,
-                directory: root.path(),
-            },
-        )
-        .await
-        .assert_value();
+        let supplied = native_connections(&submission, &store, root.path(), &environment).await;
         assert_eq!(
             supplied[&ConnectionKey::new("work-ghe").assert_value()],
             values(token)
@@ -273,10 +286,11 @@ async fn source_less_comments_and_resumes_read_fresh_credentials_for_the_destina
     }
 }
 
-#[test]
-fn named_delivery_captures_enterprise_environment_without_a_public_github_token() {
+#[tokio::test]
+async fn local_delivery_captures_enterprise_alias_without_using_the_public_token() {
+    let root = tempfile::tempdir().assert_value();
+    let store = LocalConnectionStore::new(root.path().join("state"));
     let submission = comment_submission("ghe.example.test", &["GH_TOKEN"]);
-    let mut supplied = RunConnectionValues::new();
     let environment = BTreeMap::from([
         ("GH_TOKEN".to_owned(), "public-token".to_owned()),
         (
@@ -284,10 +298,7 @@ fn named_delivery_captures_enterprise_environment_without_a_public_github_token(
             "enterprise-token".to_owned(),
         ),
     ]);
-    capture_environment(&submission, &mut supplied, &|name| {
-        environment.get(name).map(std::ffi::OsString::from)
-    })
-    .assert_value();
+    let supplied = native_connections(&submission, &store, root.path(), &environment).await;
     assert_eq!(
         supplied[&ConnectionKey::new("work-ghe").assert_value()],
         values("enterprise-token"),
