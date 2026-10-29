@@ -128,6 +128,7 @@ async fn native_gitlab_lookup_uses_the_git_credential_protocol() {
 IFS= read -r protocol
 IFS= read -r host
 [ "$protocol" = protocol=https ] && [ "$host" = host=git.example.test ] || exit 4
+/bin/cat >/dev/null || exit 8
 printf 'username=oauth2\npassword=private-gitlab-token\n\n'
 "#,
         0o700,
@@ -428,7 +429,15 @@ async fn native_helpers_forward_the_captured_absolute_config_directories() {
     std::fs::create_dir(&workspace).assert_value();
     for (program, response) in [
         ("gh", "printf 'native-config-token\\n'"),
-        ("glab", "printf 'password=native-config-token\\n\\n'"),
+        (
+            "glab",
+            r#"[ "$*" = 'auth git-credential get' ] || exit 5
+IFS= read -r protocol
+IFS= read -r host
+[ "$protocol" = protocol=https ] && [ "$host" = host=forge.example.test ] || exit 6
+/bin/cat >/dev/null || exit 7
+printf 'password=native-config-token\n\n'"#,
+        ),
     ] {
         let script = format!(
             r#"#!/bin/sh
@@ -493,6 +502,7 @@ async fn auto_identified_gitlab_uses_its_own_default_native_host() {
 IFS= read -r protocol
 IFS= read -r host
 [ "$protocol" = protocol=https ] && [ "$host" = host=gitlab.com ] || exit 2
+/bin/cat >/dev/null || exit 8
 printf 'password=gitlab-native-token\n\n'
 "#,
         0o700,
