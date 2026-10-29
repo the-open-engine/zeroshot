@@ -133,7 +133,7 @@ impl LocalHarnessEnvironment {
     }
 
     #[cfg(test)]
-    fn for_windows(values: BTreeMap<String, String>) -> Self {
+    pub(crate) fn for_windows(values: BTreeMap<String, String>) -> Self {
         Self::for_platform(values, true)
     }
 

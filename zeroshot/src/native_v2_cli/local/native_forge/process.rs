@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use tokio::process::Command;
 
+use crate::native_v2_capsule::provider_process::LocalHarnessEnvironment;
+
 use super::{NativeContext, NativeV2CliError, GITHUB, GITLAB, local_message};
 
 const NATIVE_CONTEXT_FIELDS: &[&str] = &[
@@ -36,6 +38,15 @@ pub(super) fn environment_token(
     provider: &str,
     hostname: &str,
     environment: &BTreeMap<String, String>,
+) -> Result<Option<String>, NativeV2CliError> {
+    let snapshot = LocalHarnessEnvironment::new(environment.clone());
+    environment_token_from_snapshot(provider, hostname, &snapshot)
+}
+
+fn environment_token_from_snapshot(
+    provider: &str,
+    hostname: &str,
+    environment: &LocalHarnessEnvironment,
 ) -> Result<Option<String>, NativeV2CliError> {
     let (selector, default_host, names): (&str, &str, &[&str]) = match provider {
         GITHUB if hostname == "github.com" || hostname.ends_with(".ghe.com") => {
