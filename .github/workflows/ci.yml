@@ -214,6 +214,11 @@ jobs:
           cargo check --locked --package zeroshot --lib --features workspace
           cargo clippy --package zeroshot --all-targets --features ui -- -D warnings
 
+      - name: Check privileged tests are named root_
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python3 .github/scripts/check_privilege_gates.py
+
       - name: Exercise Windows checkpoint storage before the full suite
         if: runner.os == 'Windows'
         shell: bash

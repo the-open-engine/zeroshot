@@ -379,7 +379,7 @@ fn production_ledger_rejects_symlinks_and_foreign_owners() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn hosted_worker_cannot_read_the_ledger_or_another_candidate() {
+fn root_hosted_worker_cannot_read_the_ledger_or_another_candidate() {
     use crate::execution::process::{HostedProcessPool, HostedProcessScope};
     use crate::native_v2_capsule::{CapsuleFilesystemSpec, prepare_capsule_filesystem};
 
