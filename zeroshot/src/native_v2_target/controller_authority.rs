@@ -608,6 +608,17 @@ fn require_runtime_capabilities(
     if runtime.nodes().values().any(|binding| {
         matches!(
             binding,
+            openengine_cluster_protocol::NodeRuntimeBinding::Decision { .. }
+        )
+    }) && !controller.decision_models
+    {
+        return Err(authority_error(
+            "target does not support decision models (openengine.decision-models/v1)",
+        ));
+    }
+    if runtime.nodes().values().any(|binding| {
+        matches!(
+            binding,
             openengine_cluster_protocol::NodeRuntimeBinding::CommentDelivery { .. }
         )
     }) && !controller.comment_delivery

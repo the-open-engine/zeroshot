@@ -37,6 +37,8 @@ use crate::native_v2_runner::{
     ResolvedEnvironment, SessionFactory,
 };
 
+pub(crate) mod decision;
+
 #[cfg(test)]
 #[path = "native_v2_candidate/tests.rs"]
 mod tests;
@@ -396,6 +398,13 @@ fn assemble_runner(
         agents,
         delivery: deliveries.git,
         comment_delivery: deliveries.comment,
+        decisions: admitted
+            .runtime
+            .nodes()
+            .values()
+            .any(|binding| matches!(binding, NodeRuntimeBinding::Decision { .. }))
+            .then(crate::native_v2_candidate::decision::DecisionAdapter::new)
+            .transpose()?,
     });
     Ok(match placement.session_boundary() {
         SessionBoundary::Run => NativeNodeRunner::new(admitted, routes.clone(), routes)?,
@@ -432,6 +441,7 @@ impl CandidateAgents {
 /// Routes only by the admitted closed binding: agent nodes use their effective lane's adapter,
 /// never another lane's, and the graph-visible delivery verifier uses trusted Git delivery.
 struct CandidateNodeLane {
+    decisions: Option<crate::native_v2_candidate::decision::DecisionAdapter>,
     default_lane: RuntimeLane,
     agents: BTreeMap<RuntimeLane, CandidateAgents>,
     delivery: Option<Arc<NativeV2DeliveryAdapter>>,
@@ -448,10 +458,32 @@ impl CandidateNodeLane {
                 .agents
                 .get(&lane.unwrap_or(self.default_lane))
                 .ok_or(NodeRunnerError::Driver),
-            NodeRuntimeBinding::GitDelivery { .. } | NodeRuntimeBinding::CommentDelivery { .. } => {
-                Err(NodeRunnerError::Driver)
+            NodeRuntimeBinding::Decision { .. }
+            | NodeRuntimeBinding::GitDelivery { .. }
+            | NodeRuntimeBinding::CommentDelivery { .. } => Err(NodeRunnerError::Driver),
+        }
+    }
+}
+
+impl CandidateNodeLane {
+    async fn run_agent(
+        &self,
+        invocation: DriverInvocation,
+        control: DriverControl,
+    ) -> Result<openengine_cluster_protocol::WorkerOutcome, NodeRunnerError> {
+        let agents = self.agents_for(&invocation.node.binding)?;
+        let result = agents.driver.run(invocation, control).await;
+        if result.is_err()
+            || matches!(
+                result,
+                Ok(openengine_cluster_protocol::WorkerOutcome::Error { .. })
+            )
+        {
+            if let Some(memory) = &agents.memory {
+                memory.execution_failed();
             }
         }
+        result
     }
 }
 
@@ -466,6 +498,13 @@ impl SessionFactory for CandidateNodeLane {
             NodeRuntimeBinding::Agent { .. } => {
                 self.agents_for(&invocation.binding)?
                     .sessions
+                    .open(invocation, environment)
+                    .await
+            }
+            NodeRuntimeBinding::Decision { .. } => {
+                self.decisions
+                    .as_ref()
+                    .ok_or(NodeRunnerError::Driver)?
                     .open(invocation, environment)
                     .await
             }
@@ -495,20 +534,13 @@ impl NodeDriver for CandidateNodeLane {
         control: DriverControl,
     ) -> Result<openengine_cluster_protocol::WorkerOutcome, NodeRunnerError> {
         match &invocation.node.binding {
-            NodeRuntimeBinding::Agent { .. } => {
-                let agents = self.agents_for(&invocation.node.binding)?;
-                let result = agents.driver.run(invocation, control).await;
-                if result.is_err()
-                    || matches!(
-                        result,
-                        Ok(openengine_cluster_protocol::WorkerOutcome::Error { .. })
-                    )
-                {
-                    if let Some(memory) = &agents.memory {
-                        memory.execution_failed();
-                    }
-                }
-                result
+            NodeRuntimeBinding::Agent { .. } => self.run_agent(invocation, control).await,
+            NodeRuntimeBinding::Decision { .. } => {
+                self.decisions
+                    .as_ref()
+                    .ok_or(NodeRunnerError::Driver)?
+                    .run(invocation, control)
+                    .await
             }
             NodeRuntimeBinding::CommentDelivery { .. } => {
                 self.comment_delivery

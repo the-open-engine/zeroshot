@@ -463,8 +463,9 @@ impl NativeV2TargetServer {
     }
 
     fn discovery_document(&self) -> TargetDiscoveryDocument {
-        let mut document =
-            TargetDiscoveryDocument::direct(self.access.authentication()).with_node_runtime_lanes();
+        let mut document = TargetDiscoveryDocument::direct(self.access.authentication())
+            .with_node_runtime_lanes()
+            .with_decision_models();
         if self.target.supports_git_transport() {
             document = document.with_git_transport();
         }

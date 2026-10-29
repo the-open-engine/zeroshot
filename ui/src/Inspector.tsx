@@ -1,3 +1,4 @@
+import { DecisionControls } from './DecisionControls';
 import { useEffect, useRef, useState } from 'react';
 import { Field } from './Field';
 import { InspectorPanel } from './InspectorPanel';
@@ -368,6 +369,9 @@ function ActivitySettings({
               placeholder="What should this agent do?"
             />
           </Field>
+          {binding?.kind === 'decision' && (
+            <DecisionControls node={node.name} binding={binding} onChange={bindingChange} />
+          )}
           {binding?.kind === 'agent' && (
             <>
               <ModelPicker

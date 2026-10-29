@@ -200,3 +200,65 @@ test('unknown delivery identities stay unavailable until explicitly replaced', (
   assert.equal(workerOption(node, { kind: 'git_delivery' }, workers), undefined);
   assert.throws(() => applyWorker(doc, 'done', merge, workers), /Select an Agent or Verifier/);
 });
+
+test('decision selection installs a verifier contract and remains distinct from agent models', () => {
+  const decision: WorkerOption = {
+    id: 'decision',
+    label: 'Decision model',
+    runtimeKind: 'decision',
+    workerRefs: [],
+    node: {
+      kind: 'verifier',
+      name: 'decide',
+      worker: 'decision.classify@1',
+      attempts: 1,
+      instructions: 'Classify the task.',
+      input: { kind: 'record', fields: {} },
+      inputBindings: [],
+      writeBindings: [],
+      output: {
+        kind: 'record',
+        fields: {
+          choice: { type: { kind: 'enum', values: ['simple', 'complex'] }, required: true },
+          probabilities: {
+            type: {
+              kind: 'record',
+              fields: {
+                simple: { type: { kind: 'number' }, required: true },
+                complex: { type: { kind: 'number' }, required: true },
+              },
+            },
+            required: true,
+          },
+          model: { type: { kind: 'string' }, required: true },
+        },
+      },
+      diagnostic: {
+        kind: 'record',
+        fields: { message: { type: { kind: 'string' }, required: true } },
+      },
+      signals: { route: ['simple', 'complex', 'uncertain'] },
+    },
+    runtimeBinding: {
+      kind: 'decision',
+      api: 'systemone',
+      model: '',
+      minProbability: 0.85,
+      uncertainLabel: 'uncertain',
+      connections: { decisions: ['DECISION_ENDPOINT', 'DECISION_API_KEY'] },
+    },
+  };
+  const original = document();
+  const result = applyWorker(original, 'custom_worker', decision, [agent, decision]);
+  const node = findNode(result.graph.root, 'custom_worker')!;
+  assert.equal(node.kind, 'verifier');
+  assert.equal(node.instructions, 'Classify the task.');
+  assert.deepEqual(node.inputBindings, []);
+  assert.equal(result.runtime.nodes.custom_worker.kind, 'decision');
+  assert.equal(
+    workerOption(node, result.runtime.nodes.custom_worker, [agent, decision])?.id,
+    'decision'
+  );
+  assert.equal(original.runtime.nodes.custom_worker.kind, 'agent');
+  assert.equal(applyWorker(result, 'custom_worker', decision, [agent, decision]), result);
+});

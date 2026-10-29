@@ -135,7 +135,32 @@ pub(super) fn workers() -> Result<Vec<Value>, ApiError> {
         "workerRefs":[crate::native_v2_comment_delivery::COMMENT_DELIVERY_WORKER_REF],
         "node":named_node(&graph,name.as_str())?, "runtimeBinding":binding,
     }));
+    result.push(decision_worker()?);
     Ok(result)
+}
+
+fn decision_worker() -> Result<Value, ApiError> {
+    use openengine_cluster_protocol::{EnumLabel, NonEmptyEnumSet};
+    use crate::native_v2_candidate::decision::contract;
+    let options = NonEmptyEnumSet::new(
+        ["simple", "complex"]
+            .into_iter()
+            .map(EnumLabel::new)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(internal)?,
+    )
+    .map_err(internal)?;
+    Ok(json!({
+        "id":"decision", "label":"Decision model", "runtimeKind":"decision", "workerRefs":[],
+        "runtimeBinding": {"kind":"decision", "api":"systemone", "model":"", "minProbability":0.85,
+            "uncertainLabel":"uncertain", "connections":{"decisions":["DECISION_ENDPOINT","DECISION_API_KEY"]}},
+        "node": {"kind":"verifier", "name":"decision", "worker":"decision.classify@1",
+            "instructions":"Classify this task. simple means an isolated edit with clear instructions; complex means work that needs investigation or architectural decisions.",
+            "input":{"kind":"record","fields":{}}, "inputBindings":[], "writeBindings":[], "attempts":1,
+            "output":contract::output_schema(&options).map_err(internal)?,
+            "diagnostic":contract::diagnostic_schema().map_err(internal)?,
+            "signals":{"route":["simple","complex","uncertain"]}},
+    }))
 }
 
 fn materialize(

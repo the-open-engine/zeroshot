@@ -457,6 +457,14 @@ pub struct TargetWorkspaceRecoveryDiscovery {
     pub kind: String,
 }
 
+pub const DECISION_MODELS_KIND: &str = "openengine.decision-models/v1";
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetDecisionModelsDiscovery {
+    pub kind: String,
+}
+
 pub const NODE_RUNTIME_LANES_KIND: &str = "openengine.node-runtime-lanes/v1";
 
 /// Frozen at `{"kind": ...}` so older clients parse it; new data needs a new extension key.
@@ -516,6 +524,8 @@ pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub node_runtime_lanes: Option<TargetNodeRuntimeLanesDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_models: Option<TargetDecisionModelsDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub git_transport: Option<TargetGitTransportDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comment_delivery: Option<TargetCommentDeliveryDiscovery>,
@@ -560,6 +570,7 @@ impl TargetDiscoveryExtensions {
             && self.workspace_checkpoints.is_none()
             && self.hosted_workspace_recovery.is_none()
             && self.node_runtime_lanes.is_none()
+            && self.decision_models.is_none()
             && self.git_transport.is_none()
             && self.comment_delivery.is_none()
             && self.task_resolution.is_none()
@@ -567,6 +578,15 @@ impl TargetDiscoveryExtensions {
 }
 
 impl TargetDiscoveryDocument {
+    /// Advertises the System One choice binding on native verifier nodes.
+    #[must_use]
+    pub fn with_decision_models(mut self) -> Self {
+        self.extensions.decision_models = Some(TargetDecisionModelsDiscovery {
+            kind: DECISION_MODELS_KIND.to_owned(),
+        });
+        self
+    }
+
     #[must_use]
     pub fn with_comment_delivery(mut self) -> Self {
         self.extensions.comment_delivery = Some(TargetCommentDeliveryDiscovery {

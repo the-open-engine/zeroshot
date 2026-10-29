@@ -213,3 +213,27 @@ fn static_connection_debug_redacts_values_and_validates_shape() {
     assert!(!debug.contains("secret-value"));
     assert!(StaticConnectionValues::new(BTreeMap::new()).is_err());
 }
+
+#[test]
+fn decision_capability_has_its_own_strict_marker_and_preserves_unknown_extensions() {
+    let value = serde_json::to_value(
+        TargetDiscoveryDocument::direct(TargetAuthentication::None).with_decision_models(),
+    )
+    .unwrap();
+    assert_eq!(
+        value["extensions"]["decision_models"],
+        serde_json::json!({"kind":DECISION_MODELS_KIND})
+    );
+    let mut changed = value.clone();
+    changed["extensions"]["future_extension"] = serde_json::json!({"unrecognized":true});
+    assert!(serde_json::from_value::<TargetDiscoveryDocument>(changed).is_ok());
+    let mut changed = value;
+    changed["extensions"]["decision_models"]["unexpected"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<TargetDiscoveryDocument>(changed).is_err());
+    assert!(
+        !TargetDiscoveryDocument::direct(TargetAuthentication::None)
+            .with_decision_models()
+            .extensions
+            .is_empty()
+    );
+}

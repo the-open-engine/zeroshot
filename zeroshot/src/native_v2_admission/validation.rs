@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use openengine_cluster_protocol::{
     GraphNode, GraphProfile, GraphSpec, NodeInstructions, NodeName, VerifierContract,
-    WorkerContract, WorkerRef, MAX_DECLARED_ENVIRONMENT_NAMES, RUNTIME_WORKER_ERRORS,
+    WorkerContract, WorkerRef, PayloadType, MAX_DECLARED_ENVIRONMENT_NAMES, RUNTIME_WORKER_ERRORS,
 };
 
 use super::{DeliveryPolicy, NativeV2AdmissionError, RuntimePlan, MAX_AGENT_VERIFIER_ATTEMPTS};
@@ -189,6 +189,9 @@ fn validate_binding_kinds(
                 detail: error.to_string(),
             }
         })?;
+        if let NodeRuntimeBinding::Decision { .. } = binding {
+            validate_decision_declaration(declaration, binding)?;
+        }
         validate_binding_kind(declaration, binding)?;
         validate_instructions(declaration, binding)?;
     }
@@ -225,20 +228,18 @@ fn validate_binding_kind(
         });
     }
     match (is_git_delivery_worker(&declaration.worker), binding) {
-        (true, NodeRuntimeBinding::Agent { .. }) => {
-            Err(NativeV2AdmissionError::DeliveryWorkerRequiresBinding {
-                node: declaration.name.clone(),
-                worker: declaration.worker.clone(),
-            })
+        (true, NodeRuntimeBinding::GitDelivery { .. }) => {
+            validate_delivery_declaration(declaration, binding)
         }
+        (true, _) => Err(NativeV2AdmissionError::DeliveryWorkerRequiresBinding {
+            node: declaration.name.clone(),
+            worker: declaration.worker.clone(),
+        }),
         (false, NodeRuntimeBinding::GitDelivery { .. }) => {
             Err(NativeV2AdmissionError::UnsupportedDeliveryWorker {
                 node: declaration.name.clone(),
                 worker: declaration.worker.clone(),
             })
-        }
-        (true, NodeRuntimeBinding::GitDelivery { .. }) => {
-            validate_delivery_declaration(declaration, binding)
         }
         _ => Ok(()),
     }
@@ -249,7 +250,7 @@ fn validate_instructions(
     binding: &NodeRuntimeBinding,
 ) -> Result<(), NativeV2AdmissionError> {
     match (binding, &declaration.instructions) {
-        (NodeRuntimeBinding::Agent { .. }, None) => {
+        (NodeRuntimeBinding::Agent { .. } | NodeRuntimeBinding::Decision { .. }, None) => {
             Err(NativeV2AdmissionError::MissingAgentInstructions {
                 node: declaration.name.clone(),
             })
@@ -401,4 +402,36 @@ fn validate_comment_declaration(
             worker: declaration.worker.clone(),
         }
     })
+}
+
+fn validate_decision_declaration(
+    declaration: &ExecutableDeclaration,
+    binding: &NodeRuntimeBinding,
+) -> Result<(), NativeV2AdmissionError> {
+    let invalid = |detail: &str| NativeV2AdmissionError::InvalidRuntimeBinding {
+        node: declaration.name.clone(),
+        detail: detail.to_owned(),
+    };
+    let Some(verifier) = &declaration.contract.verifier else {
+        return Err(invalid("decision bindings require a verifier node"));
+    };
+    if declaration.attempts != 1 {
+        return Err(invalid("decision verifiers require attempts: 1"));
+    }
+    if !matches!(
+        declaration.contract.input,
+        PayloadType::Record { .. } | PayloadType::String | PayloadType::Array { .. }
+    ) {
+        return Err(invalid("decision state must be a string, record or array"));
+    }
+    crate::native_v2_candidate::decision::contract::validate_contract(
+        &NodeResponseContract::Verifier {
+            output: declaration.contract.output.clone(),
+            signals: verifier.signals.clone(),
+            diagnostic: verifier.diagnostic.clone(),
+        },
+        binding,
+    )
+    .map_err(|error| invalid(&error.to_string()))?;
+    Ok(())
 }

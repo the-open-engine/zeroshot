@@ -80,3 +80,24 @@ fn lane_free_plans_are_accepted_by_every_target() {
         require_node_runtime_lanes(&controller, &lane_free()).assert_value();
     }
 }
+
+#[test]
+fn decision_plans_require_their_exact_discovery_marker() {
+    let plan = runtime(
+        json!({"kind":"decision","api":"systemone","model":"opaque-model","minProbability":0.85,
+        "uncertainLabel":"uncertain","connections":{"decisions":["DECISION_ENDPOINT","DECISION_API_KEY"]}}),
+    );
+    let document =
+        TargetDiscoveryDocument::direct(TargetAuthentication::None).with_decision_models();
+    require_runtime_capabilities(&descriptor(document.clone()), &plan).assert_value();
+    assert!(require_runtime_capabilities(&without_marker(), &plan).is_err());
+    let mut changed = document;
+    changed
+        .extensions
+        .decision_models
+        .as_mut()
+        .assert_value()
+        .kind = "openengine.decision-models/v2".to_owned();
+    assert!(require_runtime_capabilities(&descriptor(changed), &plan).is_err());
+    require_runtime_capabilities(&without_marker(), &lane_free()).assert_value();
+}

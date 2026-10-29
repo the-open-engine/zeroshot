@@ -187,7 +187,7 @@ fn planned_verifier_role<'a>(
     NodeRunnerError,
 > {
     match binding {
-        NodeRuntimeBinding::Agent { .. } => Ok((
+        NodeRuntimeBinding::Agent { .. } | NodeRuntimeBinding::Decision { .. } => Ok((
             NodeRole::Verifier,
             Some(
                 verifier

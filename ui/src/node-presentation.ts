@@ -38,7 +38,11 @@ export function nodePresentation(document: Document, node: GraphNode, workers: W
   return {
     Icon:
       nodeIcons[delivery ? (comment ? 'comment_delivery' : 'git_delivery') : node.kind] ?? Layers,
-    label: delivery ? (comment ? 'Comment delivery' : 'Git delivery') : labels[node.kind],
+    label: delivery
+      ? comment
+        ? 'Comment delivery'
+        : 'Git delivery'
+      : activityLabel(node.kind, binding?.kind),
     delivery,
     detail: delivery ? deliveryDetail(worker, comment) : binding?.model,
   };
@@ -49,4 +53,8 @@ function deliveryDetail(worker: WorkerOption | undefined, comment: boolean): str
   if (worker?.id === 'git_delivery_pr') return 'Pull request';
   if (worker?.id === 'git_delivery_merge') return 'Merge';
   return 'Git delivery';
+}
+
+function activityLabel(nodeKind: string, bindingKind?: string): string {
+  return bindingKind === 'decision' ? 'Decision' : labels[nodeKind];
 }

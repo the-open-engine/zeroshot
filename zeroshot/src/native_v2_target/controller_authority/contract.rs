@@ -61,6 +61,7 @@ pub(super) struct ControllerDescriptor {
     pub(super) workspace_recovery: bool,
     pub(super) workspace_checkpoints: bool,
     pub(super) node_runtime_lanes: bool,
+    pub(super) decision_models: bool,
     pub(super) git_transport: bool,
     pub(super) comment_delivery: bool,
     pub(super) task_resolution: Option<Url>,
@@ -75,6 +76,11 @@ pub(super) fn build_controller_descriptor(
     let workspace_recovery = parse_workspace_recovery(&wire)?;
     let workspace_checkpoints = parse_workspace_checkpoints(&wire)?;
     let node_runtime_lanes = parse_node_runtime_lanes(&wire);
+    let decision_models = wire
+        .extensions
+        .decision_models
+        .as_ref()
+        .is_some_and(|marker| marker.kind == openengine_cluster_protocol::DECISION_MODELS_KIND);
     let git_transport = wire
         .extensions
         .git_transport
@@ -99,6 +105,7 @@ pub(super) fn build_controller_descriptor(
         workspace_recovery,
         workspace_checkpoints,
         node_runtime_lanes,
+        decision_models,
         git_transport,
         comment_delivery,
         task_resolution,

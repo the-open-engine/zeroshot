@@ -399,6 +399,7 @@ pub(crate) fn executable_runtime_roles(root: &GraphNode) -> Vec<(NodeName, bool)
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RuntimeRole {
     Agent,
+    Decision,
     GitDelivery,
     CommentDelivery,
 }
@@ -424,12 +425,10 @@ impl GraphBoundWorkerRegistry {
     ) -> Result<Self, NativeV2AdmissionError> {
         let mut resolved = BTreeMap::<WorkerRef, ResolvedDeclaration>::new();
         for declaration in declarations {
-            let role = match runtime.nodes().get(&declaration.name) {
-                Some(NodeRuntimeBinding::Agent { .. }) => RuntimeRole::Agent,
-                Some(NodeRuntimeBinding::GitDelivery { .. }) => RuntimeRole::GitDelivery,
-                Some(NodeRuntimeBinding::CommentDelivery { .. }) => RuntimeRole::CommentDelivery,
-                None => continue,
+            let Some(binding) = runtime.nodes().get(&declaration.name) else {
+                continue;
             };
+            let role = runtime_role(binding);
             if let Some(first) = resolved.get(&declaration.worker) {
                 if first.contract != declaration.contract || first.role != role {
                     return Err(NativeV2AdmissionError::InconsistentWorkerReuse {
@@ -507,3 +506,12 @@ impl WorkerRegistry for GraphBoundWorkerRegistry {
 #[cfg(test)]
 #[path = "native_v2_admission/tests.rs"]
 mod tests;
+
+fn runtime_role(binding: &NodeRuntimeBinding) -> RuntimeRole {
+    match binding {
+        NodeRuntimeBinding::Agent { .. } => RuntimeRole::Agent,
+        NodeRuntimeBinding::Decision { .. } => RuntimeRole::Decision,
+        NodeRuntimeBinding::GitDelivery { .. } => RuntimeRole::GitDelivery,
+        NodeRuntimeBinding::CommentDelivery { .. } => RuntimeRole::CommentDelivery,
+    }
+}

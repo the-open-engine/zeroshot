@@ -251,6 +251,15 @@ pub enum NodeRuntimeBinding {
         #[serde(default, skip_serializing_if = "DeclaredConnections::is_empty")]
         connections: DeclaredConnections,
     },
+    Decision {
+        api: super::DecisionApi,
+        model: super::ModelId,
+        #[serde(rename = "minProbability")]
+        min_probability: super::DecisionProbability,
+        #[serde(rename = "uncertainLabel")]
+        uncertain_label: crate::EnumLabel,
+        connections: DeclaredConnections,
+    },
     CommentDelivery {
         #[serde(default, skip_serializing_if = "DeclaredConnections::is_empty")]
         connections: DeclaredConnections,
@@ -276,6 +285,7 @@ impl NodeRuntimeBinding {
     pub const fn declared_connections(&self) -> &DeclaredConnections {
         match self {
             Self::Agent { connections, .. }
+            | Self::Decision { connections, .. }
             | Self::GitDelivery { connections, .. }
             | Self::CommentDelivery { connections } => connections,
         }
@@ -286,7 +296,7 @@ impl NodeRuntimeBinding {
     pub const fn context_window(&self) -> Option<u32> {
         match self {
             Self::Agent { context_window, .. } => *context_window,
-            Self::GitDelivery { .. } | Self::CommentDelivery { .. } => None,
+            Self::Decision { .. } | Self::GitDelivery { .. } | Self::CommentDelivery { .. } => None,
         }
     }
 
@@ -295,7 +305,7 @@ impl NodeRuntimeBinding {
     pub const fn max_tokens(&self) -> Option<u32> {
         match self {
             Self::Agent { max_tokens, .. } => *max_tokens,
-            Self::GitDelivery { .. } | Self::CommentDelivery { .. } => None,
+            Self::Decision { .. } | Self::GitDelivery { .. } | Self::CommentDelivery { .. } => None,
         }
     }
 

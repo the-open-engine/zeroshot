@@ -140,6 +140,20 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `maxTokens` on an agent binding; they are declarations rather than catalog knowledge, are written
   only to the Pi gateway model entry when supplied, and stay absent so the provider keeps its own
   defaults otherwise. Never infer either value from the model identifier.
+- A `decision` runtime binding runs one TypeSafe-compatible System One Choice request on an
+  existing verifier, without a harness, tools, host context, or Active Memory. The verifier's
+  instructions supply its question and its single signal supplies the options, excluding the
+  authored `uncertainLabel`. The complete node input is the state. The native adapter lives under
+  `native_v2_candidate::decision`; admission validates its derived choice/probabilities/model
+  output and message diagnostic. Exactly `DECISION_ENDPOINT` and `DECISION_API_KEY` come from
+  declared connections; neither enters agent environments or durable invocations. Endpoint paths
+  and model identifiers remain caller-owned. A tie or winning probability below `minProbability`
+  emits the uncertainty label while preserving the original answer. Invalid/incomplete answers
+  fail without synthesizing probabilities or signals. Each execution makes one bounded,
+  cancellable request with no redirects or hidden retries and records known or incomplete usage.
+  Authentication refusal, malformed responses, and timeouts retain their shared worker error outcomes.
+  Targets advertise `openengine.decision-models/v1` through a separate discovery extension;
+  clients require that exact marker before acquiring access tokens or sending decision plan bodies.
 - Full-v1 loops may declare `maxIterationsInput` as an integer path in the initial input.
   Reusable profiles verify the authored default `maxIterations`; native-v2 run admission binds a
   present positive safe integer from caller input and re-verifies the concrete graph. An absent

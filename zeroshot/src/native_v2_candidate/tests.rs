@@ -1010,6 +1010,7 @@ fn candidate_node_lane_routes_each_agent_binding_only_to_its_own_lane() {
     let codex_agent = Arc::as_ptr(&codex).cast::<()>();
     let claude_agent = Arc::as_ptr(&claude).cast::<()>();
     let routes = CandidateNodeLane {
+        decisions: None,
         comment_delivery: None,
         default_lane: CODEX_OPENAI,
         agents: BTreeMap::from([
@@ -1044,6 +1045,7 @@ fn candidate_node_lane_routes_each_agent_binding_only_to_its_own_lane() {
     );
 
     let claude_only = CandidateNodeLane {
+        decisions: None,
         comment_delivery: None,
         default_lane: CODEX_OPENAI,
         agents: BTreeMap::from([(CLAUDE_ANTHROPIC, CandidateAgents::new(claude))]),

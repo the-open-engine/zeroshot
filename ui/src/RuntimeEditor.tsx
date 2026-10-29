@@ -1,4 +1,5 @@
 import { isDeliveryKind } from './workers';
+import { DecisionControls } from './DecisionControls';
 import { useState } from 'react';
 import { allNodes, bindingFor, clone, executable, type Document, type Runtime } from './domain';
 import { Field } from './Field';
@@ -162,6 +163,17 @@ export function RuntimeEditor(p: {
             <small>
               {kind(n.name) === 'comment_delivery' ? 'Comment delivery' : 'Git delivery'}
             </small>
+          ) : kind(n.name) === 'decision' ? (
+            <DecisionControls
+              node={n.name}
+              binding={bindingFor(doc.runtime, n.name)!}
+              onChange={(key, value) => {
+                const next = clone(doc);
+                if (value === '') delete next.runtime.nodes[n.name][key];
+                else next.runtime.nodes[n.name][key] = value;
+                p.edit(next, `binding.${n.name}.${key}`);
+              }}
+            />
           ) : kind(n.name) === 'agent' ? (
             picker([n.name], `Model for ${n.name}`)
           ) : (

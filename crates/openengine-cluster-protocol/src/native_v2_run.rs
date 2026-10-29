@@ -40,6 +40,9 @@ impl fmt::Display for NativeV2RunValueError {
 
 impl std::error::Error for NativeV2RunValueError {}
 
+mod decision;
+pub use decision::*;
+
 mod environment;
 pub use environment::*;
 mod active_memory;

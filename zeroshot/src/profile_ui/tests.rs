@@ -399,6 +399,6 @@ async fn static_assets_and_bootstrap_are_native_and_self_contained() {
         .await
         .assert_value();
     assert_eq!(bootstrap["templates"].as_array().assert_value().len(), 10);
-    assert_eq!(bootstrap["workers"].as_array().assert_value().len(), 5);
+    assert_eq!(bootstrap["workers"].as_array().assert_value().len(), 6);
     assert!(bootstrap["runtimeSchema"]["$defs"].is_object());
 }

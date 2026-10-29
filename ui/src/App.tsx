@@ -453,7 +453,7 @@ function useProfileEffects(
   }, [dirty, modalDirty]);
   useEffect(() => {
     if (!doc) return;
-    numericDrafts.prune(doc.graph.root);
+    numericDrafts.prune(doc.graph.root, doc.runtime);
     if (!findNode(doc.graph.root, selected)) setSelected(doc.graph.root.name);
   }, [doc, selected, numericDrafts]);
 }

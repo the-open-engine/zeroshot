@@ -53,7 +53,7 @@ pub struct PreparedActiveMemory {
 impl PreparedActiveMemory {
     pub fn prepare(request: MemoryPreparation<'_>) -> Result<Option<Self>, ActiveMemoryError> {
         let config = request.admitted.runtime.active_memory();
-        let Some(storage) = request.storage.filter(|_| config.enabled()) else {
+        let Some(storage) = enabled_storage(&request) else {
             return Ok(None);
         };
         if config.budget_bytes == 0
@@ -124,6 +124,18 @@ impl PreparedActiveMemory {
             _hooks: Some(self.hooks),
         })
     }
+}
+
+fn enabled_storage<'a>(request: &MemoryPreparation<'a>) -> Option<&'a Path> {
+    request.storage.filter(|_| {
+        request.admitted.runtime.active_memory().enabled()
+            && request.admitted.runtime.nodes().values().any(|binding| {
+                matches!(
+                    binding,
+                    crate::native_v2_contract::NodeRuntimeBinding::Agent { .. }
+                )
+            })
+    })
 }
 
 struct MemoryNodeRunner {

@@ -893,3 +893,48 @@ async fn auxiliary_postmortem_output_and_tool_observations_are_not_discovery_evi
             .contains("active_memory_")
     }));
 }
+
+#[tokio::test]
+async fn postmortem_inherits_an_agent_verifier_after_a_decision_verifier() {
+    use openengine_cluster_protocol::{EnumLabel, NonEmptyEnumSet};
+    use crate::native_v2_candidate::decision::contract;
+    let options = NonEmptyEnumSet::new(
+        ["simple", "complex"]
+            .into_iter()
+            .map(|label| EnumLabel::new(label).unwrap())
+            .collect(),
+    )
+    .unwrap();
+    let decision = json!({
+        "kind":"verifier","name":"triage","worker":"triage@1","instructions":"Classify the task.",
+        "input":{"kind":"record","fields":{}},"output":contract::output_schema(&options).unwrap(),
+        "signals":{"route":["simple","complex","uncertain"]},"diagnostic":contract::diagnostic_schema().unwrap(),
+        "inputBindings":[],"writeBindings":[],"attempts":1
+    });
+    let reviewer = json!({
+        "kind":"verifier","name":"reviewer","worker":"reviewer@1","instructions":"Inspect the evidence.",
+        "input":{"kind":"null"},"output":{"kind":"null"},"signals":{},"diagnostic":{"kind":"null"},
+        "inputBindings":[],"writeBindings":[],"attempts":1
+    });
+    let graph = crate::native_v2_candidate::test_support::full_graph(vec![
+        decision,
+        reviewer,
+        crate::native_v2_candidate::test_support::success_node(),
+    ]);
+    let main: RunSubmission = serde_json::from_value(json!({
+        "title":"Mixed decisions and agents", "submissionKey":"decision-postmortem", "initialInput":null,"graph":graph,
+        "runtime":{"harness":"codex","provider":"openai","size":"small","nodes":{
+            "triage":{"kind":"decision","api":"systemone","model":"decision-model","minProbability":0.85,"uncertainLabel":"uncertain",
+                "connections":{"decisions":["DECISION_ENDPOINT","DECISION_API_KEY"]}},
+            "reviewer":{"kind":"agent","model":"postmortem-model"}
+        }}
+    })).unwrap();
+    let main = NativeV2Admission.admit(main).await.unwrap();
+    let postmortem = plan::build(&main).await.unwrap();
+    for binding in postmortem.runtime.nodes().values() {
+        let crate::native_v2_contract::NodeRuntimeBinding::Agent { model, .. } = binding else {
+            panic!("agent binding")
+        };
+        assert_eq!(model.as_str(), "postmortem-model");
+    }
+}

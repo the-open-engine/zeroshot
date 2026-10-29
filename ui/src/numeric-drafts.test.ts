@@ -125,3 +125,34 @@ test('reopening a numeric field renders the exact unfinished text after its comp
   assert.match(render('worker'), /aria-invalid="true"/);
   assert.equal(hasPendingEdits(), true);
 });
+
+test('decision probability drafts follow their runtime binding through edits and worker replacement', (t) => {
+  const drafts = createNumericDrafts();
+  t.after(() => drafts.clear());
+  const doc = document();
+  doc.graph.root.kind = 'verifier';
+  doc.runtime.nodes.worker = { kind: 'decision', model: 'caller/model', minProbability: 0.85 };
+  drafts.set({ node: 'worker', field: 'minProbability', text: '1e', base: 0.85 });
+  drafts.prune(doc.graph.root, doc.runtime);
+  assert.equal(drafts.get('worker', 'minProbability')?.text, '1e');
+  assert.equal(
+    drafts.commit('worker', 'minProbability', false, () =>
+      assert.fail('Invalid text must stay pending')
+    ),
+    false
+  );
+  doc.runtime.nodes.worker.model = 'other/model';
+  drafts.prune(doc.graph.root, doc.runtime);
+  assert.equal(hasPendingEdits(), true);
+  doc.runtime.nodes.worker.minProbability = 0.9;
+  drafts.prune(doc.graph.root, doc.runtime);
+  assert.equal(hasPendingEdits(), false, 'JSON replacement clears the old draft');
+  drafts.set({ node: 'worker', field: 'minProbability', text: '1e', base: 0.9 });
+  doc.runtime.nodes.worker = { kind: 'agent', model: 'caller/model' };
+  drafts.prune(doc.graph.root, doc.runtime);
+  assert.equal(
+    hasPendingEdits(),
+    false,
+    'Worker replacement removes an irrelevant probability draft'
+  );
+});

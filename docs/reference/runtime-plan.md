@@ -1,5 +1,5 @@
 ---
-description: "RuntimePlan selects execution settings and supplies bindings for graph nodes. It names models and connection fields without containing secrets."
+description: 'RuntimePlan selects execution settings and supplies bindings for graph nodes. It names models and connection fields without containing secrets.'
 ---
 
 # RuntimePlan
@@ -94,7 +94,7 @@ rather than a bypass argument.
 
 ## Node bindings
 
-`kind` selects an agent, Git delivery, or comment delivery binding. Fields belonging to another
+`kind` selects an agent, decision, Git delivery, or comment delivery binding. Fields belonging to another
 kind are rejected.
 
 ### `agent`
@@ -125,6 +125,77 @@ retains the provider's own limit; a present value must be a positive integer in 
 
 If a reused session is lost, Zeroshot fails that execution with `session_lost`. It does not open a
 replacement session silently.
+
+### `decision`
+
+A decision binding evaluates one categorical question on an existing `verifier`, using the
+TypeSafe System One request and response format. It makes a direct HTTP request, with no coding
+harness or tool access. Upstream nodes must supply the evidence through ordinary input bindings.
+
+```json
+{
+  "kind": "decision",
+  "api": "systemone",
+  "model": "jev-1.14.0",
+  "minProbability": 0.85,
+  "uncertainLabel": "uncertain",
+  "connections": {
+    "decisions": ["DECISION_ENDPOINT", "DECISION_API_KEY"]
+  }
+}
+```
+
+All these fields are required. `model` is an opaque, caller-owned identifier; `minProbability`
+is a finite number from 0 to 1, inclusive. The example threshold is illustrative: evaluate it
+against your chosen model and workload. A decision has no `lane`, `effort`, or `sessionScope`.
+
+The verifier must have instructions, `attempts: 1`, and exactly one signal. Its signal declares
+at least two options plus the uncertainty label. For example, `route` can declare
+`["simple", "complex", "uncertain"]`. Describe each option in the instructions. The adapter
+sends one Choice question named `route`, with the remaining signal labels as criteria and null
+descriptions. The complete bound input becomes `state` and must be a string, record, or array.
+
+The output must be a record with exactly these required fields:
+
+| Field           | Payload type                                                |
+| --------------- | ----------------------------------------------------------- |
+| `choice`        | Enum of the options, excluding the uncertainty label        |
+| `probabilities` | Record with one required `number` field for each option     |
+| `model`         | `string`, preserving the identifier returned by the service |
+
+The diagnostic must be a record with one required string field named `message`. The adapter
+checks the complete distribution, its sum, and its agreement with the chosen option. It emits
+the chosen label when its probability is at least `minProbability`; a tie or lower probability
+emits `uncertainLabel`. Output preserves the original choice and distribution in both cases.
+This threshold uses the winning probability, rather than the provider's separate confidence
+statistic. Use normal graph guards on the signal to select an already authored branch.
+A decision binding cannot supply the postmortem's agent model. Graphs with no agent bindings
+skip Active Memory setup; mixed graphs inherit a postmortem model from an agent binding.
+
+Declare exactly `DECISION_ENDPOINT` and `DECISION_API_KEY` through named connections. Local
+runs resolve these fields from the invoking environment; hosted runs use the target's connection
+resolver. Supply the full POST endpoint, including its path:
+
+| Service                        | Example `DECISION_ENDPOINT`                          |
+| ------------------------------ | ---------------------------------------------------- |
+| TypeSafe                       | `https://api.typesafe.ai/v1/systemone`               |
+| OpenRouter                     | `https://openrouter.ai/api/v1/systemone`             |
+| Vercel TypeSafe-compatible API | `https://ai-gateway.vercel.sh/typesafe/v1/systemone` |
+
+Use that service's bearer API key and model identifier. The adapter preserves the supplied path
+and accepts additional response metadata. Endpoints must be absolute HTTP(S) URLs without
+embedded credentials, a query, or a fragment. It follows no redirects. Requests and responses
+have a 4 MiB bound and each evaluation has a sixty-second ceiling, within any shorter authored
+node timeout. Cancellation interrupts HTTP work; a failed request does not silently retry or
+become an uncertainty signal. Known usage survives invalid answers; unavailable usage remains
+incomplete. Settled outcomes use ordinary run persistence and checkpoint replay.
+
+The profile editor's **Decision model** worker creates a verifier with this contract. Choose
+the model and probability threshold, then bind its evidence inputs and configure the named
+connection. Changing option labels also requires updating the output enum and probability
+fields to match. Targets must advertise `openengine.decision-models/v1` before the CLI submits
+or stores a decision-bearing profile. Other question types and provider-specific extensions
+are outside this binding's current contract.
 
 ### `git_delivery`
 

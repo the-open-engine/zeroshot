@@ -36,3 +36,18 @@ test('required numeric drafts preserve emptiness, fractional values, and unsafe 
     value: Number.MAX_SAFE_INTEGER,
   });
 });
+
+test('probability drafts accept inclusive endpoints and fractions, rejecting incomplete or invalid text', () => {
+  for (const text of ['', '1e', '-0.1', '1.1', 'Infinity', 'NaN', '0x1', ' 0.5 '])
+    assert.deepEqual(
+      numericValue({ text, badInput: false }, false, 'probability'),
+      { valid: false },
+      text
+    );
+  for (const text of ['0', '1', '.85', '1e-2'])
+    assert.deepEqual(
+      numericValue({ text, badInput: false }, false, 'probability'),
+      { valid: true, value: Number(text) },
+      text
+    );
+});
