@@ -596,6 +596,17 @@
         }
       ]
     },
+    "DecisionApi": {
+      "enum": [
+        "systemone"
+      ],
+      "type": "string"
+    },
+    "DecisionProbability": {
+      "maximum": 1,
+      "minimum": 0,
+      "type": "number"
+    },
     "DeclaredConnections": {
       "additionalProperties": {
         "$ref": "#/$defs/DeclaredEnvironment"
@@ -3596,6 +3607,44 @@
           "required": [
             "kind",
             "model"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "api": {
+              "$ref": "#/$defs/DecisionApi"
+            },
+            "connections": {
+              "$ref": "#/$defs/DeclaredConnections"
+            },
+            "kind": {
+              "const": "decision",
+              "type": "string"
+            },
+            "minProbability": {
+              "$ref": "#/$defs/DecisionProbability"
+            },
+            "model": {
+              "maxLength": 2048,
+              "minLength": 1,
+              "type": "string"
+            },
+            "uncertainLabel": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "api",
+            "model",
+            "minProbability",
+            "uncertainLabel",
+            "connections"
           ],
           "type": "object"
         },
