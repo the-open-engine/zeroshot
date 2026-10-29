@@ -29,12 +29,8 @@ fn delivery_choices_use_native_contracts_and_preserve_legacy_identities() {
             choice["node"]["signals"][DELIVERY_SIGNAL_FIELD],
             json!(delivery_signal_labels(mode).assert_value())
         );
-        let binding = if mode == DeliveryMode::Push {
-            json!({"kind":"git_delivery"})
-        } else {
-            json!({"kind":"git_delivery","connections":{"github":["GH_TOKEN"]}})
-        };
-        assert_eq!(choice["runtimeBinding"], binding);
+        // The selected instance supplies delivery connections at submission.
+        assert_eq!(choice["runtimeBinding"], json!({"kind":"git_delivery"}));
         assert_eq!(
             choice["node"]["input"]["fields"]["issueNumber"]["required"],
             false

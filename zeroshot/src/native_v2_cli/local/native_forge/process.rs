@@ -37,19 +37,60 @@ pub(super) fn environment_token(
     hostname: &str,
     environment: &BTreeMap<String, String>,
 ) -> Result<Option<String>, NativeV2CliError> {
-    let names: &[&str] = match provider {
+    let (selector, default_host, names): (&str, &str, &[&str]) = match provider {
         GITHUB if hostname == "github.com" || hostname.ends_with(".ghe.com") => {
-            &["GH_TOKEN", "GITHUB_TOKEN"]
+            ("GH_HOST", "github.com", &["GH_TOKEN", "GITHUB_TOKEN"])
         }
-        GITHUB => &["GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"],
-        GITLAB => &["GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN"],
+        GITHUB => (
+            "GH_HOST",
+            "github.com",
+            &["GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"],
+        ),
+        GITLAB => (
+            "GITLAB_HOST",
+            "gitlab.com",
+            &["GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN"],
+        ),
         _ => return Ok(None),
     };
+    let selected = environment
+        .get(selector)
+        .map_or(default_host, String::as_str);
+    if environment_hostname(selected).as_deref() != Some(hostname) {
+        return Ok(None);
+    }
     names
         .iter()
         .find_map(|name| environment.get(*name))
         .map(|value| checked_token(value).map(str::to_owned))
         .transpose()
+}
+
+// Caller input can choose a destination, but cannot choose the authority of an ambient token.
+fn environment_hostname(value: &str) -> Option<String> {
+    if value.bytes().any(|byte| byte.is_ascii_whitespace()) {
+        return None;
+    }
+    let address = if value.contains("://") {
+        value.to_owned()
+    } else {
+        format!("https://{value}")
+    };
+    let parsed = url::Url::parse(&address).ok()?;
+    if parsed.scheme() != "https"
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return None;
+    }
+    let host = parsed.host()?;
+    Some(
+        parsed
+            .port()
+            .map_or_else(|| host.to_string(), |port| format!("{host}:{port}")),
+    )
 }
 
 pub(super) async fn stored_token(

@@ -468,6 +468,140 @@ async fn wave8_cli_contract_validate_only_preflight_materializes_without_backend
     }
 }
 
+fn named_validation_command(
+    directory: &std::path::Path,
+    template: BuiltinGraphTemplate,
+    extra: &[&str],
+) -> RunCommand {
+    let input = directory.join("validation-input.json");
+    let runtime = directory.join("validation-runtime.json");
+    std::fs::write(&input, template_validation_input(template).to_string()).assert_value();
+    std::fs::write(
+        &runtime,
+        serde_json::json!({
+            "harness":"codex", "provider":"openai", "model":"validation-model",
+            "connections":{"openai":["OPENAI_API_KEY"]}
+        })
+        .to_string(),
+    )
+    .assert_value();
+    let mut args = [
+        "run",
+        "--title",
+        "Validate named delivery",
+        "--target",
+        "unconfigured-target",
+        "--template",
+        template.name(),
+        "--validate-only",
+    ]
+    .into_iter()
+    .map(OsString::from)
+    .collect::<Vec<_>>();
+    args.extend([
+        OsString::from("--cwd"),
+        directory.join("missing-workspace").into_os_string(),
+        OsString::from("--input"),
+        input.into_os_string(),
+        OsString::from("--uniform-runtime-config"),
+        runtime.into_os_string(),
+    ]);
+    args.extend(extra.iter().map(OsString::from));
+    let NativeV2CliCommand::Run(run) =
+        crate::native_v2_cli::parse_native_v2_args(args).assert_value()
+    else {
+        panic!("run command")
+    };
+    *run
+}
+
+fn template_validation_input(template: BuiltinGraphTemplate) -> serde_json::Value {
+    if !matches!(
+        template,
+        BuiltinGraphTemplate::IssueReview | BuiltinGraphTemplate::PrReview
+    ) {
+        return serde_json::json!({"task":"Validate without a source or credential"});
+    }
+    let mut input = serde_json::json!({
+        "url":"https://ghe.example.test/team/project/issues/17",
+        "context":{"title":"Proposal","body":"Review prepared context","reviewScope":{}}
+    });
+    if template == BuiltinGraphTemplate::PrReview {
+        input["url"] = serde_json::json!("https://ghe.example.test/team/project/pull/17");
+        input["context"]["reviewScope"] = serde_json::json!({
+            "baseRepository":"team/project","baseBranch":"main","baseRevision":"a".repeat(40),
+            "headRepository":"team/project","headBranch":"feature","headRevision":"b".repeat(40)
+        });
+        input["context"]["linkedIssues"] = serde_json::json!([]);
+    }
+    input
+}
+
+async fn assert_source_neutral_named_validation(run: RunCommand) {
+    let mut output = Vec::new();
+    let command = NativeV2CliCommand::Run(Box::new(run));
+    assert_eq!(
+        try_execute_native_v2_preflight_with_environment(&command, &mut output, |name| {
+            panic!("validate-only must not read credential field {name}")
+        })
+        .await
+        .assert_value(),
+        Some(CliOutcome::Completed)
+    );
+    assert_eq!(output, b"{\"valid\":true}\n");
+}
+
+#[tokio::test]
+async fn named_pr_and_ship_validate_only_ignore_explicit_source_and_credentials() {
+    let directory = tempfile::tempdir().assert_value();
+    for delivery in ["--pr", "--ship"] {
+        let revision = "a".repeat(40);
+        let run = named_validation_command(
+            directory.path(),
+            BuiltinGraphTemplate::SoftwareChange,
+            &[
+                delivery,
+                "--repository",
+                "https://ghe.example.test/team/project.git",
+                "--branch",
+                "main",
+                "--revision",
+                &revision,
+                "--source-provider",
+                "source.github",
+                "--source-base-url",
+                "https://ghe.example.test",
+            ],
+        );
+        assert_source_neutral_named_validation(run).await;
+    }
+}
+
+#[tokio::test]
+async fn named_validate_only_accepts_every_supported_template_without_a_source() {
+    let directory = tempfile::tempdir().assert_value();
+    for &template in BuiltinGraphTemplate::all() {
+        for delivery in [
+            TemplateDelivery::None,
+            TemplateDelivery::Push,
+            TemplateDelivery::PullRequest,
+            TemplateDelivery::Merge,
+            TemplateDelivery::Comment,
+        ] {
+            if template.materialize(delivery).is_err() {
+                continue;
+            }
+            let run = named_validation_command(
+                directory.path(),
+                template,
+                &["--delivery", delivery.name()],
+            );
+            assert!(run.repository.is_none() && run.branch.is_none() && run.revision.is_none());
+            assert_source_neutral_named_validation(run).await;
+        }
+    }
+}
+
 #[test]
 fn github_tokens_reject_empty_oversized_and_control_bearing_values() {
     assert_eq!(

@@ -180,19 +180,7 @@ where
         crate::native_v2_local::validate_local_environment(intent.environment.as_ref())
             .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
     }
-    let connections = select_connections(&intent.runtime, intent.environment.as_ref(), &available)?;
-    let github_token = run
-        .target
-        .as_ref()
-        .and_then(|_| available("GH_TOKEN"))
-        .map(|value| {
-            value
-                .into_string()
-                .map_err(|_| NativeV2CliError::GitHubToken)
-        })
-        .transpose()?
-        .map(validate_github_token)
-        .transpose()?;
+    let (connections, github_token) = submission_credentials(run, &intent, &available)?;
     Ok(PreparedRunRequest {
         run_id: openengine_cluster_protocol::RunId::new(uuid::Uuid::now_v7().to_string()),
         intent,
@@ -207,6 +195,33 @@ where
         }),
         profile,
     })
+}
+
+fn submission_credentials<F>(
+    run: &RunCommand,
+    intent: &TargetRunIntent,
+    available: &F,
+) -> Result<(RunConnectionValues, Option<String>), NativeV2CliError>
+where
+    F: Fn(&str) -> Option<OsString>,
+{
+    if run.validate_only {
+        return Ok((RunConnectionValues::new(), None));
+    }
+    let connections = select_connections(&intent.runtime, intent.environment.as_ref(), available)?;
+    let github_token = run
+        .target
+        .as_ref()
+        .and_then(|_| available("GH_TOKEN"))
+        .map(|value| {
+            value
+                .into_string()
+                .map_err(|_| NativeV2CliError::GitHubToken)
+        })
+        .transpose()?
+        .map(validate_github_token)
+        .transpose()?;
+    Ok((connections, github_token))
 }
 
 async fn prepare_validated_submission_with_environment<F>(
@@ -241,7 +256,7 @@ fn materialize_named_delivery_access<F>(
 where
     F: Fn(&str) -> Option<OsString>,
 {
-    if run.target.is_none() {
+    if run.target.is_none() || run.validate_only {
         return Ok(());
     }
     let mut submission = crate::native_v2_local::local_submission(

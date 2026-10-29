@@ -28,7 +28,10 @@ glab auth login --hostname gitlab.com
 ```
 
 Local delivery reuses the selected host's login when its connection is empty. Explicit or saved
-values take precedence; partial connections fail. Use `repo` and `read:org` for a classic GitHub PAT,
+values take precedence; partial connections fail. Ambient tokens are bound to `GH_HOST` or
+`GITLAB_HOST`; without a selector they apply only to GitHub.com or GitLab.com. Other hosts, including
+`*.ghe.com`, require a matching selector, a per-host CLI login, or declared connection values.
+Use `repo` and `read:org` for a classic GitHub PAT,
 or `api` and `write_repository` for a GitLab PAT. Git fetch and push must also work.
 
 GitHub.com and GitLab.com remotes identify themselves automatically. Other hosts need a configured

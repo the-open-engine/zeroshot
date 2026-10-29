@@ -279,7 +279,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   the Git remote before credential resolution. GitHub Enterprise Server requires 3.22.2 or newer;
   GitLab requires 19.5.1 or newer. Adapters check versions and refuse older or unknown servers.
   Native `gh`/`glab` login resolution is host-scoped and fills only wholly missing delivery connections;
-  explicit or stored values win, and partial values fail. Unknown hosts require native configured
+  explicit or stored values win, and partial values fail. Ambient tokens require a matching
+  `GH_HOST`/`GITLAB_HOST`, defaulting only to GitHub.com/GitLab.com when absent. Unknown hosts require native configured
   identity or paired `--source-provider`/`--source-base-url` overrides. Shared Git transport remains
   independent of forge API credentials. GitLab uses bounded HTTP effects and synchronous SHA-guarded
   merges; required merge trains remain pending. Synthetic pipeline SHAs do not prove captured-head CI.

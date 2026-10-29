@@ -27,18 +27,31 @@ fn native_source_base_does_not_confuse_ssh_ports_with_web_ports() {
     }
 }
 
-#[test]
-fn one_native_connection_cannot_authorize_different_instances() {
-    let key = ConnectionKey::new("delivery").assert_value();
-    let make = |host: &str| SourceForgeIdentity {
-        provider: openengine_cluster_protocol::SourceForgeProviderId::new(GITHUB).assert_value(),
+fn fixture_forge(provider: &str, host: &str) -> SourceForgeIdentity {
+    SourceForgeIdentity {
+        provider: openengine_cluster_protocol::SourceForgeProviderId::new(provider).assert_value(),
         repository: openengine_cluster_protocol::SourceRepositoryId::new("team/repo")
             .assert_value(),
         base_url: Some(SourceForgeBaseUrl::new(format!("https://{host}")).assert_value()),
-    };
+    }
+}
+
+#[test]
+fn one_native_connection_cannot_authorize_different_instances() {
+    let key = ConnectionKey::new("delivery").assert_value();
     let mut selected = BTreeMap::new();
-    insert_selection(&mut selected, key.clone(), make("one.example.test")).assert_value();
-    insert_selection(&mut selected, key, make("two.example.test")).assert_error();
+    insert_selection(
+        &mut selected,
+        key.clone(),
+        fixture_forge(GITHUB, "one.example.test"),
+    )
+    .assert_value();
+    insert_selection(
+        &mut selected,
+        key,
+        fixture_forge(GITHUB, "two.example.test"),
+    )
+    .assert_error();
 }
 
 #[cfg(unix)]
@@ -52,6 +65,21 @@ fn fixture_environment(root: &Path) -> BTreeMap<String, String> {
             "wrong-enterprise-token".to_owned(),
         ),
         ("GITLAB_TOKEN".to_owned(), "wrong-gitlab-token".to_owned()),
+        ("GITHUB_TOKEN".to_owned(), "wrong-public-alias".to_owned()),
+        (
+            "GITHUB_ENTERPRISE_TOKEN".to_owned(),
+            "wrong-enterprise-alias".to_owned(),
+        ),
+        (
+            "GITLAB_ACCESS_TOKEN".to_owned(),
+            "wrong-gitlab-alias".to_owned(),
+        ),
+        ("OAUTH_TOKEN".to_owned(), "wrong-oauth-token".to_owned()),
+        ("GH_HOST".to_owned(), "ambient.example.test".to_owned()),
+        (
+            "GITLAB_HOST".to_owned(),
+            "https://ambient.example.test/".to_owned(),
+        ),
         (
             "DBUS_SESSION_BUS_ADDRESS".to_owned(),
             "native-keyring".to_owned(),
@@ -68,7 +96,7 @@ async fn native_github_lookup_pins_host_and_keeps_only_native_context() {
         r#"#!/bin/sh
 [ "$1" = auth ] && [ "$2" = token ] && [ "$3" = --hostname ] || exit 2
 [ "$4" = git.example.test ] || exit 3
-[ -z "${GH_TOKEN-}${GH_ENTERPRISE_TOKEN-}${GITLAB_TOKEN-}" ] || exit 4
+[ -z "${GH_TOKEN-}${GITHUB_TOKEN-}${GH_ENTERPRISE_TOKEN-}${GITHUB_ENTERPRISE_TOKEN-}${GITLAB_TOKEN-}${GITLAB_ACCESS_TOKEN-}${OAUTH_TOKEN-}${GH_HOST-}${GITLAB_HOST-}" ] || exit 4
 [ "$DBUS_SESSION_BUS_ADDRESS" = native-keyring ] || exit 5
 printf '%s\n' private-native-token
 "#,
@@ -76,9 +104,8 @@ printf '%s\n' private-native-token
     )
     .assert_value();
     let environment = fixture_environment(root.path());
-    let token = process::stored_token(
-        GITHUB,
-        "git.example.test",
+    let token = token_for(
+        &fixture_forge(GITHUB, "git.example.test"),
         NativeContext {
             environment: &environment,
             directory: root.path(),
@@ -86,7 +113,7 @@ printf '%s\n' private-native-token
     )
     .await
     .assert_value();
-    assert_eq!(token.as_deref(), Some("private-native-token"));
+    assert_eq!(token, "private-native-token");
 }
 
 #[cfg(unix)]
@@ -97,7 +124,7 @@ async fn native_gitlab_lookup_uses_the_git_credential_protocol() {
         &root.path().join("glab"),
         r#"#!/bin/sh
 [ "$1" = auth ] && [ "$2" = git-credential ] && [ "$3" = get ] || exit 2
-[ -z "${GH_TOKEN-}${GH_ENTERPRISE_TOKEN-}${GITLAB_TOKEN-}" ] || exit 3
+[ -z "${GH_TOKEN-}${GITHUB_TOKEN-}${GH_ENTERPRISE_TOKEN-}${GITHUB_ENTERPRISE_TOKEN-}${GITLAB_TOKEN-}${GITLAB_ACCESS_TOKEN-}${OAUTH_TOKEN-}${GH_HOST-}${GITLAB_HOST-}" ] || exit 3
 IFS= read -r protocol
 IFS= read -r host
 [ "$protocol" = protocol=https ] && [ "$host" = host=git.example.test ] || exit 4
@@ -107,9 +134,8 @@ printf 'username=oauth2\npassword=private-gitlab-token\n\n'
     )
     .assert_value();
     let environment = fixture_environment(root.path());
-    let token = process::stored_token(
-        GITLAB,
-        "git.example.test",
+    let token = token_for(
+        &fixture_forge(GITLAB, "git.example.test"),
         NativeContext {
             environment: &environment,
             directory: root.path(),
@@ -117,7 +143,7 @@ printf 'username=oauth2\npassword=private-gitlab-token\n\n'
     )
     .await
     .assert_value();
-    assert_eq!(token.as_deref(), Some("private-gitlab-token"));
+    assert_eq!(token, "private-gitlab-token");
 }
 
 #[cfg(unix)]
@@ -212,7 +238,10 @@ async fn explicit_and_stored_connections_win_without_starting_native_auth() {
         })
         .assert_value();
     let submission = comment_submission("git.example.test", &["GH_TOKEN"]);
-    let environment = BTreeMap::new();
+    let environment = BTreeMap::from([
+        ("GH_HOST".to_owned(), "git.example.test".to_owned()),
+        ("GH_ENTERPRISE_TOKEN".to_owned(), "ambient-token".to_owned()),
+    ]);
     let context = NativeContext {
         environment: &environment,
         directory: root.path(),
@@ -242,8 +271,10 @@ async fn partial_explicit_connection_is_not_repaired_by_native_credentials() {
     let submission = comment_submission("git.example.test", &["GH_TOKEN", "OTHER"]);
     let key = ConnectionKey::new("work-ghe").assert_value();
     let mut supplied = RunConnectionValues::from([(key, values("explicit-token"))]);
-    let environment =
-        BTreeMap::from([("GH_ENTERPRISE_TOKEN".to_owned(), "ambient-token".to_owned())]);
+    let environment = BTreeMap::from([
+        ("GH_HOST".to_owned(), "git.example.test".to_owned()),
+        ("GH_ENTERPRISE_TOKEN".to_owned(), "ambient-token".to_owned()),
+    ]);
     let error = fill_missing(
         &submission,
         &mut supplied,
@@ -286,12 +317,60 @@ async fn source_less_comments_and_resumes_read_fresh_credentials_for_the_destina
     }
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn source_less_comment_destinations_cannot_claim_unselected_ambient_tokens() {
+    for (url, field) in [
+        ("https://git.example.test/team/repo/issues/17", "GH_TOKEN"),
+        ("https://company.ghe.com/team/repo/issues/17", "GH_TOKEN"),
+        (
+            "https://git.example.test/team/repo/-/issues/17",
+            "GITLAB_TOKEN",
+        ),
+    ] {
+        let root = tempfile::tempdir().assert_value();
+        let store = LocalConnectionStore::new(root.path().join("state"));
+        let mut submission = comment_submission("git.example.test", &[field]);
+        submission.initial_input["url"] = serde_json::json!(url);
+        assert!(submission.source.is_none());
+        for selector_present in [false, true] {
+            let mut environment = fixture_environment(root.path());
+            if !selector_present {
+                environment.remove("GH_HOST");
+                environment.remove("GITLAB_HOST");
+            }
+            let context = NativeContext {
+                environment: &environment,
+                directory: root.path(),
+            };
+            let mut supplied = RunConnectionValues::new();
+            let error = fill_missing(&submission, &mut supplied, &store, context)
+                .await
+                .assert_error();
+            assert!(
+                error.to_string().contains("forge login for"),
+                "{url}: {error}"
+            );
+            assert!(
+                supplied.is_empty(),
+                "{url} must not receive an unrelated ambient token"
+            );
+            for (name, secret) in &environment {
+                if name.ends_with("TOKEN") {
+                    assert!(!error.to_string().contains(secret), "{name}");
+                }
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn local_delivery_captures_enterprise_alias_without_using_the_public_token() {
     let root = tempfile::tempdir().assert_value();
     let store = LocalConnectionStore::new(root.path().join("state"));
     let submission = comment_submission("ghe.example.test", &["GH_TOKEN"]);
     let environment = BTreeMap::from([
+        ("GH_HOST".to_owned(), "ghe.example.test".to_owned()),
         ("GH_TOKEN".to_owned(), "public-token".to_owned()),
         (
             "GH_ENTERPRISE_TOKEN".to_owned(),
