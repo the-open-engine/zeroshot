@@ -6,14 +6,14 @@ description: 'Available harnesses, local and target support, and the contract fo
 
 Official local builds include every adapter below. Install each native CLI separately for local use.
 
-| Harness ID | Providers                                                 | Distribution |
-| ---------- | --------------------------------------------------------- | ------------ |
-| `codex`    | `openai`, `openrouter`, `gateway`, `bedrock`              | Core         |
-| `claude`   | `anthropic`, `openrouter`, `gateway`, `bedrock`           | Core         |
-| `copilot`  | `github`                                                  | Core         |
-| `pi`       | `anthropic`, `openai`, `openrouter`, `gateway`, `bedrock` | Core         |
-| `opencode` | `openai`, `anthropic`, `openrouter`                       | Contributed  |
-| `hermes`   | `openai`, `anthropic`, `openrouter`                       | Contributed  |
+| Harness ID | Providers                                                           | Distribution |
+| ---------- | ------------------------------------------------------------------- | ------------ |
+| `codex`    | `openai`, `openrouter`, `gateway`, `bedrock`                        | Core         |
+| `claude`   | `anthropic`, `openrouter`, `gateway`, `bedrock`                     | Core         |
+| `copilot`  | `github`, `openai`, `anthropic`, `openrouter`, `gateway`, `bedrock` | Core         |
+| `pi`       | `anthropic`, `openai`, `openrouter`, `gateway`, `bedrock`, `github` | Core         |
+| `opencode` | `openai`, `anthropic`, `openrouter`, `bedrock`, `gateway`           | Contributed  |
+| `hermes`   | `openai`, `anthropic`, `openrouter`, `gateway`                      | Contributed  |
 
 Local builds enable `contributed-harnesses` by default. Platform and the default target image disable
 default features and independently admit only the core registry. Targets advertise enabled pairs
@@ -26,11 +26,24 @@ guarantee contributed-harness compatibility with native releases. Both groups mu
 full execution, session and Active Memory contracts. Each runtime names its harness, provider and
 model explicitly. Model identifiers remain provider-owned strings.
 
+Gateway connections carry `GATEWAY_BASE_URL` and `GATEWAY_API_KEY`. Pi, Copilot, OpenCode and Hermes
+also require `GATEWAY_API`: `openai-responses`, `openai-completions` or `anthropic-messages`.
+Codex always uses Responses; Claude always uses Messages. Copilot's Bedrock lane uses AWS's
+OpenAI-compatible Responses endpoint with `AWS_BEARER_TOKEN_BEDROCK` and `AWS_REGION`; an optional
+`AWS_BEDROCK_BASE_URL` preserves a custom endpoint. Models must support the chosen native API.
+
+Local native login works for Codex/OpenAI, Claude/Anthropic, Copilot/GitHub and its OpenAI,
+Anthropic and OpenRouter BYOK lanes, and Pi/Anthropic, OpenAI and GitHub. OpenCode and Hermes retain
+native authentication for their OpenAI, Anthropic and OpenRouter lanes; OpenCode/Bedrock also retains
+the native AWS credential chain. Other lanes require declared connections. Declared Pi/GitHub
+credentials seed private native OAuth state; Pi owns token exchange and refresh.
+
 Local OpenCode and Hermes runs preserve native configuration discovery with declared credentials.
 Their declared authentication takes precedence over ambient authentication for the selected lane,
 while native settings and plugins continue to apply. OpenCode keeps its original HOME/XDG paths and native
 permission policy. Its declared authentication uses a private plugin, so `OPENCODE_PURE=true`
-conflicts with that setup. Local OpenCode adds no `--auto` flag and skips configuration inspection
+conflicts with that setup. Native plugins and custom transport code run with the native CLI's authority.
+Local OpenCode adds no `--auto` flag and skips configuration inspection
 because that inspection can start background dependency work.
 
 Hermes uses the interpreter from its installed canonical executable and native configuration
@@ -64,8 +77,9 @@ budgets, receipts and maintenance; missing acknowledgement means unknown deliver
 Run focused fixtures and shared registry/session tests. The ignored contract in
 `harnesses/live_tests.rs` requires a disposable test repository and explicit `ZEROSHOT_LIVE_HARNESS`,
 `ZEROSHOT_LIVE_PROVIDER`, `ZEROSHOT_LIVE_MODEL` and `ZEROSHOT_LIVE_WORKSPACE` values. Set
-`ZEROSHOT_LIVE_CLI_BINARY` to a separately built CLI's absolute path for memory callbacks. Test native
-bridges too, and check the core-only library:
+`ZEROSHOT_LIVE_CLI_BINARY` to a separately built CLI's absolute path for memory callbacks. Optional
+`ZEROSHOT_LIVE_CONNECTION_FIELDS` lists additional declared field names, separated by commas.
+Test native bridges too, and check the core-only library:
 
 ```bash
 cargo check --locked --package zeroshot --lib --no-default-features

@@ -259,6 +259,88 @@ async fn native_declared_authority_does_not_send_inherited_headers() {
 }
 
 #[tokio::test]
+#[ignore = "requires installed OpenCode; uses localhost and synthetic gateway/Bedrock credentials"]
+async fn native_gateway_and_bedrock_use_declared_authentication_on_the_wire() {
+    for api in [
+        "openai-responses",
+        "openai-completions",
+        "anthropic-messages",
+    ] {
+        additional_native_wire("gateway", api).await;
+    }
+    additional_native_wire("bedrock", "converse").await;
+}
+
+async fn additional_native_wire(provider: &str, api: &str) {
+    let directory = TestDirectory::new("opencode-additional-native-wire");
+    let mut adapter = super::process::adapter(&directory, "#!/bin/sh\nexit 0\n");
+    adapter.config.provider = provider.to_owned();
+    adapter.config.executable =
+        std::env::var("ZEROSHOT_OPENCODE_BINARY").expect("explicit native binary");
+    let id = command::native_provider(provider);
+    adapter.local_environment = BTreeMap::from([
+        ("XDG_DATA_HOME".to_owned(), directory.child("data").to_string_lossy().into_owned()),
+        ("XDG_CONFIG_HOME".to_owned(), directory.child("config").to_string_lossy().into_owned()),
+        ("XDG_CACHE_HOME".to_owned(), directory.child("cache").to_string_lossy().into_owned()),
+        ("XDG_STATE_HOME".to_owned(), directory.child("state").to_string_lossy().into_owned()),
+        ("OPENCODE_DISABLE_MODELS_FETCH".to_owned(), "1".to_owned()),
+        ("OPENCODE_DISABLE_LSP_DOWNLOAD".to_owned(), "1".to_owned()),
+        ("OPENCODE_CONFIG_CONTENT".to_owned(), json!({"provider":{(id):{"options":{"apiKey":"stored-key"},"models":{"opaque/model":{"id":"wire-fixture","name":"Wire fixture","limit":{"context":100000,"output":4096}}}}}}).to_string()),
+    ]);
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .assert_value();
+    let endpoint = format!("http://{}/v1", listener.local_addr().assert_value());
+    let credential = command::credential_field(provider).assert_value();
+    let endpoint_field = command::endpoint_fields(provider)[0];
+    let mut fields = vec![
+        (credential, "declared-wire-key"),
+        (endpoint_field, endpoint.as_str()),
+    ];
+    fields.push(if provider == "gateway" {
+        ("GATEWAY_API", api)
+    } else {
+        ("AWS_REGION", "us-east-1")
+    });
+    let invocation = super::process::invocation(&fields);
+    let (cancel, control, mut durable) = crate::native_v2_runner::test_support::control();
+    let drain = tokio::spawn(async move { while durable.recv_output().await.is_ok() {} });
+    let execution = adapter.run(invocation, control);
+    let request = tokio::time::timeout(
+        std::time::Duration::from_secs(40),
+        capture_request(listener),
+    );
+    tokio::pin!(execution, request);
+    let captured = tokio::select! {
+        captured = &mut request => captured.assert_value_with("native provider wire request"),
+        result = &mut execution => panic!("native {provider}/{api} exited before sending HTTP: {result:?}"),
+    };
+    cancel.send(true).assert_value();
+    let _result = tokio::time::timeout(std::time::Duration::from_secs(10), execution)
+        .await
+        .assert_value();
+    drain.await.assert_value();
+    let captured = captured.to_ascii_lowercase();
+    let header = if api == "anthropic-messages" {
+        "x-api-key: declared-wire-key"
+    } else {
+        "authorization: bearer declared-wire-key"
+    };
+    assert!(
+        captured.contains(header),
+        "native {provider}/{api} must use selected auth: {captured}"
+    );
+    assert!(!captured.contains("stored-key"));
+    let suffix = match api {
+        "openai-responses" => "/responses",
+        "openai-completions" => "/chat/completions",
+        "anthropic-messages" => "/messages",
+        _ => "/converse-stream",
+    };
+    assert!(captured.lines().next().assert_value().contains(suffix));
+}
+
+#[tokio::test]
 #[ignore = "requires installed OpenCode; proves later native managed header conflicts before localhost HTTP"]
 async fn native_later_managed_header_conflict_is_rejected_before_provider_http() {
     let directory = TestDirectory::new("opencode-native-late-header-conflict");

@@ -4,6 +4,7 @@
 //! revisits resume the persisted session in the existing private provider home. Credentials
 //! cross private RPC only and are never placed in the process or tool environment.
 
+mod access;
 mod auth;
 mod command;
 mod events;
@@ -25,6 +26,7 @@ use crate::native_v2_capsule::provider_process::{
 };
 use crate::native_v2_runner::{DriverControl, DriverInvocation, NodeRunnerError, ResolvedEnvironment};
 use session::CopilotSession;
+use crate::native_v2_contract::CopilotProvider;
 
 /// Host-owned launch capabilities; credentials belong to each invocation's resolved connection.
 #[derive(Clone, Eq, PartialEq)]
@@ -66,8 +68,9 @@ pub struct CopilotLocalUser {
     pub copilot_home: PathBuf,
 }
 
-/// Copilot's GitHub-backed harness. Model names remain caller-owned opaque values.
+/// Copilot's native harness. Model names remain caller-owned opaque values.
 pub struct CopilotAdapter {
+    provider: CopilotProvider,
     config: CopilotConfig,
     runners: ProviderProcessRunners,
     local_token: Option<String>,
@@ -86,6 +89,7 @@ impl CopilotAdapter {
         config.local_command_environment.clear();
         let runners = ProviderProcessRunners::hosted(config.process_pool);
         Self {
+            provider: CopilotProvider::Github,
             config,
             runners,
             local_token: None,
@@ -105,11 +109,35 @@ impl CopilotAdapter {
             provider::take_local_configuration(&mut config.base_environment, &user.copilot_home)
         });
         Self {
+            provider: CopilotProvider::Github,
             config,
             runners: ProviderProcessRunners::local(),
             local_token,
             local_provider,
             active_memory: None,
+        }
+    }
+
+    /// Select one provider for this adapter while preserving the legacy GitHub default.
+    #[must_use]
+    pub fn with_provider(mut self, provider: CopilotProvider) -> Self {
+        self.provider = provider;
+        self
+    }
+
+    fn authentication<'a>(
+        &'a self,
+        environment: &'a ResolvedEnvironment,
+    ) -> Result<auth::CopilotAuthentication<'a>, NodeRunnerError> {
+        if self.provider == CopilotProvider::Github {
+            auth::CopilotAuthentication::new(
+                environment,
+                self.local_token.as_deref(),
+                self.config.local_user.is_some(),
+                &self.config.base_environment,
+            )
+        } else {
+            auth::CopilotAuthentication::external(environment)
         }
     }
 
@@ -124,12 +152,7 @@ impl CopilotAdapter {
         redactions.extend(self.local_token.iter().cloned());
         let result = async {
             session.core.ensure_live(ClosedSessionFailure::Driver)?;
-            let authentication = auth::CopilotAuthentication::new(
-                &invocation.environment,
-                self.local_token.as_deref(),
-                self.config.local_user.is_some(),
-                &self.config.base_environment,
-            )?;
+            let authentication = self.authentication(&invocation.environment)?;
             let local_provider = self.provider_configuration(
                 &invocation.environment,
                 &authentication,
@@ -182,6 +205,15 @@ impl CopilotAdapter {
         authentication: &auth::CopilotAuthentication<'_>,
         model: &str,
     ) -> Result<Option<provider::LocalProvider>, NodeRunnerError> {
+        if self.provider != CopilotProvider::Github {
+            return provider::resolve_explicit_configuration(
+                self.provider,
+                self.local_provider.as_ref(),
+                environment,
+                model,
+            )
+            .map(Some);
+        }
         if self.config.local_user.is_none() || authentication.has_declared_token() {
             return Ok(None);
         }

@@ -23,6 +23,7 @@ use crate::native_v2_runner::{
 mod authentication;
 mod framing;
 mod hosted;
+mod lanes;
 
 const INSTRUCTIONS: &str = "Return answer 42 using the required schema.";
 
@@ -58,6 +59,14 @@ fn binding_for_model(names: impl Iterator<Item = String>, model: &str) -> NodeRu
 }
 
 async fn admitted(binding: NodeRuntimeBinding, instructions: &str) -> AdmittedRun {
+    admitted_for(binding, instructions, CopilotProvider::Github).await
+}
+
+async fn admitted_for(
+    binding: NodeRuntimeBinding,
+    instructions: &str,
+    provider: CopilotProvider,
+) -> AdmittedRun {
     let graph = full_graph(vec![
         json!({
             "kind":"step", "name":"work", "worker":"agent.work@1",
@@ -73,11 +82,8 @@ async fn admitted(binding: NodeRuntimeBinding, instructions: &str) -> AdmittedRu
         graph,
         initial_input: Value::Null,
         runtime: RuntimePlan::new(
-            openengine_cluster_protocol::RuntimeLane::new(
-                "copilot",
-                (CopilotProvider::Github).name(),
-            )
-            .assert_value(),
+            openengine_cluster_protocol::RuntimeLane::new("copilot", provider.name())
+                .assert_value(),
             RunSize::Medium,
             BTreeMap::from([(NodeName::new("work").assert_value(), binding)]),
         ),

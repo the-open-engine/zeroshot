@@ -33,6 +33,7 @@ pub(super) const LOCAL_ENVIRONMENT: &[&str] = &[
     "OPENAI_BASE_URL",
     "OPENAI_API_BASE",
     "OPENROUTER_API_KEY",
+    "COPILOT_GITHUB_TOKEN",
     "AWS_BEARER_TOKEN_BEDROCK",
     "AWS_REGION",
     "AWS_DEFAULT_REGION",
@@ -78,12 +79,13 @@ const OPENAI_CREDENTIALS: [&str; 1] = [OPENAI_KEY];
 /// Credentials belonging to any other lane. A declared value from one of these must not stand in
 /// for the selected lane's credential. The Bedrock pair is handled separately so the bedrock lane
 /// can still require it while every other lane rejects it.
-const FOREIGN_CREDENTIALS: [&str; 5] = [
+const FOREIGN_CREDENTIALS: [&str; 6] = [
     ANTHROPIC_KEY,
     ANTHROPIC_AUTH,
     ANTHROPIC_OAUTH,
     OPENAI_KEY,
     OPENROUTER_KEY,
+    "COPILOT_GITHUB_TOKEN",
 ];
 
 /// The Bedrock credential pair. It is foreign to every non-bedrock lane and required together by
@@ -120,6 +122,7 @@ pub(super) struct PiCommandInput<'a> {
 /// Zeroshot-owned model catalog exists.
 const fn provider_name(provider: PiProvider) -> &'static str {
     match provider {
+        PiProvider::Github => "github-copilot",
         PiProvider::Anthropic => "anthropic",
         PiProvider::OpenAi => "openai",
         // The gateway lane registers its own provider so the caller's wire protocol is honored;
@@ -319,6 +322,7 @@ pub(super) fn configure_provider(
     native_local: bool,
 ) -> Result<(), NodeRunnerError> {
     match provider {
+        PiProvider::Github => accept_lane(environment, &["COPILOT_GITHUB_TOKEN"], native_local)?,
         PiProvider::Anthropic => accept_lane(environment, &ANTHROPIC_CREDENTIALS, native_local)?,
         PiProvider::OpenAi => accept_lane(environment, &OPENAI_CREDENTIALS, native_local)?,
         PiProvider::OpenRouter => accept_lane(environment, &[OPENROUTER_KEY], native_local)?,
@@ -370,6 +374,7 @@ fn accept_bedrock(environment: &BTreeMap<String, String>) -> Result<(), NodeRunn
 /// broader stored login. Every lane that authenticates from Pi's own credential lists them here.
 pub(super) fn native_local_credentials(provider: PiProvider) -> &'static [&'static str] {
     match provider {
+        PiProvider::Github => &["COPILOT_GITHUB_TOKEN"],
         PiProvider::Anthropic => &ANTHROPIC_CREDENTIALS,
         PiProvider::OpenAi => &OPENAI_CREDENTIALS,
         _ => &[],

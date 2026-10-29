@@ -329,10 +329,13 @@ class Runtime:
         from utils import env_var_enabled
         require_parseable_user_config(ignore_user_config=env_var_enabled("HERMES_IGNORE_USER_CONFIG"))
         authority = frame.get("authority") or {}
+        config = present_sections(load_config_readonly())
+        if frame["provider"] == "gateway":
+            config.setdefault("model", {})["api_mode"] = authority.get("apiMode")
         self.auth_module = sibling("native_auth")
         self.authority = self.auth_module.install(
             frame["provider"], authority.get("apiKey"), authority.get("baseUrl"),
-            present_sections(load_config_readonly()), model=frame["model"])
+            config, model=frame["model"])
         self.remote_kernels = RemoteKernels()
         kwargs = self.authority.agent_kwargs
         self.policy = launch_policy(frame, self.authority.config, self.authority.provider, kwargs.get("base_url"))

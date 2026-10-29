@@ -88,14 +88,29 @@ impl LiveSettings {
                 .iter()
                 .all(|name| self.environment.contains_key(*name))
         });
-        let connections = match available {
-            Some(fields) => DeclaredConnections::single(
+        let mut fields = available
+            .into_iter()
+            .flat_map(|fields| fields.iter().copied())
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+        if let Some(extra) = self.environment.get("ZEROSHOT_LIVE_CONNECTION_FIELDS") {
+            for name in extra.split(',') {
+                assert!(
+                    self.environment.contains_key(name),
+                    "explicit live connection field {name} is missing"
+                );
+                fields.insert(name.to_owned());
+            }
+        }
+        let connections = if fields.is_empty() {
+            DeclaredConnections::empty()
+        } else {
+            DeclaredConnections::single(
                 "live-provider",
                 DeclaredEnvironment::new(fields.iter().map(|name| environment_name(name)))
                     .assert_value(),
             )
-            .assert_value(),
-            None => DeclaredConnections::empty(),
+            .assert_value()
         };
         NodeRuntimeBinding::Agent {
             lane: None,

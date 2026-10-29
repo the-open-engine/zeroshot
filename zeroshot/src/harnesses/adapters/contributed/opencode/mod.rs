@@ -72,9 +72,12 @@ impl OpenCodeAdapter {
     }
 
     pub fn new_local(config: OpenCodeConfig) -> Result<Self, NodeRunnerError> {
-        let local_environment = config
+        let mut local_environment = config
             .native_environment
             .selected(command::LOCAL_ENVIRONMENT);
+        if config.provider == "bedrock" {
+            local_environment.extend(config.native_environment.selected(command::AWS_ENVIRONMENT));
+        }
         let mut adapter = Self::configured(config, ProviderProcessRunners::local())?;
         adapter.local_environment = local_environment;
         Ok(adapter)
@@ -216,6 +219,13 @@ impl OpenCodeAdapter {
     fn redactions(&self, environment: &ResolvedEnvironment) -> Vec<String> {
         let mut values = provider_redactions(environment, &self.local_environment);
         values.extend(command::configuration_secrets(&self.local_environment));
+        values.extend(
+            command::AWS_SECRETS
+                .iter()
+                .filter_map(|name| self.local_environment.get(*name))
+                .filter(|value| !value.is_empty())
+                .cloned(),
+        );
         values
     }
 }

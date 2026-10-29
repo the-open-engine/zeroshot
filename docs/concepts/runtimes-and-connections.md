@@ -71,11 +71,9 @@ The submission environment or a target-owned connection store supplies the value
 them out of the graph, runtime JSON, run ledger, and observation records.
 
 When `connections` is omitted, Zeroshot materializes provider access for each node from its
-effective lane and the selected execution placement. On a local run, the `codex`/`openai`,
-`claude`/`anthropic`, `copilot`/`github`, `pi`/`anthropic`, and `pi`/`openai` lanes, plus all supported
-`opencode` and `hermes` lanes, reuse the harness's native login and configuration without adding a
-connection requirement. On a contained target, or on any other lane, a node receives these canonical
-requirements:
+effective lane and the selected execution placement. Local adapters can reuse native authentication as described in
+[Harness adapters](../project/harness-adapters.md). Lanes requiring a connection and contained targets
+receive these canonical requirements:
 
 | Provider     | Connection key | Fields                                   |
 | ------------ | -------------- | ---------------------------------------- |
@@ -86,7 +84,7 @@ requirements:
 | `bedrock`    | `bedrock`      | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_REGION` |
 | `github`     | `github`       | `COPILOT_GITHUB_TOKEN`                   |
 
-A `pi` gateway run additionally requires `GATEWAY_API`, which names the wire protocol
+Pi, Copilot, OpenCode and Hermes gateway runs additionally require `GATEWAY_API`, which names the wire protocol
 (`openai-responses`, `openai-completions`, or `anthropic-messages`). The Codex and Claude gateway
 lanes do not use it.
 
@@ -134,8 +132,8 @@ zeroshot connection set gateway --field GATEWAY_BASE_URL --field GATEWAY_API_KEY
 
 Codex requires the OpenAI **Responses API**, including streaming and tool calls; Chat Completions
 alone is insufficient. It sends the key as a bearer token. Claude requires the Anthropic **Messages
-API** and sends the key in `x-api-key`. The `pi` gateway lane lets the caller name the wire protocol
-in `GATEWAY_API` and reaches any endpoint Pi implements without probing it; an unrecognized value
+API** and sends the key in `x-api-key`. The Pi, Copilot, OpenCode and Hermes gateway lanes let the caller name the wire protocol
+in `GATEWAY_API` and use the selected native transport without probing it; an unrecognized value
 fails before launch. The selected gateway/model must support the harness's
 requests, including structured output. Zeroshot does not probe capabilities or translate protocols.
 

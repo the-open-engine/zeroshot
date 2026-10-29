@@ -42,7 +42,7 @@ pub(super) fn install(installation: Installation<'_>) -> Result<(), NodeRunnerEr
     let auth = super::login::without_provider(
         adapter.local_environment.get("OPENCODE_AUTH_CONTENT"),
         command,
-        provider,
+        command::native_provider(provider),
     )?;
     command
         .environment
@@ -71,7 +71,8 @@ pub(super) fn install(installation: Installation<'_>) -> Result<(), NodeRunnerEr
             "OpenCode declared provider endpoint is empty".to_owned(),
         ));
     }
-    let selection = serde_json::json!({"provider":provider,"key":command::credential_field(provider),"endpoint":endpoint,"inline":inline});
+    let mut selection = serde_json::json!({"provider":command::native_provider(provider),"key":command::credential_field(provider),"endpoint":endpoint,"inline":inline,"header":if provider == "anthropic" {"x-api-key"} else {"Authorization"}});
+    extend_selection(&mut selection, provider, invocation, command)?;
     let source = HOOK.replace("AUTH_SELECTION", &selection.to_string());
     let path = write_provider_file(
         files.home(),
@@ -88,6 +89,29 @@ pub(super) fn install(installation: Installation<'_>) -> Result<(), NodeRunnerEr
             "OpenCode provider authentication hook could not be installed".to_owned(),
         )
     })
+}
+
+fn extend_selection(
+    selection: &mut serde_json::Value,
+    provider: &str,
+    invocation: &DriverInvocation,
+    command: &ProcessSessionCommand,
+) -> Result<(), NodeRunnerError> {
+    if provider == "bedrock" {
+        selection["region"] = serde_json::json!(command.environment.get("AWS_REGION"));
+    }
+    if provider == "gateway" {
+        let (npm, header) = command::gateway_protocol(&command.environment)?;
+        let crate::native_v2_contract::NodeRuntimeBinding::Agent { model, .. } =
+            &invocation.node.binding
+        else {
+            return Err(NodeRunnerError::InvalidRole);
+        };
+        selection["npm"] = serde_json::json!(npm);
+        selection["header"] = serde_json::json!(header);
+        selection["model"] = serde_json::json!(model.as_str());
+    }
+    Ok(())
 }
 
 // config() runs after native file/inline/managed configuration has merged. Native plugins keep
@@ -121,8 +145,8 @@ function authFields(options, prefix, key) {
   return fields;
 }
 function headerConflict(headers, key, normalize = false) {
-  const canonical = selection.provider === 'anthropic' ? 'x-api-key' : 'Authorization';
-  const expected = selection.provider === 'anthropic' ? key : `Bearer ${key}`;
+  const canonical = selection.header;
+  const expected = canonical === 'x-api-key' ? key : `Bearer ${key}`;
   let conflict = false;
   for (const [name,value] of Object.entries(headers ?? {})) {
     if (selection.endpoint && name.toLowerCase() === 'x-provider-api-keys') { conflict = true; continue; }
@@ -177,7 +201,16 @@ export default async ({client}) => {
       const options = provider.options ??= {};
       cleanOptions(options);
       options.apiKey = key;
-      if (selection.endpoint) options.baseURL = endpoint;
+      if (selection.endpoint) {
+        options.baseURL = endpoint;
+        if (selection.provider === 'amazon-bedrock') options.endpoint = endpoint;
+      }
+      if (selection.region) options.region = selection.region;
+      if (selection.npm) {
+        provider.npm = selection.npm;
+        const model = (provider.models ??= {})[selection.model] ??= {name:selection.model};
+        (model.provider ??= {}).npm = selection.npm;
+      }
       cleanModels(provider.models);
       configured = true;
     },
@@ -192,6 +225,9 @@ export default async ({client}) => {
           const options = input.provider.options, fields = [];
           if (!configured || !key || options?.apiKey !== key) fields.push('provider.options.apiKey');
           if (selection.endpoint && options?.baseURL !== endpoint) fields.push('provider.options.baseURL');
+          if (selection.endpoint && selection.provider === 'amazon-bedrock' && options?.endpoint !== endpoint) fields.push('provider.options.endpoint');
+          if (selection.region && options?.region !== selection.region) fields.push('provider.options.region');
+          if (selection.npm && input.model.api?.npm !== selection.npm) fields.push('model.api.npm');
           fields.push(...authFields({...options,apiKey:undefined},'provider.options',key).filter((name) => name !== 'provider.options.apiKey' && name !== 'provider.options.baseURL'));
           if (headerConflict(input.model.headers,key)) fields.push('model.headers');
           if (headerConflict(headers,key,true)) fields.push('chat.headers');

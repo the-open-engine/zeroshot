@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Number, Value};
 
 use super::rpc::failure;
+mod selection;
+pub(super) use selection::{is_credential, resolve_explicit_configuration};
 use crate::native_v2_runner::{NodeRunnerError, ResolvedEnvironment};
 
 const BASE_URL: &str = "COPILOT_PROVIDER_BASE_URL";
@@ -65,6 +67,7 @@ pub(super) fn is_configuration_for_platform(name: &str, windows: bool) -> bool {
 #[derive(Clone, Eq, PartialEq)]
 pub(super) struct LocalProviderContext {
     legacy: BTreeMap<String, String>,
+    canonical: BTreeMap<String, String>,
     registry_path: Option<String>,
     offline: Option<String>,
     default_registry: PathBuf,
@@ -108,6 +111,7 @@ pub(super) fn take_local_configuration(
         .collect();
     LocalProviderContext {
         legacy,
+        canonical: selection::take_context(environment),
         registry_path: environment.remove(PROVIDERS_CONFIG),
         offline: environment.remove(OFFLINE),
         default_registry: copilot_home.join("providers.json"),

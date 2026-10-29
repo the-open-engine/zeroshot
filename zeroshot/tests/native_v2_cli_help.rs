@@ -116,28 +116,18 @@ fn help_explains_runtime_configuration() {
         SessionScope::NodeInstance,
     ]));
     let contract_prose = [
-        // Every admitted harness/provider pair is enumerated in one place, so a new lane cannot be
-        // added to the protocol without appearing in the CLI contract.
-        concat!(
-            "provider choices are codex/openai, codex/openrouter, codex/bedrock, ",
-            "claude/anthropic, claude/openrouter, claude/bedrock, codex/gateway, claude/gateway, ",
-            "copilot/github, pi/anthropic, pi/openai, pi/openrouter, pi/bedrock, and pi/gateway."
-        )
-        .to_owned(),
+        "the host's adapter registry admits supported harness/provider pairs.".to_owned(),
+        "see the harness adapters documentation for available pairs.".to_owned(),
         concat!(
             "gateway connections require gateway_base_url and gateway_api_key. codex uses ",
-            "responses and claude uses messages. the pi/gateway lane also carries gateway_api, ",
-            "which names the wire protocol as one of openai-responses, openai-completions, or ",
+            "responses and claude uses messages. pi, copilot, opencode, and hermes gateway lanes also carry gateway_api, ",
+            "which names the protocol as openai-responses, openai-completions, or ",
             "anthropic-messages. ",
             "declaring anthropic_base_url with anthropic_api_key sends the pi/anthropic lane ",
             "to a caller-owned anthropic messages endpoint."
         )
         .to_owned(),
-        concat!(
-            "known-incompatible harness/provider pairs include codex/anthropic, claude/openai, ",
-            "and pi/github."
-        )
-        .to_owned(),
+        "known-incompatible harness/provider pairs include codex/anthropic and claude/openai.".to_owned(),
         concat!(
             "pi has no permission control of its own, so its contained runs rely on the ",
             "disposable capsule rather than a bypass argument."

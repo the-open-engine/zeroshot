@@ -31,7 +31,7 @@ fn required<'a>(
         })
 }
 
-fn validate_base_url(value: &str) -> Result<(), NodeRunnerError> {
+pub(crate) fn validate_base_url(value: &str) -> Result<(), NodeRunnerError> {
     let invalid = || {
         NodeRunnerError::DriverDetail(
             concat!(

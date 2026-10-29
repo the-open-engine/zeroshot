@@ -301,6 +301,13 @@ def endpoint_worker():
 
 @unittest.skipUnless(os.environ.get("HERMES_SOURCE") or importlib.util.find_spec("run_agent"), "requires a native Hermes installation")
 class NativeAuthorityTest(unittest.TestCase):
+    def test_gateway_native_protocols_and_factories(self):
+        for mode in ("chat_completions", "codex_responses", "anthropic_messages"):
+            with self.subTest(mode=mode):
+                completed = subprocess.run([sys.executable, __file__, "--gateway-worker", mode], stdout=subprocess.PIPE,
+                                           stderr=subprocess.STDOUT, text=True, timeout=90)
+                self.assertEqual(completed.returncode, 0, completed.stdout[-4000:])
+
     def test_endpoint_keeps_native_authentication(self):
         completed = subprocess.run([sys.executable, __file__, "--endpoint-worker"], stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT, text=True, timeout=90)
@@ -315,9 +322,70 @@ class NativeAuthorityTest(unittest.TestCase):
                     self.assertEqual(completed.returncode, 0, completed.stdout[-4000:])
 
 
+def gateway_worker(mode):
+    if os.environ.get("HERMES_SOURCE"):
+        sys.path.insert(0, os.environ["HERMES_SOURCE"])
+    with tempfile.TemporaryDirectory(prefix="zeroshot-hermes-gateway-") as directory:
+        home = Path(directory)
+        os.environ.update(HOME=directory, HERMES_HOME=directory)
+        config = {"model": {"provider": "custom", "default": "native-model", "api_mode": mode},
+                  "auxiliary": {"compression": {"provider": "auto", "model": "native-model"}},
+                  "memory": {"enabled": False, "memory_enabled": False, "user_profile_enabled": False}}
+        (home / "config.yaml").write_text(json.dumps(config))
+        import httpx
+        receipts = []
+        key, endpoint = "synthetic-gateway-secret", "https://gateway.example/owned/path"
+
+        def handle(request):
+            assert str(request.url).startswith(endpoint + "/")
+            header = "x-api-key" if mode == "anthropic_messages" else "authorization"
+            assert request.headers[header] == (key if mode == "anthropic_messages" else "Bearer " + key)
+            body = json.loads(request.content)
+            receipts.append(request.url.path)
+            if mode == "codex_responses":
+                assert request.url.path.endswith("/responses")
+                result = {"id": "resp_fixture", "object": "response", "created_at": 1,
+                    "status": "completed", "model": body["model"], "output": [{"type": "message", "id": "msg_fixture",
+                    "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "ok", "annotations": []}]}],
+                    "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}
+                events = [{"type": "response.output_item.done", "output_index": 0, "item": result["output"][0]},
+                          {"type": "response.completed", "response": result}]
+                stream = "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events)
+                return httpx.Response(200, content=stream.encode(), headers={"content-type": "text/event-stream"})
+            assert request.url.path.endswith("/messages" if mode == "anthropic_messages" else "/chat/completions")
+            return response(httpx, "anthropic" if mode == "anthropic_messages" else "openai", body)
+
+        sdk_fixtures(handle)
+        spec = importlib.util.spec_from_file_location("native_auth", AUTH)
+        auth = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(auth)
+        authority = auth.install("gateway", key, endpoint, config, model="native-model")
+        from agent import auxiliary_client as aux
+        from tools import delegate_tool as delegate
+        assert authority.agent_kwargs["api_mode"] == mode
+        messages = [{"role": "user", "content": "offline gateway fixture"}]
+        with authority.auxiliary_scope():
+            result = aux.call_llm(task="compression", messages=messages, max_tokens=16)
+            assert result.choices[0].message.content == "ok"
+            before = len(receipts)
+            header = "x-api-key" if mode == "anthropic_messages" else "Authorization"
+            with unittest.TestCase().assertRaises(auth.AuthError):
+                aux.call_llm(task="compression", messages=messages, max_tokens=16, extra_headers={header: "wrong-auth"})
+            assert len(receipts) == before
+            parent = authority.agent_class(model="native-model", enabled_toolsets=[], quiet_mode=True, skip_memory=True,
+                                           skip_background_review=True, **authority.agent_kwargs)
+            assert parent.api_mode == mode
+            credentials = delegate._resolve_delegation_credentials({"provider": "auto"}, parent)
+            assert credentials["api_mode"] == mode
+            parent.close()
+        assert receipts
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--endpoint-worker":
         endpoint_worker()
+    elif len(sys.argv) > 2 and sys.argv[1] == "--gateway-worker":
+        gateway_worker(sys.argv[2])
     elif len(sys.argv) > 2 and sys.argv[1] == "--worker":
         worker(sys.argv[2], len(sys.argv) > 3 and sys.argv[3] == "key-only")
     else:

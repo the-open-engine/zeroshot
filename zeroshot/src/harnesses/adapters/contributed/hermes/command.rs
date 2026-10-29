@@ -84,6 +84,9 @@ const CREDENTIALS: &[&str] = &[
     "ANTHROPIC_TOKEN",
     "CLAUDE_CODE_OAUTH_TOKEN",
     "OPENROUTER_API_KEY",
+    "GATEWAY_API_KEY",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "COPILOT_GITHUB_TOKEN",
 ];
 
 fn credential_fields(provider: &str) -> &'static [&'static str] {
@@ -95,6 +98,7 @@ fn credential_fields(provider: &str) -> &'static [&'static str] {
             "CLAUDE_CODE_OAUTH_TOKEN",
         ],
         "openrouter" => &["OPENROUTER_API_KEY"],
+        "gateway" => &["GATEWAY_API_KEY"],
         _ => &[],
     }
 }
@@ -104,6 +108,7 @@ pub(super) fn credential_field(provider: &str) -> Option<&'static str> {
         "openai" => Some("OPENAI_API_KEY"),
         "anthropic" => Some("ANTHROPIC_API_KEY"),
         "openrouter" => Some("OPENROUTER_API_KEY"),
+        "gateway" => Some("GATEWAY_API_KEY"),
         _ => None,
     }
 }
@@ -113,6 +118,7 @@ fn endpoint_fields(provider: &str) -> &'static [&'static str] {
         "openai" => &["OPENAI_BASE_URL", "OPENAI_API_BASE"],
         "anthropic" => &["ANTHROPIC_BASE_URL"],
         "openrouter" => &["OPENROUTER_BASE_URL"],
+        "gateway" => &["GATEWAY_BASE_URL"],
         _ => &[],
     }
 }
@@ -234,7 +240,27 @@ fn authority(provider: &str, invocation: &DriverInvocation) -> Result<Value, Nod
             base = Some(value);
         }
     }
-    Ok(json!({"apiKey":key,"baseUrl":base}))
+    let api_mode = if provider == "gateway" {
+        Some(gateway_mode(invocation)?)
+    } else {
+        None
+    };
+    Ok(json!({"apiKey":key,"baseUrl":base,"apiMode":api_mode}))
+}
+
+fn gateway_mode(invocation: &DriverInvocation) -> Result<&'static str, NodeRunnerError> {
+    let values = invocation
+        .environment
+        .iter()
+        .map(|(name, value)| (name.as_str().to_owned(), value.to_owned()))
+        .collect::<BTreeMap<_, _>>();
+    crate::native_v2_capsule::gateway::connection(&values)?;
+    match values.get("GATEWAY_API").map(String::as_str) {
+        Some("openai-responses") => Ok("codex_responses"),
+        Some("openai-completions") => Ok("chat_completions"),
+        Some("anthropic-messages") => Ok("anthropic_messages"),
+        _ => Err(failure("Hermes gateway requires a supported GATEWAY_API")),
+    }
 }
 
 fn native_context(adapter: &HermesAdapter, declared: bool) -> BTreeMap<String, String> {

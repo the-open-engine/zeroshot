@@ -58,7 +58,9 @@ fn schema_dialect(
     resolved: &ResolvedEnvironment,
 ) -> Result<ProviderSchemaDialect, NodeRunnerError> {
     Ok(match provider {
-        PiProvider::Anthropic | PiProvider::Bedrock => ProviderSchemaDialect::Standard,
+        PiProvider::Anthropic | PiProvider::Bedrock | PiProvider::Github => {
+            ProviderSchemaDialect::Standard
+        }
         PiProvider::OpenAi | PiProvider::OpenRouter => ProviderSchemaDialect::OpenAiStrict,
         PiProvider::Gateway => match declared_api(resolved, command::GATEWAY_API)?.as_str() {
             "anthropic-messages" => ProviderSchemaDialect::Standard,
@@ -219,6 +221,9 @@ impl PiAdapter {
             session_dir: &sessions,
             session_id,
         })?;
+        if self.provider == PiProvider::Github {
+            install_github_auth(invocation, &agent_dir, &mut command)?;
+        }
         // Every Pi child needs a home: Pi resolves its native agent directory, and its tools their
         // user-relative state, from `HOME`. A local run uses the invoking user's home so a
         // native-local lane finds `~/.pi/agent`; a contained run has no user home of its own and
@@ -363,6 +368,35 @@ impl PiAdapter {
     }
 }
 
+// Seed native OAuth with the caller's user token; Pi owns exchange and refresh. The private
+// agent directory prevents declared authority from replacing a user's stored native login.
+fn install_github_auth(
+    invocation: &DriverInvocation,
+    agent_dir: &Path,
+    command: &mut ProcessSessionCommand,
+) -> Result<(), NodeRunnerError> {
+    let Some((_, token)) = invocation
+        .environment
+        .iter()
+        .find(|(name, _)| name.as_str() == "COPILOT_GITHUB_TOKEN")
+    else {
+        return Ok(());
+    };
+    let auth = serde_json::json!({"github-copilot":{"type":"oauth","refresh":token,"access":"","expires":0}});
+    crate::native_v2_capsule::provider_process::write_provider_file(
+        agent_dir,
+        "auth.json",
+        auth.to_string().as_bytes(),
+    )
+    .map_err(|_| {
+        NodeRunnerError::DriverDetail(
+            "Pi private GitHub authentication could not be installed".to_owned(),
+        )
+    })?;
+    command.environment.remove("COPILOT_GITHUB_TOKEN");
+    Ok(())
+}
+
 fn is_pi_credential(name: &str) -> bool {
     matches!(
         name,
@@ -370,6 +404,7 @@ fn is_pi_credential(name: &str) -> bool {
             | "ANTHROPIC_AUTH_TOKEN"
             | "ANTHROPIC_OAUTH_TOKEN"
             | command::OPENAI_KEY
+            | "COPILOT_GITHUB_TOKEN"
             | command::OPENROUTER_KEY
             | command::AWS_BEARER_TOKEN_BEDROCK
     )

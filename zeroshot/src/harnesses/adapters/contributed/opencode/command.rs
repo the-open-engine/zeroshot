@@ -41,11 +41,80 @@ pub(super) const LOCAL_ENVIRONMENT: &[&str] = &[
     "OPENROUTER_BASE_URL",
 ];
 
+/// Native AWS credential-chain inputs; inherited only by the Bedrock lane.
+pub(super) const AWS_ENVIRONMENT: &[&str] = &[
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "AWS_BEDROCK_BASE_URL",
+    "AWS_PROFILE",
+    "AWS_CONFIG_FILE",
+    "AWS_SHARED_CREDENTIALS_FILE",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+    "AWS_ROLE_ARN",
+    "AWS_ROLE_SESSION_NAME",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+    "AWS_EC2_METADATA_DISABLED",
+];
+pub(super) const AWS_SECRETS: &[&str] = &[
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+];
+
+const CREDENTIALS: &[&str] = &[
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENROUTER_API_KEY",
+    "GATEWAY_API_KEY",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "COPILOT_GITHUB_TOKEN",
+];
+const AUTHENTICATION: &[&str] = &[
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENROUTER_API_KEY",
+    "GATEWAY_API_KEY",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "OPENCODE_AUTH_CONTENT",
+    "AWS_PROFILE",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_ROLE_ARN",
+    "AWS_ROLE_SESSION_NAME",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+    "AWS_CONFIG_FILE",
+    "AWS_SHARED_CREDENTIALS_FILE",
+];
+
+pub(super) fn native_provider(provider: &str) -> &str {
+    if provider == "bedrock" {
+        "amazon-bedrock"
+    } else {
+        provider
+    }
+}
+
 pub(super) fn credential_field(provider: &str) -> Option<&'static str> {
     match provider {
         "openai" => Some("OPENAI_API_KEY"),
         "anthropic" => Some("ANTHROPIC_API_KEY"),
         "openrouter" => Some("OPENROUTER_API_KEY"),
+        "bedrock" => Some("AWS_BEARER_TOKEN_BEDROCK"),
+        "gateway" => Some("GATEWAY_API_KEY"),
         _ => None,
     }
 }
@@ -55,6 +124,8 @@ pub(super) fn endpoint_fields(provider: &str) -> &'static [&'static str] {
         "openai" => &["OPENAI_BASE_URL", "OPENAI_API_BASE"],
         "anthropic" => &["ANTHROPIC_BASE_URL"],
         "openrouter" => &["OPENROUTER_BASE_URL"],
+        "bedrock" => &["AWS_BEDROCK_BASE_URL"],
+        "gateway" => &["GATEWAY_BASE_URL"],
         _ => &[],
     }
 }
@@ -130,6 +201,7 @@ pub(super) fn declared_authority(
     environment.iter().any(|(name, _)| {
         Some(name.as_str()) == credential_field(provider)
             || endpoint_fields(provider).contains(&name.as_str())
+            || (provider == "bedrock" && name.as_str() == "AWS_REGION")
     })
 }
 
@@ -148,12 +220,7 @@ fn process_environment(
         &mut environment,
         &invocation.environment,
         &adapter.local_environment,
-        &[
-            "OPENAI_API_KEY",
-            "ANTHROPIC_API_KEY",
-            "OPENROUTER_API_KEY",
-            "OPENCODE_AUTH_CONTENT",
-        ],
+        AUTHENTICATION,
     );
     let home = adapter
         .config
@@ -224,7 +291,11 @@ fn arguments(
         "--format".to_owned(),
         "json".to_owned(),
         "--model".to_owned(),
-        format!("{}/{}", adapter.config.provider, model.as_str()),
+        format!(
+            "{}/{}",
+            native_provider(&adapter.config.provider),
+            model.as_str()
+        ),
     ]);
     if let Some(id) = session_id {
         argv.extend(["--session".to_owned(), id.to_owned()]);
@@ -332,6 +403,7 @@ pub(super) fn configure_provider(
     reject_foreign_credentials(invocation, field)?;
     let declared =
         declared_credential(invocation, environment, field, adapter.runners.is_hosted())?;
+    validate_extended_provider(provider, invocation, environment, declared)?;
     let endpoints = endpoint_fields(provider);
     let declared_endpoint = invocation
         .environment
@@ -354,17 +426,67 @@ pub(super) fn configure_provider(
         .cloned();
     apply_provider_options(
         config,
-        provider,
+        native_provider(provider),
         declared.then_some(field),
         endpoint.as_deref(),
     )?;
     // Only the selected lane's ambient credentials enter this child.
-    for foreign in ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"] {
+    for foreign in CREDENTIALS.iter().copied() {
         if foreign != field {
             environment.remove(foreign);
         }
     }
     Ok(())
+}
+
+fn validate_extended_provider(
+    provider: &str,
+    invocation: &DriverInvocation,
+    environment: &BTreeMap<String, String>,
+    declared: bool,
+) -> Result<(), NodeRunnerError> {
+    if provider == "gateway" {
+        crate::native_v2_capsule::gateway::connection(environment)?;
+        gateway_protocol(environment)?;
+    }
+    if provider == "bedrock" {
+        validate_bedrock(invocation, environment, declared)?;
+    }
+    Ok(())
+}
+
+fn validate_bedrock(
+    invocation: &DriverInvocation,
+    environment: &BTreeMap<String, String>,
+    declared: bool,
+) -> Result<(), NodeRunnerError> {
+    let region = invocation
+        .environment
+        .iter()
+        .any(|(name, _)| name.as_str() == "AWS_REGION");
+    if (declared && !region)
+        || (region && !declared)
+        || (region && environment["AWS_REGION"].trim().is_empty())
+    {
+        return Err(NodeRunnerError::DriverDetail(
+            "OpenCode declared Bedrock authentication requires its own bearer token and region"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn gateway_protocol(
+    environment: &BTreeMap<String, String>,
+) -> Result<(&'static str, &'static str), NodeRunnerError> {
+    match environment.get("GATEWAY_API").map(String::as_str) {
+        Some("openai-responses") => Ok(("@ai-sdk/openai", "Authorization")),
+        Some("openai-completions") => Ok(("@ai-sdk/openai-compatible", "Authorization")),
+        Some("anthropic-messages") => Ok(("@ai-sdk/anthropic", "x-api-key")),
+        _ => Err(NodeRunnerError::DriverDetail(
+            "OpenCode gateway requires a supported GATEWAY_API".to_owned(),
+        )),
+    }
 }
 
 fn apply_provider_options(
@@ -412,7 +534,7 @@ fn reject_foreign_credentials(
     invocation: &DriverInvocation,
     own: &str,
 ) -> Result<(), NodeRunnerError> {
-    let credential_fields = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"];
+    let credential_fields = CREDENTIALS;
     let foreign = invocation
         .environment
         .iter()

@@ -12,7 +12,7 @@ import json
 import re
 from urllib.parse import urlsplit
 
-_PROVIDERS = {"openai": "openai-api", "anthropic": "anthropic", "openrouter": "openrouter"}
+_PROVIDERS = {"openai": "openai-api", "anthropic": "anthropic", "openrouter": "openrouter", "gateway": "custom"}
 _AUTH_HEADER = re.compile(r"^(authorization|proxy-authorization)$|(^|[-_])(api[-_]?key|auth|token|secret)([-_]|$)", re.I)
 _AUTH_PARAMETER = {"api_key", "apikey", "x_api_key", "access_token", "auth_token", "authorization"}
 
@@ -27,6 +27,15 @@ class _RequestRefused(BaseException):
         self.error = error
 
 
+def gateway_mode(provider, config):
+    if provider != "gateway":
+        return None
+    mode = (config.get("model") or {}).get("api_mode")
+    if mode not in {"codex_responses", "chat_completions", "anthropic_messages"}:
+        raise AuthError("Hermes gateway requires an explicit supported API mode")
+    return mode
+
+
 class Authority:
     def __init__(self, provider, credentials, config, *, model):
         declared_key, declared_base = credentials
@@ -35,6 +44,7 @@ class Authority:
         from hermes_cli.runtime_provider import frozen_runtime_config, resolve_runtime_provider
 
         self.product_provider, self.provider = provider, _PROVIDERS[provider]
+        self._api_mode = gateway_mode(provider, config)
         self._pin_endpoint = bool(declared_base)
         self._guard_required = bool(declared_key or declared_base)
         self.declared_key = declared_key
@@ -57,6 +67,9 @@ class Authority:
         with frozen_runtime_config(self.config):
             self.runtime = resolve_runtime_provider(requested=self.provider, target_model=model,
                 explicit_api_key=declared_key, explicit_base_url=declared_base)
+        if self._api_mode:
+            self.runtime["api_mode"] = self._api_mode
+            self.config["model"]["api_mode"] = self._api_mode
         self._check(self.runtime["provider"], "resolved provider")
         self._remember(self.runtime.get("api_key"))
         self.agent_kwargs = {key: self.runtime.get(key) for key in ("provider", "api_key", "base_url", "api_mode", "credential_pool")}
@@ -112,6 +125,8 @@ class Authority:
             runtime.update({key: getattr(agent, key, runtime.get(key))
                             for key in ("provider", "model", "api_key", "base_url", "api_mode")})
         runtime["provider"] = self.provider
+        if self._api_mode:
+            runtime["api_mode"] = self._api_mode
         if self.declared_key:
             runtime["api_key"] = self.declared_key
         if self._pin_endpoint:
@@ -281,6 +296,8 @@ class Authority:
                 authority._check(kwargs.get("provider"), "agent provider")
                 kwargs["provider"] = authority.provider
                 kwargs["fallback_model"] = {}
+                if authority._api_mode:
+                    kwargs["api_mode"] = authority._api_mode
                 if authority.declared_key:
                     kwargs.update(api_key=authority.declared_key, credential_pool=None)
                 if authority._pin_endpoint:
@@ -350,6 +367,8 @@ class Authority:
                 params["explicit_api_key"] = authority.declared_key
             if authority._pin_endpoint:
                 params["explicit_base_url"] = runtime["base_url"]
+            if authority._api_mode:
+                params["api_mode"] = authority._api_mode
             params["main_runtime"] = runtime
             return resolve(**params)
 
@@ -403,6 +422,8 @@ class Authority:
             elif bound.get("provider"):
                 bound["provider"] = authority.provider
             result = credentials(bound, parent)
+            if authority._api_mode:
+                result["api_mode"] = authority._api_mode
             if result.get("provider") == "custom":
                 result["provider"] = authority.provider
             return result
@@ -427,6 +448,8 @@ class Authority:
         if not model or str(model).strip().lower() == "auto":
             model = self._auxiliary._main_route_target(runtime, task)[1]
         settings = {**settings, "provider": self.provider, "model": model}
+        if self._api_mode:
+            settings["api_mode"] = self._api_mode
         if self.declared_key:
             settings["api_key"] = self.declared_key
         if self._pin_endpoint:

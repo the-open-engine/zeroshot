@@ -16,7 +16,7 @@ pub(crate) fn registration() -> HarnessRegistration {
         descriptor: HarnessDescriptor {
             id: "opencode",
             label: "OpenCode",
-            providers: &["openai", "anthropic", "openrouter"],
+            providers: &["openai", "anthropic", "openrouter", "bedrock", "gateway"],
             executable: "opencode",
             source: HarnessSource::Contributed,
         },
@@ -77,6 +77,18 @@ fn access(provider: &str) -> Result<ProviderAccessContract, HarnessError> {
             &["OPENROUTER_API_KEY"],
             &[&["OPENROUTER_API_KEY"]],
         )),
+        "bedrock" => Ok(ProviderAccessContract::new(
+            true,
+            "bedrock",
+            &["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"],
+            &[&["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"]],
+        )),
+        "gateway" => Ok(ProviderAccessContract::new(
+            false,
+            "gateway",
+            &["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "GATEWAY_API"],
+            &[&["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "GATEWAY_API"]],
+        )),
         _ => Err(HarnessError::Configuration(
             "OpenCode provider is unsupported".to_owned(),
         )),
@@ -91,6 +103,10 @@ fn normalize_local(
         environment,
         directory,
         &[
+            "AWS_CONFIG_FILE",
+            "AWS_SHARED_CREDENTIALS_FILE",
+            "AWS_WEB_IDENTITY_TOKEN_FILE",
+            "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
             "ProgramData",
             "OPENCODE_CONFIG",
             "OPENCODE_CONFIG_DIR",

@@ -265,3 +265,7 @@ mod native_authority;
 #[cfg(unix)]
 #[path = "tests/auth.rs"]
 mod auth;
+
+#[cfg(unix)]
+#[path = "tests/providers.rs"]
+mod providers;

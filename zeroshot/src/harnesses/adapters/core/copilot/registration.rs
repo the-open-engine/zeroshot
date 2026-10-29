@@ -14,21 +14,19 @@ pub(crate) fn registration() -> HarnessRegistration {
         descriptor: HarnessDescriptor {
             id: "copilot",
             label: "GitHub Copilot",
-            providers: &["github"],
+            providers: &[
+                "github",
+                "openai",
+                "anthropic",
+                "openrouter",
+                "gateway",
+                "bedrock",
+            ],
             executable: "copilot",
             source: HarnessSource::Core,
         },
         build,
-        access: |provider| {
-            parsed_provider_access(provider, |_: crate::native_v2_contract::CopilotProvider| {
-                crate::harnesses::ProviderAccessContract::new(
-                    true,
-                    "github",
-                    &["COPILOT_GITHUB_TOKEN"],
-                    &[&["COPILOT_GITHUB_TOKEN"]],
-                )
-            })
-        },
+        access: |provider| parsed_provider_access(provider, super::access::provider_access),
         normalize_local,
     }
 }
@@ -74,5 +72,9 @@ fn build(
     } else {
         super::CopilotAdapter::new(config)
     };
-    Ok(HarnessAdapter::new(adapter.with_active_memory(memory)))
+    Ok(HarnessAdapter::new(
+        adapter
+            .with_provider(native.provider)
+            .with_active_memory(memory),
+    ))
 }

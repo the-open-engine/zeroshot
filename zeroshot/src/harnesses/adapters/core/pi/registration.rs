@@ -17,7 +17,14 @@ pub(crate) fn registration() -> HarnessRegistration {
         descriptor: HarnessDescriptor {
             id: "pi",
             label: "Pi",
-            providers: &["anthropic", "openai", "openrouter", "gateway", "bedrock"],
+            providers: &[
+                "anthropic",
+                "openai",
+                "openrouter",
+                "gateway",
+                "bedrock",
+                "github",
+            ],
             executable: "pi",
             source: HarnessSource::Core,
         },

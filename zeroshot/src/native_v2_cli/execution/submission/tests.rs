@@ -107,7 +107,11 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
 
     for (harness, provider, accepted) in [
         ("copilot", "github", true),
-        ("copilot", "openai", false),
+        ("copilot", "openai", true),
+        ("copilot", "anthropic", true),
+        ("copilot", "openrouter", true),
+        ("copilot", "gateway", true),
+        ("copilot", "bedrock", true),
         ("codex", "openai", true),
         ("codex", "openrouter", true),
         ("codex", "gateway", true),
@@ -123,7 +127,8 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
         ("pi", "openrouter", true),
         ("pi", "gateway", true),
         ("pi", "bedrock", true),
-        ("pi", "github", false),
+        ("pi", "github", true),
+        ("pi", "unregistered-provider", false),
     ] {
         let runtime = uniform(harness, provider)
             .into_runtime_plan(

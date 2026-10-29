@@ -1162,21 +1162,19 @@ RUNTIME CONFIGURATION
         }
       }
 
-    Provider choices are codex/openai, codex/openrouter, codex/bedrock, claude/anthropic,
-    claude/openrouter, claude/bedrock, codex/gateway, claude/gateway, copilot/github,
-    pi/anthropic, pi/openai, pi/openrouter, pi/bedrock, and pi/gateway. Official local builds also
-    include contributed opencode and hermes adapters with openai, anthropic, and openrouter providers.
+    The host's adapter registry admits supported harness/provider pairs. See the Harness adapters
+    documentation for available pairs. Official local builds include contributed opencode and hermes.
     Contributed adapters use the same feature contract; compatibility is community-maintained.
     Platform and the default target image enable only core harnesses. Gateway connections
     require GATEWAY_BASE_URL and GATEWAY_API_KEY. Codex uses Responses and Claude uses Messages.
-    The pi/gateway lane also carries GATEWAY_API, which names the wire protocol as one of
+    Pi, Copilot, OpenCode, and Hermes gateway lanes also carry GATEWAY_API, which names the protocol as
     openai-responses, openai-completions, or anthropic-messages.
     Declaring ANTHROPIC_BASE_URL with ANTHROPIC_API_KEY sends the pi/anthropic lane to a
     caller-owned Anthropic Messages endpoint.
     Known-incompatible harness/provider pairs include
-    codex/anthropic, claude/openai, and pi/github. Local Copilot reuses its native user login;
-    contained
-    Copilot uses a user-backed GitHub connection with COPILOT_GITHUB_TOKEN. Pi has no permission
+    codex/anthropic and claude/openai. Local copilot/github reuses native login; contained
+    copilot/github uses a user-backed GitHub connection with COPILOT_GITHUB_TOKEN.
+    Copilot's other lanes use native BYOK transports; its Bedrock lane uses AWS's Responses API. Pi has no permission
     control of its own, so its contained runs rely on the disposable capsule rather than a bypass
     argument. Model IDs are passed
     unchanged to the selected harness and
@@ -1203,10 +1201,8 @@ RUNTIME CONFIGURATION
     effort, sessionScope, connections, activeMemory, and globalAgents fields without nodes.
     Zeroshot expands that agent binding
     across every executable graph node and supplies graph-visible Git delivery bindings itself.
-    Omitted connections reuse native local login for codex/openai, claude/anthropic,
-    copilot/github, pi/anthropic, pi/openai, and the supported local opencode and hermes lanes;
-    other local lanes and contained targets derive
-    their canonical connection requirements.
+    Omitted connections reuse native local authentication when the selected adapter supports it;
+    other local lanes and contained targets derive their canonical connection requirements.
 
 ENVIRONMENT PREPARATION
     For Docker or Platform targets, pass --environment environment.json with a separate, flat JSON

@@ -6,6 +6,75 @@
 use super::*;
 
 #[test]
+fn github_user_token_seeds_native_oauth_in_private_state() {
+    let directory = TestDirectory::new("pi-github-auth");
+    let files = files(&directory);
+    let adapter = PiAdapter::new_local(adapter_configuration(
+        PiProvider::Github,
+        "pi",
+        BTreeMap::new(),
+    ))
+    .assert_value();
+    let invocation = invocation(
+        agent_binding(
+            "native-model",
+            None,
+            SessionScope::NodeInstance,
+            &["COPILOT_GITHUB_TOKEN"],
+        ),
+        NodeRole::Worker,
+        resolved(
+            &["COPILOT_GITHUB_TOKEN"],
+            &[("COPILOT_GITHUB_TOKEN", "declared-user-token")],
+        ),
+    );
+    let command = adapter
+        .command_for_test(&invocation, &files, "zs-fixed")
+        .assert_value();
+    assert_eq!(
+        command.argv[command
+            .argv
+            .iter()
+            .position(|arg| arg == "--provider")
+            .assert_value()
+            + 1],
+        "github-copilot"
+    );
+    assert!(!command.environment.contains_key("COPILOT_GITHUB_TOKEN"));
+    let home = PathBuf::from(&command.environment["PI_CODING_AGENT_DIR"]);
+    assert!(home.starts_with(files.home()));
+    let auth: Value =
+        serde_json::from_str(&std::fs::read_to_string(home.join("auth.json")).assert_value())
+            .assert_value();
+    assert_eq!(
+        auth["github-copilot"],
+        serde_json::json!({"type":"oauth","refresh":"declared-user-token","access":"","expires":0})
+    );
+}
+
+#[test]
+fn github_without_declared_credentials_keeps_native_login_and_agent_directory() {
+    let directory = TestDirectory::new("pi-github-native");
+    let files = files(&directory);
+    let adapter = PiAdapter::new_local(adapter_configuration(
+        PiProvider::Github,
+        "pi",
+        BTreeMap::from([("PI_CODING_AGENT_DIR".to_owned(), "/native/agent".to_owned())]),
+    ))
+    .assert_value();
+    let invocation = invocation(
+        agent_binding("native-model", None, SessionScope::Execution, &[]),
+        NodeRole::Worker,
+        resolved(&[], &[]),
+    );
+    let command = adapter
+        .command_for_test(&invocation, &files, "zs-fixed")
+        .assert_value();
+    assert_eq!(command.environment["PI_CODING_AGENT_DIR"], "/native/agent");
+    assert!(!files.home().join("pi-agent/auth.json").exists());
+}
+
+#[test]
 fn declaring_any_anthropic_authentication_form_suppresses_other_ambient_forms() {
     let names = [
         "ANTHROPIC_API_KEY",

@@ -16,7 +16,7 @@ pub(crate) fn registration() -> HarnessRegistration {
         descriptor: HarnessDescriptor {
             id: "hermes",
             label: "Hermes",
-            providers: &["openai", "anthropic", "openrouter"],
+            providers: &["openai", "anthropic", "openrouter", "gateway"],
             executable: "hermes",
             source: HarnessSource::Contributed,
         },
@@ -73,6 +73,12 @@ fn access(provider: &str) -> Result<ProviderAccessContract, HarnessError> {
             "openrouter",
             &["OPENROUTER_API_KEY"],
             &[&["OPENROUTER_API_KEY"]],
+        )),
+        "gateway" => Ok(ProviderAccessContract::new(
+            false,
+            "gateway",
+            &["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "GATEWAY_API"],
+            &[&["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "GATEWAY_API"]],
         )),
         _ => Err(HarnessError::Configuration(
             "Hermes provider is unsupported".to_owned(),

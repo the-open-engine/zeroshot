@@ -61,12 +61,12 @@ compatibility during admission; see [Harness adapters](../project/harness-adapte
 pairs and where each adapter runs. The same compatibility rules apply to an agent node's
 [`lane`](#per-node-lanes).
 
-`pi/anthropic` and `pi/openai` reuse a local Pi login from `~/.pi/agent`; the other `pi` lanes
+`pi/anthropic`, `pi/openai` and `pi/github` reuse a local Pi login from `~/.pi/agent`; the other `pi` lanes
 need a connection.
 
-`pi/gateway` carries `GATEWAY_BASE_URL`, `GATEWAY_API_KEY`, and `GATEWAY_API`. The last names the
+Pi, Copilot, OpenCode and Hermes gateway lanes carry `GATEWAY_BASE_URL`, `GATEWAY_API_KEY`, and `GATEWAY_API`. The last names the
 wire protocol as `openai-responses`, `openai-completions`, or `anthropic-messages`, so one lane
-reaches any endpoint Pi implements and the model identifier stays opaque and caller-owned. Zeroshot
+selects the native transport and the model identifier stays opaque and caller-owned. Zeroshot
 never infers the protocol from the identifier, and an unrecognized value fails before launch.
 
 To send the `anthropic` lane to a caller-owned Messages-compatible endpoint, declare

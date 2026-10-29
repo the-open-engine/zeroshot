@@ -451,6 +451,13 @@ pub use source::*;
 #[serde(rename_all = "snake_case")]
 pub enum CopilotProvider {
     Github,
+    #[serde(rename = "openai")]
+    OpenAi,
+    Anthropic,
+    #[serde(rename = "openrouter")]
+    OpenRouter,
+    Gateway,
+    Bedrock,
 }
 
 #[derive(
@@ -500,6 +507,7 @@ pub enum ClaudeProvider {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum PiProvider {
+    Github,
     Anthropic,
     #[serde(rename = "openai")]
     OpenAi,
@@ -515,7 +523,7 @@ impl PiProvider {
     /// environment, so native reuse means exactly that stored credential.
     #[must_use]
     pub const fn natively_authenticated(self) -> bool {
-        matches!(self, Self::Anthropic | Self::OpenAi)
+        matches!(self, Self::Anthropic | Self::OpenAi | Self::Github)
     }
 }
 
@@ -579,7 +587,14 @@ macro_rules! native_provider_names {
     };
 }
 
-native_provider_names!(CopilotProvider, {CopilotProvider::Github => "github"});
+native_provider_names!(CopilotProvider, {
+    CopilotProvider::Github => "github",
+    CopilotProvider::OpenAi => "openai",
+    CopilotProvider::Anthropic => "anthropic",
+    CopilotProvider::OpenRouter => "openrouter",
+    CopilotProvider::Gateway => "gateway",
+    CopilotProvider::Bedrock => "bedrock",
+});
 native_provider_names!(CodexProvider, {
     CodexProvider::OpenAi => "openai",
     CodexProvider::OpenRouter => "openrouter",
@@ -593,6 +608,7 @@ native_provider_names!(ClaudeProvider, {
     ClaudeProvider::Bedrock => "bedrock",
 });
 native_provider_names!(PiProvider, {
+    PiProvider::Github => "github",
     PiProvider::Anthropic => "anthropic",
     PiProvider::OpenAi => "openai",
     PiProvider::OpenRouter => "openrouter",

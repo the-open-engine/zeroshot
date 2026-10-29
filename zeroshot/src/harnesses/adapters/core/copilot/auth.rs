@@ -34,6 +34,24 @@ impl<'a> CopilotAuthentication<'a> {
         Ok(authentication)
     }
 
+    pub(super) fn external(environment: &'a ResolvedEnvironment) -> Result<Self, NodeRunnerError> {
+        if LOCAL_TOKEN_NAMES
+            .iter()
+            .chain([EXPIRES_AT].iter())
+            .any(|name| field(environment, name).is_some())
+        {
+            return Err(failure(
+                "Copilot GitHub credentials conflict with the selected provider",
+            ));
+        }
+        Ok(Self {
+            environment,
+            local_token: None,
+            native: true,
+            github_origin: "https://github.com".to_owned(),
+        })
+    }
+
     fn validate(&self) -> Result<(), NodeRunnerError> {
         for token in LOCAL_TOKEN_NAMES
             .iter()

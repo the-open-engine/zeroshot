@@ -11,6 +11,13 @@ use crate::native_v2_runner::{DriverInvocation, NodeRunnerError};
 use super::{CopilotConfig, auth, provider};
 
 pub(super) const LOCAL_ENVIRONMENT: &[&str] = &[
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENAI_API_BASE",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_BASE_URL",
     "COPILOT_GITHUB_TOKEN",
     "GH_TOKEN",
     "GITHUB_TOKEN",
@@ -329,7 +336,10 @@ fn extend_declared_environment(
 ) -> Result<(), NodeRunnerError> {
     for (name, value) in invocation.environment.iter() {
         let name = name.as_str();
-        if auth::is_credential(name) || provider::is_configuration(name) {
+        if auth::is_credential(name)
+            || provider::is_configuration(name)
+            || provider::is_credential(name)
+        {
             continue;
         }
         if reserved_process_environment(name) {

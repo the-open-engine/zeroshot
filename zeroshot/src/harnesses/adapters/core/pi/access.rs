@@ -3,6 +3,12 @@ use crate::native_v2_contract::PiProvider;
 
 pub(super) fn provider_access(provider: PiProvider) -> ProviderAccessContract {
     match provider {
+        PiProvider::Github => ProviderAccessContract::new(
+            true,
+            "github",
+            &["COPILOT_GITHUB_TOKEN"],
+            &[&["COPILOT_GITHUB_TOKEN"]],
+        ),
         PiProvider::Anthropic => ProviderAccessContract::new(
             true,
             "anthropic",

@@ -81,6 +81,12 @@ while (message := read()) is not None:
             auth = read()
             assert auth["result"]["kind"] == "token"
             assert auth["result"]["expiresIn"] > 3600
+        elif mode == "explicit_provider":
+            assert "gitHubToken" not in params
+            assert "gitHubTokenProviderRegistrationId" not in params
+            assert "provider" in params
+            for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "GATEWAY_API_KEY"):
+                assert name not in os.environ
         elif mode == "provider_command":
             assert "gitHubToken" not in params
             assert "gitHubTokenProviderRegistrationId" not in params

@@ -111,7 +111,7 @@ fn unsupported_harness_provider_pairs_decode_but_fail_registered_compatibility()
     // Portable identities are readable without the implementation; its registry owns admission.
     let mut pi_fixture = canonical_submission();
     *pi_fixture.pointer_mut("/runtime/harness").assert_value() = json!("pi");
-    *pi_fixture.pointer_mut("/runtime/provider").assert_value() = json!("github");
+    *pi_fixture.pointer_mut("/runtime/provider").assert_value() = json!("unregistered-provider");
     let decoded: RunSubmission = serde_json::from_value(pi_fixture).assert_value();
     assert!(
         crate::harnesses::HarnessRegistry::core()
@@ -128,6 +128,7 @@ fn every_pi_lane_round_trips() {
         ("openrouter", "anthropic/claude-sonnet-5"),
         ("bedrock", "global.anthropic.claude-sonnet-5"),
         ("gateway", "provider-owned-model"),
+        ("github", "native-copilot-model"),
     ] {
         let mut expected = canonical_submission();
         *expected.pointer_mut("/runtime/harness").assert_value() = json!("pi");

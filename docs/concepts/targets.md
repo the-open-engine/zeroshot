@@ -80,7 +80,7 @@ command translated to the singular RPC contract uses its authored `modelId` as t
 Contained targets use a private Copilot home and require the canonical `COPILOT_GITHUB_TOKEN`
 connection instead.
 
-Local Pi runs use the current user's `~/.pi/agent` for a `pi/anthropic` or `pi/openai` lane, which
+Local Pi runs use the current user's `~/.pi/agent` for a `pi/anthropic`, `pi/openai` or `pi/github` lane, which
 reuses a stored Pi login. Any other Pi lane, a declared credential, or a caller-owned endpoint
 instead receives a private agent directory so no ambient catalog or credential is inherited. A
 declared or ambient `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, or `OPENAI_API_BASE` becomes a Pi
