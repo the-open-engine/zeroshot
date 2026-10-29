@@ -72,7 +72,7 @@ fn environment_token_from_snapshot(
     }
     names
         .iter()
-        .find_map(|name| environment.get(*name))
+        .find_map(|name| environment.get(name))
         .map(|value| checked_token(value).map(str::to_owned))
         .transpose()
 }
