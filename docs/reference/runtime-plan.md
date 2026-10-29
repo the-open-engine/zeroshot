@@ -18,12 +18,12 @@ machine-readable contract.
 
 `RuntimePlan` is a closed JSON object. The following four fields are required; unknown fields are rejected.
 
-| Field      | Value                                                                                 |
-| ---------- | ------------------------------------------------------------------------------------- |
-| `harness`  | Registered harness of the default lane; official local builds also include `opencode` |
-| `provider` | Provider of the default lane, supported by the selected harness                       |
-| `size`     | `small`, `medium`, or `large`                                                         |
-| `nodes`    | Object mapping each executable graph node name to a [node binding](#node-bindings)    |
+| Field      | Value                                                                                              |
+| ---------- | -------------------------------------------------------------------------------------------------- |
+| `harness`  | Registered harness of the default lane; official local builds also include `opencode` and `hermes` |
+| `provider` | Provider of the default lane, supported by the selected harness                                    |
+| `size`     | `small`, `medium`, or `large`                                                                      |
+| `nodes`    | Object mapping each executable graph node name to a [node binding](#node-bindings)                 |
 
 Optional `activeMemory` controls repository and graph recall/collection independently, and
 `globalAgents.postmortem` configures the built-in after-run specialists. Both default to enabled
@@ -65,6 +65,7 @@ Harness and provider identifiers are bounded non-control strings. The host regis
 | `copilot`                       | `github`                                                  |
 | `pi`                            | `anthropic`, `openai`, `openrouter`, `bedrock`, `gateway` |
 | `opencode` (contributed, local) | `anthropic`, `openai`, `openrouter`                       |
+| `hermes` (contributed, local)   | `anthropic`, `openai`, `openrouter`                       |
 
 The same pairs apply to an agent node's [`lane`](#per-node-lanes). Any other pair is rejected when
 the plan is admitted.
@@ -249,7 +250,7 @@ the session request fails with the same message. When every `PATH` entry is abso
 checks at startup. An empty or relative entry resolves against the directory the harness starts in,
 which is known only per session, so then the startup check is skipped. The check does not inspect login state; a missing login surfaces at
 that lane's first turn. As in a single-lane run, local `codex`/`openai`, `claude`/`anthropic`,
-`copilot`/`github`, `pi`/`anthropic`, `pi`/`openai`, and supported local `opencode` lanes reuse
+`copilot`/`github`, `pi`/`anthropic`, `pi`/`openai`, and supported local `opencode` and `hermes` lanes reuse
 their harness's native login. Other lanes need their provider's connection fields; see
 [Connections](#connections).
 
@@ -359,10 +360,11 @@ Custom graphs author delivery in both the graph and the plan.
 
 ## Contributed harnesses
 
-Official local binaries include contributed adapters. OpenCode supports the `openai`, `anthropic`,
+Official local binaries include contributed adapters. OpenCode and Hermes support the `openai`, `anthropic`,
 and `openrouter` providers and reuses native local login when no credential is declared. Declared
 connections use `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENROUTER_API_KEY` respectively. Install
-`opencode` separately and put it on `PATH`.
+`opencode` or `hermes` separately and put it on `PATH`. Hermes uses its installed Python environment;
+the adapter has been exercised against Hermes v0.22.5.
 
 Contributed and core adapters share the complete feature contract, including Active Memory,
 structured output, reusable sessions, corrections, cancellation and usage reporting. Contributors

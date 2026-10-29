@@ -11,6 +11,7 @@ pub(super) struct NativeProof {
     run: String,
     workspace: PathBuf,
     receipts: PathBuf,
+    harness: Option<String>,
     tool: String,
     instruction: String,
 }
@@ -21,37 +22,56 @@ impl NativeProof {
         let source = std::fs::read(path).assert_value_with("native proof manifest");
         let proof: Self = serde_json::from_slice(&source).assert_value();
         assert_eq!(proof.schema, "zeroshot.native-parity-fixture/v1");
+        assert!(matches!(
+            proof.harness.as_deref(),
+            None | Some("opencode" | "hermes")
+        ));
         assert_eq!(proof.workspace.canonicalize().assert_value(), workspace);
         Some(proof)
     }
 
-    pub(super) fn append_instruction(&self, instruction: &mut String) {
+    pub(super) fn append_instruction(&self, instruction: &mut String, phase: &str) {
         instruction.push_str("\n\n");
         instruction.push_str(&self.instruction);
+        instruction.push_str(&format!(
+            " Use exactly `{phase}` as the native MCP record `phase` value."
+        ));
     }
 
     pub(super) fn tool_calls(&self) -> usize {
-        self.mcp_calls().len()
+        self.mcp_events().len()
     }
 
     pub(super) fn assert_new_call(&self, before: usize, node: &str, marker: &str) {
-        let calls = self.mcp_calls();
+        let calls = self.mcp_events();
         assert!(
             calls.len() >= before,
             "native proof receipts were truncated"
         );
         assert!(
-            calls[before..].iter().any(|call| {
-                call["phase"] == node
+            calls[before..].iter().enumerate().any(|(index, call)| {
+                call["kind"] == "tool-call"
+                    && call["phase"] == node
                     && call["marker"] == marker
                     && call["authenticated"] == true
                     && call["nativeResources"] == true
+                    && (!self.is_hermes()
+                        || (call["nativeTransform"] == true
+                            && calls[before..before + index].iter().any(|probe| {
+                                probe["kind"] == "probe-call"
+                                    && probe["authenticated"] == true
+                                    && probe["pid"] == call["pid"]
+                            })))
             }),
             "live {node} must make a new authenticated native MCP call with recalled memory and native resources"
         );
     }
 
     pub(super) fn assert_completed(&self) {
+        if self.is_hermes() {
+            self.assert_hermes();
+            return;
+        }
         for scope in ["global", "project"] {
             let events = self.records(&format!("plugin-{scope}.jsonl"));
             assert!(
@@ -92,7 +112,57 @@ impl NativeProof {
         }
     }
 
-    fn mcp_calls(&self) -> Vec<Value> {
+    fn is_hermes(&self) -> bool {
+        self.harness.as_deref() == Some("hermes")
+    }
+
+    fn assert_hermes(&self) {
+        let events = self.records("plugin-global.jsonl");
+        assert!(
+            events
+                .iter()
+                .all(|event| { event["scope"] == "global" && event["harness"] == "hermes" })
+        );
+        let initializations: Vec<_> = events
+            .iter()
+            .filter(|event| event["kind"] == "init")
+            .collect();
+        assert!(!initializations.is_empty(), "missing native Hermes plugin");
+        for initialization in initializations {
+            assert_eq!(initialization["safeMode"], false);
+            assert_eq!(initialization["permissionMode"], "manual");
+            assert_eq!(initialization["pluginsEnabled"], true);
+            assert_eq!(initialization["mcpPresent"], true);
+        }
+        assert!(
+            events
+                .iter()
+                .filter(|event| event["kind"] == "tool-before")
+                .all(|event| event["auto"] == false)
+        );
+        for kind in ["tool-before", "tool-after", "tool-transform"] {
+            assert!(
+                events
+                    .iter()
+                    .any(|event| { event["kind"] == kind && event["tool"] == self.tool }),
+                "native Hermes plugin must observe {kind} for the proof MCP tool"
+            );
+        }
+        assert!(
+            events.iter().any(|event| {
+                event["kind"] == "tool-transform"
+                    && event["tool"] == "mcp__nativeproof__probe"
+                    && event["challengeEmitted"] == true
+            }),
+            "native Hermes result transform must provide the proof challenge"
+        );
+        assert!(
+            !self.receipts.join("disabled-plugin-loaded").exists(),
+            "native disabled Hermes plugin must stay disabled"
+        );
+    }
+
+    fn mcp_events(&self) -> Vec<Value> {
         let events = self.records("mcp.jsonl");
         assert!(
             events
@@ -101,9 +171,6 @@ impl NativeProof {
             "native proof MCP authentication was rejected"
         );
         events
-            .into_iter()
-            .filter(|event| event["kind"] == "tool-call")
-            .collect()
     }
 
     fn records(&self, name: &str) -> Vec<Value> {

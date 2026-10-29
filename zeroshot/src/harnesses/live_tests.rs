@@ -191,8 +191,8 @@ async fn registered_harness_live_memory_sessions_and_verifier_contract() {
         "Independently inspect {artifact} and run npm test using native tools. Your final output must include the exact marker delivered by Active Memory and your verification result. Do not edit files or run Git commands."
     );
     if let Some(proof) = &native_proof {
-        proof.append_instruction(&mut worker);
-        proof.append_instruction(&mut verifier);
+        proof.append_instruction(&mut worker, "worker");
+        proof.append_instruction(&mut verifier, "verifier");
     }
     let bindings = runtime_bindings(&settings, &registry);
     let admitted = NativeV2Admission

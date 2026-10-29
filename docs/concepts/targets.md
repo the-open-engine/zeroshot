@@ -14,7 +14,7 @@ again during admission. Older targets without this extension accept only the est
 harnesses through client preflight.
 
 Official local builds include [contributed harness adapters](../project/harness-adapters.md),
-including OpenCode. They use the same execution and Active Memory contracts as core adapters;
+including OpenCode and Hermes. They use the same execution and Active Memory contracts as core adapters;
 contributors maintain their native CLI compatibility. Platform and the default target image
 enable only core adapters and do not ship contributed harness executables.
 

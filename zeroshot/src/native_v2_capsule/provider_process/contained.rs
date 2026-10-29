@@ -11,6 +11,7 @@ pub(crate) struct ProviderProcess {
     process: ProcessSession,
     files: Arc<ProviderExecutionFiles>,
     pending: bool,
+    retain_files: bool,
 }
 
 impl ProviderProcess {
@@ -19,6 +20,7 @@ impl ProviderProcess {
             process,
             files,
             pending: true,
+            retain_files: false,
         }
     }
 
@@ -34,8 +36,16 @@ impl ProviderProcess {
         result
     }
 
+    /// A native runtime may own detached jobs beyond the contained process group. Keep its
+    /// execution files until whole-run cleanup when that additional settlement is unconfirmed.
+    #[cfg(feature = "contributed-harnesses")]
+    pub(crate) fn retain_execution_files(&mut self) {
+        self.retain_files = true;
+    }
+
     fn record_completion(&mut self, result: &Result<ProcessSessionOutput, ProcessRunnerError>) {
         if self.pending
+            && !self.retain_files
             && result
                 .as_ref()
                 .is_ok_and(|output| output.cleanup.proves_tree_empty())

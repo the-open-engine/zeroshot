@@ -1059,7 +1059,7 @@ RUNTIME CONFIGURATION
     Provider choices are codex/openai, codex/openrouter, codex/bedrock, claude/anthropic,
     claude/openrouter, claude/bedrock, codex/gateway, claude/gateway, copilot/github,
     pi/anthropic, pi/openai, pi/openrouter, pi/bedrock, and pi/gateway. Official local builds also
-    include contributed opencode/openai, opencode/anthropic, and opencode/openrouter adapters.
+    include contributed opencode and hermes adapters with openai, anthropic, and openrouter providers.
     Contributed adapters use the same feature contract; compatibility is community-maintained.
     Platform and the default target image enable only core harnesses. Gateway connections
     require GATEWAY_BASE_URL and GATEWAY_API_KEY. Codex uses Responses and Claude uses Messages.
@@ -1098,7 +1098,7 @@ RUNTIME CONFIGURATION
     Zeroshot expands that agent binding
     across every executable graph node and supplies graph-visible Git delivery bindings itself.
     Omitted connections reuse native local login for codex/openai, claude/anthropic,
-    copilot/github, pi/anthropic, pi/openai, and the supported local opencode lanes;
+    copilot/github, pi/anthropic, pi/openai, and the supported local opencode and hermes lanes;
     other local lanes and contained targets derive
     their canonical connection requirements.
 

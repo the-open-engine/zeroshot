@@ -162,6 +162,25 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   disposable capsule. Active Memory installs a separate native plugin alongside user plugins.
   Explicit `OPENCODE_PURE=true` conflicts with declared authentication because it disables the
   required provider overlay.
+  Hermes uses its installed canonical executable's interpreter and native `AIAgent`/configuration
+  factories in a private process, without starting or attaching its shared gateway. A scoped import
+  hook preserves native startup; `--version --help` fails closed if that hook is unavailable.
+  Credentials cross private stdin after a versioned handshake. Local profile selection, managed
+  settings, plugins, MCP, instructions and permissions remain native. The owned agent, auxiliary
+  and delegation factories keep declared credentials authoritative through refresh and retries;
+  explicit foreign provider routes refuse before authentication. Native login retains native refresh.
+  Structured corrections share one runtime; node revisits follow native compression tips in a
+  private native session database. Bind the original native profile through execution and cleanup
+  so private database placement never changes SOUL or skills lookup. Captured shell values remain private until native configuration
+  requests their names. Declared connections override native dotenv values; provider credentials
+  remain private and are available to explicit native configuration lookups.
+  Cancellation requests native interruption and confirms terminal jobs, Python kernels, owned
+  background work, LSP and MCP cleanup before the shared process-kill fallback. A native cleanup acknowledgement is required
+  in addition to process containment evidence. Remote kernel retirement retains known ownership
+  until checked native transport confirms settlement; inaccessible evidence stays unknown.
+  Caller-selected remote backends retain native containment guarantees. Native token deltas remain visible; unreported
+  auxiliary or child work marks totals incomplete. Active Memory attaches native model-facing
+  notices after tool-result bookkeeping, preserving native transforms and durable messages.
 - Model identifiers are opaque provider-owned strings. Do not infer a harness from a provider/model,
   maintain runtime model catalogs, or validate provider availability. Admission may reject only known
   incompatible harness/provider pairs.

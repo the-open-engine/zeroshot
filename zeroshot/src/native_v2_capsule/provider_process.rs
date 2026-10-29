@@ -196,8 +196,19 @@ pub(crate) async fn open_provider_process(
     command: ProcessSessionCommand,
     control: &DriverControl,
 ) -> Result<Result<ProviderProcess, ProcessRunnerError>, NodeRunnerError> {
+    open_provider_process_with_cancellation(files, command, control, control.cancellation()).await
+}
+
+/// Adapters with native detached jobs first request and confirm native cleanup, then trip their
+/// bounded kill signal. Other adapters retain the ordinary immediate cancellation behavior.
+pub(crate) async fn open_provider_process_with_cancellation(
+    files: Arc<ProviderExecutionFiles>,
+    command: ProcessSessionCommand,
+    control: &DriverControl,
+    cancellation: crate::execution::driver::DriverCancellation,
+) -> Result<Result<ProviderProcess, ProcessRunnerError>, NodeRunnerError> {
     files.begin_process();
-    match files.runner.open(command, control.cancellation()).await {
+    match files.runner.open(command, cancellation).await {
         Ok(process) => Ok(Ok(ProviderProcess::new(process, files))),
         Err(error) => {
             if error.launch_evidence() == ProcessLaunchEvidence::MayHaveStarted {

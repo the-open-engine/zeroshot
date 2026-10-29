@@ -109,25 +109,27 @@ fn core_and_local_catalogs_apply_only_the_compiled_contribution_policy() {
         core.descriptors()
             .all(|descriptor| matches!(descriptor.source, HarnessSource::Core))
     );
-    let opencode = RuntimeLane::new("opencode", "openai").unwrap();
-    assert!(matches!(
-        core.descriptor(&opencode),
-        Err(HarnessError::UnknownHarness(_))
-    ));
     let local = HarnessRegistry::local();
     for lane in core.lanes() {
         local.descriptor(&lane).unwrap();
     }
-    #[cfg(feature = "contributed-harnesses")]
-    assert!(matches!(
-        local.descriptor(&opencode).unwrap().source,
-        HarnessSource::Contributed
-    ));
-    #[cfg(not(feature = "contributed-harnesses"))]
-    assert!(matches!(
-        local.descriptor(&opencode),
-        Err(HarnessError::UnknownHarness(_))
-    ));
+    for harness in ["opencode", "hermes"] {
+        let lane = RuntimeLane::new(harness, "openai").unwrap();
+        assert!(matches!(
+            core.descriptor(&lane),
+            Err(HarnessError::UnknownHarness(_))
+        ));
+        #[cfg(feature = "contributed-harnesses")]
+        assert!(matches!(
+            local.descriptor(&lane).unwrap().source,
+            HarnessSource::Contributed
+        ));
+        #[cfg(not(feature = "contributed-harnesses"))]
+        assert!(matches!(
+            local.descriptor(&lane),
+            Err(HarnessError::UnknownHarness(_))
+        ));
+    }
 }
 
 #[test]
