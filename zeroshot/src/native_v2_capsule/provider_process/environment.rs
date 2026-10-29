@@ -6,86 +6,6 @@ use std::collections::BTreeMap;
 use crate::native_v2_runner::{NodeRunnerError, ResolvedEnvironment};
 use std::fmt;
 
-pub(crate) const CODEX_LOCAL_ENVIRONMENT: &[&str] = &[
-    "CODEX_API_KEY",
-    "OPENAI_API_KEY",
-    "CODEX_BASE_URL",
-    "OPENAI_BASE_URL",
-    "OPENAI_API_BASE",
-];
-
-pub(crate) const CLAUDE_LOCAL_ENVIRONMENT: &[&str] = &[
-    // Claude's macOS Keychain login uses the invoking user's account name.
-    "USER",
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
-    "CLAUDE_CONFIG_DIR",
-    "CLAUDE_CODE_FORCE_SANDBOX",
-    "CLAUDE_CODE_RESTRICTED",
-    "CLAUDE_CODE_AUTO_MODE_EXTERNAL_PERMISSIONS",
-    "CLAUDE_BG_SESSION_PERMISSION_RULES",
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_BEDROCK_BASE_URL",
-    "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
-    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
-    "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
-    "CLAUDE_CODE_USE_BEDROCK",
-    "CLAUDE_CODE_USE_GATEWAY",
-    "CLAUDE_CODE_USE_MANTLE",
-    "CLAUDE_CODE_USE_VERTEX",
-    "CLAUDE_CODE_USE_FOUNDRY",
-];
-
-/// Pi provider credentials, endpoint settings, and process controls.
-///
-/// The lane decides which of these it accepts; the harness only forwards names a caller may have
-/// set in their invoking shell. Pi resolves credentials from its own agent directory first, so a
-/// native-local lane reuses a stored login while every other lane drops these values.
-pub(crate) const PI_LOCAL_ENVIRONMENT: &[&str] = &[
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_OAUTH_TOKEN",
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_BEDROCK_BASE_URL",
-    "OPENAI_API_KEY",
-    "OPENAI_BASE_URL",
-    "OPENAI_API_BASE",
-    "OPENROUTER_API_KEY",
-    "AWS_BEARER_TOKEN_BEDROCK",
-    "AWS_REGION",
-    "AWS_DEFAULT_REGION",
-    "PI_CODING_AGENT_DIR",
-    "PI_CODING_AGENT_SESSION_DIR",
-    "PI_OFFLINE",
-    "PI_SKIP_VERSION_CHECK",
-    "PI_TELEMETRY",
-];
-
-pub(crate) const COPILOT_LOCAL_ENVIRONMENT: &[&str] = &[
-    "COPILOT_GITHUB_TOKEN",
-    "GH_TOKEN",
-    "GITHUB_TOKEN",
-    "GH_HOST",
-    "COPILOT_GH_HOST",
-    "COPILOT_PROVIDER_BASE_URL",
-    "COPILOT_PROVIDER_TYPE",
-    "COPILOT_PROVIDER_API_KEY",
-    "COPILOT_PROVIDER_API_KEY_COMMAND",
-    "COPILOT_PROVIDER_BEARER_TOKEN",
-    "COPILOT_PROVIDER_WIRE_API",
-    "COPILOT_PROVIDER_TRANSPORT",
-    "COPILOT_PROVIDER_AZURE_API_VERSION",
-    "COPILOT_PROVIDER_MODEL_ID",
-    "COPILOT_PROVIDER_WIRE_MODEL",
-    "COPILOT_PROVIDER_MAX_PROMPT_TOKENS",
-    "COPILOT_PROVIDER_MAX_OUTPUT_TOKENS",
-    "COPILOT_PROVIDER_HEADERS",
-    "COPILOT_PROVIDERS_CONFIG",
-    "COPILOT_OFFLINE",
-];
-
 const LOCAL_TRANSPORT_ENVIRONMENT: &[&str] = &[
     "DBUS_SESSION_BUS_ADDRESS",
     "XDG_RUNTIME_DIR",
@@ -111,7 +31,7 @@ pub(crate) fn current_process_environment() -> BTreeMap<String, String> {
         .collect()
 }
 
-/// Private snapshot of the invoking shell used only by built-in local harnesses.
+/// Private snapshot of the invoking shell used only by local harness adapters.
 ///
 /// Its values cross the one-shot controller bootstrap but never the controller process
 /// environment, hosted composition, durable state, or debug output. Harnesses select only the

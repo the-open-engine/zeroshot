@@ -187,7 +187,7 @@ fn gateway_environment_rejects_conflicting_provider_credentials() {
 
 #[test]
 fn hosted_claude_passes_declared_endpoints_configuration_and_controls() {
-    for name in crate::native_v2_capsule::provider_process::CLAUDE_LOCAL_ENVIRONMENT {
+    for name in super::super::command::LOCAL_ENVIRONMENT {
         let values = provider_environment(ClaudeProvider::Anthropic, &[(name, "caller-value")])
             .assert_value();
         assert_eq!(values.get(*name).map(String::as_str), Some("caller-value"));

@@ -6,6 +6,30 @@ use crate::native_v2_capsule::provider_process::{effort_token, with_driver_detai
 use crate::native_v2_runner::{DriverInvocation, NodeRunnerError, render_agent_prompt};
 use crate::worker_catalog::ReasoningEffort;
 
+pub(super) const LOCAL_ENVIRONMENT: &[&str] = &[
+    // Claude's macOS Keychain login uses the invoking user's account name.
+    "USER",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_CODE_FORCE_SANDBOX",
+    "CLAUDE_CODE_RESTRICTED",
+    "CLAUDE_CODE_AUTO_MODE_EXTERNAL_PERMISSIONS",
+    "CLAUDE_BG_SESSION_PERMISSION_RULES",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_BEDROCK_BASE_URL",
+    "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_GATEWAY",
+    "CLAUDE_CODE_USE_MANTLE",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+];
+
 pub(super) const AWS_BEARER_TOKEN_BEDROCK: &str = "AWS_BEARER_TOKEN_BEDROCK";
 pub(super) const AWS_REGION: &str = "AWS_REGION";
 pub(super) const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api";

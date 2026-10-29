@@ -27,8 +27,8 @@ use std::path::{Path, PathBuf};
 
 use crate::execution::process::{HostedProcessPool, ProcessSessionCommand};
 use crate::native_v2_capsule::provider_process::{
-    ClosedSessionFailure, LocalHarnessEnvironment, PI_LOCAL_ENVIRONMENT, ProviderExecution,
-    ProviderExecutionFiles, ProviderProcessRunners, provider_redactions, with_driver_detail,
+    ClosedSessionFailure, LocalHarnessEnvironment, ProviderExecution, ProviderExecutionFiles,
+    ProviderProcessRunners, provider_redactions, with_driver_detail,
 };
 use crate::native_v2_contract::{NodeRuntimeBinding, PiProvider};
 use crate::native_v2_runner::{
@@ -36,7 +36,7 @@ use crate::native_v2_runner::{
     ProviderSchemaDialect, ResolvedEnvironment, render_agent_prompt_with_schema,
     resolve_agent_response_with_schema,
 };
-use command::{PiCommandRequest, command};
+use command::{LOCAL_ENVIRONMENT, PiCommandRequest, command};
 use provider_document::{
     OPENAI, declared_api, declared_base_url, gateway_base_url, write_endpoint, write_gateway,
 };
@@ -139,9 +139,7 @@ impl PiAdapter {
     /// receives a private agent directory and drops the ambient credentials of its lane.
     pub fn new_local(configuration: PiConfig) -> Result<Self, PiAdapterConfigError> {
         let provider = configuration.provider;
-        let local_environment = configuration
-            .native_environment
-            .selected(PI_LOCAL_ENVIRONMENT);
+        let local_environment = configuration.native_environment.selected(LOCAL_ENVIRONMENT);
         let mut adapter = Self::configured(configuration, ProviderProcessRunners::local())?;
         adapter.local_environment = local_environment;
         // A Bedrock region is foreign to every lane but Bedrock. Forwarding it would make the

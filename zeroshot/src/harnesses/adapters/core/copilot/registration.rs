@@ -57,7 +57,7 @@ fn build(
     });
     let mut base_environment = native
         .environment
-        .selected(crate::native_v2_capsule::provider_process::COPILOT_LOCAL_ENVIRONMENT);
+        .selected(super::command::LOCAL_ENVIRONMENT);
     base_environment.extend(context.base_environment);
     let config = super::CopilotConfig {
         executable: context.executable,

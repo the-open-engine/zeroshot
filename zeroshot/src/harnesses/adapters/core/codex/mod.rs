@@ -23,8 +23,8 @@ use crate::execution::driver::WorkspaceCapability;
 use crate::execution::process::{HostedProcessPool, ProcessSessionCommand};
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderFailure, ProviderFailureRetry, ProviderProcessRunners,
-    ProviderExecution, ProviderFilesystemConfig, CODEX_LOCAL_ENVIRONMENT, LocalHarnessEnvironment,
-    agent_workspace_access, provider_redactions, redaction_values, with_driver_detail,
+    ProviderExecution, ProviderFilesystemConfig, LocalHarnessEnvironment, agent_workspace_access,
+    provider_redactions, redaction_values, with_driver_detail,
 };
 use crate::native_v2_contract::CodexProvider;
 use crate::native_v2_runner::{
@@ -34,8 +34,8 @@ use crate::native_v2_runner::{
 };
 
 use command::{
-    add_node_args, add_provider_args, add_resume_command, add_session_target, agent_selection,
-    configure_provider_auth, process_environment, path_text,
+    LOCAL_ENVIRONMENT, add_node_args, add_provider_args, add_resume_command, add_session_target,
+    agent_selection, configure_provider_auth, process_environment, path_text,
 };
 use output::CodexOutput;
 use process::{ProcessOpen, ProcessTurnContext, exchange_turn, open_process};
@@ -96,7 +96,7 @@ impl NativeV2CodexAdapter {
 
     #[must_use]
     pub fn new_local(config: NativeV2CodexConfig) -> Self {
-        let mut local_environment = config.native_environment.selected(CODEX_LOCAL_ENVIRONMENT);
+        let mut local_environment = config.native_environment.selected(LOCAL_ENVIRONMENT);
         if config.provider != CodexProvider::OpenAi {
             local_environment
                 .retain(|name, _| !matches!(name.as_str(), "CODEX_API_KEY" | "OPENAI_API_KEY"));

@@ -18,6 +18,31 @@ use crate::native_v2_contract::{NodeRuntimeBinding, PiProvider};
 use crate::native_v2_runner::{DriverInvocation, NodeRunnerError, ResolvedEnvironment};
 use crate::worker_catalog::ReasoningEffort;
 
+/// Pi provider credentials, endpoint settings, and process controls.
+///
+/// The lane decides which of these it accepts; the harness only forwards names a caller may have
+/// set in their invoking shell. Pi resolves credentials from its own agent directory first, so a
+/// native-local lane reuses a stored login while every other lane drops these values.
+pub(super) const LOCAL_ENVIRONMENT: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_OAUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_BEDROCK_BASE_URL",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENAI_API_BASE",
+    "OPENROUTER_API_KEY",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "PI_CODING_AGENT_DIR",
+    "PI_CODING_AGENT_SESSION_DIR",
+    "PI_OFFLINE",
+    "PI_SKIP_VERSION_CHECK",
+    "PI_TELEMETRY",
+];
+
 pub(super) const AWS_BEARER_TOKEN_BEDROCK: &str = "AWS_BEARER_TOKEN_BEDROCK";
 pub(super) const AWS_REGION: &str = "AWS_REGION";
 pub(super) const OPENROUTER_KEY: &str = "OPENROUTER_API_KEY";

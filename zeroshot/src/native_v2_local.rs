@@ -242,25 +242,6 @@ fn resolve_relative_home_overrides(
         .map_err(LocalCompositionError::Harness)
 }
 
-pub(crate) fn pi_agent_directory_path(
-    value: &str,
-    user_home: Option<&Path>,
-) -> Result<PathBuf, LocalCompositionError> {
-    let relative = if value == "~" {
-        Some("")
-    } else {
-        value
-            .strip_prefix("~/")
-            .or_else(|| value.strip_prefix("~\\").filter(|_| cfg!(windows)))
-    };
-    match relative {
-        Some(relative) => Ok(user_home
-            .ok_or(LocalCompositionError::NativeEnvironment)?
-            .join(relative)),
-        None => Ok(PathBuf::from(value)),
-    }
-}
-
 /// A branch-independent identity proof for retrospective local history selection.
 /// Runtime source admission still requires an exact attached source when delivery needs one.
 pub(crate) fn local_memory_remote(

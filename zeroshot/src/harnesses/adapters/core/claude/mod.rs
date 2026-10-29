@@ -21,15 +21,15 @@ use std::path::{Path, PathBuf};
 use crate::execution::process::{HostedProcessPool, ProcessSessionCommand};
 use crate::native_v2_capsule::provider_process::{
     ClosedSessionFailure, ProviderExecution, ProviderExecutionFiles, ProviderProcessRunners,
-    CLAUDE_LOCAL_ENVIRONMENT, LocalHarnessEnvironment, agent_workspace_access, provider_redactions,
-    with_driver_detail, merge_local_environment, extend_declared_environment,
+    LocalHarnessEnvironment, agent_workspace_access, provider_redactions, with_driver_detail,
+    merge_local_environment, extend_declared_environment,
 };
 use crate::native_v2_contract::{ClaudeProvider, NodeRuntimeBinding};
 use crate::native_v2_runner::{
     AgentResponse, resolve_agent_response, DriverControl, DriverInvocation, LiveOutput,
     LiveOutputStream, NodeRunnerError, ProviderSchemaDialect, ResolvedEnvironment,
 };
-use command::{ClaudeTurnArguments, claude_arguments, configure_provider, prompt};
+use command::{LOCAL_ENVIRONMENT, ClaudeTurnArguments, claude_arguments, configure_provider, prompt};
 use session::{ClaudeRunState, ClaudeSession, attempt_session_id, observe_session};
 use transcript::{ClaudeAttempt, ClaudeTranscript};
 use turn_process::ProviderProcessStart as ClaudeProcessStart;
@@ -84,9 +84,7 @@ impl ClaudeAdapter {
 
     pub fn new_local(configuration: ClaudeAdapterConfig) -> Result<Self, ClaudeAdapterConfigError> {
         let inherit_selectors = configuration.provider == ClaudeProvider::Anthropic;
-        let local_environment = configuration
-            .native_environment
-            .selected(CLAUDE_LOCAL_ENVIRONMENT);
+        let local_environment = configuration.native_environment.selected(LOCAL_ENVIRONMENT);
         let mut adapter = Self::configured(configuration, ProviderProcessRunners::local())?;
         adapter.local_environment = local_environment;
         if !inherit_selectors {

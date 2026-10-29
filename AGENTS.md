@@ -138,8 +138,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   requirements, executable lookup and factories for every adapter. Maintained implementations live
   in `harnesses/adapters/core`; contributions live in `harnesses/adapters/contributed` and register
   explicitly. Protocol harness/provider IDs are bounded opaque strings; registry admission owns
-  pair compatibility. Core and contributed adapters implement the same complete execution and
-  Active Memory contracts. The distinction controls distribution and maintenance ownership only.
+  pair compatibility. Each adapter owns its native environment allowlist and home/path expansion;
+  shared process helpers keep only common environment and transport mechanics. Existing public
+  core module paths remain available for embedders. Core and contributed adapters implement the same
+  complete execution and Active Memory contracts. The distinction controls distribution and maintenance
+  ownership only.
   Native memory hook/extension installation belongs to the adapter; shared memory owns the broker,
   frozen recall budgets, receipts and maintenance. Contributions never acquire a separate runtime
   or reduced feature path. Official local builds enable `contributed-harnesses`; target images and

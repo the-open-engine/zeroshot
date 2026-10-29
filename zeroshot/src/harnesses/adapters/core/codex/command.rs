@@ -7,6 +7,14 @@ use crate::native_v2_contract::{CodexProvider, NodeRuntimeBinding};
 use crate::native_v2_runner::{NodeRunnerError, ResolvedEnvironment};
 use crate::worker_catalog::{ModelId, ReasoningEffort};
 
+pub(super) const LOCAL_ENVIRONMENT: &[&str] = &[
+    "CODEX_API_KEY",
+    "OPENAI_API_KEY",
+    "CODEX_BASE_URL",
+    "OPENAI_BASE_URL",
+    "OPENAI_API_BASE",
+];
+
 pub(super) const AWS_BEARER_TOKEN_BEDROCK: &str = "AWS_BEARER_TOKEN_BEDROCK";
 pub(super) const AWS_REGION: &str = "AWS_REGION";
 const CODEX_HOME: &str = "CODEX_HOME";

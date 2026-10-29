@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::active_memory::hooks::ActiveMemoryHooks;
@@ -38,12 +38,27 @@ fn normalize_local(
         if value.starts_with("file://") {
             return Ok(());
         }
-        let path = crate::native_v2_local::pi_agent_directory_path(value, home.as_deref())
-            .map_err(|_| HarnessError::Configuration("Pi agent directory is invalid".to_owned()))?;
+        let path = agent_directory_path(value, home.as_deref())?;
         *value = path.to_string_lossy().into_owned();
     }
     normalize_paths(environment, directory, &["PI_CODING_AGENT_DIR"])
 }
+fn agent_directory_path(value: &str, user_home: Option<&Path>) -> Result<PathBuf, HarnessError> {
+    let relative = if value == "~" {
+        Some("")
+    } else {
+        value
+            .strip_prefix("~/")
+            .or_else(|| value.strip_prefix("~\\").filter(|_| cfg!(windows)))
+    };
+    match relative {
+        Some(relative) => Ok(user_home
+            .ok_or_else(|| HarnessError::Configuration("Pi agent directory is invalid".to_owned()))?
+            .join(relative)),
+        None => Ok(PathBuf::from(value)),
+    }
+}
+
 fn build(
     context: HarnessBuildContext,
     memory: Option<Arc<ActiveMemoryHooks>>,
@@ -70,3 +85,6 @@ fn build(
     .map_err(|error| HarnessError::Configuration(error.to_string()))?;
     Ok(HarnessAdapter::new(adapter.with_active_memory(memory)))
 }
+
+#[cfg(test)]
+mod tests;

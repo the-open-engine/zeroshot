@@ -411,7 +411,7 @@ fn hosted_codex_preserves_declared_endpoint_overrides_for_all_providers() {
             ],
         ),
     ] {
-        for name in crate::native_v2_capsule::provider_process::CODEX_LOCAL_ENVIRONMENT
+        for name in super::super::command::LOCAL_ENVIRONMENT
             .iter()
             .copied()
             .filter(|name| !matches!(*name, "CODEX_API_KEY" | "OPENAI_API_KEY"))
