@@ -2,8 +2,11 @@
 use openengine_cluster_testkit::assertions::AssertError;
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{Value, json};
+#[cfg(unix)]
+use std::collections::BTreeSet;
 
 use super::*;
+use crate::harnesses::{HarnessBuildContext, HarnessHost, HarnessRegistry};
 use crate::native_v2_admission::NativeV2Admission;
 use crate::native_v2_candidate::test_support::{TestDirectory, full_graph, git, success_node};
 
@@ -126,16 +129,23 @@ fn single_lane(lanes: Vec<NativeV2HarnessConfig>) -> NativeV2HarnessConfig {
     lane
 }
 
-fn assert_local_harness_paths(
-    actual: (&Path, &Path, &str, Option<&Path>),
-    expected: (&Path, &Path, &Path),
-) {
-    let (actual_workspace, actual_runtime_home, actual_search_path, actual_home) = actual;
+fn assert_local_harness_paths(context: &HarnessBuildContext, expected: (&Path, &Path, &Path)) {
     let (workspace, runtime_home, home) = expected;
-    assert_eq!(actual_workspace, workspace);
-    assert_eq!(actual_runtime_home, runtime_home);
-    assert_eq!(actual_search_path, "/custom/bin");
-    assert_eq!(actual_home, Some(home));
+    assert_eq!(context.workspace, workspace);
+    assert_eq!(context.runtime_home, runtime_home);
+    assert_eq!(context.search_path, "/custom/bin");
+    let HarnessHost::Local {
+        home: local_home,
+        environment,
+    } = &context.host
+    else {
+        panic!("a local adapter must receive local native context");
+    };
+    assert_eq!(local_home.as_deref(), Some(home));
+    assert_eq!(
+        environment.get("PATH").map(String::as_str),
+        Some("/custom/bin")
+    );
 }
 
 #[test]
@@ -227,88 +237,24 @@ async fn local_harness_contract_materializes_each_native_lane_without_processes(
     let runtime_home = root.child("runtime");
     let home = root.child("home");
     let environment = local_environment(&root);
-
-    match single_lane(
-        local_lanes(
-            &admitted_for("copilot", "github").await,
-            &workspace,
-            &runtime_home,
-            &environment,
-        )
-        .assert_value(),
-    ) {
-        NativeV2HarnessConfig::Copilot(config) => {
-            assert_local_harness_paths(
-                (
-                    &config.workspace,
-                    &config.runtime_home,
-                    &config.search_path,
-                    config.local_user.as_ref().map(|user| user.home.as_path()),
-                ),
-                (&workspace, &runtime_home, &home),
+    let registry = HarnessRegistry::local();
+    for descriptor in registry.descriptors() {
+        for provider in descriptor.providers {
+            let config = single_lane(
+                local_lanes(
+                    &admitted_for(descriptor.id, provider).await,
+                    &workspace,
+                    &runtime_home,
+                    &environment,
+                )
+                .assert_value(),
             );
+            let context = &config.context;
+            assert_eq!(config.lane().harness_name(), descriptor.id);
+            assert_eq!(config.lane().provider_name(), *provider);
+            assert_eq!(context.executable, PathBuf::from(descriptor.executable));
+            assert_local_harness_paths(context, (&workspace, &runtime_home, &home));
         }
-        _ => panic!("expected Copilot harness"),
-    }
-    match single_lane(
-        local_lanes(
-            &admitted_for("codex", "openai").await,
-            &workspace,
-            &runtime_home,
-            &environment,
-        )
-        .assert_value(),
-    ) {
-        NativeV2HarnessConfig::Codex(config) => {
-            assert_eq!(config.executable, PathBuf::from("codex"));
-            assert_eq!(config.workspace, workspace);
-            assert_eq!(config.runtime_home, runtime_home);
-            assert_eq!(
-                config.native_environment.get("PATH").map(String::as_str),
-                Some("/custom/bin")
-            );
-            assert_eq!(config.local_user.assert_value().home, home);
-        }
-        _ => panic!("expected Codex harness"),
-    }
-    match single_lane(
-        local_lanes(
-            &admitted_for("claude", "anthropic").await,
-            &workspace,
-            &runtime_home,
-            &environment,
-        )
-        .assert_value(),
-    ) {
-        NativeV2HarnessConfig::Claude(config) => {
-            assert_eq!(config.workspace, workspace);
-            assert_eq!(config.runtime_home, runtime_home);
-            assert_eq!(config.local_user_home, Some(home.clone()));
-            assert_eq!(config.executable, "claude");
-        }
-        _ => panic!("expected Claude harness"),
-    }
-    match single_lane(
-        local_lanes(
-            &admitted_for("pi", "anthropic").await,
-            &workspace,
-            &runtime_home,
-            &environment,
-        )
-        .assert_value(),
-    ) {
-        NativeV2HarnessConfig::Pi(config) => {
-            assert_eq!(
-                config.provider,
-                crate::native_v2_contract::PiProvider::Anthropic
-            );
-            assert_eq!(config.executable, "pi");
-            assert_eq!(config.workspace, workspace);
-            assert_eq!(config.runtime_home, runtime_home);
-            // A native-local lane reuses the invoking user's home so Pi finds `~/.pi/agent`.
-            assert_eq!(config.local_user_home, Some(home.clone()));
-        }
-        _ => panic!("expected Pi harness"),
     }
 }
 
@@ -338,40 +284,17 @@ async fn local_lanes_build_one_configuration_per_effective_lane_from_shared_inpu
     .await;
 
     let lanes = local_lanes(&admitted, &workspace, &runtime_home, &environment).assert_value();
-    let [
-        NativeV2HarnessConfig::Codex(codex),
-        NativeV2HarnessConfig::Claude(claude),
-    ] = lanes.as_slice()
-    else {
-        panic!("expected exactly a Codex and then a Claude configuration");
-    };
-    assert_eq!(
-        codex.provider,
-        openengine_cluster_protocol::CodexProvider::OpenAi
-    );
-    assert_eq!(
-        claude.provider,
-        openengine_cluster_protocol::ClaudeProvider::Anthropic
-    );
-    assert_eq!(codex.executable, PathBuf::from("codex"));
-    assert_eq!(claude.executable, "claude");
-    for (lane_workspace, lane_runtime_home) in [
-        (&codex.workspace, &codex.runtime_home),
-        (&claude.workspace, &claude.runtime_home),
-    ] {
-        assert_eq!(lane_workspace, &workspace);
-        assert_eq!(lane_runtime_home, &runtime_home);
+    assert_eq!(lanes.len(), 2);
+    for (harness, provider) in [("codex", "openai"), ("claude", "anthropic")] {
+        let config = lanes
+            .iter()
+            .find(|config| config.lane().harness_name() == harness)
+            .assert_value();
+        let context = &config.context;
+        assert_eq!(config.lane().provider_name(), provider);
+        assert_eq!(context.executable, PathBuf::from(harness));
+        assert_local_harness_paths(context, (&workspace, &runtime_home, &home));
     }
-    assert_eq!(codex.search_path, "/custom/bin");
-    assert_eq!(
-        claude.base_environment.clone_values().get("PATH"),
-        Some(&codex.search_path)
-    );
-    assert_eq!(
-        codex.local_user.as_ref().map(|user| user.home.as_path()),
-        Some(home.as_path())
-    );
-    assert_eq!(claude.local_user_home.as_deref(), Some(home.as_path()));
 }
 
 #[tokio::test]
@@ -502,28 +425,26 @@ fn lane_executables_pass_when_every_lane_finds_its_executable() {
 fn a_missing_lane_executable_names_the_first_such_lane_and_its_executable() {
     let root = TestDirectory::new("lane-executables-missing");
     let (bin, environment) = search_directory(&root);
-
-    let error =
-        check_lane_executables(&mixed_lane_plan(), &environment, root.path()).assert_error();
+    let mut missing = BTreeSet::new();
+    for _ in 0..2 {
+        let error =
+            check_lane_executables(&mixed_lane_plan(), &environment, root.path()).assert_error();
+        let LocalCompositionError::MissingLaneExecutable { lane, executable } = &error else {
+            panic!("missing executables must return the lane and required program");
+        };
+        assert_eq!(lane.harness_name(), *executable);
+        assert_eq!(
+            error.to_string(),
+            format!("lane {lane} needs the `{executable}` executable on PATH")
+        );
+        assert!(missing.insert(lane.harness_name().to_owned()));
+        install_executable(&bin, executable);
+    }
     assert_eq!(
-        error.to_string(),
-        "lane codex/openai needs the `codex` executable on PATH"
+        missing,
+        BTreeSet::from(["claude".to_owned(), "codex".to_owned()])
     );
-
-    install_executable(&bin, "codex");
-    let error =
-        check_lane_executables(&mixed_lane_plan(), &environment, root.path()).assert_error();
-    assert!(matches!(
-        error,
-        LocalCompositionError::MissingLaneExecutable {
-            lane: RuntimeLane::Claude { .. },
-            executable: "claude",
-        }
-    ));
-    assert_eq!(
-        error.to_string(),
-        "lane claude/anthropic needs the `claude` executable on PATH"
-    );
+    check_lane_executables(&mixed_lane_plan(), &environment, root.path()).assert_value();
 }
 
 #[test]
@@ -543,15 +464,21 @@ fn an_empty_path_entry_finds_lane_executables_in_the_directory_the_harness_start
     std::fs::create_dir(&workspace).assert_value();
     let environment = BTreeMap::from([("PATH".to_owned(), format!(":{}", bin.display()))]);
 
-    let error = check_lane_executables(&mixed_lane_plan(), &environment, &workspace).assert_error();
-    assert_eq!(
-        error.to_string(),
-        "lane codex/openai needs the `codex` executable on PATH"
-    );
+    let plan = mixed_lane_plan();
+    assert!(matches!(
+        check_lane_executables(&plan, &environment, &workspace).assert_error(),
+        LocalCompositionError::MissingLaneExecutable { .. }
+    ));
 
-    install_executable(&workspace, "codex");
-    install_executable(&workspace, "claude");
-    check_lane_executables(&mixed_lane_plan(), &environment, &workspace).assert_value();
+    let registry = HarnessRegistry::local();
+    for lane in plan.lanes() {
+        install_executable(
+            &workspace,
+            registry.descriptor(&lane).assert_value().executable,
+        );
+    }
+    check_lane_executables(&plan, &environment, &workspace).assert_value();
+    assert!(check_lane_executables(&plan, &environment, root.path()).is_err());
 }
 
 fn forge_source(url: &str, provider: &str) -> ResolvedSource {

@@ -213,3 +213,65 @@ fn static_connection_debug_redacts_values_and_validates_shape() {
     assert!(!debug.contains("secret-value"));
     assert!(StaticConnectionValues::new(BTreeMap::new()).is_err());
 }
+
+#[test]
+fn enabled_runtime_harnesses_have_their_own_versioned_catalog() {
+    let lane = crate::RuntimeLane::new("opencode", "openai").assert_value();
+    for authentication in [
+        TargetAuthentication::None,
+        TargetAuthentication::PrivateCapability,
+        TargetAuthentication::HostedOauth,
+    ] {
+        let document = TargetDiscoveryDocument::direct(authentication)
+            .with_node_runtime_lanes()
+            .with_runtime_harnesses(
+                TargetRuntimeHarnessesDiscovery::new(vec![lane.clone()]).assert_value(),
+            );
+        assert!(!document.extensions.is_empty());
+        let wire = serde_json::to_value(&document).assert_value();
+        assert_eq!(
+            wire["extensions"]["node_runtime_lanes"],
+            serde_json::json!({"kind":NODE_RUNTIME_LANES_KIND})
+        );
+        assert_eq!(
+            wire["extensions"]["runtime_harnesses"],
+            serde_json::json!({
+                "kind":RUNTIME_HARNESSES_KIND, "lanes":[{"harness":"opencode","provider":"openai"}]
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<TargetDiscoveryDocument>(wire).assert_value(),
+            document
+        );
+    }
+    let extension_only = TargetDiscoveryExtensions {
+        runtime_harnesses: Some(TargetRuntimeHarnessesDiscovery::new(vec![lane]).assert_value()),
+        ..Default::default()
+    };
+    assert!(!extension_only.is_empty());
+}
+
+#[test]
+fn runtime_harness_catalog_rejects_duplicate_unbounded_or_malformed_entries() {
+    let lane = crate::RuntimeLane::new("opencode", "openai").assert_value();
+    assert!(TargetRuntimeHarnessesDiscovery::new(vec![lane.clone(), lane.clone()]).is_err());
+    let too_many = (0..=MAX_TARGET_RUNTIME_LANES)
+        .map(|index| crate::RuntimeLane::new(format!("harness-{index}"), "provider").assert_value())
+        .collect();
+    assert!(TargetRuntimeHarnessesDiscovery::new(too_many).is_err());
+    for lanes in [
+        serde_json::json!([lane.clone(), lane]),
+        serde_json::json!([{"harness":"", "provider":"provider"}]),
+        serde_json::json!([{"harness":"opencode","provider":"openai","extra":true}]),
+    ] {
+        assert!(
+            serde_json::from_value::<TargetRuntimeHarnessesDiscovery>(
+                serde_json::json!({"kind":RUNTIME_HARNESSES_KIND,"lanes":lanes})
+            )
+            .is_err()
+        );
+    }
+    let mut direct = TargetRuntimeHarnessesDiscovery::new(Vec::new()).assert_value();
+    direct.lanes = vec![crate::RuntimeLane::new("same", "same").assert_value(); 2];
+    assert!(direct.validate().is_err());
+}

@@ -343,11 +343,13 @@ pub(crate) fn codex_runtime(
         crate::native_v2_contract::NodeRuntimeBinding,
     >,
 ) -> crate::native_v2_contract::RuntimePlan {
-    crate::native_v2_contract::RuntimePlan::Codex {
-        active_memory: Default::default(),
-        global_agents: Default::default(),
-        provider: openengine_cluster_protocol::CodexProvider::OpenAi,
+    crate::native_v2_contract::RuntimePlan::new(
+        openengine_cluster_protocol::RuntimeLane::new(
+            "codex",
+            (openengine_cluster_protocol::CodexProvider::OpenAi).name(),
+        )
+        .assert_value(),
         size,
         nodes,
-    }
+    )
 }

@@ -475,13 +475,15 @@ async fn start_delivery(fixture: &OwnershipFixture) -> crate::native_v2_runner::
         title: contract::RunTitle::new("Ownership handoff").assert_value(),
         graph: full_graph(vec![git_delivery_node(), success_node()]),
         initial_input: serde_json::Value::Null,
-        runtime: contract::RuntimePlan::Codex {
-            active_memory: Default::default(),
-            global_agents: Default::default(),
-            provider: contract::CodexProvider::OpenAi,
-            size: contract::RunSize::Small,
-            nodes: BTreeMap::from([(node.clone(), binding.clone())]),
-        },
+        runtime: contract::RuntimePlan::new(
+            openengine_cluster_protocol::RuntimeLane::new(
+                "codex",
+                (contract::CodexProvider::OpenAi).name(),
+            )
+            .assert_value(),
+            contract::RunSize::Small,
+            BTreeMap::from([(node.clone(), binding.clone())]),
+        ),
         source: Some(contract::ResolvedSource {
             remote: None,
             repository: contract::SourceRepositoryId::new("acme/project").assert_value(),

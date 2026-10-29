@@ -14,20 +14,14 @@ use openengine_cluster_protocol::{
 };
 use thiserror::Error;
 
-use crate::execution::process::HostedProcessPool;
 use crate::native_v2_candidate::{
     NativeV2CandidateConfig, NativeV2CandidateCommentDelivery, NativeV2CandidateDelivery,
     NativeV2CandidateError, NativeV2HarnessConfig, TrustedDeliveryCapabilities,
     build_local_native_v2_candidate_with_authority, build_local_owner_native_v2_candidate,
 };
-use crate::native_v2_claude::{ClaudeAdapterConfig, ClaudeAdapterConfigError};
 use crate::native_v2_cli::PreparedRunRequest;
-use crate::native_v2_codex::{NativeV2CodexConfig, NativeV2CodexUser};
 use crate::native_v2_contract::AdmittedRun;
-use crate::native_v2_capsule::HarnessProcessEnvironment;
-use crate::native_v2_copilot::{CopilotConfig, CopilotLocalUser};
-use crate::native_v2_pi::{PiAdapterConfigError, PiConfig};
-use crate::native_v2_capsule::provider_process::{COPILOT_LOCAL_ENVIRONMENT, LocalHarnessEnvironment};
+use crate::native_v2_capsule::provider_process::LocalHarnessEnvironment;
 use crate::native_v2_delivery::{NativeV2DeliveryConfig, TrustedGitHubTokenFile};
 use crate::native_v2_delivery::validation::TrustedDeliveryValidator;
 mod token_file;
@@ -103,9 +97,7 @@ pub enum LocalCompositionError {
     #[error("Git delivery needs the `{executable}` executable on PATH")]
     MissingDeliveryExecutable { executable: &'static str },
     #[error(transparent)]
-    Claude(#[from] ClaudeAdapterConfigError),
-    #[error(transparent)]
-    Pi(#[from] PiAdapterConfigError),
+    Harness(#[from] crate::harnesses::HarnessError),
     #[error(transparent)]
     Candidate(#[from] NativeV2CandidateError),
 }
@@ -245,42 +237,12 @@ fn resolve_relative_home_overrides(
     environment: &mut LocalHarnessEnvironment,
     invoking_directory: &Path,
 ) -> Result<(), LocalCompositionError> {
-    let user_home = current_user_home(environment);
-    for name in [
-        "CODEX_HOME",
-        "CLAUDE_CONFIG_DIR",
-        "COPILOT_HOME",
-        "COPILOT_PROVIDERS_CONFIG",
-        "PI_CODING_AGENT_DIR",
-    ] {
-        let Some(value) = environment.get_mut(name) else {
-            continue;
-        };
-        // Pi owns file-URL decoding, including platform rules and percent escapes.
-        if name == "PI_CODING_AGENT_DIR" && value.starts_with("file://") {
-            continue;
-        }
-        let path = if name == "PI_CODING_AGENT_DIR" {
-            pi_agent_directory_path(value, user_home.as_deref())?
-        } else {
-            PathBuf::from(&*value)
-        };
-        let path = if path.is_relative() {
-            invoking_directory.join(path)
-        } else {
-            path
-        };
-        *value = path
-            .into_os_string()
-            .into_string()
-            .map_err(|_| LocalCompositionError::NativeEnvironment)?;
-    }
-    Ok(())
+    crate::harnesses::HarnessRegistry::local()
+        .normalize_local(environment, invoking_directory)
+        .map_err(LocalCompositionError::Harness)
 }
 
-/// Pi expands a leading home shorthand before resolving its agent directory. Resolve it against
-/// the captured user's home before detachment instead of treating the tilde as a workspace name.
-fn pi_agent_directory_path(
+pub(crate) fn pi_agent_directory_path(
     value: &str,
     user_home: Option<&Path>,
 ) -> Result<PathBuf, LocalCompositionError> {
@@ -484,112 +446,40 @@ fn build_local_candidate_config(
     }
 }
 
-struct LocalLaneInputs<'a> {
-    workspace: &'a Path,
-    runtime_home: &'a Path,
-    native_environment: LocalHarnessEnvironment,
-    local_command_environment: BTreeMap<String, String>,
-    search_path: String,
-    local_home: Option<PathBuf>,
-    process_pool: HostedProcessPool,
-}
-
 fn local_lanes(
     admitted: &AdmittedRun,
     workspace: &Path,
     runtime_home: &Path,
     native_environment: &BTreeMap<String, String>,
 ) -> Result<Vec<NativeV2HarnessConfig>, LocalCompositionError> {
-    let native_environment =
+    use crate::harnesses::{HarnessBuildContext, HarnessHost, HarnessRegistry};
+    let environment =
         LocalHarnessEnvironment::new(token_file::provider_environment(native_environment));
-    let inputs = LocalLaneInputs {
-        workspace,
-        runtime_home,
-        local_command_environment: native_environment.clone().into_values(),
-        search_path: local_search_path(&native_environment),
-        local_home: current_user_home(&native_environment),
-        process_pool: HostedProcessPool::hosted_default(),
-        native_environment,
-    };
+    let search_path = local_search_path(&environment);
+    let registry = HarnessRegistry::local();
     admitted
         .runtime
         .lanes()
         .into_iter()
-        .map(|lane| local_lane(lane, &inputs))
+        .map(|lane| {
+            let executable = PathBuf::from(registry.descriptor(&lane)?.executable);
+            registry
+                .configure(HarnessBuildContext {
+                    lane,
+                    workspace: workspace.to_owned(),
+                    runtime_home: runtime_home.to_owned(),
+                    executable,
+                    prefix_arguments: Vec::new(),
+                    search_path: search_path.clone(),
+                    base_environment: BTreeMap::new(),
+                    host: HarnessHost::Local {
+                        home: current_user_home(&environment),
+                        environment: environment.clone(),
+                    },
+                })
+                .map_err(LocalCompositionError::from)
+        })
         .collect()
-}
-
-fn local_lane(
-    lane: RuntimeLane,
-    inputs: &LocalLaneInputs<'_>,
-) -> Result<NativeV2HarnessConfig, LocalCompositionError> {
-    let LocalLaneInputs {
-        workspace,
-        runtime_home,
-        ref native_environment,
-        ref local_command_environment,
-        ref search_path,
-        ref local_home,
-        process_pool,
-    } = *inputs;
-    let harness = match lane {
-        RuntimeLane::Copilot { .. } => NativeV2HarnessConfig::Copilot(CopilotConfig {
-            executable: PathBuf::from("copilot"),
-            workspace: workspace.to_owned(),
-            runtime_home: runtime_home.to_owned(),
-            local_user: local_home.clone().map(|home| CopilotLocalUser {
-                copilot_home: native_environment
-                    .get("COPILOT_HOME")
-                    .filter(|value| !value.is_empty())
-                    .map_or_else(|| home.join(".copilot"), PathBuf::from),
-                home,
-            }),
-            base_environment: native_environment.selected(COPILOT_LOCAL_ENVIRONMENT),
-            local_command_environment: local_command_environment.clone(),
-            search_path: search_path.clone(),
-            process_pool,
-        }),
-        RuntimeLane::Codex { provider } => NativeV2HarnessConfig::Codex(NativeV2CodexConfig {
-            base_environment: Default::default(),
-            provider,
-            executable: PathBuf::from("codex"),
-            workspace: workspace.to_owned(),
-            runtime_home: runtime_home.to_owned(),
-            local_user: local_home.clone().map(|home| NativeV2CodexUser {
-                codex_home: native_environment
-                    .get("CODEX_HOME")
-                    .filter(|value| !value.is_empty())
-                    .map_or_else(|| home.join(".codex"), PathBuf::from),
-                home,
-            }),
-            native_environment: native_environment.clone(),
-            search_path: search_path.clone(),
-            process_pool,
-        }),
-        RuntimeLane::Claude { provider } => NativeV2HarnessConfig::Claude(ClaudeAdapterConfig {
-            provider,
-            executable: "claude".to_owned(),
-            prefix_arguments: Vec::new(),
-            workspace: workspace.to_owned(),
-            runtime_home: runtime_home.to_owned(),
-            local_user_home: local_home.clone(),
-            native_environment: native_environment.clone(),
-            base_environment: local_process_environment(search_path, native_environment)?,
-            process_pool,
-        }),
-        RuntimeLane::Pi { provider } => NativeV2HarnessConfig::Pi(PiConfig {
-            provider,
-            executable: "pi".to_owned(),
-            prefix_arguments: Vec::new(),
-            workspace: workspace.to_owned(),
-            runtime_home: runtime_home.to_owned(),
-            local_user_home: local_home.clone(),
-            native_environment: native_environment.clone(),
-            base_environment: local_process_environment(search_path, native_environment)?,
-            process_pool,
-        }),
-    };
-    Ok(harness)
 }
 
 pub(crate) fn local_search_path(environment: &LocalHarnessEnvironment) -> String {
@@ -623,8 +513,10 @@ pub(crate) fn check_lane_executables(
     native_environment: &BTreeMap<String, String>,
     working_directory: &Path,
 ) -> Result<(), LocalCompositionError> {
+    let registry = crate::harnesses::HarnessRegistry::local();
+    registry.validate_runtime(runtime)?;
     for lane in runtime.lanes() {
-        let executable = lane.harness_name();
+        let executable = registry.descriptor(&lane)?.executable;
         if find_local_executable(executable, native_environment, working_directory).is_none() {
             return Err(LocalCompositionError::MissingLaneExecutable { lane, executable });
         }
@@ -706,19 +598,6 @@ fn default_search_path(environment: &LocalHarnessEnvironment) -> String {
         let _ = environment;
         DEFAULT_SEARCH_PATH.to_owned()
     }
-}
-
-fn local_process_environment(
-    search_path: &str,
-    native_environment: &LocalHarnessEnvironment,
-) -> Result<HarnessProcessEnvironment, crate::native_v2_capsule::ProcessEnvironmentError> {
-    let mut base_environment = BTreeMap::from([("PATH".to_owned(), search_path.to_owned())]);
-    for name in ["LANG", "LC_ALL", "TERM", "TMPDIR"] {
-        if let Some(value) = native_environment.get(name) {
-            base_environment.insert(name.to_owned(), value.clone());
-        }
-    }
-    HarnessProcessEnvironment::new(base_environment)
 }
 
 fn prepare_private_directory(path: &Path) -> Result<(), LocalCompositionError> {

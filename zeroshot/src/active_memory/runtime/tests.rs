@@ -234,16 +234,16 @@ fn fresh_execution_sessions_recall_repository_cards_while_reused_sessions_dedupl
         let first = invocation(scope, 2);
         assert!(
             hooks
-                .copilot_context(&first, &tool, &source.workspace)
+                .tool_context(&first, &tool, &source.workspace)
                 .contains("Preserve sibling guards")
         );
         assert!(
             hooks
-                .copilot_context(&first, &tool, &source.workspace)
+                .tool_context(&first, &tool, &source.workspace)
                 .is_empty()
         );
         let next = invocation(scope, 3);
-        let recalled = hooks.copilot_context(&next, &tool, &source.workspace);
+        let recalled = hooks.tool_context(&next, &tool, &source.workspace);
         assert_eq!(
             recalled.contains("Preserve sibling guards"),
             scope == SessionScope::Execution
@@ -281,7 +281,7 @@ fn graph_guidance_and_tool_callbacks_share_one_budget_with_the_configured_sessio
         let tool = json!({"tool_name":"Read", "tool_input":{"file_path":"src/guard.rs"}});
         assert!(
             hooks
-                .copilot_context(&first, &tool, &source.workspace)
+                .tool_context(&first, &tool, &source.workspace)
                 .is_empty()
         );
         let repeated = hooks.invocation(first);
@@ -294,7 +294,7 @@ fn graph_guidance_and_tool_callbacks_share_one_budget_with_the_configured_sessio
                 .contains("Check declared outputs")
         );
         let next = invocation(scope, 3);
-        let recalled = hooks.copilot_context(&next, &tool, &source.workspace);
+        let recalled = hooks.tool_context(&next, &tool, &source.workspace);
         assert_eq!(
             recalled.contains("Preserve sibling guards"),
             scope == SessionScope::Execution
@@ -429,8 +429,8 @@ fn prepared_memory_keeps_a_frozen_snapshot_after_another_run_updates_the_store()
     .unwrap();
     let call = json!({"tool_name":"Read", "tool_input":{"file_path":"src/guard.rs"}});
     let invoked = invocation(crate::execution::SessionScope::Execution, 2);
-    let old_context = first.hooks.copilot_context(&invoked, &call, &workspace);
-    let new_context = next.hooks.copilot_context(&invoked, &call, &workspace);
+    let old_context = first.hooks.tool_context(&invoked, &call, &workspace);
+    let new_context = next.hooks.tool_context(&invoked, &call, &workspace);
     assert!(old_context.contains("Check every credential selector"));
     assert!(!old_context.contains("updated credential guard"));
     assert!(new_context.contains("updated credential guard"));

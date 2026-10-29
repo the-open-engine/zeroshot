@@ -4,7 +4,7 @@ use acp::Agent as _;
 use super::*;
 use openengine_cluster_protocol::{
     ClaudeProvider, CodexProvider, CopilotProvider, DeclaredConnections, ModelId, NodeName,
-    RecordField, RunSize,
+    RecordField, RunSize, RuntimeLane,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
@@ -146,9 +146,8 @@ async fn agent_surface_advertises_its_contract_and_rejects_unsupported_session_i
 #[test]
 fn a_missing_lane_executable_reaches_the_client_as_invalid_params() {
     let missing = LocalCompositionError::MissingLaneExecutable {
-        lane: RuntimeLane::Claude {
-            provider: ClaudeProvider::Anthropic,
-        },
+        lane: RuntimeLane::new("claude", (ClaudeProvider::Anthropic).name())
+            .expect("valid built-in lane"),
         executable: "claude",
     };
     let error = AcpServeError::MissingLaneExecutable(missing.to_string()).rpc_error();
@@ -220,27 +219,30 @@ fn runtime(harness: &str, scope: &str, connections: Value) -> RuntimePlan {
     };
     let nodes = BTreeMap::from([(NodeName::new("worker").assert_value(), binding)]);
     match harness {
-        "claude" => RuntimePlan::Claude {
-            active_memory: Default::default(),
-            global_agents: Default::default(),
-            provider: ClaudeProvider::Anthropic,
-            size: RunSize::Small,
+        "claude" => RuntimePlan::new(
+            openengine_cluster_protocol::RuntimeLane::new(
+                "claude",
+                (ClaudeProvider::Anthropic).name(),
+            )
+            .assert_value(),
+            RunSize::Small,
             nodes,
-        },
-        "copilot" => RuntimePlan::Copilot {
-            active_memory: Default::default(),
-            global_agents: Default::default(),
-            provider: CopilotProvider::Github,
-            size: RunSize::Small,
+        ),
+        "copilot" => RuntimePlan::new(
+            openengine_cluster_protocol::RuntimeLane::new(
+                "copilot",
+                (CopilotProvider::Github).name(),
+            )
+            .assert_value(),
+            RunSize::Small,
             nodes,
-        },
-        _ => RuntimePlan::Codex {
-            active_memory: Default::default(),
-            global_agents: Default::default(),
-            provider: CodexProvider::OpenAi,
-            size: RunSize::Small,
+        ),
+        _ => RuntimePlan::new(
+            openengine_cluster_protocol::RuntimeLane::new("codex", (CodexProvider::OpenAi).name())
+                .assert_value(),
+            RunSize::Small,
             nodes,
-        },
+        ),
     }
 }
 
@@ -288,9 +290,8 @@ fn with_worker_lane(mut runtime: RuntimePlan, lane: RuntimeLane) -> RuntimePlan 
 async fn acp_profile_validation_checks_every_effective_lane() {
     let claude_worker = with_worker_lane(
         runtime("codex", "node_instance", json!({})),
-        RuntimeLane::Claude {
-            provider: ClaudeProvider::Anthropic,
-        },
+        RuntimeLane::new("claude", (ClaudeProvider::Anthropic).name())
+            .expect("valid built-in lane"),
     );
     validate_profile(&acp_profile(claude_worker))
         .await
@@ -298,49 +299,42 @@ async fn acp_profile_validation_checks_every_effective_lane() {
 
     let copilot_worker = with_worker_lane(
         runtime("claude", "node_instance", json!({})),
-        RuntimeLane::Copilot {
-            provider: CopilotProvider::Github,
-        },
+        RuntimeLane::new("copilot", (CopilotProvider::Github).name()).expect("valid built-in lane"),
     );
-    assert_eq!(
-        validate_profile(&acp_profile(copilot_worker))
-            .await
-            .assert_error()
-            .to_string(),
-        "ACP profile is not eligible: only Codex and Claude lanes are supported"
-    );
+    validate_profile(&acp_profile(copilot_worker))
+        .await
+        .assert_value();
 }
 
 #[tokio::test]
 async fn acp_profile_validation_accepts_mixed_codex_and_claude_lanes() {
-    let codex = RuntimeLane::Codex {
-        provider: CodexProvider::OpenAi,
-    };
-    let claude = RuntimeLane::Claude {
-        provider: ClaudeProvider::Anthropic,
-    };
-    let mixed = two_agent_profile(runtime("codex", "node_instance", json!({})), Some(claude));
-    assert_eq!(mixed.runtime.lanes(), BTreeSet::from([codex, claude]));
+    let codex =
+        RuntimeLane::new("codex", (CodexProvider::OpenAi).name()).expect("valid built-in lane");
+    let claude = RuntimeLane::new("claude", (ClaudeProvider::Anthropic).name())
+        .expect("valid built-in lane");
+    let mixed = two_agent_profile(
+        runtime("codex", "node_instance", json!({})),
+        Some(claude.clone()),
+    );
+    assert_eq!(
+        mixed.runtime.lanes(),
+        BTreeSet::from([codex.clone(), claude])
+    );
     validate_profile(&mixed)
         .await
         .unwrap_or_else(|error| panic!("a mixed Codex and Claude profile was rejected: {error}"));
 
-    let copilot = RuntimeLane::Copilot {
-        provider: CopilotProvider::Github,
-    };
-    let with_copilot =
-        two_agent_profile(runtime("codex", "node_instance", json!({})), Some(copilot));
+    let copilot =
+        RuntimeLane::new("copilot", (CopilotProvider::Github).name()).expect("valid built-in lane");
+    let with_copilot = two_agent_profile(
+        runtime("codex", "node_instance", json!({})),
+        Some(copilot.clone()),
+    );
     assert_eq!(
         with_copilot.runtime.lanes(),
         BTreeSet::from([copilot, codex])
     );
-    assert_eq!(
-        validate_profile(&with_copilot)
-            .await
-            .assert_error()
-            .to_string(),
-        "ACP profile is not eligible: only Codex and Claude lanes are supported"
-    );
+    validate_profile(&with_copilot).await.assert_value();
 }
 
 #[tokio::test]
@@ -366,13 +360,9 @@ async fn wave7_cli_contract_acp_profile_validation_rejects_unsupported_shapes() 
             .to_string()
             .contains("at least one success")
     );
-    assert!(
-        validate_profile(&acp_profile(runtime("copilot", "node_instance", json!({}))))
-            .await
-            .assert_error()
-            .to_string()
-            .contains("only Codex and Claude")
-    );
+    validate_profile(&acp_profile(runtime("copilot", "node_instance", json!({}))))
+        .await
+        .assert_value();
     assert!(
         validate_profile(&acp_profile(runtime(
             "codex",

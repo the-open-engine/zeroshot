@@ -80,3 +80,68 @@ fn lane_free_plans_are_accepted_by_every_target() {
         require_node_runtime_lanes(&controller, &lane_free()).assert_value();
     }
 }
+
+#[test]
+fn target_harness_catalog_checks_default_and_effective_lanes_with_legacy_fallback() {
+    use openengine_cluster_protocol::{RuntimeLane, TargetRuntimeHarnessesDiscovery};
+    let codex = RuntimeLane::new("codex", "openai").assert_value();
+    let opencode = RuntimeLane::new("opencode", "openai").assert_value();
+    let only_core = descriptor(
+        TargetDiscoveryDocument::direct(TargetAuthentication::None)
+            .with_node_runtime_lanes()
+            .with_runtime_harnesses(
+                TargetRuntimeHarnessesDiscovery::new(vec![codex.clone()]).assert_value(),
+            ),
+    );
+    let mut custom_default = lane_bearing("codex", "openai");
+    custom_default.harness = opencode.harness.clone();
+    for controller in [without_marker(), only_core] {
+        let mut plan = lane_free();
+        plan.harness = opencode.harness.clone();
+        assert!(require_runtime_capabilities(&controller, &plan).is_err());
+    }
+    let core_only = descriptor(
+        TargetDiscoveryDocument::direct(TargetAuthentication::None)
+            .with_node_runtime_lanes()
+            .with_runtime_harnesses(
+                TargetRuntimeHarnessesDiscovery::new(vec![codex.clone()]).assert_value(),
+            ),
+    );
+    assert!(
+        require_runtime_capabilities(&core_only, &custom_default)
+            .assert_error()
+            .to_string()
+            .contains("opencode/openai")
+    );
+    assert!(require_runtime_capabilities(&core_only, &lane_bearing("opencode", "openai")).is_err());
+    require_runtime_capabilities(&without_marker(), &lane_free()).assert_value();
+    let enabled = descriptor(
+        TargetDiscoveryDocument::direct(TargetAuthentication::None)
+            .with_node_runtime_lanes()
+            .with_runtime_harnesses(
+                TargetRuntimeHarnessesDiscovery::new(vec![codex, opencode]).assert_value(),
+            ),
+    );
+    require_runtime_capabilities(&enabled, &custom_default).assert_value();
+    require_runtime_capabilities(&enabled, &lane_bearing("opencode", "openai")).assert_value();
+}
+
+#[test]
+fn future_harness_catalog_versions_do_not_enable_contributions() {
+    use openengine_cluster_protocol::{RuntimeLane, TargetRuntimeHarnessesDiscovery};
+    let mut catalog = TargetRuntimeHarnessesDiscovery::new(vec![
+        RuntimeLane::new("opencode", "openai").assert_value(),
+    ])
+    .assert_value();
+    catalog.kind = "openengine.runtime-harnesses/v2".to_owned();
+    let controller = descriptor(
+        TargetDiscoveryDocument::direct(TargetAuthentication::None)
+            .with_node_runtime_lanes()
+            .with_runtime_harnesses(catalog),
+    );
+    assert!(controller.runtime_harnesses.is_none());
+    assert!(
+        require_runtime_capabilities(&controller, &lane_bearing("opencode", "openai")).is_err()
+    );
+    require_runtime_capabilities(&controller, &lane_free()).assert_value();
+}

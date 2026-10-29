@@ -3,6 +3,10 @@
 `ghcr.io/the-open-engine/zeroshot-target` is the canonical self-hosted target server image. It
 contains the native `zeroshot` executable plus pinned Codex, Claude, GitHub Copilot, and Pi
 harness CLIs.
+The image disables Cargo's default `contributed-harnesses` feature and contains only core adapters.
+Official local binaries include contributed adapters, including OpenCode; users install those
+harness executables separately. Platform embedders use `default-features = false` on their Zeroshot
+dependency and the core-only host registry.
 The image uses Debian Trixie with package updates applied at build time. GitHub CLI is pinned
 separately to an upstream release, verified by checksum, and tested for delivery API pagination
 before publication. Git checkout and push support HTTPS and SSH. OpenSSH and libnss_wrapper

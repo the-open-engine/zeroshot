@@ -90,7 +90,11 @@ impl PortableRunController {
             lease.clone(),
             paths.storage().join("checkpoints"),
         ));
-        let inner = Arc::new(NativeV2PlatformController::new(ledger, allocator).await?);
+        let inner = Arc::new(
+            NativeV2PlatformController::new(ledger, allocator)
+                .await?
+                .with_harness_registry(crate::harnesses::HarnessRegistry::local()),
+        );
         Ok(Self {
             run_id,
             inner,
@@ -122,7 +126,8 @@ impl PortableRunController {
                 allocator.clone(),
                 bootstrap.delivery_policy,
             )
-            .await?,
+            .await?
+            .with_harness_registry(crate::harnesses::HarnessRegistry::local()),
         );
         let receipt = inner
             .submit_with_exact_environment(

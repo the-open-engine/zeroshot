@@ -42,6 +42,8 @@ pub enum DeliveryPolicy {
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum NativeV2AdmissionError {
+    #[error("invalid runtime: {0}")]
+    InvalidRuntime(String),
     #[error("native-v2 requires graph profile openengine.graph.full/v1")]
     UnsupportedGraphProfile,
     #[error("invalid runtime environment: {0}")]
@@ -116,6 +118,37 @@ pub enum NativeV2AdmissionError {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NativeV2Admission;
 
+/// Host-selected implementation registries and policy for one pure admission operation.
+#[derive(Clone, Copy)]
+pub struct NativeV2AdmissionContext<'a> {
+    pub harnesses: &'a crate::harnesses::HarnessRegistry,
+    pub source: Option<&'a crate::source_code_provider::SourceCodeProviderRegistry>,
+    pub delivery_policy: DeliveryPolicy,
+}
+
+impl<'a> NativeV2AdmissionContext<'a> {
+    #[must_use]
+    pub fn new(
+        harnesses: &'a crate::harnesses::HarnessRegistry,
+        delivery_policy: DeliveryPolicy,
+    ) -> Self {
+        Self {
+            harnesses,
+            source: None,
+            delivery_policy,
+        }
+    }
+
+    #[must_use]
+    pub fn with_source_registry(
+        mut self,
+        source: &'a crate::source_code_provider::SourceCodeProviderRegistry,
+    ) -> Self {
+        self.source = Some(source);
+        self
+    }
+}
+
 impl NativeV2Admission {
     /// Validates one reusable graph/runtime profile without requiring run-specific input.
     pub async fn validate_profile(
@@ -124,11 +157,27 @@ impl NativeV2Admission {
         runtime: &RuntimePlan,
         delivery_policy: DeliveryPolicy,
     ) -> Result<(), NativeV2AdmissionError> {
+        let harnesses = crate::harnesses::HarnessRegistry::local();
+        self.validate_profile_with_context(
+            graph,
+            runtime,
+            NativeV2AdmissionContext::new(&harnesses, delivery_policy),
+        )
+        .await
+    }
+
+    /// Validates against the host's enabled implementations without runtime effects.
+    pub async fn validate_profile_with_context(
+        &self,
+        graph: &GraphSpec,
+        runtime: &RuntimePlan,
+        context: NativeV2AdmissionContext<'_>,
+    ) -> Result<(), NativeV2AdmissionError> {
         if graph.profile != GraphProfile::Full {
             return Err(NativeV2AdmissionError::UnsupportedGraphProfile);
         }
         let declarations = executable_declarations(&graph.root);
-        validate_executable_bindings(&declarations, runtime, delivery_policy)?;
+        validate_executable_bindings(&declarations, runtime, context)?;
         validate_delivery_concurrency(&graph.root)?;
         comment::validate_comment_profile(graph)?;
         let registry = GraphBoundWorkerRegistry::from_declarations(graph, &declarations, runtime)?;
@@ -187,8 +236,12 @@ impl NativeV2Admission {
         submission: RunSubmission,
         delivery_policy: DeliveryPolicy,
     ) -> Result<AdmittedRun, NativeV2AdmissionError> {
-        self.admit_using_registry(submission, delivery_policy, None)
-            .await
+        let harnesses = crate::harnesses::HarnessRegistry::local();
+        self.admit_with_context(
+            submission,
+            NativeV2AdmissionContext::new(&harnesses, delivery_policy),
+        )
+        .await
     }
 
     /// Uses the caller's registered source adapters with the same graph and runtime admission.
@@ -197,15 +250,17 @@ impl NativeV2Admission {
         submission: RunSubmission,
         registry: &crate::source_code_provider::SourceCodeProviderRegistry,
     ) -> Result<AdmittedRun, NativeV2AdmissionError> {
-        self.admit_using_registry(submission, DeliveryPolicy::Optional, Some(registry))
-            .await
+        let harnesses = crate::harnesses::HarnessRegistry::local();
+        let context = NativeV2AdmissionContext::new(&harnesses, DeliveryPolicy::Optional)
+            .with_source_registry(registry);
+        self.admit_with_context(submission, context).await
     }
 
-    async fn admit_using_registry(
+    /// Admits through exactly the implementation registries selected by the execution host.
+    pub async fn admit_with_context(
         &self,
         submission: RunSubmission,
-        delivery_policy: DeliveryPolicy,
-        registry: Option<&crate::source_code_provider::SourceCodeProviderRegistry>,
+        context: NativeV2AdmissionContext<'_>,
     ) -> Result<AdmittedRun, NativeV2AdmissionError> {
         let RunSubmission {
             title,
@@ -226,9 +281,9 @@ impl NativeV2Admission {
                 branch: None,
                 submission_key,
             },
-            delivery_policy,
+            context,
         )?;
-        validate_source_delivery_with_registry(source.as_ref(), &prepared.graph, registry)?;
+        validate_source_delivery_with_registry(source.as_ref(), &prepared.graph, context.source)?;
         let verified = verify_submission(&prepared).await?;
 
         Ok(AdmittedRun {
@@ -247,7 +302,21 @@ impl NativeV2Admission {
         intent: &RunSubmissionIntent,
         delivery_policy: DeliveryPolicy,
     ) -> Result<(), NativeV2AdmissionError> {
-        let prepared = prepare_submission(intent.clone(), delivery_policy)?;
+        let harnesses = crate::harnesses::HarnessRegistry::local();
+        self.validate_intent_with_context(
+            intent,
+            NativeV2AdmissionContext::new(&harnesses, delivery_policy),
+        )
+        .await
+    }
+
+    /// Validates an intent before host effects using the selected implementation registries.
+    pub async fn validate_intent_with_context(
+        &self,
+        intent: &RunSubmissionIntent,
+        context: NativeV2AdmissionContext<'_>,
+    ) -> Result<(), NativeV2AdmissionError> {
+        let prepared = prepare_submission(intent.clone(), context)?;
         verify_submission(&prepared).await.map(|_| ())
     }
 }
@@ -322,7 +391,7 @@ struct PreparedSubmission {
 
 fn prepare_submission(
     intent: RunSubmissionIntent,
-    delivery_policy: DeliveryPolicy,
+    context: NativeV2AdmissionContext<'_>,
 ) -> Result<PreparedSubmission, NativeV2AdmissionError> {
     let RunSubmissionIntent {
         title,
@@ -337,7 +406,7 @@ fn prepare_submission(
     validate_graph_input(&graph, &initial_input)?;
     loop_limits::bind_input_limits(&mut graph.root, &initial_input)?;
     let declarations = executable_declarations(&graph.root);
-    validate_executable_bindings(&declarations, &runtime, delivery_policy)?;
+    validate_executable_bindings(&declarations, &runtime, context)?;
     validate_delivery_concurrency(&graph.root)?;
     comment::validate_comment_profile(&graph)?;
     comment::resolve_comment_input(&graph.root, &initial_input)?;

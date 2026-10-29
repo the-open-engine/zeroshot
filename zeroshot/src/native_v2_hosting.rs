@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use openengine_cluster_protocol::{NativeV2RunValueError, RunSubmitParams, RuntimePlan};
+use openengine_cluster_protocol::{RunSubmitParams, RuntimePlan};
 use thiserror::Error;
 
 use crate::execution::process::HostedProcessPool;
@@ -50,7 +50,8 @@ pub(crate) use connections::build_connection_resolver;
 /// This updates declarations only and never reads or resolves credential values.
 pub fn materialize_contained_provider_access(
     runtime: &mut RuntimePlan,
-) -> Result<(), NativeV2RunValueError> {
+) -> Result<(), crate::harnesses::HarnessError> {
+    crate::harnesses::HarnessRegistry::core().validate_runtime(runtime)?;
     materialize_provider_access(runtime, ProviderAccessPlacement::Contained)
 }
 
@@ -150,6 +151,17 @@ impl ProductionTargetControllerFactory {
 
 #[async_trait]
 impl TargetControllerFactory for ProductionTargetControllerFactory {
+    fn runtime_harnesses(
+        &self,
+    ) -> Option<openengine_cluster_protocol::TargetRuntimeHarnessesDiscovery> {
+        Some(
+            openengine_cluster_protocol::TargetRuntimeHarnessesDiscovery::new(
+                crate::harnesses::HarnessRegistry::core().lanes(),
+            )
+            .expect("product registry supplies unique bounded runtime lanes"),
+        )
+    }
+
     fn supports_comment_delivery(&self) -> bool {
         true
     }
@@ -260,6 +272,9 @@ fn prepare_contained_submission(
             "contained runs require a resolved Git source",
         ));
     }
+    crate::harnesses::HarnessRegistry::core()
+        .validate_runtime(&submission.runtime)
+        .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
     materialize_contained_provider_access(&mut submission.runtime)
         .map_err(|error| TargetAuthorityError::invalid(error.to_string()))
 }

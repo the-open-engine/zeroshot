@@ -10,185 +10,96 @@ use crate::{
 };
 
 use super::{
-    ClaudeProvider, CodexProvider, CopilotProvider, NodeRuntimeBinding, PiProvider, RunSize,
-    ResolvedSource, RuntimeLane, ActiveMemoryConfig, GlobalAgentsConfig,
+    NodeRuntimeBinding, RunSize, ResolvedSource, RuntimeLane, HarnessId, ProviderId,
+    ActiveMemoryConfig, GlobalAgentsConfig,
 };
 
+/// Portable runtime selection. Compatibility belongs to the host's installed harness registry.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, tag = "harness", rename_all = "snake_case")]
-pub enum RuntimePlan {
-    Copilot {
-        provider: CopilotProvider,
-        size: RunSize,
-        #[serde(
-            default,
-            rename = "activeMemory",
-            skip_serializing_if = "ActiveMemoryConfig::is_default"
-        )]
-        active_memory: ActiveMemoryConfig,
-        #[serde(
-            default,
-            rename = "globalAgents",
-            skip_serializing_if = "GlobalAgentsConfig::is_default"
-        )]
-        global_agents: GlobalAgentsConfig,
-        nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
-    },
-    Codex {
-        provider: CodexProvider,
-        size: RunSize,
-        #[serde(
-            default,
-            rename = "activeMemory",
-            skip_serializing_if = "ActiveMemoryConfig::is_default"
-        )]
-        active_memory: ActiveMemoryConfig,
-        #[serde(
-            default,
-            rename = "globalAgents",
-            skip_serializing_if = "GlobalAgentsConfig::is_default"
-        )]
-        global_agents: GlobalAgentsConfig,
-        nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
-    },
-    Claude {
-        provider: ClaudeProvider,
-        size: RunSize,
-        #[serde(
-            default,
-            rename = "activeMemory",
-            skip_serializing_if = "ActiveMemoryConfig::is_default"
-        )]
-        active_memory: ActiveMemoryConfig,
-        #[serde(
-            default,
-            rename = "globalAgents",
-            skip_serializing_if = "GlobalAgentsConfig::is_default"
-        )]
-        global_agents: GlobalAgentsConfig,
-        nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
-    },
-    Pi {
-        provider: PiProvider,
-        size: RunSize,
-        #[serde(
-            default,
-            rename = "activeMemory",
-            skip_serializing_if = "ActiveMemoryConfig::is_default"
-        )]
-        active_memory: ActiveMemoryConfig,
-        #[serde(
-            default,
-            rename = "globalAgents",
-            skip_serializing_if = "GlobalAgentsConfig::is_default"
-        )]
-        global_agents: GlobalAgentsConfig,
-        nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
-    },
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RuntimePlan {
+    pub harness: HarnessId,
+    pub provider: ProviderId,
+    pub size: RunSize,
+    #[serde(default, skip_serializing_if = "ActiveMemoryConfig::is_default")]
+    pub active_memory: ActiveMemoryConfig,
+    #[serde(default, skip_serializing_if = "GlobalAgentsConfig::is_default")]
+    pub global_agents: GlobalAgentsConfig,
+    pub nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
 }
 
 impl RuntimePlan {
     #[must_use]
-    pub const fn active_memory(&self) -> &ActiveMemoryConfig {
-        match self {
-            Self::Copilot { active_memory, .. }
-            | Self::Codex { active_memory, .. }
-            | Self::Claude { active_memory, .. }
-            | Self::Pi { active_memory, .. } => active_memory,
+    pub fn new(
+        lane: RuntimeLane,
+        size: RunSize,
+        nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
+    ) -> Self {
+        Self {
+            harness: lane.harness,
+            provider: lane.provider,
+            size,
+            active_memory: ActiveMemoryConfig::default(),
+            global_agents: GlobalAgentsConfig::default(),
+            nodes,
         }
     }
 
+    #[must_use]
+    pub const fn active_memory(&self) -> &ActiveMemoryConfig {
+        &self.active_memory
+    }
+
     pub fn active_memory_mut(&mut self) -> &mut ActiveMemoryConfig {
-        match self {
-            Self::Copilot { active_memory, .. }
-            | Self::Codex { active_memory, .. }
-            | Self::Claude { active_memory, .. }
-            | Self::Pi { active_memory, .. } => active_memory,
-        }
+        &mut self.active_memory
     }
 
     #[must_use]
     pub const fn global_agents(&self) -> &GlobalAgentsConfig {
-        match self {
-            Self::Copilot { global_agents, .. }
-            | Self::Codex { global_agents, .. }
-            | Self::Claude { global_agents, .. }
-            | Self::Pi { global_agents, .. } => global_agents,
-        }
+        &self.global_agents
     }
 
     pub fn global_agents_mut(&mut self) -> &mut GlobalAgentsConfig {
-        match self {
-            Self::Copilot { global_agents, .. }
-            | Self::Codex { global_agents, .. }
-            | Self::Claude { global_agents, .. }
-            | Self::Pi { global_agents, .. } => global_agents,
-        }
+        &mut self.global_agents
     }
 
     #[must_use]
     pub const fn size(&self) -> RunSize {
-        match self {
-            Self::Copilot { size, .. }
-            | Self::Codex { size, .. }
-            | Self::Claude { size, .. }
-            | Self::Pi { size, .. } => *size,
-        }
+        self.size
     }
 
     #[must_use]
     pub const fn nodes(&self) -> &BTreeMap<NodeName, NodeRuntimeBinding> {
-        match self {
-            Self::Copilot { nodes, .. }
-            | Self::Codex { nodes, .. }
-            | Self::Claude { nodes, .. }
-            | Self::Pi { nodes, .. } => nodes,
-        }
+        &self.nodes
     }
 
     #[must_use]
     pub fn nodes_mut(&mut self) -> &mut BTreeMap<NodeName, NodeRuntimeBinding> {
-        match self {
-            Self::Copilot { nodes, .. }
-            | Self::Codex { nodes, .. }
-            | Self::Claude { nodes, .. }
-            | Self::Pi { nodes, .. } => nodes,
-        }
+        &mut self.nodes
     }
 
     #[must_use]
-    pub const fn lane(&self) -> RuntimeLane {
-        match self {
-            Self::Copilot { provider, .. } => RuntimeLane::Copilot {
-                provider: *provider,
-            },
-            Self::Codex { provider, .. } => RuntimeLane::Codex {
-                provider: *provider,
-            },
-            Self::Claude { provider, .. } => RuntimeLane::Claude {
-                provider: *provider,
-            },
-            Self::Pi { provider, .. } => RuntimeLane::Pi {
-                provider: *provider,
-            },
+    pub fn lane(&self) -> RuntimeLane {
+        RuntimeLane {
+            harness: self.harness.clone(),
+            provider: self.provider.clone(),
         }
     }
 
-    /// The binding's own lane, else the run-level lane; Git delivery bindings have no lane.
+    /// The binding's own lane, else the run-level lane; trusted delivery has no model lane.
     #[must_use]
-    pub const fn effective_lane(&self, binding: &NodeRuntimeBinding) -> Option<RuntimeLane> {
+    pub fn effective_lane(&self, binding: &NodeRuntimeBinding) -> Option<RuntimeLane> {
         match binding {
-            NodeRuntimeBinding::Agent {
-                lane: Some(lane), ..
-            } => Some(*lane),
-            NodeRuntimeBinding::Agent { lane: None, .. } => Some(self.lane()),
+            NodeRuntimeBinding::Agent { lane, .. } => {
+                Some(lane.clone().unwrap_or_else(|| self.lane()))
+            }
             NodeRuntimeBinding::GitDelivery { .. } | NodeRuntimeBinding::CommentDelivery { .. } => {
                 None
             }
         }
     }
 
-    /// Distinct effective lanes of the agent bindings, in harness and then provider order.
+    /// Distinct effective lanes of the agent bindings, ordered by opaque harness/provider names.
     #[must_use]
     pub fn lanes(&self) -> BTreeSet<RuntimeLane> {
         self.nodes()

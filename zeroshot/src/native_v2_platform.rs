@@ -97,6 +97,7 @@ pub struct NativeV2PlatformController {
     submission_turn: Arc<Mutex<()>>,
     reconstructed_turn: Arc<Mutex<()>>,
     delivery_policy: DeliveryPolicy,
+    harnesses: Arc<crate::harnesses::HarnessRegistry>,
     operator_diagnostics: Arc<crate::native_v2_target_authority::OperatorDiagnosticStore>,
 }
 
@@ -157,10 +158,28 @@ impl NativeV2PlatformController {
             submission_turn: Arc::new(Mutex::new(())),
             reconstructed_turn: Arc::new(Mutex::new(())),
             delivery_policy,
+            harnesses: Arc::new(crate::harnesses::HarnessRegistry::core()),
             operator_diagnostics: Arc::default(),
         };
         controller.reconcile_persisted_runs().await?;
         Ok(controller)
+    }
+
+    fn validate_harnesses(
+        &self,
+        runtime: &crate::native_v2_contract::RuntimePlan,
+    ) -> Result<(), NativeV2AdmissionError> {
+        self.harnesses
+            .validate_runtime(runtime)
+            .map_err(|error| NativeV2AdmissionError::InvalidRuntime(error.to_string()))
+    }
+
+    /// Selects the host's enabled implementations before serving submissions.
+    /// The allocator must construct adapters from this same registry.
+    #[must_use]
+    pub fn with_harness_registry(mut self, harnesses: crate::harnesses::HarnessRegistry) -> Self {
+        self.harnesses = Arc::new(harnesses);
+        self
     }
 
     pub(crate) fn with_operator_diagnostics(
@@ -269,10 +288,16 @@ impl NativeV2PlatformController {
     ) -> Result<PlatformRunReceipt, NativeV2PlatformError> {
         let _turn = self.submission_turn.lock().await;
         let RunSubmitParams { run_id, submission } = request;
+        let harnesses = self.harnesses.as_ref();
+        self.validate_harnesses(&submission.runtime)?;
         let digest = submission_digest(&submission)?;
         let submission_key = submission.submission_key.clone();
+        let admission = crate::native_v2_admission::NativeV2AdmissionContext::new(
+            harnesses,
+            self.delivery_policy,
+        );
         let admitted = NativeV2Admission
-            .admit_with_policy(submission, self.delivery_policy)
+            .admit_with_context(submission, admission)
             .await?;
         let environment = environment.for_admitted(&admitted)?;
         let created = self
@@ -439,6 +464,7 @@ impl NativeV2PlatformController {
         let (submission_key, submission_digest) =
             retained_submission_identity(&run_id, &successor_run_id)?;
         let admitted = source.admitted.clone();
+        self.validate_harnesses(&admitted.runtime)?;
         let secrets = resume_secret_envelope(ResumeSecretRequest {
             admitted: &admitted,
             successor_run_id: &successor_run_id,

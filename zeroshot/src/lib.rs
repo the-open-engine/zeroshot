@@ -1,20 +1,25 @@
 mod active_memory;
 pub mod execution;
 pub mod full_v1_reducer;
+pub mod harnesses;
 pub mod issue_provider;
 pub mod native_v2_admission;
 pub mod native_v2_candidate;
 pub mod native_v2_capsule;
+#[path = "harnesses/adapters/core/claude/mod.rs"]
 pub mod native_v2_claude;
 pub mod native_v2_cli;
+#[path = "harnesses/adapters/core/codex/mod.rs"]
 pub mod native_v2_codex;
 pub mod native_v2_comment_delivery;
 pub mod native_v2_contract;
+#[path = "harnesses/adapters/core/copilot/mod.rs"]
 pub mod native_v2_copilot;
 pub mod native_v2_delivery;
 pub mod native_v2_hosting;
 pub mod native_v2_local;
 pub mod native_v2_observability;
+#[path = "harnesses/adapters/core/pi/mod.rs"]
 pub mod native_v2_pi;
 pub mod native_v2_platform;
 pub mod native_v2_portable_controller;

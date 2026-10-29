@@ -29,6 +29,7 @@ use super::repository::{RepositoryInstall, install_repository, path_source};
 
 mod checkout;
 pub(super) mod fixtures;
+mod harnesses;
 
 use fixtures::*;
 
@@ -453,13 +454,15 @@ async fn invalid_submission_fails_before_run_allocation() {
         "0123456789abcdef0123456789abcdef01234567",
         "invalid-before-effects",
     );
-    sourceful.runtime = RuntimePlan::Codex {
-        active_memory: Default::default(),
-        global_agents: Default::default(),
-        provider: crate::native_v2_contract::CodexProvider::OpenAi,
-        size: RunSize::Small,
-        nodes: BTreeMap::new(),
-    };
+    sourceful.runtime = RuntimePlan::new(
+        openengine_cluster_protocol::RuntimeLane::new(
+            "codex",
+            (crate::native_v2_contract::CodexProvider::OpenAi).name(),
+        )
+        .assert_value(),
+        RunSize::Small,
+        BTreeMap::new(),
+    );
 
     let error = factory
         .submit(

@@ -1,5 +1,5 @@
 ---
-description: "RuntimePlan selects execution settings and supplies bindings for graph nodes. It names models and connection fields without containing secrets."
+description: 'RuntimePlan selects execution settings and supplies bindings for graph nodes. It names models and connection fields without containing secrets.'
 ---
 
 # RuntimePlan
@@ -18,12 +18,12 @@ machine-readable contract.
 
 `RuntimePlan` is a closed JSON object. The following four fields are required; unknown fields are rejected.
 
-| Field      | Value                                                                              |
-| ---------- | ---------------------------------------------------------------------------------- |
-| `harness`  | Harness of the default lane: `codex`, `claude`, `copilot`, or `pi`                 |
-| `provider` | Provider of the default lane, supported by the selected harness                    |
-| `size`     | `small`, `medium`, or `large`                                                      |
-| `nodes`    | Object mapping each executable graph node name to a [node binding](#node-bindings) |
+| Field      | Value                                                                                 |
+| ---------- | ------------------------------------------------------------------------------------- |
+| `harness`  | Registered harness of the default lane; official local builds also include `opencode` |
+| `provider` | Provider of the default lane, supported by the selected harness                       |
+| `size`     | `small`, `medium`, or `large`                                                         |
+| `nodes`    | Object mapping each executable graph node name to a [node binding](#node-bindings)    |
 
 Optional `activeMemory` controls repository and graph recall/collection independently, and
 `globalAgents.postmortem` configures the built-in after-run specialists. Both default to enabled
@@ -56,17 +56,18 @@ This plan binds the three agent nodes of the built-in `software-change` template
 
 ## Harness and provider
 
-`harness` selects which `provider` values parse:
+Harness and provider identifiers are bounded non-control strings. The host registry validates their compatibility during admission. The shipped registrations are:
 
-| `harness` | `provider`                                                |
-| --------- | --------------------------------------------------------- |
-| `codex`   | `openai`, `openrouter`, `bedrock`, `gateway`              |
-| `claude`  | `anthropic`, `openrouter`, `bedrock`, `gateway`           |
-| `copilot` | `github`                                                  |
-| `pi`      | `anthropic`, `openai`, `openrouter`, `bedrock`, `gateway` |
+| `harness`                       | `provider`                                                |
+| ------------------------------- | --------------------------------------------------------- |
+| `codex`                         | `openai`, `openrouter`, `bedrock`, `gateway`              |
+| `claude`                        | `anthropic`, `openrouter`, `bedrock`, `gateway`           |
+| `copilot`                       | `github`                                                  |
+| `pi`                            | `anthropic`, `openai`, `openrouter`, `bedrock`, `gateway` |
+| `opencode` (contributed, local) | `anthropic`, `openai`, `openrouter`                       |
 
 The same pairs apply to an agent node's [`lane`](#per-node-lanes). Any other pair is rejected when
-the plan is read.
+the plan is admitted.
 
 `pi/anthropic` and `pi/openai` reuse a local Pi login from `~/.pi/agent`; the other `pi` lanes
 need a connection.
@@ -197,7 +198,7 @@ Each `model` goes to the provider of its node's effective lane, so here `worker`
 model identifier and the reviewers need Anthropic ones.
 
 - `lane` accepts the same pairs as the run level, listed in
-  [Harness and provider](#harness-and-provider). An invalid pair is rejected when the plan is read.
+  [Harness and provider](#harness-and-provider). An invalid pair is rejected when the plan is admitted.
 - A `git_delivery` or `comment_delivery` binding cannot carry a `lane`.
 - A `lane` equal to the run-level pair is accepted, and the node runs exactly as it would without
   one. It is still a `lane` field, so the [target support](#target-support) check applies to it and
@@ -236,7 +237,7 @@ the profile or its `lane` fields with the newer binary.
 ### Local runs
 
 Before the controller starts, a local `zeroshot run` or `zeroshot resume` checks that each lane's
-executable, `codex`, `claude`, `copilot`, or `pi`, is on `PATH`. A missing executable fails the
+registered executable is on `PATH`. A missing executable fails the
 command with a message such as:
 
 ```text
@@ -248,8 +249,9 @@ the session request fails with the same message. When every `PATH` entry is abso
 checks at startup. An empty or relative entry resolves against the directory the harness starts in,
 which is known only per session, so then the startup check is skipped. The check does not inspect login state; a missing login surfaces at
 that lane's first turn. As in a single-lane run, local `codex`/`openai`, `claude`/`anthropic`,
-`copilot`/`github`, `pi`/`anthropic`, and `pi`/`openai` lanes reuse their harness's native login,
-and other lanes need their provider's connection fields; see [Connections](#connections).
+`copilot`/`github`, `pi`/`anthropic`, `pi`/`openai`, and supported local `opencode` lanes reuse
+their harness's native login. Other lanes need their provider's connection fields; see
+[Connections](#connections).
 
 ## Coverage
 
@@ -354,3 +356,17 @@ mode. It may omit the delivery node; if it includes it, the binding must be `git
 with `zeroshot template show TEMPLATE` plus the same delivery flag.
 
 Custom graphs author delivery in both the graph and the plan.
+
+## Contributed harnesses
+
+Official local binaries include contributed adapters. OpenCode supports the `openai`, `anthropic`,
+and `openrouter` providers and reuses native local login when no credential is declared. Declared
+connections use `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENROUTER_API_KEY` respectively. Install
+`opencode` separately and put it on `PATH`.
+
+Contributed and core adapters share the complete feature contract, including Active Memory,
+structured output, reusable sessions, corrections, cancellation and usage reporting. Contributors
+maintain native-harness compatibility. Platform and the default target image enable only core
+adapters. Targets advertise their enabled pairs through `openengine.runtime-harnesses/v1`; this is
+separate from the unchanged per-node-lanes marker. A contributed lane needs positive target
+advertisement before submission. See [Harness adapters](../project/harness-adapters.md).

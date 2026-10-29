@@ -200,7 +200,7 @@ zeroshot acp --profile local:NAME
 ```
 
 Check the profile first. It must accept exactly one required string named `task`; every success node
-must return exactly one required string named `response`. The runtime must use Codex or Claude for
+must return exactly one required string named `response`. The runtime must use a registered local harness for
 every node, and every executable node must have an agent binding with `sessionScope: node_instance`.
 Maps, delivery, runtime connections, MCP servers, and session reload are unsupported.
 

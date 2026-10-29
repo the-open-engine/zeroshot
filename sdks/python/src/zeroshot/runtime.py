@@ -105,7 +105,7 @@ class UniformRuntime:
     """Apply one agent runtime to every executable graph node.
 
     Args:
-        harness: Native codex, claude, copilot, or pi harness name.
+        harness: Harness identifier enabled by the selected host.
         provider: Native provider name.
         model: Native model identifier.
         effort: Optional native reasoning effort.

@@ -22,10 +22,10 @@ fn target_api_keys_cannot_be_collected_by_a_runtime_connection_requirement() {
     assert!(values.contains_key(&EnvironmentVariableName::new("OPENAI_API_KEY").assert_value()));
 }
 
-fn uniform(harness: UniformHarness, provider: UniformProvider) -> UniformRuntimePlan {
+fn uniform(harness: &str, provider: &str) -> UniformRuntimePlan {
     UniformRuntimePlan {
-        harness,
-        provider,
+        harness: openengine_cluster_protocol::HarnessId::new(harness).assert_value(),
+        provider: openengine_cluster_protocol::ProviderId::new(provider).assert_value(),
         size: RunSize::Small,
         model: ModelId::new("provider-owned-model").assert_value(),
         effort: None,
@@ -83,16 +83,15 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
         .materialize(TemplateDelivery::Merge)
         .assert_value();
     assert_eq!(graph.profile, GraphProfile::Full);
-    let runtime = uniform(UniformHarness::Codex, UniformProvider::OpenAi)
+    let runtime = uniform("codex", "openai")
         .materialize(
             &graph,
             PullRequestFeedback::Ignore,
             Some(BuiltinGraphTemplate::SoftwareChange),
         )
         .assert_value();
-    let RuntimePlan::Codex { nodes, .. } = &runtime else {
-        panic!("expected Codex runtime")
-    };
+    assert_eq!(runtime.harness.as_str(), "codex");
+    let nodes = runtime.nodes();
     assert!(nodes.values().any(|binding| matches!(
         binding,
         NodeRuntimeBinding::GitDelivery {
@@ -107,28 +106,34 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
     );
 
     for (harness, provider, accepted) in [
-        (UniformHarness::Copilot, UniformProvider::Github, true),
-        (UniformHarness::Copilot, UniformProvider::OpenAi, false),
-        (UniformHarness::Codex, UniformProvider::OpenAi, true),
-        (UniformHarness::Codex, UniformProvider::OpenRouter, true),
-        (UniformHarness::Codex, UniformProvider::Gateway, true),
-        (UniformHarness::Codex, UniformProvider::Bedrock, true),
-        (UniformHarness::Codex, UniformProvider::Anthropic, false),
-        (UniformHarness::Claude, UniformProvider::Anthropic, true),
-        (UniformHarness::Claude, UniformProvider::OpenRouter, true),
-        (UniformHarness::Claude, UniformProvider::Gateway, true),
-        (UniformHarness::Claude, UniformProvider::Bedrock, true),
-        (UniformHarness::Claude, UniformProvider::OpenAi, false),
-        (UniformHarness::Pi, UniformProvider::Anthropic, true),
-        (UniformHarness::Pi, UniformProvider::OpenAi, true),
-        (UniformHarness::Pi, UniformProvider::OpenRouter, true),
-        (UniformHarness::Pi, UniformProvider::Gateway, true),
-        (UniformHarness::Pi, UniformProvider::Bedrock, true),
-        (UniformHarness::Pi, UniformProvider::Github, false),
+        ("copilot", "github", true),
+        ("copilot", "openai", false),
+        ("codex", "openai", true),
+        ("codex", "openrouter", true),
+        ("codex", "gateway", true),
+        ("codex", "bedrock", true),
+        ("codex", "anthropic", false),
+        ("claude", "anthropic", true),
+        ("claude", "openrouter", true),
+        ("claude", "gateway", true),
+        ("claude", "bedrock", true),
+        ("claude", "openai", false),
+        ("pi", "anthropic", true),
+        ("pi", "openai", true),
+        ("pi", "openrouter", true),
+        ("pi", "gateway", true),
+        ("pi", "bedrock", true),
+        ("pi", "github", false),
     ] {
+        let runtime = uniform(harness, provider)
+            .into_runtime_plan(
+                openengine_cluster_protocol::HarnessId::new(harness).assert_value(),
+                BTreeMap::new(),
+            )
+            .assert_value();
         assert_eq!(
-            uniform(harness, provider)
-                .into_runtime_plan(harness, BTreeMap::new())
+            crate::harnesses::HarnessRegistry::local()
+                .validate_runtime(&runtime)
                 .is_ok(),
             accepted,
             "unexpected compatibility for {harness:?}/{provider:?}"
@@ -142,10 +147,7 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
         })
         .assert_value();
     let mut invalid = runtime.clone();
-    let invalid_nodes = match &mut invalid {
-        RuntimePlan::Codex { nodes, .. } => nodes,
-        _ => unreachable!(),
-    };
+    let invalid_nodes = invalid.nodes_mut();
     invalid_nodes.insert(
         delivery_name.clone(),
         NodeRuntimeBinding::Agent {
@@ -210,7 +212,7 @@ fn software_change_session_defaults_preserve_explicit_runtime_choices() {
             SessionScope::NodeInstance,
         ),
     ] {
-        let mut uniform = uniform(UniformHarness::Codex, UniformProvider::OpenAi);
+        let mut uniform = uniform("codex", "openai");
         uniform.session_scope = scope;
         let runtime = uniform
             .materialize(&graph, PullRequestFeedback::Consider, template)
@@ -237,7 +239,7 @@ fn auto_research_session_defaults_preserve_explicit_runtime_choices() {
         Some(SessionScope::Execution),
         Some(SessionScope::NodeInstance),
     ] {
-        let mut uniform = uniform(UniformHarness::Codex, UniformProvider::OpenAi);
+        let mut uniform = uniform("codex", "openai");
         uniform.session_scope = override_scope;
         let runtime = uniform
             .materialize(&graph, PullRequestFeedback::Consider, Some(template))

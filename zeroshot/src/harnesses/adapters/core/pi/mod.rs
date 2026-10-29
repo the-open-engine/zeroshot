@@ -9,15 +9,16 @@
 //! JSONL event stream on stdout. Nothing here appends a permission argument, because Pi has no
 //! bypass flag to append.
 
-#[path = "native_v2_pi/command.rs"]
+#[path = "command.rs"]
 mod command;
-#[path = "native_v2_pi/provider_document.rs"]
+pub(crate) mod memory;
+#[path = "provider_document.rs"]
 mod provider_document;
-#[path = "native_v2_pi/session.rs"]
+#[path = "session.rs"]
 mod session;
-#[path = "native_v2_pi/session_id.rs"]
+#[path = "session_id.rs"]
 mod session_id;
-#[path = "native_v2_pi/transcript.rs"]
+#[path = "transcript.rs"]
 mod transcript;
 use crate::native_v2_capsule::provider_process::turn as turn_process;
 
@@ -244,13 +245,13 @@ impl PiAdapter {
             .entry("HOME".to_owned())
             .or_insert_with(|| provider_home.to_owned());
         if let Some(memory) = &self.active_memory {
-            memory.configure(
-                crate::active_memory::hooks::Harness::Pi,
+            memory.configure_with(
                 &mut command,
                 crate::active_memory::hooks::HookInstallation {
                     invocation,
                     home: files.home(),
                 },
+                memory::install,
             );
         }
         Ok(command)
@@ -426,14 +427,7 @@ impl PiAdapter {
     ) -> Result<PiAttempt, NodeRunnerError> {
         let files = match turn.execution.prepare(turn.control).await {
             Ok(files) => files,
-            Err(error) => {
-                return match turn_process::failed_before_start(error, turn.control)? {
-                    PiProcessStart::Ready(_) => {
-                        unreachable!("a preparation failure cannot be ready")
-                    }
-                    PiProcessStart::Failed(attempt) => Ok(attempt),
-                };
-            }
+            Err(error) => return failed_preparation(error, turn.control),
         };
         let mut command = self.command(turn.invocation, &files, &state.session_id)?;
         // The minimal base environment supplies the executable search path and any run tool
@@ -452,6 +446,16 @@ impl PiAdapter {
         };
         turn_process::finish_process(&mut process, prompt.as_bytes(), transcript, turn.control)
             .await
+    }
+}
+
+fn failed_preparation(
+    error: crate::execution::process::ProcessRunnerError,
+    control: &DriverControl,
+) -> Result<PiAttempt, NodeRunnerError> {
+    match turn_process::failed_before_start(error, control)? {
+        PiProcessStart::Ready(_) => unreachable!("a preparation failure cannot be ready"),
+        PiProcessStart::Failed(attempt) => Ok(attempt),
     }
 }
 
@@ -492,5 +496,9 @@ pub(crate) struct PiTurn<'a> {
 }
 
 #[cfg(test)]
-#[path = "native_v2_pi/tests.rs"]
+#[path = "tests.rs"]
 mod tests;
+
+mod registration;
+pub(crate) use registration::registration;
+mod access;

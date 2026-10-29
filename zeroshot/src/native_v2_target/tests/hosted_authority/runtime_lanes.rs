@@ -547,3 +547,54 @@ async fn supported_hosted_target_transmits_private_credentials_only_in_the_envel
 
 #[path = "runtime_lanes/review.rs"]
 mod review;
+
+fn core_catalog_response(
+    request: &CapturedHttpRequest,
+    origin: &str,
+    tokens: &mut u8,
+) -> (&'static str, String) {
+    if (request.method.as_str(), request.path.as_str()) == DISCOVERY {
+        let mut document: Value =
+            serde_json::from_str(&hosted_lane_discovery(origin, true)).assert_value();
+        document["extensions"]["runtime_harnesses"] = json!({
+            "kind":openengine_cluster_protocol::RUNTIME_HARNESSES_KIND,
+            "lanes":[{"harness":"codex","provider":"openai"}]
+        });
+        return ("200 OK", document.to_string());
+    }
+    hosted_response(request, origin, tokens, true)
+}
+
+#[tokio::test]
+async fn unsupported_contribution_defaults_and_overrides_stop_before_oauth_or_request_bodies() {
+    for override_lane in [false, true] {
+        for store_profile in [false, true] {
+            let root = temp_root();
+            let target = RecordingTarget::spawn(core_catalog_response).await;
+            let (record, authority) = authenticated_authority(&root, &target.origin).await;
+            let mut request = run_request(if override_lane {
+                json!({"kind":"agent","lane":{"harness":"opencode","provider":"openai"},"model":"opaque-model"})
+            } else {
+                lane_free_binding()
+            });
+            if !override_lane {
+                request.submission.runtime.harness =
+                    openengine_cluster_protocol::HarnessId::new("opencode").assert_value();
+            }
+            let authority: &dyn TargetControlAuthority = &authority;
+            let error = if store_profile {
+                let mut profile = profile_request(lane_free_binding());
+                profile.runtime = request.submission.runtime;
+                authority.profile_set(&record, profile).await.assert_error()
+            } else {
+                authority.submit(&record, &request).await.assert_error()
+            };
+            assert!(
+                error
+                    .to_string()
+                    .contains("target does not advertise runtime lane opencode/openai")
+            );
+            assert_eq!(routes(&target.stop()), [DISCOVERY, OAUTH_METADATA]);
+        }
+    }
+}

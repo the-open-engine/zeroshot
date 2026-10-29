@@ -77,12 +77,8 @@ fn lane_submission_fixture_round_trips_with_per_node_lanes() {
     let wire: Value = serde_json::from_str(LANE_SUBMISSION).assert_value();
     let params: RunSubmitParams = serde_json::from_value(wire.clone()).assert_value();
     let runtime = &params.submission.runtime;
-    let codex = RuntimeLane::Codex {
-        provider: CodexProvider::OpenAi,
-    };
-    let claude = RuntimeLane::Claude {
-        provider: ClaudeProvider::Anthropic,
-    };
+    let codex = RuntimeLane::new("codex", "openai").assert_value();
+    let claude = RuntimeLane::new("claude", "anthropic").assert_value();
     let effective_lane = |node: &str| {
         let binding = runtime
             .nodes()

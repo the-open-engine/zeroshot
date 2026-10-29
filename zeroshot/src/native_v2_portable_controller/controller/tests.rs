@@ -55,12 +55,11 @@ async fn review_git_preparation_requires_the_workspace_lease_before_any_mutation
                 "headRepository":"contributor/fork", "headBranch":"feature", "headRevision":revision
             }}
         });
-        submission.runtime = RuntimePlan::Codex {
-            active_memory: Default::default(),
-            global_agents: Default::default(),
-            provider: CodexProvider::OpenAi,
-            size: RunSize::Small,
-            nodes: std::collections::BTreeMap::from([
+        submission.runtime = RuntimePlan::new(
+            openengine_cluster_protocol::RuntimeLane::new("codex", (CodexProvider::OpenAi).name())
+                .assert_value(),
+            RunSize::Small,
+            std::collections::BTreeMap::from([
                 (
                     NodeName::new("reviewer").assert_value(),
                     serde_json::from_value(json!({"kind":"agent", "model":"fixture"}))
@@ -73,7 +72,7 @@ async fn review_git_preparation_requires_the_workspace_lease_before_any_mutation
                     },
                 ),
             ]),
-        };
+        );
         let mut bootstrap = crate::native_v2_portable_controller::tests::bootstrap(
             RunId::new("review-lease"),
             submission,

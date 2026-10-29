@@ -263,13 +263,12 @@ async fn admitted(binding: NodeRuntimeBinding, provider: CodexProvider) -> Admit
         title: RunTitle::new("Codex adapter test").assert_value(),
         graph,
         initial_input: Value::Null,
-        runtime: RuntimePlan::Codex {
-            active_memory: Default::default(),
-            global_agents: Default::default(),
-            provider,
-            size: RunSize::Medium,
-            nodes: BTreeMap::from([(NodeName::new("work").assert_value(), binding)]),
-        },
+        runtime: RuntimePlan::new(
+            openengine_cluster_protocol::RuntimeLane::new("codex", (provider).name())
+                .assert_value(),
+            RunSize::Medium,
+            BTreeMap::from([(NodeName::new("work").assert_value(), binding)]),
+        ),
         source: serde_json::from_value(json!({
             "repository": "open-engine/zeroshot",
             "branch": "main",

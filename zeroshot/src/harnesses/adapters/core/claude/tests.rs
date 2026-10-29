@@ -307,13 +307,11 @@ async fn runner_with_command(
         verifier,
         command,
     } = configuration;
-    let runtime = RuntimePlan::Claude {
-        active_memory: Default::default(),
-        global_agents: Default::default(),
-        provider,
-        size: RunSize::Medium,
-        nodes: BTreeMap::from([(NodeName::new("agent").assert_value(), binding)]),
-    };
+    let runtime = RuntimePlan::new(
+        openengine_cluster_protocol::RuntimeLane::new("claude", (provider).name()).assert_value(),
+        RunSize::Medium,
+        BTreeMap::from([(NodeName::new("agent").assert_value(), binding)]),
+    );
     let admitted = admit(RunSubmission {
         environment: None,
         title: RunTitle::new("Claude adapter test").assert_value(),

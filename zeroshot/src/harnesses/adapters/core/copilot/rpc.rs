@@ -333,7 +333,7 @@ impl<'a> CopilotRpc<'a> {
             self.active_memory
                 .as_ref()
                 .map(|memory| {
-                    memory.copilot_context(self.invocation, &params["input"], &self.workspace)
+                    memory.tool_context(self.invocation, &params["input"], &self.workspace)
                 })
                 .filter(|value| !value.is_empty())
         } else {

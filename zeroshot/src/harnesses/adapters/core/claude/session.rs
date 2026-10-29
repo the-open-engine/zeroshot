@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use openengine_cluster_protocol::WorkerOutcome;
 use tokio::sync::Mutex;
@@ -11,8 +9,7 @@ use crate::native_v2_capsule::provider_process::{
 };
 use crate::native_v2_contract::{NodeInvocation, NodeRuntimeBinding};
 use crate::native_v2_runner::{
-    AgentResponse, AgentResponseState, DriverControl, DriverInvocation, NodeDriver,
-    NodeRunnerError, NodeSession, ResolvedEnvironment, SessionFactory,
+    AgentResponse, AgentResponseState, DriverControl, DriverInvocation, NodeDriver, NodeRunnerError,
 };
 
 use super::{ClaudeAdapter, ClaudeAttempt, ClaudeTurn, ClaudeTurnAdvance, prompt};
@@ -36,19 +33,10 @@ impl ClaudeSession {
 
 impl_provider_node_session!(ClaudeSession);
 
-#[async_trait]
-impl SessionFactory for ClaudeAdapter {
-    async fn open(
-        &self,
-        invocation: &NodeInvocation,
-        _environment: &ResolvedEnvironment,
-    ) -> Result<Arc<dyn NodeSession>, NodeRunnerError> {
-        let NodeRuntimeBinding::Agent { .. } = &invocation.binding else {
-            return Err(NodeRunnerError::SessionOpen);
-        };
-        Ok(Arc::new(ClaudeSession::new()))
-    }
-}
+crate::native_v2_capsule::provider_process::impl_provider_session_factory!(
+    ClaudeAdapter,
+    ClaudeSession::new()
+);
 
 #[async_trait]
 impl NodeDriver for ClaudeAdapter {
@@ -58,11 +46,9 @@ impl NodeDriver for ClaudeAdapter {
         control: DriverControl,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
         let invocation = self.memory_invocation(invocation);
-        let session = invocation
-            .session
-            .as_any()
-            .downcast_ref::<ClaudeSession>()
-            .ok_or(NodeRunnerError::Driver)?;
+        let session = crate::native_v2_capsule::provider_process::invocation_session::<
+            ClaudeSession,
+        >(&invocation)?;
         let _turn = session.core.turn.lock().await;
         let execution = ProviderExecution::new(
             ProviderFilesystemConfig {

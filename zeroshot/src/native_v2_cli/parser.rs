@@ -108,8 +108,9 @@ enum InterfaceCommand {
     /// Serve one local Zeroshot profile as an experimental ACP agent over stdio.
     ///
     /// The MVP supports one active session and text prompts. The profile must accept one task
-    /// string and return one response string from every success node. It supports local Codex or
-    /// Claude node-instance sessions, without maps, delivery, connections, MCP, or session reload.
+    /// string and return one response string from every success node. It supports registered local
+    /// harnesses with node-instance sessions, without maps, delivery, connections, MCP, or session
+    /// reload.
     Acp(AcpArgs),
 
     /// Serve the local profile editor and live or recorded run history.
@@ -474,7 +475,10 @@ struct TemplateShowArgs {
 
     Provider choices are codex/openai, codex/openrouter, codex/bedrock, claude/anthropic,
     claude/openrouter, claude/bedrock, codex/gateway, claude/gateway, copilot/github,
-    pi/anthropic, pi/openai, pi/openrouter, pi/bedrock, and pi/gateway. Gateway connections
+    pi/anthropic, pi/openai, pi/openrouter, pi/bedrock, and pi/gateway. Official local builds also
+    include contributed opencode/openai, opencode/anthropic, and opencode/openrouter adapters.
+    Contributed adapters use the same feature contract; compatibility is community-maintained.
+    Platform and the default target image enable only core harnesses. Gateway connections
     require GATEWAY_BASE_URL and GATEWAY_API_KEY. Codex uses Responses and Claude uses Messages.
     The pi/gateway lane also carries GATEWAY_API, which names the wire protocol as one of
     openai-responses, openai-completions, or anthropic-messages.
@@ -500,7 +504,8 @@ struct TemplateShowArgs {
     "lane": {"harness": "claude", "provider": "anthropic"} to run that node on another accepted
     pair; git_delivery and comment_delivery bindings cannot. --uniform-runtime-config applies one lane to every agent
     node. Named targets must advertise per-node lane support (openengine.node-runtime-lanes/v1), and
-    a local run first checks that each lane's executable (codex, claude, or copilot) is on PATH.
+    targets advertise enabled pairs through openengine.runtime-harnesses/v1. A local run first checks
+    that each registered lane's executable is on PATH.
 
     Use `zeroshot template show TEMPLATE` to inspect node names. With --push, --pr, or --ship, omit the
     template-owned delivery binding.
@@ -510,7 +515,8 @@ struct TemplateShowArgs {
     Zeroshot expands that agent binding
     across every executable graph node and supplies graph-visible Git delivery bindings itself.
     Omitted connections reuse native local login for codex/openai, claude/anthropic,
-    copilot/github, pi/anthropic, and pi/openai; other local lanes and contained targets derive
+    copilot/github, pi/anthropic, pi/openai, and the supported local opencode lanes;
+    other local lanes and contained targets derive
     their canonical connection requirements.
 
 ENVIRONMENT PREPARATION

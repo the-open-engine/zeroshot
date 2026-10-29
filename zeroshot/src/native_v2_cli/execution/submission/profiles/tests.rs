@@ -157,7 +157,7 @@ async fn wave6_cli_contract_remote_profile_resolution_preserves_selector_and_pay
         resolved.graph.profile,
         openengine_cluster_protocol::GraphProfile::Full
     );
-    assert!(matches!(resolved.runtime, RuntimePlan::Codex { .. }));
+    assert_eq!(resolved.runtime.harness.as_str(), "codex");
     assert!(matches!(
         backend.calls().as_slice(),
         [

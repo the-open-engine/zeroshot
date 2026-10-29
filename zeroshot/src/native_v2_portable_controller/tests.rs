@@ -577,3 +577,44 @@ async fn controller_entry_reports_why_a_loaded_bootstrap_could_not_start() {
     );
     assert!(!report.contains("startup-secret-token"));
 }
+
+#[cfg(feature = "contributed-harnesses")]
+#[tokio::test]
+async fn local_portable_controller_admits_contributed_runtime_without_native_processes() {
+    let root = TestDirectory::new("contributed-runtime");
+    let workspace = root.child("workspace");
+    std::fs::create_dir(&workspace).assert_value();
+    let mut request = submission("local-contributed-runtime");
+    request.runtime.harness =
+        openengine_cluster_protocol::HarnessId::new("opencode").assert_value();
+    request.runtime.provider =
+        openengine_cluster_protocol::ProviderId::new("openai").assert_value();
+    let run_id = RunId::new("local-contributed-runtime");
+    let controller = PortableRunController::start(
+        bootstrap(run_id.clone(), request, workspace, root.child("state")),
+        |_| Ok::<_, std::convert::Infallible>(PortableRuntime::new(Arc::new(NeverDispatched))),
+    )
+    .await
+    .assert_value();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let status = controller
+                .inner
+                .status(RunStatusParams {
+                    run_id: run_id.clone(),
+                })
+                .await
+                .assert_value();
+            if let RunStatus::Finished {
+                terminal_result, ..
+            } = status.status
+            {
+                assert!(matches!(terminal_result, TerminalResult::Succeeded { .. }));
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .assert_value();
+}

@@ -134,6 +134,34 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Each full-v1 loop round starts with fresh error, signal, group, and output-channel facts for its
   body at that map scope. Caller state persists across rounds; internal visit markers persist for
   durable replay. Final-round facts replace older facts when the loop returns to its parent.
+- Harness integration lives in `harnesses/`: one registry supplies pure descriptors, provider
+  requirements, executable lookup and factories for every adapter. Maintained implementations live
+  in `harnesses/adapters/core`; contributions live in `harnesses/adapters/contributed` and register
+  explicitly. Protocol harness/provider IDs are bounded opaque strings; registry admission owns
+  pair compatibility. Core and contributed adapters implement the same complete execution and
+  Active Memory contracts. The distinction controls distribution and maintenance ownership only.
+  Native memory hook/extension installation belongs to the adapter; shared memory owns the broker,
+  frozen recall budgets, receipts and maintenance. Contributions never acquire a separate runtime
+  or reduced feature path. Official local builds enable `contributed-harnesses`; target images and
+  Platform dependencies disable default features, and target admission independently uses the
+  core-only registry even when compiled into a local binary. Targets advertise enabled pairs via
+  the separate `openengine.runtime-harnesses/v1` discovery extension; older targets without it
+  retain legacy core submissions, while contributed lanes require positive advertisement.
+  Local adapters preserve native configuration discovery when provider credentials are declared.
+  OpenCode retains its original HOME/XDG paths and native managed, global/project, plugin and MCP
+  resources. A private dependency-free native plugin applies declared authentication or endpoints
+  to the selected provider after native resolution and checks outgoing authentication headers
+  after all native plugin hooks, at the final request handoff.
+  Mask only the selected stored login in private process state; preserve unrelated native auth for
+  well-known discovery. The native `auth.set` custody wrapper forwards refreshes using their original
+  file or inline authority and preserves the selected login during unrelated refreshes; OpenCode
+  owns auth-file writes.
+  Local OpenCode keeps native permissions and adds no `--auto`: native configuration inspection
+  starts background dependency work, so use the shared unavailable-inspection fallback without a
+  probe, custom policy parser or cache-lock management. Contained OpenCode adds `--auto` in its
+  disposable capsule. Active Memory installs a separate native plugin alongside user plugins.
+  Explicit `OPENCODE_PURE=true` conflicts with declared authentication because it disables the
+  required provider overlay.
 - Model identifiers are opaque provider-owned strings. Do not infer a harness from a provider/model,
   maintain runtime model catalogs, or validate provider availability. Admission may reject only known
   incompatible harness/provider pairs.
@@ -221,8 +249,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   verifiers share the prepared workspace and can write files. Review instructions prohibit repairs
   and warn that other nodes may execute concurrently; this is an instructional boundary. Missing
   dependencies are reported with environment evidence rather than unrelated code repair requests.
-  Shared inspection owns bounded JSONL exchange and process cleanup. Each harness owns its native
-  policy parser and `apply_permission_default` entry point; `PermissionPolicy` distinguishes unset,
+  Shared inspection owns bounded JSONL exchange and process cleanup. Each harness owns native
+  permission handling and any parser it needs; `PermissionPolicy` distinguishes unset,
   configured, and unavailable inspection results. Codex browser/computer access controls and explicit
   approval-review features count as authored policy.
 - The local target registry initializes `platform` at `https://api.app.zeroshot.sh` with a persistent hosted device identity.

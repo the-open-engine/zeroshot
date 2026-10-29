@@ -235,6 +235,7 @@ test('mounted Runtime dialog edits a draft shared by its Form and JSON views', a
     version: 1,
     workspace: { kind: 'local', id: 'runtime-dialog-test' },
     templates: [],
+    harnesses: [{ id: 'codex', label: 'Codex', providers: ['openai', 'gateway'] }],
     runtimeSchema: {
       oneOf: [
         { properties: { harness: { const: 'codex' }, provider: { enum: ['openai', 'gateway'] } } },

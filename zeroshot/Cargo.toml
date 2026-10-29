@@ -15,6 +15,8 @@ name = "zeroshot"
 path = "src/main.rs"
 
 [features]
+default = ["contributed-harnesses"]
+contributed-harnesses = ["dep:jsonc-parser"]
 workspace = ["dep:schemars"]
 ui = ["workspace", "dep:axum", "dep:hyper", "dep:hyper-util", "dep:include_dir"]
 
@@ -35,6 +37,7 @@ fs2.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
 httparse.workspace = true
+jsonc-parser = { version = "0.34", features = ["serde"], optional = true }
 libc.workspace = true
 keyring = { workspace = true, features = [
   "apple-native",

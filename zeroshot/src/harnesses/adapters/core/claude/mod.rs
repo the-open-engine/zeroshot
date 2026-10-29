@@ -4,13 +4,14 @@
 //! Admission has already selected the model, effort, session scope, and declared environment for
 //! each node. Only the local adapter inherits the current user's harness configuration environment.
 
-#[path = "native_v2_claude/command.rs"]
+#[path = "command.rs"]
 mod command;
-#[path = "native_v2_claude/permissions.rs"]
+pub(crate) mod memory;
+#[path = "permissions.rs"]
 mod permissions;
-#[path = "native_v2_claude/session.rs"]
+#[path = "session.rs"]
 mod session;
-#[path = "native_v2_claude/transcript.rs"]
+#[path = "transcript.rs"]
 mod transcript;
 use crate::native_v2_capsule::provider_process::turn as turn_process;
 
@@ -193,13 +194,13 @@ impl ClaudeAdapter {
             deadline: None,
         };
         if let Some(memory) = &self.active_memory {
-            memory.configure(
-                crate::active_memory::hooks::Harness::Claude,
+            memory.configure_with(
                 &mut command,
                 crate::active_memory::hooks::HookInstallation {
                     invocation,
                     home: input.files.home(),
                 },
+                memory::install,
             );
         }
         Ok(command)
@@ -382,5 +383,9 @@ struct ClaudeCommandInput<'a> {
 }
 
 #[cfg(test)]
-#[path = "native_v2_claude/tests.rs"]
+#[path = "tests.rs"]
 mod tests;
+
+mod registration;
+pub(crate) use registration::registration;
+mod access;

@@ -78,6 +78,27 @@ test('bootstrap accepts the platform workspace tag and rejects its retired spell
   );
 });
 
+test('bootstrap accepts host harness metadata and rejects malformed adapter choices', () => {
+  const value = {
+    ...bootstrap(),
+    harnesses: [{ id: 'opencode', label: 'OpenCode', providers: ['openai', 'anthropic'] }],
+  };
+  assert.deepEqual(readBootstrap(value), value);
+  for (const harnesses of [
+    null,
+    'opencode',
+    [null],
+    [{ id: '', label: 'OpenCode', providers: ['openai'] }],
+    [{ id: 'opencode', label: '', providers: ['openai'] }],
+    [{ id: 'opencode', label: 'OpenCode', providers: [5] }],
+  ]) {
+    assert.throws(
+      () => readBootstrap({ ...value, harnesses }),
+      (cause: unknown) => cause instanceof ApiError && cause.code === 'invalid_bootstrap'
+    );
+  }
+});
+
 test('profile and history services remain on the injected mount and forward cancellation', async () => {
   const requests: { url: string; init?: RequestInit }[] = [];
   const fetcher: typeof fetch = async (url, init) => {

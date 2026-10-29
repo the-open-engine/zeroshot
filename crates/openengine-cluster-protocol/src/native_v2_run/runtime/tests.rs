@@ -34,15 +34,14 @@ fn pr_feedback_defaults_to_consider_and_runtime_can_select_ignore() {
 fn agent_lane_round_trips_exactly() {
     let wire = r#"{"kind":"agent","lane":{"harness":"claude","provider":"anthropic"},"model":"review-model"}"#;
     let binding: NodeRuntimeBinding = serde_json::from_str(wire).unwrap();
-    assert!(matches!(
-        binding,
-        NodeRuntimeBinding::Agent {
-            lane: Some(crate::RuntimeLane::Claude {
-                provider: crate::ClaudeProvider::Anthropic
-            }),
-            ..
-        }
-    ));
+    let NodeRuntimeBinding::Agent {
+        lane: Some(lane), ..
+    } = &binding
+    else {
+        panic!("expected an explicit agent lane");
+    };
+    assert_eq!(lane.harness_name(), "claude");
+    assert_eq!(lane.provider_name(), "anthropic");
     assert_eq!(serde_json::to_string(&binding).unwrap(), wire);
 }
 
@@ -77,20 +76,23 @@ fn lane_is_rejected_on_git_delivery() {
 }
 
 #[test]
-fn lane_rejects_incompatible_pairs_and_unknown_or_missing_fields() {
+fn lane_defers_pair_compatibility_but_rejects_unknown_or_missing_fields() {
+    for (harness, provider) in [
+        ("codex", "anthropic"),
+        ("claude", "openai"),
+        ("copilot", "openai"),
+        ("contributed", "private-provider"),
+    ] {
+        let binding: NodeRuntimeBinding = serde_json::from_value(serde_json::json!({
+            "kind":"agent", "lane":{"harness":harness,"provider":provider}, "model":"opaque-model"
+        }))
+        .unwrap();
+        assert!(matches!(
+            binding,
+            NodeRuntimeBinding::Agent { lane: Some(_), .. }
+        ));
+    }
     for (lane, expected) in [
-        (
-            serde_json::json!({"harness": "codex", "provider": "anthropic"}),
-            "unknown variant `anthropic`",
-        ),
-        (
-            serde_json::json!({"harness": "claude", "provider": "openai"}),
-            "unknown variant `openai`",
-        ),
-        (
-            serde_json::json!({"harness": "copilot", "provider": "openai"}),
-            "unknown variant `openai`",
-        ),
         (
             serde_json::json!({"harness": "claude", "provider": "anthropic", "model": "m"}),
             "unknown field `model`",

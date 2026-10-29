@@ -13,7 +13,7 @@ use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
 use crate::native_v2_candidate::test_support::{full_graph, git_delivery_node, success_node};
 use crate::native_v2_contract::{
     AdmittedRun, ExecutionId, ExecutionRef, NodeInstanceId, NodeRuntimeBinding, ReasoningEffort,
-    RunSubmission, RuntimePlan,
+    RunSubmission,
 };
 use crate::native_v2_delivery::{DELIVERY_MERGED_LABEL, DELIVERY_SIGNAL_FIELD};
 use crate::v2_run_ledger::{NodeSnapshot, NodeState, RunPhase, RunSnapshot, cursor_for};
@@ -498,9 +498,8 @@ async fn cancellation_delivery_supervisor(
         success_node(),
     ]);
     let mut runtime = admitted.runtime;
-    let RuntimePlan::Codex { nodes, .. } = &mut runtime else {
-        panic!("Codex fixture");
-    };
+    assert_eq!(runtime.harness.as_str(), "codex");
+    let nodes = runtime.nodes_mut();
     nodes.insert(NodeName::new("fast").assert_value(), agent_binding());
     let submission_key = IdempotencyKey::new("cancelled-writer-delivery").assert_value();
     let admitted = NativeV2Admission

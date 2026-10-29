@@ -61,6 +61,7 @@ pub(super) struct ControllerDescriptor {
     pub(super) workspace_recovery: bool,
     pub(super) workspace_checkpoints: bool,
     pub(super) node_runtime_lanes: bool,
+    pub(super) runtime_harnesses: Option<Vec<openengine_cluster_protocol::RuntimeLane>>,
     pub(super) git_transport: bool,
     pub(super) comment_delivery: bool,
     pub(super) task_resolution: Option<Url>,
@@ -75,6 +76,18 @@ pub(super) fn build_controller_descriptor(
     let workspace_recovery = parse_workspace_recovery(&wire)?;
     let workspace_checkpoints = parse_workspace_checkpoints(&wire)?;
     let node_runtime_lanes = parse_node_runtime_lanes(&wire);
+    let runtime_harnesses = wire
+        .extensions
+        .runtime_harnesses
+        .as_ref()
+        .filter(|catalog| catalog.kind == openengine_cluster_protocol::RUNTIME_HARNESSES_KIND)
+        .map(|catalog| {
+            catalog
+                .validate()
+                .map_err(|error| authority_error(error.to_string()))?;
+            Ok::<_, TargetAuthorityError>(catalog.lanes.clone())
+        })
+        .transpose()?;
     let git_transport = wire
         .extensions
         .git_transport
@@ -99,6 +112,7 @@ pub(super) fn build_controller_descriptor(
         workspace_recovery,
         workspace_checkpoints,
         node_runtime_lanes,
+        runtime_harnesses,
         git_transport,
         comment_delivery,
         task_resolution,

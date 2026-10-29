@@ -37,7 +37,7 @@ COPY crates ./crates
 COPY zeroshot ./zeroshot
 COPY --from=ui-builder /src/ui/dist ./ui/dist
 
-RUN cargo build --locked --release --package zeroshot --bin zeroshot --features ui
+RUN cargo build --locked --release --package zeroshot --bin zeroshot --no-default-features --features ui
 
 FROM python:3.12.14-slim-trixie@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea AS python-runtime
 

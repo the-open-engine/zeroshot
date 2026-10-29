@@ -1,11 +1,22 @@
 ---
-description: "Run the same graph locally, on a self-hosted Docker target or on a managed target. Compare source preparation, connections and durable run state."
+description: 'Run the same graph locally, on a self-hosted Docker target or on a managed target. Compare source preparation, connections and durable run state.'
 ---
 
 # Targets
 
 A target owns source preparation and the processes that execute graph nodes; it also stores durable
 run state and resolves connections. The graph protocol stays the same when the target changes.
+
+Targets advertise their enabled harness/provider pairs through the
+`openengine.runtime-harnesses/v1` discovery extension. The CLI checks every selected lane before
+requesting an access token or submitting a run or profile, and the target enforces its catalog
+again during admission. Older targets without this extension accept only the established core
+harnesses through client preflight.
+
+Official local builds include [contributed harness adapters](../project/harness-adapters.md),
+including OpenCode. They use the same execution and Active Memory contracts as core adapters;
+contributors maintain their native CLI compatibility. Platform and the default target image
+enable only core adapters and do not ship contributed harness executables.
 
 ## Local controller
 
@@ -28,9 +39,9 @@ another folder returns a conflict rather than a run from the first folder.
 Local execution is the only mode that mutates the caller's existing folder; each selected
 installed harness runs as the current user. A plan with
 [per-node lanes](../reference/runtime-plan.md#per-node-lanes) needs every lane's CLI installed. The
-native `codex`/`openai`, `claude`/`anthropic`, and `copilot`/`github` lanes also need that CLI
-signed in; other lanes need their provider's
-[connection values](../reference/runtime-plan.md#connections). Before the controller starts,
+adapter declares whether its lane can reuse the CLI's native login; otherwise it needs the provider's
+[connection values](../reference/runtime-plan.md#connections). Declared credentials take precedence
+over native login state. Before the controller starts,
 `zeroshot run` and `zeroshot resume` check that each lane's executable is on `PATH`; they do not
 check login state, so a missing login fails at that lane's first turn.
 

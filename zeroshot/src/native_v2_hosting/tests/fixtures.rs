@@ -167,12 +167,11 @@ pub(super) fn runtime(environment: BTreeSet<EnvironmentVariableName>) -> Runtime
 }
 
 pub(super) fn claude_runtime() -> RuntimePlan {
-    RuntimePlan::Claude {
-        active_memory: Default::default(),
-        global_agents: Default::default(),
-        provider: ClaudeProvider::Anthropic,
-        size: RunSize::Small,
-        nodes: BTreeMap::from([(
+    RuntimePlan::new(
+        openengine_cluster_protocol::RuntimeLane::new("claude", (ClaudeProvider::Anthropic).name())
+            .assert_value(),
+        RunSize::Small,
+        BTreeMap::from([(
             NodeName::new("work").assert_value_with("node"),
             NodeRuntimeBinding::Agent {
                 lane: None,
@@ -182,7 +181,7 @@ pub(super) fn claude_runtime() -> RuntimePlan {
                 connections: DeclaredConnections::empty(),
             },
         )]),
-    }
+    )
 }
 
 fn graph() -> GraphSpec {

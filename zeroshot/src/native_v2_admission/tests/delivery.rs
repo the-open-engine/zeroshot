@@ -218,13 +218,15 @@ async fn legacy_merge_worker_remains_admissible_but_is_not_a_merge_plan_profile(
         NativeV2Admission
             .validate_merge_profile(
                 &legacy_graph,
-                &RuntimePlan::Claude {
-                    active_memory: Default::default(),
-                    global_agents: Default::default(),
-                    provider: ClaudeProvider::Anthropic,
-                    size: RunSize::Medium,
-                    nodes: legacy_nodes,
-                },
+                &RuntimePlan::new(
+                    openengine_cluster_protocol::RuntimeLane::new(
+                        "claude",
+                        (ClaudeProvider::Anthropic).name()
+                    )
+                    .assert_value(),
+                    RunSize::Medium,
+                    legacy_nodes
+                ),
             )
             .await,
         Err(NativeV2AdmissionError::MergeDeliveryRequired)

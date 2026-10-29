@@ -98,7 +98,7 @@ fn router(state: UiState, target_history: bool) -> Router {
 }
 
 async fn bootstrap(State(state): State<UiState>) -> Result<Json<Value>, ApiError> {
-    let mut catalog = workspace::catalog()?;
+    let mut catalog = workspace::catalog_with_harnesses(&harness_registry(&state))?;
     catalog["workspace"] = serde_json::to_value(state.workspace)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     Ok(Json(catalog))
@@ -142,10 +142,11 @@ struct SaveRequest {
 }
 
 async fn validate(
+    State(state): State<UiState>,
     bytes: Result<Bytes, axum::extract::rejection::BytesRejection>,
 ) -> Result<Json<Value>, ApiError> {
     let document: ProfileDocument = decode(bytes)?;
-    admit(&document.graph, &document.runtime).await?;
+    admit(&state, &document.graph, &document.runtime).await?;
     Ok(Json(json!({"valid":true})))
 }
 async fn author(
@@ -170,7 +171,7 @@ async fn save(
         return Err(workspace_changed());
     }
     let request: SaveRequest = decode(bytes)?;
-    admit(&request.graph, &request.runtime).await?;
+    admit(&state, &request.graph, &request.runtime).await?;
     let result = blocking(move || {
         state.store.set_checked(
             RunProfileSetRequest {
@@ -198,8 +199,15 @@ fn workspace_changed() -> ApiError {
         message: "This workspace changed. Reload before saving. Your draft is unchanged.".into(),
     }
 }
-async fn admit(graph: &GraphSpec, runtime: &RuntimePlan) -> Result<(), ApiError> {
-    workspace::validate_profile(graph, runtime)
+fn harness_registry(state: &UiState) -> crate::harnesses::HarnessRegistry {
+    if state.workspace.kind == "target" {
+        crate::harnesses::HarnessRegistry::core()
+    } else {
+        crate::harnesses::HarnessRegistry::local()
+    }
+}
+async fn admit(state: &UiState, graph: &GraphSpec, runtime: &RuntimePlan) -> Result<(), ApiError> {
+    workspace::validate_profile_with_harnesses(graph, runtime, &harness_registry(state))
         .await
         .map_err(Into::into)
 }

@@ -42,11 +42,19 @@ impl WorkspaceError {
 
 /// Native templates, worker contracts and runtime schema. The host adds workspace identity.
 pub fn catalog() -> Result<Value, WorkspaceError> {
+    catalog_with_harnesses(&crate::harnesses::HarnessRegistry::core())
+}
+
+/// Supplies authoring metadata for the host's explicitly selected implementations.
+pub fn catalog_with_harnesses(
+    harnesses: &crate::harnesses::HarnessRegistry,
+) -> Result<Value, WorkspaceError> {
     Ok(json!({
         "version": 1,
         "templates": catalog::templates()?,
         "workers": catalog::workers()?,
         "runtimeSchema": schemars::schema_for!(RuntimePlan),
+        "harnesses": harnesses.descriptors().collect::<Vec<_>>(),
     }))
 }
 
@@ -69,8 +77,25 @@ pub async fn validate_profile(
     graph: &GraphSpec,
     runtime: &RuntimePlan,
 ) -> Result<(), WorkspaceError> {
+    validate_profile_with_harnesses(graph, runtime, &crate::harnesses::HarnessRegistry::core())
+        .await
+}
+
+/// Applies the same graph checks with an explicit local or custom host registry.
+pub async fn validate_profile_with_harnesses(
+    graph: &GraphSpec,
+    runtime: &RuntimePlan,
+    harnesses: &crate::harnesses::HarnessRegistry,
+) -> Result<(), WorkspaceError> {
     NativeV2Admission
-        .validate_profile(graph, runtime, DeliveryPolicy::Optional)
+        .validate_profile_with_context(
+            graph,
+            runtime,
+            crate::native_v2_admission::NativeV2AdmissionContext::new(
+                harnesses,
+                DeliveryPolicy::Optional,
+            ),
+        )
         .await
         .map_err(|error| WorkspaceError::invalid(error.to_string()))
 }

@@ -15,7 +15,7 @@ rule.
 
 Each agent node uses:
 
-1. a **harness**, `codex`, `claude`, `copilot`, or `pi`;
+1. a **harness** enabled by the host, including core `codex`, `claude`, `copilot`, and `pi`, plus contributed `opencode` in official local builds;
 2. a **provider** supported by that harness;
 3. an opaque provider-owned **model** identifier;
 4. zero or more named **connections**, each declaring exact environment field names.

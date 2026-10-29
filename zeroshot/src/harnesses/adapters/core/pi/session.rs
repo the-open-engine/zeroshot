@@ -5,8 +5,6 @@
 //! turn belongs to. The reported header still has to agree, because a mismatch would silently
 //! split one logical node session across two provider sessions.
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use openengine_cluster_protocol::WorkerOutcome;
 
@@ -15,10 +13,10 @@ use crate::native_v2_capsule::provider_process::{
     ProviderExecution, ProviderFilesystemConfig, ProviderFailure, ProviderFailureRetry,
     ProviderSessionCore, impl_provider_node_session,
 };
-use crate::native_v2_contract::{NodeInvocation, NodeRuntimeBinding, PiProvider};
+use crate::native_v2_contract::{NodeRuntimeBinding, PiProvider};
 use crate::native_v2_runner::{
     AgentResponse, AgentResponseState, DriverControl, DriverInvocation, NodeDriver,
-    NodeRunnerError, NodeSession, ProviderSchemaDialect, ResolvedEnvironment, SessionFactory,
+    NodeRunnerError, ProviderSchemaDialect,
 };
 
 use super::session_id::pi_session_id;
@@ -60,19 +58,10 @@ pub(super) enum PiTurnAdvance {
     ProviderFailure { retryable: bool, diagnostic: String },
 }
 
-#[async_trait]
-impl SessionFactory for PiAdapter {
-    async fn open(
-        &self,
-        invocation: &NodeInvocation,
-        _environment: &ResolvedEnvironment,
-    ) -> Result<Arc<dyn NodeSession>, NodeRunnerError> {
-        let NodeRuntimeBinding::Agent { .. } = &invocation.binding else {
-            return Err(NodeRunnerError::SessionOpen);
-        };
-        Ok(Arc::new(PiSession::new()))
-    }
-}
+crate::native_v2_capsule::provider_process::impl_provider_session_factory!(
+    PiAdapter,
+    PiSession::new()
+);
 
 #[async_trait]
 impl NodeDriver for PiAdapter {
@@ -82,11 +71,9 @@ impl NodeDriver for PiAdapter {
         control: DriverControl,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
         let invocation = self.memory_invocation(invocation);
-        let session = invocation
-            .session
-            .as_any()
-            .downcast_ref::<PiSession>()
-            .ok_or(NodeRunnerError::Driver)?;
+        let session = crate::native_v2_capsule::provider_process::invocation_session::<PiSession>(
+            &invocation,
+        )?;
         let _turn = session.core.turn.lock().await;
         let execution = ProviderExecution::new(
             ProviderFilesystemConfig {

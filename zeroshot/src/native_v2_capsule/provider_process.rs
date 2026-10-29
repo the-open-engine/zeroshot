@@ -241,6 +241,44 @@ macro_rules! impl_provider_node_session {
 
 pub(crate) use impl_provider_node_session;
 
+/// Agent sessions share role admission while each adapter constructs its native session state.
+macro_rules! impl_provider_session_factory {
+    ($adapter:ty, $session:expr) => {
+        #[async_trait::async_trait]
+        impl crate::native_v2_runner::SessionFactory for $adapter {
+            async fn open(
+                &self,
+                invocation: &crate::native_v2_contract::NodeInvocation,
+                _environment: &crate::native_v2_runner::ResolvedEnvironment,
+            ) -> Result<
+                std::sync::Arc<dyn crate::native_v2_runner::NodeSession>,
+                crate::native_v2_runner::NodeRunnerError,
+            > {
+                if !matches!(
+                    invocation.binding,
+                    crate::native_v2_contract::NodeRuntimeBinding::Agent { .. }
+                ) {
+                    return Err(crate::native_v2_runner::NodeRunnerError::SessionOpen);
+                }
+                Ok(std::sync::Arc::new($session))
+            }
+        }
+    };
+}
+
+pub(crate) use impl_provider_session_factory;
+
+/// Drivers resolve only the session type owned by their admitted lane's factory.
+pub(crate) fn invocation_session<T: crate::native_v2_runner::NodeSession>(
+    invocation: &DriverInvocation,
+) -> Result<&T, NodeRunnerError> {
+    invocation
+        .session
+        .as_any()
+        .downcast_ref::<T>()
+        .ok_or(NodeRunnerError::Driver)
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum ClosedSessionFailure {
     Driver,

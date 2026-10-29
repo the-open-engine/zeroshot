@@ -168,15 +168,9 @@ fn titled_json(text: &str, name: &str) -> Vec<(String, Value)> {
     examples
 }
 
-/// Every harness needs a first-run example. The match is exhaustive, so adding a harness stops
-/// compiling here until its example is documented and listed.
-const fn documented_harness(lane: RuntimeLane) -> &'static str {
-    match lane {
-        RuntimeLane::Codex { .. } => "codex",
-        RuntimeLane::Claude { .. } => "claude",
-        RuntimeLane::Copilot { .. } => "copilot",
-        RuntimeLane::Pi { .. } => "pi",
-    }
+/// Maintained harnesses have explicit first-run examples; contributions supply their own docs.
+fn documented_harness(lane: &RuntimeLane) -> String {
+    lane.harness_name().to_owned()
 }
 const HARNESSES: [&str; 4] = ["codex", "claude", "copilot", "pi"];
 
@@ -254,7 +248,7 @@ async fn first_run_runtimes_validate_for_every_harness() {
         }))
         .unwrap_or_else(|error| panic!("{file} `{title}` names an unknown lane: {error}"));
         assert!(
-            harnesses.insert(documented_harness(lane)),
+            harnesses.insert(documented_harness(&lane)),
             "{file} documents {} twice",
             lane.harness_name()
         );
@@ -298,7 +292,7 @@ async fn first_run_runtimes_validate_for_every_harness() {
     }
     assert_eq!(
         harnesses,
-        BTreeSet::from(HARNESSES),
+        HARNESSES.into_iter().map(str::to_owned).collect(),
         "{file} needs one runtime.json example per harness"
     );
 }

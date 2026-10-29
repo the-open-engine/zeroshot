@@ -347,16 +347,18 @@ async fn admitted_routing_graph(base_revision: &str) -> crate::native_v2_contrac
             title: RunTitle::new("Delivery routing test").assert_value(),
             graph,
             initial_input: routing_initial_input(base_revision),
-            runtime: RuntimePlan::Codex {
-                active_memory: Default::default(),
-                global_agents: Default::default(),
-                provider: crate::native_v2_contract::CodexProvider::OpenAi,
-                size: RunSize::Medium,
-                nodes: BTreeMap::from([
+            runtime: RuntimePlan::new(
+                openengine_cluster_protocol::RuntimeLane::new(
+                    "codex",
+                    (crate::native_v2_contract::CodexProvider::OpenAi).name(),
+                )
+                .assert_value(),
+                RunSize::Medium,
+                BTreeMap::from([
                     (NodeName::new("deliver").assert_value(), delivery),
                     (NodeName::new("repair").assert_value(), repair),
                 ]),
-            },
+            ),
             source: source_for_revision(base_revision),
             submission_key: IdempotencyKey::new("delivery-routing").assert_value(),
         })

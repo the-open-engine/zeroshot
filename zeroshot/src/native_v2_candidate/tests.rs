@@ -4,7 +4,7 @@ use std::any::{Any, TypeId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -25,8 +25,6 @@ use crate::native_v2_candidate::test_support::{
 };
 use crate::native_v2_admission::NativeV2Admission;
 use crate::native_v2_capsule::{NativeCapsuleNodeEndpoint, RemoteCapsuleNodeRunner};
-use crate::native_v2_claude::ClaudeProcessEnvironment;
-use crate::native_v2_pi::PiProcessEnvironment;
 use crate::native_v2_cli::execution::{CliExecutionContext, execute_native_v2_cli_with_context};
 use crate::native_v2_cli::{
     CliOutcome, CliRunForceResult, CliRunListResult, CliRunStatusResult,
@@ -58,6 +56,16 @@ use crate::v2_run_ledger::fake::FakeRunLedger;
 use crate::worker_catalog::{self, ReasoningEffort};
 
 type TempRepository = TestGitRepository;
+
+impl CandidateAgents {
+    fn new<T: NodeDriver + SessionFactory + 'static>(agent: Arc<T>) -> Self {
+        Self {
+            driver: agent.clone(),
+            sessions: agent,
+            memory: None,
+        }
+    }
+}
 
 struct ScriptedGitHub {
     remote: PathBuf,
@@ -413,7 +421,7 @@ impl CapsuleAllocator for CandidateAllocator {
         agents.extend(
             self.lane_agents
                 .iter()
-                .map(|(lane, agent)| (*lane, CandidateAgents::new(agent.clone()))),
+                .map(|(lane, agent)| (lane.clone(), CandidateAgents::new(agent.clone()))),
         );
         let local = assemble_runner(
             admitted,
@@ -531,7 +539,7 @@ async fn platform_oecp_candidate_runs_each_agent_node_on_its_own_lane_and_provid
         target,
         github: github.clone(),
         agent: codex.clone(),
-        lane_agents: vec![(CLAUDE_ANTHROPIC, claude.clone())],
+        lane_agents: vec![(claude_anthropic(), claude.clone())],
         cleanup: cleanup.clone(),
     });
     let controller = Arc::new(
@@ -588,15 +596,15 @@ async fn node_instance_session_reused_through_a_loop_stays_on_its_lane() {
             .nodes_mut()
             .get_mut(&NodeName::new("looped").assert_value())
             .assert_value(),
-        CLAUDE_ANTHROPIC,
+        claude_anthropic(),
     );
     let codex = Arc::new(ScriptedAgent::new(root.path().to_owned()));
     let claude = Arc::new(ScriptedAgent::new(root.path().to_owned()));
     let runner = assemble_runner(
         &admitted,
         BTreeMap::from([
-            (CODEX_OPENAI, CandidateAgents::new(codex.clone())),
-            (CLAUDE_ANTHROPIC, CandidateAgents::new(claude.clone())),
+            (codex_openai(), CandidateAgents::new(codex.clone())),
+            (claude_anthropic(), CandidateAgents::new(claude.clone())),
         ]),
         CandidateDeliveries {
             git: Some(routing_delivery(root.path())),
@@ -612,7 +620,7 @@ async fn node_instance_session_reused_through_a_loop_stays_on_its_lane() {
             "looped",
             (1, execution),
         );
-        set_agent_lane(&mut request.invocation.binding, CLAUDE_ANTHROPIC);
+        set_agent_lane(&mut request.invocation.binding, claude_anthropic());
         runner
             .start(request)
             .await
@@ -761,18 +769,18 @@ async fn coverage_contract_candidate_builders_bind_only_to_their_admitted_lane_a
     .assert_value_with("hosted candidate with token");
     build_local_native_v2_candidate(
         &codex,
-        candidate_config(RuntimePlanKind::Codex, &repository, github.clone()),
+        local_candidate_config(RuntimePlanKind::Codex, &repository, github.clone()),
     )
     .assert_value_with("local candidate");
     build_local_native_v2_candidate_with_github_token(
         &codex,
-        candidate_config(RuntimePlanKind::Codex, &repository, github.clone()),
+        local_candidate_config(RuntimePlanKind::Codex, &repository, github.clone()),
         Some(Arc::from("private-token")),
     )
     .assert_value_with("local candidate with token");
     build_local_owner_native_v2_candidate(
         &codex,
-        candidate_config(RuntimePlanKind::Codex, &repository, github.clone()),
+        local_candidate_config(RuntimePlanKind::Codex, &repository, github.clone()),
     )
     .assert_value_with("owner-scoped local candidate");
 
@@ -791,7 +799,7 @@ async fn coverage_contract_candidate_builders_bind_only_to_their_admitted_lane_a
 
     build_local_native_v2_candidate(
         &claude,
-        candidate_config(RuntimePlanKind::Claude, &repository, github.clone()),
+        local_candidate_config(RuntimePlanKind::Claude, &repository, github.clone()),
     )
     .assert_value_with("local Claude candidate");
 
@@ -803,7 +811,7 @@ async fn coverage_contract_candidate_builders_bind_only_to_their_admitted_lane_a
     .assert_value_with("Pi candidate");
     build_local_native_v2_candidate(
         &pi,
-        candidate_config(RuntimePlanKind::Pi, &repository, github.clone()),
+        local_candidate_config(RuntimePlanKind::Pi, &repository, github.clone()),
     )
     .assert_value_with("local Pi candidate");
     assert_eq!(
@@ -822,17 +830,13 @@ async fn candidate_lanes_must_be_exactly_the_admitted_effective_lanes() {
     let github = Arc::new(ScriptedGitHub::new(repository.remote.clone()));
     let config = |kind| candidate_config(kind, &repository, github.clone());
     for lane in [
-        COPILOT_GITHUB,
-        CODEX_OPENAI,
-        RuntimeLane::Codex {
-            provider: CodexProvider::OpenRouter,
-        },
-        CLAUDE_ANTHROPIC,
-        RuntimeLane::Claude {
-            provider: ClaudeProvider::Bedrock,
-        },
+        copilot_github(),
+        codex_openai(),
+        RuntimeLane::new("codex", (CodexProvider::OpenRouter).name()).expect("valid built-in lane"),
+        claude_anthropic(),
+        RuntimeLane::new("claude", (ClaudeProvider::Bedrock).name()).expect("valid built-in lane"),
     ] {
-        assert_eq!(harness_config(lane, &repository).lane(), lane);
+        assert_eq!(harness_config(lane.clone(), &repository).lane(), lane);
     }
 
     let claude_override = admitted(RuntimePlanKind::ClaudeOverride).await;
@@ -849,7 +853,7 @@ async fn candidate_lanes_must_be_exactly_the_admitted_effective_lanes() {
         .assert_value_with("mixed plan takes both lanes");
     let mut reversed = config(RuntimePlanKind::ClaudeReviewer);
     reversed.lanes.reverse();
-    build_local_native_v2_candidate(&reviewed, reversed)
+    build_local_native_v2_candidate(&reviewed, as_local(reversed))
         .assert_value_with("lane order does not matter");
     for missing in [RuntimePlanKind::Codex, RuntimePlanKind::Claude] {
         assert_eq!(
@@ -858,10 +862,12 @@ async fn candidate_lanes_must_be_exactly_the_admitted_effective_lanes() {
         );
     }
     let mut misplaced = config(RuntimePlanKind::ClaudeReviewer);
-    let Some(NativeV2HarnessConfig::Claude(claude)) = misplaced.lanes.last_mut() else {
-        panic!("the mixed plan's last lane is Claude");
-    };
-    claude.workspace = repository.root.child("different-workspace");
+    let claude = misplaced
+        .lanes
+        .iter_mut()
+        .find(|config| config.lane().harness_name() == "claude")
+        .assert_value();
+    claude.context.workspace = repository.root.child("different-workspace");
     assert_eq!(
         validate_config(&reviewed, &misplaced).assert_error(),
         NativeV2CandidateError::WorkspaceMismatch
@@ -870,13 +876,18 @@ async fn candidate_lanes_must_be_exactly_the_admitted_effective_lanes() {
     let copilot_reviewed = admitted(RuntimePlanKind::CopilotReviewer).await;
     build_native_v2_candidate(&copilot_reviewed, config(RuntimePlanKind::CopilotReviewer))
         .assert_value_with("hosted plan takes its Copilot lane");
-    build_local_native_v2_candidate(&copilot_reviewed, config(RuntimePlanKind::CopilotReviewer))
-        .assert_value_with("local plan takes its Copilot lane");
+    build_local_native_v2_candidate(
+        &copilot_reviewed,
+        as_local(config(RuntimePlanKind::CopilotReviewer)),
+    )
+    .assert_value_with("local plan takes its Copilot lane");
     let mut copilot_misplaced = config(RuntimePlanKind::CopilotReviewer);
-    let Some(NativeV2HarnessConfig::Copilot(copilot)) = copilot_misplaced.lanes.first_mut() else {
-        panic!("the Copilot lane sorts first");
-    };
-    copilot.workspace = repository.root.child("different-workspace");
+    let copilot = copilot_misplaced
+        .lanes
+        .iter_mut()
+        .find(|config| config.lane().harness_name() == "copilot")
+        .assert_value();
+    copilot.context.workspace = repository.root.child("different-workspace");
     assert_eq!(
         validate_config(&copilot_reviewed, &copilot_misplaced).assert_error(),
         NativeV2CandidateError::WorkspaceMismatch
@@ -886,7 +897,7 @@ async fn candidate_lanes_must_be_exactly_the_admitted_effective_lanes() {
     let mut duplicated = config(RuntimePlanKind::Codex);
     duplicated
         .lanes
-        .push(harness_config(CODEX_OPENAI, &repository));
+        .push(harness_config(codex_openai(), &repository));
     duplicated
         .delivery
         .as_mut()
@@ -935,14 +946,14 @@ async fn candidate_lanes_must_be_exactly_the_admitted_effective_lanes() {
 async fn candidate_keys_each_built_adapter_by_the_lane_its_configuration_serves() {
     let repository = TempRepository::candidate();
     let github = Arc::new(ScriptedGitHub::new(repository.remote.clone()));
-    let codex = harness_session_type(CODEX_OPENAI, &repository).await;
+    let codex = harness_session_type(codex_openai(), &repository).await;
     assert_ne!(
         codex,
-        harness_session_type(CLAUDE_ANTHROPIC, &repository).await
+        harness_session_type(claude_anthropic(), &repository).await
     );
     assert_ne!(
         codex,
-        harness_session_type(COPILOT_GITHUB, &repository).await
+        harness_session_type(copilot_github(), &repository).await
     );
 
     for kind in [
@@ -953,11 +964,17 @@ async fn candidate_keys_each_built_adapter_by_the_lane_its_configuration_serves(
             CandidatePlacement::Capsule,
             CandidatePlacement::Local(SessionBoundary::Run),
         ] {
-            let mut lanes = candidate_config(kind, &repository, github.clone()).lanes;
+            let config = candidate_config(kind, &repository, github.clone());
+            let config = if placement.is_local() {
+                as_local(config)
+            } else {
+                config
+            };
+            let mut lanes = config.lanes;
             lanes.reverse();
             let agents = lane_agents(lanes, placement, None).assert_value_with("lane adapters");
             assert_eq!(
-                agents.keys().copied().collect::<BTreeSet<_>>(),
+                agents.keys().cloned().collect::<BTreeSet<_>>(),
                 runtime(kind).lanes()
             );
             for (lane, adapter) in &agents {
@@ -968,7 +985,7 @@ async fn candidate_keys_each_built_adapter_by_the_lane_its_configuration_serves(
                 );
                 assert_eq!(
                     session_type(&*adapter.sessions).await,
-                    harness_session_type(*lane, &repository).await,
+                    harness_session_type(lane.clone(), &repository).await,
                     "lane {lane} holds another lane's adapter"
                 );
             }
@@ -977,18 +994,10 @@ async fn candidate_keys_each_built_adapter_by_the_lane_its_configuration_serves(
 }
 
 async fn harness_session_type(lane: RuntimeLane, repository: &TempRepository) -> TypeId {
-    match harness_config(lane, repository) {
-        NativeV2HarnessConfig::Copilot(config) => session_type(&CopilotAdapter::new(config)).await,
-        NativeV2HarnessConfig::Codex(config) => {
-            session_type(&NativeV2CodexAdapter::new(config)).await
-        }
-        NativeV2HarnessConfig::Claude(config) => {
-            session_type(&ClaudeAdapter::new(config).assert_value_with("Claude adapter")).await
-        }
-        NativeV2HarnessConfig::Pi(config) => {
-            session_type(&PiAdapter::new(config).assert_value_with("Pi adapter")).await
-        }
-    }
+    let adapter = harness_config(lane, repository)
+        .build(None)
+        .assert_value_with("registered harness adapter");
+    session_type(&*adapter.sessions).await
 }
 
 async fn session_type(sessions: &dyn SessionFactory) -> TypeId {
@@ -1011,16 +1020,16 @@ fn candidate_node_lane_routes_each_agent_binding_only_to_its_own_lane() {
     let claude_agent = Arc::as_ptr(&claude).cast::<()>();
     let routes = CandidateNodeLane {
         comment_delivery: None,
-        default_lane: CODEX_OPENAI,
+        default_lane: codex_openai(),
         agents: BTreeMap::from([
-            (CODEX_OPENAI, CandidateAgents::new(codex)),
-            (CLAUDE_ANTHROPIC, CandidateAgents::new(claude.clone())),
+            (codex_openai(), CandidateAgents::new(codex)),
+            (claude_anthropic(), CandidateAgents::new(claude.clone())),
         ]),
         delivery: Some(routing_delivery(&workspace)),
     };
 
     assert_eq!(
-        routed_agent(&routes, &agent_binding(Some(CLAUDE_ANTHROPIC), "model")),
+        routed_agent(&routes, &agent_binding(Some(claude_anthropic()), "model")),
         Ok((claude_agent, claude_agent))
     );
     assert_eq!(
@@ -1028,12 +1037,11 @@ fn candidate_node_lane_routes_each_agent_binding_only_to_its_own_lane() {
         Ok((codex_agent, codex_agent))
     );
     assert_eq!(
-        routed_agent(&routes, &agent_binding(Some(CODEX_OPENAI), "model")),
+        routed_agent(&routes, &agent_binding(Some(codex_openai()), "model")),
         Ok((codex_agent, codex_agent))
     );
-    let unconfigured = RuntimeLane::Claude {
-        provider: ClaudeProvider::Bedrock,
-    };
+    let unconfigured =
+        RuntimeLane::new("claude", (ClaudeProvider::Bedrock).name()).expect("valid built-in lane");
     assert_eq!(
         routed_agent(&routes, &agent_binding(Some(unconfigured), "model")),
         Err(NodeRunnerError::Driver)
@@ -1045,8 +1053,8 @@ fn candidate_node_lane_routes_each_agent_binding_only_to_its_own_lane() {
 
     let claude_only = CandidateNodeLane {
         comment_delivery: None,
-        default_lane: CODEX_OPENAI,
-        agents: BTreeMap::from([(CLAUDE_ANTHROPIC, CandidateAgents::new(claude))]),
+        default_lane: codex_openai(),
+        agents: BTreeMap::from([(claude_anthropic(), CandidateAgents::new(claude))]),
         delivery: Some(routing_delivery(&workspace)),
     };
     assert_eq!(
@@ -1120,8 +1128,7 @@ fn candidate_source_has_no_route_to_the_replaced_runtime_paths() {
         assert!(!source.contains(&forbidden), "forbidden route {forbidden}");
     }
     for required in [
-        "NativeV2CodexAdapter",
-        "ClaudeAdapter",
+        "HarnessConfig",
         "NativeV2DeliveryAdapter",
         "NativeNodeRunner",
     ] {
@@ -1132,8 +1139,9 @@ fn candidate_source_has_no_route_to_the_replaced_runtime_paths() {
 #[path = "tests/fixtures.rs"]
 mod fixtures;
 use fixtures::{
-    CLAUDE_ANTHROPIC, CODEX_OPENAI, COPILOT_GITHUB, RuntimePlanKind, admitted, agent_binding,
-    candidate_config, delivery_binding, harness_config, runtime, shipping_graph, wait_for_terminal,
+    claude_anthropic, codex_openai, copilot_github, RuntimePlanKind, admitted, agent_binding,
+    as_local, candidate_config, local_candidate_config, delivery_binding, harness_config, runtime,
+    shipping_graph, wait_for_terminal,
 };
 
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue, JsonAt};

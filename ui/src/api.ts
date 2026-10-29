@@ -59,14 +59,39 @@ export function createApiClient(base: URL, fetcher: typeof fetch = fetch): ApiCl
   };
 }
 
+export type HarnessOption = {
+  id: string;
+  label: string;
+  providers: string[];
+  source?: 'core' | 'contributed';
+};
+
 export type WorkspaceIdentity = { kind: 'local' | 'target' | 'platform'; id: string };
 export type Bootstrap = {
   templates: Template[];
   workers?: WorkerOption[];
   runtimeSchema: any;
+  harnesses?: HarnessOption[];
   version: number;
   workspace: WorkspaceIdentity;
 };
+
+function validHarnessOption(value: unknown): value is HarnessOption {
+  const entry = value as Partial<HarnessOption> | null;
+  return (
+    !!entry &&
+    typeof entry.id === 'string' &&
+    !!entry.id.trim() &&
+    typeof entry.label === 'string' &&
+    !!entry.label.trim() &&
+    Array.isArray(entry.providers) &&
+    entry.providers.every((provider) => typeof provider === 'string' && !!provider.trim())
+  );
+}
+
+function validHarnessCatalog(value: unknown): boolean {
+  return value === undefined || (Array.isArray(value) && value.every(validHarnessOption));
+}
 
 export function readBootstrap(value: unknown): Bootstrap {
   const result = value as Partial<Bootstrap> | null;
@@ -79,6 +104,7 @@ export function readBootstrap(value: unknown): Bootstrap {
   if (
     !Array.isArray(result.templates) ||
     !result.runtimeSchema ||
+    !validHarnessCatalog(result.harnesses) ||
     !['local', 'target', 'platform'].includes(result.workspace?.kind ?? '') ||
     typeof result.workspace?.id !== 'string' ||
     !result.workspace.id.trim()

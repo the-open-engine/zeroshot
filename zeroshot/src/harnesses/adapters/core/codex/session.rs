@@ -1,14 +1,11 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use openengine_cluster_protocol::{TokenCount, WorkerOutcome};
 use tokio::sync::Mutex;
 
 use crate::native_v2_capsule::provider_process::{ProviderSessionCore, impl_provider_node_session};
-use crate::native_v2_contract::{NodeInvocation, NodeRuntimeBinding, TokenUsageDelta};
+use crate::native_v2_contract::{NodeRuntimeBinding, TokenUsageDelta};
 use crate::native_v2_runner::{
-    AgentResponse, DriverControl, DriverInvocation, NodeDriver, NodeRunnerError, NodeSession,
-    ResolvedEnvironment, SessionFactory,
+    AgentResponse, DriverControl, DriverInvocation, NodeDriver, NodeRunnerError,
 };
 
 use super::NativeV2CodexAdapter;
@@ -164,19 +161,10 @@ fn optional_token_delta(
 
 impl_provider_node_session!(CodexSession);
 
-#[async_trait]
-impl SessionFactory for NativeV2CodexAdapter {
-    async fn open(
-        &self,
-        invocation: &NodeInvocation,
-        _environment: &ResolvedEnvironment,
-    ) -> Result<Arc<dyn NodeSession>, NodeRunnerError> {
-        if !matches!(invocation.binding, NodeRuntimeBinding::Agent { .. }) {
-            return Err(NodeRunnerError::SessionOpen);
-        }
-        Ok(Arc::new(CodexSession::new()))
-    }
-}
+crate::native_v2_capsule::provider_process::impl_provider_session_factory!(
+    NativeV2CodexAdapter,
+    CodexSession::new()
+);
 
 #[async_trait]
 impl NodeDriver for NativeV2CodexAdapter {
@@ -186,11 +174,9 @@ impl NodeDriver for NativeV2CodexAdapter {
         control: DriverControl,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
         let invocation = self.memory_invocation(invocation);
-        let session = invocation
-            .session
-            .as_any()
-            .downcast_ref::<CodexSession>()
-            .ok_or(NodeRunnerError::Driver)?;
+        let session = crate::native_v2_capsule::provider_process::invocation_session::<CodexSession>(
+            &invocation,
+        )?;
         self.run_turn(&invocation, session, control).await
     }
 }

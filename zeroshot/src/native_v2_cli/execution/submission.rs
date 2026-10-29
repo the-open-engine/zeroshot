@@ -8,10 +8,10 @@ use std::path::Path;
 use std::pin::Pin;
 
 use openengine_cluster_protocol::{
-    ActiveMemoryConfig, ClaudeProvider, CodexProvider, DeclaredConnections, DeclaredEnvironment,
-    GlobalAgentsConfig, EnvironmentVariableName, GraphProfile, GraphSpec, IdempotencyKey, ModelId,
-    NodeName, NodeRuntimeBinding, PiProvider, ReasoningEffort, RunConnectionValues, RunSize,
-    RunSubmitResult, RunConnectionRequirements, RuntimePlan, SessionScope, StaticConnectionValues,
+    ActiveMemoryConfig, DeclaredConnections, DeclaredEnvironment, GlobalAgentsConfig,
+    EnvironmentVariableName, GraphProfile, GraphSpec, IdempotencyKey, ModelId, NodeName,
+    NodeRuntimeBinding, ReasoningEffort, RunConnectionValues, RunSize, RunSubmitResult,
+    RunConnectionRequirements, RuntimePlan, SessionScope, StaticConnectionValues,
 };
 use serde::Deserialize;
 
@@ -567,33 +567,11 @@ fn apply_template_runtime(
     Ok(runtime)
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "snake_case")]
-enum UniformHarness {
-    Copilot,
-    Codex,
-    Claude,
-    Pi,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "snake_case")]
-enum UniformProvider {
-    Github,
-    #[serde(rename = "openai")]
-    OpenAi,
-    #[serde(rename = "openrouter")]
-    OpenRouter,
-    Gateway,
-    Anthropic,
-    Bedrock,
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct UniformRuntimePlan {
-    harness: UniformHarness,
-    provider: UniformProvider,
+    harness: openengine_cluster_protocol::HarnessId,
+    provider: openengine_cluster_protocol::ProviderId,
     #[serde(default = "medium_size")]
     size: RunSize,
     model: ModelId,
@@ -620,7 +598,7 @@ impl UniformRuntimePlan {
         pull_request_feedback: crate::native_v2_contract::PullRequestFeedback,
         template: Option<BuiltinGraphTemplate>,
     ) -> Result<RuntimePlan, NativeV2CliError> {
-        let harness = self.harness;
+        let harness = self.harness.clone();
         let mut nodes = BTreeMap::new();
         let mode = crate::native_v2_admission::delivery_mode(&graph.root);
         for (name, delivery) in executable_runtime_roles(&graph.root) {
@@ -673,48 +651,17 @@ impl UniformRuntimePlan {
 
     fn into_runtime_plan(
         self,
-        harness: UniformHarness,
+        harness: openengine_cluster_protocol::HarnessId,
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
     ) -> Result<RuntimePlan, NativeV2CliError> {
-        let incompatible = || {
-            NativeV2CliError::Usage(format!(
-                "provider {:?} is incompatible with harness {:?}",
-                self.provider, harness
-            ))
-        };
-        match harness {
-            UniformHarness::Copilot if self.provider == UniformProvider::Github => {
-                Ok(RuntimePlan::Copilot {
-                    active_memory: self.active_memory,
-                    global_agents: self.global_agents,
-                    provider: crate::native_v2_contract::CopilotProvider::Github,
-                    size: self.size,
-                    nodes,
-                })
-            }
-            UniformHarness::Codex => Ok(RuntimePlan::Codex {
-                active_memory: self.active_memory,
-                global_agents: self.global_agents,
-                provider: self.provider.codex().ok_or_else(incompatible)?,
-                size: self.size,
-                nodes,
-            }),
-            UniformHarness::Claude => Ok(RuntimePlan::Claude {
-                active_memory: self.active_memory,
-                global_agents: self.global_agents,
-                provider: self.provider.claude().ok_or_else(incompatible)?,
-                size: self.size,
-                nodes,
-            }),
-            UniformHarness::Pi => Ok(RuntimePlan::Pi {
-                active_memory: self.active_memory,
-                global_agents: self.global_agents,
-                provider: self.provider.pi().ok_or_else(incompatible)?,
-                size: self.size,
-                nodes,
-            }),
-            UniformHarness::Copilot => Err(incompatible()),
-        }
+        Ok(RuntimePlan {
+            harness,
+            provider: self.provider,
+            size: self.size,
+            active_memory: self.active_memory,
+            global_agents: self.global_agents,
+            nodes,
+        })
     }
 }
 
@@ -730,39 +677,6 @@ fn is_comment_node(root: &openengine_cluster_protocol::GraphNode, name: &NodeNam
         pending.extend(openengine_cluster_server::graph_verifier::graph_node_children(node));
     }
     false
-}
-
-impl UniformProvider {
-    const fn codex(self) -> Option<CodexProvider> {
-        match self {
-            Self::OpenAi => Some(CodexProvider::OpenAi),
-            Self::OpenRouter => Some(CodexProvider::OpenRouter),
-            Self::Gateway => Some(CodexProvider::Gateway),
-            Self::Bedrock => Some(CodexProvider::Bedrock),
-            _ => None,
-        }
-    }
-
-    const fn claude(self) -> Option<ClaudeProvider> {
-        match self {
-            Self::Anthropic => Some(ClaudeProvider::Anthropic),
-            Self::OpenRouter => Some(ClaudeProvider::OpenRouter),
-            Self::Gateway => Some(ClaudeProvider::Gateway),
-            Self::Bedrock => Some(ClaudeProvider::Bedrock),
-            _ => None,
-        }
-    }
-
-    const fn pi(self) -> Option<PiProvider> {
-        match self {
-            Self::Anthropic => Some(PiProvider::Anthropic),
-            Self::OpenAi => Some(PiProvider::OpenAi),
-            Self::OpenRouter => Some(PiProvider::OpenRouter),
-            Self::Gateway => Some(PiProvider::Gateway),
-            Self::Bedrock => Some(PiProvider::Bedrock),
-            _ => None,
-        }
-    }
 }
 
 fn git_delivery_binding(

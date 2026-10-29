@@ -100,9 +100,11 @@ async fn direct_profile_handlers_round_trip_without_a_transport() {
 
 #[tokio::test]
 async fn direct_authoring_and_validation_handlers_preserve_drafts_and_reject_bad_json() {
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test("profile-ui-validation");
+    let state = state(root.as_path().to_owned(), "https://target.example");
     let request = profile_request();
     let document = json!({"graph":request["graph"],"runtime":request["runtime"]});
-    let Json(valid) = validate(Ok(Bytes::from(document.to_string())))
+    let Json(valid) = validate(State(state.clone()), Ok(Bytes::from(document.to_string())))
         .await
         .assert_value();
     assert_eq!(valid, json!({"valid":true}));
@@ -124,7 +126,7 @@ async fn direct_authoring_and_validation_handlers_preserve_drafts_and_reject_bad
     );
 
     for malformed in ["{", r#"{"graph":null,"runtime":null,"extra":true}"#] {
-        let error = validate(Ok(Bytes::from(malformed.to_owned())))
+        let error = validate(State(state.clone()), Ok(Bytes::from(malformed.to_owned())))
             .await
             .err()
             .assert_value();
@@ -401,4 +403,39 @@ async fn static_assets_and_bootstrap_are_native_and_self_contained() {
     assert_eq!(bootstrap["templates"].as_array().assert_value().len(), 10);
     assert_eq!(bootstrap["workers"].as_array().assert_value().len(), 5);
     assert!(bootstrap["runtimeSchema"]["$defs"].is_object());
+}
+
+#[cfg(feature = "contributed-harnesses")]
+#[tokio::test]
+async fn host_selected_catalog_and_validation_keep_contributions_local() {
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test("harness-catalog-host");
+    let local = state(root.as_path().to_owned(), "https://target.example");
+    let mut target = local.clone();
+    target.workspace.kind = "target";
+    let Json(local_catalog) = bootstrap(State(local.clone())).await.assert_value();
+    let Json(target_catalog) = bootstrap(State(target.clone())).await.assert_value();
+    let contains_opencode = |catalog: &Value| {
+        catalog["harnesses"]
+            .as_array()
+            .assert_value()
+            .iter()
+            .any(|entry| entry["id"] == "opencode")
+    };
+    assert!(contains_opencode(&local_catalog));
+    assert!(!contains_opencode(&target_catalog));
+    assert!(!contains_opencode(
+        &crate::workspace::catalog().assert_value()
+    ));
+    let request = profile_request();
+    let graph: GraphSpec = serde_json::from_value(request["graph"].clone()).assert_value();
+    let mut runtime: RuntimePlan =
+        serde_json::from_value(request["runtime"].clone()).assert_value();
+    runtime.harness = openengine_cluster_protocol::HarnessId::new("opencode").assert_value();
+    assert!(admit(&local, &graph, &runtime).await.is_ok());
+    assert!(admit(&target, &graph, &runtime).await.is_err());
+    assert!(
+        crate::workspace::validate_profile(&graph, &runtime)
+            .await
+            .is_err()
+    );
 }

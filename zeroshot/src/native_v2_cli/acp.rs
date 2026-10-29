@@ -13,8 +13,8 @@ use acp::Client as _;
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
     FieldName, GraphNode, IdempotencyKey, PayloadType, RunConnectionValues, RunId, RunProfile,
-    RunProfileName, RunProfileScope, RunProfileSelector, RunSubmission, RunTitle, RuntimeLane,
-    RuntimePlan, SessionScope, TerminalResult,
+    RunProfileName, RunProfileScope, RunProfileSelector, RunSubmission, RunTitle, RuntimePlan,
+    SessionScope, TerminalResult,
 };
 use serde_json::{json, Map, Value};
 use thiserror::Error;
@@ -872,16 +872,6 @@ fn submission(
 
 async fn validate_profile(profile: &RunProfile) -> Result<(), AcpServeError> {
     validate_task_type(&profile.graph.initial_input)?;
-    if profile
-        .runtime
-        .lanes()
-        .iter()
-        .any(|lane| matches!(lane, RuntimeLane::Copilot { .. } | RuntimeLane::Pi { .. }))
-    {
-        return Err(AcpServeError::Profile(
-            "only Codex and Claude lanes are supported",
-        ));
-    }
     let mut success_count = 0;
     validate_node(&profile.graph.root, &mut success_count)?;
     if success_count == 0 {

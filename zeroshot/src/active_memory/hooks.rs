@@ -59,20 +59,43 @@ impl ActiveMemoryHooks {
         })
     }
 
-    pub(crate) fn configure(
+    /// Creates the same bounded, run-scoped callback capability for every native bridge.
+    /// The adapter owns hook/extension installation and acknowledges context it returns.
+    pub(crate) fn capability_file(
         &self,
-        harness: native::Harness,
+        invocation: &DriverInvocation,
+        workspace: &Path,
+        home: &Path,
+    ) -> io::Result<Option<PathBuf>> {
+        if auxiliary_invocation(invocation) {
+            return Ok(None);
+        }
+        let capability = self.broker.capability(invocation, workspace)?;
+        let bytes = serde_json::to_vec(&capability)?;
+        crate::native_v2_capsule::provider_process::write_provider_file(
+            home,
+            "active-memory-capability.json",
+            &bytes,
+        )
+        .map(Some)
+    }
+
+    /// The host owns the callback capability; the adapter installs its native carrier.
+    pub(crate) fn configure_with(
+        &self,
         command: &mut ProcessSessionCommand,
         installation: HookInstallation<'_>,
+        install: fn(&mut ProcessSessionCommand, &Path) -> io::Result<()>,
     ) {
-        if auxiliary_invocation(installation.invocation) {
-            return;
-        }
         let result = self
-            .broker
-            .capability(installation.invocation, &command.workspace.current_dir)
-            .and_then(|capability| {
-                native::configure(harness, command, installation.home, &capability)
+            .capability_file(
+                installation.invocation,
+                &command.workspace.current_dir,
+                installation.home,
+            )
+            .and_then(|capability| match capability {
+                Some(path) => install(command, &path),
+                None => Ok(()),
             });
         if result.is_err() {
             self.source
@@ -112,7 +135,7 @@ impl ActiveMemoryHooks {
         );
     }
 
-    pub(crate) fn copilot_context(
+    pub(crate) fn tool_context(
         &self,
         invocation: &DriverInvocation,
         input: &Value,
@@ -149,7 +172,7 @@ pub fn run_hook_helper(capability_path: &Path) -> io::Result<()> {
     broker::run_helper(capability_path)
 }
 
-pub(crate) use native::Harness;
+pub(crate) use native::command_handler;
 
 /// All four adapters attach the same optional run-owned capability. Keep their builder and
 /// private-invocation behavior together so a future policy change reaches every harness.

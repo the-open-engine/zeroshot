@@ -1,5 +1,5 @@
 ---
-description: "Use zeroshot acp to expose a saved local profile as an experimental Agent Client Protocol agent, running the graph once per prompt."
+description: 'Use zeroshot acp to expose a saved local profile as an experimental Agent Client Protocol agent, running the graph once per prompt.'
 ---
 
 # Use a local graph as an ACP agent
@@ -18,10 +18,9 @@ The ACP preview accepts a deliberately narrow profile:
 - Every success node returns one required string field named `response`.
 - Map nodes and Git delivery nodes aren't accepted.
 - Every executable node has an agent runtime binding with `sessionScope` set to `node_instance`.
-- Runtime connections aren't accepted. The endpoint supports Codex and Claude through their local
-  user login and configuration.
-- Agent nodes may mix Codex and Claude [lanes](../reference/runtime-plan.md#per-node-lanes). A
-  Copilot or Pi lane isn't accepted.
+- Runtime connections aren't accepted. Registered local harnesses use their native login and
+  configuration.
+- Agent nodes may mix registered harness [lanes](../reference/runtime-plan.md#per-node-lanes).
 
 These limits keep one ACP turn equivalent to one ordinary local run; the graph compiler, reducer,
 provider adapters, and run ledger stay unchanged.
@@ -140,7 +139,7 @@ Configure the ACP client to launch the saved profile:
 zeroshot acp --profile local:acp-worker
 ```
 
-The command checks that each lane's executable, `codex` or `claude`, is on `PATH`, as a local run
+The command checks that each registered lane's executable is on `PATH`, as a local run
 does. Each session checks when it opens, against that session's workspace, and a missing executable
 fails `session/new` with an invalid-params error that names the lane and executable. If every
 `PATH` entry is absolute, the command also checks at startup. An empty or relative entry resolves
@@ -185,7 +184,7 @@ fresh run ID, controller lock, SQLite ledger, and supervisor lifecycle, so it re
 the ACP session closes.
 
 Provider sessions use stable graph-node slots within the outer ACP session. A clean node completion
-can therefore resume the same Codex thread or Claude session on the next prompt.
+can therefore resume the same native harness session on the next prompt.
 Closing the ACP session cancels an active prompt, waits for it to settle, closes every provider
 session, and releases the workspace lease. `session/cancel` force-stops only the current durable
 turn and returns ACP's `cancelled` stop reason.

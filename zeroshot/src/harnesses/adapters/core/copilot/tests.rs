@@ -29,7 +29,7 @@ const INSTRUCTIONS: &str = "Return answer 42 using the required schema.";
 fn script() -> String {
     std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/native_v2_copilot/tests/runtime.py"
+        "/src/harnesses/adapters/core/copilot/tests/runtime.py"
     ))
     .unwrap()
 }
@@ -72,13 +72,15 @@ async fn admitted(binding: NodeRuntimeBinding, instructions: &str) -> AdmittedRu
         title: RunTitle::new("Copilot contract test").assert_value(),
         graph,
         initial_input: Value::Null,
-        runtime: RuntimePlan::Copilot {
-            active_memory: Default::default(),
-            global_agents: Default::default(),
-            provider: CopilotProvider::Github,
-            size: RunSize::Medium,
-            nodes: BTreeMap::from([(NodeName::new("work").assert_value(), binding)]),
-        },
+        runtime: RuntimePlan::new(
+            openengine_cluster_protocol::RuntimeLane::new(
+                "copilot",
+                (CopilotProvider::Github).name(),
+            )
+            .assert_value(),
+            RunSize::Medium,
+            BTreeMap::from([(NodeName::new("work").assert_value(), binding)]),
+        ),
         source: serde_json::from_value(
             json!({"repository":"the-open-engine/zeroshot", "branch":"main",
             "revision":"0123456789abcdef0123456789abcdef01234567"}),

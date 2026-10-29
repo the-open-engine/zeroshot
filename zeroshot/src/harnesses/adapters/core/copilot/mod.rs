@@ -267,3 +267,6 @@ async fn exchange_rpc(
 
 #[cfg(test)]
 mod tests;
+
+mod registration;
+pub(crate) use registration::registration;

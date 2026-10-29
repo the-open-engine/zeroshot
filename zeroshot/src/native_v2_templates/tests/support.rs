@@ -70,13 +70,12 @@ pub(super) fn runtime_for(
     if let Some((name, binding)) = template.delivery_runtime_binding(delivery).assert_value() {
         nodes.insert(name, binding);
     }
-    RuntimePlan::Codex {
-        active_memory: Default::default(),
-        global_agents: Default::default(),
-        provider: CodexProvider::OpenAi,
-        size: RunSize::Medium,
+    RuntimePlan::new(
+        openengine_cluster_protocol::RuntimeLane::new("codex", (CodexProvider::OpenAi).name())
+            .assert_value(),
+        RunSize::Medium,
         nodes,
-    }
+    )
 }
 
 fn agent_binding() -> NodeRuntimeBinding {

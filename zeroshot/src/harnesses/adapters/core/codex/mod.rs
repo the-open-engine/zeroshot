@@ -5,11 +5,12 @@
 //! Provider sessions are harness-owned runtime state and never enter the durable runner contract.
 
 mod command;
+pub(crate) mod memory;
 mod output;
 mod permissions;
 mod process;
 mod schema_file;
-#[path = "native_v2_codex/session.rs"]
+#[path = "session.rs"]
 mod session;
 mod turn;
 
@@ -188,11 +189,7 @@ impl NativeV2CodexAdapter {
         installation: crate::active_memory::hooks::HookInstallation<'_>,
     ) {
         if let Some(memory) = &self.active_memory {
-            memory.configure(
-                crate::active_memory::hooks::Harness::Codex,
-                command,
-                installation,
-            );
+            memory.configure_with(command, installation, memory::install);
         }
     }
 
@@ -542,3 +539,7 @@ async fn resolve_codex_output(
 
 #[cfg(test)]
 mod tests;
+
+mod registration;
+pub(crate) use registration::registration;
+mod access;

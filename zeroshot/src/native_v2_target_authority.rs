@@ -93,6 +93,13 @@ impl TargetAuthorityError {
 /// environment, exact source checkout, and private capsule allocator for this target process.
 #[async_trait]
 pub trait TargetControllerFactory: Send + Sync {
+    /// Host-enabled lanes; absent only for older or custom factories without a catalog.
+    fn runtime_harnesses(
+        &self,
+    ) -> Option<openengine_cluster_protocol::TargetRuntimeHarnessesDiscovery> {
+        None
+    }
+
     fn supports_comment_delivery(&self) -> bool {
         false
     }
@@ -170,6 +177,12 @@ pub struct NativeV2TargetAuthority {
 }
 
 impl NativeV2TargetAuthority {
+    fn runtime_harnesses(
+        &self,
+    ) -> Option<openengine_cluster_protocol::TargetRuntimeHarnessesDiscovery> {
+        self.factory.runtime_harnesses()
+    }
+
     fn supports_comment_delivery(&self) -> bool {
         self.factory.supports_comment_delivery()
     }

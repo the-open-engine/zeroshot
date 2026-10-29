@@ -125,13 +125,15 @@ fn submission(graph: GraphSpec, nodes: BTreeMap<NodeName, NodeRuntimeBinding>) -
         title: RunTitle::new("Admission test").assert_value(),
         graph,
         initial_input: json!({"items":[null]}),
-        runtime: RuntimePlan::Claude {
-            active_memory: Default::default(),
-            global_agents: Default::default(),
-            provider: ClaudeProvider::Anthropic,
-            size: RunSize::Medium,
+        runtime: RuntimePlan::new(
+            openengine_cluster_protocol::RuntimeLane::new(
+                "claude",
+                (ClaudeProvider::Anthropic).name(),
+            )
+            .assert_value(),
+            RunSize::Medium,
             nodes,
-        },
+        ),
         source: Some(resolved_source()),
         submission_key: IdempotencyKey::new("admission-test").assert_value(),
     }
@@ -357,26 +359,21 @@ async fn admits_bedrock_for_both_harnesses_and_preserves_provider_owned_models()
         title: RunTitle::new("Opaque Codex model").assert_value(),
         graph: graph.clone(),
         initial_input: json!({"items":[null]}),
-        runtime: RuntimePlan::Codex {
-            active_memory: Default::default(),
-            global_agents: Default::default(),
-            provider: CodexProvider::Bedrock,
-            size: RunSize::Small,
-            nodes: BTreeMap::from([(
+        runtime: RuntimePlan::new(
+            openengine_cluster_protocol::RuntimeLane::new("codex", (CodexProvider::Bedrock).name())
+                .assert_value(),
+            RunSize::Small,
+            BTreeMap::from([(
                 named("work"),
                 binding("provider/future-model", Some(ReasoningEffort::Max)),
             )]),
-        },
+        ),
         source: Some(resolved_source()),
         submission_key: IdempotencyKey::new("opaque-codex-model").assert_value(),
     };
     let admitted = NativeV2Admission.admit(codex_runtime).await.assert_value();
-    let provider = match &admitted.runtime {
-        RuntimePlan::Codex { provider, .. } => Some(provider),
-        RuntimePlan::Claude { .. } | RuntimePlan::Copilot { .. } | RuntimePlan::Pi { .. } => None,
-    };
-    let provider = provider.assert_value_with("admission preserves the Codex harness");
-    assert_eq!(*provider, CodexProvider::Bedrock);
+    assert_eq!(admitted.runtime.harness.as_str(), "codex");
+    assert_eq!(admitted.runtime.provider.as_str(), "bedrock");
     assert!(matches!(
         admitted.runtime.nodes().get(&named("work")),
         Some(NodeRuntimeBinding::Agent { model, effort: Some(ReasoningEffort::Max), .. })
@@ -390,19 +387,11 @@ async fn admits_bedrock_for_both_harnesses_and_preserves_provider_owned_models()
             binding("claude-haiku-4-5", Some(ReasoningEffort::Low)),
         )]),
     );
-    let provider = match &mut claude_runtime.runtime {
-        RuntimePlan::Claude { provider, .. } => Some(provider),
-        RuntimePlan::Codex { .. } | RuntimePlan::Copilot { .. } | RuntimePlan::Pi { .. } => None,
-    };
-    let provider = provider.assert_value_with("submission fixture uses Claude");
-    *provider = ClaudeProvider::Bedrock;
+    assert_eq!(claude_runtime.runtime.harness.as_str(), "claude");
+    claude_runtime.runtime.provider = ClaudeProvider::Bedrock.into();
     let admitted = NativeV2Admission.admit(claude_runtime).await.assert_value();
-    let provider = match &admitted.runtime {
-        RuntimePlan::Claude { provider, .. } => Some(provider),
-        RuntimePlan::Codex { .. } | RuntimePlan::Copilot { .. } | RuntimePlan::Pi { .. } => None,
-    };
-    let provider = provider.assert_value_with("admission preserves the Claude harness");
-    assert_eq!(*provider, ClaudeProvider::Bedrock);
+    assert_eq!(admitted.runtime.harness.as_str(), "claude");
+    assert_eq!(admitted.runtime.provider.as_str(), "bedrock");
     assert!(matches!(
         admitted.runtime.nodes().get(&named("work")),
         Some(NodeRuntimeBinding::Agent { model, effort: Some(ReasoningEffort::Low), .. })
@@ -562,3 +551,60 @@ async fn environment_name_limit_counts_distinct_names_across_nodes_hooks_and_var
 
 #[path = "tests/comments.rs"]
 mod comments;
+
+#[tokio::test]
+async fn host_selected_harness_registry_controls_profiles_intents_and_run_admission() {
+    use crate::harnesses::{HarnessDescriptor, HarnessRegistration, HarnessRegistry, HarnessSource};
+    let mut registry = HarnessRegistry::core();
+    registry
+        .register(HarnessRegistration {
+            descriptor: HarnessDescriptor {
+                id: "fixture-contribution",
+                label: "Fixture contribution",
+                providers: &["private-provider"],
+                executable: "must-not-launch",
+                source: HarnessSource::Contributed,
+            },
+            build: |_, _| panic!("pure admission must not construct a harness"),
+            access: |_| panic!("pure admission must not resolve provider credentials"),
+            normalize_local: |_, _| panic!("pure admission must not inspect local configuration"),
+        })
+        .assert_value();
+    let mut request = submission(
+        graph(vec![null_step("work", "agent.work@1"), succeed("done")]),
+        BTreeMap::from([(named("work"), binding("opaque-model", None))]),
+    );
+    request.runtime.harness =
+        openengine_cluster_protocol::HarnessId::new("fixture-contribution").assert_value();
+    request.runtime.provider =
+        openengine_cluster_protocol::ProviderId::new("private-provider").assert_value();
+    let context = NativeV2AdmissionContext::new(&registry, DeliveryPolicy::Optional);
+    NativeV2Admission
+        .validate_profile_with_context(&request.graph, &request.runtime, context)
+        .await
+        .assert_value();
+    let intent = RunSubmissionIntent::from(&request);
+    NativeV2Admission
+        .validate_intent_with_context(&intent, context)
+        .await
+        .assert_value();
+    let admitted = NativeV2Admission
+        .admit_with_context(request.clone(), context)
+        .await
+        .assert_value();
+    assert_eq!(admitted.runtime, request.runtime);
+    assert!(matches!(
+        NativeV2Admission.admit(request.clone()).await,
+        Err(NativeV2AdmissionError::InvalidRuntime(_))
+    ));
+    let core = HarnessRegistry::core();
+    assert!(matches!(
+        NativeV2Admission
+            .admit_with_context(
+                request,
+                NativeV2AdmissionContext::new(&core, DeliveryPolicy::Optional)
+            )
+            .await,
+        Err(NativeV2AdmissionError::InvalidRuntime(_))
+    ));
+}

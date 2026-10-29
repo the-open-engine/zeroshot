@@ -51,47 +51,41 @@ fn node_connection_wire_shape_is_keyed_and_secret_free() {
     assert!(encoded.get("env").is_none());
 }
 
-fn every_lane() -> [RuntimeLane; 9] {
+fn lane(harness: &str, provider: &str) -> RuntimeLane {
+    RuntimeLane::new(harness, provider).assert_value()
+}
+
+fn every_lane() -> Vec<RuntimeLane> {
     [
-        RuntimeLane::Copilot {
-            provider: CopilotProvider::Github,
-        },
-        RuntimeLane::Codex {
-            provider: CodexProvider::OpenAi,
-        },
-        RuntimeLane::Codex {
-            provider: CodexProvider::OpenRouter,
-        },
-        RuntimeLane::Codex {
-            provider: CodexProvider::Gateway,
-        },
-        RuntimeLane::Codex {
-            provider: CodexProvider::Bedrock,
-        },
-        RuntimeLane::Claude {
-            provider: ClaudeProvider::Anthropic,
-        },
-        RuntimeLane::Claude {
-            provider: ClaudeProvider::OpenRouter,
-        },
-        RuntimeLane::Claude {
-            provider: ClaudeProvider::Gateway,
-        },
-        RuntimeLane::Claude {
-            provider: ClaudeProvider::Bedrock,
-        },
+        ("claude", "anthropic"),
+        ("claude", "bedrock"),
+        ("claude", "gateway"),
+        ("claude", "openrouter"),
+        ("codex", "bedrock"),
+        ("codex", "gateway"),
+        ("codex", "openai"),
+        ("codex", "openrouter"),
+        ("copilot", "github"),
+        ("opencode", "custom/provider"),
+        ("pi", "anthropic"),
+        ("pi", "bedrock"),
+        ("pi", "gateway"),
+        ("pi", "openai"),
+        ("pi", "openrouter"),
     ]
+    .into_iter()
+    .map(|(harness, provider)| lane(harness, provider))
+    .collect()
 }
 
 #[test]
 fn lane_names_and_display_agree_with_the_serde_wire_names() {
     for lane in every_lane() {
-        let wire = serde_json::to_value(lane).assert_value();
+        let wire = serde_json::to_value(&lane).assert_value();
         assert_eq!(
             wire,
             serde_json::json!({
-                "harness": lane.harness_name(),
-                "provider": lane.provider_name(),
+                "harness": lane.harness_name(), "provider": lane.provider_name(),
             })
         );
         assert_eq!(
@@ -103,39 +97,88 @@ fn lane_names_and_display_agree_with_the_serde_wire_names() {
             lane
         );
     }
+}
+
+#[test]
+fn lanes_order_by_opaque_harness_then_provider_names() {
+    let sorted = every_lane()
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(sorted.into_iter().collect::<Vec<_>>(), every_lane());
+}
+
+#[test]
+fn runtime_ids_are_bounded_opaque_values_and_do_not_select_an_adapter() {
+    assert!(HarnessId::new("contributed/tool").is_ok());
+    assert!(ProviderId::new("private-provider:region").is_ok());
+    for invalid in [
+        "".to_owned(),
+        "bad\nname".to_owned(),
+        "bad\0name".to_owned(),
+        "x".repeat(129),
+        "é".repeat(65),
+    ] {
+        assert!(HarnessId::new(invalid.clone()).is_err());
+        assert!(ProviderId::new(invalid).is_err());
+    }
+    assert!(HarnessId::new("é".repeat(64)).is_ok());
+    let wire = serde_json::json!({
+        "harness":"contributed-tool", "provider":"private-provider", "size":"small",
+        "nodes":{"worker":{"kind":"agent","model":"opaque-model"}}
+    });
+    let plan: RuntimePlan = serde_json::from_value(wire.clone()).assert_value();
+    assert_eq!(serde_json::to_value(&plan).assert_value(), wire);
     assert_eq!(
-        RuntimeLane::Claude {
-            provider: ClaudeProvider::Anthropic
-        }
-        .to_string(),
-        "claude/anthropic"
+        plan.lanes().into_iter().collect::<Vec<_>>(),
+        [lane("contributed-tool", "private-provider")]
     );
 }
 
 #[test]
-fn lanes_order_by_harness_then_provider_declaration() {
-    let sorted = every_lane()
-        .into_iter()
-        .collect::<std::collections::BTreeSet<_>>();
+fn core_provider_conversion_round_trips_without_runtime_compatibility_policy() {
+    for value in [
+        CodexProvider::OpenAi,
+        CodexProvider::OpenRouter,
+        CodexProvider::Gateway,
+        CodexProvider::Bedrock,
+    ] {
+        assert_eq!(value.name().parse::<CodexProvider>().assert_value(), value);
+        assert_eq!(ProviderId::from(value).as_str(), value.name());
+    }
+    for value in [
+        ClaudeProvider::Anthropic,
+        ClaudeProvider::OpenRouter,
+        ClaudeProvider::Gateway,
+        ClaudeProvider::Bedrock,
+    ] {
+        assert_eq!(value.name().parse::<ClaudeProvider>().assert_value(), value);
+        assert_eq!(ProviderId::from(value).as_str(), value.name());
+    }
+    for value in [
+        PiProvider::Anthropic,
+        PiProvider::OpenAi,
+        PiProvider::OpenRouter,
+        PiProvider::Gateway,
+        PiProvider::Bedrock,
+    ] {
+        assert_eq!(value.name().parse::<PiProvider>().assert_value(), value);
+        assert_eq!(ProviderId::from(value).as_str(), value.name());
+    }
+    let copilot = CopilotProvider::Github;
     assert_eq!(
-        sorted.into_iter().collect::<Vec<_>>(),
-        every_lane().to_vec()
+        copilot.name().parse::<CopilotProvider>().assert_value(),
+        copilot
     );
+    assert_eq!(ProviderId::from(copilot).as_str(), copilot.name());
+    assert!("anthropic".parse::<CodexProvider>().is_err());
+    assert!("openai".parse::<ClaudeProvider>().is_err());
+    assert!("openai".parse::<CopilotProvider>().is_err());
+    assert!("github".parse::<PiProvider>().is_err());
 }
-
-const CODEX_OPENAI: RuntimeLane = RuntimeLane::Codex {
-    provider: CodexProvider::OpenAi,
-};
-const CLAUDE_ANTHROPIC: RuntimeLane = RuntimeLane::Claude {
-    provider: ClaudeProvider::Anthropic,
-};
 
 fn codex_plan(nodes: serde_json::Value) -> RuntimePlan {
     serde_json::from_value(serde_json::json!({
-        "harness": "codex",
-        "provider": "openai",
-        "size": "small",
-        "nodes": nodes
+        "harness": "codex", "provider": "openai", "size": "small", "nodes": nodes
     }))
     .assert_value()
 }
@@ -143,16 +186,8 @@ fn codex_plan(nodes: serde_json::Value) -> RuntimePlan {
 fn mixed_lane_plan() -> RuntimePlan {
     codex_plan(serde_json::json!({
         "worker": {"kind": "agent", "model": "worker-model"},
-        "review": {
-            "kind": "agent",
-            "lane": {"harness": "claude", "provider": "anthropic"},
-            "model": "review-model"
-        },
-        "same": {
-            "kind": "agent",
-            "lane": {"harness": "codex", "provider": "openai"},
-            "model": "same-model"
-        },
+        "review": {"kind": "agent", "lane": {"harness": "claude", "provider": "anthropic"}, "model": "review-model"},
+        "same": {"kind": "agent", "lane": {"harness": "codex", "provider": "openai"}, "model": "same-model"},
         "deliver": {"kind": "git_delivery"}
     }))
 }
@@ -168,14 +203,23 @@ fn effective_lane_of(plan: &RuntimePlan, node: &str) -> Option<RuntimeLane> {
 #[test]
 fn plan_resolves_each_binding_to_its_effective_lane() {
     let plan = mixed_lane_plan();
-    assert_eq!(plan.lane(), CODEX_OPENAI);
-    assert_eq!(effective_lane_of(&plan, "worker"), Some(CODEX_OPENAI));
-    assert_eq!(effective_lane_of(&plan, "review"), Some(CLAUDE_ANTHROPIC));
-    assert_eq!(effective_lane_of(&plan, "same"), Some(CODEX_OPENAI));
+    assert_eq!(plan.lane(), lane("codex", "openai"));
+    assert_eq!(
+        effective_lane_of(&plan, "worker"),
+        Some(lane("codex", "openai"))
+    );
+    assert_eq!(
+        effective_lane_of(&plan, "review"),
+        Some(lane("claude", "anthropic"))
+    );
+    assert_eq!(
+        effective_lane_of(&plan, "same"),
+        Some(lane("codex", "openai"))
+    );
     assert_eq!(effective_lane_of(&plan, "deliver"), None);
     assert_eq!(
         plan.lanes().into_iter().collect::<Vec<_>>(),
-        [CODEX_OPENAI, CLAUDE_ANTHROPIC]
+        [lane("claude", "anthropic"), lane("codex", "openai")]
     );
     assert!(plan.has_lane_overrides());
 }
@@ -183,28 +227,21 @@ fn plan_resolves_each_binding_to_its_effective_lane() {
 #[test]
 fn lane_overrides_are_reported_even_when_they_repeat_the_run_level_lane() {
     let plain = codex_plan(serde_json::json!({
-        "worker": {"kind": "agent", "model": "worker-model"},
-        "deliver": {"kind": "git_delivery"}
+        "worker": {"kind": "agent", "model": "worker-model"}, "deliver": {"kind": "git_delivery"}
     }));
     assert!(!plain.has_lane_overrides());
     assert_eq!(
         plain.lanes().into_iter().collect::<Vec<_>>(),
-        [CODEX_OPENAI]
+        [lane("codex", "openai")]
     );
-
     let repeated = codex_plan(serde_json::json!({
-        "same": {
-            "kind": "agent",
-            "lane": {"harness": "codex", "provider": "openai"},
-            "model": "same-model"
-        }
+        "same": {"kind": "agent", "lane": {"harness": "codex", "provider": "openai"}, "model": "same-model"}
     }));
     assert!(repeated.has_lane_overrides());
     assert_eq!(
         repeated.lanes().into_iter().collect::<Vec<_>>(),
-        [CODEX_OPENAI]
+        [lane("codex", "openai")]
     );
-
     let delivery_only = codex_plan(serde_json::json!({"deliver": {"kind": "git_delivery"}}));
     assert!(!delivery_only.has_lane_overrides());
     assert!(delivery_only.lanes().is_empty());
@@ -212,27 +249,41 @@ fn lane_overrides_are_reported_even_when_they_repeat_the_run_level_lane() {
 
 #[test]
 fn node_edits_through_nodes_mut_are_visible_through_nodes() {
-    let mut plan = codex_plan(serde_json::json!({
-        "worker": {"kind": "agent", "model": "worker-model"}
-    }));
+    let mut plan =
+        codex_plan(serde_json::json!({"worker": {"kind": "agent", "model": "worker-model"}}));
     let worker = crate::NodeName::new("worker").assert_value();
-    let Some(NodeRuntimeBinding::Agent { lane, .. }) = plan.nodes_mut().get_mut(&worker) else {
+    let Some(NodeRuntimeBinding::Agent {
+        lane: override_lane,
+        ..
+    }) = plan.nodes_mut().get_mut(&worker)
+    else {
         panic!("worker must be an agent binding");
     };
-    *lane = Some(CLAUDE_ANTHROPIC);
-    assert!(matches!(
-        plan.nodes().get(&worker),
-        Some(NodeRuntimeBinding::Agent {
-            lane: Some(CLAUDE_ANTHROPIC),
-            ..
-        })
-    ));
-    assert_eq!(plan.lane(), CODEX_OPENAI);
-    assert_eq!(effective_lane_of(&plan, "worker"), Some(CLAUDE_ANTHROPIC));
+    *override_lane = Some(lane("claude", "anthropic"));
+    assert_eq!(plan.lane(), lane("codex", "openai"));
+    assert_eq!(
+        effective_lane_of(&plan, "worker"),
+        Some(lane("claude", "anthropic"))
+    );
     assert!(plan.has_lane_overrides());
     assert_eq!(
         plan.lanes().into_iter().collect::<Vec<_>>(),
-        [CLAUDE_ANTHROPIC]
+        [lane("claude", "anthropic")]
+    );
+}
+
+#[test]
+fn runtime_plan_constructor_preserves_existing_wire_defaults() {
+    let plan = RuntimePlan::new(
+        lane("opencode", "openai"),
+        RunSize::Medium,
+        Default::default(),
+    );
+    assert_eq!(
+        serde_json::to_value(plan).assert_value(),
+        serde_json::json!({
+            "harness":"opencode", "provider":"openai", "size":"medium", "nodes":{}
+        })
     );
 }
 

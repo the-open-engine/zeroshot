@@ -31,8 +31,12 @@ pub(super) fn validate_graph_input(
 pub(super) fn validate_executable_bindings(
     declarations: &[ExecutableDeclaration],
     runtime: &RuntimePlan,
-    delivery_policy: DeliveryPolicy,
+    context: super::NativeV2AdmissionContext<'_>,
 ) -> Result<(), NativeV2AdmissionError> {
+    context
+        .harnesses
+        .validate_runtime(runtime)
+        .map_err(|error| NativeV2AdmissionError::InvalidRuntime(error.to_string()))?;
     runtime
         .active_memory()
         .validate()
@@ -51,7 +55,7 @@ pub(super) fn validate_executable_bindings(
     validate_attempts(declarations)?;
     validate_binding_coverage(declarations, bindings)?;
     validate_binding_kinds(declarations, bindings)?;
-    validate_delivery_policy(delivery_policy, declarations)?;
+    validate_delivery_policy(context.delivery_policy, declarations)?;
     validate_declared_environment(runtime, None)
 }
 

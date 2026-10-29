@@ -1,5 +1,5 @@
 ---
-description: "Install the zeroshot CLI and its agent skills, connect Cloud, open the workspace UI and prepare a local run."
+description: 'Install the zeroshot CLI and its agent skills, connect Cloud, open the workspace UI and prepare a local run.'
 ---
 
 # Install Zeroshot
@@ -115,14 +115,15 @@ Git delivery do not need a repository. Install each agent harness named by the r
 - install and sign in to Codex for `"harness": "codex"`;
 - install and sign in to Claude Code for `"harness": "claude"`;
 - install GitHub Copilot CLI 1.0.86 for `"harness": "copilot"` with `"provider": "github"`;
-- install and sign in to Pi for `"harness": "pi"`.
+- install and sign in to Pi for `"harness": "pi"`;
+- install OpenCode for the contributed `"harness": "opencode"` adapter in official local builds.
 
 Local GitHub pull request delivery (`--pr` or `--ship`) also needs the GitHub CLI, `gh`, on `PATH`.
 Zeroshot runs the `gh` that `PATH` finds and rejects the run before any agent starts if there is
 none.
 
-Local Codex/OpenAI, Claude/Anthropic, Copilot/GitHub, Pi/Anthropic, and Pi/OpenAI lanes reuse the
-installed harness's native login and configuration. Other provider lanes can read declared values
+Local Codex/OpenAI, Claude/Anthropic, Copilot/GitHub, Pi/Anthropic, Pi/OpenAI, and supported OpenCode
+lanes reuse the installed harness's native login and configuration. Other provider lanes can read declared values
 from the current environment or the private Zeroshot connection store. For example, this command
 prompts without echo and keeps
 an OpenAI value out of runtime JSON for a contained target:

@@ -15,6 +15,17 @@ use crate::execution::driver::WorkspaceCapability;
 use crate::execution::process::ProcessSessionCommand;
 use crate::native_v2_runner::{NodeResponseContract, NodeRole, NodeSession};
 
+type NativeInstaller = fn(&mut ProcessSessionCommand, &Path) -> std::io::Result<()>;
+
+fn native_installers() -> [NativeInstaller; 3] {
+    use crate::harnesses::adapters::core::{claude, codex, pi};
+    [
+        codex::memory::install,
+        claude::memory::install,
+        pi::memory::install,
+    ]
+}
+
 #[derive(Default)]
 struct Source {
     queries: Mutex<Vec<HookQuery>>,
@@ -228,15 +239,15 @@ fn harness_configuration_preserves_arguments_and_uses_private_capabilities() {
     let directory = tempfile::tempdir().assert_value();
     let hooks = ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value();
     let invocation = invocation();
-    for harness in [Harness::Codex, Harness::Claude, Harness::Pi] {
+    for install in native_installers() {
         let mut command = command(directory.path());
-        hooks.configure(
-            harness,
+        hooks.configure_with(
             &mut command,
             HookInstallation {
                 invocation: &invocation,
                 home: directory.path(),
             },
+            install,
         );
         assert!(
             command
@@ -261,45 +272,6 @@ fn harness_configuration_preserves_arguments_and_uses_private_capabilities() {
         .assert_value();
     assert!(extension.contains("tool_result"));
     assert!(extension.contains("event.structuredContent"));
-}
-
-#[test]
-fn codex_trust_is_scoped_to_the_owned_session_handler_and_exact_definition() {
-    // Independently cross-checked against native Codex 0.163 hooks/list and the
-    // 0.155 source. Existing user/project hooks retain their own trust state.
-    let handler = json!({
-        "type":"command",
-        "command":"'/opt/zeroshot' __active-memory-hook '/runtime/capability.json'",
-        "timeout":1,
-        "additionalContextLimit":32768,
-    });
-    let configuration = native::codex_configuration(&handler).assert_value();
-    assert_eq!(configuration[0], "--config");
-    assert_eq!(configuration[2], "--config");
-    assert!(configuration[1].starts_with("hooks.PreToolUse="));
-    let source = if cfg!(windows) {
-        r"C:\<session-flags>\config.toml:pre_tool_use:0:0"
-    } else {
-        "/<session-flags>/config.toml:pre_tool_use:0:0"
-    };
-    assert_eq!(
-        configuration[3],
-        format!(
-            "hooks.state={{{}={{\"trusted_hash\"=\"sha256:7a01b70421fb3d85a31fa6255d46a1a35f1d34043464aef81d33afb463d38ee8\"}}}}",
-            serde_json::to_string(source).assert_value(),
-        ),
-    );
-    assert!(
-        !configuration
-            .iter()
-            .any(|argument| argument.contains("bypass"))
-    );
-    let mut changed = handler;
-    changed["command"] = json!("'/opt/zeroshot' __active-memory-hook '/runtime/other.json'");
-    assert_ne!(
-        configuration[3],
-        native::codex_configuration(&changed).assert_value()[3]
-    );
 }
 
 #[test]
@@ -358,19 +330,19 @@ fn auxiliary_roles_never_recall_even_when_a_main_node_has_the_same_name() {
         );
         assert!(
             hooks
-                .copilot_context(&auxiliary, &json!({"toolName":"Read"}), home.path())
+                .tool_context(&auxiliary, &json!({"toolName":"Read"}), home.path())
                 .is_empty()
         );
-        for harness in [Harness::Codex, Harness::Claude, Harness::Pi] {
+        for install in native_installers() {
             let mut command = command(home.path());
             let original = command.argv.clone();
-            hooks.configure(
-                harness,
+            hooks.configure_with(
                 &mut command,
                 HookInstallation {
                     invocation: &auxiliary,
                     home: home.path(),
                 },
+                install,
             );
             assert_eq!(command.argv, original);
         }
@@ -473,16 +445,16 @@ fn full_authored_instructions_and_failed_hook_setup_preserve_the_primary_invocat
     assert_eq!(supplemented.node.instructions, original.node.instructions);
     assert!(source.unavailable.lock().unwrap()[0].contains("instruction bounds"));
     let invalid_home = tempfile::NamedTempFile::new().unwrap();
-    for harness in [Harness::Codex, Harness::Claude, Harness::Pi] {
+    for install in native_installers() {
         let mut command = command(invalid_home.path().parent().unwrap());
         let arguments = command.argv.clone();
-        hooks.configure(
-            harness,
+        hooks.configure_with(
             &mut command,
             HookInstallation {
                 invocation: &original,
                 home: invalid_home.path(),
             },
+            install,
         );
         assert_eq!(command.argv, arguments);
     }
@@ -539,4 +511,16 @@ fn helper_rejects_invalid_utf8_and_oversized_callback_frames() {
         assert_eq!(serde_json::from_slice::<Value>(&output).unwrap(), json!({}));
         server.join().unwrap();
     }
+}
+
+#[test]
+fn live_test_hook_executable_is_explicit_absolute_and_does_not_change_production_selection() {
+    let current = std::env::current_exe().assert_value();
+    assert_eq!(native::test_hook_executable(None).assert_value(), current);
+    assert_eq!(
+        native::test_hook_executable(Some(current.clone().into_os_string())).assert_value(),
+        current
+    );
+    let error = native::test_hook_executable(Some("relative-cli".into())).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
 }

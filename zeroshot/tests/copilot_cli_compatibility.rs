@@ -272,7 +272,7 @@ impl Drop for CopilotFixture {
 }
 
 /// A headless stdio peer that answers like the given Copilot CLI release. Frames, events, and
-/// replies follow `zeroshot/src/native_v2_copilot/tests/runtime.py`; the `--version`, `connect`,
+/// replies follow `zeroshot/src/harnesses/adapters/core/copilot/tests/runtime.py`; the `--version`, `connect`,
 /// and `session.detach` replies are the ones the real 1.0.70 and 1.0.86 CLIs return.
 fn fake_copilot(release: &CopilotRelease, capture: &Path) -> String {
     let detach = if release.supports_detach {

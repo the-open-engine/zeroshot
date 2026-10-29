@@ -3,7 +3,7 @@
 //! These values are deliberately separate from OECP JSON-RPC methods. HTTP submission is the
 //! only run-creation seam; OECP begins after a target has accepted the exact immutable run.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use schemars::{JsonSchema, Schema, SchemaGenerator};
@@ -466,6 +466,60 @@ pub struct TargetNodeRuntimeLanesDiscovery {
     pub kind: String,
 }
 
+pub const RUNTIME_HARNESSES_KIND: &str = "openengine.runtime-harnesses/v1";
+pub const MAX_TARGET_RUNTIME_LANES: usize = 128;
+
+/// The target's enabled harness/provider pairs, independently of model or credential availability.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetRuntimeHarnessesDiscovery {
+    pub kind: String,
+    #[serde(deserialize_with = "deserialize_runtime_harness_lanes")]
+    pub lanes: Vec<crate::RuntimeLane>,
+}
+
+impl TargetRuntimeHarnessesDiscovery {
+    pub fn new(lanes: Vec<crate::RuntimeLane>) -> Result<Self, NativeV2RunValueError> {
+        validate_runtime_harness_lanes(&lanes)?;
+        Ok(Self {
+            kind: RUNTIME_HARNESSES_KIND.to_owned(),
+            lanes,
+        })
+    }
+
+    /// Also checks metadata assembled directly by a Rust host.
+    pub fn validate(&self) -> Result<(), NativeV2RunValueError> {
+        validate_runtime_harness_lanes(&self.lanes)
+    }
+}
+
+fn validate_runtime_harness_lanes(
+    lanes: &[crate::RuntimeLane],
+) -> Result<(), NativeV2RunValueError> {
+    if lanes.len() > MAX_TARGET_RUNTIME_LANES {
+        return Err(NativeV2RunValueError(
+            "runtime harness catalog exceeds 128 lanes",
+        ));
+    }
+    if lanes.iter().collect::<BTreeSet<_>>().len() != lanes.len() {
+        return Err(NativeV2RunValueError(
+            "runtime harness catalog contains duplicate lanes",
+        ));
+    }
+    Ok(())
+}
+
+fn deserialize_runtime_harness_lanes<'de, D>(
+    deserializer: D,
+) -> Result<Vec<crate::RuntimeLane>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let lanes = Vec::<crate::RuntimeLane>::deserialize(deserializer)?;
+    validate_runtime_harness_lanes(&lanes).map_err(serde::de::Error::custom)?;
+    Ok(lanes)
+}
+
 pub const GIT_TRANSPORT_KIND: &str = "openengine.git-transport/v1";
 
 /// Frozen at `{"kind": ...}`; generic source and credential envelopes require this marker.
@@ -516,6 +570,8 @@ pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub node_runtime_lanes: Option<TargetNodeRuntimeLanesDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_harnesses: Option<TargetRuntimeHarnessesDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub git_transport: Option<TargetGitTransportDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comment_delivery: Option<TargetCommentDeliveryDiscovery>,
@@ -560,6 +616,7 @@ impl TargetDiscoveryExtensions {
             && self.workspace_checkpoints.is_none()
             && self.hosted_workspace_recovery.is_none()
             && self.node_runtime_lanes.is_none()
+            && self.runtime_harnesses.is_none()
             && self.git_transport.is_none()
             && self.comment_delivery.is_none()
             && self.task_resolution.is_none()
@@ -632,6 +689,13 @@ impl TargetDiscoveryDocument {
         self.extensions.node_runtime_lanes = Some(TargetNodeRuntimeLanesDiscovery {
             kind: NODE_RUNTIME_LANES_KIND.to_owned(),
         });
+        self
+    }
+
+    /// Advertises the same enabled lanes that the host accepts during run admission.
+    #[must_use]
+    pub fn with_runtime_harnesses(mut self, catalog: TargetRuntimeHarnessesDiscovery) -> Self {
+        self.extensions.runtime_harnesses = Some(catalog);
         self
     }
 

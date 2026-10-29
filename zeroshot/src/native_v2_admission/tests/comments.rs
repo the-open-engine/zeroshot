@@ -30,18 +30,17 @@ fn comment_submission() -> RunSubmission {
         title: RunTitle::new("Source-less comment").assert_value(),
         graph,
         initial_input: json!({"url":"https://github.com/acme/project/issues/7","body":"A report", "context":{"title":"An issue","body":"Description","reviewScope":{}}}),
-        runtime: RuntimePlan::Codex {
-            active_memory: Default::default(),
-            global_agents: Default::default(),
-            provider: CodexProvider::OpenAi,
-            size: RunSize::Medium,
-            nodes: BTreeMap::from([(
+        runtime: RuntimePlan::new(
+            openengine_cluster_protocol::RuntimeLane::new("codex", (CodexProvider::OpenAi).name())
+                .assert_value(),
+            RunSize::Medium,
+            BTreeMap::from([(
                 named("deliver"),
                 NodeRuntimeBinding::CommentDelivery {
                     connections: DeclaredConnections::empty(),
                 },
             )]),
-        },
+        ),
         source: None,
         environment: None,
         submission_key: IdempotencyKey::new("comment-admission").assert_value(),

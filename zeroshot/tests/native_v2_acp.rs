@@ -202,7 +202,16 @@ async fn startup_checks_lane_executables_after_the_profile_gate() {
         ),
         (
             json!({"harness":"copilot","provider":"github"}),
-            "ACP profile is not eligible: only Codex and Claude lanes are supported",
+            "lane copilot/github needs the `copilot` executable on PATH",
+        ),
+        (
+            json!({"harness":"pi","provider":"anthropic"}),
+            "lane pi/anthropic needs the `pi` executable on PATH",
+        ),
+        #[cfg(feature = "contributed-harnesses")]
+        (
+            json!({"harness":"opencode","provider":"openai"}),
+            "lane opencode/openai needs the `opencode` executable on PATH",
         ),
     ] {
         let fixture = AcpFixture::new();

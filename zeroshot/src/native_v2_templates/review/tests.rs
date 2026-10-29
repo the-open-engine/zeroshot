@@ -33,13 +33,12 @@ fn runtime(delivery: TemplateDelivery) -> RuntimePlan {
     {
         nodes.insert(name, binding);
     }
-    RuntimePlan::Codex {
-        active_memory: Default::default(),
-        global_agents: Default::default(),
-        provider: CodexProvider::OpenAi,
-        size: RunSize::Small,
+    RuntimePlan::new(
+        openengine_cluster_protocol::RuntimeLane::new("codex", (CodexProvider::OpenAi).name())
+            .assert_value(),
+        RunSize::Small,
         nodes,
-    }
+    )
 }
 
 #[tokio::test]

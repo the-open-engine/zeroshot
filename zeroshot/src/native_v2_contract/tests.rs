@@ -95,20 +95,29 @@ fn submission_serialization_is_idempotent() {
 }
 
 #[test]
-fn unsupported_harness_provider_pair_is_rejected_by_shape() {
+fn unsupported_harness_provider_pairs_decode_but_fail_registered_compatibility() {
     let mut fixture = canonical_submission();
     *fixture
         .pointer_mut("/runtime/provider")
         .assert_value_with("runtime provider exists") = json!("anthropic");
 
-    assert!(serde_json::from_value::<RunSubmission>(fixture).is_err());
+    let decoded: RunSubmission = serde_json::from_value(fixture).assert_value();
+    assert!(
+        crate::harnesses::HarnessRegistry::core()
+            .validate_runtime(&decoded.runtime)
+            .is_err()
+    );
 
-    // A provider that belongs to another harness is equally unparseable: the tagged enum, not a
-    // compatibility table, is what rejects the pair.
+    // Portable identities are readable without the implementation; its registry owns admission.
     let mut pi_fixture = canonical_submission();
     *pi_fixture.pointer_mut("/runtime/harness").assert_value() = json!("pi");
     *pi_fixture.pointer_mut("/runtime/provider").assert_value() = json!("github");
-    assert!(serde_json::from_value::<RunSubmission>(pi_fixture).is_err());
+    let decoded: RunSubmission = serde_json::from_value(pi_fixture).assert_value();
+    assert!(
+        crate::harnesses::HarnessRegistry::core()
+            .validate_runtime(&decoded.runtime)
+            .is_err()
+    );
 }
 
 #[test]

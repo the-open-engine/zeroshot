@@ -9,7 +9,7 @@ mod provider_access;
 pub(crate) use provider_access::{ProviderAccessPlacement, materialize_provider_access};
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use openengine_cluster_protocol::GitTransportCredentials;
 use std::sync::Arc;
 
@@ -20,13 +20,7 @@ use crate::native_v2_comment_delivery::{
     NativeV2CommentDeliveryAdapter, NativeV2CommentDeliveryConfig, CommentPublicationStore,
 };
 use crate::source_code_provider::SourceCommentAuthority;
-use crate::native_v2_claude::{ClaudeAdapter, ClaudeAdapterConfig, ClaudeAdapterConfigError};
-use crate::native_v2_codex::{NativeV2CodexAdapter, NativeV2CodexConfig};
-use crate::native_v2_copilot::{CopilotAdapter, CopilotConfig};
-use crate::native_v2_pi::{PiAdapter, PiAdapterConfigError, PiConfig};
-use crate::native_v2_contract::{
-    AdmittedRun, CopilotProvider, NodeInvocation, NodeRuntimeBinding, RuntimeLane,
-};
+use crate::native_v2_contract::{AdmittedRun, NodeInvocation, NodeRuntimeBinding, RuntimeLane};
 use crate::native_v2_delivery::validation::TrustedDeliveryValidator;
 use crate::native_v2_delivery::{
     SourceDeliveryAuthority, NativeV2DeliveryAdapter, NativeV2DeliveryConfig,
@@ -44,42 +38,7 @@ mod tests;
 #[cfg(test)]
 pub(crate) mod test_support;
 
-/// Configuration of one lane's agent adapter: a harness and the provider it is fixed to.
-pub enum NativeV2HarnessConfig {
-    Copilot(CopilotConfig),
-    Codex(NativeV2CodexConfig),
-    Claude(ClaudeAdapterConfig),
-    Pi(PiConfig),
-}
-
-impl NativeV2HarnessConfig {
-    #[must_use]
-    pub fn lane(&self) -> RuntimeLane {
-        match self {
-            Self::Copilot(_) => RuntimeLane::Copilot {
-                provider: CopilotProvider::Github,
-            },
-            Self::Codex(config) => RuntimeLane::Codex {
-                provider: config.provider,
-            },
-            Self::Claude(config) => RuntimeLane::Claude {
-                provider: config.provider,
-            },
-            Self::Pi(config) => RuntimeLane::Pi {
-                provider: config.provider,
-            },
-        }
-    }
-
-    fn workspace(&self) -> &Path {
-        match self {
-            Self::Copilot(config) => &config.workspace,
-            Self::Codex(config) => &config.workspace,
-            Self::Claude(config) => &config.workspace,
-            Self::Pi(config) => &config.workspace,
-        }
-    }
-}
+pub use crate::harnesses::HarnessConfig as NativeV2HarnessConfig;
 
 // Library embedders may supply a host-owned recall capability; storage and orchestration stay internal.
 pub use crate::active_memory::hooks::{ActiveMemoryHooks, ActiveMemorySource, HookQuery};
@@ -137,9 +96,7 @@ pub enum NativeV2CandidateError {
     #[error("agent and delivery adapters must use the same run workspace")]
     WorkspaceMismatch,
     #[error(transparent)]
-    Claude(#[from] ClaudeAdapterConfigError),
-    #[error(transparent)]
-    Pi(#[from] PiAdapterConfigError),
+    Harness(#[from] crate::harnesses::HarnessError),
     #[error(transparent)]
     Runner(#[from] NodeRunnerError),
 }
@@ -304,43 +261,15 @@ fn build_lane_agents(
     placement: CandidatePlacement,
     memory: Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
 ) -> Result<CandidateAgents, NativeV2CandidateError> {
-    let on_failure = memory.clone();
-    let mut agents = match harness {
-        NativeV2HarnessConfig::Copilot(config) => CandidateAgents::new(Arc::new(
-            (if placement.is_local() {
-                CopilotAdapter::new_local(config)
-            } else {
-                CopilotAdapter::new(config)
-            })
-            .with_active_memory(memory),
-        )),
-        NativeV2HarnessConfig::Codex(config) => CandidateAgents::new(Arc::new(
-            (if placement.is_local() {
-                NativeV2CodexAdapter::new_local(config)
-            } else {
-                NativeV2CodexAdapter::new(config)
-            })
-            .with_active_memory(memory),
-        )),
-        NativeV2HarnessConfig::Claude(config) => CandidateAgents::new(Arc::new(
-            (if placement.is_local() {
-                ClaudeAdapter::new_local(config)?
-            } else {
-                ClaudeAdapter::new(config)?
-            })
-            .with_active_memory(memory),
-        )),
-        NativeV2HarnessConfig::Pi(config) => CandidateAgents::new(Arc::new(
-            (if placement.is_local() {
-                PiAdapter::new_local(config)?
-            } else {
-                PiAdapter::new(config)?
-            })
-            .with_active_memory(memory),
-        )),
-    };
-    agents.memory = on_failure;
-    Ok(agents)
+    if harness.context.host.is_local() != placement.is_local() {
+        return Err(NativeV2CandidateError::RuntimeMismatch);
+    }
+    let adapter = harness.build(memory.clone())?;
+    Ok(CandidateAgents {
+        driver: adapter.driver,
+        sessions: adapter.sessions,
+        memory,
+    })
 }
 
 fn validate_config(
@@ -416,19 +345,6 @@ struct CandidateAgents {
     memory: Option<Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
 }
 
-impl CandidateAgents {
-    fn new<T>(agent: Arc<T>) -> Self
-    where
-        T: NodeDriver + SessionFactory + 'static,
-    {
-        Self {
-            memory: None,
-            driver: agent.clone(),
-            sessions: agent,
-        }
-    }
-}
-
 /// Routes only by the admitted closed binding: agent nodes use their effective lane's adapter,
 /// never another lane's, and the graph-visible delivery verifier uses trusted Git delivery.
 struct CandidateNodeLane {
@@ -446,7 +362,7 @@ impl CandidateNodeLane {
         match binding {
             NodeRuntimeBinding::Agent { lane, .. } => self
                 .agents
-                .get(&lane.unwrap_or(self.default_lane))
+                .get(&lane.clone().unwrap_or_else(|| self.default_lane.clone()))
                 .ok_or(NodeRunnerError::Driver),
             NodeRuntimeBinding::GitDelivery { .. } | NodeRuntimeBinding::CommentDelivery { .. } => {
                 Err(NodeRunnerError::Driver)

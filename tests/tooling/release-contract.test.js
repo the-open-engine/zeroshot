@@ -212,6 +212,18 @@ describe('Embedded UI distribution', () => {
     assert.match(ignore, /^\*\*\/node_modules$/m);
   });
 
+  it('includes contributed adapters locally and excludes them from the default target image', () => {
+    const manifest = read('zeroshot/Cargo.toml');
+    const dockerfile = read('docker/zeroshot-target/Dockerfile');
+    const release = yaml.load(read('.github/workflows/release.yml'));
+    const commands = release.jobs.binaries.steps.map((step) => step.run || '').join('\n');
+    assert.match(manifest, /^default = \["contributed-harnesses"\]$/m);
+    assert.match(manifest, /^contributed-harnesses = \[[^\n]*\]$/m);
+    assert.match(dockerfile, /cargo build[^\n]+--no-default-features --features ui/);
+    assert.doesNotMatch(commands, /cargo build[^\n]+--no-default-features/);
+    assert.doesNotMatch(dockerfile, /opencode-ai|contributed-harnesses/);
+  });
+
   it('checks library and UI feature lanes plus native and Docker lifecycle smoke', () => {
     const workflow = yaml.load(read('.github/workflows/ci.yml'));
     const commands = workflow.jobs['native-check'].steps.map((step) => step.run || '').join('\n');

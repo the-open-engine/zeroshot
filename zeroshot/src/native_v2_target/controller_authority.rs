@@ -605,6 +605,20 @@ fn require_runtime_capabilities(
     runtime: &RuntimePlan,
 ) -> Result<(), TargetAuthorityError> {
     require_node_runtime_lanes(controller, runtime)?;
+    let legacy = zeroshot_engine::harnesses::HarnessRegistry::core();
+    let mut required = runtime.lanes();
+    required.insert(runtime.lane());
+    for lane in required {
+        let supported = match &controller.runtime_harnesses {
+            Some(lanes) => lanes.contains(&lane),
+            None => legacy.descriptor(&lane).is_ok(),
+        };
+        if !supported {
+            return Err(authority_error(format!(
+                "target does not advertise runtime lane {lane}"
+            )));
+        }
+    }
     if runtime.nodes().values().any(|binding| {
         matches!(
             binding,
