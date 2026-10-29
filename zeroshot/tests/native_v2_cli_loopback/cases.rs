@@ -10,23 +10,21 @@ async fn shipped_cli_reaches_one_target_controller_over_http_and_websocket() {
     let config = root.path("config");
     let (runtime, graph, input) = write_fixture_files(&root);
     let binary = env!("CARGO_BIN_EXE_zeroshot");
-    let (stdout, stderr) = run_cli_command(
-        cli_command(CliInvocation {
-            script: &shell_script(),
-            label: "acceptance",
-            binary,
-            origin: &host.origin,
-            config: &config,
-            runtime: &runtime,
-            graph: &graph,
-            input: &input,
-            extra: None,
-            source_revision: Some(TEST_SOURCE_REVISION),
-        }),
-        Duration::from_secs(60),
-        "shipped CLI acceptance",
-    )
-    .await;
+    let mut command = cli_command(CliInvocation {
+        script: &shell_script(),
+        label: "acceptance",
+        binary,
+        origin: &host.origin,
+        config: &config,
+        runtime: &runtime,
+        graph: &graph,
+        input: &input,
+        extra: None,
+        source_revision: Some(TEST_SOURCE_REVISION),
+    });
+    command.env(GITHUB_TOKEN_ENV, "test-token");
+    let (stdout, stderr) =
+        run_cli_command(command, Duration::from_secs(60), "shipped CLI acceptance").await;
     assert!(stderr.contains("ABCD-EFGH"), "device code was not surfaced");
     let run_id = stdout
         .lines()
@@ -138,7 +136,7 @@ async fn shipped_cli_observes_capsule_loss_as_terminal_without_replacement() {
     let config = root.path("loss-config");
     let (runtime, graph, input) = write_fixture_files(&root);
     let binary = env!("CARGO_BIN_EXE_zeroshot");
-    let command = cli_command(CliInvocation {
+    let mut command = cli_command(CliInvocation {
         script: &loss_shell_script(),
         label: "loss-acceptance",
         binary,
@@ -150,6 +148,7 @@ async fn shipped_cli_observes_capsule_loss_as_terminal_without_replacement() {
         extra: None,
         source_revision: Some(TEST_SOURCE_REVISION),
     });
+    command.env(GITHUB_TOKEN_ENV, "test-token");
     let acceptance = tokio::spawn(run_cli_command(
         command,
         Duration::from_secs(60),
