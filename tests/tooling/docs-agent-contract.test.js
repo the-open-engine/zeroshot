@@ -269,30 +269,36 @@ it('the llms.txt quick start matches the README first run', () => {
   assert.deepEqual(command(LLMS), command('README.md'));
 });
 
-it('the first-run guide shows a runtime for every harness', () => {
-  const table = read('docs/reference/runtime-plan.md')
-    .split('\n## Harness and provider\n')[1]
-    .split('\n## ')[0];
+it('the first-run guide covers core harnesses from the canonical catalog', () => {
+  const guide = 'docs/project/harness-adapters.md';
   const lanes = new Map(
-    [...table.matchAll(/^\| `(\w+)`\s+\| (.+?) \|$/gm)]
-      .filter(([, harness]) => harness !== 'harness')
-      .map(([, harness, providers]) => [
+    [...read(guide).matchAll(/^\|\s*`([^`]+)`\s*\|(.+?)\|\s*(Core|Contributed)\s*\|$/gm)].map(
+      ([, harness, providers, distribution]) => [
         harness,
-        [...providers.matchAll(/`(\w+)`/g)].map(([, provider]) => provider),
-      ])
+        {
+          providers: [...providers.matchAll(/`([^`]+)`/g)].map(([, provider]) => provider),
+          distribution,
+        },
+      ]
+    )
   );
-  assert.ok(lanes.has('codex'), 'the RuntimePlan harness table was not found');
+  assert.ok(lanes.has('codex'), `${guide} must contain the harness catalog`);
   const runtimes = titledJson(FIRST_RUN, 'runtime.json');
   for (const { title, value } of runtimes) {
     assert.ok(
-      lanes.get(value.harness)?.includes(value.provider),
-      `${FIRST_RUN} "${title}" uses ${value.harness}/${value.provider}, which the RuntimePlan table rejects`
+      lanes.get(value.harness)?.providers.includes(value.provider),
+      `${FIRST_RUN} "${title}" uses ${value.harness}/${value.provider}, which ${guide} rejects`
     );
   }
-  assert.deepEqual(
-    [...new Set(runtimes.map(({ value }) => value.harness))].sort(),
-    [...lanes.keys()].sort(),
-    `${FIRST_RUN} needs one runtime.json example per harness`
+  const examples = new Set(runtimes.map(({ value }) => value.harness));
+  for (const [harness, { distribution }] of lanes) {
+    if (distribution === 'Core') {
+      assert.ok(examples.has(harness), `${FIRST_RUN} needs a runtime.json example for ${harness}`);
+    }
+  }
+  assert.ok(
+    read(FIRST_RUN).includes('../project/harness-adapters.md'),
+    `${FIRST_RUN} must link to the complete harness catalog`
   );
 });
 

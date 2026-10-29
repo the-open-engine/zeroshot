@@ -43,7 +43,7 @@ Choose the agents and models, define what must pass, and decide where rejected w
 repair.
 
 The engine enforces the graph’s review gates and retry limits. Each agent can use its own model and
-harness (Pi, Claude Code, Codex or Copilot).
+harness.
 
 On 20 ProgramBench tasks, [a small model in a zeroshot loop](https://theopenengine.com/blog/review-loop/)
 matched a larger model's score at a median 58% of its cost. More examples on zeroshot.sh:
@@ -108,9 +108,11 @@ The installer requires Node.js 18 or newer and installs a verified native binary
 x64/arm64, macOS x64/arm64, or Windows x64. It also installs agent skills for Codex, GitHub
 Copilot, Pi, and Claude Code at user scope.
 
-For local execution, install and sign in to Codex, Claude Code, GitHub Copilot, or Pi. Local runs can
-reuse the harness's existing login, including subscription-backed sessions. See the
-[installation guide](docs/getting-started/install.md) for harness prerequisites.
+For local execution, install your chosen harness CLI separately. Official local builds include
+contributed OpenCode and Hermes adapters alongside the core adapters; see
+[Harness adapters](docs/project/harness-adapters.md) for availability and provider support.
+Local runs can reuse native login, including subscription-backed sessions. The
+[installation guide](docs/getting-started/install.md) covers Zeroshot setup.
 
 #### Run directly from the CLI
 
@@ -158,7 +160,7 @@ running. The CLI also provides `zeroshot list`, `zeroshot status RUN_ID`, and `z
 A failed run with a recoverable workspace can be
 [restarted or resumed](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run).
 
-For other harnesses and providers, see [Runtimes and connections](docs/concepts/runtimes-and-connections.md).
+For runtime configuration and credentials, see [Runtimes and connections](docs/concepts/runtimes-and-connections.md).
 
 ### Run on Zeroshot Platform
 
@@ -295,7 +297,8 @@ See [targets and source credentials](docs/concepts/targets.md) for setup.
 ### Self-hosted: run the Docker target
 
 Keep execution and durable state on infrastructure you control. The target image includes the native
-engine plus pinned Codex, Claude, GitHub Copilot, and Pi harness CLIs.
+engine plus pinned core harness CLIs; see [Harness adapters](docs/project/harness-adapters.md) for
+availability.
 
 ```bash
 docker run --detach --restart unless-stopped --name zeroshot-target \

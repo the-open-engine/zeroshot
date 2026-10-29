@@ -1,5 +1,5 @@
 ---
-description: "Run the built-in software-change graph in a local folder with Git delivery disabled. Validate the input and runtime plan before starting."
+description: 'Run the built-in software-change graph in a local folder with Git delivery disabled. Validate the input and runtime plan before starting.'
 ---
 
 # Run a first task
@@ -70,8 +70,9 @@ For another harness, use its file instead. A local run reuses that CLI's own log
 }
 ```
 
-The [RuntimePlan reference](../reference/runtime-plan.md#harness-and-provider) lists every accepted
-pair, including the OpenRouter, Bedrock, and gateway lanes that need a connection.
+See [Harness adapters](../project/harness-adapters.md) for available harness/provider pairs and
+contributed adapters. [Runtimes and connections](../concepts/runtimes-and-connections.md) explains
+native login and credential requirements.
 
 ## 3. Check the request without starting it
 

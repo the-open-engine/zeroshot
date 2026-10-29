@@ -31,9 +31,10 @@ this mount. See the [target image guide](../docker/zeroshot-target/README.md) fo
 The bootstrap `harnesses` catalog supplies each host-enabled adapter's `id`, `label`, and
 `providers`. The editor uses this catalog for runtime choices; `runtimeSchema` supplies structural
 fields such as run size and effort. For older hosts that omit the catalog, choices come from their
-legacy runtime schema; an explicit empty catalog offers no adapters. Local catalogs include compiled contributed adapters; target
-and Platform catalogs use their host's enabled registry. Existing unavailable selections remain
-visible and stay in the profile until the author changes them.
+legacy runtime schema; an explicit empty catalog offers no adapters. Local catalogs include compiled
+[contributed adapters](../docs/project/harness-adapters.md); target and Platform catalogs use their
+host's enabled registry. Existing unavailable selections remain visible and stay in the profile until
+the author changes them.
 
 Profiles contain graphs and agent runtime configuration. Environments belong to run submission,
 not profile authoring. Plain local UI has no environment catalog or management page.

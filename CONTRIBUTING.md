@@ -47,6 +47,8 @@ sdks/python/.venv/bin/python -m pip install -e 'sdks/python[dev]' -r docs/requir
 | Release tooling                   | `scripts/distribution.js`                    |
 | Repository tooling tests          | `tests/tooling/`                             |
 
+For harness integration and contributor requirements, see [Harness adapters](docs/project/harness-adapters.md).
+
 ## Validation
 
 Start with the narrowest relevant command, then run broader checks before handoff.

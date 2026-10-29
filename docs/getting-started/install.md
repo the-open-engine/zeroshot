@@ -110,24 +110,18 @@ can leave the `ui` feature disabled.
 ## Prepare a local run
 
 Choose an existing working folder with `--cwd FOLDER`, or use the invoking folder. Local runs without
-Git delivery do not need a repository. Install each agent harness named by the runtime plan:
-
-- install and sign in to Codex for `"harness": "codex"`;
-- install and sign in to Claude Code for `"harness": "claude"`;
-- install GitHub Copilot CLI 1.0.86 for `"harness": "copilot"` with `"provider": "github"`;
-- install and sign in to Pi for `"harness": "pi"`;
-- install OpenCode for the contributed `"harness": "opencode"` adapter in official local builds.
-- install Hermes for the contributed `"harness": "hermes"` adapter; its canonical executable selects its Python environment.
+Git delivery do not need a repository. Install each native harness CLI named by the runtime plan and
+put it on `PATH`. Official local builds include contributed OpenCode and Hermes adapters; see
+[Harness adapters](../project/harness-adapters.md) for availability and provider support.
 
 Local GitHub pull request delivery (`--pr` or `--ship`) also needs the GitHub CLI, `gh`, on `PATH`.
 Zeroshot runs the `gh` that `PATH` finds and rejects the run before any agent starts if there is
 none.
 
-Local Codex/OpenAI, Claude/Anthropic, Copilot/GitHub, Pi/Anthropic, Pi/OpenAI, and supported OpenCode and Hermes
-lanes reuse the installed harness's native login and configuration. Other provider lanes can read declared values
-from the current environment or the private Zeroshot connection store. For example, this command
-prompts without echo and keeps
-an OpenAI value out of runtime JSON for a contained target:
+Local lanes with native-login support reuse the installed harness's login and configuration. Other
+provider lanes can read declared values from the current environment or the private Zeroshot
+connection store. For example, this command prompts without echo and keeps an OpenAI value out of
+runtime JSON for a contained target:
 
 ```console
 zeroshot connection set openai --field OPENAI_API_KEY
@@ -192,7 +186,7 @@ Model IDs pass unchanged to the Copilot process. When a registry entry with `api
 Copilot's singular provider contract, its authored `modelId` becomes the RPC session model and its
 authored `wireModel` still names the provider request model. Zeroshot uses headless RPC schema output
 and validates each response locally, allowing at most two correction turns in the same session.
-Install the pinned CLI version above; the target image already includes it.
+The target image already includes the native Copilot CLI.
 
 Hosted connection resolvers may additionally declare `COPILOT_GITHUB_TOKEN_EXPIRES_AT` (Unix
 seconds). Copilot then requests credentials through the resolver throughout a long execution.

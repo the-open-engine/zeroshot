@@ -15,7 +15,7 @@ rule.
 
 Each agent node uses:
 
-1. a **harness** enabled by the host, including core `codex`, `claude`, `copilot`, and `pi`, plus contributed `opencode` and `hermes` in official local builds;
+1. a **harness** enabled by the host;
 2. a **provider** supported by that harness;
 3. an opaque provider-owned **model** identifier;
 4. zero or more named **connections**, each declaring exact environment field names.
@@ -26,7 +26,7 @@ The harness and provider form the node's effective lane. A plan's run-level `har
 Claude Code review. Zeroshot starts one harness adapter per distinct effective lane, and each node
 runs on its own lane's CLI. Model and connections are always chosen per node.
 
-The [RuntimePlan reference](../reference/runtime-plan.md#harness-and-provider) lists the accepted
+[Harness adapters](../project/harness-adapters.md) lists available adapters and accepted
 harness/provider pairs, which apply to the default lane and to every node's lane. Admission rejects
 known-incompatible pairs, such as `codex` with `anthropic`, `claude` with `openai`, and `pi` with
 `github`. Zeroshot does not check current provider availability, and model names remain
@@ -71,10 +71,11 @@ The submission environment or a target-owned connection store supplies the value
 them out of the graph, runtime JSON, run ledger, and observation records.
 
 When `connections` is omitted, Zeroshot materializes provider access for each node from its
-effective lane and the selected execution placement. On a local run, nodes on the `codex`/`openai`,
-`claude`/`anthropic`, `copilot`/`github`, `pi`/`anthropic`, and `pi`/`openai` lanes reuse the
-harness's native login and configuration without inventing a connection. On a contained target, or
-on any non-native provider lane, a node receives these canonical requirements:
+effective lane and the selected execution placement. On a local run, the `codex`/`openai`,
+`claude`/`anthropic`, `copilot`/`github`, `pi`/`anthropic`, and `pi`/`openai` lanes, plus all supported
+`opencode` and `hermes` lanes, reuse the harness's native login and configuration without adding a
+connection requirement. On a contained target, or on any other lane, a node receives these canonical
+requirements:
 
 | Provider     | Connection key | Fields                                   |
 | ------------ | -------------- | ---------------------------------------- |
