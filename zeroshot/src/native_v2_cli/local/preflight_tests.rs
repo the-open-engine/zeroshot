@@ -101,6 +101,16 @@ fn declare_connections(request: &mut PreparedRunRequest, fields: &[&str]) {
     );
 }
 
+// These preflight contracts must not depend on the invoking user's native forge login.
+pub(super) fn with_declared_github_token(mut request: PreparedRunRequest) -> PreparedRunRequest {
+    declare_connections(&mut request, &["GH_TOKEN"]);
+    request.connections.insert(
+        ConnectionKey::new("delivery").assert_value(),
+        serde_json::from_value(json!({"GH_TOKEN":"preflight-token"})).assert_value(),
+    );
+    request
+}
+
 fn assert_controller_start(result: Result<RunId, NativeV2CliError>) {
     assert!(
         matches!(result, Err(NativeV2CliError::Local(_))),
@@ -116,7 +126,7 @@ async fn fresh_branch_is_rejected_until_its_upstream_selects_a_remote_base() {
         git(workspace, &["checkout", "-b", "my-change"]);
         let rejected = fixture
             .backend
-            .start_controller(fixture.request(mode))
+            .start_controller(with_declared_github_token(fixture.request(mode)))
             .await;
         assert!(
             matches!(rejected, Err(NativeV2CliError::Usage(ref message))
@@ -133,7 +143,7 @@ async fn fresh_branch_is_rejected_until_its_upstream_selects_a_remote_base() {
         assert_controller_start(
             fixture
                 .backend
-                .start_controller(fixture.request(mode))
+                .start_controller(with_declared_github_token(fixture.request(mode)))
                 .await,
         );
         assert_eq!(
@@ -231,7 +241,9 @@ async fn remote_access_failure_is_distinct_from_a_missing_branch() {
     let fixture = Fixture::new("exit 128");
     let result = fixture
         .backend
-        .start_controller(fixture.request(DeliveryMode::Merge))
+        .start_controller(with_declared_github_token(
+            fixture.request(DeliveryMode::Merge),
+        ))
         .await;
     assert!(
         matches!(result, Err(NativeV2CliError::Usage(ref message))
@@ -310,7 +322,9 @@ async fn accepted_pr_submission_returns_without_remote_access() {
     let fixture = Fixture::new("exit 128");
     let prepared = fixture
         .backend
-        .prepare_run(fixture.request(DeliveryMode::PullRequest))
+        .prepare_run(with_declared_github_token(
+            fixture.request(DeliveryMode::PullRequest),
+        ))
         .await
         .assert_value();
     create_contract_run(&fixture.backend, &prepared.run_id, &prepared.submission).await;
@@ -328,7 +342,9 @@ async fn accepted_pr_submission_returns_without_remote_access() {
     assert_eq!(
         fixture
             .backend
-            .start_controller(fixture.request(DeliveryMode::PullRequest))
+            .start_controller(with_declared_github_token(
+                fixture.request(DeliveryMode::PullRequest),
+            ))
             .await
             .assert_value(),
         prepared.run_id
@@ -353,7 +369,9 @@ async fn preflight_resolves_relative_search_paths_against_the_selected_workspace
     let fixture = Fixture::new(MAIN_REF);
     let mut prepared = fixture
         .backend
-        .prepare_run(fixture.request(DeliveryMode::PullRequest))
+        .prepare_run(with_declared_github_token(
+            fixture.request(DeliveryMode::PullRequest),
+        ))
         .await
         .assert_value();
     let tools = prepared.workspace.join("preflight-tools");

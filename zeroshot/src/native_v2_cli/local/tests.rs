@@ -921,6 +921,7 @@ async fn slow_remote_preflight_does_not_block_unrelated_submission() {
         },
     );
 
+    let slow_request = preflight_tests::with_declared_github_token(slow_request);
     let slow_submission =
         tokio::spawn(async move { slow_backend.start_controller(slow_request).await });
     let reached_remote_check = tokio::time::timeout(Duration::from_secs(5), async {
