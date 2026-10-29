@@ -412,9 +412,13 @@ async fn maintained_github_provider_uses_the_caller_forge_identity_and_checkout(
     assert_eq!(issue.repository, "acme/project");
     assert_eq!(issue.discussion_id, "17");
     assert_eq!(issue.kind, SourceDiscussionKind::Issue);
+    let enterprise = provider
+        .comment_destination_from_url("https://ghe.example/acme/project/issues/17")
+        .assert_value();
+    assert_eq!(enterprise.base_url.as_deref(), Some("https://ghe.example"));
     assert!(
         provider
-            .comment_destination_from_url("https://gitlab.com/acme/project/issues/17")
+            .comment_destination_from_url("https://gitlab.com/acme/project/-/issues/17")
             .is_none()
     );
     assert_eq!(
