@@ -15,6 +15,41 @@ pub(super) const SOURCE_ENV: &str = "ZEROSHOT_OPENCODE_AUTH_SOURCE";
 pub(super) struct NativeLogin {
     pub(super) masked: String,
     pub(super) inline: Option<String>,
+    pub(super) selected: Option<Value>,
+}
+
+impl NativeLogin {
+    pub(super) fn select(
+        &mut self,
+        provider: &str,
+        environment: &BTreeMap<String, String>,
+    ) -> Result<(), NodeRunnerError> {
+        if provider != "github" {
+            return Ok(());
+        }
+        let key = environment
+            .get("COPILOT_GITHUB_TOKEN")
+            .ok_or(NodeRunnerError::Driver)?;
+        let mut entry = json!({"type":"oauth","refresh":key,"access":key,"expires":0});
+        if let Some(enterprise) = self
+            .selected
+            .as_ref()
+            .and_then(|selected| selected.get("enterpriseUrl"))
+            .filter(|value| value.is_string())
+        {
+            entry["enterpriseUrl"] = enterprise.clone();
+        }
+        let mut masked: Value =
+            serde_json::from_str(&self.masked).map_err(|_| NodeRunnerError::Driver)?;
+        let object = masked.as_object_mut().ok_or_else(|| {
+            NodeRunnerError::DriverDetail(
+                "OpenCode GitHub authentication must be an object".to_owned(),
+            )
+        })?;
+        object.insert("github-copilot".to_owned(), entry);
+        self.masked = masked.to_string();
+        Ok(())
+    }
 }
 
 pub(super) fn without_provider(
@@ -38,9 +73,7 @@ pub(super) fn without_provider(
         Some((auth, source)) => (auth, Some(source)),
         None => (read_auth(&auth_path(command)?)?, None),
     };
-    if let Some(auth) = auth.as_object_mut() {
-        auth.remove(provider);
-    }
+    let selected = auth.as_object_mut().and_then(|auth| auth.remove(provider));
     let auth = serde_json::to_string(&auth).map_err(|_| NodeRunnerError::Driver)?;
     if auth.len() as u64 > MAX_AUTH_BYTES {
         return Err(bound_error());
@@ -48,6 +81,7 @@ pub(super) fn without_provider(
     Ok(NativeLogin {
         masked: auth,
         inline,
+        selected,
     })
 }
 

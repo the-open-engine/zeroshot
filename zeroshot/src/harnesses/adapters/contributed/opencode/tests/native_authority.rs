@@ -215,7 +215,7 @@ export default async ({{directory,client}})=>{{
     std::fs::write(workspace.join(".opencode/plugins/native-proof.js"), source).assert_value();
 }
 
-async fn capture_request(listener: tokio::net::TcpListener) -> String {
+pub(super) async fn capture_request(listener: tokio::net::TcpListener) -> String {
     let (mut stream, _) = listener.accept().await.assert_value();
     let mut bytes = Vec::new();
     let headers = loop {
@@ -278,19 +278,9 @@ async fn additional_native_wire(provider: &str, api: &str) {
     adapter.config.executable =
         std::env::var("ZEROSHOT_OPENCODE_BINARY").expect("explicit native binary");
     let id = command::native_provider(provider);
-    adapter.local_environment = BTreeMap::from([
-        ("XDG_DATA_HOME".to_owned(), directory.child("data").to_string_lossy().into_owned()),
-        ("XDG_CONFIG_HOME".to_owned(), directory.child("config").to_string_lossy().into_owned()),
-        ("XDG_CACHE_HOME".to_owned(), directory.child("cache").to_string_lossy().into_owned()),
-        ("XDG_STATE_HOME".to_owned(), directory.child("state").to_string_lossy().into_owned()),
-        ("OPENCODE_DISABLE_MODELS_FETCH".to_owned(), "1".to_owned()),
-        ("OPENCODE_DISABLE_LSP_DOWNLOAD".to_owned(), "1".to_owned()),
-        ("OPENCODE_CONFIG_CONTENT".to_owned(), json!({"provider":{(id):{"options":{"apiKey":"stored-key"},"models":{"opaque/model":{"id":"wire-fixture","name":"Wire fixture","limit":{"context":100000,"output":4096}}}}}}).to_string()),
-    ]);
-    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-        .await
-        .assert_value();
-    let endpoint = format!("http://{}/v1", listener.local_addr().assert_value());
+    let config = json!({"provider":{(id):{"options":{"apiKey":"stored-key"},"models":{"opaque/model":{"id":"wire-fixture","name":"Wire fixture","limit":{"context":100000,"output":4096}}}}}});
+    adapter.local_environment = native_wire_environment(&directory, config);
+    let (listener, endpoint) = native_listener().await;
     let credential = command::credential_field(provider).assert_value();
     let endpoint_field = command::endpoint_fields(provider)[0];
     let mut fields = vec![
@@ -303,23 +293,7 @@ async fn additional_native_wire(provider: &str, api: &str) {
         ("AWS_REGION", "us-east-1")
     });
     let invocation = super::process::invocation(&fields);
-    let (cancel, control, mut durable) = crate::native_v2_runner::test_support::control();
-    let drain = tokio::spawn(async move { while durable.recv_output().await.is_ok() {} });
-    let execution = adapter.run(invocation, control);
-    let request = tokio::time::timeout(
-        std::time::Duration::from_secs(40),
-        capture_request(listener),
-    );
-    tokio::pin!(execution, request);
-    let captured = tokio::select! {
-        captured = &mut request => captured.assert_value_with("native provider wire request"),
-        result = &mut execution => panic!("native {provider}/{api} exited before sending HTTP: {result:?}"),
-    };
-    cancel.send(true).assert_value();
-    let _result = tokio::time::timeout(std::time::Duration::from_secs(10), execution)
-        .await
-        .assert_value();
-    drain.await.assert_value();
+    let captured = run_native_wire(&adapter, invocation, listener).await;
     let captured = captured.to_ascii_lowercase();
     let header = if api == "anthropic-messages" {
         "x-api-key: declared-wire-key"
@@ -338,6 +312,65 @@ async fn additional_native_wire(provider: &str, api: &str) {
         _ => "/converse-stream",
     };
     assert!(captured.lines().next().assert_value().contains(suffix));
+}
+
+pub(super) async fn native_listener() -> (tokio::net::TcpListener, String) {
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .assert_value();
+    let endpoint = format!("http://{}/v1", listener.local_addr().assert_value());
+    (listener, endpoint)
+}
+
+pub(super) fn native_wire_environment(
+    directory: &TestDirectory,
+    config: Value,
+) -> BTreeMap<String, String> {
+    let mut environment: BTreeMap<String, String> = [
+        ("XDG_DATA_HOME", "data"),
+        ("XDG_CONFIG_HOME", "config"),
+        ("XDG_CACHE_HOME", "cache"),
+        ("XDG_STATE_HOME", "state"),
+    ]
+    .into_iter()
+    .map(|(name, path)| {
+        (
+            name.to_owned(),
+            directory.child(path).to_string_lossy().into_owned(),
+        )
+    })
+    .collect();
+    environment.extend([
+        ("OPENCODE_DISABLE_MODELS_FETCH".to_owned(), "1".to_owned()),
+        ("OPENCODE_DISABLE_LSP_DOWNLOAD".to_owned(), "1".to_owned()),
+        ("OPENCODE_CONFIG_CONTENT".to_owned(), config.to_string()),
+    ]);
+    environment
+}
+
+pub(super) async fn run_native_wire(
+    adapter: &OpenCodeAdapter,
+    invocation: DriverInvocation,
+    listener: tokio::net::TcpListener,
+) -> String {
+    let (cancel, control, mut durable) = crate::native_v2_runner::test_support::control();
+    let drain = tokio::spawn(async move { while durable.recv_output().await.is_ok() {} });
+    let execution = adapter.run(invocation, control);
+    let wire = tokio::time::timeout(
+        std::time::Duration::from_secs(40),
+        capture_request(listener),
+    );
+    tokio::pin!(execution, wire);
+    let captured = tokio::select! {
+        captured = &mut wire => captured.assert_value_with("native provider wire request"),
+        result = &mut execution => panic!("native {} exited before HTTP: {result:?}", adapter.config.provider),
+    };
+    cancel.send(true).assert_value();
+    let _result = tokio::time::timeout(std::time::Duration::from_secs(10), execution)
+        .await
+        .assert_value();
+    drain.await.assert_value();
+    captured
 }
 
 #[tokio::test]

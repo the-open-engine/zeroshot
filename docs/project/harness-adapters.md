@@ -12,8 +12,8 @@ Official local builds include every adapter below. Install each native CLI separ
 | `claude`   | `anthropic`, `openrouter`, `gateway`, `bedrock`                     | Core         |
 | `copilot`  | `github`, `openai`, `anthropic`, `openrouter`, `gateway`, `bedrock` | Core         |
 | `pi`       | `anthropic`, `openai`, `openrouter`, `gateway`, `bedrock`, `github` | Core         |
-| `opencode` | `openai`, `anthropic`, `openrouter`, `bedrock`, `gateway`           | Contributed  |
-| `hermes`   | `openai`, `anthropic`, `openrouter`, `gateway`                      | Contributed  |
+| `opencode` | `openai`, `anthropic`, `openrouter`, `bedrock`, `gateway`, `github` | Contributed  |
+| `hermes`   | `openai`, `anthropic`, `openrouter`, `gateway`, `github`, `bedrock` | Contributed  |
 
 Local builds enable `contributed-harnesses` by default. Platform and the default target image disable
 default features and independently admit only the core registry. Targets advertise enabled pairs
@@ -34,9 +34,10 @@ OpenAI-compatible Responses endpoint with `AWS_BEARER_TOKEN_BEDROCK` and `AWS_RE
 
 Local native login works for Codex/OpenAI, Claude/Anthropic, Copilot/GitHub and its OpenAI,
 Anthropic and OpenRouter BYOK lanes, and Pi/Anthropic, OpenAI and GitHub. OpenCode and Hermes retain
-native authentication for their OpenAI, Anthropic and OpenRouter lanes; OpenCode/Bedrock also retains
-the native AWS credential chain. Other lanes require declared connections. Declared Pi/GitHub
-credentials seed private native OAuth state; Pi owns token exchange and refresh.
+native authentication for every supported provider except gateway, including the native AWS
+credential chain for Bedrock. Other lanes require declared connections. GitHub connections use
+`COPILOT_GITHUB_TOKEN`; each harness owns its native exchange and refresh behavior. Declared
+credentials use private runtime state and preserve saved logins.
 
 Local OpenCode and Hermes runs preserve native configuration discovery with declared credentials.
 Their declared authentication takes precedence over ambient authentication for the selected lane,

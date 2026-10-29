@@ -39,11 +39,12 @@ pub(super) fn install(installation: Installation<'_>) -> Result<(), NodeRunnerEr
         return Err(NodeRunnerError::DriverDetail("OpenCode pure mode disables the native hook required by declared provider authentication".to_owned()));
     }
     let provider = &adapter.config.provider;
-    let auth = super::login::without_provider(
+    let mut auth = super::login::without_provider(
         adapter.local_environment.get("OPENCODE_AUTH_CONTENT"),
         command,
         command::native_provider(provider),
     )?;
+    auth.select(provider, &command.environment)?;
     command
         .environment
         .insert("OPENCODE_AUTH_CONTENT".to_owned(), auth.masked);
@@ -118,7 +119,8 @@ fn extend_selection(
 // their order and all unrelated settings. provider.models handles catalog models before authored
 // models merge. chat.headers observes actual SDK inputs and propagates concrete conflict errors
 // before a model request; config() errors alone are swallowed by the native plugin loader.
-const HOOK: &str = r#"const selection = AUTH_SELECTION;
+const HOOK: &str = r#"import {AsyncLocalStorage} from 'node:async_hooks';
+const selection = AUTH_SELECTION;
 const authentication = ['apiKey','authToken','authorization','token','accessKeyId','secretAccessKey','sessionToken'];
 const authHeader = (name) => /^(authorization|proxy-authorization|cookie|set-cookie)$/i.test(name) || /(^|[-_])(api[-_]?key|auth|token|secret)([-_]|$)/i.test(name);
 const object = (value) => value && typeof value === 'object' && !Array.isArray(value);
@@ -170,20 +172,27 @@ function preserveNativeWrites(client) {
   delete process.env.ZEROSHOT_OPENCODE_AUTH_SOURCE;
   if (!client?.auth?.set) return;
   let masked = JSON.parse(process.env.OPENCODE_AUTH_CONTENT), queue = Promise.resolve();
+  const selected = masked[selection.provider], authority = new AsyncLocalStorage(), environment = process.env;
+  // Native Auth.set reads Auth.all in its own async scope. Never unmask another model request.
+  process.env = new Proxy(environment, {
+    get(target,name,receiver) {
+      if (name === 'OPENCODE_AUTH_CONTENT' && authority.getStore()) return authority.getStore().source;
+      return Reflect.get(target,name,receiver);
+    },
+    set(target,name,value) { target[name] = value; return true; }
+  });
   const set = client.auth.set.bind(client.auth);
   client.auth.set = (...args) => {
     const write = queue.then(async () => {
-      if (inline === undefined) delete process.env.OPENCODE_AUTH_CONTENT;
-      else process.env.OPENCODE_AUTH_CONTENT = inline;
-      try {
-        const result = await set(...args), request = args[0];
-        if (result?.data === true && typeof request?.path?.id === 'string') {
-          masked = updated(masked,request.path.id,request.body);
-          delete masked[selection.provider];
-          if (inline !== undefined) inline = JSON.stringify(updated(JSON.parse(inline),request.path.id,request.body));
-        }
-        return result;
-      } finally { process.env.OPENCODE_AUTH_CONTENT = JSON.stringify(masked); }
+      const result = await authority.run({source:inline}, () => set(...args)), request = args[0];
+      if (result?.data === true && typeof request?.path?.id === 'string') {
+        masked = updated(masked,request.path.id,request.body);
+        delete masked[selection.provider];
+        if (selected !== undefined) masked[selection.provider] = selected;
+        if (inline !== undefined) inline = JSON.stringify(updated(JSON.parse(inline),request.path.id,request.body));
+      }
+      process.env.OPENCODE_AUTH_CONTENT = JSON.stringify(masked);
+      return result;
     });
     queue = write.then(() => undefined, () => undefined);
     return write;

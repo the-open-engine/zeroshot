@@ -113,8 +113,14 @@ fn core_and_local_catalogs_apply_only_the_compiled_contribution_policy() {
     for lane in core.lanes() {
         local.descriptor(&lane).unwrap();
     }
-    for harness in ["opencode", "hermes"] {
-        let lane = RuntimeLane::new(harness, "openai").unwrap();
+    for (harness, provider) in [
+        ("opencode", "openai"),
+        ("opencode", "github"),
+        ("hermes", "openai"),
+        ("hermes", "github"),
+        ("hermes", "bedrock"),
+    ] {
+        let lane = RuntimeLane::new(harness, provider).unwrap();
         assert!(matches!(
             core.descriptor(&lane),
             Err(HarnessError::UnknownHarness(_))

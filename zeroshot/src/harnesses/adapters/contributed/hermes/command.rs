@@ -22,6 +22,11 @@ pub(super) const NATIVE_PATHS: &[&str] = &[
     "HERMES_OPTIONAL_SKILLS",
     "HERMES_OPTIONAL_MCPS",
     "HERMES_PREFILL_MESSAGES_FILE",
+    "AWS_CA_BUNDLE",
+    "AWS_CONFIG_FILE",
+    "AWS_SHARED_CREDENTIALS_FILE",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
     "XDG_CONFIG_HOME",
     "XDG_DATA_HOME",
     "XDG_CACHE_HOME",
@@ -34,6 +39,10 @@ pub(super) const LOCAL_ENVIRONMENT: &[&str] = &[
     "SHELL",
     "USERPROFILE",
     "PYTHONPATH",
+    "AWS_CONFIG_FILE",
+    "AWS_SHARED_CREDENTIALS_FILE",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
     "XDG_CONFIG_HOME",
     "XDG_DATA_HOME",
     "XDG_CACHE_HOME",
@@ -75,6 +84,30 @@ pub(super) const LOCAL_ENVIRONMENT: &[&str] = &[
     "ANTHROPIC_BASE_URL",
     "OPENROUTER_API_KEY",
     "OPENROUTER_BASE_URL",
+    "AWS_CA_BUNDLE",
+    "AWS_ENDPOINT_URL",
+    "AWS_ENDPOINT_URL_BEDROCK_RUNTIME",
+    "AWS_ENDPOINT_URL_BEDROCK",
+    "AWS_ENDPOINT_URL_STS",
+    "AWS_MAX_ATTEMPTS",
+    "AWS_RETRY_MODE",
+    "AWS_USE_FIPS_ENDPOINT",
+    "AWS_USE_DUALSTACK_ENDPOINT",
+    "AWS_IGNORE_CONFIGURED_ENDPOINT_URLS",
+    "AWS_EC2_METADATA_SERVICE_ENDPOINT",
+    "AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE",
+    "AWS_EC2_METADATA_V1_DISABLED",
+    "AWS_METADATA_SERVICE_TIMEOUT",
+    "AWS_METADATA_SERVICE_NUM_ATTEMPTS",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "AWS_PROFILE",
+    "AWS_DEFAULT_PROFILE",
+    "AWS_ROLE_ARN",
+    "AWS_ROLE_SESSION_NAME",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_EC2_METADATA_DISABLED",
     "OP_SERVICE_ACCOUNT_TOKEN",
     "BWS_ACCESS_TOKEN",
 ];
@@ -87,6 +120,12 @@ const CREDENTIALS: &[&str] = &[
     "GATEWAY_API_KEY",
     "AWS_BEARER_TOKEN_BEDROCK",
     "COPILOT_GITHUB_TOKEN",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN",
 ];
 
 fn credential_fields(provider: &str) -> &'static [&'static str] {
@@ -99,6 +138,14 @@ fn credential_fields(provider: &str) -> &'static [&'static str] {
         ],
         "openrouter" => &["OPENROUTER_API_KEY"],
         "gateway" => &["GATEWAY_API_KEY"],
+        "github" => &["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
+        "bedrock" => &[
+            "AWS_BEARER_TOKEN_BEDROCK",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+        ],
         _ => &[],
     }
 }
@@ -109,6 +156,8 @@ pub(super) fn credential_field(provider: &str) -> Option<&'static str> {
         "anthropic" => Some("ANTHROPIC_API_KEY"),
         "openrouter" => Some("OPENROUTER_API_KEY"),
         "gateway" => Some("GATEWAY_API_KEY"),
+        "github" => Some("COPILOT_GITHUB_TOKEN"),
+        "bedrock" => Some("AWS_BEARER_TOKEN_BEDROCK"),
         _ => None,
     }
 }
@@ -136,11 +185,13 @@ pub(super) fn prepare(
         .ok_or_else(|| failure("Hermes provider is unsupported"))?;
     let mut environment = environment(adapter, invocation, files)?;
     let authority = authority(&adapter.config.provider, invocation)?;
-    let native_environment = native_context(adapter, !authority["apiKey"].is_null());
-    if !authority["apiKey"].is_null() {
-        for name in CREDENTIALS {
-            environment.remove(*name);
-        }
+    let declared_auth = !authority["apiKey"].is_null()
+        || authority["aws"]
+            .as_object()
+            .is_some_and(|aws| aws.keys().any(|name| aws_auth_field(name)));
+    let native_environment = native_context(adapter, declared_auth);
+    for name in CREDENTIALS {
+        environment.remove(*name);
     }
     bootstrap_environment(&mut environment, files.home())?;
     let memory = memory_capability(adapter, invocation, files);
@@ -214,7 +265,12 @@ fn memory_capability(
 
 fn authority(provider: &str, invocation: &DriverInvocation) -> Result<Value, NodeRunnerError> {
     let fields = credential_fields(provider);
-    let key = fields.iter().find_map(|name| {
+    let key_fields = if provider == "bedrock" {
+        &["AWS_BEARER_TOKEN_BEDROCK"][..]
+    } else {
+        fields
+    };
+    let key = key_fields.iter().find_map(|name| {
         invocation
             .environment
             .iter()
@@ -223,16 +279,7 @@ fn authority(provider: &str, invocation: &DriverInvocation) -> Result<Value, Nod
     });
     let mut base: Option<&str> = None;
     for (name, value) in invocation.environment.iter() {
-        if CREDENTIALS.contains(&name.as_str()) {
-            if !fields.contains(&name.as_str()) {
-                return Err(failure(
-                    "Hermes credential conflicts with the selected provider",
-                ));
-            }
-            if value.trim().is_empty() {
-                return Err(failure("Hermes declared credential is empty"));
-            }
-        }
+        validate_credential(name.as_str(), value, fields)?;
         if endpoint_fields(provider).contains(&name.as_str()) {
             if value.trim().is_empty() || base.is_some_and(|base| base != value) {
                 return Err(failure("Hermes declared endpoints are empty or disagree"));
@@ -245,7 +292,83 @@ fn authority(provider: &str, invocation: &DriverInvocation) -> Result<Value, Nod
     } else {
         None
     };
-    Ok(json!({"apiKey":key,"baseUrl":base,"apiMode":api_mode}))
+    let aws = aws_authority(provider, invocation)?;
+    Ok(json!({"apiKey":key,"baseUrl":base,"apiMode":api_mode,"aws":aws}))
+}
+
+fn validate_credential(name: &str, value: &str, fields: &[&str]) -> Result<(), NodeRunnerError> {
+    if !CREDENTIALS.contains(&name) {
+        return Ok(());
+    }
+    if !fields.contains(&name) {
+        return Err(failure(
+            "Hermes credential conflicts with the selected provider",
+        ));
+    }
+    if value.trim().is_empty() {
+        return Err(failure("Hermes declared credential is empty"));
+    }
+    Ok(())
+}
+
+fn aws_auth_field(name: &str) -> bool {
+    matches!(
+        name,
+        "AWS_BEARER_TOKEN_BEDROCK"
+            | "AWS_ACCESS_KEY_ID"
+            | "AWS_SECRET_ACCESS_KEY"
+            | "AWS_SESSION_TOKEN"
+            | "AWS_PROFILE"
+            | "AWS_DEFAULT_PROFILE"
+            | "AWS_WEB_IDENTITY_TOKEN_FILE"
+            | "AWS_ROLE_ARN"
+            | "AWS_ROLE_SESSION_NAME"
+            | "AWS_CONTAINER_AUTHORIZATION_TOKEN"
+            | "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE"
+            | "AWS_CONTAINER_CREDENTIALS_FULL_URI"
+            | "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"
+    )
+}
+
+fn required_aws_value(name: &str) -> bool {
+    aws_auth_field(name) || matches!(name, "AWS_REGION" | "AWS_DEFAULT_REGION")
+}
+
+fn aws_authority(
+    provider: &str,
+    invocation: &DriverInvocation,
+) -> Result<BTreeMap<String, String>, NodeRunnerError> {
+    if provider != "bedrock" {
+        return Ok(BTreeMap::new());
+    }
+    let aws = invocation
+        .environment
+        .iter()
+        .filter(|(name, _)| name.as_str().starts_with("AWS_"))
+        .map(|(name, value)| (name.as_str().to_owned(), value.to_owned()))
+        .collect::<BTreeMap<_, _>>();
+    let bearer = aws.contains_key("AWS_BEARER_TOKEN_BEDROCK");
+    if aws
+        .iter()
+        .any(|(name, value)| required_aws_value(name) && value.trim().is_empty())
+    {
+        return Err(failure("Hermes declared AWS field is empty"));
+    }
+    if bearer && !aws.contains_key("AWS_REGION") {
+        return Err(failure(
+            "Hermes declared Bedrock bearer requires AWS_REGION",
+        ));
+    }
+    if bearer
+        && aws
+            .keys()
+            .any(|name| aws_auth_field(name) && name != "AWS_BEARER_TOKEN_BEDROCK")
+    {
+        return Err(failure(
+            "Hermes Bedrock bearer and IAM credentials conflict",
+        ));
+    }
+    Ok(aws)
 }
 
 fn gateway_mode(invocation: &DriverInvocation) -> Result<&'static str, NodeRunnerError> {
@@ -274,9 +397,10 @@ fn native_context(adapter: &HermesAdapter, declared: bool) -> BTreeMap<String, S
         .filter(|(name, _)| !name.to_ascii_uppercase().starts_with("ZEROSHOT_"))
         .filter(|(name, _)| {
             !(declared
-                && selected_credentials
+                && (selected_credentials
                     .iter()
-                    .any(|field| name.eq_ignore_ascii_case(field)))
+                    .any(|field| name.eq_ignore_ascii_case(field))
+                    || (adapter.config.provider == "bedrock" && aws_auth_field(name))))
         })
         .collect()
 }
@@ -346,7 +470,10 @@ pub(super) fn validate_connection_name(name: &str) -> Result<(), NodeRunnerError
         || upper.starts_with("XDG_")
         || (upper.starts_with("HERMES_") && !permission.contains(&name))
         || upper.starts_with("ZEROSHOT_")
-        || (cfg!(windows) && name != upper && LOCAL_ENVIRONMENT.contains(&upper.as_str()))
+        || (cfg!(windows)
+            && name != upper
+            && (LOCAL_ENVIRONMENT.contains(&upper.as_str())
+                || CREDENTIALS.contains(&upper.as_str())))
     {
         return Err(failure(
             "Hermes connection shadows a reserved or noncanonical launch control",
@@ -360,6 +487,7 @@ fn install_runtime(home: &Path) -> Result<(), NodeRunnerError> {
         ("sitecustomize.py", include_str!("sitecustomize.py")),
         ("native_runtime.py", include_str!("native_runtime.py")),
         ("native_auth.py", include_str!("native_auth.py")),
+        ("native_providers.py", include_str!("native_providers.py")),
         ("native_memory.py", include_str!("native_memory.py")),
         (
             "native_environment.py",

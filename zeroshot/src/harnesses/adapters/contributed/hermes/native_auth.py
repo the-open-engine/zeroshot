@@ -12,7 +12,7 @@ import json
 import re
 from urllib.parse import urlsplit
 
-_PROVIDERS = {"openai": "openai-api", "anthropic": "anthropic", "openrouter": "openrouter", "gateway": "custom"}
+_PROVIDERS = {"openai": "openai-api", "anthropic": "anthropic", "openrouter": "openrouter", "gateway": "custom", "github": "copilot", "bedrock": "bedrock"}
 _AUTH_HEADER = re.compile(r"^(authorization|proxy-authorization)$|(^|[-_])(api[-_]?key|auth|token|secret)([-_]|$)", re.I)
 _AUTH_PARAMETER = {"api_key", "apikey", "x_api_key", "access_token", "auth_token", "authorization"}
 
@@ -36,9 +36,18 @@ def gateway_mode(provider, config):
     return mode
 
 
+def declared_aws_auth(values):
+    return any(name in values for name in (
+        "AWS_BEARER_TOKEN_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_PROFILE", "AWS_DEFAULT_PROFILE",
+        "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_ARN", "AWS_ROLE_SESSION_NAME", "AWS_SESSION_TOKEN",
+        "AWS_CONTAINER_AUTHORIZATION_TOKEN", "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+        "AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"))
+
+
 class Authority:
-    def __init__(self, provider, credentials, config, *, model):
+    def __init__(self, provider, credentials, config, **native):
         declared_key, declared_base = credentials
+        model = native.get("model")
         from agent import auxiliary_client as auxiliary
         from gateway.session_policy import _apply_launch_overrides
         from hermes_cli.runtime_provider import frozen_runtime_config, resolve_runtime_provider
@@ -47,7 +56,8 @@ class Authority:
         self._api_mode = gateway_mode(provider, config)
         self._pin_endpoint = bool(declared_base)
         self._guard_required = bool(declared_key or declared_base)
-        self.declared_key = declared_key
+        self.declared_key = declared_key if provider not in {"github", "bedrock"} else None
+        self._declared_auth = bool(declared_key or declared_aws_auth(native.get("aws", {})))
         self.declared_base = declared_base
         self.config = deepcopy(config)
         self.redactions = set()
@@ -55,6 +65,8 @@ class Authority:
         self._model = model
         self._main_agent = None
         self._remember(declared_key)
+        self._provider_auth = self._install_provider(declared_key, native)
+        self._guard_required |= self._declared_auth
         self._validate_config(self.config)
         picks = {"provider": self.provider}
         if declared_base:
@@ -66,7 +78,7 @@ class Authority:
         self.config.update(fallback_providers=[], fallback_model=None)
         with frozen_runtime_config(self.config):
             self.runtime = resolve_runtime_provider(requested=self.provider, target_model=model,
-                explicit_api_key=declared_key, explicit_base_url=declared_base)
+                explicit_api_key=self.declared_key, explicit_base_url=declared_base)
         if self._api_mode:
             self.runtime["api_mode"] = self._api_mode
             self.config["model"]["api_mode"] = self._api_mode
@@ -74,11 +86,30 @@ class Authority:
         self._remember(self.runtime.get("api_key"))
         self.agent_kwargs = {key: self.runtime.get(key) for key in ("provider", "api_key", "base_url", "api_mode", "credential_pool")}
         self.agent_kwargs["fallback_model"] = {}
-        if declared_key:
+        if self._declared_auth:
             self.agent_kwargs["credential_pool"] = None
         self._install_agent()
         self._install_auxiliary()
         self._install_delegation()
+
+    @staticmethod
+    def refuse(error):
+        raise _RequestRefused(AuthError(str(error)))
+
+    @staticmethod
+    def error(message):
+        return AuthError("Hermes " + message)
+
+    def _install_provider(self, source, native):
+        if self.product_provider not in {"github", "bedrock"}:
+            return None
+        import importlib.util
+        from pathlib import Path
+        path = Path(__file__).with_name("native_providers.py")
+        spec = importlib.util.spec_from_file_location("_zeroshot_hermes_providers", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.install(self, source, native.get("directory"), native.get("aws") or {})
 
     def _remember(self, value):
         if isinstance(value, str) and value:
@@ -150,8 +181,10 @@ class Authority:
             kwargs["api_key"] = self.declared_key
         if self._pin_endpoint:
             kwargs["base_url"] = self.runtime["base_url"]
-        if self.declared_key:
+        if self._declared_auth:
             kwargs["default_headers"] = self._headers(kwargs.get("default_headers"))
+        if self._provider_auth:
+            kwargs = self._provider_auth.client_kwargs(kwargs)
         self._remember(kwargs.get("api_key"))
         return kwargs
 
@@ -163,6 +196,8 @@ class Authority:
     def _guard_client(self, client):
         if self._native_probe(client):
             return client
+        if self._provider_auth and self._provider_auth.guard_client(client):
+            return client
         if hasattr(client, "_real_client"):
             self._guard_client(client._real_client)
             return client
@@ -173,7 +208,7 @@ class Authority:
         self._require_model_client(client)
         # The SDK has already merged native beta/identity/metadata headers. Remove
         # inherited authentication only; a later per-request override is refused.
-        if self.declared_key:
+        if self._declared_auth:
             client._custom_headers = self._headers(client._custom_headers)
         transport = client._client
         expected = self._client_authentication(client)
@@ -201,6 +236,8 @@ class Authority:
         if self.declared_key and (not expected or any(value not in (
                 self.declared_key, "Bearer " + self.declared_key) for value in expected.values())):
             raise AuthError("Hermes model client overrides declared authentication")
+        if self._provider_auth:
+            self._provider_auth.authentication(expected)
         return expected
 
     @staticmethod
@@ -243,9 +280,13 @@ class Authority:
     def _guard_request(self, endpoint, expected, request):
         if endpoint is not None:
             self._guard_endpoint(endpoint, request)
-        if self.declared_key:
+        if self._declared_auth:
             received = {name.lower(): value for name, value in request.headers.items()
                         if _AUTH_HEADER.search(name) or name.lower() == "x-provider-api-keys"}
+            if self._provider_auth:
+                self._provider_auth.authentication(received)
+                self._provider_auth.parameters(request)
+                return
             if received != expected:
                 names = self._conflicting_headers(expected, received)
                 raise AuthError(f"Hermes model request overrides declared authentication (headers: {names})")
@@ -299,7 +340,11 @@ class Authority:
                 if authority._api_mode:
                     kwargs["api_mode"] = authority._api_mode
                 if authority.declared_key:
-                    kwargs.update(api_key=authority.declared_key, credential_pool=None)
+                    kwargs["api_key"] = authority.declared_key
+                if authority._declared_auth:
+                    kwargs["credential_pool"] = None
+                if authority._provider_auth:
+                    kwargs = authority._provider_auth.agent_kwargs(kwargs)
                 if authority._pin_endpoint:
                     kwargs["base_url"] = authority.runtime["base_url"]
                 super().__init__(*args, **kwargs)
@@ -374,7 +419,7 @@ class Authority:
 
         def selected_pool(provider):
             authority._check(provider, "auxiliary provider")
-            return CredentialPool(provider, []) if authority.declared_key else pool(provider)
+            return CredentialPool(provider, []) if authority._declared_auth else pool(provider)
 
         def selected_refresh(provider, **kwargs):
             if provider != "custom":
@@ -411,7 +456,9 @@ class Authority:
         def delegation_credentials(config, parent):
             authority._check(config.get("provider"), "delegation.provider")
             bound = dict(config)
-            if authority._guard_required:
+            if authority._provider_auth:
+                bound = authority._provider_auth.delegation(bound)
+            elif authority._guard_required:
                 # Native direct-endpoint resolution with no provider lookup keeps
                 # its wire/model/settings and never refreshes a stored login.
                 bound["provider"] = None
@@ -430,7 +477,7 @@ class Authority:
 
         def delegation_pool(provider, parent, base_url=None, **kwargs):
             authority._check(provider, "delegated provider")
-            return None if authority.declared_key else child_pool(provider, parent, base_url, **kwargs)
+            return None if authority._declared_auth else child_pool(provider, parent, base_url, **kwargs)
 
         delegate_tool._resolve_delegation_credentials = delegation_credentials
         delegate_tool._resolve_child_credential_pool = delegation_pool
@@ -473,8 +520,8 @@ class Authority:
             yield
 
 
-def install(provider, declared_key, declared_base, config, *, model=None):
+def install(provider, declared_key, declared_base, config, **options):
     """Install once in an owned native worker, before native plugin discovery."""
     if provider not in _PROVIDERS:
         raise AuthError("Hermes provider is unsupported")
-    return Authority(provider, (declared_key, declared_base), config, model=model)
+    return Authority(provider, (declared_key, declared_base), config, **options)

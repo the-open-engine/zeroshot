@@ -157,9 +157,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   after native header hooks and before the SDK transport. Arbitrary native custom transport code
   remains trusted executable code and may replace HTTP behavior.
   Mask only the selected stored login in private process state; preserve unrelated native auth for
-  well-known discovery. The native `auth.set` custody wrapper forwards refreshes using their original
-  file or inline authority and preserves the selected login during unrelated refreshes; OpenCode
-  owns auth-file writes.
+  well-known discovery. The native `auth.set` wrapper supplies its original file or inline authority only within
+  that write's async scope, so concurrent model requests retain selected authentication. OpenCode owns
+  auth-file writes. The GitHub lane seeds private native OAuth state and retains its native provider
+  loader, endpoint metadata and request authentication; declared tokens never replace saved logins.
   Local OpenCode keeps native permissions and adds no `--auto`: native configuration inspection
   starts background dependency work, so use the shared unavailable-inspection fallback without a
   probe, custom policy parser or cache-lock management. Contained OpenCode adds `--auto` in its
@@ -173,6 +174,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   settings, plugins, MCP, instructions and permissions remain native. The owned agent, auxiliary
   and delegation factories keep declared credentials authoritative through refresh and retries;
   explicit foreign provider routes refuse before authentication. Native login retains native refresh.
+  GitHub binds the native source-token resolver while preserving native exchange, account endpoints,
+  refresh and retries; declared credentials use a private native token cache. Bedrock binds private
+  native AWS sessions for Converse, Anthropic and Mantle clients, preserving native signing and
+  credential refresh. Declared AWS authentication suppresses ambient alternatives and pins declared
+  region; native profiles and plugin discovery keep their original paths.
   Structured corrections share one runtime; node revisits follow native compression tips in a
   private native session database. Bind the original native profile through execution and cleanup
   so private database placement never changes SOUL or skills lookup. Captured shell values remain private until native configuration
@@ -236,7 +242,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Provider access defaults are materialized from the authored runtime at the execution-placement
   boundary. Omitted connections remain omitted in author-owned local profiles. Local Codex/OpenAI,
   Claude/Anthropic, Copilot/GitHub and its OpenAI/Anthropic/OpenRouter BYOK lanes, Pi/Anthropic,
-  Pi/OpenAI, and Pi/GitHub lanes reuse native login state
+  Pi/OpenAI, Pi/GitHub, and native-local contributed lanes reuse native login state
   without inventing a connection requirement; contained placements and non-native lanes add only their canonical
   missing requirements. Explicit
   compatible authored fields always win. Hosts use

@@ -16,7 +16,14 @@ pub(crate) fn registration() -> HarnessRegistration {
         descriptor: HarnessDescriptor {
             id: "hermes",
             label: "Hermes",
-            providers: &["openai", "anthropic", "openrouter", "gateway"],
+            providers: &[
+                "openai",
+                "anthropic",
+                "openrouter",
+                "gateway",
+                "github",
+                "bedrock",
+            ],
             executable: "hermes",
             source: HarnessSource::Contributed,
         },
@@ -73,6 +80,22 @@ fn access(provider: &str) -> Result<ProviderAccessContract, HarnessError> {
             "openrouter",
             &["OPENROUTER_API_KEY"],
             &[&["OPENROUTER_API_KEY"]],
+        )),
+        "github" => Ok(ProviderAccessContract::new(
+            true,
+            "github",
+            &["COPILOT_GITHUB_TOKEN"],
+            &[&["COPILOT_GITHUB_TOKEN"], &["GH_TOKEN"], &["GITHUB_TOKEN"]],
+        )),
+        "bedrock" => Ok(ProviderAccessContract::new(
+            true,
+            "bedrock",
+            &["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"],
+            &[
+                &["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"],
+                &["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION"],
+                &["AWS_PROFILE", "AWS_REGION"],
+            ],
         )),
         "gateway" => Ok(ProviderAccessContract::new(
             false,

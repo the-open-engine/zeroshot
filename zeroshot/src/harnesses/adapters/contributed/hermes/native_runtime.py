@@ -316,6 +316,8 @@ class Runtime:
         self.remote_kernels = None
 
     def initialize(self, frame):
+        from agent.ssl_verify import install_truststore
+        install_truststore()
         sibling("native_environment").install(
             frame.get("nativeEnvironment") or {}, frame.get("declaredEnvironment") or {},
             frame.get("providerEnvironment") or {})
@@ -335,7 +337,8 @@ class Runtime:
         self.auth_module = sibling("native_auth")
         self.authority = self.auth_module.install(
             frame["provider"], authority.get("apiKey"), authority.get("baseUrl"),
-            config, model=frame["model"])
+            config, model=frame["model"], directory=Path(frame["dbPath"]).parent,
+            aws=authority.get("aws") or {})
         self.remote_kernels = RemoteKernels()
         kwargs = self.authority.agent_kwargs
         self.policy = launch_policy(frame, self.authority.config, self.authority.provider, kwargs.get("base_url"))

@@ -16,7 +16,14 @@ pub(crate) fn registration() -> HarnessRegistration {
         descriptor: HarnessDescriptor {
             id: "opencode",
             label: "OpenCode",
-            providers: &["openai", "anthropic", "openrouter", "bedrock", "gateway"],
+            providers: &[
+                "openai",
+                "anthropic",
+                "openrouter",
+                "bedrock",
+                "gateway",
+                "github",
+            ],
             executable: "opencode",
             source: HarnessSource::Contributed,
         },
@@ -82,6 +89,12 @@ fn access(provider: &str) -> Result<ProviderAccessContract, HarnessError> {
             "bedrock",
             &["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"],
             &[&["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"]],
+        )),
+        "github" => Ok(ProviderAccessContract::new(
+            true,
+            "github",
+            &["COPILOT_GITHUB_TOKEN"],
+            &[&["COPILOT_GITHUB_TOKEN"]],
         )),
         "gateway" => Ok(ProviderAccessContract::new(
             false,

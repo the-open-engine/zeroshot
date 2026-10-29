@@ -17,6 +17,11 @@ ENV_KEYS = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY", "openr
 
 
 def response(httpx, provider, body):
+    if provider == "responses":
+        return httpx.Response(200, json={"id": "resp_fixture", "object": "response", "created_at": 1,
+            "status": "completed", "model": body["model"], "output": [{"type": "message", "id": "msg_fixture",
+            "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "ok", "annotations": []}]}],
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}})
     if provider == "anthropic":
         message = {"id": "msg_fixture", "type": "message", "role": "assistant", "model": body["model"],
                    "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn", "stop_sequence": None,
@@ -344,10 +349,7 @@ def gateway_worker(mode):
             receipts.append(request.url.path)
             if mode == "codex_responses":
                 assert request.url.path.endswith("/responses")
-                result = {"id": "resp_fixture", "object": "response", "created_at": 1,
-                    "status": "completed", "model": body["model"], "output": [{"type": "message", "id": "msg_fixture",
-                    "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "ok", "annotations": []}]}],
-                    "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}
+                result = response(httpx, "responses", body).json()
                 events = [{"type": "response.output_item.done", "output_index": 0, "item": result["output"][0]},
                           {"type": "response.completed", "response": result}]
                 stream = "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events)

@@ -79,6 +79,7 @@ const CREDENTIALS: &[&str] = &[
     "COPILOT_GITHUB_TOKEN",
 ];
 const AUTHENTICATION: &[&str] = &[
+    "COPILOT_GITHUB_TOKEN",
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
     "OPENROUTER_API_KEY",
@@ -101,20 +102,21 @@ const AUTHENTICATION: &[&str] = &[
 ];
 
 pub(super) fn native_provider(provider: &str) -> &str {
-    if provider == "bedrock" {
-        "amazon-bedrock"
-    } else {
-        provider
+    match provider {
+        "bedrock" => "amazon-bedrock",
+        "github" => "github-copilot",
+        _ => provider,
     }
 }
 
 pub(super) fn credential_field(provider: &str) -> Option<&'static str> {
     match provider {
-        "openai" => Some("OPENAI_API_KEY"),
         "anthropic" => Some("ANTHROPIC_API_KEY"),
-        "openrouter" => Some("OPENROUTER_API_KEY"),
         "bedrock" => Some("AWS_BEARER_TOKEN_BEDROCK"),
         "gateway" => Some("GATEWAY_API_KEY"),
+        "github" => Some("COPILOT_GITHUB_TOKEN"),
+        "openai" => Some("OPENAI_API_KEY"),
+        "openrouter" => Some("OPENROUTER_API_KEY"),
         _ => None,
     }
 }
@@ -265,7 +267,11 @@ pub(super) fn validate_connection_name(name: &str, windows: bool) -> Result<(), 
     ];
     let native_control = upper.starts_with("OPENCODE_") && name != "OPENCODE_PERMISSION";
     let reserved = reserved.contains(&name) || (windows && reserved.contains(&upper.as_str()));
-    let alias = windows && name != upper && LOCAL_ENVIRONMENT.contains(&upper.as_str());
+    let native_names = LOCAL_ENVIRONMENT
+        .iter()
+        .chain(AWS_ENVIRONMENT)
+        .chain(CREDENTIALS);
+    let alias = windows && name != upper && native_names.into_iter().any(|field| *field == upper);
     let host_control = ["ProgramData", super::login::SOURCE_ENV]
         .iter()
         .any(|candidate| name.eq_ignore_ascii_case(candidate));

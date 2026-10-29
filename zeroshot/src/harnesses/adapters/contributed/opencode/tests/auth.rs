@@ -112,7 +112,9 @@ const requests=[
   {path:{id:'openai/'},body:{type:'api',key:'updated-native-login'}},
   {path:{id:'last'},body:{type:'api',key:'last-key'}}
 ];
+const outside=[];const sample=setInterval(()=>outside.push(JSON.parse(process.env.OPENCODE_AUTH_CONTENT)),1);
 const results=await Promise.allSettled(requests.map(request=>auth.set(request,{custom:true})));
+clearInterval(sample);if(!outside.length||outside.some(auth=>auth.openai))throw new Error('selected native login exposed during a pending write');
 console.log(JSON.stringify({maximum,seen,masked:JSON.parse(process.env.OPENCODE_AUTH_CONTENT),
   sourceRetained:process.env.ZEROSHOT_OPENCODE_AUTH_SOURCE!==undefined,mcpUntouched:auth.remove===remove,
   results:results.map(result=>result.status==='fulfilled'?result.value:{error:result.reason.message})}));"#;

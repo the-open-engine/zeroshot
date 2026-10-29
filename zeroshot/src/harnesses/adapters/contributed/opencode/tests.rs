@@ -204,6 +204,8 @@ fn declared_launch_controls_cannot_restore_native_managed_authority() {
     for name in [
         "openai_api_key",
         "OpenAI_Base_Url",
+        "copilot_github_token",
+        "Aws_Secret_Access_Key",
         "Path",
         "tmpdir",
         "userprofile",
@@ -269,3 +271,7 @@ mod auth;
 #[cfg(unix)]
 #[path = "tests/providers.rs"]
 mod providers;
+
+#[cfg(unix)]
+#[path = "tests/github.rs"]
+mod github;
