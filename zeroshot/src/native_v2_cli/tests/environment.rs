@@ -5,7 +5,6 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{Value, json};
 
 use super::*;
-use crate::native_v2_cli::execution::{CliExecutionContext, execute_native_v2_cli_with_context};
 
 fn runtime_with_environment() -> RuntimePlan {
     serde_json::from_value(json!({
@@ -51,15 +50,6 @@ fn environment_command(extra: &[&str]) -> (FixtureFiles, NativeV2CliCommand) {
     let command = parse_native_v2_args(run_args(&files.graph, &files.input, &files.runtime, extra))
         .assert_value();
     (files, command)
-}
-
-async fn execute_with_environment(
-    command: NativeV2CliCommand,
-    backend: &FakeBackend,
-    environment: &dyn Fn(&str) -> Option<OsString>,
-) -> Result<CliOutcome, NativeV2CliError> {
-    let context = CliExecutionContext::new(backend, environment);
-    execute_native_v2_cli_with_context(command, &context, &mut NeverDetach, &mut Vec::new()).await
 }
 
 #[cfg(unix)]

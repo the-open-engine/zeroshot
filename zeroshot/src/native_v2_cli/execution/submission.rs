@@ -334,22 +334,15 @@ fn validate_local_workspace(params: &PreparedRunRequest) -> Result<(), NativeV2C
 }
 
 fn select_source_connections(params: &mut PreparedRunRequest) -> Result<(), NativeV2CliError> {
-    let Some(remote) = params
-        .source
-        .as_ref()
-        .and_then(|source| source.resolved.remote.as_ref())
-    else {
+    let Some(source) = params.source.as_ref() else {
         return Ok(());
     };
-    if remote.forge.as_ref().is_none_or(|forge| {
-        forge.provider.as_str() != "source.github"
-            || forge
-                .base_url
-                .as_ref()
-                .is_some_and(|base| base.as_str().trim_end_matches('/') != "https://github.com")
-    }) {
+    if !crate::native_v2_candidate::is_github_com_source(&source.resolved) {
         params.github_token = None;
     }
+    let Some(remote) = source.resolved.remote.as_ref() else {
+        return Ok(());
+    };
     let (Some(key), Some(credentials)) = (&remote.connection, &params.git_credentials) else {
         return Ok(());
     };

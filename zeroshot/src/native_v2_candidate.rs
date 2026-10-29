@@ -253,7 +253,7 @@ fn build_candidate(
         comment_delivery,
         ..
     } = config;
-    let source_is_github_com = admitted.source.as_ref().is_some_and(default_github_source);
+    let source_is_github_com = admitted.source.as_ref().is_some_and(is_github_com_source);
     let comment_is_github_com = comment_delivery.as_ref().is_some_and(|delivery| {
         crate::source_code_provider::adapters::core::comment_destination(
             &delivery.config.expected_url,
@@ -308,7 +308,7 @@ fn build_candidate(
     )
 }
 
-fn default_github_source(source: &crate::native_v2_contract::ResolvedSource) -> bool {
+pub(crate) fn is_github_com_source(source: &crate::native_v2_contract::ResolvedSource) -> bool {
     let Some(remote) = &source.remote else {
         return true;
     };

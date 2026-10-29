@@ -816,7 +816,7 @@ fn named_source_less_comments_materialize_the_canonical_connection_used_by_resum
                 .into_iter()
                 .map(|(key, fields)| (key, fields.into_iter().collect()))
                 .collect(),
-            &available,
+            available,
         )
         .assert_value();
         assert_eq!(resumed, request.connections);
