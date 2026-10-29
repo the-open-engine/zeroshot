@@ -115,6 +115,7 @@ impl NativeV2DeliveryAdapter {
                 outcome: DELIVERY_REPAIR_REQUIRED_LABEL,
                 review: &review,
                 merge_revision: None,
+                links: contract::supports_links(&feedback.invocation.response).then(Map::new),
             },
             &diagnostic,
         )

@@ -104,6 +104,7 @@ async fn confirmed_comment_facts_survive_attempt_disposal_and_remain_lineage_sco
     let record = PublicationRecord {
         version: 1,
         url: URL.to_owned(),
+        destination: None,
         marker: format!("<!-- zeroshot-comment:v1:{} -->", "b".repeat(64)),
         body_hash: "a".repeat(64),
         author: "123".to_owned(),

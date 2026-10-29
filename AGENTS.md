@@ -274,7 +274,20 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Maintained implementations live in `source_code/adapters/core`; contributed implementations
   live in `source_code/adapters/contributed`. Git is shared transport; forge adapters supply review,
   checks, and merge behavior through the existing delivery nodes and opaque repository/review IDs.
-  GitHub remains the maintained forge; its review and merge identity must match the Git remote.
+  GitHub and GitLab are maintained forges. `SourceForgeIdentity.baseUrl` is a canonical credential-free
+  HTTPS web base, including an optional installation path prefix. Review/merge identity must match
+  the Git remote before credential resolution. GitHub Enterprise Server requires 3.22.2 or newer;
+  GitLab requires 19.5.1 or newer. Adapters check versions and refuse older or unknown servers.
+  Native `gh`/`glab` login resolution is host-scoped and fills only wholly missing delivery connections;
+  explicit or stored values win, and partial values fail. Unknown hosts require native configured
+  identity or paired `--source-provider`/`--source-base-url` overrides. Shared Git transport remains
+  independent of forge API credentials. GitLab uses bounded HTTP effects and synchronous SHA-guarded
+  merges; required merge trains remain pending. Synthetic pipeline SHAs do not prove captured-head CI.
+  Empty generated delivery bindings acquire the adapter's default connection only after source or
+  comment destination selection. Managed GitHub.com token/file fallback never authorizes another instance.
+  Adapters own optional canonical review/commit receipt links and comment permalink validation.
+  Provider-owned comment normalization runs before the publisher hashes and records its durable
+  intent; canonicalized text must retain one exact publication marker.
   Capability admission rejects unsupported operations before credential resolution or workspace
   mutation. Pure remote identification uses each registered
   provider's `repository_from_remote` hook; CLI source selection has no separate forge catalog and

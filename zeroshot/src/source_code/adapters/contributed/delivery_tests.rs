@@ -456,6 +456,7 @@ fn contribution_graph(mode: DeliveryMode) -> (openengine_cluster_protocol::Graph
                 let value = match field["type"]["kind"].as_str() {
                     Some("enum") => field["type"]["values"][0].clone(),
                     Some("string") => Value::String(String::new()),
+                    Some("record") => json!({}),
                     other => panic!("unexpected contribution receipt field: {other:?}"),
                 };
                 (name.clone(), value)

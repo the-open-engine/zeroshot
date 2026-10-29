@@ -231,6 +231,14 @@ impl NativeV2Admission {
             delivery_policy,
         )?;
         validate_source_delivery_with_registry(source.as_ref(), &prepared.graph, registry)?;
+        comment::resolve_comment_input_at(
+            &prepared.graph.root,
+            &prepared.initial_input,
+            source
+                .as_ref()
+                .and_then(|source| source.remote.as_ref())
+                .and_then(|remote| remote.forge.as_ref()),
+        )?;
         let verified = verify_submission(&prepared).await?;
 
         Ok(AdmittedRun {
@@ -342,7 +350,7 @@ fn prepare_submission(
     validate_executable_bindings(&declarations, &runtime, delivery_policy)?;
     validate_delivery_concurrency(&graph.root)?;
     comment::validate_comment_profile(&graph)?;
-    comment::resolve_comment_input(&graph.root, &initial_input)?;
+    comment::validate_comment_input_shape(&graph.root, &initial_input)?;
 
     Ok(PreparedSubmission {
         title,
@@ -382,7 +390,9 @@ async fn verify_submission(
 }
 
 mod comment;
-pub(crate) use comment::{admitted_comment_input, comment_node};
+mod source_access;
+pub use source_access::{delivery_credential_destinations, materialize_delivery_access};
+pub(crate) use comment::{resolve_comment_input_at, admitted_comment_input, comment_node};
 mod concurrency;
 mod loop_limits;
 mod validation;

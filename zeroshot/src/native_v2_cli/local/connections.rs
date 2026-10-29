@@ -106,6 +106,31 @@ impl LocalConnectionStore {
         RunEnvironment::exact_for_submission(submission, resolved).map_err(Into::into)
     }
 
+    /// Native authentication may satisfy only wholly absent connections. Existing values must
+    /// pass the same shape checks as ordinary resolution before any credential helper starts.
+    pub(super) fn missing_submission_connections(
+        &self,
+        submission: &openengine_cluster_protocol::RunSubmission,
+        explicit: &RunConnectionValues,
+    ) -> Result<BTreeSet<ConnectionKey>, NativeV2CliError> {
+        let requirements = submission.connection_requirements();
+        if requirements.is_empty() {
+            return Ok(BTreeSet::new());
+        }
+        let lock = self.lock()?;
+        FileExt::lock_shared(&lock).map_err(local_io)?;
+        let stored = self.read()?;
+        let mut missing = BTreeSet::new();
+        for (key, fields) in requirements {
+            if explicit.contains_key(&key) || stored.contains_key(&key) {
+                resolve_connection(&key, &fields.into_iter().collect(), explicit, &stored)?;
+            } else {
+                missing.insert(key);
+            }
+        }
+        Ok(missing)
+    }
+
     fn resolve_requirements(
         &self,
         requirements: BTreeMap<ConnectionKey, BTreeSet<EnvironmentVariableName>>,

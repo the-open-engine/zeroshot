@@ -253,11 +253,30 @@ fn build_candidate(
         comment_delivery,
         ..
     } = config;
+    let source_is_github_com = admitted.source.as_ref().is_some_and(default_github_source);
+    let comment_is_github_com = comment_delivery.as_ref().is_some_and(|delivery| {
+        crate::source_code_provider::adapters::core::comment_destination(
+            &delivery.config.expected_url,
+        )
+        .is_ok_and(|destination| {
+            destination.provider.id().as_str()
+                == crate::source_code_provider::adapters::core::GITHUB_PROVIDER_ID
+                && destination.base_url.as_deref() == Some("https://github.com")
+        })
+    });
     let delivery = delivery.map(|delivery| {
         Arc::new(
             NativeV2DeliveryAdapter::new(delivery.config, delivery.authority)
-                .with_trusted_github_token(trusted.token.clone())
-                .with_trusted_github_token_file(trusted.token_file.clone())
+                .with_trusted_github_token(
+                    source_is_github_com
+                        .then(|| trusted.token.clone())
+                        .flatten(),
+                )
+                .with_trusted_github_token_file(
+                    source_is_github_com
+                        .then(|| trusted.token_file.clone())
+                        .flatten(),
+                )
                 .with_trusted_delivery_validator(trusted.validator)
                 .with_git_credentials(delivery.git_credentials),
         )
@@ -270,8 +289,12 @@ fn build_candidate(
                 delivery.authority,
                 delivery.store,
             )
-            .with_trusted_github_token(trusted.token)
-            .with_trusted_github_token_file(trusted.token_file),
+            .with_trusted_github_token(comment_is_github_com.then_some(trusted.token).flatten())
+            .with_trusted_github_token_file(
+                comment_is_github_com
+                    .then_some(trusted.token_file)
+                    .flatten(),
+            ),
         )
     });
     assemble_runner(
@@ -283,6 +306,19 @@ fn build_candidate(
         },
         placement,
     )
+}
+
+fn default_github_source(source: &crate::native_v2_contract::ResolvedSource) -> bool {
+    let Some(remote) = &source.remote else {
+        return true;
+    };
+    remote.forge.as_ref().is_some_and(|forge| {
+        forge.provider.as_str() == crate::source_code_provider::adapters::core::GITHUB_PROVIDER_ID
+            && forge
+                .base_url
+                .as_ref()
+                .is_none_or(|base| base.as_str() == "https://github.com")
+    })
 }
 
 fn lane_agents(

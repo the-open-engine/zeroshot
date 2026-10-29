@@ -4,7 +4,7 @@ use std::process::Stdio;
 
 use openengine_cluster_protocol::{
     GitRemoteUrl, GitTransportCredentials, ResolvedGitRemote, RunConnectionValues, ResolvedSource,
-    SourceBranchId, SourceRepositoryId, SourceRevisionId,
+    SourceBranchId, SourceForgeIdentity, SourceRepositoryId, SourceRevisionId,
 };
 use tokio::process::Command;
 
@@ -98,8 +98,29 @@ async fn selected_repository(
     ),
     NativeV2CliError,
 > {
-    let (repository, remote) = select_run_repository(request.run, worktree).await?;
-    let metadata = resolved_remote(request.run, &worktree.root, remote.as_deref()).await?;
+    let (mut repository, remote) = select_run_repository(request.run, worktree).await?;
+    let mut metadata = resolved_remote(request.run, &worktree.root, remote.as_deref()).await?;
+    let needs_forge =
+        crate::native_v2_cli::local::native_forge::needs_forge(request.required_capabilities);
+    if needs_forge && let Some(metadata) = metadata.as_mut().filter(|remote| remote.forge.is_none())
+    {
+        let invoking =
+            std::env::current_dir().map_err(|_| source_error("invoking folder is unavailable"))?;
+        let environment =
+            crate::native_v2_cli::local::native_forge::capture_native_environment(&invoking)?;
+        let forge = crate::native_v2_cli::local::native_forge::identify_remote(
+            &metadata.url,
+            crate::native_v2_cli::local::native_forge::NativeContext {
+                environment: &environment,
+                directory: &worktree.root,
+            },
+        )
+        .await?;
+        metadata.forge = Some(forge);
+    }
+    if let Some(forge) = metadata.as_ref().and_then(|remote| remote.forge.as_ref()) {
+        repository = forge.repository.clone();
+    }
     crate::source_code_provider::adapters::core::validate_delivery_repository(
         repository.as_str(),
         metadata.as_ref(),
@@ -388,15 +409,19 @@ async fn resolved_remote(
     let Some(url) = selected_remote_url(run, root, selected).await? else {
         return Ok(None);
     };
-    let forge = crate::source_code_provider::adapters::core::forge_identity(&url)
-        .map_err(|error| source_error(&error.to_string()))?;
-    let explicit_url = matches!(run.repository.as_ref(), Some(RunRepository::Git(_)));
-    if forge
-        .as_ref()
-        .is_some_and(|forge| forge.provider.as_str() == "source.github")
-        && !explicit_url
-        && run.source_connection.is_none()
-    {
+    let forge = match &run.source_forge {
+        Some(selection) => Some(
+            crate::source_code_provider::adapters::core::forge_identity_for(
+                &url,
+                selection.provider.as_str(),
+                &selection.base_url,
+            )
+            .map_err(|error| source_error(&error.to_string()))?,
+        ),
+        None => crate::source_code_provider::adapters::core::forge_identity(&url)
+            .map_err(|error| source_error(&error.to_string()))?,
+    };
+    if implicit_github_remote(run, forge.as_ref()) {
         return Ok(None);
     }
     Ok(Some(ResolvedGitRemote {
@@ -404,6 +429,19 @@ async fn resolved_remote(
         forge,
         connection: run.source_connection.clone(),
     }))
+}
+
+fn implicit_github_remote(run: &RunCommand, forge: Option<&SourceForgeIdentity>) -> bool {
+    run.source_forge.is_none()
+        && run.source_connection.is_none()
+        && !matches!(run.repository.as_ref(), Some(RunRepository::Git(_)))
+        && forge.is_some_and(|forge| {
+            forge.provider.as_str() == "source.github"
+                && forge
+                    .base_url
+                    .as_ref()
+                    .is_none_or(|base| base.as_str().trim_end_matches('/') == "https://github.com")
+        })
 }
 
 async fn remote_tip(

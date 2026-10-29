@@ -465,6 +465,7 @@ fn routing_initial_input(base_revision: &str) -> Value {
         ("headRevision".to_owned(), json!(base_revision)),
         ("mergeRevision".to_owned(), json!("")),
         ("pullRequestId".to_owned(), json!("pending")),
+        ("links".to_owned(), json!({})),
     ]))
 }
 

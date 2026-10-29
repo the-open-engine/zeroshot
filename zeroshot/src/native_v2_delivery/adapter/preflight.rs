@@ -91,8 +91,7 @@ impl NativeV2DeliveryAdapter {
     ) -> Result<(), DeliveryStop> {
         let branch = delivery_branch(self.config.delivery_run_id.as_str());
         let known = self.delivery_state();
-        let mode = DeliveryMode::from_worker(&preparation.invocation.node.worker)
-            .ok_or(NodeRunnerError::InvalidRole)?;
+        let mode = preparation_mode(preparation)?;
         let request = SourceDeliveryRead {
             target: &self.config.target,
             head_branch: &branch,
@@ -326,8 +325,7 @@ impl NativeV2DeliveryAdapter {
             .workspace_state(&self.config.workspace)
             .await
             .map_err(recovery::git_failure)?;
-        let mode = DeliveryMode::from_worker(&preparation.invocation.node.worker)
-            .ok_or(NodeRunnerError::InvalidRole)?;
+        let mode = preparation_mode(preparation)?;
         if dirty || head != review.head_revision || !mode.is_merge() {
             return self.refuse_delivery(preparation.control,
                 "the run PR is already merged, but current local work is not confirmed delivered; work was preserved")
@@ -350,16 +348,26 @@ impl NativeV2DeliveryAdapter {
         let receipt = receipt_from_observation(review);
         let diagnostic = "forge confirmed the previously delivered candidate is already merged";
         emit(preparation.control, diagnostic).await?;
-        let outcome = delivery_outcome(
-            DeliveryResult {
-                mode,
-                outcome: DELIVERY_MERGED_LABEL,
-                review: &receipt,
-                merge_revision: Some(merge_revision),
-            },
-            diagnostic,
-        )?;
+        let outcome = self.existing_merge_outcome(preparation, &receipt, merge_revision)?;
         Err(DeliveryStop::Outcome(outcome))
+    }
+
+    fn existing_merge_outcome(
+        &self,
+        preparation: &DeliveryPreparation<'_, '_>,
+        review: &SourceReviewReceipt,
+        merge_revision: &str,
+    ) -> Result<WorkerOutcome, NodeRunnerError> {
+        delivery_outcome(
+            DeliveryResult {
+                mode: preparation_mode(preparation)?,
+                outcome: DELIVERY_MERGED_LABEL,
+                review,
+                merge_revision: Some(merge_revision),
+                links: self.result_links(&preparation.invocation.response, review)?,
+            },
+            "forge confirmed the previously delivered candidate is already merged",
+        )
     }
 
     pub(super) async fn refuse_delivery(
@@ -524,3 +532,10 @@ pub(super) fn receipt_from_observation(review: &SourceReviewObservation) -> Sour
 #[cfg(test)]
 #[path = "preflight/tests.rs"]
 mod tests;
+
+fn preparation_mode(
+    preparation: &DeliveryPreparation<'_, '_>,
+) -> Result<DeliveryMode, NodeRunnerError> {
+    DeliveryMode::from_worker(&preparation.invocation.node.worker)
+        .ok_or(NodeRunnerError::InvalidRole)
+}

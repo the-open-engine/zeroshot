@@ -181,11 +181,12 @@ async fn preflight_reuses_snapshot_and_preserves_trusted_token_file_precedence()
         authenticated_ref("eC1hY2Nlc3MtdG9rZW46ZmlsZS10b2tlbg=="),
     );
     let fixture = Fixture::new(&reply);
-    let mut prepared = fixture
-        .backend
-        .prepare_run(fixture.request(DeliveryMode::Merge))
-        .await
-        .assert_value();
+    // Reserve trusted authority before preparation, then attach its renewable file below.
+    // A real token-file selection reserves this same lane before native login materialization.
+    let mut request = fixture.request(DeliveryMode::Merge);
+    request.github_token = Some("file-token".to_owned());
+    let mut prepared = fixture.backend.prepare_run(request).await.assert_value();
+    prepared.github_token = None;
     prepared
         .native_environment
         .insert("PREFLIGHT_SNAPSHOT".to_owned(), "captured".to_owned());

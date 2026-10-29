@@ -1,11 +1,13 @@
 ---
-description: "Review a pull request with the pr-review template and publish its findings as a Markdown comment. Learn what the graph checks."
+description: 'Review a pull request with the pr-review template and publish its findings as a Markdown comment. Learn what the graph checks.'
 ---
 
 # Review a pull request
 
 The `pr-review` template checks a PR's implementation and posts a concise Markdown comment.
 PR review uses comment delivery so comparison preparation always has an admitted publisher.
+The `--task-from` resolver supports GitHub.com; [GHE and GitLab comments](forge-delivery.md) need
+caller-supplied graph input.
 The separate `issue-review` template retains a basic issue-proposal review; its review workflow
 will be designed separately.
 
@@ -41,9 +43,8 @@ The supplied [runtime plan](../assets/pr-review/runtime.json) assigns all three 
 Model choices remain in the caller's runtime plan rather than the graph.
 
 Comment delivery uses the `github` connection's `GH_TOKEN`, as other GitHub delivery does.
-Provide that field through a named connection or the invoking environment. For a local run using
-a stored GitHub CLI login, resolve `GH_TOKEN` from `gh auth token` before submission. Publication
-credentials belong to the native node and are not declared on the review agents.
+Provide that field through a named connection, the invoking environment, or a native `gh` login.
+Publication credentials belong to the native node and are not declared on the review agents.
 
 Local metadata resolution accepts `GH_TOKEN`, `GITHUB_TOKEN`, or a native GitHub CLI login.
 Named targets resolve metadata through their task-resolution route. Hosted targets use host-owned

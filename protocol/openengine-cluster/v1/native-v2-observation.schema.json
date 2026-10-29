@@ -1148,6 +1148,16 @@
       "additionalProperties": false,
       "description": "Optional forge identity selects one registered source-code adapter.",
       "properties": {
+        "baseUrl": {
+          "description": "Canonical web base, including an optional installation path prefix.\nOmission selects the adapter's public service default when one exists.",
+          "maxLength": 2048,
+          "minLength": 8,
+          "pattern": "^https://[^\\s?#@]+$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "provider": {
           "maxLength": 128,
           "minLength": 1,

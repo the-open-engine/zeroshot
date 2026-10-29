@@ -609,9 +609,9 @@ fn receipt_matches_admission(admitted: &AdmittedRun, output: &Value) -> bool {
     let Ok(Some(comment)) = crate::native_v2_admission::admitted_comment_input(admitted) else {
         return false;
     };
-    crate::native_v2_comment_delivery::is_matching_success_receipt(
+    crate::native_v2_comment_delivery::is_matching_success_receipt_for(
         output,
-        &comment.url,
+        &comment.destination,
         admitted
             .source
             .as_ref()

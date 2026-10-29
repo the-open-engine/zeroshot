@@ -121,6 +121,7 @@ Git delivery do not need a repository. Install each agent harness named by the r
 Local GitHub pull request delivery (`--pr` or `--ship`) also needs the GitHub CLI, `gh`, on `PATH`.
 Zeroshot runs the `gh` that `PATH` finds and rejects the run before any agent starts if there is
 none.
+See [forge setup](../guides/forge-delivery.md) for host logins and token connections.
 
 Local Codex/OpenAI, Claude/Anthropic, Copilot/GitHub, Pi/Anthropic, and Pi/OpenAI lanes reuse the
 installed harness's native login and configuration. Other provider lanes can read declared values

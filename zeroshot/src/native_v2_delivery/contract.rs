@@ -46,7 +46,7 @@ fn delivery_contract_matches(
     let matching = [true, false]
         .into_iter()
         .map(|repair| {
-            Ok(output == &result_schema(mode, repair)?
+            Ok(compatible_result_schema(output, mode, repair)?
                 && signals.get(&field) == Some(&signal_labels(mode, repair)?))
         })
         .collect::<Result<Vec<_>, ContractValueError>>()?
@@ -83,11 +83,26 @@ fn receipt_matches_target(
     mode: DeliveryMode,
     target: &DeliveryTarget,
 ) -> bool {
-    result.repository == target.repository
+    valid_result_links(result)
+        && result.repository == target.repository
         && result.target_branch == target.target_branch
         && valid_revision(&result.head_revision)
         && result.head_revision != target.base_revision
         && receipt_mode_matches(result, mode)
+}
+
+fn valid_result_links(result: &DeliveryResultWire) -> bool {
+    match result
+        .links
+        .as_ref()
+        .map(|links| (&links.url, &links.commit_url))
+    {
+        None | Some((None, None)) => true,
+        Some((Some(url), Some(commit))) => {
+            crate::source_code_provider::same_public_origin(url, commit)
+        }
+        _ => false,
+    }
 }
 
 fn receipt_mode_matches(result: &DeliveryResultWire, mode: DeliveryMode) -> bool {
@@ -126,6 +141,14 @@ struct DeliveryResultWire {
     head_branch: Option<String>,
     pull_request_id: Option<String>,
     merge_revision: Option<String>,
+    links: Option<DeliveryLinksWire>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct DeliveryLinksWire {
+    url: Option<String>,
+    commit_url: Option<String>,
 }
 
 pub(crate) fn delivery_result_schema(
@@ -140,6 +163,32 @@ fn result_schema(mode: DeliveryMode, repair: bool) -> Result<PayloadType, Contra
     Ok(PayloadType::Record {
         fields: fields.into_iter().collect(),
     })
+}
+
+fn compatible_result_schema(
+    output: &PayloadType,
+    mode: DeliveryMode,
+    repair: bool,
+) -> Result<bool, ContractValueError> {
+    let mut expected = result_schema(mode, repair)?;
+    if output == &expected {
+        return Ok(true);
+    }
+    if let PayloadType::Record { fields } = &mut expected {
+        fields.retain(|name, _| name.as_str() != "links");
+    }
+    Ok(output == &expected)
+}
+
+pub(super) fn supports_links(response: &NodeResponseContract) -> bool {
+    let NodeResponseContract::Verifier {
+        output: PayloadType::Record { fields },
+        ..
+    } = response
+    else {
+        return false;
+    };
+    fields.keys().any(|name| name.as_str() == "links")
 }
 
 fn delivery_identity_fields(
@@ -165,6 +214,9 @@ fn delivery_identity_fields(
             PayloadType::String,
         )?);
     }
+    if mode != DeliveryMode::Push {
+        fields.push(contract_field("links", review_links_schema()?)?);
+    }
     if mode.includes_merge_revision() {
         fields.push(contract_field(
             DELIVERY_MERGE_REVISION_FIELD,
@@ -172,6 +224,22 @@ fn delivery_identity_fields(
         )?);
     }
     Ok(fields)
+}
+
+fn review_links_schema() -> Result<PayloadType, ContractValueError> {
+    let fields = ["url", "commitUrl"]
+        .into_iter()
+        .map(|name| {
+            Ok((
+                FieldName::new(name)?,
+                RecordField {
+                    value_type: PayloadType::String,
+                    required: false,
+                },
+            ))
+        })
+        .collect::<Result<_, ContractValueError>>()?;
+    Ok(PayloadType::Record { fields })
 }
 
 fn delivery_mode_fields(

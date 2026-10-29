@@ -50,7 +50,7 @@ zeroshot target add local --url http://127.0.0.1:8080 --direct
 
 Runs require an exact committed Git source; local uncommitted files stay on the client.
 See [source selection and credentials](../../docs/concepts/targets.md#source-and-delivery-credentials)
-for HTTPS/SSH checkout and push, source connections, and GitHub PR/merge support.
+for HTTPS/SSH checkout and push, source connections, and GitHub/GitLab PR and merge support.
 
 Closing the browser leaves runs active.
 Stopping the container stops its runtime; on restart, interrupted runs are reconciled as lost,

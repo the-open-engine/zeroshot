@@ -85,6 +85,33 @@ fn validate_ssh_shorthand(value: &str) -> Result<(), ()> {
     validate_remote_url(&format!("ssh://{authority}/repository"))
 }
 
+fn validate_forge_base_url(value: &str) -> Result<(), NativeV2RunValueError> {
+    let invalid = NativeV2RunValueError("forge base URL must be canonical credential-free HTTPS");
+    validate_non_control_bytes(value, 2_048, invalid.0)?;
+    let parsed = url::Url::parse(value).map_err(|_| invalid.clone())?;
+    if parsed.scheme() != "https"
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || parsed.as_str().trim_end_matches('/') != value
+    {
+        return Err(invalid);
+    }
+    Ok(())
+}
+
+native_v2_string_kind!(
+    SourceForgeBaseUrlKind,
+    SourceForgeBaseUrl,
+    validate_forge_base_url,
+    json_schema!({
+        "type": "string", "minLength": 8, "maxLength": 2048,
+        "pattern": r"^https://[^\s?#@]+$"
+    })
+);
+
 fn validate_forge_provider(value: &str) -> Result<(), NativeV2RunValueError> {
     validate_non_control_bytes(
         value,
@@ -133,6 +160,10 @@ native_v2_string_kind!(
 pub struct SourceForgeIdentity {
     pub provider: SourceForgeProviderId,
     pub repository: SourceRepositoryId,
+    /// Canonical web base, including an optional installation path prefix.
+    /// Omission selects the adapter's public service default when one exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<SourceForgeBaseUrl>,
 }
 
 /// Credential-free Git locator. Git effects use this transport; forge operations use `forge`.

@@ -55,6 +55,7 @@ impl SourceCodeProvider for ScriptedSourceProvider {
     fn comment_destination_from_url(&self, url: &str) -> Option<SourceCommentDestination> {
         (url == "https://comments.fixture.invalid/project/issues/17").then(|| {
             SourceCommentDestination {
+                base_url: None,
                 provider: self.descriptor.provider().clone(),
                 repository: "team/project".into(),
                 discussion_id: "17".into(),

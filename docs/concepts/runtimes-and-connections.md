@@ -117,6 +117,11 @@ updating a multi-field connection. `connection list` reports names and kind but 
 Hosted targets can also own user- or organization-scoped connections. Setup and dynamic connection
 kinds depend on the target; Zeroshot consumes only the resolved fields declared by the runtime.
 
+Source delivery selects its own credentials independently of agent model providers. GitHub uses
+`GH_TOKEN`; GitLab uses `GITLAB_TOKEN`. Local delivery can reuse the selected host's native
+`gh` or `glab` login. See [forge delivery setup](../guides/forge-delivery.md) for explicit instances,
+Git transport credentials, and target connection examples.
+
 ## Gateways
 
 Use `provider: "gateway"` with `codex`, `claude`, or `pi` and the gateway's model identifier:

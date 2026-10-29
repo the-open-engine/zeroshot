@@ -414,6 +414,7 @@ async fn wave8_cli_contract_validate_only_preflight_materializes_without_backend
     let run = RunCommand {
         cwd: None,
         source_connection: None,
+        source_forge: None,
 
         environment: None,
         target: None,
@@ -719,4 +720,72 @@ fn template_binding_insertion_owns_comment_and_git_delivery_nodes() {
         .to_string()
         .contains("git_delivery")
     );
+}
+
+#[test]
+fn named_source_less_comments_materialize_the_destination_connection() {
+    let graph = BuiltinGraphTemplate::IssueReview
+        .materialize(TemplateDelivery::Comment)
+        .assert_value();
+    let runtime = uniform(UniformHarness::Codex, UniformProvider::OpenAi)
+        .materialize(&graph, PullRequestFeedback::Consider, None)
+        .assert_value();
+    let NativeV2CliCommand::Run(run) = crate::native_v2_cli::parse_native_v2_args(
+        [
+            "run",
+            "--title",
+            "Comment",
+            "--target",
+            "prod",
+            "--input",
+            "input.json",
+            "--profile",
+            "review",
+        ]
+        .into_iter()
+        .map(OsString::from),
+    )
+    .assert_value() else {
+        panic!("run command")
+    };
+    let mut request = PreparedRunRequest {
+        run_id: openengine_cluster_protocol::RunId::new("source-less-comment"),
+        intent: TargetRunIntent {
+            title: run.title.clone(),
+            graph,
+            initial_input: serde_json::json!({
+                "url":"https://ghe.example.test/team/project/issues/17",
+                "context":{"title":"Issue","body":"Review this","reviewScope":{}}
+            }),
+            runtime,
+            environment: None,
+            branch: None,
+            submission_key: IdempotencyKey::new("source-less-comment").assert_value(),
+        },
+        connections: RunConnectionValues::new(),
+        github_token: None,
+        git_credentials: None,
+        cwd: None,
+        source_connection: None,
+        source: None,
+        profile: None,
+    };
+    materialize_named_delivery_access(&run, &mut request, &|name| {
+        (name == "GH_ENTERPRISE_TOKEN").then(|| OsString::from("enterprise-inline-token"))
+    })
+    .assert_value();
+    let key = ConnectionKey::new("github").assert_value();
+    let required = request.intent.runtime.connection_requirements();
+    assert_eq!(
+        required[&key],
+        std::collections::BTreeSet::from(
+            [EnvironmentVariableName::new("GH_TOKEN").assert_value(),]
+        )
+    );
+    assert_eq!(
+        request.connections[&key].as_map()
+            [&EnvironmentVariableName::new("GH_TOKEN").assert_value()],
+        "enterprise-inline-token",
+    );
+    assert!(request.source.is_none());
 }

@@ -205,6 +205,7 @@ impl NativeV2DeliveryAdapter {
                             outcome: DELIVERY_PUSHED_LABEL,
                             review: &review,
                             merge_revision: None,
+                            links: None,
                         },
                         diagnostic,
                     ).map_err(DeliveryStop::Runner);
@@ -444,6 +445,26 @@ fn authorized_mode(
 }
 
 impl NativeV2DeliveryAdapter {
+    fn result_links(
+        &self,
+        response: &NodeResponseContract,
+        review: &SourceReviewReceipt,
+    ) -> Result<Option<Map<String, Value>>, NodeRunnerError> {
+        if !contract::supports_links(response) {
+            return Ok(None);
+        }
+        let mut fields = Map::new();
+        if let Some(links) = self
+            .authority
+            .review_links(review)
+            .map_err(|error| NodeRunnerError::DriverDetail(error.to_string()))?
+        {
+            fields.insert("url".to_owned(), Value::String(links.url));
+            fields.insert("commitUrl".to_owned(), Value::String(links.commit_url));
+        }
+        Ok(Some(fields))
+    }
+
     async fn report_delivery_result(
         &self,
         result: &Result<WorkerOutcome, DeliveryStop>,

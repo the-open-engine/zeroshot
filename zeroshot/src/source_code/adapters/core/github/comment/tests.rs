@@ -18,7 +18,7 @@ async fn report_json_uses_stdin_and_preserves_large_utf8_body() {
     let root = tempfile::tempdir().unwrap();
     let script = r##"#!/usr/bin/env python3
 import json,sys
-assert sys.argv[1:] == ['api','repos/acme/project/issues/17/comments','--method','POST','--input','-']
+assert sys.argv[1:] == ['api','repos/acme/project/issues/17/comments','--method','POST','--input','-','--header','X-GitHub-Api-Version: 2026-03-10']
 body=json.load(sys.stdin)['body']
 print(json.dumps({'id':23,'html_url':'https://github.com/acme/project/issues/17#issuecomment-23','issue_url':'https://api.github.com/repos/acme/project/issues/17','body':body,'user':{'node_id':'ACTOR_ID'}}))
 "##;

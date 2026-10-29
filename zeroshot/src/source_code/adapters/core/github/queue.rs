@@ -259,7 +259,7 @@ fn mutation(
     if node_id.trim().is_empty() {
         return Err(invalid_receipt());
     }
-    let mut command = clean_command(&authority.config, &authority.config.gh_program, credential);
+    let mut command = authority.api_command(credential);
     command.args([
         "api",
         "graphql",

@@ -15,6 +15,8 @@ const MAX_RECORD_BYTES: usize = 16 * 1024;
 pub struct PublicationRecord {
     pub version: u32,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination: Option<crate::source_code_provider::SourceCommentDestination>,
     pub marker: String,
     pub body_hash: String,
     pub author: String,
@@ -46,9 +48,9 @@ pub enum PublicationStoreError {
 
 impl PublicationRecord {
     pub fn validate(&self) -> Result<(), PublicationStoreError> {
+        let destination = self.destination()?;
         let valid = self.version == 1
             && self.url.len() <= 2048
-            && crate::source_code_provider::adapters::core::comment_destination(&self.url).is_ok()
             && self
                 .marker
                 .strip_prefix("<!-- zeroshot-comment:v1:")
@@ -56,7 +58,7 @@ impl PublicationRecord {
                 .is_some_and(super::valid_digest)
             && super::valid_digest(&self.body_hash)
             && super::valid_id(&self.author)
-            && self.valid_status();
+            && self.valid_status(&destination);
         if valid && serde_json::to_vec(self).is_ok_and(|bytes| bytes.len() <= MAX_RECORD_BYTES) {
             Ok(())
         } else {
@@ -64,16 +66,35 @@ impl PublicationRecord {
         }
     }
 
-    fn valid_status(&self) -> bool {
+    pub(super) fn destination(
+        &self,
+    ) -> Result<crate::source_code_provider::SourceCommentDestination, PublicationStoreError> {
+        let destination = self
+            .destination
+            .clone()
+            .map(Ok)
+            .unwrap_or_else(|| {
+                crate::source_code_provider::adapters::core::comment_destination(&self.url)
+            })
+            .map_err(|_| PublicationStoreError::InvalidRecord)?;
+        if destination.url != self.url
+            || !crate::source_code_provider::adapters::core::valid_comment_destination(&destination)
+        {
+            return Err(PublicationStoreError::InvalidRecord);
+        }
+        Ok(destination)
+    }
+
+    fn valid_status(
+        &self,
+        destination: &crate::source_code_provider::SourceCommentDestination,
+    ) -> bool {
         match &self.status {
             PublicationStatus::Ready | PublicationStatus::Attempted => true,
             PublicationStatus::Confirmed {
                 comment_id,
                 comment_url,
-            } => crate::source_code_provider::adapters::core::comment_destination(&self.url)
-                .is_ok_and(|destination| {
-                    super::valid_comment_permalink(&destination, comment_id, comment_url)
-                }),
+            } => super::valid_comment_permalink(destination, comment_id, comment_url),
         }
     }
 }

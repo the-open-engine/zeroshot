@@ -1,5 +1,5 @@
 ---
-description: "Configure a caller-owned local executable to validate delivery before pushing, during PR review and before requesting a merge."
+description: 'Configure a caller-owned local executable to validate delivery before pushing, during PR review and before requesting a merge.'
 ---
 
 # Caller-owned delivery validation
@@ -22,7 +22,7 @@ those effects. Acceptance cannot override forge policy, required checks, reviews
 The helper has no imposed turn deadline. Bounded pipes and cancellation use the normal process session;
 its process tree must be confirmed gone before delivery releases the workspace, even if the outer
 operation is cancelled. An accepted helper must leave the captured candidate clean and unchanged.
-GitHub confirmation remains authoritative: accepting or queuing a merge is not a merged receipt.
+Forge confirmation remains authoritative: accepting or queuing a merge is not a merged receipt.
 
 The published-stage notification precedes the first policy/status read, so a caller can durably record
 the actual PR even when a subsequent inspection fails. Terminal merged/closed observations settle before

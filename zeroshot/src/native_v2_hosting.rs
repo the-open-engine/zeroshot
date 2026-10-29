@@ -262,6 +262,8 @@ fn prepare_contained_submission(
             "contained runs require a resolved Git source",
         ));
     }
+    crate::native_v2_admission::materialize_delivery_access(submission)
+        .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
     materialize_contained_provider_access(&mut submission.runtime)
         .map_err(|error| TargetAuthorityError::invalid(error.to_string()))
 }

@@ -237,10 +237,9 @@ pub(crate) fn capture_local_native_environment(
     Ok(environment.into_values())
 }
 
-/// Resolves every harness home override that the invoking shell may have set relatively against
-/// the invoking directory, before the controller detaches. The variable is forwarded to the
-/// harness child, whose working directory differs, so leaving it relative would change what it
-/// points at.
+/// Resolves native configuration directories against the invoking directory before detachment.
+/// Harness children and trusted Git credential helpers can start in another workspace, so a
+/// relative override must retain the invoking shell's location.
 fn resolve_relative_home_overrides(
     environment: &mut LocalHarnessEnvironment,
     invoking_directory: &Path,
@@ -252,6 +251,8 @@ fn resolve_relative_home_overrides(
         "COPILOT_HOME",
         "COPILOT_PROVIDERS_CONFIG",
         "PI_CODING_AGENT_DIR",
+        "GH_CONFIG_DIR",
+        "GLAB_CONFIG_DIR",
     ] {
         let Some(value) = environment.get_mut(name) else {
             continue;
@@ -670,10 +671,22 @@ pub(crate) fn check_delivery_executables(
     native_environment: &BTreeMap<String, String>,
     working_directory: &Path,
 ) -> Result<(), LocalCompositionError> {
-    if crate::native_v2_admission::comment_node(&submission.graph.root).is_some()
-        && find_local_executable("gh", native_environment, working_directory).is_none()
-    {
-        return Err(LocalCompositionError::MissingDeliveryExecutable { executable: "gh" });
+    if let Some(input) = crate::native_v2_admission::resolve_comment_input_at(
+        &submission.graph.root,
+        &submission.initial_input,
+        submission
+            .source
+            .as_ref()
+            .and_then(|source| source.remote.as_ref())
+            .and_then(|remote| remote.forge.as_ref()),
+    )? {
+        let destination = input.destination;
+        if destination.provider.id().as_str()
+            == crate::source_code_provider::adapters::core::GITHUB_PROVIDER_ID
+            && find_local_executable("gh", native_environment, working_directory).is_none()
+        {
+            return Err(LocalCompositionError::MissingDeliveryExecutable { executable: "gh" });
+        }
     }
     let required = crate::native_v2_admission::delivery_capabilities(&submission.graph.root);
     match &submission.source {
@@ -752,16 +765,23 @@ fn local_comment_delivery(
     use crate::native_v2_comment_delivery::{
         LocalCommentPublicationStore, NativeV2CommentDeliveryConfig,
     };
-    use crate::source_code_provider::adapters::core::{GhCliAuthorityConfig, comment_authority};
+    use crate::source_code_provider::adapters::core::{GhCliAuthorityConfig, comment_authority_for};
     let Some(input) = crate::native_v2_admission::admitted_comment_input(admitted)? else {
         return Ok(None);
     };
-    let gh = find_local_executable("gh", environment, workspace)
-        .ok_or(LocalCompositionError::MissingDeliveryExecutable { executable: "gh" })?;
+    let destination = &input.destination;
+    let gh = if destination.provider.id().as_str()
+        == crate::source_code_provider::adapters::core::GITHUB_PROVIDER_ID
+    {
+        find_local_executable("gh", environment, workspace)
+            .ok_or(LocalCompositionError::MissingDeliveryExecutable { executable: "gh" })?
+    } else {
+        PathBuf::from("gh")
+    };
     let mut config = GhCliAuthorityConfig::hosted(runtime_home.to_owned());
     config.gh_program = gh;
-    let authority =
-        comment_authority(config, &input.url).map_err(|_| LocalCompositionError::ResolvedSource)?;
+    let authority = comment_authority_for(config, &input.destination)
+        .map_err(|_| LocalCompositionError::ResolvedSource)?;
     let state = storage
         .parent()
         .and_then(Path::parent)

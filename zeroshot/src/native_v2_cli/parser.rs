@@ -603,6 +603,14 @@ struct RunArgs {
     #[arg(long, value_name = "KEY")]
     source_connection: Option<String>,
 
+    /// Forge provider ID for the selected Git remote (for example source.github or source.gitlab).
+    #[arg(long, value_name = "PROVIDER", requires = "source_base_url")]
+    source_provider: Option<String>,
+
+    /// Public HTTPS base URL of the forge instance, including any installation path.
+    #[arg(long, value_name = "URL", requires = "source_provider")]
+    source_base_url: Option<String>,
+
     /// Repository in GitHub owner/name form or a credential-free HTTPS/SSH Git URL. Requires --target.
     #[arg(long, value_name = "REPOSITORY")]
     repository: Option<String>,

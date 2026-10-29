@@ -684,6 +684,7 @@ async fn submit_through_cli(
         NativeV2CliCommand::Run(Box::new(RunCommand {
             cwd: None,
             source_connection: None,
+            source_forge: None,
 
             environment: None,
             target: Some("candidate-platform".to_owned()),

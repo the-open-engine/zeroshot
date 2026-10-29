@@ -3,6 +3,101 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::json;
 
 #[test]
+fn explicit_instances_require_matching_git_transport_and_repository() {
+    for (provider, base, remote, repository, valid) in [
+        (
+            GITHUB_PROVIDER_ID,
+            "https://ghe.example",
+            "git@ghe.example:team/project.git",
+            "team/project",
+            true,
+        ),
+        (
+            GITHUB_PROVIDER_ID,
+            "https://ghe.example",
+            "https://github.com/team/project.git",
+            "team/project",
+            false,
+        ),
+        (
+            GITLAB_PROVIDER_ID,
+            "https://gitlab.com",
+            "git@gitlab.com:group/subgroup/project.git",
+            "group/subgroup/project",
+            true,
+        ),
+        (
+            GITLAB_PROVIDER_ID,
+            "https://forge.example/gitlab",
+            "https://forge.example/gitlab/group/project.git",
+            "group/project",
+            true,
+        ),
+        (
+            GITLAB_PROVIDER_ID,
+            "https://forge.example/gitlab",
+            "git@forge.example:group/project.git",
+            "group/project",
+            true,
+        ),
+        (
+            GITLAB_PROVIDER_ID,
+            "https://forge.example/gitlab",
+            "https://forge.example/gitlab-other/group/project.git",
+            "group/project",
+            false,
+        ),
+        (
+            GITLAB_PROVIDER_ID,
+            "https://forge.example",
+            "git@other.example:group/project.git",
+            "group/project",
+            false,
+        ),
+        (
+            GITLAB_PROVIDER_ID,
+            "https://forge.example",
+            "git@forge.example:other/project.git",
+            "group/project",
+            false,
+        ),
+    ] {
+        let source: ResolvedSource = serde_json::from_value(json!({
+            "repository":"opaque/source", "branch":"main", "revision":"a".repeat(40),
+            "remote":{"url":remote,"forge":{"provider":provider,"baseUrl":base,"repository":repository}}
+        })).assert_value();
+        assert_eq!(
+            validate_delivery_source(
+                &source,
+                &[SourceCapability::PullRequest, SourceCapability::Merge]
+            )
+            .is_ok(),
+            valid,
+            "{base} / {remote}"
+        );
+    }
+}
+
+#[test]
+fn unknown_hosts_require_explicit_provider_identity() {
+    let remote =
+        openengine_cluster_protocol::GitRemoteUrl::new("git@forge.example:team/project.git")
+            .assert_value();
+    assert!(forge_identity(&remote).assert_value().is_none());
+    for provider in [GITHUB_PROVIDER_ID, GITLAB_PROVIDER_ID] {
+        let forge = forge_identity_for(
+            &remote,
+            provider,
+            &openengine_cluster_protocol::SourceForgeBaseUrl::new("https://forge.example")
+                .assert_value(),
+        )
+        .assert_value();
+        assert_eq!(forge.provider.as_str(), provider);
+        assert_eq!(forge.repository.as_str(), "team/project");
+    }
+}
+
+#[test]
 fn github_delivery_requires_a_matching_remote_identity() {
     for (url, repository, valid) in [
         ("https://github.com/acme/project.git", "acme/project", true),
@@ -14,6 +109,16 @@ fn github_delivery_requires_a_matching_remote_identity() {
         ),
         (
             "ssh://git@ssh.github.com:443/acme/project.git",
+            "acme/project",
+            true,
+        ),
+        (
+            "ssh://ssh.github.com:443/acme/project.git",
+            "acme/project",
+            true,
+        ),
+        (
+            "ssh://alice@SSH.GITHUB.COM:443/acme/project.git",
             "acme/project",
             true,
         ),
@@ -46,8 +151,8 @@ fn github_delivery_requires_a_matching_remote_identity() {
         .assert_value();
         let detected = forge_identity(&source.remote.as_ref().assert_value().url).assert_value();
         assert_eq!(
-            detected
-                .is_some_and(|forge| forge.repository.as_str().eq_ignore_ascii_case(repository)),
+            detected.is_some_and(|forge| forge.provider.as_str() == GITHUB_PROVIDER_ID
+                && forge.repository.as_str().eq_ignore_ascii_case(repository)),
             valid,
             "remote identification: {url} / {repository}"
         );

@@ -346,6 +346,7 @@ struct DeliveryResult<'a> {
     outcome: &'a str,
     review: &'a SourceReviewReceipt,
     merge_revision: Option<&'a str>,
+    links: Option<Map<String, Value>>,
 }
 
 fn delivery_outcome(
@@ -490,6 +491,9 @@ fn delivery_result(result: &DeliveryResult<'_>) -> Value {
             DELIVERY_MERGE_REVISION_FIELD.to_owned(),
             Value::String(result.merge_revision.unwrap_or_default().to_owned()),
         );
+    }
+    if let Some(links) = &result.links {
+        fields.insert("links".to_owned(), Value::Object(links.clone()));
     }
     Value::Object(fields)
 }

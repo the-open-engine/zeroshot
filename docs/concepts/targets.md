@@ -1,5 +1,5 @@
 ---
-description: "Run the same graph locally, on a self-hosted Docker target or on a managed target. Compare source preparation, connections and durable run state."
+description: 'Run the same graph locally, on a self-hosted Docker target or on a managed target. Compare source preparation, connections and durable run state.'
 ---
 
 # Targets
@@ -267,9 +267,9 @@ their usual connections.
 
 Git checkout and push use shared HTTPS or SSH transport. A local push needs an attached, committed branch
 and an eligible remote; it uses the invoking user's native Git configuration and authentication when
-no source connection is selected. Push does not require GitHub or its CLI. PR and merge additionally
-require a registered forge adapter; GitHub is the maintained forge today. Other Git hosts can already
-use checkout and push.
+no source connection is selected. PR and merge support GitHub (including Enterprise) and GitLab;
+see [forge setup](../guides/forge-delivery.md) for supported versions and authentication.
+Other Git hosts support checkout and push.
 
 For local PR and merge delivery, the target branch is the current branch's upstream when configured;
 otherwise, Zeroshot uses the local branch name. Preparation verifies that the selected remote
@@ -283,7 +283,7 @@ HTTPS connections declare `GIT_USERNAME` and `GIT_PASSWORD`; SSH connections dec
 `GIT_SSH_PRIVATE_KEY` and `GIT_SSH_KNOWN_HOSTS`. Explicit SSH authentication uses those pinned hosts
 and its private key. Contained runs inherit no host Git login state.
 
-Named GitHub runs retain `GH_TOKEN` checkout and delivery support. That token is not automatically
+Named GitHub.com runs retain `GH_TOKEN` checkout and delivery support. That token is not automatically
 applied to another Git host. A model provider receives a connection field only when its own runtime
 binding declares it. Transport values stay out of source records, ledgers, observations, and
 checkpoint snapshots. Direct-target resume reuses the original source connection authorization and

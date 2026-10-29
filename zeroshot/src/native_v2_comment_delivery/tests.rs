@@ -110,17 +110,16 @@ async fn retained_ready_authority_cannot_change_destination_marker_actor_or_body
         let (_temp, forge, adapter) = fixture();
         let input = json!({"url":URL,"body":"report"});
         let invocation = invocation(&adapter, input.clone()).await;
-        let mut retained = adapter
-            .prepare_publication(
-                &invocation,
-                serde_json::from_value(input.clone()).unwrap(),
-                "ACTOR_ID".into(),
-            )
-            .unwrap()
-            .record;
+        let mut retained = prepared_record(&adapter, &invocation);
         retained.status = PublicationStatus::Ready;
         match changed {
-            "url" => retained.url = "https://github.com/acme/project/issues/18".into(),
+            "url" => {
+                retained.url = "https://github.com/acme/project/issues/18".into();
+                retained.destination = Some(
+                    crate::source_code_provider::adapters::core::comment_destination(&retained.url)
+                        .unwrap(),
+                );
+            }
             "marker" => {
                 retained.marker = format!("<!-- zeroshot-comment:v1:{} -->", "c".repeat(64))
             }
@@ -145,6 +144,7 @@ async fn retained_ready_authority_cannot_change_destination_marker_actor_or_body
 
 #[derive(Default)]
 struct Forge {
+    destination: Mutex<Option<SourceCommentDestination>>,
     comments: Mutex<Vec<SourceComment>>,
     creates: AtomicUsize,
     actors: AtomicUsize,
@@ -164,6 +164,39 @@ struct Forge {
 
 #[async_trait]
 impl SourceCommentAuthority for Forge {
+    fn prepare_comment_body(&self, body: &str) -> Result<String, SourceDeliveryError> {
+        Ok(
+            if self
+                .destination
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|destination| {
+                    destination.provider.id().as_str()
+                        == crate::source_code_provider::adapters::core::GITLAB_PROVIDER_ID
+                })
+            {
+                body.replace('\r', "").trim_end().to_owned()
+            } else {
+                body.to_owned()
+            },
+        )
+    }
+
+    fn resolve_destination(
+        &self,
+        url: &str,
+    ) -> Result<Option<SourceCommentDestination>, SourceDeliveryError> {
+        let destination = self.destination.lock().unwrap().clone();
+        if destination
+            .as_ref()
+            .is_some_and(|destination| destination.url != url)
+        {
+            return Err(SourceDeliveryError::Rejected);
+        }
+        Ok(destination)
+    }
+
     fn comment_credential_field(&self) -> &'static str {
         "GH_TOKEN"
     }
@@ -211,10 +244,23 @@ impl SourceCommentAuthority for Forge {
         }
         let comment = SourceComment {
             id: "23".into(),
-            url: format!("{}#issuecomment-23", destination.url),
+            url: if destination.provider.id().as_str()
+                == crate::source_code_provider::adapters::core::GITLAB_PROVIDER_ID
+            {
+                format!("{}#note_23", destination.url)
+            } else {
+                format!("{}#issuecomment-23", destination.url)
+            },
             discussion_url: destination.url.clone(),
             author: "ACTOR_ID".into(),
-            body: body.into(),
+            // Model the server's storage normalization independently of request preparation.
+            body: if destination.provider.id().as_str()
+                == crate::source_code_provider::adapters::core::GITLAB_PROVIDER_ID
+            {
+                body.replace('\r', "").trim_end().to_owned()
+            } else {
+                body.to_owned()
+            },
         };
         if !self.omit_publication.load(Ordering::SeqCst) {
             self.comments.lock().unwrap().push(comment.clone());
@@ -398,6 +444,20 @@ async fn invocation(adapter: &NativeV2CommentDeliveryAdapter, input: Value) -> D
         session,
         provider_session_slot: NodeInstanceId::new(1).unwrap(),
     }
+}
+
+fn prepared_record(
+    adapter: &NativeV2CommentDeliveryAdapter,
+    invocation: &DriverInvocation,
+) -> PublicationRecord {
+    adapter
+        .prepare_publication(
+            invocation,
+            serde_json::from_value(invocation.node.input.clone()).unwrap(),
+            "ACTOR_ID".into(),
+        )
+        .unwrap()
+        .record
 }
 
 async fn run(
@@ -925,6 +985,7 @@ fn publication_record() -> PublicationRecord {
     PublicationRecord {
         version: 1,
         url: URL.into(),
+        destination: None,
         marker: marker(&RunId::new("root"), "deliver"),
         body_hash: hash("report"),
         author: "ACTOR_ID".into(),
@@ -1235,4 +1296,136 @@ async fn untrusted_forge_actor_and_confirmed_comment_identity_cannot_grant_a_rec
             PublicationStatus::Confirmed { .. }
         ));
     }
+}
+
+fn prefixed_gitlab_destination() -> SourceCommentDestination {
+    let forge = serde_json::from_value(json!({
+        "provider":"source.gitlab", "repository":"group/sub/project",
+        "baseUrl":"https://gitlab.example/install",
+    }))
+    .unwrap();
+    crate::source_code_provider::adapters::core::comment_destination_for(
+        "https://gitlab.example/install/group/sub/project/-/issues/17",
+        &forge,
+    )
+    .unwrap()
+}
+
+fn gitlab_fixture() -> (PublicationFixture, SourceCommentDestination) {
+    let (temp, forge, mut adapter) = fixture();
+    let destination = prefixed_gitlab_destination();
+    Arc::make_mut(&mut adapter.config).expected_url = destination.url.clone();
+    *forge.destination.lock().unwrap() = Some(destination.clone());
+    ((temp, forge, adapter), destination)
+}
+
+#[tokio::test]
+async fn configured_gitlab_publication_keeps_installation_identity_through_recovery_and_receipt() {
+    let ((_temp, forge, adapter), destination) = gitlab_fixture();
+    let input = json!({"url":destination.url,"body":"Review report."});
+    let result = run(&adapter, input.clone()).await.unwrap();
+    let WorkerOutcome::Verifier { output, .. } = result else {
+        panic!("expected receipt");
+    };
+    assert!(is_matching_success_receipt_for(&output, &destination, None));
+    assert!(!is_matching_success_receipt(
+        &output,
+        &destination.url,
+        None
+    ));
+    assert_eq!(
+        adapter.store.load().await.unwrap().unwrap().destination,
+        Some(destination.clone())
+    );
+    run(&adapter, input).await.unwrap();
+    assert_eq!(forge.creates.load(Ordering::SeqCst), 1);
+    assert_eq!(output["receipt"]["repository"], "group/sub/project");
+    assert_eq!(
+        output["receipt"]["url"],
+        format!("{}#note_23", destination.url)
+    );
+}
+
+#[tokio::test]
+async fn retained_publication_cannot_reinterpret_an_installation_prefix_as_a_group() {
+    let ((_temp, forge, adapter), destination) = gitlab_fixture();
+    let input = json!({"url":destination.url,"body":"Report."});
+    let invocation = invocation(&adapter, input.clone()).await;
+    let mut retained = prepared_record(&adapter, &invocation);
+    retained.status = PublicationStatus::Ready;
+    retained.destination = Some(
+        crate::source_code_provider::adapters::core::comment_destination(&destination.url).unwrap(),
+    );
+    adapter
+        .store
+        .compare_and_set(None, &retained)
+        .await
+        .unwrap();
+    assert!(
+        run(&adapter, input)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("publication identity differs")
+    );
+    assert_eq!(forge.creates.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn custom_gitlab_roots_and_explicit_prefixes_use_the_same_registered_factory() {
+    let destination = prefixed_gitlab_destination();
+    let authority = crate::source_code_provider::adapters::core::comment_authority_for(
+        crate::source_code_provider::adapters::core::GhCliAuthorityConfig::hosted(
+            std::path::PathBuf::from("/unused"),
+        ),
+        &destination,
+    )
+    .unwrap();
+    assert_eq!(
+        authority.resolve_destination(&destination.url).unwrap(),
+        Some(destination)
+    );
+    let root = crate::source_code_provider::adapters::core::comment_destination(
+        "https://gitlab.example/group/project/-/issues/5",
+    )
+    .unwrap();
+    assert_eq!(root.provider.id().as_str(), "source.gitlab");
+    assert_eq!(root.base_url.as_deref(), Some("https://gitlab.example"));
+}
+
+#[tokio::test]
+async fn normalized_gitlab_comment_hash_survives_lost_response_and_equivalent_line_endings() {
+    let ((_temp, forge, adapter), destination) = gitlab_fixture();
+    forge.lose_response.store(true, Ordering::SeqCst);
+    let mut input = json!({"url":destination.url,"body":"First finding.\r\nSecond finding.  \r\n"});
+    let result = run(&adapter, input.clone()).await.unwrap();
+    let WorkerOutcome::Verifier { output, .. } = &result else {
+        panic!("expected receipt");
+    };
+    let stored = adapter.store.load().await.unwrap().unwrap();
+    let posted = forge.comments.lock().unwrap()[0].clone();
+    assert!(!posted.body.contains('\r'));
+    assert!(posted.body.contains("First finding.\nSecond finding."));
+    assert_eq!(stored.body_hash, hash(&posted.body));
+    assert_eq!(output["receipt"]["bodyHash"], stored.body_hash);
+    assert!(matches!(stored.status, PublicationStatus::Confirmed { .. }));
+    assert!(is_matching_success_receipt_for(output, &destination, None));
+    assert_eq!(run(&adapter, input.clone()).await.unwrap(), result);
+    input["body"] = json!("First finding.\nSecond finding.  \n");
+    assert_eq!(run(&adapter, input).await.unwrap(), result);
+    assert_eq!(forge.creates.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn normalization_cannot_reveal_reserved_markers_after_input_validation() {
+    let ((_temp, forge, adapter), destination) = gitlab_fixture();
+    let error = run(
+        &adapter,
+        json!({"url":destination.url,"body":"<!-- zero\rshot-comment:v1:forged -->"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("publication marker"));
+    assert_eq!(forge.creates.load(Ordering::SeqCst), 0);
+    assert!(adapter.store.load().await.unwrap().is_none());
 }

@@ -186,12 +186,15 @@ fn write_review_fixture(
         }
     });
     let source = format!(
-        "#!/bin/sh\ncase \"$2:$4\" in\n\
+        "#!/bin/sh\ncase \"$*\" in\n\
+         *'--header X-GitHub-Api-Version: 2026-03-10') ;;\n\
+         *) exit 18 ;;\n\
+         esac\ncase \"$2:$4\" in\n\
          repos/acme/project/pulls:GET) printf '%s\\n' {} ;;\n\
          repos/acme/project/pulls:POST) printf '%s\\n' {} ;;\n\
          repos/acme/project/pulls/17:GET) printf '%s\\n' {} ;;\n\
          repos/acme/project/pulls/17:PATCH) printf '%s\\n' {} ;;\n\
-         repos/acme/project/git/ref/heads/zeroshot/v2-run:) \
+         repos/acme/project/git/ref/heads/zeroshot/v2-run:'X-GitHub-Api-Version: 2026-03-10') \
            printf '%s\\n' {} ;;\n\
          *) exit 19 ;;\n\
          esac\n",

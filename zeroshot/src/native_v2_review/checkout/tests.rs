@@ -455,3 +455,78 @@ exec "$REVIEW_FIXTURE_GIT" "$@"
         }
     }
 }
+
+#[test]
+fn github_comment_destinations_do_not_prepare_refs_from_mirrored_or_unrelated_sources() {
+    for (provider, base, remote, repository) in [
+        (
+            "source.gitlab",
+            "https://gitlab.com",
+            "https://gitlab.com/acme/project.git",
+            "acme/project",
+        ),
+        (
+            "source.github",
+            "https://ghe.example",
+            "https://ghe.example/acme/project.git",
+            "acme/project",
+        ),
+        (
+            "source.github",
+            "https://github.com",
+            "https://github.com/acme/unrelated.git",
+            "acme/unrelated",
+        ),
+    ] {
+        let mut admitted = review();
+        admitted.source.as_mut().unwrap().remote = Some(
+            serde_json::from_value(json!({
+                "url":remote,
+                "forge":{"provider":provider, "repository":repository, "baseUrl":base},
+            }))
+            .assert_value(),
+        );
+        assert!(
+            checkout_references(&admitted).assert_value().is_empty(),
+            "GitHub.com comparison must not fetch PR refs from {remote}"
+        );
+    }
+}
+
+#[test]
+fn explicit_github_source_locators_retain_exact_review_checkout_references() {
+    for remote in [
+        "https://github.com/ACME/Project.git",
+        "ssh://git@github.com/acme/project.git",
+        "ssh://git@ssh.github.com:443/acme/project.git",
+    ] {
+        let mut admitted = review();
+        admitted.source.as_mut().unwrap().remote =
+            Some(serde_json::from_value(json!({"url":remote})).assert_value());
+        assert_eq!(
+            checkout_references(&admitted).assert_value(),
+            ["refs/pull/17/head".to_owned(), "b".repeat(40)],
+            "supported GitHub.com locator {remote}"
+        );
+    }
+}
+
+#[test]
+fn generic_forge_publishers_do_not_enter_github_review_checkout_preparation() {
+    for url in [
+        "https://gitlab.com/acme/project/-/merge_requests/17",
+        "https://ghe.example/acme/project/pull/17",
+    ] {
+        for has_source in [false, true] {
+            let mut admitted = review();
+            admitted.initial_input["url"] = json!(url);
+            if !has_source {
+                admitted.source = None;
+            }
+            assert!(
+                checkout_references(&admitted).assert_value().is_empty(),
+                "generic publisher {url} / source {has_source}"
+            );
+        }
+    }
+}

@@ -284,6 +284,7 @@ pub(super) fn delivery_receipt(mode: DeliveryMode, outcome: &str) -> serde_json:
         receipt["headBranch"] = json!("zeroshot/v2-test");
     } else {
         receipt["pullRequestId"] = json!("17");
+        receipt["links"] = json!({});
     }
     if let Some(merge_revision) = merge_revision {
         receipt["mergeRevision"] = json!(merge_revision);

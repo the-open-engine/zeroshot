@@ -16,7 +16,7 @@ use crate::native_v2_cli::{
     BuiltinGraphTemplate, ConnectionInput, ConnectionRoute, ConnectionSetCommand,
     MergePlanSelector, MergePlanSubmitCommand, NativeV2CliCommand, NativeV2CliError,
     ProfileQualifier, ProfileReference, RunCommand, RunGraph, RunLogsCommand, RunRepository,
-    RunRuntime, RunSelection, RunSelector, RunResumeCommand, RunCheckpointsCommand,
+    RunSourceForge, RunRuntime, RunSelection, RunSelector, RunResumeCommand, RunCheckpointsCommand,
     RunWatchCommand, TargetAdd, TargetServe, TemplateDelivery,
 };
 
@@ -333,6 +333,11 @@ impl RunArgs {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         validate_review_source(&self)?;
         let route = run_route(self.target, self.repository, self.branch, self.revision)?;
+        let source_forge = source_forge(
+            self.source_provider,
+            self.source_base_url,
+            route.repository.as_ref(),
+        )?;
         let selection = run_selection(RunSelectionArgs {
             profile: self.profile,
             graph: self.graph,
@@ -349,6 +354,7 @@ impl RunArgs {
                 .map(openengine_cluster_protocol::ConnectionKey::new)
                 .transpose()
                 .map_err(|error| usage(format!("invalid --source-connection: {error}")))?,
+            source_forge,
             title: RunTitle::new(self.title)
                 .map_err(|error| usage(format!("invalid --title: {error}")))?,
             input: run_input(self.input, self.task_from)?,
@@ -370,12 +376,39 @@ impl RunArgs {
 }
 
 fn validate_review_source(args: &RunArgs) -> Result<(), NativeV2CliError> {
-    if args.task_from.is_some() && (args.repository.is_some() || args.source_connection.is_some()) {
+    if args.task_from.is_some()
+        && (args.repository.is_some()
+            || args.source_connection.is_some()
+            || args.source_provider.is_some()
+            || args.source_base_url.is_some())
+    {
         return Err(usage(
-            "--task-from selects its repository and does not accept --repository or --source-connection",
+            "--task-from selects its repository and does not accept source overrides",
         ));
     }
     Ok(())
+}
+
+fn source_forge(
+    provider: Option<String>,
+    base_url: Option<String>,
+    repository: Option<&RunRepository>,
+) -> Result<Option<RunSourceForge>, NativeV2CliError> {
+    match (provider, base_url) {
+        (None, None) => Ok(None),
+        (Some(_), Some(_)) if matches!(repository, Some(RunRepository::GitHub(_))) => Err(usage(
+            "explicit source instances require a Git remote URL instead of GitHub owner/name shorthand",
+        )),
+        (Some(provider), Some(base_url)) => Ok(Some(RunSourceForge {
+            provider: openengine_cluster_protocol::SourceForgeProviderId::new(provider)
+                .map_err(|error| usage(format!("invalid --source-provider: {error}")))?,
+            base_url: openengine_cluster_protocol::SourceForgeBaseUrl::new(base_url)
+                .map_err(|error| usage(format!("invalid --source-base-url: {error}")))?,
+        })),
+        _ => Err(usage(
+            "--source-provider and --source-base-url must be supplied together",
+        )),
+    }
 }
 
 fn run_input(

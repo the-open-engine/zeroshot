@@ -25,7 +25,6 @@ use super::super::{
 use super::{CliExecutionContext, write_json};
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission, executable_runtime_roles};
 use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
-use crate::native_v2_delivery::GITHUB_TOKEN_ENV;
 
 #[path = "submission/profiles.rs"]
 mod profiles;
@@ -227,11 +226,40 @@ where
         .validate_intent(&params.intent, DeliveryPolicy::Optional)
         .await
         .map_err(NativeV2CliError::InvalidRun)?;
-    if run.target.is_none() && run.validate_only {
-        validate_local_workspace(&params)?;
-    }
+    crate::native_v2_cli::local::native_forge::select_local_source(run, &mut params)?;
+    validate_local_only_workspace(run, &params)?;
     resolve_named_source(run, &mut params, &available).await?;
+    materialize_named_delivery_access(run, &mut params, &available)?;
     Ok(params)
+}
+
+fn materialize_named_delivery_access<F>(
+    run: &RunCommand,
+    request: &mut PreparedRunRequest,
+    available: &F,
+) -> Result<(), NativeV2CliError>
+where
+    F: Fn(&str) -> Option<OsString>,
+{
+    if run.target.is_none() {
+        return Ok(());
+    }
+    let mut submission = crate::native_v2_local::local_submission(
+        &request.intent,
+        request
+            .source
+            .as_ref()
+            .map(|source| source.resolved.clone()),
+    );
+    crate::native_v2_admission::materialize_delivery_access(&mut submission)
+        .map_err(NativeV2CliError::InvalidRun)?;
+    request.intent.runtime = submission.runtime.clone();
+    crate::native_v2_cli::local::native_forge::capture_environment(
+        &submission,
+        &mut request.connections,
+        available,
+    )?;
+    Ok(())
 }
 
 fn resolved_initial_input(
@@ -279,6 +307,16 @@ where
     Ok(())
 }
 
+fn validate_local_only_workspace(
+    run: &RunCommand,
+    params: &PreparedRunRequest,
+) -> Result<(), NativeV2CliError> {
+    if run.target.is_none() && run.validate_only {
+        validate_local_workspace(params)?;
+    }
+    Ok(())
+}
+
 fn validate_local_workspace(params: &PreparedRunRequest) -> Result<(), NativeV2CliError> {
     let invoking = std::env::current_dir()
         .map_err(|_| NativeV2CliError::Usage("invoking folder is unavailable".to_owned()))?;
@@ -298,11 +336,13 @@ fn select_source_connections(params: &mut PreparedRunRequest) -> Result<(), Nati
     else {
         return Ok(());
     };
-    if remote
-        .forge
-        .as_ref()
-        .is_none_or(|forge| forge.provider.as_str() != "source.github")
-    {
+    if remote.forge.as_ref().is_none_or(|forge| {
+        forge.provider.as_str() != "source.github"
+            || forge
+                .base_url
+                .as_ref()
+                .is_some_and(|base| base.as_str().trim_end_matches('/') != "https://github.com")
+    }) {
         params.github_token = None;
     }
     let (Some(key), Some(credentials)) = (&remote.connection, &params.git_credentials) else {
@@ -658,10 +698,7 @@ impl UniformRuntimePlan {
                 nodes.insert(
                     name,
                     NodeRuntimeBinding::CommentDelivery {
-                        connections: connection(
-                            crate::native_v2_contract::GITHUB_CONNECTION_KEY,
-                            &[GITHUB_TOKEN_ENV],
-                        )?,
+                        connections: DeclaredConnections::empty(),
                     },
                 );
                 continue;
@@ -799,32 +836,13 @@ impl UniformProvider {
 
 fn git_delivery_binding(
     pull_request_feedback: crate::native_v2_contract::PullRequestFeedback,
-    mode: crate::native_v2_delivery::DeliveryMode,
+    _mode: crate::native_v2_delivery::DeliveryMode,
 ) -> Result<NodeRuntimeBinding, NativeV2CliError> {
-    let connections = if mode == crate::native_v2_delivery::DeliveryMode::Push {
-        DeclaredConnections::empty()
-    } else {
-        connection(
-            crate::native_v2_contract::GITHUB_CONNECTION_KEY,
-            &[GITHUB_TOKEN_ENV],
-        )?
-    };
+    let connections = DeclaredConnections::empty();
     Ok(NodeRuntimeBinding::GitDelivery {
         connections,
         pull_request_feedback,
     })
-}
-
-fn connection(key: &str, names: &[&str]) -> Result<DeclaredConnections, NativeV2CliError> {
-    let names = names
-        .iter()
-        .map(|name| EnvironmentVariableName::new(*name))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
-    let environment = DeclaredEnvironment::new(names)
-        .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
-    DeclaredConnections::single(key, environment)
-        .map_err(|error| NativeV2CliError::Usage(error.to_string()))
 }
 
 fn insert_template_binding(

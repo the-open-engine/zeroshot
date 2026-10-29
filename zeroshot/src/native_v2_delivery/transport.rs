@@ -16,8 +16,12 @@ use super::command::{
 };
 
 mod authentication;
+mod conflict;
 mod materialization;
 mod reconcile;
+mod target;
+pub(crate) use target::reconcile_target;
+pub(crate) use conflict::materialize_conflict;
 pub(crate) use materialization::GitMaterializationTarget;
 pub(crate) use reconcile::reconcile as reconcile_head;
 use authentication::GitAuthentication;

@@ -11,7 +11,7 @@ impl ProductionCapsuleAllocator {
         use crate::native_v2_comment_delivery::{
             LocalCommentPublicationStore, NativeV2CommentDeliveryConfig,
         };
-        use crate::source_code_provider::adapters::core::{GhCliAuthorityConfig, comment_authority};
+        use crate::source_code_provider::adapters::core::{GhCliAuthorityConfig, comment_authority_for};
         let Some(input) = crate::native_v2_admission::admitted_comment_input(request.admitted)
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?
         else {
@@ -24,7 +24,7 @@ impl ProductionCapsuleAllocator {
             .unwrap_or(request.delivery_run_id);
         let mut config = GhCliAuthorityConfig::hosted(prepared.paths.runtime_home.clone());
         config.gh_program = self.config.gh_program.clone();
-        let authority = comment_authority(config, &input.url)
+        let authority = comment_authority_for(config, &input.destination)
             .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
         let store = match &prepared.hosted_workspace.comment_publications {
             Some(store) => store.clone(),
