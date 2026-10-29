@@ -64,7 +64,7 @@ fn binding_destination(
     binding: &NodeRuntimeBinding,
 ) -> Result<Option<SourceForgeIdentity>, NativeV2AdmissionError> {
     match binding {
-        NodeRuntimeBinding::Agent { .. } => Ok(None),
+        NodeRuntimeBinding::Agent { .. } | NodeRuntimeBinding::Decision { .. } => Ok(None),
         NodeRuntimeBinding::CommentDelivery { .. } => comment_forge(submission).map(Some),
         NodeRuntimeBinding::GitDelivery { .. } => {
             if super::delivery_mode(&submission.graph.root)

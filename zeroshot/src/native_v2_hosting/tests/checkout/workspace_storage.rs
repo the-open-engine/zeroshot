@@ -117,7 +117,7 @@ elif endpoint == 'repos/acme/project/pulls/17':
 elif endpoint == 'repos/acme/project/issues/17/comments?per_page=100&page=1':
     result = [json.loads(posted.read_text())] if posted.exists() else []
 elif endpoint == 'repos/acme/project/issues/17/comments':
-    assert sys.argv[3:] == ['--method', 'POST', '--input', '-']
+    assert sys.argv[3:] == ['--method', 'POST', '--input', '-', '--header', 'X-GitHub-Api-Version: 2026-03-10']
     result = {'id': 23, 'html_url': 'https://github.com/acme/project/pull/17#issuecomment-23',
               'issue_url': 'https://api.github.com/repos/acme/project/issues/17',
               'body': json.load(sys.stdin)['body'], 'user': {'node_id': 'HOST_ACTOR'}}

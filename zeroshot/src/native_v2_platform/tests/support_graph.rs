@@ -102,7 +102,7 @@ fn delivery_node() -> Value {
     })
 }
 
-fn delivery_fields() -> [&'static str; 7] {
+fn delivery_fields() -> [&'static str; 8] {
     [
         "version",
         "mode",
@@ -111,6 +111,7 @@ fn delivery_fields() -> [&'static str; 7] {
         "targetBranch",
         "headRevision",
         "pullRequestId",
+        "links",
     ]
 }
 
@@ -154,7 +155,8 @@ fn valid_input_or(input: Value) -> Value {
         "repository": "owner/repo",
         "targetBranch": "main",
         "headRevision": "1111111111111111111111111111111111111111",
-        "pullRequestId": "pending"
+        "pullRequestId": "pending",
+        "links": {}
     })
 }
 

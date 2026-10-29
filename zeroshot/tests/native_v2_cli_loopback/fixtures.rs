@@ -238,7 +238,11 @@ pub(crate) fn delivery_result_schema(mode: &str) -> serde_json::Value {
             "repository":{"type":{"kind":"string"},"required":true},
             "targetBranch":{"type":{"kind":"string"},"required":true},
             "headRevision":{"type":{"kind":"string"},"required":true},
-            "pullRequestId":{"type":{"kind":"string"},"required":true}
+            "pullRequestId":{"type":{"kind":"string"},"required":true},
+            "links":{"type":{"kind":"record","fields":{
+                "url":{"type":{"kind":"string"},"required":false},
+                "commitUrl":{"type":{"kind":"string"},"required":false}
+            }},"required":true}
         }
     });
     if mode == "merge" {
@@ -282,7 +286,8 @@ pub(crate) fn delivery_initial_input(instruction: &str, mode: &str) -> serde_jso
         "repository":"placeholder/repository",
         "targetBranch":"main",
         "headRevision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "pullRequestId":"pending"
+        "pullRequestId":"pending",
+        "links":{}
     });
     if mode == "merge" {
         input["mergeRevision"] = json!("");
@@ -300,6 +305,7 @@ fn delivery_fields(mode: &str) -> &'static [&'static str] {
             "targetBranch",
             "headRevision",
             "pullRequestId",
+            "links",
         ],
         "merge" => &[
             "version",
@@ -310,6 +316,7 @@ fn delivery_fields(mode: &str) -> &'static [&'static str] {
             "headRevision",
             "mergeRevision",
             "pullRequestId",
+            "links",
         ],
         _ => panic!("fixture delivery mode is closed"),
     }

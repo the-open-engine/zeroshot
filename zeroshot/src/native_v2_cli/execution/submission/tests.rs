@@ -571,6 +571,7 @@ fn intent_command(selection: RunSelection) -> RunCommand {
         target: None,
         cwd: None,
         source_connection: None,
+        source_forge: None,
         title: RunTitle::new("Intent validation").assert_value(),
         input: "input.json".into(),
         selection,
@@ -651,11 +652,7 @@ fn template_binding_insertion_owns_comment_and_git_delivery_nodes() {
     )
     .assert_value();
     let comment_binding = NodeRuntimeBinding::CommentDelivery {
-        connections: connection(
-            crate::native_v2_contract::GITHUB_CONNECTION_KEY,
-            &[GITHUB_TOKEN_ENV],
-        )
-        .assert_value(),
+        connections: DeclaredConnections::default(),
     };
 
     insert_template_binding(&mut runtime, delivery.clone(), push, false).assert_value();
