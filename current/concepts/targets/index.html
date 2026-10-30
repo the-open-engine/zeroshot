@@ -2040,6 +2040,13 @@ run state and resolves connections. The graph protocol stays the same when the t
 requesting an access token or submitting a run or profile, and the target enforces its catalog
 again during admission. Older targets without this extension accept only the established core
 harnesses through client preflight.</p>
+<p>Targets may advertise accepted machine size identities through
+<code>extensions.run_sizes: {kind: "openengine.run-sizes/v1", sizes: ["medium", "large", "xl", "gpu_t4"]}</code>.
+The CLI checks this catalog before requesting access tokens or submitting inline runs or profiles.
+An explicit empty list permits no sizes. Without the exact extension, client preflight retains
+<code>small</code>, <code>medium</code> and <code>large</code>; <code>xl</code> and <code>gpu_t4</code> require positive advertisement. Hosts choose machine
+resources and enforce size availability at admission. A runtime size is shared by the graph's agents,
+independently of their harness/provider lanes. Zeroshot does not define AWS shapes or billing prices.</p>
 <p>Official local builds include contributed adapters; Platform and the default target image enable
 only core adapters. See <a href="../../project/harness-adapters/">Harness adapters</a> for availability and
 provider support.</p>

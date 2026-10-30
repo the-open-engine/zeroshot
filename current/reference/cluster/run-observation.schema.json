@@ -920,7 +920,9 @@
       "enum": [
         "small",
         "medium",
-        "large"
+        "large",
+        "xl",
+        "gpu_t4"
       ],
       "type": "string"
     },
