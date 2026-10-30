@@ -26,6 +26,7 @@ struct StateData {
     lose_merge: bool,
     move_head_during_feedback: bool,
     oversized_notes: bool,
+    responses: BTreeMap<(String, String), (StatusCode, Value)>,
 }
 
 struct Fixture {
@@ -55,6 +56,7 @@ impl Fixture {
             lose_merge: false,
             move_head_during_feedback: false,
             oversized_notes: false,
+            responses: BTreeMap::new(),
         }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("http://{}/api/v4/", listener.local_addr().unwrap());
@@ -74,6 +76,14 @@ impl Fixture {
 
     fn open_review(&self) {
         self.state.lock().unwrap().review = Some(merge_request());
+    }
+
+    fn response(&self, method: &str, suffix: &str, response: (StatusCode, Value)) {
+        self.state
+            .lock()
+            .unwrap()
+            .responses
+            .insert((method.to_owned(), suffix.to_owned()), response);
     }
 
     fn writes(&self, suffix: &str) -> usize {
@@ -147,6 +157,14 @@ fn credential() -> SourceDeliveryCredential<'static> {
     SourceDeliveryCredential::token("test-private-token")
 }
 
+fn overridden_response(state: &StateData, method: &Method, path: &str) -> Option<Response> {
+    state
+        .responses
+        .iter()
+        .find(|((verb, suffix), _)| verb == method.as_str() && path.ends_with(suffix))
+        .map(|(_, (status, body))| (*status, Json(body.clone())).into_response())
+}
+
 fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Response {
     let http_fixture::Request {
         method,
@@ -168,7 +186,9 @@ fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Res
         .calls
         .push((method.to_string(), path.to_owned(), body.clone()));
     let query = uri.query().unwrap_or("");
-    if let Some(response) = simple_response(&state, path) {
+    if let Some(response) =
+        overridden_response(&state, &method, path).or_else(|| simple_response(&state, path))
+    {
         return response;
     }
     if path.ends_with("/merge_requests") {
@@ -1192,3 +1212,9 @@ async fn missing_ambiguous_or_nonconsecutive_notes_pagination_never_proves_compl
     );
     assert_eq!(fixture.writes("/notes"), 0);
 }
+
+#[path = "policy_tests.rs"]
+mod policy_tests;
+
+#[path = "effect_tests.rs"]
+mod effect_tests;

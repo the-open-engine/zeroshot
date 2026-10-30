@@ -623,3 +623,6 @@ async fn rejects_invalid_caller_declared_model_limits_at_admission() {
 
 #[path = "tests/comments.rs"]
 mod comments;
+
+#[path = "tests/source_access.rs"]
+mod source_access;

@@ -392,3 +392,7 @@ pub trait SourceCodeProvider: Send + Sync {
         workspace: SourceWorkspaceCapability<'_>,
     ) -> Result<SourceOperationReceipt, SourceProviderFailure>;
 }
+
+#[cfg(test)]
+#[path = "evidence/tests.rs"]
+mod tests;

@@ -2,7 +2,7 @@ use super::*;
 use crate::native_v2_cli::{BuiltinGraphTemplate, TemplateDelivery};
 use openengine_cluster_protocol::{NonEmptyVec, PayloadType, RecordField, VerifierNode};
 
-fn comment_submission() -> RunSubmission {
+pub(super) fn comment_submission() -> RunSubmission {
     let mut graph = BuiltinGraphTemplate::IssueReview
         .materialize(TemplateDelivery::Comment)
         .assert_value();
