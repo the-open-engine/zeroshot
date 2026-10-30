@@ -335,7 +335,7 @@ fn git_output(
     arguments: &[&str],
 ) -> Result<String, LocalCompositionError> {
     let mut command = Command::new(git_program);
-    crate::native_v2_delivery::transport::remove_repository_environment(&mut command);
+    crate::native_v2_delivery::command::remove_repository_environment(&mut command);
     let output = command
         .arg("-C")
         .arg(workspace)
@@ -470,7 +470,8 @@ fn build_local_candidate_config(
         delivery,
     };
     if owner_scoped {
-        build_local_owner_native_v2_candidate(admitted, config).map_err(Into::into)
+        build_local_owner_native_v2_candidate(admitted, config, native_environment.clone())
+            .map_err(Into::into)
     } else {
         build_local_native_v2_candidate_with_authority(
             admitted,
@@ -479,6 +480,7 @@ fn build_local_candidate_config(
                 token: github_token.map(Arc::<str>::from),
                 token_file: github_token_file,
                 validator: delivery_validator,
+                local_git_environment: Some(native_environment.clone()),
             },
         )
         .map_err(Into::into)

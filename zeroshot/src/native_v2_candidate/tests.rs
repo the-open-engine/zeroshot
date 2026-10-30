@@ -774,6 +774,7 @@ async fn coverage_contract_candidate_builders_bind_only_to_their_admitted_lane_a
     build_local_owner_native_v2_candidate(
         &codex,
         candidate_config(RuntimePlanKind::Codex, &repository, github.clone()),
+        BTreeMap::new(),
     )
     .assert_value_with("owner-scoped local candidate");
 

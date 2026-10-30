@@ -387,6 +387,62 @@ pub(super) fn pin_delivery_identity(command: &mut Command) {
         .env("GIT_COMMITTER_EMAIL", "delivery@zeroshot.invalid");
 }
 
+/// Repository-selection controls never override an engine-selected workspace. Native Git
+/// configuration and authentication settings continue to apply inside that workspace. Platform's
+/// machine credential belongs only to target HTTP and is excluded from every Git subprocess.
+pub(crate) fn remove_repository_environment(command: &mut std::process::Command) {
+    for variable in [
+        "ZEROSHOT_API_KEY",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_NAMESPACE",
+    ] {
+        command.env_remove(variable);
+    }
+}
+
+/// Selects the same private native Git context for local workspace and transport operations.
+/// An absent snapshot retains hosted isolation; the controller's ambient environment is never used.
+pub(crate) fn git_command(
+    program: &Path,
+    workspace: &Path,
+    identity: Option<crate::execution::process::HostedProcessIdentity>,
+    local_environment: Option<&std::collections::BTreeMap<String, String>>,
+) -> Command {
+    let mut command = local_git_command_with_identity(program, workspace, identity);
+    if let Some(environment) = local_environment {
+        command.envs(environment);
+        if identity.is_none() {
+            // Resolve native relative PATH entries in the selected workspace.
+            command.current_dir(workspace);
+        }
+        for variable in ["GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL"] {
+            #[cfg(windows)]
+            let supplied = environment
+                .keys()
+                .any(|name| name.eq_ignore_ascii_case(variable));
+            #[cfg(not(windows))]
+            let supplied = environment.contains_key(variable);
+            if !supplied {
+                command.env_remove(variable);
+            }
+        }
+    }
+    remove_repository_environment(command.as_std_mut());
+    pin_delivery_identity(&mut command);
+    command
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never")
+        .env("SSH_ASKPASS_REQUIRE", "never");
+    command
+}
+
 /// Hosted Git writes as the allocated workspace owner, including on failed or cancelled operations.
 /// Admission excludes concurrent writers and their cleanup completes before delivery starts.
 pub(crate) fn local_git_command_with_identity(

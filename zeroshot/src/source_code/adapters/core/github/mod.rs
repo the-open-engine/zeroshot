@@ -7,7 +7,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use openengine_cluster_protocol::RunId;
 use tokio::process::Command;
-use crate::native_v2_delivery::command::capture;
+use crate::native_v2_delivery::command::{GitCommandOutput, capture, capture_sensitive};
 
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
 use crate::source_code_provider::SourceReviewLinks;
@@ -690,18 +690,22 @@ fn clean_command(
 }
 
 fn git_command(
-    config: &GhCliAuthorityConfig,
+    authority: &GhCliDeliveryAuthority,
     workspace: &std::path::Path,
     credential: SourceDeliveryCredential<'_>,
 ) -> Command {
-    let mut command = local_git_command(config, workspace);
+    let mut command = local_git_command(authority, workspace);
     command
         .env("GH_HOST", "github.com")
         .env("GH_TOKEN", credential.expose());
     command
 }
 
-fn local_git_command(config: &GhCliAuthorityConfig, workspace: &std::path::Path) -> Command {
+fn local_git_command(authority: &GhCliDeliveryAuthority, workspace: &std::path::Path) -> Command {
+    if let Some(transport) = &authority.transport {
+        return transport.command(workspace);
+    }
+    let config = &authority.config;
     let mut command = crate::native_v2_delivery::command::local_git_command_with_identity(
         &config.git_program,
         workspace,
@@ -723,15 +727,17 @@ async fn bounded_git_output(
     command: &mut Command,
     deadline: Duration,
     maximum_bytes: usize,
-) -> Result<String, SourceDeliveryError> {
-    let output = capture(command, deadline).await?.require_success()?;
-    if output.stdout_truncated || output.stdout.len() > maximum_bytes {
+) -> Result<GitCommandOutput, SourceDeliveryError> {
+    let output = capture_sensitive(command, deadline, &[])
+        .await?
+        .require_success()?;
+    if output.stdout_truncated() || output.stdout().len() > maximum_bytes {
         return Err(SourceDeliveryError::api(
             None,
             format!("Git output exceeded {maximum_bytes} bytes\n{output}"),
         ));
     }
-    Ok(output.stdout)
+    Ok(output)
 }
 
 #[cfg(test)]

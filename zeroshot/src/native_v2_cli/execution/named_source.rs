@@ -504,7 +504,7 @@ fn git_command(root: Option<&Path>) -> Command {
     let mut command = Command::new(
         std::env::var_os("ZEROSHOT_TARGET_GIT_PROGRAM").unwrap_or_else(|| "git".into()),
     );
-    crate::native_v2_delivery::transport::remove_repository_environment(command.as_std_mut());
+    crate::native_v2_delivery::command::remove_repository_environment(command.as_std_mut());
     command
         .kill_on_drop(true)
         .env("LANG", "C")

@@ -7,6 +7,9 @@ use super::*;
 use crate::native_v2_admission::NativeV2Admission;
 use crate::native_v2_candidate::test_support::{TestDirectory, full_graph, git, success_node};
 
+#[path = "tests/git_environment.rs"]
+mod git_environment;
+
 fn local_request(run_id: RunId) -> PreparedRunRequest {
     let intent = serde_json::from_value(json!({
         "title": "Hermetic local preparation",

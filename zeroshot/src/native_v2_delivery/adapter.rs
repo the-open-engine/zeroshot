@@ -54,6 +54,16 @@ impl NativeV2DeliveryAdapter {
         }
     }
 
+    /// Supplies the invoking shell snapshot only to trusted local Git subprocesses.
+    #[must_use]
+    pub(crate) fn with_local_git_environment(
+        mut self,
+        environment: Option<BTreeMap<String, String>>,
+    ) -> Self {
+        self.git = self.git.with_local_environment(environment);
+        self
+    }
+
     /// Supplies source-only Git credentials without adding them to provider children.
     #[must_use]
     pub fn with_git_credentials(

@@ -1,9 +1,7 @@
 //! One supervised Git transport for source admission, checkout, and exact-SHA publication.
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
-#[cfg(test)]
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
@@ -11,9 +9,7 @@ use tokio::process::Command;
 use crate::execution::process::HostedProcessIdentity;
 use crate::native_v2_target_authority::{NewOperatorDiagnostic, OperatorDiagnosticStore};
 use crate::source_code_provider::{SourceDeliveryCredential, SourceDeliveryError, valid_git_revision};
-use super::command::{
-    GitCommandFailure, GitCommandOutput, capture_sensitive, local_git_command_with_identity,
-};
+use super::command::{GitCommandFailure, GitCommandOutput, capture_sensitive, git_command};
 
 mod authentication;
 mod conflict;
@@ -388,7 +384,7 @@ impl GitTransport {
         credential: SourceDeliveryCredential<'_>,
         deadline: Duration,
     ) -> Result<GitCommandOutput, GitCommandFailure> {
-        let mut command = self.command();
+        let mut command = self.command(&self.config.workspace);
         let authentication = GitAuthentication::prepare(&self.config, &self.remote, credential)
             .map_err(|error| super::command::preparation_failure(&command, error))?;
         if arguments.first().is_some_and(|operation| {
@@ -403,36 +399,21 @@ impl GitTransport {
     pub(crate) fn workspace_git(&self) -> super::git::SystemGit {
         super::git::SystemGit::new(self.config.git_program.clone())
             .with_identity(self.config.identity)
+            .with_local_environment(self.config.local_environment.clone())
     }
 
-    fn command(&self) -> Command {
-        let mut command = local_git_command_with_identity(
+    pub(crate) fn command(&self, workspace: &Path) -> Command {
+        let mut command = git_command(
             &self.config.git_program,
-            &self.config.workspace,
+            workspace,
             self.config.identity,
+            self.config.local_environment.as_ref(),
         );
-        if let Some(environment) = &self.config.local_environment {
-            command.envs(environment);
-            if self.config.identity.is_none() {
-                // Resolve native relative PATH entries in the selected workspace.
-                command.current_dir(&self.config.workspace);
-            }
-            for variable in ["GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL"] {
-                if !environment.contains_key(variable) {
-                    command.env_remove(variable);
-                }
-            }
-        } else {
+        if self.config.local_environment.is_none() {
             command
                 .env("HOME", &self.config.home_directory)
                 .env("PATH", "/usr/bin:/bin");
         }
-        remove_repository_environment(command.as_std_mut());
-        super::command::pin_delivery_identity(&mut command);
-        command
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GCM_INTERACTIVE", "never")
-            .env("SSH_ASKPASS_REQUIRE", "never");
         command
     }
 
@@ -514,26 +495,6 @@ pub(crate) const fn object_format(revision: &str) -> &'static str {
         "--object-format=sha256"
     } else {
         "--object-format=sha1"
-    }
-}
-
-/// Repository-selection controls never override an engine-selected workspace. Native Git
-/// configuration and authentication settings continue to apply inside that workspace. Platform's
-/// machine credential belongs only to target HTTP and is excluded from every Git subprocess.
-pub(crate) fn remove_repository_environment(command: &mut std::process::Command) {
-    for variable in [
-        "ZEROSHOT_API_KEY",
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_COMMON_DIR",
-        "GIT_INDEX_FILE",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_CEILING_DIRECTORIES",
-        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-        "GIT_NAMESPACE",
-    ] {
-        command.env_remove(variable);
     }
 }
 

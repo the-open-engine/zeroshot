@@ -632,8 +632,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Capture and native transport share credential-name selection for tokens, passwords and API keys,
   respecting operating-system case rules. Trusted Git commands pin author and committer identity
   after applying native transport context and keep automatic GC foreground on old and current Git.
-  Private Git protocol stdout stays separate from printable diagnostics; parsing and failure
-  classification must preserve raw evidence before credential redaction. Final delivery feedback
+  Local workspace inspection, staging, commits, and reconciliation share transport's private caller
+  snapshot and native Git configuration; hosted Git retains isolated global/system configuration.
+  Forge target integration, head adoption, and conflict commands reuse that configured transport;
+  forge API subprocesses retain their separate isolated environment.
+  Workspace Git and forge reconciliation parse private protocol stdout separately from printable
+  diagnostics, including when native credentials collide with object IDs or Git-directory paths;
+  parsing and failure classification must preserve raw evidence before credential redaction. Final delivery feedback
   also redacts the invocation's source credentials and its current refreshed issuance;
   unfamiliar failures use the existing optional `repair_required` signal. Only successful receipts
   require complete remote identity. Live output splits large UTF-8 diagnostics into bounded records.

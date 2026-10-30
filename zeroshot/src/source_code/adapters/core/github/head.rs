@@ -156,32 +156,28 @@ async fn require_local_head(
     expected: &str,
 ) -> Result<(), SourceDeliveryError> {
     let head = git_output(
-        git_command(
-            &context.authority.config,
-            context.workspace,
-            context.credential,
-        )
-        .args(["rev-parse", "HEAD"]),
+        git_command(context.authority, context.workspace, context.credential)
+            .args(["rev-parse", "HEAD"]),
         context.authority.config.api_deadline,
     )
     .await?;
     let status = git_output(
-        git_command(
-            &context.authority.config,
-            context.workspace,
-            context.credential,
-        )
-        .args(["status", "--porcelain=v1", "--untracked-files=all"]),
+        git_command(context.authority, context.workspace, context.credential).args([
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+        ]),
         context.authority.config.api_deadline,
     )
     .await?;
-    if head.trim() == expected && status.is_empty() {
+    if head.stdout().trim() == expected && status.stdout().is_empty() {
         return Ok(());
     }
     Err(SourceDeliveryError::repairable(format!(
         "Local Git state cannot adopt the authorized head: expected HEAD {expected}, actual HEAD {}\n\
-             git status --porcelain=v1 --untracked-files=all:\n{status}",
-        head.trim()
+             git status --porcelain=v1 --untracked-files=all:\n{}",
+        head.diagnostic().stdout.trim(),
+        status.diagnostic().stdout,
     )))
 }
 
@@ -254,7 +250,7 @@ async fn local_transition_required(
 async fn git_output(
     command: &mut Command,
     deadline: Duration,
-) -> Result<String, SourceDeliveryError> {
+) -> Result<GitCommandOutput, SourceDeliveryError> {
     bounded_git_output(command, deadline, MAX_GIT_OUTPUT_BYTES).await
 }
 
@@ -263,9 +259,5 @@ async fn git_output(
 mod tests;
 
 fn head_command(context: HeadUpdateContext<'_>) -> Command {
-    git_command(
-        &context.authority.config,
-        context.workspace,
-        context.credential,
-    )
+    git_command(context.authority, context.workspace, context.credential)
 }

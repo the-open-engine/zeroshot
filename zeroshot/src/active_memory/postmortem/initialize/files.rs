@@ -138,7 +138,7 @@ pub(super) async fn source_files(workspace: &Path) -> Result<BTreeSet<String>> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    crate::native_v2_delivery::transport::remove_repository_environment(command.as_std_mut());
+    crate::native_v2_delivery::command::remove_repository_environment(command.as_std_mut());
     let mut child = command.spawn()?;
     let stdout = child
         .stdout

@@ -210,12 +210,16 @@ pub fn build_local_native_v2_candidate_with_github_token(
 pub(crate) fn build_local_owner_native_v2_candidate(
     admitted: &AdmittedRun,
     config: NativeV2CandidateConfig,
+    local_git_environment: BTreeMap<String, String>,
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
     build_candidate(
         admitted,
         config,
         CandidatePlacement::Local(SessionBoundary::Owner),
-        TrustedDeliveryCapabilities::default(),
+        TrustedDeliveryCapabilities {
+            local_git_environment: Some(local_git_environment),
+            ..Default::default()
+        },
     )
 }
 
@@ -224,6 +228,8 @@ pub(crate) struct TrustedDeliveryCapabilities {
     pub(crate) token: Option<Arc<str>>,
     pub(crate) token_file: Option<TrustedGitHubTokenFile>,
     pub(crate) validator: Option<TrustedDeliveryValidator>,
+    // Private bootstrap context, never part of authored or durable candidate configuration.
+    pub(crate) local_git_environment: Option<BTreeMap<String, String>>,
 }
 
 pub(crate) fn build_local_native_v2_candidate_with_authority(
@@ -267,6 +273,11 @@ fn build_candidate(
     let delivery = delivery.map(|delivery| {
         Arc::new(
             NativeV2DeliveryAdapter::new(delivery.config, delivery.authority)
+                .with_local_git_environment(
+                    trusted
+                        .local_git_environment
+                        .filter(|_| placement.is_local()),
+                )
                 .with_trusted_github_token(
                     source_is_github_com
                         .then(|| trusted.token.clone())

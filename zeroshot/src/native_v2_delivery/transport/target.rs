@@ -156,13 +156,14 @@ async fn has_exact_conflict(
             return Ok(false);
         }
     }
-    let output = capture(
+    let output = capture_sensitive(
         local_command(context).args(["ls-files", "--unmerged", "-z"]),
         context.transport.config().deadline,
+        &[],
     )
     .await?
     .require_success()?;
-    Ok(!output.stdout.is_empty() || output.stdout_truncated)
+    Ok(!output.stdout().is_empty() || output.stdout_truncated())
 }
 
 async fn is_ancestor(
@@ -183,7 +184,7 @@ async fn is_ancestor(
 }
 
 fn local_command(context: TargetContext<'_>) -> Command {
-    context.transport.command()
+    context.transport.command(context.request.workspace)
 }
 
 pub(super) async fn configure_delivery_identity(
@@ -193,7 +194,7 @@ pub(super) async fn configure_delivery_identity(
         ("user.name", "Zeroshot"),
         ("user.email", "delivery@zeroshot.invalid"),
     ] {
-        let mut command = transport.command();
+        let mut command = transport.command(&transport.config().workspace);
         command.args(["config", "--local", "--replace-all", key, value]);
         bounded_status(command, transport.config().deadline).await?;
     }

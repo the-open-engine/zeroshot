@@ -7,6 +7,107 @@ use super::observation::test_support::{authority, shell_literal, write_executabl
 use super::merge_policy::MergeMethod;
 use crate::native_v2_delivery::SourceChecks;
 
+#[tokio::test]
+async fn configured_transport_owns_workspace_git_context_and_hosted_isolation() {
+    use crate::native_v2_delivery::git::test_support::{ConfigLocation, GitFixture};
+    use crate::native_v2_delivery::transport::{GitTransport, GitTransportConfig};
+
+    for local in [true, false] {
+        let mut fixture = GitFixture::new("[core]\n autocrlf = true\n", ConfigLocation::Home);
+        fixture
+            .environment
+            .insert("GIT_USERNAME".to_owned(), "true".to_owned());
+        let base = fixture.seed();
+        fixture.edit();
+        let home = PathBuf::from(&fixture.environment["HOME"]);
+        let mut config = GhCliAuthorityConfig::hosted(home.clone());
+        config.git_program = fixture.root.path().join("unconfigured-git-must-not-run");
+        let mut transport_config = GitTransportConfig {
+            git_program: fixture.program.clone(),
+            workspace: fixture.workspace.clone(),
+            home_directory: home,
+            private_directory: fixture.root.path().to_owned(),
+            identity: None,
+            local_environment: local.then(|| fixture.environment.clone()),
+            deadline: Duration::from_secs(20),
+        };
+        let authority = GhCliDeliveryAuthority::new(config).with_git_transport(GitTransport::new(
+            transport_config.clone(),
+            "https://github.com/fixture/project.git",
+        ));
+        let git = authority
+            .git_transport(&fixture.workspace, "fixture/project")
+            .workspace_git();
+        let revision = git
+            .prepare_revision(&fixture.workspace, &base, "fix: captured Git context")
+            .await
+            .assert_value();
+        assert_eq!(
+            fixture.git(&["show", "HEAD:sample.txt"]),
+            if local {
+                b"first\nchanged\n".as_slice()
+            } else {
+                b"first\r\nchanged\r\n".as_slice()
+            }
+        );
+        assert_eq!(
+            git.workspace_state(&fixture.workspace).await.assert_value(),
+            (revision.clone(), false)
+        );
+        let output = bounded_git_output(
+            local_git_command(&authority, &fixture.workspace).args([
+                "config",
+                "--get",
+                "core.autocrlf",
+            ]),
+            Duration::from_secs(20),
+            128,
+        )
+        .await;
+        if local {
+            assert_eq!(output.assert_value().stdout(), "true\n");
+            let output = bounded_git_output(
+                local_git_command(&authority, &fixture.workspace).args([
+                    "config",
+                    "--get",
+                    "core.autocrlf",
+                ]),
+                Duration::from_secs(20),
+                1,
+            )
+            .await
+            .unwrap_err();
+            assert!(output.to_string().contains("[REDACTED]"));
+            assert!(!output.to_string().contains("true"));
+            // Head adoption compares raw object IDs while retaining printable diagnostics.
+            transport_config
+                .local_environment
+                .as_mut()
+                .assert_value()
+                .insert("GIT_USERNAME".to_owned(), revision[..1].to_owned());
+            let authority = authority.with_git_transport(GitTransport::new(
+                transport_config,
+                "https://github.com/fixture/project.git",
+            ));
+            let mut review = review();
+            review.head_revision = revision;
+            head::synchronize_review_head(
+                &authority,
+                SourceHeadSynchronization {
+                    workspace: &fixture.workspace,
+                    previous: &review,
+                    updated: &review,
+                },
+                SourceDeliveryCredential::token("fixture-token"),
+            )
+            .await
+            .assert_value();
+        } else {
+            assert!(output.is_err());
+        }
+    }
+}
+
 #[cfg(unix)]
 #[path = "merge_tests.rs"]
 mod merge_tests;
