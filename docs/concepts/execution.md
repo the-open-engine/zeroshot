@@ -1,5 +1,5 @@
 ---
-description: "Learn how zeroshot admits a graph, executes its nodes, checks typed output and chooses the next edge independently of model behavior."
+description: 'Learn how zeroshot admits a graph, executes its nodes, checks typed output and chooses the next edge independently of model behavior.'
 ---
 
 # How execution works
@@ -83,6 +83,9 @@ public `GraphSpec` that custom submissions use:
 zeroshot template list
 zeroshot template show software-change
 ```
+
+In a terminal, `template show` prints a tree and marks executable node names with `*`.
+Use `--json` or redirect stdout to export the complete `GraphSpec`.
 
 `software-change` has four delivery choices and opens a pull request by default. `--delivery none`
 keeps the accepted change local. `--push` publishes the managed run branch without opening a pull

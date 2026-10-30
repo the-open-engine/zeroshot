@@ -23,6 +23,8 @@ mod connections;
 mod context;
 #[path = "execution/failure.rs"]
 mod failure;
+#[path = "graph_tree.rs"]
+mod graph_tree;
 #[path = "execution/merge_plans.rs"]
 mod merge_plans;
 #[path = "execution/profiles.rs"]
@@ -34,7 +36,10 @@ mod submission;
 use attach::{RoutedAttach, follow_attach};
 pub(crate) use context::CliExecutionContext;
 pub use failure::RunFailure;
-pub use submission::{try_execute_native_v2_preflight, try_execute_native_v2_static};
+pub use submission::{
+    try_execute_native_v2_preflight, try_execute_native_v2_static,
+    try_execute_native_v2_static_with_terminal,
+};
 use submission::{RunSubmission, select_connection_requirements, submit_run, validate_github_token};
 use status::outcome_for_status;
 

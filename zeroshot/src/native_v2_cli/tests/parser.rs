@@ -557,6 +557,7 @@ fn parser_exposes_the_builtin_templates_and_closed_delivery_choice() {
         NativeV2CliCommand::TemplateShow {
             template: BuiltinGraphTemplate::SoftwareChange,
             delivery: TemplateDelivery::Merge,
+            json: false,
         }
     );
     assert_eq!(
@@ -564,6 +565,7 @@ fn parser_exposes_the_builtin_templates_and_closed_delivery_choice() {
         NativeV2CliCommand::TemplateShow {
             template: BuiltinGraphTemplate::AutoResearch,
             delivery: TemplateDelivery::Push,
+            json: false,
         }
     );
     assert!(parse_native_v2_args(args(&["template", "show", "auto-research", "--pr"])).is_err());

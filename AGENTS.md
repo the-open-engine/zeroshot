@@ -814,6 +814,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 ## CLI and target contracts
 
 - CLI grammar/help comes from the derived Clap `Cli` tree and Rust doc comments.
+- `template show` renders the materialized graph as a tree only on terminal stdout; piped or
+  redirected stdout and explicit `--json` retain the complete, single-line `GraphSpec` JSON.
+  The CLI graph renderer preserves authored structure and marks every step/verifier RuntimePlan
+  binding; it does not infer or rewrite execution flow. Terminal detection belongs to the process
+  entrypoint; generic output writers default to JSON.
 - The foreground run command carries one Ctrl-C signal across preparation, submission, and
   observation. An interrupt before the backend submission future is first polled cancels without
   entering the backend. Once polled, that future is preserved through its receipt or error because

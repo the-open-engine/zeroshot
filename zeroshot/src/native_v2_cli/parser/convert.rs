@@ -275,6 +275,7 @@ impl TemplateCommand {
                 Ok(NativeV2CliCommand::TemplateShow {
                     template,
                     delivery: template_delivery(template, args.delivery.selection())?,
+                    json: args.json,
                 })
             }
         }

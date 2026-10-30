@@ -372,10 +372,11 @@ async fn assert_static_dispatch_and_remaining_management_routes_are_exact() {
     let validate = validation_command(input.path(), runtime.path());
     run_public_command(validate).await.assert_value();
 
-    let static_error = execute_public_command(NativeV2CliCommand::Version, &mut RejectWrites)
-        .await
-        .err()
-        .assert_value();
+    let static_error =
+        execute_public_command(NativeV2CliCommand::Version, &mut RejectWrites, false)
+            .await
+            .err()
+            .assert_value();
     assert!(matches!(
         static_error,
         ProcessError::Cli(NativeV2CliError::Output(_))
@@ -385,6 +386,7 @@ async fn assert_static_dispatch_and_remaining_management_routes_are_exact() {
     let preflight_error = execute_public_command(
         validation_command(&missing_input, runtime.path()),
         &mut Vec::new(),
+        false,
     )
     .await
     .err()

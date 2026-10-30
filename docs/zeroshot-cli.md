@@ -817,7 +817,7 @@ Usage: zeroshot template <COMMAND>
 
 Commands:
   list  List built-in template names as JSON
-  show  Write a built-in graph template as JSON
+  show  Show a built-in graph as a tree in terminals, or JSON when piped
   help  Print this message or the help of the given subcommand(s)
 
 Options:
@@ -840,7 +840,7 @@ Options:
 #### `zeroshot template show`
 
 ```text
-Write a built-in graph template as JSON
+Show a built-in graph as a tree in terminals, or JSON when piped
 
 Usage: zeroshot template show [OPTIONS] <TEMPLATE>
 
@@ -856,6 +856,9 @@ Arguments:
           - pr-review:       Review a PR diff, conditionally reproduce behavior, and post a concise report
 
 Options:
+      --json
+          Write the complete graph as JSON even when stdout is a terminal
+
       --delivery <MODE>
           Template delivery mode. Defaults to pull_request for software-change, comment for issue-review and pr-review, otherwise none
 
@@ -884,7 +887,7 @@ Usage: zeroshot template help [COMMAND]
 
 Commands:
   list  List built-in template names as JSON
-  show  Write a built-in graph template as JSON
+  show  Show a built-in graph as a tree in terminals, or JSON when piped
   help  Print this message or the help of the given subcommand(s)
 ```
 

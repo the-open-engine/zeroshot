@@ -118,6 +118,16 @@ pub fn try_execute_native_v2_static(
     command: &NativeV2CliCommand,
     output: &mut impl Write,
 ) -> Result<Option<CliOutcome>, NativeV2CliError> {
+    try_execute_native_v2_static_with_terminal(command, output, false)
+}
+
+/// Executes static commands with an explicit output destination capability.
+/// Callers writing to stdout supply its terminal status; other writers default to JSON.
+pub fn try_execute_native_v2_static_with_terminal(
+    command: &NativeV2CliCommand,
+    output: &mut impl Write,
+    is_terminal: bool,
+) -> Result<Option<CliOutcome>, NativeV2CliError> {
     if let Some(text) = command.product_info() {
         output.write_all(text.as_bytes())?;
         output.flush()?;
@@ -128,9 +138,11 @@ pub fn try_execute_native_v2_static(
             return super::merge_plans::validate_file(file, output).map(Some);
         }
         NativeV2CliCommand::TemplateList => execute_template_list(output)?,
-        NativeV2CliCommand::TemplateShow { template, delivery } => {
-            execute_template_show(*template, *delivery, output)?
-        }
+        NativeV2CliCommand::TemplateShow {
+            template,
+            delivery,
+            json,
+        } => execute_template_show(*template, *delivery, is_terminal && !json, output)?,
         _ => return Ok(None),
     };
     Ok(Some(outcome))
@@ -148,12 +160,19 @@ fn execute_template_list(output: &mut impl Write) -> Result<CliOutcome, NativeV2
 fn execute_template_show(
     template: BuiltinGraphTemplate,
     delivery: TemplateDelivery,
+    tree: bool,
     output: &mut impl Write,
 ) -> Result<CliOutcome, NativeV2CliError> {
     let graph = template
         .materialize(delivery)
         .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
-    write_json(output, &graph)?;
+    if tree {
+        writeln!(output, "{} (delivery: {delivery})", template.name())?;
+        super::graph_tree::write_graph_tree(&graph, output)?;
+        output.flush()?;
+    } else {
+        write_json(output, &graph)?;
+    }
     Ok(CliOutcome::Completed)
 }
 

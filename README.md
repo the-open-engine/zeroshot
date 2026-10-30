@@ -187,6 +187,14 @@ Inspect the built-in graph as a starting point:
 zeroshot template show software-change
 ```
 
+Terminal output is a tree. Names marked `*` are executable nodes for `--runtime-config`;
+template delivery bindings are supplied automatically. Use the same delivery flags as your run to
+inspect its delivery nodes. Add `--json` or redirect stdout to export the complete graph as JSON:
+
+```bash
+zeroshot template show software-change > graph.json
+```
+
 Start with [Build a review loop](docs/guides/review-loop.md), a complete example with two independent
 reviewers and a repair loop. Adapt the reviewers’ instructions to your project. See the
 [graph contract](docs/reference/cluster/graph.md) for supported graph structures and

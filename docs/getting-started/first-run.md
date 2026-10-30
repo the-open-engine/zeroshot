@@ -1,5 +1,5 @@
 ---
-description: "Run the built-in software-change graph in a local folder with Git delivery disabled. Validate the input and runtime plan before starting."
+description: 'Run the built-in software-change graph in a local folder with Git delivery disabled. Validate the input and runtime plan before starting.'
 ---
 
 # Run a first task
@@ -128,8 +128,10 @@ its error lists the latest of those records, followed by the `zeroshot logs` com
 zeroshot template show single-worker
 ```
 
-`zeroshot template show software-change --delivery none` prints the exact graph behind the first example as the same
-`GraphSpec` accepted by `--graph` and the Python SDK.
+`zeroshot template show software-change --delivery none` shows the graph behind the first example
+as a tree in a terminal. Names marked `*` need RuntimePlan bindings; template delivery bindings are
+supplied automatically. Add `--json` or redirect stdout to export the complete `GraphSpec` accepted
+by `--graph` and the Python SDK.
 
 `zeroshot template show auto-research` prints the research graph with its default of ten iterations.
 Supply a positive `options.iterations` integer in the run input to set the admitted loop bound. It keeps

@@ -79,7 +79,7 @@ mod update;
 
 pub use execution::{
     RunFailure, execute_native_v2_cli, try_execute_native_v2_preflight,
-    try_execute_native_v2_static,
+    try_execute_native_v2_static, try_execute_native_v2_static_with_terminal,
 };
 pub use parser::{Cli, parse_native_v2_args};
 
@@ -359,6 +359,7 @@ pub enum NativeV2CliCommand {
     TemplateShow {
         template: BuiltinGraphTemplate,
         delivery: TemplateDelivery,
+        json: bool,
     },
     PlanValidate {
         file: PathBuf,
