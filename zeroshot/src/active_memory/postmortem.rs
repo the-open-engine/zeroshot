@@ -84,6 +84,8 @@ pub enum PostmortemError {
     CleanupUnconfirmed,
     #[error("postmortem could not be prepared")]
     Preparation,
+    #[error("postmortem cancelled")]
+    Cancelled,
     #[error("postmortem evidence or publication is unavailable")]
     Storage,
 }
@@ -143,13 +145,14 @@ impl BuiltinPostmortem {
         &self,
         request: &PostmortemRequest,
         scope: &ScopeQuery,
+        cancellation: watch::Receiver<bool>,
     ) -> Result<MemorySnapshot, PostmortemError> {
-        let latest = self
-            .config
-            .store
-            .snapshot(&request.run_id, scope)
-            .await
-            .map_err(|_| PostmortemError::Storage)?;
+        let latest = tokio::select! {
+            biased;
+            () = super::backend::cancelled(cancellation) => return Err(PostmortemError::Cancelled),
+            result = self.config.store.snapshot(&request.run_id, scope) =>
+                result.map_err(|_| PostmortemError::Storage)?,
+        };
         if latest
             .lessons
             .iter()
@@ -193,20 +196,44 @@ impl BuiltinPostmortem {
         &self,
         request: &PostmortemRequest,
         publication: MemoryPublication,
+        cancellation: watch::Receiver<bool>,
     ) -> Result<Option<usize>, PostmortemError> {
-        match self
+        let result = self
             .config
             .store
-            .publish(&request.run_id, publication)
-            .await
-        {
+            .publish(&request.run_id, publication, cancellation.clone())
+            .await;
+        if *cancellation.borrow() || cancellation.has_changed().is_err() {
+            return Err(PostmortemError::Cancelled);
+        }
+        match result {
             Ok(versions) => Ok(Some(versions.len())),
             Err(ActiveMemoryError::RevisionConflict { .. }) => {
                 execution::log(request, "Active Memory publication conflicted; refreshing lessons and reconciling retained findings".to_owned()).await?;
                 Ok(None)
             }
+            Err(ActiveMemoryError::Cancelled) => Err(PostmortemError::Cancelled),
             Err(_) => Err(PostmortemError::Storage),
         }
+    }
+
+    async fn refreshed(
+        &self,
+        work: &Reconciliation<'_>,
+        previous: Option<&[crate::active_memory::Lesson]>,
+    ) -> Result<MemorySnapshot, PostmortemError> {
+        let latest = self
+            .current(
+                work.request,
+                &self.scope(work.request),
+                work.cancellation.clone(),
+            )
+            .await?;
+        if previous == Some(latest.lessons.as_slice()) {
+            // A hidden tombstone or unchanged snapshot cannot supply new reconciliation input.
+            return Err(PostmortemError::Storage);
+        }
+        Ok(latest)
     }
 
     async fn reconcile(
@@ -217,6 +244,7 @@ impl BuiltinPostmortem {
         let mut discoveries: Option<Vec<crate::active_memory::LessonMutation>> = None;
         let mut attempt = 0_u64;
         let mut previous = Vec::new();
+        let mut conflicted_lessons = None;
         loop {
             if *work.cancellation.borrow() {
                 return Ok(PostmortemReport {
@@ -224,7 +252,7 @@ impl BuiltinPostmortem {
                     ..Default::default()
                 });
             }
-            let latest = self.current(work.request, &scope).await?;
+            let latest = self.refreshed(&work, conflicted_lessons.as_deref()).await?;
             let (mut report, mutations) = self
                 .execute(
                     &work,
@@ -249,10 +277,14 @@ impl BuiltinPostmortem {
                     .collect(),
                 mutations: mutations.clone(),
             };
-            if let Some(count) = self.publish(work.request, publication).await? {
+            if let Some(count) = self
+                .publish(work.request, publication, work.cancellation.clone())
+                .await?
+            {
                 report.published_mutations = count;
                 return Ok(report);
             }
+            conflicted_lessons = Some(latest.lessons);
             previous = mutations;
             attempt = attempt.checked_add(1).ok_or(PostmortemError::Storage)?;
         }
@@ -300,7 +332,13 @@ impl RunPostmortem for BuiltinPostmortem {
             })
             .await;
         runner.close_run(&request.run_id).await;
-        result
+        match result {
+            Err(PostmortemError::Cancelled) => Ok(PostmortemReport {
+                cancelled: true,
+                ..Default::default()
+            }),
+            result => result,
+        }
     }
 }
 

@@ -11,6 +11,8 @@ pub const MAX_INJECTION_BYTES: usize = 16_384;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ActiveMemoryError {
+    #[error("active memory operation cancelled")]
+    Cancelled,
     #[error("active memory storage unavailable")]
     Unavailable,
     #[error("invalid active memory: {0}")]

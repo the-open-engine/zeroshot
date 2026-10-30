@@ -3,6 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use openengine_cluster_protocol::RunId;
 use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
 use super::{
     ActiveMemoryError, LessonMutation, LessonVersion, MemorySnapshot, ScopeQuery,
     SharedActiveMemoryStore,
@@ -24,10 +25,13 @@ pub trait ActiveMemoryBackend: Send + Sync {
         run: &RunId,
         scope: &ScopeQuery,
     ) -> Result<MemorySnapshot, ActiveMemoryError>;
+    /// Stop queued work on cancellation; check again before starting a write.
+    /// Drain already-started writes within the adapter's bounded storage timeout.
     async fn publish(
         &self,
         run: &RunId,
         publication: MemoryPublication,
+        cancellation: watch::Receiver<bool>,
     ) -> Result<Vec<LessonVersion>, ActiveMemoryError>;
 }
 
@@ -50,9 +54,17 @@ impl ActiveMemoryBackend for SqliteMemoryBackend {
         &self,
         _: &RunId,
         publication: MemoryPublication,
+        cancellation: watch::Receiver<bool>,
     ) -> Result<Vec<LessonVersion>, ActiveMemoryError> {
-        let mut store = self.0.clone().lock_owned().await;
+        let mut store = tokio::select! {
+            biased;
+            () = cancelled(cancellation.clone()) => return Err(ActiveMemoryError::Cancelled),
+            store = self.0.clone().lock_owned() => store,
+        };
         tokio::task::spawn_blocking(move || {
+            if *cancellation.borrow() || cancellation.has_changed().is_err() {
+                return Err(ActiveMemoryError::Cancelled);
+            }
             let expected = publication
                 .reviewed
                 .into_iter()
@@ -72,5 +84,14 @@ impl ActiveMemoryBackend for SqliteMemoryBackend {
 impl SqliteMemoryBackend {
     pub fn shared(store: SharedActiveMemoryStore) -> Arc<dyn ActiveMemoryBackend> {
         Arc::new(Self(store))
+    }
+}
+
+/// A closed cancellation channel also revokes permission to start more work.
+pub(super) async fn cancelled(mut cancellation: watch::Receiver<bool>) {
+    loop {
+        if *cancellation.borrow_and_update() || cancellation.changed().await.is_err() {
+            return;
+        }
     }
 }

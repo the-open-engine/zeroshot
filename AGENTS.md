@@ -93,6 +93,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Postmortems refresh scoped lessons and pass before/current changes separately from original worker
   exposure. Revision conflicts reinvoke maintenance with retained discoveries under the original
   deadline; host-owned ActiveMemoryBackend adapters supply authenticated snapshot/publication storage.
+  Storage reads and queued writes observe cancellation, while started writes drain with bounded storage
+  timeouts. Unchanged conflict snapshots stop reconciliation rather than spending model calls on hidden
+  tombstones; deferred unpublished findings remain unpublished.
   Codex trusts only the exact normalized hash of the product-owned session hook; never bypass trust
   for unrelated native hooks or write user trust configuration. Callback receipts acknowledge returned
   context, not model compliance. Missing carrier acknowledgement, failed provider startup or bounded

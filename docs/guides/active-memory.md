@@ -271,7 +271,12 @@ scoped lessons and supplies before/current changes separately from the original 
 Maintenance decisions target current revisions; newly received advice is not evidence of worker use.
 Publication checks reviewed revisions atomically. A revision conflict refreshes the context and
 reinvokes maintenance while retaining validated discoveries, within the original cancellation and
-time budget. Ordinary transport failures are not revision conflicts.
+time budget. A conflict followed by an unchanged visible lesson set stops rather than repeatedly
+retrying a hidden deletion tombstone. New findings deferred by maintenance remain unpublished.
+Ordinary transport failures are not revision conflicts.
+
+Storage reads and queued writes stop on cancellation. Backends check cancellation before starting
+publication and drain started writes within a bounded storage timeout before cleanup completes.
 
 Embedding hosts may install an authenticated `ActiveMemoryBackend` through `ProductionHostingConfig`.
 Its snapshot and publication operations carry run identity; the backend must derive and enforce the

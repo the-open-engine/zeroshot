@@ -416,6 +416,7 @@ impl<'a> ProposalContext<'a> {
         decision: MaintenanceDecision,
     ) -> Result<Option<LessonMutation>, ProposalRejection> {
         let id = decision.id.clone();
+        let keep = decision.action == "keep";
         let mutation = self.maintenance(role, decision)?;
         let is_new = self.findings.contains_key(&id)
             && !self
@@ -433,10 +434,11 @@ impl<'a> ProposalContext<'a> {
                 expected_revision: None,
             }),
             Some(LessonMutation::Delete { .. }) => None,
-            None => Some(LessonMutation::Upsert {
+            None if keep => Some(LessonMutation::Upsert {
                 draft: Box::new(self.findings[&id].draft()),
                 expected_revision: None,
             }),
+            None => None,
         })
     }
 
