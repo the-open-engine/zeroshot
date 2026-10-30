@@ -38,8 +38,7 @@ the author changes them.
 
 Hosting shells may supply a `machines` array in the existing bootstrap. Each entry has `size`,
 `label`, `vcpus`, `memoryMiB`, `diskGiB`, `laneUnits`, and optional
-`gpu: {name, memoryMiB}` or `null`. The shared size picker displays these host-owned resources and
-lane weights. Starting a size with Boost uses its full `laneUnits` in Boosts for that run; ordinary
+`gpu: {name, memoryMiB}` or `null`. The shared size picker displays the host label and lane count. Starting a size with Boost uses its full `laneUnits` in Boosts for that run; ordinary
 runs do not spend Boosts merely because a size is selected. This is presentation metadata: the host
 owns admission and billing. An explicit empty list offers no machines. When the array is absent,
 the native `RunSize` schema supplies size identities without resource or pricing claims. Unavailable

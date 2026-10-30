@@ -9,14 +9,15 @@ export function RunSizePicker(p: {
   onChange: (value: string) => void;
 }) {
   const nativeSizes: string[] = p.schema?.$defs?.RunSize?.enum ?? [];
+  const machines = p.machines?.filter((machine) => nativeSizes.includes(machine.size));
   const choices =
-    p.machines?.map((machine) => ({
+    machines?.map((machine) => ({
       value: machine.size,
       label: `${machine.label} · ${machine.laneUnits} ${machine.laneUnits === 1 ? 'lane' : 'lanes'}`,
     })) ?? nativeSizes.map((value) => ({ value, label: value }));
   const missing = !!p.value && !choices.some((option) => option.value === p.value);
   const unavailable = missing && (p.machines !== undefined || nativeSizes.length > 0);
-  const selected = p.machines?.find((machine) => machine.size === p.value);
+  const selected = machines?.find((machine) => machine.size === p.value);
   return (
     <Field label="Run size">
       <select

@@ -61,3 +61,14 @@ test('local schema fallback lists sizes without adding billing facts', () => {
   for (const size of schema.$defs.RunSize.enum) assert.match(html, new RegExp(`value="${size}"`));
   assert.doesNotMatch(html, /Boost|lanes|unavailable/);
 });
+
+test('host metadata cannot offer sizes outside the native schema', () => {
+  const machines = [large, { ...gpu, size: 'gpu' }];
+  const html = render('large', machines);
+  assert.match(html, /value="large"/);
+  assert.doesNotMatch(html, /value="gpu"/);
+  const saved = render('gpu', machines);
+  assert.match(saved, /<option value="gpu"[^>]*disabled=""[^>]*selected=""/);
+  assert.match(saved, /gpu \(unavailable\)/);
+  assert.doesNotMatch(saved, /Starting this size with Boost/);
+});
