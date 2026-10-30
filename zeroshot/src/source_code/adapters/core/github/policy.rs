@@ -54,6 +54,7 @@ query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
                     conclusion
                     detailsUrl
                     databaseId
+                    checkSuite { app { databaseId } }
                     isRequired(pullRequestNumber: $number)
                   }
                   ... on StatusContext {
@@ -86,6 +87,90 @@ pub(super) struct PolicySnapshot {
     pub(super) is_merge_queue_enabled: bool,
     pub(super) head_update: Option<HeadUpdate>,
     pub(super) pull_request_ready: bool,
+    pub(super) observed_required_checks: BTreeSet<(String, Option<u64>)>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+enum BranchRuleWire {
+    #[serde(rename = "required_status_checks")]
+    RequiredStatusChecks { parameters: BranchChecksWire },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Deserialize)]
+struct BranchChecksWire {
+    required_status_checks: Vec<BranchCheckWire>,
+}
+
+#[derive(Deserialize)]
+struct BranchCheckWire {
+    context: String,
+    integration_id: Option<std::num::NonZeroU64>,
+}
+
+impl PolicySnapshot {
+    pub(super) fn apply_branch_rules(&mut self, value: Value) -> Result<(), SourceDeliveryError> {
+        let pages: Vec<Vec<BranchRuleWire>> = serde_json::from_value(value).map_err(|error| {
+            SourceDeliveryError::api(
+                None,
+                format!("GitHub returned invalid branch rules: {error}"),
+            )
+        })?;
+        if pages.is_empty() {
+            return Err(SourceDeliveryError::api(
+                None,
+                "GitHub returned no branch-rule pages",
+            ));
+        }
+        for rule in pages.into_iter().flatten() {
+            let BranchRuleWire::RequiredStatusChecks { parameters } = rule else {
+                continue;
+            };
+            for check in parameters.required_status_checks {
+                if check.context.trim().is_empty() {
+                    return Err(SourceDeliveryError::api(
+                        None,
+                        "GitHub returned an empty required check context",
+                    ));
+                }
+                let observed = self.observed_required_checks.iter().any(|(name, source)| {
+                    name == &check.context
+                        && check
+                            .integration_id
+                            .is_none_or(|id| Some(id.get()) == *source)
+                });
+                if !observed {
+                    self.state = SourceReviewState::Open {
+                        checks: SourceChecks::Pending,
+                    };
+                    self.pull_request_ready = false;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+pub(super) fn branch_rules_arguments(
+    review: &SourceReviewReceipt,
+) -> Result<Vec<String>, SourceDeliveryError> {
+    if !crate::source_code_provider::valid_git_branch(&review.target_branch) {
+        return Err(SourceDeliveryError::Rejected);
+    }
+    let branch: String =
+        url::form_urlencoded::byte_serialize(review.target_branch.as_bytes()).collect();
+    Ok(vec![
+        format!(
+            "repos/{}/rules/branches/{branch}?per_page=100",
+            review.repository
+        ),
+        "--method".to_owned(),
+        "GET".to_owned(),
+        "--paginate".to_owned(),
+        "--slurp".to_owned(),
+    ])
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -182,6 +267,8 @@ enum CheckContextWire {
         details_url: Option<String>,
         #[serde(rename = "databaseId")]
         database_id: Option<u64>,
+        #[serde(rename = "checkSuite")]
+        check_suite: Option<CheckSuiteWire>,
         #[serde(rename = "isRequired")]
         is_required: bool,
     },
@@ -194,6 +281,17 @@ enum CheckContextWire {
         #[serde(rename = "isRequired")]
         is_required: bool,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+struct CheckSuiteWire {
+    app: Option<CheckAppWire>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct CheckAppWire {
+    database_id: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -401,6 +499,7 @@ fn classify_snapshot(
             is_merge_queue_enabled: pull_request.is_merge_queue_enabled,
             head_update: head_update(pull_request),
             pull_request_ready: false,
+            observed_required_checks: BTreeSet::new(),
         };
     }
     let policy_ready = merge_gate_ready(pull_request) || pull_request_ready(pull_request);
@@ -420,6 +519,11 @@ fn classify_snapshot(
         is_merge_queue_enabled: pull_request.is_merge_queue_enabled,
         head_update: head_update(pull_request),
         pull_request_ready,
+        observed_required_checks: contexts
+            .iter()
+            .filter(|context| context.is_required())
+            .map(|context| (context.name().to_owned(), context.integration_id()))
+            .collect(),
     }
 }
 
@@ -437,6 +541,7 @@ fn required_context_is_missing(
     };
     let observed = contexts
         .iter()
+        .filter(|context| context.is_required())
         .map(CheckContextWire::name)
         .collect::<BTreeSet<_>>();
     required
@@ -488,6 +593,7 @@ fn terminal_snapshot(
         is_merge_queue_enabled: false,
         head_update: None,
         pull_request_ready: false,
+        observed_required_checks: BTreeSet::new(),
     }))
 }
 
@@ -510,6 +616,7 @@ fn merged_snapshot(
             is_merge_queue_enabled: false,
             head_update: None,
             pull_request_ready: false,
+            observed_required_checks: BTreeSet::new(),
         })
         .ok_or(SourceDeliveryError::Rejected)
 }
@@ -548,6 +655,7 @@ fn waiting_snapshot() -> PolicySnapshot {
         is_merge_queue_enabled: false,
         head_update: None,
         pull_request_ready: false,
+        observed_required_checks: BTreeSet::new(),
     }
 }
 

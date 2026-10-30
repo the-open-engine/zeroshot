@@ -116,6 +116,9 @@ mod merge_tests;
 #[path = "queue/tests.rs"]
 mod queue_tests;
 
+#[path = "policy/rules_tests.rs"]
+mod rules_tests;
+
 pub(super) fn review() -> SourceReviewReceipt {
     SourceReviewReceipt {
         review_id: "17".to_owned(),
@@ -134,6 +137,7 @@ fn check_run(name: &str, status: &str, conclusion: Option<&str>, required: bool)
         "conclusion": conclusion,
         "detailsUrl": "https://github.com/acme/project/actions/runs/17",
         "databaseId": 91,
+        "checkSuite": {"app": {"databaseId": 15368}},
         "isRequired": required
     })
 }
@@ -327,6 +331,9 @@ fn write_policy_fixture(
     let source = format!(
         "#!/bin/sh\ncase \"$2\" in\n\
          graphql) printf '%s\\n' {} ;;\n\
+         'repos/acme/project/rules/branches/main?per_page=100') \
+           printf '%s\\n' \"$@\" >> \"$HOME/rules-reads\"; \
+           if [ -f \"$HOME/branch-rules.json\" ]; then /bin/cat \"$HOME/branch-rules.json\"; else printf '[[]]\\n'; fi ;;\n\
          repos/acme/project/actions/jobs/91/logs) {} ;;\n\
          *) exit 19 ;;\n\
          esac\n",
@@ -365,6 +372,7 @@ fn policy_query_is_repository_generic_and_paginates_required_contexts() {
         .find(|argument| argument.starts_with("query="))
         .assert_value();
     assert!(query.contains("isRequired(pullRequestNumber: $number)"));
+    assert!(query.contains("checkSuite { app { databaseId } }"));
     assert!(query.contains("statusCheckRollup"));
     assert!(query.contains("isMergeQueueEnabled"));
     assert!(!query.contains("mergeCommitAllowed"));
@@ -942,6 +950,7 @@ fn merge_actions_preserve_terminal_authority_and_queue_ownership() {
         is_merge_queue_enabled: queued,
         head_update: None,
         pull_request_ready: false,
+        observed_required_checks: Default::default(),
     };
     for (state, expected) in [
         (

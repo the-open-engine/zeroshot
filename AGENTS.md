@@ -728,8 +728,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   authorizes agent repair. Authorities that schedule deferred merges must override
   `withdraw_merge_request`; its default is valid only when no autonomous merge effects exist. Merge commands retain contained process cleanup and use the GitHub API error boundary,
   never Git repair; changed gates cannot mask a permanent rejection. Configured
-  branch-protection contexts remain pending until they appear on the exact PR head, preventing a
-  newly opened PR from looking ready before its required workflow registers. Missing or stale human
+  branch-protection and active branch-ruleset contexts remain pending until they appear as required
+  on the exact PR head. Supplement otherwise-ready observations with all pages of GitHub's effective
+  branch-rules API, so a newly opened PR cannot look ready before its required workflow registers.
+  Ruleset App bindings require matching check-suite App identity. Legacy status contexts satisfy
+  unbound ruleset checks; unresolved App-bound checks remain pending. Missing or stale human
   review may satisfy PR readiness when aggregate ref-update policy positively requires approval,
   required checks have settled, and no observed conversation, linear-history, or signature blocker
   remains. Deployment requirements do not block PR handoff. Missing review-policy evidence stays

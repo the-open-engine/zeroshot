@@ -379,6 +379,7 @@ exec /bin/cat "$HOME/payload"
         is_merge_queue_enabled: false,
         head_update: None,
         pull_request_ready: false,
+        observed_required_checks: Default::default(),
     };
     include_check_logs(&mut snapshot, &[(91, check_log_tail(&output))]);
     let SourceReviewState::Open {

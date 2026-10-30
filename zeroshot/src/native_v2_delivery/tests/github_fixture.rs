@@ -1005,6 +1005,9 @@ case "$endpoint:$method" in
   repos/acme/project/issues/208/comments:POST)
     /usr/bin/printf '%s\n' '{"id":71}'
     ;;
+  'repos/acme/project/rules/branches/main?per_page=100:GET')
+    /usr/bin/printf '%s\n' '[[]]'
+    ;;
   graphql:GET)
     /usr/bin/printf '%s%s%s%s%s%s\n' \
       '[{"data":{"repository":{"nameWithOwner":"acme/project","mergeCommitAllowed":true,' \

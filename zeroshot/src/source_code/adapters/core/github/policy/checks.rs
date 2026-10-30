@@ -20,6 +20,24 @@ enum RequiredCheckOutcome {
 }
 
 impl CheckContextWire {
+    pub(super) const fn is_required(&self) -> bool {
+        match self {
+            Self::CheckRun { is_required, .. } | Self::StatusContext { is_required, .. } => {
+                *is_required
+            }
+        }
+    }
+
+    pub(super) fn integration_id(&self) -> Option<u64> {
+        match self {
+            Self::CheckRun { check_suite, .. } => check_suite
+                .as_ref()
+                .and_then(|suite| suite.app.as_ref())
+                .and_then(|app| app.database_id),
+            Self::StatusContext { .. } => None,
+        }
+    }
+
     pub(super) fn name(&self) -> &str {
         match self {
             Self::CheckRun { name, .. } => name,

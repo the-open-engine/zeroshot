@@ -123,6 +123,7 @@ fn assert_production_github_capture(gh_capture: &str, home: &Path) {
     assert!(gh_capture.contains("arg=repos/acme/project/issues/208/comments"));
     assert!(gh_capture.contains("arg=page=1"));
     assert!(gh_capture.contains("arg=graphql"));
+    assert!(gh_capture.contains("arg=repos/acme/project/rules/branches/main?per_page=100"));
     assert!(gh_capture.contains("arg=--paginate"));
     assert!(gh_capture.contains("isRequired(pullRequestNumber: $number)"));
     assert!(gh_capture.contains(

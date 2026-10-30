@@ -44,6 +44,7 @@ fn merge_authority(
         format!(
             "#!/bin/sh\ncase \"$2\" in\n\
          graphql) if [ -f \"$HOME/merge-args\" ]; then printf '%s\\n' {}; else printf '%s\\n' {}; fi ;;\n\
+         'repos/acme/project/rules/branches/main?per_page=100') printf '[[]]\\n' ;;\n\
          merge) printf '%s\\n' \"$@\" >> \"$HOME/merge-args\"; {action} ;;\n\
          *) exit 19 ;;\nesac\n",
             shell_literal(&json!([after]).to_string()),

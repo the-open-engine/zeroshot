@@ -54,15 +54,24 @@ pub(super) fn queue_authority(
         format!(
             r#"#!/bin/sh
 set -eu
+case "$2" in
+'repos/acme/project/rules/branches/main?per_page=100')
+    printf '%s\n' "$@" >> "$HOME/rules-reads"
+    if [ -f "$HOME/branch-rules-error" ]; then /bin/cat "$HOME/branch-rules-error" >&2; exit 1; fi
+    if [ -f "$HOME/branch-rules.json" ]; then /bin/cat "$HOME/branch-rules.json"; else printf '[[]]\n'; fi ;;
+graphql)
 case "$*" in
 {branches}
-*)
+*'query($owner:'*)
     index=0
     if [ -f "$HOME/reads" ]; then index=$(/bin/cat "$HOME/reads"); fi
     printf '%s' "$((index + 1))" > "$HOME/reads"
     if [ "$index" -gt 0 ] && [ -f "$HOME/require-completion" ]; then [ -f "$HOME/completed" ] || exit 31; fi
     if [ "$index" -gt {last} ]; then index={last}; fi
     /bin/cat "$HOME/policy-$index.json" ;;
+*) exit 19 ;;
+esac ;;
+*) exit 19 ;;
 esac
 "#,
             last = states.len() - 1

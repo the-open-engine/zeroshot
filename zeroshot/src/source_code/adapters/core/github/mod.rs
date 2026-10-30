@@ -253,7 +253,19 @@ impl GhCliDeliveryAuthority {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<PolicySnapshot, SourceDeliveryError> {
         let value = self.api(&query_arguments(review)?, credential).await?;
-        classify_policy(value, review)
+        let mut snapshot = classify_policy(value, review)?;
+        if matches!(
+            snapshot.state,
+            SourceReviewState::Open {
+                checks: SourceChecks::NotRequired | SourceChecks::Passed
+            }
+        ) {
+            let rules = self
+                .api(&policy::branch_rules_arguments(review)?, credential)
+                .await?;
+            snapshot.apply_branch_rules(rules)?;
+        }
+        Ok(snapshot)
     }
 
     async fn policy_snapshot_with_logs(
