@@ -159,7 +159,7 @@ Commands:
 <section id="zeroshot-acp"><h3><code>zeroshot acp</code></h3>
 <pre><code>Serve one local Zeroshot profile as an experimental ACP agent over stdio.
 
-The MVP supports one active session and text prompts. The profile must accept one task string and return one response string from every success node. It supports local Codex or Claude node-instance sessions, without maps, delivery, connections, MCP, or session reload.
+The MVP supports one active session and text prompts. The profile must accept one task string and return one response string from every success node. It supports registered local harnesses with node-instance sessions, without maps, delivery, connections, MCP, or session reload.
 
 Usage: zeroshot acp --profile &lt;local:NAME&gt;
 
@@ -1062,18 +1062,19 @@ RUNTIME CONFIGURATION
         }
       }
 
-    Provider choices are codex/openai, codex/openrouter, codex/bedrock, claude/anthropic,
-    claude/openrouter, claude/bedrock, codex/gateway, claude/gateway, copilot/github,
-    pi/anthropic, pi/openai, pi/openrouter, pi/bedrock, and pi/gateway. Gateway connections
+    The host&#39;s adapter registry admits supported harness/provider pairs. See the Harness adapters
+    documentation for available pairs. Official local builds include contributed opencode and hermes.
+    Contributed adapters use the same feature contract; compatibility is community-maintained.
+    Platform and the default target image enable only core harnesses. Gateway connections
     require GATEWAY_BASE_URL and GATEWAY_API_KEY. Codex uses Responses and Claude uses Messages.
-    The pi/gateway lane also carries GATEWAY_API, which names the wire protocol as one of
+    Pi, Copilot, OpenCode, and Hermes gateway lanes also carry GATEWAY_API, which names the protocol as
     openai-responses, openai-completions, or anthropic-messages.
     Declaring ANTHROPIC_BASE_URL with ANTHROPIC_API_KEY sends the pi/anthropic lane to a
     caller-owned Anthropic Messages endpoint.
     Known-incompatible harness/provider pairs include
-    codex/anthropic, claude/openai, and pi/github. Local Copilot reuses its native user login;
-    contained
-    Copilot uses a user-backed GitHub connection with COPILOT_GITHUB_TOKEN. Pi has no permission
+    codex/anthropic and claude/openai. Local copilot/github reuses native login; contained
+    copilot/github uses a user-backed GitHub connection with COPILOT_GITHUB_TOKEN.
+    Copilot&#39;s other lanes use native BYOK transports; its Bedrock lane uses AWS&#39;s Responses API. Pi has no permission
     control of its own, so its contained runs rely on the disposable capsule rather than a bypass
     argument. Model IDs are passed
     unchanged to the selected harness and
@@ -1090,7 +1091,8 @@ RUNTIME CONFIGURATION
     &quot;lane&quot;: {&quot;harness&quot;: &quot;claude&quot;, &quot;provider&quot;: &quot;anthropic&quot;} to run that node on another accepted
     pair; git_delivery and comment_delivery bindings cannot. --uniform-runtime-config applies one lane to every agent
     node. Named targets must advertise per-node lane support (openengine.node-runtime-lanes/v1), and
-    a local run first checks that each lane&#39;s executable (codex, claude, or copilot) is on PATH.
+    targets advertise enabled pairs through openengine.runtime-harnesses/v1. A local run first checks
+    that each registered lane&#39;s executable is on PATH.
 
     Use `zeroshot template show TEMPLATE` to inspect node names. With --push, --pr, or --ship, omit the
     template-owned delivery binding.
@@ -1099,9 +1101,8 @@ RUNTIME CONFIGURATION
     effort, sessionScope, connections, activeMemory, and globalAgents fields without nodes.
     Zeroshot expands that agent binding
     across every executable graph node and supplies graph-visible Git delivery bindings itself.
-    Omitted connections reuse native local login for codex/openai, claude/anthropic,
-    copilot/github, pi/anthropic, and pi/openai; other local lanes and contained targets derive
-    their canonical connection requirements.
+    Omitted connections reuse native local authentication when the selected adapter supports it;
+    other local lanes and contained targets derive their canonical connection requirements.
 
 ENVIRONMENT PREPARATION
     For Docker or Platform targets, pass --environment environment.json with a separate, flat JSON

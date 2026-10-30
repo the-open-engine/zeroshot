@@ -441,15 +441,6 @@
       ],
       "type": "object"
     },
-    "ClaudeProvider": {
-      "enum": [
-        "anthropic",
-        "openrouter",
-        "gateway",
-        "bedrock"
-      ],
-      "type": "string"
-    },
     "ClusterStatus": {
       "properties": {
         "atCursor": {
@@ -491,15 +482,6 @@
       ],
       "type": "object"
     },
-    "CodexProvider": {
-      "enum": [
-        "openai",
-        "openrouter",
-        "gateway",
-        "bedrock"
-      ],
-      "type": "string"
-    },
     "ControlSelector": {
       "additionalProperties": false,
       "properties": {
@@ -533,12 +515,6 @@
         "signal",
         "error",
         "group"
-      ],
-      "type": "string"
-    },
-    "CopilotProvider": {
-      "enum": [
-        "github"
       ],
       "type": "string"
     },
@@ -3928,17 +3904,6 @@
       ],
       "type": "string"
     },
-    "PiProvider": {
-      "description": "Provider lanes owned by the Pi harness.\n\nEach variant names one Pi provider whose credentials resolve through a named connection. Pi\nowns the wire behavior of every lane; this enum only selects which lane the adapter\nconfigures and which requirements admission materializes.",
-      "enum": [
-        "anthropic",
-        "openai",
-        "openrouter",
-        "gateway",
-        "bedrock"
-      ],
-      "type": "string"
-    },
     "PlanParams": {
       "additionalProperties": false,
       "properties": {
@@ -5191,229 +5156,70 @@
       "type": "object"
     },
     "RuntimeLane": {
-      "description": "One harness and provider pair: the run-level default, or an agent node's override.",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "harness": {
-              "const": "copilot",
-              "type": "string"
-            },
-            "provider": {
-              "$ref": "#/$defs/CopilotProvider"
-            }
-          },
-          "required": [
-            "harness",
-            "provider"
-          ],
-          "type": "object"
+      "additionalProperties": false,
+      "description": "One opaque harness/provider pair. Installed adapters own compatibility and execution policy.",
+      "properties": {
+        "harness": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
         },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "harness": {
-              "const": "codex",
-              "type": "string"
-            },
-            "provider": {
-              "$ref": "#/$defs/CodexProvider"
-            }
-          },
-          "required": [
-            "harness",
-            "provider"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "harness": {
-              "const": "claude",
-              "type": "string"
-            },
-            "provider": {
-              "$ref": "#/$defs/ClaudeProvider"
-            }
-          },
-          "required": [
-            "harness",
-            "provider"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "harness": {
-              "const": "pi",
-              "type": "string"
-            },
-            "provider": {
-              "$ref": "#/$defs/PiProvider"
-            }
-          },
-          "required": [
-            "harness",
-            "provider"
-          ],
-          "type": "object"
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
         }
-      ]
+      },
+      "required": [
+        "harness",
+        "provider"
+      ],
+      "type": "object"
     },
     "RuntimePlan": {
-      "oneOf": [
-        {
+      "additionalProperties": false,
+      "description": "Portable runtime selection. Compatibility belongs to the host's installed harness registry.",
+      "properties": {
+        "activeMemory": {
+          "$ref": "#/$defs/ActiveMemoryConfig"
+        },
+        "globalAgents": {
+          "$ref": "#/$defs/GlobalAgentsConfig"
+        },
+        "harness": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
+        },
+        "nodes": {
           "additionalProperties": false,
-          "properties": {
-            "activeMemory": {
-              "$ref": "#/$defs/ActiveMemoryConfig"
-            },
-            "globalAgents": {
-              "$ref": "#/$defs/GlobalAgentsConfig"
-            },
-            "harness": {
-              "const": "copilot",
-              "type": "string"
-            },
-            "nodes": {
-              "additionalProperties": false,
-              "patternProperties": {
-                "^[A-Za-z_][A-Za-z0-9_.-]*$": {
-                  "$ref": "#/$defs/NodeRuntimeBinding"
-                }
-              },
-              "type": "object"
-            },
-            "provider": {
-              "$ref": "#/$defs/CopilotProvider"
-            },
-            "size": {
-              "$ref": "#/$defs/RunSize"
+          "patternProperties": {
+            "^[A-Za-z_][A-Za-z0-9_.-]*$": {
+              "$ref": "#/$defs/NodeRuntimeBinding"
             }
           },
-          "required": [
-            "harness",
-            "provider",
-            "size",
-            "nodes"
-          ],
           "type": "object"
         },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "activeMemory": {
-              "$ref": "#/$defs/ActiveMemoryConfig"
-            },
-            "globalAgents": {
-              "$ref": "#/$defs/GlobalAgentsConfig"
-            },
-            "harness": {
-              "const": "codex",
-              "type": "string"
-            },
-            "nodes": {
-              "additionalProperties": false,
-              "patternProperties": {
-                "^[A-Za-z_][A-Za-z0-9_.-]*$": {
-                  "$ref": "#/$defs/NodeRuntimeBinding"
-                }
-              },
-              "type": "object"
-            },
-            "provider": {
-              "$ref": "#/$defs/CodexProvider"
-            },
-            "size": {
-              "$ref": "#/$defs/RunSize"
-            }
-          },
-          "required": [
-            "harness",
-            "provider",
-            "size",
-            "nodes"
-          ],
-          "type": "object"
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
         },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "activeMemory": {
-              "$ref": "#/$defs/ActiveMemoryConfig"
-            },
-            "globalAgents": {
-              "$ref": "#/$defs/GlobalAgentsConfig"
-            },
-            "harness": {
-              "const": "claude",
-              "type": "string"
-            },
-            "nodes": {
-              "additionalProperties": false,
-              "patternProperties": {
-                "^[A-Za-z_][A-Za-z0-9_.-]*$": {
-                  "$ref": "#/$defs/NodeRuntimeBinding"
-                }
-              },
-              "type": "object"
-            },
-            "provider": {
-              "$ref": "#/$defs/ClaudeProvider"
-            },
-            "size": {
-              "$ref": "#/$defs/RunSize"
-            }
-          },
-          "required": [
-            "harness",
-            "provider",
-            "size",
-            "nodes"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "activeMemory": {
-              "$ref": "#/$defs/ActiveMemoryConfig"
-            },
-            "globalAgents": {
-              "$ref": "#/$defs/GlobalAgentsConfig"
-            },
-            "harness": {
-              "const": "pi",
-              "type": "string"
-            },
-            "nodes": {
-              "additionalProperties": false,
-              "patternProperties": {
-                "^[A-Za-z_][A-Za-z0-9_.-]*$": {
-                  "$ref": "#/$defs/NodeRuntimeBinding"
-                }
-              },
-              "type": "object"
-            },
-            "provider": {
-              "$ref": "#/$defs/PiProvider"
-            },
-            "size": {
-              "$ref": "#/$defs/RunSize"
-            }
-          },
-          "required": [
-            "harness",
-            "provider",
-            "size",
-            "nodes"
-          ],
-          "type": "object"
+        "size": {
+          "$ref": "#/$defs/RunSize"
         }
-      ]
+      },
+      "required": [
+        "harness",
+        "provider",
+        "size",
+        "nodes"
+      ],
+      "type": "object"
     },
     "ServerCapabilities": {
       "additionalProperties": false,

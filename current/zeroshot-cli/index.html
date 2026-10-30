@@ -2268,6 +2268,8 @@
       
         
       
+        
+      
     
     
     
@@ -2384,6 +2386,34 @@
     
   
     Source-code adapters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../project/harness-adapters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harness adapters
   
 
     
@@ -3283,7 +3313,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <h3 id="zeroshot-acp"><code>zeroshot acp</code><a class="headerlink" href="#zeroshot-acp" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Serve one local Zeroshot profile as an experimental ACP agent over stdio.
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>The MVP supports one active session and text prompts. The profile must accept one task string and return one response string from every success node. It supports local Codex or Claude node-instance sessions, without maps, delivery, connections, MCP, or session reload.
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>The MVP supports one active session and text prompts. The profile must accept one task string and return one response string from every success node. It supports registered local harnesses with node-instance sessions, without maps, delivery, connections, MCP, or session reload.
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>Usage: zeroshot acp --profile &lt;local:NAME&gt;
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
@@ -4227,75 +4257,76 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-45-117" name="__codelineno-45-117" href="#__codelineno-45-117"></a>        }
 <a id="__codelineno-45-118" name="__codelineno-45-118" href="#__codelineno-45-118"></a>      }
 <a id="__codelineno-45-119" name="__codelineno-45-119" href="#__codelineno-45-119"></a>
-<a id="__codelineno-45-120" name="__codelineno-45-120" href="#__codelineno-45-120"></a>    Provider choices are codex/openai, codex/openrouter, codex/bedrock, claude/anthropic,
-<a id="__codelineno-45-121" name="__codelineno-45-121" href="#__codelineno-45-121"></a>    claude/openrouter, claude/bedrock, codex/gateway, claude/gateway, copilot/github,
-<a id="__codelineno-45-122" name="__codelineno-45-122" href="#__codelineno-45-122"></a>    pi/anthropic, pi/openai, pi/openrouter, pi/bedrock, and pi/gateway. Gateway connections
-<a id="__codelineno-45-123" name="__codelineno-45-123" href="#__codelineno-45-123"></a>    require GATEWAY_BASE_URL and GATEWAY_API_KEY. Codex uses Responses and Claude uses Messages.
-<a id="__codelineno-45-124" name="__codelineno-45-124" href="#__codelineno-45-124"></a>    The pi/gateway lane also carries GATEWAY_API, which names the wire protocol as one of
-<a id="__codelineno-45-125" name="__codelineno-45-125" href="#__codelineno-45-125"></a>    openai-responses, openai-completions, or anthropic-messages.
-<a id="__codelineno-45-126" name="__codelineno-45-126" href="#__codelineno-45-126"></a>    Declaring ANTHROPIC_BASE_URL with ANTHROPIC_API_KEY sends the pi/anthropic lane to a
-<a id="__codelineno-45-127" name="__codelineno-45-127" href="#__codelineno-45-127"></a>    caller-owned Anthropic Messages endpoint.
-<a id="__codelineno-45-128" name="__codelineno-45-128" href="#__codelineno-45-128"></a>    Known-incompatible harness/provider pairs include
-<a id="__codelineno-45-129" name="__codelineno-45-129" href="#__codelineno-45-129"></a>    codex/anthropic, claude/openai, and pi/github. Local Copilot reuses its native user login;
-<a id="__codelineno-45-130" name="__codelineno-45-130" href="#__codelineno-45-130"></a>    contained
-<a id="__codelineno-45-131" name="__codelineno-45-131" href="#__codelineno-45-131"></a>    Copilot uses a user-backed GitHub connection with COPILOT_GITHUB_TOKEN. Pi has no permission
-<a id="__codelineno-45-132" name="__codelineno-45-132" href="#__codelineno-45-132"></a>    control of its own, so its contained runs rely on the disposable capsule rather than a bypass
-<a id="__codelineno-45-133" name="__codelineno-45-133" href="#__codelineno-45-133"></a>    argument. Model IDs are passed
-<a id="__codelineno-45-134" name="__codelineno-45-134" href="#__codelineno-45-134"></a>    unchanged to the selected harness and
-<a id="__codelineno-45-135" name="__codelineno-45-135" href="#__codelineno-45-135"></a>    provider; Zeroshot does not maintain or validate provider model catalogs.
-<a id="__codelineno-45-136" name="__codelineno-45-136" href="#__codelineno-45-136"></a>
-<a id="__codelineno-45-137" name="__codelineno-45-137" href="#__codelineno-45-137"></a>    Sizes are small, medium, and large.
-<a id="__codelineno-45-138" name="__codelineno-45-138" href="#__codelineno-45-138"></a>
-<a id="__codelineno-45-139" name="__codelineno-45-139" href="#__codelineno-45-139"></a>    Every executable graph node needs a same-named binding. Agent bindings require kind and model.
-<a id="__codelineno-45-140" name="__codelineno-45-140" href="#__codelineno-45-140"></a>    Optional fields are effort (low, medium, high, xhigh, or max when supported), sessionScope
-<a id="__codelineno-45-141" name="__codelineno-45-141" href="#__codelineno-45-141"></a>    (execution or node_instance), and connections. Each connection key maps to the exact
-<a id="__codelineno-45-142" name="__codelineno-45-142" href="#__codelineno-45-142"></a>    environment variable names required by that node; never put values in this file.
-<a id="__codelineno-45-143" name="__codelineno-45-143" href="#__codelineno-45-143"></a>
-<a id="__codelineno-45-144" name="__codelineno-45-144" href="#__codelineno-45-144"></a>    The run-level harness and provider are the default lane. An agent binding may add
-<a id="__codelineno-45-145" name="__codelineno-45-145" href="#__codelineno-45-145"></a>    "lane": {"harness": "claude", "provider": "anthropic"} to run that node on another accepted
-<a id="__codelineno-45-146" name="__codelineno-45-146" href="#__codelineno-45-146"></a>    pair; git_delivery and comment_delivery bindings cannot. --uniform-runtime-config applies one lane to every agent
-<a id="__codelineno-45-147" name="__codelineno-45-147" href="#__codelineno-45-147"></a>    node. Named targets must advertise per-node lane support (openengine.node-runtime-lanes/v1), and
-<a id="__codelineno-45-148" name="__codelineno-45-148" href="#__codelineno-45-148"></a>    a local run first checks that each lane's executable (codex, claude, or copilot) is on PATH.
-<a id="__codelineno-45-149" name="__codelineno-45-149" href="#__codelineno-45-149"></a>
-<a id="__codelineno-45-150" name="__codelineno-45-150" href="#__codelineno-45-150"></a>    Use `zeroshot template show TEMPLATE` to inspect node names. With --push, --pr, or --ship, omit the
-<a id="__codelineno-45-151" name="__codelineno-45-151" href="#__codelineno-45-151"></a>    template-owned delivery binding.
-<a id="__codelineno-45-152" name="__codelineno-45-152" href="#__codelineno-45-152"></a>
-<a id="__codelineno-45-153" name="__codelineno-45-153" href="#__codelineno-45-153"></a>    --uniform-runtime-config requires harness, provider, and model. It accepts optional size,
-<a id="__codelineno-45-154" name="__codelineno-45-154" href="#__codelineno-45-154"></a>    effort, sessionScope, connections, activeMemory, and globalAgents fields without nodes.
-<a id="__codelineno-45-155" name="__codelineno-45-155" href="#__codelineno-45-155"></a>    Zeroshot expands that agent binding
-<a id="__codelineno-45-156" name="__codelineno-45-156" href="#__codelineno-45-156"></a>    across every executable graph node and supplies graph-visible Git delivery bindings itself.
-<a id="__codelineno-45-157" name="__codelineno-45-157" href="#__codelineno-45-157"></a>    Omitted connections reuse native local login for codex/openai, claude/anthropic,
-<a id="__codelineno-45-158" name="__codelineno-45-158" href="#__codelineno-45-158"></a>    copilot/github, pi/anthropic, and pi/openai; other local lanes and contained targets derive
-<a id="__codelineno-45-159" name="__codelineno-45-159" href="#__codelineno-45-159"></a>    their canonical connection requirements.
-<a id="__codelineno-45-160" name="__codelineno-45-160" href="#__codelineno-45-160"></a>
-<a id="__codelineno-45-161" name="__codelineno-45-161" href="#__codelineno-45-161"></a>ENVIRONMENT PREPARATION
-<a id="__codelineno-45-162" name="__codelineno-45-162" href="#__codelineno-45-162"></a>    For Docker or Platform targets, pass --environment environment.json with a separate, flat JSON
-<a id="__codelineno-45-163" name="__codelineno-45-163" href="#__codelineno-45-163"></a>    definition (not a profile field or an "environment" wrapper):
-<a id="__codelineno-45-164" name="__codelineno-45-164" href="#__codelineno-45-164"></a>
-<a id="__codelineno-45-165" name="__codelineno-45-165" href="#__codelineno-45-165"></a>      {
-<a id="__codelineno-45-166" name="__codelineno-45-166" href="#__codelineno-45-166"></a>        "setup": "apt-get update &amp;&amp; apt-get install -y jq",
-<a id="__codelineno-45-167" name="__codelineno-45-167" href="#__codelineno-45-167"></a>        "startup": "npm ci",
-<a id="__codelineno-45-168" name="__codelineno-45-168" href="#__codelineno-45-168"></a>        "variables": {"CI": "true"}
-<a id="__codelineno-45-169" name="__codelineno-45-169" href="#__codelineno-45-169"></a>      }
-<a id="__codelineno-45-170" name="__codelineno-45-170" href="#__codelineno-45-170"></a>
-<a id="__codelineno-45-171" name="__codelineno-45-171" href="#__codelineno-45-171"></a>    Setup runs as root before checkout or workspace restore. Startup runs as the non-root
-<a id="__codelineno-45-172" name="__codelineno-45-172" href="#__codelineno-45-172"></a>    workspace owner in the checkout before any agent starts. Workers and reviewers share the
-<a id="__codelineno-45-173" name="__codelineno-45-173" href="#__codelineno-45-173"></a>    prepared workspace. Both hooks rerun on resume; startup must tolerate existing files.
-<a id="__codelineno-45-174" name="__codelineno-45-174" href="#__codelineno-45-174"></a>
-<a id="__codelineno-45-175" name="__codelineno-45-175" href="#__codelineno-45-175"></a>    Install OS packages in setup, project dependencies in startup, and shared executable tools
-<a id="__codelineno-45-176" name="__codelineno-45-176" href="#__codelineno-45-176"></a>    under $ZEROSHOT_TOOLS/bin (already on every hook and agent's PATH). Shell exports last only
-<a id="__codelineno-45-177" name="__codelineno-45-177" href="#__codelineno-45-177"></a>    for that hook; use variables for public values shared with agents. Scripts and variables
-<a id="__codelineno-45-178" name="__codelineno-45-178" href="#__codelineno-45-178"></a>    are public. If hooks need secrets, add e.g. "connections": {"package-registry": ["NPM_TOKEN"]}.
-<a id="__codelineno-45-179" name="__codelineno-45-179" href="#__codelineno-45-179"></a>    Hook connections are separate from node connections.
-<a id="__codelineno-45-180" name="__codelineno-45-180" href="#__codelineno-45-180"></a>
-<a id="__codelineno-45-181" name="__codelineno-45-181" href="#__codelineno-45-181"></a>    Hook failures stop the run before agents start and use no graph retry attempts.
-<a id="__codelineno-45-182" name="__codelineno-45-182" href="#__codelineno-45-182"></a>    Inspect `zeroshot logs RUN_ID --target NAME` for preparation output.
-<a id="__codelineno-45-183" name="__codelineno-45-183" href="#__codelineno-45-183"></a>    Omit both flags to allow host defaults; direct Docker defaults to the base environment.
-<a id="__codelineno-45-184" name="__codelineno-45-184" href="#__codelineno-45-184"></a>    --no-environment sends {} to bypass host defaults. Local runs use the invoking machine and
-<a id="__codelineno-45-185" name="__codelineno-45-185" href="#__codelineno-45-185"></a>    reject hooks and hook connections.
-<a id="__codelineno-45-186" name="__codelineno-45-186" href="#__codelineno-45-186"></a>
-<a id="__codelineno-45-187" name="__codelineno-45-187" href="#__codelineno-45-187"></a>    Installation, services, limits, and recovery:
-<a id="__codelineno-45-188" name="__codelineno-45-188" href="#__codelineno-45-188"></a>    https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/
+<a id="__codelineno-45-120" name="__codelineno-45-120" href="#__codelineno-45-120"></a>    The host's adapter registry admits supported harness/provider pairs. See the Harness adapters
+<a id="__codelineno-45-121" name="__codelineno-45-121" href="#__codelineno-45-121"></a>    documentation for available pairs. Official local builds include contributed opencode and hermes.
+<a id="__codelineno-45-122" name="__codelineno-45-122" href="#__codelineno-45-122"></a>    Contributed adapters use the same feature contract; compatibility is community-maintained.
+<a id="__codelineno-45-123" name="__codelineno-45-123" href="#__codelineno-45-123"></a>    Platform and the default target image enable only core harnesses. Gateway connections
+<a id="__codelineno-45-124" name="__codelineno-45-124" href="#__codelineno-45-124"></a>    require GATEWAY_BASE_URL and GATEWAY_API_KEY. Codex uses Responses and Claude uses Messages.
+<a id="__codelineno-45-125" name="__codelineno-45-125" href="#__codelineno-45-125"></a>    Pi, Copilot, OpenCode, and Hermes gateway lanes also carry GATEWAY_API, which names the protocol as
+<a id="__codelineno-45-126" name="__codelineno-45-126" href="#__codelineno-45-126"></a>    openai-responses, openai-completions, or anthropic-messages.
+<a id="__codelineno-45-127" name="__codelineno-45-127" href="#__codelineno-45-127"></a>    Declaring ANTHROPIC_BASE_URL with ANTHROPIC_API_KEY sends the pi/anthropic lane to a
+<a id="__codelineno-45-128" name="__codelineno-45-128" href="#__codelineno-45-128"></a>    caller-owned Anthropic Messages endpoint.
+<a id="__codelineno-45-129" name="__codelineno-45-129" href="#__codelineno-45-129"></a>    Known-incompatible harness/provider pairs include
+<a id="__codelineno-45-130" name="__codelineno-45-130" href="#__codelineno-45-130"></a>    codex/anthropic and claude/openai. Local copilot/github reuses native login; contained
+<a id="__codelineno-45-131" name="__codelineno-45-131" href="#__codelineno-45-131"></a>    copilot/github uses a user-backed GitHub connection with COPILOT_GITHUB_TOKEN.
+<a id="__codelineno-45-132" name="__codelineno-45-132" href="#__codelineno-45-132"></a>    Copilot's other lanes use native BYOK transports; its Bedrock lane uses AWS's Responses API. Pi has no permission
+<a id="__codelineno-45-133" name="__codelineno-45-133" href="#__codelineno-45-133"></a>    control of its own, so its contained runs rely on the disposable capsule rather than a bypass
+<a id="__codelineno-45-134" name="__codelineno-45-134" href="#__codelineno-45-134"></a>    argument. Model IDs are passed
+<a id="__codelineno-45-135" name="__codelineno-45-135" href="#__codelineno-45-135"></a>    unchanged to the selected harness and
+<a id="__codelineno-45-136" name="__codelineno-45-136" href="#__codelineno-45-136"></a>    provider; Zeroshot does not maintain or validate provider model catalogs.
+<a id="__codelineno-45-137" name="__codelineno-45-137" href="#__codelineno-45-137"></a>
+<a id="__codelineno-45-138" name="__codelineno-45-138" href="#__codelineno-45-138"></a>    Sizes are small, medium, and large.
+<a id="__codelineno-45-139" name="__codelineno-45-139" href="#__codelineno-45-139"></a>
+<a id="__codelineno-45-140" name="__codelineno-45-140" href="#__codelineno-45-140"></a>    Every executable graph node needs a same-named binding. Agent bindings require kind and model.
+<a id="__codelineno-45-141" name="__codelineno-45-141" href="#__codelineno-45-141"></a>    Optional fields are effort (low, medium, high, xhigh, or max when supported), sessionScope
+<a id="__codelineno-45-142" name="__codelineno-45-142" href="#__codelineno-45-142"></a>    (execution or node_instance), and connections. Each connection key maps to the exact
+<a id="__codelineno-45-143" name="__codelineno-45-143" href="#__codelineno-45-143"></a>    environment variable names required by that node; never put values in this file.
+<a id="__codelineno-45-144" name="__codelineno-45-144" href="#__codelineno-45-144"></a>
+<a id="__codelineno-45-145" name="__codelineno-45-145" href="#__codelineno-45-145"></a>    The run-level harness and provider are the default lane. An agent binding may add
+<a id="__codelineno-45-146" name="__codelineno-45-146" href="#__codelineno-45-146"></a>    "lane": {"harness": "claude", "provider": "anthropic"} to run that node on another accepted
+<a id="__codelineno-45-147" name="__codelineno-45-147" href="#__codelineno-45-147"></a>    pair; git_delivery and comment_delivery bindings cannot. --uniform-runtime-config applies one lane to every agent
+<a id="__codelineno-45-148" name="__codelineno-45-148" href="#__codelineno-45-148"></a>    node. Named targets must advertise per-node lane support (openengine.node-runtime-lanes/v1), and
+<a id="__codelineno-45-149" name="__codelineno-45-149" href="#__codelineno-45-149"></a>    targets advertise enabled pairs through openengine.runtime-harnesses/v1. A local run first checks
+<a id="__codelineno-45-150" name="__codelineno-45-150" href="#__codelineno-45-150"></a>    that each registered lane's executable is on PATH.
+<a id="__codelineno-45-151" name="__codelineno-45-151" href="#__codelineno-45-151"></a>
+<a id="__codelineno-45-152" name="__codelineno-45-152" href="#__codelineno-45-152"></a>    Use `zeroshot template show TEMPLATE` to inspect node names. With --push, --pr, or --ship, omit the
+<a id="__codelineno-45-153" name="__codelineno-45-153" href="#__codelineno-45-153"></a>    template-owned delivery binding.
+<a id="__codelineno-45-154" name="__codelineno-45-154" href="#__codelineno-45-154"></a>
+<a id="__codelineno-45-155" name="__codelineno-45-155" href="#__codelineno-45-155"></a>    --uniform-runtime-config requires harness, provider, and model. It accepts optional size,
+<a id="__codelineno-45-156" name="__codelineno-45-156" href="#__codelineno-45-156"></a>    effort, sessionScope, connections, activeMemory, and globalAgents fields without nodes.
+<a id="__codelineno-45-157" name="__codelineno-45-157" href="#__codelineno-45-157"></a>    Zeroshot expands that agent binding
+<a id="__codelineno-45-158" name="__codelineno-45-158" href="#__codelineno-45-158"></a>    across every executable graph node and supplies graph-visible Git delivery bindings itself.
+<a id="__codelineno-45-159" name="__codelineno-45-159" href="#__codelineno-45-159"></a>    Omitted connections reuse native local authentication when the selected adapter supports it;
+<a id="__codelineno-45-160" name="__codelineno-45-160" href="#__codelineno-45-160"></a>    other local lanes and contained targets derive their canonical connection requirements.
+<a id="__codelineno-45-161" name="__codelineno-45-161" href="#__codelineno-45-161"></a>
+<a id="__codelineno-45-162" name="__codelineno-45-162" href="#__codelineno-45-162"></a>ENVIRONMENT PREPARATION
+<a id="__codelineno-45-163" name="__codelineno-45-163" href="#__codelineno-45-163"></a>    For Docker or Platform targets, pass --environment environment.json with a separate, flat JSON
+<a id="__codelineno-45-164" name="__codelineno-45-164" href="#__codelineno-45-164"></a>    definition (not a profile field or an "environment" wrapper):
+<a id="__codelineno-45-165" name="__codelineno-45-165" href="#__codelineno-45-165"></a>
+<a id="__codelineno-45-166" name="__codelineno-45-166" href="#__codelineno-45-166"></a>      {
+<a id="__codelineno-45-167" name="__codelineno-45-167" href="#__codelineno-45-167"></a>        "setup": "apt-get update &amp;&amp; apt-get install -y jq",
+<a id="__codelineno-45-168" name="__codelineno-45-168" href="#__codelineno-45-168"></a>        "startup": "npm ci",
+<a id="__codelineno-45-169" name="__codelineno-45-169" href="#__codelineno-45-169"></a>        "variables": {"CI": "true"}
+<a id="__codelineno-45-170" name="__codelineno-45-170" href="#__codelineno-45-170"></a>      }
+<a id="__codelineno-45-171" name="__codelineno-45-171" href="#__codelineno-45-171"></a>
+<a id="__codelineno-45-172" name="__codelineno-45-172" href="#__codelineno-45-172"></a>    Setup runs as root before checkout or workspace restore. Startup runs as the non-root
+<a id="__codelineno-45-173" name="__codelineno-45-173" href="#__codelineno-45-173"></a>    workspace owner in the checkout before any agent starts. Workers and reviewers share the
+<a id="__codelineno-45-174" name="__codelineno-45-174" href="#__codelineno-45-174"></a>    prepared workspace. Both hooks rerun on resume; startup must tolerate existing files.
+<a id="__codelineno-45-175" name="__codelineno-45-175" href="#__codelineno-45-175"></a>
+<a id="__codelineno-45-176" name="__codelineno-45-176" href="#__codelineno-45-176"></a>    Install OS packages in setup, project dependencies in startup, and shared executable tools
+<a id="__codelineno-45-177" name="__codelineno-45-177" href="#__codelineno-45-177"></a>    under $ZEROSHOT_TOOLS/bin (already on every hook and agent's PATH). Shell exports last only
+<a id="__codelineno-45-178" name="__codelineno-45-178" href="#__codelineno-45-178"></a>    for that hook; use variables for public values shared with agents. Scripts and variables
+<a id="__codelineno-45-179" name="__codelineno-45-179" href="#__codelineno-45-179"></a>    are public. If hooks need secrets, add e.g. "connections": {"package-registry": ["NPM_TOKEN"]}.
+<a id="__codelineno-45-180" name="__codelineno-45-180" href="#__codelineno-45-180"></a>    Hook connections are separate from node connections.
+<a id="__codelineno-45-181" name="__codelineno-45-181" href="#__codelineno-45-181"></a>
+<a id="__codelineno-45-182" name="__codelineno-45-182" href="#__codelineno-45-182"></a>    Hook failures stop the run before agents start and use no graph retry attempts.
+<a id="__codelineno-45-183" name="__codelineno-45-183" href="#__codelineno-45-183"></a>    Inspect `zeroshot logs RUN_ID --target NAME` for preparation output.
+<a id="__codelineno-45-184" name="__codelineno-45-184" href="#__codelineno-45-184"></a>    Omit both flags to allow host defaults; direct Docker defaults to the base environment.
+<a id="__codelineno-45-185" name="__codelineno-45-185" href="#__codelineno-45-185"></a>    --no-environment sends {} to bypass host defaults. Local runs use the invoking machine and
+<a id="__codelineno-45-186" name="__codelineno-45-186" href="#__codelineno-45-186"></a>    reject hooks and hook connections.
+<a id="__codelineno-45-187" name="__codelineno-45-187" href="#__codelineno-45-187"></a>
+<a id="__codelineno-45-188" name="__codelineno-45-188" href="#__codelineno-45-188"></a>    Installation, services, limits, and recovery:
+<a id="__codelineno-45-189" name="__codelineno-45-189" href="#__codelineno-45-189"></a>    https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/
 </code></pre></div>
 <h3 id="zeroshot-update"><code>zeroshot update</code><a class="headerlink" href="#zeroshot-update" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-46-1" name="__codelineno-46-1" href="#__codelineno-46-1"></a>Update this executable and managed agent skills to the newest canonical release.

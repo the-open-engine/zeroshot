@@ -1609,6 +1609,8 @@
       
         
       
+        
+      
     
     
     
@@ -1725,6 +1727,34 @@
     
   
     Source-code adapters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../project/harness-adapters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harness adapters
   
 
     
@@ -1891,10 +1921,9 @@ from the active Zeroshot state directory.</p>
 <li>Every success node returns one required string field named <code>response</code>.</li>
 <li>Map nodes and Git delivery nodes aren't accepted.</li>
 <li>Every executable node has an agent runtime binding with <code>sessionScope</code> set to <code>node_instance</code>.</li>
-<li>Runtime connections aren't accepted. The endpoint supports Codex and Claude through their local
-  user login and configuration.</li>
-<li>Agent nodes may mix Codex and Claude <a href="../../reference/runtime-plan/#per-node-lanes">lanes</a>. A
-  Copilot or Pi lane isn't accepted.</li>
+<li>Runtime connections aren't accepted. Registered local harnesses use their native login and
+  configuration.</li>
+<li>Agent nodes may mix registered harness <a href="../../reference/runtime-plan/#per-node-lanes">lanes</a>.</li>
 </ul>
 <p>These limits keep one ACP turn equivalent to one ordinary local run; the graph compiler, reducer,
 provider adapters, and run ledger stay unchanged.</p>
@@ -1999,7 +2028,7 @@ it from the success node:</p>
 <p>Configure the ACP client to launch the saved profile:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot acp --profile local:acp-worker</span>
 </code></pre></div>
-<p>The command checks that each lane's executable, <code>codex</code> or <code>claude</code>, is on <code>PATH</code>, as a local run
+<p>The command checks that each registered lane's executable is on <code>PATH</code>, as a local run
 does. Each session checks when it opens, against that session's workspace, and a missing executable
 fails <code>session/new</code> with an invalid-params error that names the lane and executable. If every
 <code>PATH</code> entry is absolute, the command also checks at startup. An empty or relative entry resolves
@@ -2032,7 +2061,7 @@ either one stops the active turn as <code>runtime_lost</code> and rejects later 
 fresh run ID, controller lock, SQLite ledger, and supervisor lifecycle, so it remains visible after
 the ACP session closes.</p>
 <p>Provider sessions use stable graph-node slots within the outer ACP session. A clean node completion
-can therefore resume the same Codex thread or Claude session on the next prompt.
+can therefore resume the same native harness session on the next prompt.
 Closing the ACP session cancels an active prompt, waits for it to settle, closes every provider
 session, and releases the workspace lease. <code>session/cancel</code> force-stops only the current durable
 turn and returns ACP's <code>cancelled</code> stop reason.</p>
@@ -2059,7 +2088,7 @@ error and write the safe diagnostic to standard error.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-24">24 October 2026</time>
+    Last updated <time datetime="2026-10-30">30 October 2026</time>
   </span>
 
     

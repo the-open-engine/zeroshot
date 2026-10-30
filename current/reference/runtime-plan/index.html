@@ -1565,6 +1565,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#contributed-harnesses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contributed harnesses
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1744,6 +1755,8 @@
       
         
       
+        
+      
     
     
     
@@ -1860,6 +1873,34 @@
     
   
     Source-code adapters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../project/harness-adapters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harness adapters
   
 
     
@@ -2126,6 +2167,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#contributed-harnesses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contributed harnesses
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2167,7 +2219,7 @@ machine-readable contract.</p>
 <tbody>
 <tr>
 <td><code>harness</code></td>
-<td>Harness of the default lane: <code>codex</code>, <code>claude</code>, <code>copilot</code>, or <code>pi</code></td>
+<td>Registered harness of the default lane</td>
 </tr>
 <tr>
 <td><code>provider</code></td>
@@ -2206,49 +2258,24 @@ status; the hosting target decides what resources each class receives.</p>
 <a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="p">}</span>
 </code></pre></div>
 <h2 id="harness-and-provider">Harness and provider<a class="headerlink" href="#harness-and-provider" title="Permanent link">&para;</a></h2>
-<p><code>harness</code> selects which <code>provider</code> values parse:</p>
-<table>
-<thead>
-<tr>
-<th><code>harness</code></th>
-<th><code>provider</code></th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>codex</code></td>
-<td><code>openai</code>, <code>openrouter</code>, <code>bedrock</code>, <code>gateway</code></td>
-</tr>
-<tr>
-<td><code>claude</code></td>
-<td><code>anthropic</code>, <code>openrouter</code>, <code>bedrock</code>, <code>gateway</code></td>
-</tr>
-<tr>
-<td><code>copilot</code></td>
-<td><code>github</code></td>
-</tr>
-<tr>
-<td><code>pi</code></td>
-<td><code>anthropic</code>, <code>openai</code>, <code>openrouter</code>, <code>bedrock</code>, <code>gateway</code></td>
-</tr>
-</tbody>
-</table>
-<p>The same pairs apply to an agent node's <a href="#per-node-lanes"><code>lane</code></a>. Any other pair is rejected when
-the plan is read.</p>
-<p><code>pi/anthropic</code> and <code>pi/openai</code> reuse a local Pi login from <code>~/.pi/agent</code>; the other <code>pi</code> lanes
+<p>Harness and provider identifiers are bounded non-control strings. The host registry validates their
+compatibility during admission; see <a href="../../project/harness-adapters/">Harness adapters</a> for available
+pairs and where each adapter runs. The same compatibility rules apply to an agent node's
+<a href="#per-node-lanes"><code>lane</code></a>.</p>
+<p><code>pi/anthropic</code>, <code>pi/openai</code> and <code>pi/github</code> reuse a local Pi login from <code>~/.pi/agent</code>; the other <code>pi</code> lanes
 need a connection.</p>
-<p><code>pi/gateway</code> carries <code>GATEWAY_BASE_URL</code>, <code>GATEWAY_API_KEY</code>, and <code>GATEWAY_API</code>. The last names the
+<p>Pi, Copilot, OpenCode and Hermes gateway lanes carry <code>GATEWAY_BASE_URL</code>, <code>GATEWAY_API_KEY</code>, and <code>GATEWAY_API</code>. The last names the
 wire protocol as <code>openai-responses</code>, <code>openai-completions</code>, or <code>anthropic-messages</code>, so one lane
-reaches any endpoint Pi implements and the model identifier stays opaque and caller-owned. Zeroshot
-never infers the protocol from the identifier, and an unrecognized value fails before launch. The
-synthesized model entry carries a node's <code>contextWindow</code> and <code>maxTokens</code> only when the caller
-declared them; omitted limits keep Pi's own defaults. The built-in-provider endpoint overrides keep
-Pi's catalog and receive no synthesized model entry.</p>
-<p>To send the <code>anthropic</code> lane to a caller-owned Messages-compatible endpoint, declare
+selects the native transport and the model identifier stays opaque and caller-owned. Zeroshot
+never infers the protocol from the identifier, and an unrecognized value fails before launch.
+Pi's gateway model entry carries a node's <code>contextWindow</code> and <code>maxTokens</code> only when the caller
+has declared them; omitted limits keep Pi's own defaults. Built-in-provider endpoint overrides
+keep Pi's catalog and receive no synthesized model entry.</p>
+<p>To send Pi's <code>anthropic</code> lane to a caller-owned Messages-compatible endpoint, declare
 <code>ANTHROPIC_BASE_URL</code> with any one of the lane's credentials (<code>ANTHROPIC_API_KEY</code>,
 <code>ANTHROPIC_AUTH_TOKEN</code>, or <code>ANTHROPIC_OAUTH_TOKEN</code>); a local run also honors the invoking shell's
 <code>ANTHROPIC_BASE_URL</code>. The endpoint override interpolates the API key only when the connection
-supplies it, so a token keeps Pi's own environment authentication. The <code>openai</code> lane likewise
+supplies it, so a token keeps Pi's own environment authentication. Pi's <code>openai</code> lane likewise
 honors <code>OPENAI_BASE_URL</code> or <code>OPENAI_API_BASE</code>. Pi ignores these variables itself, so Zeroshot turns each into a provider
 override that keeps that provider's own protocol; the <code>openai</code> lane therefore needs a
 Responses-compatible endpoint, and any other protocol uses <code>pi/gateway</code>. A declared endpoint ends
@@ -2538,8 +2565,8 @@ on the default <code>codex</code>/<code>openai</code> lane, and both reviewers r
 <p>Each <code>model</code> goes to the provider of its node's effective lane, so here <code>worker</code> needs an OpenAI
 model identifier and the reviewers need Anthropic ones.</p>
 <ul>
-<li><code>lane</code> accepts the same pairs as the run level, listed in
-  <a href="#harness-and-provider">Harness and provider</a>. An invalid pair is rejected when the plan is read.</li>
+<li><code>lane</code> follows the same <a href="#harness-and-provider">harness/provider admission rules</a> as the run
+  level. An invalid pair is rejected when the plan is admitted.</li>
 <li>A <code>git_delivery</code> or <code>comment_delivery</code> binding cannot carry a <code>lane</code>.</li>
 <li>A <code>lane</code> equal to the run-level pair is accepted, and the node runs exactly as it would without
   one. It is still a <code>lane</code> field, so the <a href="#target-support">target support</a> check applies to it and
@@ -2555,8 +2582,9 @@ node carries a <code>lane</code> and the target does not advertise the capabilit
 reading the target's discovery document and before it requests an access token or sends the plan:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>target operation failed: target does not support per-node runtime lanes (openengine.node-runtime-lanes/v1)
 </code></pre></div>
-<p>Plans without a <code>lane</code> are unchanged on the wire and work with every target. Older Zeroshot
-binaries reject a plan that contains a <code>lane</code> field when they read it.</p>
+<p>Plans without a <code>lane</code> do not require the per-node capability. Targets separately advertise enabled
+harness/provider pairs through <code>openengine.runtime-harnesses/v1</code>; see <a href="../../concepts/targets/">Targets</a>.
+Older Zeroshot binaries reject a plan that contains a <code>lane</code> field when they read it.</p>
 <p>Local profiles are saved together in one file in the configuration store (<code>ZEROSHOT_CONFIG_DIR</code>).
 Once any local profile carries a <code>lane</code>, an older binary cannot read that file at all. Every local
 profile command, <code>--profile local:NAME</code> run, and <code>zeroshot acp</code> session then fails, including for
@@ -2567,17 +2595,17 @@ profiles without lanes:</p>
 the profile or its <code>lane</code> fields with the newer binary.</p>
 <h3 id="local-runs">Local runs<a class="headerlink" href="#local-runs" title="Permanent link">&para;</a></h3>
 <p>Before the controller starts, a local <code>zeroshot run</code> or <code>zeroshot resume</code> checks that each lane's
-executable, <code>codex</code>, <code>claude</code>, <code>copilot</code>, or <code>pi</code>, is on <code>PATH</code>. A missing executable fails the
+registered executable is on <code>PATH</code>. A missing executable fails the
 command with a message such as:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>lane claude/anthropic needs the `claude` executable on PATH
 </code></pre></div>
 <p><code>zeroshot acp</code> runs the same check when each session opens, against that session's workspace, and
 the session request fails with the same message. When every <code>PATH</code> entry is absolute, it also
 checks at startup. An empty or relative entry resolves against the directory the harness starts in,
-which is known only per session, so then the startup check is skipped. The check does not inspect login state; a missing login surfaces at
-that lane's first turn. As in a single-lane run, local <code>codex</code>/<code>openai</code>, <code>claude</code>/<code>anthropic</code>,
-<code>copilot</code>/<code>github</code>, <code>pi</code>/<code>anthropic</code>, and <code>pi</code>/<code>openai</code> lanes reuse their harness's native login,
-and other lanes need their provider's connection fields; see <a href="#connections">Connections</a>.</p>
+which is known only per session, so then the startup check is skipped. The check does not inspect
+login state; a missing login surfaces at that lane's first turn. Lanes with native-login support reuse
+their harness's login. Other lanes need provider connection fields; see
+<a href="../../concepts/runtimes-and-connections/#runtime-configuration-contains-names-not-secret-values">Runtimes and connections</a>.</p>
 <h2 id="coverage">Coverage<a class="headerlink" href="#coverage" title="Permanent link">&para;</a></h2>
 <p><code>nodes</code> contains exactly one binding for every <code>step</code> and <code>verifier</code> in the graph, keyed by the node
 name. Structural nodes (<code>seq</code>, <code>choice</code>, <code>par</code>, <code>loop</code>, <code>map</code>) and terminal nodes (<code>succeed</code>,
@@ -2737,6 +2765,10 @@ all agent nodes itself. Software-change uses <code>worker</code>, <code>acceptan
 mode. It may omit the delivery node; if it includes it, the binding must be <code>git_delivery</code>. List the executable nodes
 with <code>zeroshot template show TEMPLATE</code> plus the same delivery flag.</p>
 <p>Custom graphs author delivery in both the graph and the plan.</p>
+<h2 id="contributed-harnesses">Contributed harnesses<a class="headerlink" href="#contributed-harnesses" title="Permanent link">&para;</a></h2>
+<p>Official local builds include contributed OpenCode and Hermes adapters; their native CLIs are
+installed separately. See <a href="../../project/harness-adapters/">Harness adapters</a> for available providers,
+target support and the shared execution and Active Memory contracts.</p>
 
 
 
@@ -2757,7 +2789,7 @@ with <code>zeroshot template show TEMPLATE</code> plus the same delivery flag.</
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-29">29 October 2026</time>
+    Last updated <time datetime="2026-10-30">30 October 2026</time>
   </span>
 
     

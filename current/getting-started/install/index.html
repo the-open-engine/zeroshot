@@ -1631,6 +1631,8 @@
       
         
       
+        
+      
     
     
     
@@ -1747,6 +1749,34 @@
     
   
     Source-code adapters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../project/harness-adapters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harness adapters
   
 
     
@@ -1995,22 +2025,17 @@ Platform embedding remains tracked in <a href="https://github.com/the-open-engin
 can leave the <code>ui</code> feature disabled.</p>
 <h2 id="prepare-a-local-run">Prepare a local run<a class="headerlink" href="#prepare-a-local-run" title="Permanent link">&para;</a></h2>
 <p>Choose an existing working folder with <code>--cwd FOLDER</code>, or use the invoking folder. Local runs without
-Git delivery do not need a repository. Install each agent harness named by the runtime plan:</p>
-<ul>
-<li>install and sign in to Codex for <code>"harness": "codex"</code>;</li>
-<li>install and sign in to Claude Code for <code>"harness": "claude"</code>;</li>
-<li>install GitHub Copilot CLI 1.0.86 for <code>"harness": "copilot"</code> with <code>"provider": "github"</code>;</li>
-<li>install and sign in to Pi for <code>"harness": "pi"</code>.</li>
-</ul>
+Git delivery do not need a repository. Install each native harness CLI named by the runtime plan and
+put it on <code>PATH</code>. Official local builds include contributed OpenCode and Hermes adapters; see
+<a href="../../project/harness-adapters/">Harness adapters</a> for availability and provider support.</p>
 <p>Local GitHub pull request delivery (<code>--pr</code> or <code>--ship</code>) also needs the GitHub CLI, <code>gh</code>, on <code>PATH</code>.
 Zeroshot runs the <code>gh</code> that <code>PATH</code> finds and rejects the run before any agent starts if there is
 none.
 See <a href="../../guides/forge-delivery/">forge setup</a> for host logins and token connections.</p>
-<p>Local Codex/OpenAI, Claude/Anthropic, Copilot/GitHub, Pi/Anthropic, and Pi/OpenAI lanes reuse the
-installed harness's native login and configuration. Other provider lanes can read declared values
-from the current environment or the private Zeroshot connection store. For example, this command
-prompts without echo and keeps
-an OpenAI value out of runtime JSON for a contained target:</p>
+<p>Local lanes with native-login support reuse the installed harness's login and configuration. Other
+provider lanes can read declared values from the current environment or the private Zeroshot
+connection store. For example, this command prompts without echo and keeps an OpenAI value out of
+runtime JSON for a contained target:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="go">zeroshot connection set openai --field OPENAI_API_KEY</span>
 </code></pre></div>
 <p>Use <code>openrouter</code>, <code>anthropic</code>, <code>bedrock</code>, or <code>gateway</code> as the connection key when the effective
@@ -2030,8 +2055,8 @@ Replace <code>WHEEL_FILE</code> with its local path:</p>
 <a href="../../concepts/targets/">targets guide</a> for a Docker setup bound to loopback.</p>
 <p><a href="../first-run/">Validate and run a first task</a> after installation.</p>
 <h2 id="github-copilot">GitHub Copilot<a class="headerlink" href="#github-copilot" title="Permanent link">&para;</a></h2>
-<p>Copilot uses your GitHub user identity and Copilot entitlement. Local runs reuse the login stored by
-<code>copilot login</code> in <code>COPILOT_HOME</code> or the system credential store. Ambient
+<p>Copilot's <code>github</code> lane uses your GitHub user identity and Copilot entitlement. Local runs on that
+lane reuse the login stored by <code>copilot login</code> in <code>COPILOT_HOME</code> or the system credential store. Ambient
 <code>COPILOT_GITHUB_TOKEN</code>, <code>GH_TOKEN</code>, or <code>GITHUB_TOKEN</code> values stay in private RPC and are excluded
 from agent tool environments. For a contained target, store a user OAuth token or fine-grained
 personal token with Copilot Requests permission in the <code>github</code> connection's
@@ -2058,7 +2083,7 @@ process running as your own user.</p>
 Copilot's singular provider contract, its authored <code>modelId</code> becomes the RPC session model and its
 authored <code>wireModel</code> still names the provider request model. Zeroshot uses headless RPC schema output
 and validates each response locally, allowing at most two correction turns in the same session.
-Install the pinned CLI version above; the target image already includes it.</p>
+The target image already includes the native Copilot CLI.</p>
 <p>Hosted connection resolvers may additionally declare <code>COPILOT_GITHUB_TOKEN_EXPIRES_AT</code> (Unix
 seconds). Copilot then requests credentials through the resolver throughout a long execution.
 The callback must match <code>COPILOT_GH_HOST</code> (or <code>GH_HOST</code>) when configured. The resolver must return a

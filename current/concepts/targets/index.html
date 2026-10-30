@@ -1671,6 +1671,8 @@
       
         
       
+        
+      
     
     
     
@@ -1787,6 +1789,34 @@
     
   
     Source-code adapters
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../project/harness-adapters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Harness adapters
   
 
     
@@ -2005,6 +2035,14 @@
 <h1 id="targets">Targets<a class="headerlink" href="#targets" title="Permanent link">&para;</a></h1>
 <p>A target owns source preparation and the processes that execute graph nodes; it also stores durable
 run state and resolves connections. The graph protocol stays the same when the target changes.</p>
+<p>Targets advertise their enabled harness/provider pairs through the
+<code>openengine.runtime-harnesses/v1</code> discovery extension. The CLI checks every selected lane before
+requesting an access token or submitting a run or profile, and the target enforces its catalog
+again during admission. Older targets without this extension accept only the established core
+harnesses through client preflight.</p>
+<p>Official local builds include contributed adapters; Platform and the default target image enable
+only core adapters. See <a href="../../project/harness-adapters/">Harness adapters</a> for availability and
+provider support.</p>
 <h2 id="local-controller">Local controller<a class="headerlink" href="#local-controller" title="Permanent link">&para;</a></h2>
 <p>Omit <code>--target</code> to work in an existing local folder. <code>--cwd FOLDER</code> selects the folder for one run;
 the default is the invoking folder. Input, graph, runtime, and environment file arguments remain
@@ -2022,9 +2060,9 @@ another folder returns a conflict rather than a run from the first folder.</p>
 <p>Local execution is the only mode that mutates the caller's existing folder; each selected
 installed harness runs as the current user. A plan with
 <a href="../../reference/runtime-plan/#per-node-lanes">per-node lanes</a> needs every lane's CLI installed. The
-native <code>codex</code>/<code>openai</code>, <code>claude</code>/<code>anthropic</code>, and <code>copilot</code>/<code>github</code> lanes also need that CLI
-signed in; other lanes need their provider's
-<a href="../../reference/runtime-plan/#connections">connection values</a>. Before the controller starts,
+adapter declares whether its lane can reuse the CLI's native login; otherwise it needs the provider's
+<a href="../../reference/runtime-plan/#connections">connection values</a>. Declared credentials take precedence
+over native login state. Before the controller starts,
 <code>zeroshot run</code> and <code>zeroshot resume</code> check that each lane's executable is on <code>PATH</code>; they do not
 check login state, so a missing login fails at that lane's first turn.</p>
 <p>Local Codex runs with <code>provider: "openai"</code> use the model provider and transport configured in the
@@ -2060,7 +2098,7 @@ selection while provider <code>modelId</code> capability and wire-model mappings
 command translated to the singular RPC contract uses its authored <code>modelId</code> as that session's model.
 Contained targets use a private Copilot home and require the canonical <code>COPILOT_GITHUB_TOKEN</code>
 connection instead.</p>
-<p>Local Pi runs use the current user's <code>~/.pi/agent</code> for a <code>pi/anthropic</code> or <code>pi/openai</code> lane, which
+<p>Local Pi runs use the current user's <code>~/.pi/agent</code> for a <code>pi/anthropic</code>, <code>pi/openai</code> or <code>pi/github</code> lane, which
 reuses a stored Pi login. Any other Pi lane, a declared credential, or a caller-owned endpoint
 instead receives a private agent directory so no ambient catalog or credential is inherited. A
 declared or ambient <code>ANTHROPIC_BASE_URL</code>, <code>OPENAI_BASE_URL</code>, or <code>OPENAI_API_BASE</code> becomes a Pi
@@ -2126,7 +2164,8 @@ or exit status without exposing private child output; the previous published che
 available when a later backup fails.</p>
 <h2 id="direct-target">Direct target<a class="headerlink" href="#direct-target" title="Permanent link">&para;</a></h2>
 <p>A direct target exposes Zeroshot's HTTP and OECP contracts without application-level authentication.
-The released container includes Zeroshot plus pinned Codex, Claude, GitHub Copilot, and Pi harnesses.
+The released container includes Zeroshot plus the pinned core harness CLIs listed in
+<a href="../../project/harness-adapters/">Harness adapters</a>.
 A run can mix their lanes; its connection requirements are then the union over its nodes, such as
 <code>OPENAI_API_KEY</code> and <code>ANTHROPIC_API_KEY</code> for a Codex worker with Claude Code reviewers.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="go">docker run --detach --restart unless-stopped --name zeroshot-target \</span>
