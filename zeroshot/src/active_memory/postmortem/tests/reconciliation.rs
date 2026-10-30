@@ -107,3 +107,36 @@ async fn discovery_publishes_all_qualifying_findings_without_a_count_quota() {
             .any(|lesson| lesson.title == "Provider control interaction 128")
     );
 }
+
+#[tokio::test]
+async fn retry_retains_original_advice_when_initial_maintenance_kept_without_a_mutation() {
+    let fixture = fixture(Default::default(), Some(seed_lesson()), true).await;
+    *fixture.driver.concurrent_store.lock().assert_value() = Some(fixture.store.clone());
+    let mut keep = decision("keep");
+    for key in ["title", "recommendation"] {
+        keep[key] = json!("");
+    }
+    for key in ["files", "folders", "identifiers", "keyword_groups"] {
+        keep[key] = json!([]);
+    }
+    fixture.output("repository_maintenance", json!({"decisions":[keep]}));
+    fixture.drive().await;
+    let inputs = fixture.driver.maintenance_inputs.lock().assert_value();
+    let retry = inputs
+        .iter()
+        .find(|input| {
+            input["publication_retry"] == true
+                && input["role"] == "active_memory_repository_maintenance"
+        })
+        .assert_value();
+    let change = &retry["lesson_changes"]["existing-provider-lesson"];
+    assert_eq!(
+        change["before"]["recommendation"],
+        seed_lesson().recommendation
+    );
+    assert_eq!(change["before"]["revision"], 1);
+    assert_eq!(change["current"]["revision"], 2);
+    assert_eq!(change["worker_received"], true);
+    assert!(change["initial_proposal"].is_null());
+    assert!(change["previous_proposal"].is_null());
+}
