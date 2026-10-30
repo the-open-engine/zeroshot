@@ -7,6 +7,9 @@ pub(crate) mod hooks;
 pub(crate) mod postmortem;
 pub(crate) mod runtime;
 
+mod backend;
+pub use backend::*;
+
 mod model;
 mod retrieval;
 mod store;

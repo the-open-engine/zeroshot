@@ -27,6 +27,7 @@ pub(super) struct PostmortemExecution<'a> {
     pub(super) request: &'a PostmortemRequest,
     pub(super) context: &'a ProposalContext<'a>,
     pub(super) cancellation: watch::Receiver<bool>,
+    pub(super) attempt: u64,
 }
 
 pub(super) async fn run(
@@ -36,7 +37,8 @@ pub(super) async fn run(
     let mut cancellation = execution.cancellation.clone();
     let mut work = FuturesUnordered::new();
     for (index, role) in Role::ALL.into_iter().enumerate() {
-        if execution.context.role_enabled(role) {
+        if execution.context.role_enabled(role) && (execution.attempt == 0 || role.is_maintenance())
+        {
             work.push(run_role(&execution, role, index, stopping.clone()));
         }
     }
@@ -209,6 +211,16 @@ async fn run_role_inner(
     }
 }
 
+fn role_slot(attempt: u64, index: usize) -> Result<u64, PostmortemError> {
+    let offset = attempt
+        .checked_mul(1_000_000)
+        .ok_or(PostmortemError::Preparation)?;
+    AUXILIARY_PROVIDER_SLOT_OFFSET
+        .checked_add(offset)
+        .and_then(|value| value.checked_add(index as u64 + 1))
+        .ok_or(PostmortemError::Preparation)
+}
+
 fn invocation(
     execution: &PostmortemExecution<'_>,
     batch: &RoleBatch<'_>,
@@ -222,9 +234,7 @@ fn invocation(
         .cloned()
         .ok_or(PostmortemError::Preparation)?;
     let leaf = find_leaf(&execution.plan.graph.root, &node).ok_or(PostmortemError::Preparation)?;
-    let number = AUXILIARY_PROVIDER_SLOT_OFFSET
-        + u64::try_from(batch.index).map_err(|_| PostmortemError::Preparation)?
-        + 1;
+    let number = role_slot(execution.attempt, batch.index)?;
     let execution_number = u64::try_from(batch.round)
         .ok()
         .and_then(|round| round.checked_mul(Role::ALL.len() as u64))

@@ -187,8 +187,7 @@ tool matches no card. Receipts contain the node, tool name, time and a few assoc
 paths; they exclude arguments and results and do not claim that a tool succeeded. The first and
 latest receipts survive a fixed 512-record cap. Hidden reasoning is not required or inspected.
 
-Local and target stores do not synchronize automatically. Platform integration and ACP integration
-are outside this version. Embedders must explicitly select a host-owned memory namespace; the
+Local and target stores do not synchronize automatically. ACP integration is outside this version. Embedders must explicitly select a host-owned memory namespace; the
 generic hosting configuration does not create an organization-wide store implicitly.
 
 ## Initialize from local history
@@ -264,3 +263,18 @@ Inventory can prove an attached run's repository from a unique eligible remote e
 recorded checkout now has detached HEAD. Publication uses that checkout's current runtime namespace,
 reported per run. Existing local path namespaces do not migrate automatically when a checkout later
 acquires an admitted remote source.
+
+## Concurrent maintenance and hosting
+
+Worker recall remains frozen at run startup. Immediately before postmortem, the host reads current
+scoped lessons and supplies before/current changes separately from the original delivery manifest.
+Maintenance decisions target current revisions; newly received advice is not evidence of worker use.
+Publication checks reviewed revisions atomically. A revision conflict refreshes the context and
+reinvokes maintenance while retaining validated discoveries, within the original cancellation and
+time budget. Ordinary transport failures are not revision conflicts.
+
+Embedding hosts may install an authenticated `ActiveMemoryBackend` through `ProductionHostingConfig`.
+Its snapshot and publication operations carry run identity; the backend must derive and enforce the
+accepted run's tenant, repository and graph scope independently of request fields. SQLite implements
+the same interface for local and direct-target runs. Hosts must return complete bounded snapshots;
+failed or partial reads must never masquerade as an empty lesson set.

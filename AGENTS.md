@@ -90,6 +90,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   ownership before use. Initialization creates temporary files with private security at
   creation rather than repairing default-owned files afterward.
   Shared store mutations use expected revisions and retained deletion tombstones.
+  Postmortems refresh scoped lessons and pass before/current changes separately from original worker
+  exposure. Revision conflicts reinvoke maintenance with retained discoveries under the original
+  deadline; host-owned ActiveMemoryBackend adapters supply authenticated snapshot/publication storage.
   Codex trusts only the exact normalized hash of the product-owned session hook; never bypass trust
   for unrelated native hooks or write user trust configuration. Callback receipts acknowledge returned
   context, not model compliance. Missing carrier acknowledgement, failed provider startup or bounded

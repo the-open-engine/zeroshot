@@ -389,6 +389,7 @@ pub(crate) fn live_hosting_config(root: &TempRoot, lane: LiveLane) -> Production
     ProductionHostingConfig {
         agent_context: None,
         memory_storage: None,
+        memory_backend: None,
         storage_root: root.path("live-target"),
         operator_diagnostic_output: None,
         workspace_storage: None,

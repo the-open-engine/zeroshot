@@ -15,8 +15,7 @@ use sha2::{Digest, Sha256};
 
 use crate::active_memory::{
     ActiveMemoryError, ActiveMemoryStore, LessonVersion, MemoryIndex, MemorySnapshot,
-    RetrievalQuery, RetrievalResult, ScopeQuery, SharedActiveMemoryStore, SuppliedMemoryManifest,
-    ToolObservation,
+    RetrievalQuery, RetrievalResult, ScopeQuery, SuppliedMemoryManifest, ToolObservation,
 };
 use crate::active_memory::hooks::{ActiveMemoryHooks, ActiveMemorySource, HookQuery};
 use crate::active_memory::postmortem::{
@@ -43,7 +42,7 @@ pub struct MemoryPreparation<'a> {
 /// Prepared before adapters are built, so every lane shares one immutable index.
 pub struct PreparedActiveMemory {
     pub hooks: Arc<ActiveMemoryHooks>,
-    store: SharedActiveMemoryStore,
+    store: Arc<dyn crate::active_memory::ActiveMemoryBackend>,
     snapshot: MemorySnapshot,
     source: Arc<RunMemorySource>,
     repository: Option<String>,
@@ -74,6 +73,59 @@ impl PreparedActiveMemory {
             repository_lessons: config.repository,
             graph_lessons: config.graph,
         })?;
+        Self::from_snapshot(
+            request,
+            crate::active_memory::SqliteMemoryBackend::shared(Arc::new(tokio::sync::Mutex::new(
+                store,
+            ))),
+            snapshot,
+            (repository, graph_hash),
+        )
+        .map(Some)
+    }
+
+    pub async fn prepare_hosted(
+        request: MemoryPreparation<'_>,
+        backend: Option<Arc<dyn crate::active_memory::ActiveMemoryBackend>>,
+        run: &RunId,
+    ) -> Result<Option<Self>, ActiveMemoryError> {
+        let Some(backend) = backend else {
+            return Self::prepare(request);
+        };
+        let config = request.admitted.runtime.active_memory();
+        if !config.enabled() {
+            return Ok(None);
+        }
+        let repository = Some(repository_key(request.admitted, request.workspace));
+        let graph_hash = authored_graph_hash(request.admitted)?;
+        let scope = ScopeQuery {
+            repository: repository.clone(),
+            graph_hash: Some(graph_hash.clone()),
+            node_id: None,
+            repository_lessons: config.repository,
+            graph_lessons: config.graph,
+        };
+        let snapshot = backend.snapshot(run, &scope).await?;
+        if snapshot
+            .lessons
+            .iter()
+            .any(|lesson| !lesson.scope.matches(&scope))
+        {
+            return Err(ActiveMemoryError::Invalid(
+                "host memory scope mismatch".into(),
+            ));
+        }
+        Self::from_snapshot(request, backend, snapshot, (repository, graph_hash)).map(Some)
+    }
+
+    fn from_snapshot(
+        request: MemoryPreparation<'_>,
+        store: Arc<dyn crate::active_memory::ActiveMemoryBackend>,
+        snapshot: MemorySnapshot,
+        identity: (Option<String>, String),
+    ) -> Result<Self, ActiveMemoryError> {
+        let (repository, graph_hash) = identity;
+        let config = request.admitted.runtime.active_memory();
         let source = Arc::new(RunMemorySource {
             index: MemoryIndex::new(snapshot.clone())?,
             workspace: request.workspace.to_path_buf(),
@@ -90,14 +142,14 @@ impl PreparedActiveMemory {
             state: Mutex::new(ExposureState::default()),
         });
         let hooks = Arc::new(ActiveMemoryHooks::new(source.clone())?);
-        Ok(Some(Self {
+        Ok(Self {
             hooks,
-            store: Arc::new(tokio::sync::Mutex::new(store)),
+            store,
             snapshot,
             source,
             repository,
             graph_hash,
-        }))
+        })
     }
 
     /// The global agents reuse the same admitted provider adapters with isolated sessions.

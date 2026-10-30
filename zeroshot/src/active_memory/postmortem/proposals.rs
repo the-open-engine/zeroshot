@@ -60,6 +60,11 @@ pub(super) struct ProposalContext<'a> {
     supplied: Option<SuppliedMemoryManifest>,
     supplied_lessons: BTreeMap<String, Lesson>,
     actual_nodes: BTreeSet<String>,
+    original: Option<&'a crate::active_memory::MemorySnapshot>,
+    findings: BTreeMap<String, Lesson>,
+    initial_proposals: BTreeMap<String, LessonMutation>,
+    previous_proposals: BTreeMap<String, LessonMutation>,
+    publication_retry: bool,
 }
 
 impl<'a> ProposalContext<'a> {
@@ -101,7 +106,93 @@ impl<'a> ProposalContext<'a> {
             supplied,
             supplied_lessons,
             actual_nodes,
+            original: None,
+            findings: BTreeMap::new(),
+            initial_proposals: BTreeMap::new(),
+            previous_proposals: BTreeMap::new(),
+            publication_retry: false,
         }
+    }
+
+    pub(super) fn refreshed(
+        mut self,
+        latest: &'a crate::active_memory::MemorySnapshot,
+    ) -> Result<Self, super::PostmortemError> {
+        self.validate_manifest()
+            .map_err(|_| super::PostmortemError::Preparation)?;
+        self.original = Some(self.config.snapshot);
+        if self.supplied.is_some() {
+            self.supplied_lessons = latest
+                .lessons
+                .iter()
+                .filter(|lesson| {
+                    self.supplied_lessons.contains_key(&lesson.id)
+                        || !self
+                            .config
+                            .snapshot
+                            .lessons
+                            .iter()
+                            .any(|old| old == *lesson)
+                })
+                .map(|lesson| (lesson.id.clone(), lesson.clone()))
+                .collect();
+        }
+        self.config.snapshot = latest;
+        Ok(self)
+    }
+
+    pub(super) fn include_findings(
+        &mut self,
+        findings: &[LessonMutation],
+        previous: &[LessonMutation],
+    ) -> Result<(), super::PostmortemError> {
+        if self.supplied.is_none() {
+            return Err(super::PostmortemError::Preparation);
+        }
+        self.publication_retry = true;
+        self.initial_proposals = findings
+            .iter()
+            .map(|mutation| (mutation.id().to_owned(), mutation.clone()))
+            .collect();
+        self.previous_proposals = previous
+            .iter()
+            .map(|mutation| (mutation.id().to_owned(), mutation.clone()))
+            .collect();
+        // Reconsider current cards as well as validated discoveries, including ID collisions.
+        self.supplied_lessons = self
+            .config
+            .snapshot
+            .lessons
+            .iter()
+            .map(|lesson| (lesson.id.clone(), lesson.clone()))
+            .collect();
+        for finding in findings {
+            if let LessonMutation::Upsert {
+                draft,
+                expected_revision: None,
+            } = finding
+            {
+                let lesson = draft.as_ref().clone().into_lesson(1);
+                self.findings.insert(lesson.id.clone(), lesson.clone());
+                self.supplied_lessons
+                    .entry(lesson.id.clone())
+                    .or_insert(lesson);
+            }
+        }
+        Ok(())
+    }
+
+    fn change(&self, id: &str) -> Value {
+        let before = self
+            .original
+            .and_then(|snapshot| snapshot.lessons.iter().find(|lesson| lesson.id == id));
+        let after = self
+            .config
+            .snapshot
+            .lessons
+            .iter()
+            .find(|lesson| lesson.id == id);
+        json!({"before":before,"current":after,"run_finding":self.findings.get(id),"initial_proposal":self.initial_proposals.get(id),"previous_proposal":self.previous_proposals.get(id),"worker_received":before.is_some_and(|lesson| self.supplied.as_ref().is_some_and(|manifest| manifest.lessons.contains(&lesson.version())))})
     }
 
     pub(super) fn role_enabled(&self, role: Role) -> bool {
@@ -120,6 +211,8 @@ impl<'a> ProposalContext<'a> {
             "scope_controls":{"repository":self.request.admitted.runtime.active_memory().repository,
                 "graph":self.request.admitted.runtime.active_memory().graph},
             "manifest_known":self.supplied.is_some(),
+            "publication_retry":self.publication_retry,
+            "lesson_changes":{},
             "supplied_lessons":{},
             "supplied_manifest_total":self.supplied_lessons.values().filter(|lesson| role.accepts_scope(&lesson.scope)).count(),
             "maintenance_batch":null,
@@ -137,36 +230,37 @@ impl<'a> ProposalContext<'a> {
     }
 
     fn maintenance_inputs(&self, role: Role, template: Value) -> Result<Vec<Value>, ()> {
-        if self
-            .supplied
-            .as_ref()
-            .is_some_and(|manifest| manifest.lessons.len() != self.supplied_lessons.len())
-        {
-            return Err(());
-        }
-        let mut batches = Vec::new();
-        let mut input = template.clone();
-        for (id, lesson) in self
+        self.validate_manifest()?;
+        let mut entries = self
             .supplied_lessons
             .iter()
             .filter(|(_, lesson)| role.accepts_scope(&lesson.scope))
-        {
-            let lesson = serde_json::to_value(lesson).map_err(|_| ())?;
-            if !super::context_budget::add_object(
-                &mut input,
-                "supplied_lessons",
-                id,
-                lesson.clone(),
-            ) {
-                if input["supplied_lessons"].as_object().ok_or(())?.is_empty() {
-                    return Err(());
-                }
-                batches.push(input);
-                input = template.clone();
-                if !super::context_budget::add_object(&mut input, "supplied_lessons", id, lesson) {
-                    return Err(());
+            .map(|(id, lesson)| (id.clone(), json!({"card":lesson,"change":self.change(id)})))
+            .collect::<BTreeMap<_, _>>();
+        if let Some(original) = self.original {
+            for lesson in original
+                .lessons
+                .iter()
+                .filter(|lesson| role.accepts_scope(&lesson.scope))
+            {
+                if !self
+                    .config
+                    .snapshot
+                    .lessons
+                    .iter()
+                    .any(|current| current.id == lesson.id)
+                {
+                    entries.insert(
+                        lesson.id.clone(),
+                        json!({"card":null,"change":self.change(&lesson.id)}),
+                    );
                 }
             }
+        }
+        let mut batches = Vec::new();
+        let mut input = template.clone();
+        for entry in entries {
+            Self::append_batch_entry(&mut batches, &mut input, &template, entry)?;
         }
         batches.push(input);
         let total = batches.len();
@@ -174,6 +268,58 @@ impl<'a> ProposalContext<'a> {
             input["maintenance_batch"] = json!({"index":index + 1,"total":total});
         }
         Ok(batches)
+    }
+
+    fn append_batch_entry(
+        batches: &mut Vec<Value>,
+        input: &mut Value,
+        template: &Value,
+        entry: (String, Value),
+    ) -> Result<(), ()> {
+        let (id, value) = entry;
+        if Self::add_entry(input, &id, &value) {
+            return Ok(());
+        }
+        if input["lesson_changes"].as_object().ok_or(())?.is_empty() {
+            return Err(());
+        }
+        batches.push(std::mem::replace(input, template.clone()));
+        if !Self::add_entry(input, &id, &value) {
+            return Err(());
+        }
+        Ok(())
+    }
+
+    fn validate_manifest(&self) -> Result<(), ()> {
+        if self.original.is_none()
+            && self
+                .supplied
+                .as_ref()
+                .is_some_and(|manifest| manifest.lessons.len() != self.supplied_lessons.len())
+        {
+            return Err(());
+        }
+        Ok(())
+    }
+
+    fn add_entry(input: &mut Value, id: &str, value: &Value) -> bool {
+        if !value["card"].is_null()
+            && !super::context_budget::add_object(
+                input,
+                "supplied_lessons",
+                id,
+                value["card"].clone(),
+            )
+        {
+            return false;
+        }
+        if super::context_budget::add_object(input, "lesson_changes", id, value["change"].clone()) {
+            return true;
+        }
+        if let Some(cards) = input["supplied_lessons"].as_object_mut() {
+            cards.remove(id);
+        }
+        false
     }
 
     fn append_existing(&self, role: Role, input: &mut Value) {
@@ -254,7 +400,7 @@ impl<'a> ProposalContext<'a> {
             if !pending.remove(&decision.id) {
                 return Err(ProposalRejection::Maintenance);
             }
-            if let Some(mutation) = self.maintenance(role, decision)? {
+            if let Some(mutation) = self.reconciled_decision(role, decision)? {
                 mutations.push(mutation);
             }
         }
@@ -262,6 +408,36 @@ impl<'a> ProposalContext<'a> {
             return Err(ProposalRejection::Maintenance);
         }
         Ok(mutations)
+    }
+
+    fn reconciled_decision(
+        &self,
+        role: Role,
+        decision: MaintenanceDecision,
+    ) -> Result<Option<LessonMutation>, ProposalRejection> {
+        let id = decision.id.clone();
+        let mutation = self.maintenance(role, decision)?;
+        let is_new = self.findings.contains_key(&id)
+            && !self
+                .config
+                .snapshot
+                .lessons
+                .iter()
+                .any(|lesson| lesson.id == id);
+        if !is_new {
+            return Ok(mutation);
+        }
+        Ok(match mutation {
+            Some(LessonMutation::Upsert { draft, .. }) => Some(LessonMutation::Upsert {
+                draft,
+                expected_revision: None,
+            }),
+            Some(LessonMutation::Delete { .. }) => None,
+            None => Some(LessonMutation::Upsert {
+                draft: Box::new(self.findings[&id].draft()),
+                expected_revision: None,
+            }),
+        })
     }
 
     fn discovery(

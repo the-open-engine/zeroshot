@@ -354,9 +354,10 @@ impl ProductionCapsuleAllocator {
                 paths,
             },
         )
+        .await
     }
 
-    fn finish_capsule(
+    async fn finish_capsule(
         &self,
         pending: PendingCapsule<'_>,
         request: &CapsuleBuildRequest<'_>,
@@ -375,13 +376,16 @@ impl ProductionCapsuleAllocator {
             hosted_workspace,
             ..
         } = prepared;
-        let memory = crate::active_memory::runtime::PreparedActiveMemory::prepare(
+        let memory = crate::active_memory::runtime::PreparedActiveMemory::prepare_hosted(
             crate::active_memory::runtime::MemoryPreparation {
                 admitted: request.admitted,
                 workspace: &filesystem.workspace,
                 storage: self.config.memory_storage.as_deref(),
             },
-        );
+            self.config.memory_backend.clone(),
+            run_id,
+        )
+        .await;
         let hooks = memory
             .as_ref()
             .ok()

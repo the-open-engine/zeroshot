@@ -11,6 +11,13 @@ mod environment;
 mod repository;
 mod workspaces;
 
+pub use crate::active_memory::{
+    ActiveMemoryBackend, ActiveMemoryError, Lesson, LessonDraft, LessonMutation, LessonScope,
+    LessonVersion, MemorySnapshot, MemoryPublication, ScopeQuery, MAX_STORE_BYTES, MAX_LESSONS,
+    MAX_RECORD_BYTES, MAX_TOMBSTONES,
+};
+pub use crate::active_memory::runtime::{repository_key, authored_graph_hash};
+
 pub use workspaces::{HostedWorkspace, HostedWorkspaceRequest, HostedWorkspaceStorage};
 
 #[cfg(test)]
@@ -74,6 +81,8 @@ pub struct ProductionHostingConfig {
     pub agent_context: Option<Arc<dyn crate::native_v2_runner::AgentContextProvider>>,
     /// A host-owned namespace. Platform embedders select their own tenant-scoped storage.
     pub memory_storage: Option<PathBuf>,
+    /// Explicit host-owned remote memory storage, scoped by accepted run identity.
+    pub memory_backend: Option<Arc<dyn ActiveMemoryBackend>>,
     /// Private diagnostics collection; the host owns the receiver and durable storage.
     pub operator_diagnostic_output: Option<OperatorDiagnosticOutput>,
     pub workspace_storage: Option<Arc<dyn HostedWorkspaceStorage>>,
@@ -404,6 +413,7 @@ impl Default for ProductionHostingConfig {
         Self {
             agent_context: None,
             memory_storage: None,
+            memory_backend: None,
             operator_diagnostic_output: None,
             workspace_storage: None,
             storage_root: PathBuf::from("/var/lib/zeroshot/native-v2"),

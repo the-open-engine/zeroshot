@@ -11,6 +11,8 @@ pub const MAX_INJECTION_BYTES: usize = 16_384;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ActiveMemoryError {
+    #[error("active memory storage unavailable")]
+    Unavailable,
     #[error("invalid active memory: {0}")]
     Invalid(String),
     #[error("active memory revision conflict for {id}; expected {expected:?}, found {actual:?}")]
@@ -123,7 +125,8 @@ pub struct ToolObservation {
     pub paths: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScopeQuery {
     pub repository: Option<String>,
     pub graph_hash: Option<String>,

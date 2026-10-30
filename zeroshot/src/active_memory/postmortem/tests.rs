@@ -9,6 +9,8 @@ use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{Value, json};
 
 use super::*;
+use tokio::sync::Mutex;
+use crate::active_memory::{ActiveMemoryStore, SqliteMemoryBackend};
 
 mod diagnostics;
 mod initialization;
@@ -53,6 +55,7 @@ struct Driver {
     maintenance_action: StdMutex<Option<&'static str>>,
     maintenance_omit: StdMutex<Option<String>>,
     maintenance_inputs: StdMutex<Vec<Value>>,
+    concurrent_store: StdMutex<Option<Arc<Mutex<ActiveMemoryStore>>>>,
 }
 
 #[async_trait]
@@ -100,6 +103,24 @@ impl NodeDriver for Driver {
             });
         }
         self.globals.fetch_add(1, Ordering::SeqCst);
+        let concurrent = if name == "active_memory_repository_maintenance" {
+            self.concurrent_store.lock().assert_value().take()
+        } else {
+            None
+        };
+        if let Some(store) = concurrent {
+            let mut newer = seed_lesson();
+            newer.recommendation =
+                "Keep the concurrent provider advice and reconcile the new finding.".to_owned();
+            store
+                .lock()
+                .await
+                .apply_batch(&[LessonMutation::Upsert {
+                    expected_revision: Some(1),
+                    draft: Box::new(newer),
+                }])
+                .assert_value();
+        }
         let fallback = if name.ends_with("_maintenance") {
             self.maintenance_output(&invocation)
         } else {
@@ -330,7 +351,7 @@ async fn fixture_with_lessons(
         observations: StdMutex::new(Vec::new()),
     });
     let postmortem = Arc::new(BuiltinPostmortem::new(BuiltinPostmortemConfig {
-        store: store.clone(),
+        store: SqliteMemoryBackend::shared(store.clone()),
         factory: factory.clone(),
         snapshot,
         supplied: source.clone(),
@@ -597,7 +618,7 @@ async fn unknown_supplied_manifest_prevents_maintenance_mutation() {
 }
 
 #[tokio::test]
-async fn stale_maintenance_revision_cannot_overwrite_a_newer_lesson_or_publish_a_partial_batch() {
+async fn pre_postmortem_refresh_reconciles_the_new_revision_and_preserves_discovery() {
     let fixture = self::fixture(Default::default(), Some(seed_lesson()), true).await;
     fixture.substantial_exploration();
     let mut newer = seed_lesson();
@@ -618,9 +639,17 @@ async fn stale_maintenance_revision_cannot_overwrite_a_newer_lesson_or_publish_a
     fixture.output("repository", json!({"lessons":[candidate("worker")]}));
     fixture.drive().await;
     let lessons = fixture.lessons().await;
-    assert_eq!(lessons.len(), 1);
-    assert_eq!(lessons[0].revision, 2);
-    assert!(lessons[0].recommendation.contains("concurrent"));
+    assert_eq!(lessons.len(), 2);
+    let existing = lessons
+        .iter()
+        .find(|lesson| lesson.id == "existing-provider-lesson")
+        .assert_value();
+    assert_eq!(existing.revision, 3);
+    assert!(existing.recommendation.contains("cached OAuth"));
+    let inputs = fixture.driver.maintenance_inputs.lock().assert_value();
+    assert!(inputs.iter().any(
+        |input| input["lesson_changes"]["existing-provider-lesson"]["current"]["revision"] == 2
+    ));
 }
 
 #[tokio::test]
@@ -937,4 +966,89 @@ async fn postmortem_inherits_an_agent_verifier_after_a_decision_verifier() {
         };
         assert_eq!(model.as_str(), "postmortem-model");
     }
+}
+
+#[tokio::test]
+async fn publication_conflict_reinvokes_maintenance_and_preserves_new_discoveries() {
+    let fixture = fixture(Default::default(), Some(seed_lesson()), true).await;
+    fixture.substantial_exploration();
+    *fixture.driver.maintenance_action.lock().assert_value() = Some("adapt");
+    *fixture.driver.concurrent_store.lock().assert_value() = Some(fixture.store.clone());
+    fixture.output("repository", json!({"lessons":[candidate("worker")]}));
+    fixture.drive().await;
+    let lessons = fixture.lessons().await;
+    assert_eq!(lessons.len(), 2);
+    assert_eq!(
+        lessons
+            .iter()
+            .find(|lesson| lesson.id == "existing-provider-lesson")
+            .assert_value()
+            .revision,
+        3
+    );
+    assert_eq!(fixture.driver.globals.load(Ordering::SeqCst), 6);
+    assert!(fixture.driver.maintenance_inputs.lock().assert_value().iter().any(|input| {
+        input["publication_retry"] == true && input["lesson_changes"]["existing-provider-lesson"]["initial_proposal"]["draft"]["recommendation"].as_str().is_some_and(|text| text.contains("cached OAuth"))
+    }));
+    let inputs = fixture.driver.maintenance_inputs.lock().assert_value();
+    assert!(inputs.iter().any(
+        |input| input["lesson_changes"]["existing-provider-lesson"]["current"]["revision"] == 2
+    ));
+    assert!(inputs.iter().any(|input| {
+        input["lesson_changes"]
+            .as_object()
+            .assert_value()
+            .values()
+            .any(|change| !change["run_finding"].is_null())
+    }));
+}
+
+#[tokio::test]
+async fn refresh_reports_retirement_without_recreating_the_lesson() {
+    let fixture = fixture(Default::default(), Some(seed_lesson()), true).await;
+    fixture
+        .store
+        .lock()
+        .await
+        .apply_batch(&[LessonMutation::Delete {
+            id: "existing-provider-lesson".to_owned(),
+            expected_revision: 1,
+        }])
+        .assert_value();
+    fixture.drive().await;
+    assert!(fixture.lessons().await.is_empty());
+    let inputs = fixture.driver.maintenance_inputs.lock().assert_value();
+    let change = inputs
+        .iter()
+        .find_map(|input| input["lesson_changes"].get("existing-provider-lesson"))
+        .assert_value();
+    assert_eq!(change["before"]["revision"], 1);
+    assert!(change["current"].is_null());
+    assert_eq!(change["worker_received"], true);
+}
+
+#[tokio::test]
+async fn externally_added_advice_is_reconciled_without_claiming_worker_exposure() {
+    let fixture = fixture(Default::default(), None, true).await;
+    let mut external = seed_lesson();
+    external.id = "external-new-lesson".to_owned();
+    fixture
+        .store
+        .lock()
+        .await
+        .apply_batch(&[LessonMutation::Upsert {
+            expected_revision: None,
+            draft: Box::new(external),
+        }])
+        .assert_value();
+    fixture.drive().await;
+    assert_eq!(fixture.lessons().await.len(), 1);
+    let inputs = fixture.driver.maintenance_inputs.lock().assert_value();
+    let change = inputs
+        .iter()
+        .find_map(|input| input["lesson_changes"].get("external-new-lesson"))
+        .assert_value();
+    assert!(change["before"].is_null());
+    assert_eq!(change["current"]["revision"], 1);
+    assert_eq!(change["worker_received"], false);
 }
