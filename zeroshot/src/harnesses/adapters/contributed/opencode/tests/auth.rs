@@ -73,12 +73,10 @@ fn run_hook_with_auth(source: &str, endpoint: bool, native_auth: Option<&str>) -
         .as_str()
         .assert_value();
     let input = directory.write("native-config.json", &configuration().to_string());
-    let output = std::process::Command::new("node")
+    let output = node_command()
         .args(["--input-type=module", "-e", source, plugin])
         .arg(input)
-        .env_clear()
         .envs(&command.environment)
-        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
         .env("OPENAI_API_KEY", "declared-key")
         .env("OPENAI_BASE_URL", "https://declared.invalid/v1")
         .output()

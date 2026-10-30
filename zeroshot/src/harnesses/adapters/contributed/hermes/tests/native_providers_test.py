@@ -455,6 +455,7 @@ def github_native_aliases(home):
 
 
 
+@unittest.skipUnless(os.environ.get("HERMES_SOURCE") or importlib.util.find_spec("run_agent"), "requires a native Hermes installation")
 class NativeProviderTest(unittest.TestCase):
     def test_native_authentication_and_refresh(self):
         for scenario in ("github", "github_native_aliases", "bedrock_bearer", "bedrock_mantle", "bedrock_iam", "bedrock_mantle_iam", "aws_sources", "aws_nested_profile", "aws_settings"):

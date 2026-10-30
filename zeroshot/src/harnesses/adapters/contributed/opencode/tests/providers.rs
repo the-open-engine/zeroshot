@@ -32,9 +32,8 @@ fn run_plugin(command: &ProcessSessionCommand, source: &str) {
         .assert_value()
         .as_str()
         .assert_value();
-    let output = std::process::Command::new("node")
+    let output = node_command()
         .args(["--input-type=module", "-e", source, plugin])
-        .env_clear()
         .envs(&command.environment)
         .output()
         .assert_value();

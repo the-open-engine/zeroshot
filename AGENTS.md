@@ -1106,8 +1106,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Python test doubles use `openengine_cluster_testkit::fixture::python3_script`, which resolves
   the test PATH's actual interpreter before entering a pinned or cleared child environment.
 - `.opcore.json` owns the full-source Opcore policy. `.github/workflows/opcore.yml` runs the Fast
-  and native Rust providers on every PR and main commit. Its two exact PowerShell exclusions reflect
-  unsupported parsing; the Windows native CI lane still runs those scripts.
+  provider and Cargo with warnings denied on every PR and main commit. Cargo uses the complete checkout
+  because Opcore's Rust snapshot omits embedded Python assets. The two exact PowerShell exclusions
+  reflect unsupported parsing; the Windows native CI lane still runs those scripts.
 - Preserve bounded values, explicit overflow, cancellation safety, and exact source provenance at
   every public boundary.
 - Add focused tests beside the owning crate/module.

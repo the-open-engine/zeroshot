@@ -35,5 +35,11 @@ jobs:
       - name: Fetch locked Rust dependencies
         run: cargo fetch --locked
 
-      - name: Check all supported source with native Rust
-        run: opcore check --repo . --committed --comparison all --providers fast,rust-native --allow-unsandboxed-native
+      - name: Check all supported source
+        run: opcore check --repo . --committed --comparison all --providers fast
+
+      # Opcore 0.3.2 omits embedded Python assets from its Rust workspace snapshot.
+      - name: Check native Rust with complete build inputs
+        run: cargo check --locked --offline --workspace --all-targets
+        env:
+          RUSTFLAGS: -Dwarnings

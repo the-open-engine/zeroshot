@@ -512,11 +512,9 @@ const before=structuredClone(mcp);
 await plugin['tool.execute.after']({tool:'nativeproof_record',sessionID:'ses_fixture',callID:'call2',args:{marker:'mcp-fixture'}},mcp);
 await plugin['tool.execute.after']({tool:'nativeproof_record',sessionID:'ses_fixture',callID:'call3',args:{marker:'mcp-fixture'}},null);
 console.log(JSON.stringify({output,mcp,before}));"#;
-    let output = std::process::Command::new("node")
+    let output = node_command()
         .args(["--input-type=module", "-e", source_code, plugin_url])
         .arg(&files.workspace)
-        .env_clear()
-        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
         .output()
         .assert_value();
     assert!(

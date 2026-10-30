@@ -9,6 +9,18 @@ use super::*;
 use crate::execution::SessionScope;
 use crate::native_v2_capsule::provider_process::turn::ProviderTranscript;
 
+fn node_command() -> std::process::Command {
+    let executable = crate::execution::platform::find_executable(
+        "node",
+        &BTreeMap::from([("PATH".to_owned(), std::env::var("PATH").assert_value())]),
+        &std::env::current_dir().assert_value(),
+    )
+    .expect("Node.js must be installed on the test PATH");
+    let mut command = std::process::Command::new(executable);
+    command.env_clear();
+    command
+}
+
 fn event(kind: &str, id: &str, message: &str) -> Value {
     json!({"type":kind,"sessionID":"ses_fixture","part":{"id":id,"messageID":message}})
 }
