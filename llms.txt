@@ -1,6 +1,6 @@
 # Zeroshot
 
-> Zeroshot enforces your team's QA process on coding agents. You define the process as a graph: which agents implement, which independent agents review or test the result, where rejected work goes for repair, and where a run stops. The engine runs the graph's order, routing and bounds in code, so no agent can skip a step; model output cannot add an edge or raise a bound. It is a native CLI (`zeroshot`) for Linux, macOS, and Windows, driving Codex, Claude Code, GitHub Copilot, or Pi, and each node can use its own harness and model. MIT licensed.
+> Zeroshot enforces your team's QA process on coding agents. You define the process as a graph: which agents implement, which independent agents review or test the result, where rejected work goes for repair, and where a run stops. The engine runs the graph's order, routing and bounds in code, so no agent can skip a step; model output cannot add an edge or raise a bound. It is a native CLI (`zeroshot`) for Linux, macOS, and Windows. Each node can use its own harness and model. MIT licensed.
 
 ## Why teams use it
 
@@ -49,18 +49,19 @@ zeroshot run --title "Add JSON status output" --template software-change --deliv
 
 Replace `YOUR_MODEL_ID` with a model your installed Codex CLI supports. A valid request prints `{"valid":true}`; drop `--validate-only` to start the run. The worker edits the selected folder (`--cwd FOLDER`). `--delivery none` keeps the change local, so Git is optional; without it the run opens a pull request.
 
-For another harness, change `harness` and `provider` in `runtime.json`: `claude` with `anthropic` for Claude Code, `copilot` with `github` for GitHub Copilot, or `pi` with `anthropic` or `openai`. The [first-run guide](https://zeroshot.sh/docs/current/getting-started/first-run/) has each file. Model identifiers pass to the harness unchanged; Zeroshot keeps no model catalog.
+For another harness, choose an available `harness`/`provider` pair from [Harness adapters](https://zeroshot.sh/docs/current/project/harness-adapters/). The [first-run guide](https://zeroshot.sh/docs/current/getting-started/first-run/) includes core examples. Model identifiers pass to the harness unchanged; Zeroshot keeps no model catalog.
 
-The installer needs Node.js 18+ and installs a verified native binary plus the `zeroshot` and `zeroshot-memory-init` skills for Codex, Claude Code, GitHub Copilot, and Pi. Local runs reuse the harness's existing login, so no API key is needed. The [install guide](https://zeroshot.sh/docs/current/getting-started/install/) says where the skills go and how to remove them.
+The installer needs Node.js 18+ and installs a verified native binary plus the `zeroshot` and `zeroshot-memory-init` skills for Codex, Claude Code, GitHub Copilot, and Pi. The local Codex example reuses the harness's existing login, so no API key is needed. The [install guide](https://zeroshot.sh/docs/current/getting-started/install/) says where the skills go and how to remove them.
 
 The CLI is free and open source (MIT). Model calls go through your own harness login or provider account.
 
 ## Docs
 
-- [Install](https://zeroshot.sh/docs/current/getting-started/install/): prerequisites and harness setup
+- [Install](https://zeroshot.sh/docs/current/getting-started/install/): CLI and agent-skill installation
 - [First run](https://zeroshot.sh/docs/current/getting-started/first-run/): input, runtime config, and inspecting a run
 - [Execution](https://zeroshot.sh/docs/current/concepts/execution/): built-in graphs and delivery behavior
-- [Runtimes and connections](https://zeroshot.sh/docs/current/concepts/runtimes-and-connections/): supported harness and provider pairs
+- [Harness adapters](https://zeroshot.sh/docs/current/project/harness-adapters/): available harness/provider pairs and contribution requirements
+- [Runtimes and connections](https://zeroshot.sh/docs/current/concepts/runtimes-and-connections/): runtime configuration and credentials
 - [Graph contract](https://zeroshot.sh/docs/current/reference/cluster/graph/): authoring custom graphs
 - [Build a review loop](https://zeroshot.sh/docs/current/guides/review-loop/): a worked custom graph and runtime plan
 - [RuntimePlan reference](https://zeroshot.sh/docs/current/reference/runtime-plan/): every runtime binding field and admission limit
