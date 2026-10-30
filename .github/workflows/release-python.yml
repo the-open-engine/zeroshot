@@ -172,7 +172,7 @@ jobs:
             restic-executable: restic
             wheel-platform: macosx_11_0_x86_64
           - target: aarch64-apple-darwin
-            runner: macos-14
+            runner: macos-15
             executable: zeroshot
             restic-executable: restic
             wheel-platform: macosx_11_0_arm64

@@ -270,7 +270,7 @@ jobs:
             restic-executable: restic
             c-compiler: cc
           - target: aarch64-apple-darwin
-            runner: macos-14
+            runner: macos-15
             executable: zeroshot
             restic-executable: restic
             c-compiler: cc
