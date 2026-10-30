@@ -1,0 +1,30 @@
+{
+  "harness": "codex",
+  "provider": "openai",
+  "size": "medium",
+  "nodes": {
+    "worker": {
+      "kind": "agent",
+      "model": "YOUR_OPENAI_MODEL_ID",
+      "sessionScope": "node_instance"
+    },
+    "acceptance": {
+      "kind": "agent",
+      "lane": {
+        "harness": "claude",
+        "provider": "anthropic"
+      },
+      "model": "YOUR_ANTHROPIC_MODEL_ID",
+      "sessionScope": "execution"
+    },
+    "code": {
+      "kind": "agent",
+      "lane": {
+        "harness": "claude",
+        "provider": "anthropic"
+      },
+      "model": "YOUR_ANTHROPIC_MODEL_ID",
+      "sessionScope": "execution"
+    }
+  }
+}
