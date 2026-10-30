@@ -317,6 +317,25 @@ pub trait SourceCodeProvider: Send + Sync {
         None
     }
 
+    /// Pure identification relative to one explicitly selected instance.
+    fn comment_destination_at(
+        &self,
+        url: &str,
+        _base_url: &str,
+    ) -> Option<SourceCommentDestination> {
+        self.comment_destination_from_url(url)
+    }
+
+    /// Pure verification of an adapter's canonical comment permalink.
+    fn valid_comment_permalink(
+        &self,
+        _destination: &SourceCommentDestination,
+        _id: &str,
+        _url: &str,
+    ) -> bool {
+        false
+    }
+
     fn comment_authority(&self) -> Option<Arc<dyn SourceCommentAuthority>> {
         None
     }
@@ -324,6 +343,20 @@ pub trait SourceCodeProvider: Send + Sync {
     /// Pure identification of a credential-free Git locator. Return only this provider's opaque
     /// repository identity; no filesystem, credentials, processes, or network effects are allowed.
     fn repository_from_remote(&self, _remote: &str) -> Option<SourceRepositoryId> {
+        None
+    }
+
+    /// Pure locator identification relative to an explicit instance.
+    fn repository_from_remote_at(
+        &self,
+        remote: &str,
+        _base_url: &str,
+    ) -> Option<SourceRepositoryId> {
+        self.repository_from_remote(remote)
+    }
+
+    /// Provider-owned default API credential field, independent of configured authority.
+    fn default_forge_connection(&self) -> Option<(&'static str, &'static str)> {
         None
     }
 
@@ -359,3 +392,7 @@ pub trait SourceCodeProvider: Send + Sync {
         workspace: SourceWorkspaceCapability<'_>,
     ) -> Result<SourceOperationReceipt, SourceProviderFailure>;
 }
+
+#[cfg(test)]
+#[path = "evidence/tests.rs"]
+mod tests;

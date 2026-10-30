@@ -65,7 +65,8 @@ fn validate_previous(
     intended: &PublicationRecord,
 ) -> Result<(), NodeRunnerError> {
     previous.validate().map_err(store_failure)?;
-    if previous.url != intended.url
+    if previous.destination().map_err(store_failure)?
+        != intended.destination().map_err(store_failure)?
         || previous.marker != intended.marker
         || previous.author != intended.author
     {
@@ -211,12 +212,7 @@ impl NativeV2CommentDeliveryAdapter {
         let comment = self
             .read_comment(publication.borrowed(), comment_id, credentials)
             .await?;
-        validate_comment(
-            &comment,
-            &publication.destination,
-            &publication.record,
-            &publication.body,
-        )?;
+        validate_comment(self.authority.as_ref(), &comment, publication.borrowed())?;
         receipt(
             &comment,
             &publication.destination,
@@ -235,20 +231,38 @@ impl NativeV2CommentDeliveryAdapter {
         if !valid_id(&author) {
             return Err(failure("invalid comment author identity"));
         }
-        let destination =
-            crate::source_code_provider::adapters::core::comment_destination(&input.url)
-                .map_err(|error| failure(error.to_string()))?;
+        let destination = self
+            .authority
+            .resolve_destination(&input.url)
+            .map_err(|error| failure(error.to_string()))?
+            .map(Ok)
+            .unwrap_or_else(|| {
+                crate::source_code_provider::adapters::core::comment_destination(&input.url)
+                    .map_err(|error| failure(error.to_string()))
+            })?;
         let marker = marker(
             &self.config.delivery_run_id,
             invocation.node.reference.node.as_str(),
         );
         let body = finalized_body(&input, &marker, self.config.source_revision.as_deref());
+        let body = self
+            .authority
+            .prepare_comment_body(&body)
+            .map_err(|error| failure(error.to_string()))?;
+        if body.matches("<!-- zeroshot-").count() != 1
+            || body.lines().filter(|line| *line == marker).count() != 1
+        {
+            return Err(failure(
+                "prepared comment body changed its publication marker",
+            ));
+        }
         if body.len() > MAX_BODY_BYTES {
             return Err(failure("final comment body exceeds its size limit"));
         }
         let record = PublicationRecord {
             version: 1,
             url: input.url,
+            destination: Some(destination.clone()),
             marker,
             body_hash: hash(&body),
             author,
@@ -339,12 +353,7 @@ impl NativeV2CommentDeliveryAdapter {
                 .await
             {
                 Ok(comment) => {
-                    validate_comment(
-                        &comment,
-                        &publication.destination,
-                        &publication.record,
-                        &publication.body,
-                    )?;
+                    validate_comment(self.authority.as_ref(), &comment, publication.borrowed())?;
                     return Ok(comment);
                 }
                 Err(error) if definite_nonpublication(&error) => {
@@ -569,7 +578,15 @@ impl NativeV2CommentDeliveryAdapter {
                 if comment.author == intended.author
                     && comment.body.lines().any(|line| line == intended.marker)
                 {
-                    validate_comment(&comment, destination, intended, body)?;
+                    validate_comment(
+                        self.authority.as_ref(),
+                        &comment,
+                        Publication {
+                            destination,
+                            record: intended,
+                            body,
+                        },
+                    )?;
                     if found.replace(comment).is_some() {
                         return Err(failure("multiple comments match this publication identity"));
                     }
@@ -721,16 +738,7 @@ pub(crate) fn valid_comment_permalink(
     id: &str,
     value: &str,
 ) -> bool {
-    !id.is_empty()
-        && id.bytes().all(|byte| byte.is_ascii_digit())
-        && id != "0"
-        && ["issues", "pull"].iter().any(|segment| {
-            let suffix = format!("/{segment}/{}#issuecomment-{id}", destination.discussion_id);
-            value
-                .strip_prefix("https://github.com/")
-                .and_then(|value| value.strip_suffix(suffix.as_str()))
-                .is_some_and(|repository| repository.eq_ignore_ascii_case(&destination.repository))
-        })
+    crate::source_code_provider::adapters::core::valid_comment_permalink(destination, id, value)
 }
 
 fn finalized_body(input: &contract::CommentInput, marker: &str, revision: Option<&str>) -> String {
@@ -755,11 +763,18 @@ fn finalized_body(input: &contract::CommentInput, marker: &str, revision: Option
 }
 
 fn validate_comment(
+    authority: &dyn SourceCommentAuthority,
     comment: &SourceComment,
-    destination: &SourceCommentDestination,
-    record: &PublicationRecord,
-    body: &str,
+    publication: Publication<'_>,
 ) -> Result<(), NodeRunnerError> {
+    let Publication {
+        destination,
+        record,
+        body,
+    } = publication;
+    authority
+        .validate_comment(destination, comment)
+        .map_err(|error| failure(error.to_string()))?;
     if comment.discussion_url != destination.url
         || comment.author != record.author
         || comment.body != body

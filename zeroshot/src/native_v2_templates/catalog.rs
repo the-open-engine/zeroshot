@@ -3,16 +3,9 @@
 use openengine_cluster_protocol::{GraphSpec, NodeName, SessionScope};
 use thiserror::Error;
 
-use crate::native_v2_contract::{
-    ConnectionKey, DeclaredConnections, DeclaredEnvironment, EnvironmentVariableName,
-    GITHUB_CONNECTION_KEY, NodeRuntimeBinding,
-};
-use crate::native_v2_delivery::GITHUB_TOKEN_ENV;
+use crate::native_v2_contract::{DeclaredConnections, NodeRuntimeBinding};
 
-use super::{
-    auto_research_graph, node_name, single_worker_graph, software_change_graph, static_value,
-    DELIVERY_NODE,
-};
+use super::{auto_research_graph, node_name, single_worker_graph, software_change_graph, DELIVERY_NODE};
 
 /// The deliberately small set of built-in graph templates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -113,7 +106,7 @@ impl BuiltinGraphTemplate {
         if delivery == TemplateDelivery::None {
             return Ok(None);
         }
-        let connections = delivery_connections(delivery)?;
+        let connections = DeclaredConnections::empty();
         let name = match self {
             Self::AutoResearch => "checkpoint_delivery",
             Self::SingleWorker | Self::SoftwareChange | Self::IssueReview | Self::PrReview => {
@@ -194,17 +187,4 @@ pub(crate) enum BuiltinTemplateError {
     },
     #[error("a built-in graph template contains an invalid static contract")]
     InvalidStaticContract,
-}
-
-fn delivery_connections(
-    delivery: TemplateDelivery,
-) -> Result<DeclaredConnections, BuiltinTemplateError> {
-    if delivery == TemplateDelivery::Push {
-        Ok(DeclaredConnections::empty())
-    } else {
-        let environment_name = static_value(EnvironmentVariableName::new(GITHUB_TOKEN_ENV))?;
-        let environment = static_value(DeclaredEnvironment::new([environment_name]))?;
-        let connection_key = static_value(ConnectionKey::new(GITHUB_CONNECTION_KEY))?;
-        static_value(DeclaredConnections::new([(connection_key, environment)]))
-    }
 }

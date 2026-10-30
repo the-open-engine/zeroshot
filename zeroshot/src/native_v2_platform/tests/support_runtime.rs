@@ -157,7 +157,9 @@ impl TestAllocator<GatedAllocation> {
     }
 
     pub(super) async fn wait_started(&self) {
-        self.gate.wait_started().await;
+        tokio::time::timeout(Duration::from_secs(2), self.gate.wait_started())
+            .await
+            .assert_value_with("allocation started");
     }
 
     pub(super) fn release(&self) {

@@ -3,30 +3,124 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::native_v2_delivery::command::capture_sensitive_with_input;
-use crate::native_v2_review::{ReviewTargetKind, parse_review_url};
 use crate::source_code_provider::*;
 
-use super::{GhCliDeliveryAuthority, clean_command};
+use super::GhCliDeliveryAuthority;
 
 #[cfg(test)]
 mod tests;
 
 pub(crate) fn comment_destination(value: &str) -> Option<SourceCommentDestination> {
-    let target = parse_review_url(value).ok()?;
+    let url = super::super::instance::public_discussion_url(value)?;
+    let base =
+        openengine_cluster_protocol::SourceForgeBaseUrl::new(url.origin().ascii_serialization())
+            .ok()?;
+    comment_destination_at(value, &base)
+}
+
+pub(crate) fn comment_destination_at(
+    value: &str,
+    base: &openengine_cluster_protocol::SourceForgeBaseUrl,
+) -> Option<SourceCommentDestination> {
+    let url = super::super::instance::public_discussion_url(value)?;
+    let base_url = url::Url::parse(base.as_str()).ok()?;
+    if url.origin() != base_url.origin() || base_url.path() != "/" {
+        return None;
+    }
+    let path = super::super::instance::strip_base_path(url.path(), base_url.path())?;
+    let (repository, kind, discussion_id) = discussion_path(path)?;
     Some(SourceCommentDestination {
         provider: SourceProviderRef::new(
             SourceProviderId::new(super::super::GITHUB_PROVIDER_ID).ok()?,
             1,
         )
         .ok()?,
-        repository: target.repository,
-        discussion_id: target.number.to_string(),
-        kind: match target.kind {
-            ReviewTargetKind::Issue => SourceDiscussionKind::Issue,
-            ReviewTargetKind::PullRequest => SourceDiscussionKind::PullRequest,
-        },
-        url: target.url,
+        base_url: Some(base.to_string()),
+        repository,
+        discussion_id,
+        kind,
+        url: value.to_owned(),
     })
+}
+
+fn discussion_path(path: &str) -> Option<(String, SourceDiscussionKind, String)> {
+    let parts = path.split('/').collect::<Vec<_>>();
+    let [owner, name, kind, number] = parts.as_slice() else {
+        return None;
+    };
+    let repository = format!("{owner}/{name}");
+    if !super::super::valid_github_repository(&repository) {
+        return None;
+    }
+    let id = number.parse::<u64>().ok()?;
+    if id == 0 || id.to_string() != *number {
+        return None;
+    }
+    let kind = match *kind {
+        "issues" => SourceDiscussionKind::Issue,
+        "pull" => SourceDiscussionKind::PullRequest,
+        _ => return None,
+    };
+    Some((repository, kind, id.to_string()))
+}
+
+fn api_base(destination: &SourceCommentDestination) -> Option<String> {
+    let base = destination
+        .base_url
+        .as_deref()
+        .unwrap_or("https://github.com");
+    let url = url::Url::parse(base).ok()?;
+    let host = url.host_str()?;
+    Some(if base == "https://github.com" {
+        "https://api.github.com".to_owned()
+    } else if host.ends_with(".ghe.com") {
+        format!("https://api.{host}")
+    } else {
+        format!("{base}/api/v3")
+    })
+}
+
+pub(crate) fn valid_github_permalink(
+    destination: &SourceCommentDestination,
+    id: &str,
+    link: &str,
+) -> bool {
+    valid_comment_id(id)
+        && permalink_destination(destination, id, link).is_some_and(|actual| {
+            actual
+                .repository
+                .eq_ignore_ascii_case(&destination.repository)
+                && actual.discussion_id == destination.discussion_id
+        })
+}
+
+fn valid_comment_id(id: &str) -> bool {
+    id.parse::<u64>()
+        .ok()
+        .filter(|id| *id > 0)
+        .map(|id| id.to_string())
+        .as_deref()
+        == Some(id)
+}
+
+fn permalink_destination(
+    destination: &SourceCommentDestination,
+    id: &str,
+    link: &str,
+) -> Option<SourceCommentDestination> {
+    let mut parsed = url::Url::parse(link).ok()?;
+    if parsed.fragment()? != format!("issuecomment-{id}") {
+        return None;
+    }
+    parsed.set_fragment(None);
+    let base = openengine_cluster_protocol::SourceForgeBaseUrl::new(
+        destination
+            .base_url
+            .as_deref()
+            .unwrap_or("https://github.com"),
+    )
+    .ok()?;
+    comment_destination_at(parsed.as_str(), &base)
 }
 
 /// Validates captured comparison identity without credentials, files, or network effects.
@@ -97,7 +191,10 @@ fn decode_comment(
     let suffix = format!("/issues/{}", destination.discussion_id);
     let repository = wire
         .issue_url
-        .strip_prefix("https://api.github.com/repos/")
+        .strip_prefix(&format!(
+            "{}/repos/",
+            api_base(destination).ok_or(SourceDeliveryError::Rejected)?
+        ))
         .and_then(|value| value.strip_suffix(suffix.as_str()));
     if wire.id == 0
         || !repository.is_some_and(|value| value.eq_ignore_ascii_case(&destination.repository))
@@ -145,8 +242,12 @@ impl GhCliDeliveryAuthority {
         bytes: &[u8],
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<Value, SourceDeliveryError> {
-        let mut command = clean_command(&self.config, &self.config.gh_program, credential);
-        command.arg("api").args(arguments);
+        self.ensure_instance(credential).await?;
+        let mut command = self.api_command(credential);
+        command
+            .arg("api")
+            .args(arguments)
+            .args(["--header", "X-GitHub-Api-Version: 2026-03-10"]);
         let secrets = vec![credential.expose().to_owned()];
         let output =
             capture_sensitive_with_input(&mut command, self.config.api_deadline, &secrets, bytes)
@@ -166,6 +267,16 @@ impl GhCliDeliveryAuthority {
 
 #[async_trait]
 impl SourceCommentAuthority for GhCliDeliveryAuthority {
+    fn validate_comment(
+        &self,
+        destination: &SourceCommentDestination,
+        comment: &SourceComment,
+    ) -> Result<(), SourceDeliveryError> {
+        validate_comment_identity(destination, comment)?;
+        valid_github_permalink(destination, &comment.id, &comment.url)
+            .then_some(())
+            .ok_or(SourceDeliveryError::Rejected)
+    }
     fn comment_credential_field(&self) -> &'static str {
         "GH_TOKEN"
     }

@@ -56,6 +56,9 @@ use connections::LocalConnectionStore;
 #[path = "local/backend.rs"]
 mod backend;
 
+#[path = "local/native_forge.rs"]
+pub(super) mod native_forge;
+
 /// Private process mode intercepted by the shipped binary before public CLI parsing.
 #[doc(hidden)]
 pub const LOCAL_CONTROLLER_MODE: &str = "__zeroshot-run-controller";
@@ -245,6 +248,9 @@ impl LocalCliBackend {
         &self,
         mut request: PreparedRunRequest,
     ) -> Result<PreparedLocalRun, NativeV2CliError> {
+        let native_environment = native_forge::capture_native_environment(&self.current_directory)?;
+        self.enrich_local_source(&mut request, &native_environment)
+            .await?;
         let (workspace, source) = crate::native_v2_local::prepare_local_source(
             &request,
             &self.current_directory,
@@ -253,8 +259,29 @@ impl LocalCliBackend {
         .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
         crate::native_v2_local::validate_workspace_state(&workspace, &self.state_root)
             .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
-        let submission = crate::native_v2_local::local_submission(&request.intent, source.clone());
-        request.connections = LocalConnectionStore::new(self.state_root.clone())
+        let mut submission =
+            crate::native_v2_local::local_submission(&request.intent, source.clone());
+        native_forge::materialize_local_access(
+            &mut submission,
+            native_forge::NativeContext {
+                environment: &native_environment,
+                directory: &workspace,
+            },
+            request.github_token.is_some(),
+        )?;
+        request.intent.runtime = submission.runtime.clone();
+        let store = LocalConnectionStore::new(self.state_root.clone());
+        native_forge::fill_missing(
+            &submission,
+            &mut request.connections,
+            &store,
+            native_forge::NativeContext {
+                environment: &native_environment,
+                directory: &workspace,
+            },
+        )
+        .await?;
+        request.connections = store
             .resolve_submission(&submission, &request.connections)?
             .bootstrap_values();
         request.git_credentials =
@@ -268,6 +295,47 @@ impl LocalCliBackend {
             dirty: false,
         });
         prepare_local_run(request, &self.current_directory, &self.git_program).map_err(local_error)
+    }
+
+    async fn enrich_local_source(
+        &self,
+        request: &mut PreparedRunRequest,
+        environment: &std::collections::BTreeMap<String, String>,
+    ) -> Result<(), NativeV2CliError> {
+        let selected = request.cwd.as_deref().unwrap_or(&self.current_directory);
+        let selected = if selected.is_absolute() {
+            selected.to_owned()
+        } else {
+            self.current_directory.join(selected)
+        };
+        if request.source.is_none() {
+            let (_, source) =
+                crate::native_v2_local::local_resolved_source(&selected, &self.git_program)
+                    .map_err(local_error)?;
+            request.source = source.map(|mut resolved| {
+                if let Some(remote) = &mut resolved.remote {
+                    remote.connection = request.source_connection.clone();
+                }
+                super::NamedRunSource {
+                    resolved,
+                    dirty: false,
+                }
+            });
+        }
+        let capabilities =
+            crate::native_v2_admission::delivery_capabilities(&request.intent.graph.root);
+        let needs_forge = native_forge::needs_forge(&capabilities);
+        if needs_forge && let Some(source) = &mut request.source {
+            native_forge::enrich_source(
+                &mut source.resolved,
+                native_forge::NativeContext {
+                    environment,
+                    directory: &selected,
+                },
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     async fn start_prepared_controller(

@@ -8,12 +8,13 @@ use std::path::Path;
 use std::pin::Pin;
 
 use openengine_cluster_protocol::{
-    ActiveMemoryConfig, DeclaredConnections, DeclaredEnvironment, GlobalAgentsConfig,
-    EnvironmentVariableName, GraphProfile, GraphSpec, IdempotencyKey, ModelId, NodeName,
-    NodeRuntimeBinding, ReasoningEffort, RunConnectionValues, RunSize, RunSubmitResult,
-    RunConnectionRequirements, RuntimePlan, SessionScope, StaticConnectionValues,
+    ActiveMemoryConfig, DeclaredConnections, GlobalAgentsConfig, GraphProfile, GraphSpec,
+    IdempotencyKey, ModelId, NodeName, MAX_MODEL_CONTEXT_WINDOW, MAX_MODEL_MAX_TOKENS,
+    MIN_MODEL_CONTEXT_WINDOW, MIN_MODEL_MAX_TOKENS, NodeRuntimeBinding, ReasoningEffort,
+    RunConnectionValues, RunSize, RunSubmitResult, RunConnectionRequirements, RuntimePlan,
+    SessionScope, StaticConnectionValues, deserialize_optional_model_limit,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use super::super::{
     BuiltinGraphTemplate, CliOutcome, NativeV2CliBackend, NativeV2CliCommand, NativeV2CliError,
@@ -23,7 +24,6 @@ use super::super::{
 use super::{CliExecutionContext, write_json};
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission, executable_runtime_roles};
 use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
-use crate::native_v2_delivery::GITHUB_TOKEN_ENV;
 
 #[path = "submission/profiles.rs"]
 mod profiles;
@@ -179,19 +179,7 @@ where
         crate::native_v2_local::validate_local_environment(intent.environment.as_ref())
             .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
     }
-    let connections = select_connections(&intent.runtime, intent.environment.as_ref(), &available)?;
-    let github_token = run
-        .target
-        .as_ref()
-        .and_then(|_| available("GH_TOKEN"))
-        .map(|value| {
-            value
-                .into_string()
-                .map_err(|_| NativeV2CliError::GitHubToken)
-        })
-        .transpose()?
-        .map(validate_github_token)
-        .transpose()?;
+    let (connections, github_token) = submission_credentials(run, &intent, &available)?;
     Ok(PreparedRunRequest {
         run_id: openengine_cluster_protocol::RunId::new(uuid::Uuid::now_v7().to_string()),
         intent,
@@ -206,6 +194,33 @@ where
         }),
         profile,
     })
+}
+
+fn submission_credentials<F>(
+    run: &RunCommand,
+    intent: &TargetRunIntent,
+    available: &F,
+) -> Result<(RunConnectionValues, Option<String>), NativeV2CliError>
+where
+    F: Fn(&str) -> Option<OsString>,
+{
+    if run.validate_only {
+        return Ok((RunConnectionValues::new(), None));
+    }
+    let connections = select_connections(&intent.runtime, intent.environment.as_ref(), available)?;
+    let github_token = run
+        .target
+        .as_ref()
+        .and_then(|_| available("GH_TOKEN"))
+        .map(|value| {
+            value
+                .into_string()
+                .map_err(|_| NativeV2CliError::GitHubToken)
+        })
+        .transpose()?
+        .map(validate_github_token)
+        .transpose()?;
+    Ok((connections, github_token))
 }
 
 async fn prepare_validated_submission_with_environment<F>(
@@ -225,11 +240,45 @@ where
         .validate_intent(&params.intent, DeliveryPolicy::Optional)
         .await
         .map_err(NativeV2CliError::InvalidRun)?;
-    if run.target.is_none() && run.validate_only {
-        validate_local_workspace(&params)?;
-    }
+    crate::native_v2_cli::local::native_forge::select_local_source(run, &mut params)?;
+    validate_local_only_workspace(run, &params)?;
     resolve_named_source(run, &mut params, &available).await?;
+    materialize_named_delivery_access(run, &mut params, &available)?;
     Ok(params)
+}
+
+fn materialize_named_delivery_access<F>(
+    run: &RunCommand,
+    request: &mut PreparedRunRequest,
+    available: &F,
+) -> Result<(), NativeV2CliError>
+where
+    F: Fn(&str) -> Option<OsString>,
+{
+    if run.target.is_none() || run.validate_only {
+        return Ok(());
+    }
+    let mut submission = crate::native_v2_local::local_submission(
+        &request.intent,
+        request
+            .source
+            .as_ref()
+            .map(|source| source.resolved.clone()),
+    );
+    crate::native_v2_admission::materialize_delivery_access(&mut submission)
+        .map_err(NativeV2CliError::InvalidRun)?;
+    request.intent.runtime = submission.runtime.clone();
+    let missing = submission
+        .runtime
+        .connection_requirements()
+        .into_iter()
+        .filter(|(key, _)| !request.connections.contains_key(key))
+        .map(|(key, fields)| (key, fields.into_iter().collect()))
+        .collect();
+    request
+        .connections
+        .extend(select_connection_requirements(missing, available)?);
+    Ok(())
 }
 
 fn resolved_initial_input(
@@ -277,6 +326,16 @@ where
     Ok(())
 }
 
+fn validate_local_only_workspace(
+    run: &RunCommand,
+    params: &PreparedRunRequest,
+) -> Result<(), NativeV2CliError> {
+    if run.target.is_none() && run.validate_only {
+        validate_local_workspace(params)?;
+    }
+    Ok(())
+}
+
 fn validate_local_workspace(params: &PreparedRunRequest) -> Result<(), NativeV2CliError> {
     let invoking = std::env::current_dir()
         .map_err(|_| NativeV2CliError::Usage("invoking folder is unavailable".to_owned()))?;
@@ -289,20 +348,15 @@ fn validate_local_workspace(params: &PreparedRunRequest) -> Result<(), NativeV2C
 }
 
 fn select_source_connections(params: &mut PreparedRunRequest) -> Result<(), NativeV2CliError> {
-    let Some(remote) = params
-        .source
-        .as_ref()
-        .and_then(|source| source.resolved.remote.as_ref())
-    else {
+    let Some(source) = params.source.as_ref() else {
         return Ok(());
     };
-    if remote
-        .forge
-        .as_ref()
-        .is_none_or(|forge| forge.provider.as_str() != "source.github")
-    {
+    if !crate::native_v2_candidate::is_github_com_source(&source.resolved) {
         params.github_token = None;
     }
+    let Some(remote) = source.resolved.remote.as_ref() else {
+        return Ok(());
+    };
     let (Some(key), Some(credentials)) = (&remote.connection, &params.git_credentials) else {
         return Ok(());
     };
@@ -577,6 +631,10 @@ struct UniformRuntimePlan {
     model: ModelId,
     #[serde(default)]
     effort: Option<ReasoningEffort>,
+    #[serde(default, deserialize_with = "deserialize_context_window")]
+    context_window: Option<u32>,
+    #[serde(default, deserialize_with = "deserialize_max_tokens")]
+    max_tokens: Option<u32>,
     #[serde(default)]
     session_scope: Option<SessionScope>,
     #[serde(default)]
@@ -589,6 +647,30 @@ struct UniformRuntimePlan {
 
 const fn medium_size() -> RunSize {
     RunSize::Medium
+}
+
+fn deserialize_context_window<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_optional_model_limit(
+        deserializer,
+        "contextWindow",
+        MIN_MODEL_CONTEXT_WINDOW,
+        MAX_MODEL_CONTEXT_WINDOW,
+    )
+}
+
+fn deserialize_max_tokens<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_optional_model_limit(
+        deserializer,
+        "maxTokens",
+        MIN_MODEL_MAX_TOKENS,
+        MAX_MODEL_MAX_TOKENS,
+    )
 }
 
 impl UniformRuntimePlan {
@@ -606,10 +688,7 @@ impl UniformRuntimePlan {
                 nodes.insert(
                     name,
                     NodeRuntimeBinding::CommentDelivery {
-                        connections: connection(
-                            crate::native_v2_contract::GITHUB_CONNECTION_KEY,
-                            &[GITHUB_TOKEN_ENV],
-                        )?,
+                        connections: DeclaredConnections::empty(),
                     },
                 );
                 continue;
@@ -637,6 +716,8 @@ impl UniformRuntimePlan {
             lane: None,
             model: self.model.clone(),
             effort: self.effort,
+            context_window: self.context_window,
+            max_tokens: self.max_tokens,
             session_scope: self.session_scope.unwrap_or_else(|| {
                 template.map_or(SessionScope::Execution, |template| {
                     template.default_session_scope(name.as_str())
@@ -681,32 +762,13 @@ fn is_comment_node(root: &openengine_cluster_protocol::GraphNode, name: &NodeNam
 
 fn git_delivery_binding(
     pull_request_feedback: crate::native_v2_contract::PullRequestFeedback,
-    mode: crate::native_v2_delivery::DeliveryMode,
+    _mode: crate::native_v2_delivery::DeliveryMode,
 ) -> Result<NodeRuntimeBinding, NativeV2CliError> {
-    let connections = if mode == crate::native_v2_delivery::DeliveryMode::Push {
-        DeclaredConnections::empty()
-    } else {
-        connection(
-            crate::native_v2_contract::GITHUB_CONNECTION_KEY,
-            &[GITHUB_TOKEN_ENV],
-        )?
-    };
+    let connections = DeclaredConnections::empty();
     Ok(NodeRuntimeBinding::GitDelivery {
         connections,
         pull_request_feedback,
     })
-}
-
-fn connection(key: &str, names: &[&str]) -> Result<DeclaredConnections, NativeV2CliError> {
-    let names = names
-        .iter()
-        .map(|name| EnvironmentVariableName::new(*name))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
-    let environment = DeclaredEnvironment::new(names)
-        .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
-    DeclaredConnections::single(key, environment)
-        .map_err(|error| NativeV2CliError::Usage(error.to_string()))
 }
 
 fn insert_template_binding(

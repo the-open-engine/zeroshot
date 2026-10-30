@@ -1,25 +1,17 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use openengine_cluster_protocol::{
-    NodeInstructions, NodeName, PayloadType, RunId, WorkerOutcome, WorkerRef,
-};
+use openengine_cluster_protocol::WorkerOutcome;
 use openengine_cluster_testkit::assertions::AssertValue;
-use serde_json::{Value, json};
+use serde_json::json;
 
 use super::*;
-use crate::execution::SessionScope;
-use crate::native_v2_candidate::test_support::{TestDirectory, environment_name};
-use crate::native_v2_contract::{
-    DeclaredConnections, DeclaredEnvironment, ExecutionId, ExecutionRef, NodeInstanceId,
-    NodeInvocation, NodeRuntimeBinding,
-};
-use crate::native_v2_runner::{NodeResponseContract, NodeRole, ResolvedEnvironment};
+use crate::native_v2_candidate::test_support::TestDirectory;
 use crate::native_v2_runner::test_support::control;
-use crate::worker_catalog::ModelId;
 
 fn adapter(directory: &TestDirectory, fixture: &str) -> HermesAdapter {
-    let executable = directory.write_executable("hermes", fixture);
+    let source = openengine_cluster_testkit::fixture::python3_script(fixture);
+    let executable = directory.write_executable("hermes", &source);
     let workspace = directory.child("workspace");
     std::fs::create_dir_all(&workspace).assert_value();
     std::fs::create_dir_all(directory.child("runtime")).assert_value();
@@ -40,61 +32,20 @@ fn adapter(directory: &TestDirectory, fixture: &str) -> HermesAdapter {
 }
 
 fn invocation(fields: &[(&str, &str)]) -> DriverInvocation {
-    let connections = if fields.is_empty() {
-        DeclaredConnections::empty()
-    } else {
-        DeclaredConnections::single(
-            "provider",
-            DeclaredEnvironment::new(fields.iter().map(|(name, _)| environment_name(name)))
-                .assert_value(),
-        )
-        .assert_value()
-    };
-    let binding = NodeRuntimeBinding::Agent {
-        lane: None,
-        model: ModelId::new("opaque/model").assert_value(),
-        effort: None,
-        session_scope: SessionScope::NodeInstance,
-        connections,
-    };
-    let environment = ResolvedEnvironment::exact(
-        &binding,
-        fields
-            .iter()
-            .map(|(name, value)| (environment_name(name), (*value).to_owned()))
-            .collect(),
-    )
-    .assert_value();
-    DriverInvocation {
-        node: NodeInvocation {
-            reference: ExecutionRef {
-                run_id: RunId::new("run-hermes"),
-                node: NodeName::new("agent").assert_value(),
-                node_instance: NodeInstanceId::new(1).assert_value(),
-                execution: ExecutionId::new(1).assert_value(),
-            },
-            worker: WorkerRef::new("agent.hermes@1").assert_value(),
-            instructions: Some(NodeInstructions::new("Exercise the adapter.").assert_value()),
-            input: Value::Null,
-            binding,
-        },
-        role: NodeRole::Worker,
-        response: NodeResponseContract::Worker {
-            output: PayloadType::Null,
-        },
-        environment,
-        session: Arc::new(HermesSession {
+    crate::harnesses::adapters::contributed::test_support::invocation(
+        "hermes",
+        fields,
+        Arc::new(HermesSession {
             core: ProviderSessionCore::new(),
             id: "owned-session".to_owned(),
         }),
-        provider_session_slot: NodeInstanceId::new(1).assert_value(),
-    }
+    )
 }
 
 #[cfg(unix)]
 fn fixture(answer: &str, clean: bool) -> String {
     format!(
-        r##"#!/usr/bin/python3
+        r##"#!/usr/bin/env python3
 import json, os, pathlib, sys
 assert sys.argv[1:] == ['--version', '--help']
 def emit(value): print(json.dumps(value), flush=True)
@@ -146,7 +97,10 @@ async fn run(
 #[tokio::test]
 async fn private_handshake_credentials_and_native_node_session_reuse() {
     let directory = TestDirectory::new("hermes-session");
-    let mut source = fixture("{\"response\":null}", true);
+    let mut source = fixture("{\"response\":null}", true).replace(
+        "assert message['type']=='prompt'",
+        "assert message['type']=='prompt'; pathlib.Path('received-prompt.txt').write_text(message['text'])",
+    );
     source.push_str(
         "\nassert init['nativeEnvironment']['ANTHROPIC_API_KEY']=='unrelated-native-login'\n",
     );
@@ -166,9 +120,19 @@ async fn private_handshake_credentials_and_native_node_session_reuse() {
         .config
         .native_environment
         .selected(command::LOCAL_ENVIRONMENT);
-    let invocation = invocation(&[("OPENAI_API_KEY", "declared-sensitive-fixture")]);
-    assert!(run(&adapter, invocation.clone()).await.is_ok());
-    assert!(run(&adapter, invocation).await.is_ok());
+    let mut invocation = invocation(&[("OPENAI_API_KEY", "declared-sensitive-fixture")]);
+    for context in ["first private context", "fresh private context"] {
+        invocation.host_context = Some(context.to_owned());
+        assert!(run(&adapter, invocation.clone()).await.is_ok());
+        let prompt = std::fs::read_to_string(adapter.config.workspace.join("received-prompt.txt"))
+            .assert_value();
+        assert!(prompt.starts_with(&format!("Runtime-owned execution context:\n{context}\n\n")));
+        assert_eq!(
+            invocation.agent_instructions().assert_value().as_str(),
+            "Exercise the adapter."
+        );
+    }
+    drop(invocation);
     let home = std::fs::read_to_string(adapter.config.workspace.join("native-home")).assert_value();
     assert!(!PathBuf::from(home).join("native_runtime.py").exists());
 }

@@ -166,8 +166,8 @@ fn inherited_binding(main: &AdmittedRun) -> Result<NodeRuntimeBinding, Postmorte
         .postmortem
         .source_node
         .as_ref()
-        .or_else(|| first_agent(&main.graph.root, false))
-        .or_else(|| first_agent(&main.graph.root, true))
+        .or_else(|| first_agent(&main.graph.root, main.runtime.nodes(), false))
+        .or_else(|| first_agent(&main.graph.root, main.runtime.nodes(), true))
         .ok_or(PostmortemError::Preparation)?;
     match main.runtime.nodes().get(name) {
         Some(binding @ NodeRuntimeBinding::Agent { .. }) => Ok(binding.clone()),
@@ -175,17 +175,25 @@ fn inherited_binding(main: &AdmittedRun) -> Result<NodeRuntimeBinding, Postmorte
     }
 }
 
-fn first_agent(node: &GraphNode, verifiers: bool) -> Option<&NodeName> {
+fn first_agent<'a>(
+    node: &'a GraphNode,
+    bindings: &BTreeMap<NodeName, NodeRuntimeBinding>,
+    verifiers: bool,
+) -> Option<&'a NodeName> {
+    let agent = matches!(
+        bindings.get(node.name()),
+        Some(NodeRuntimeBinding::Agent { .. })
+    );
     match node {
-        GraphNode::Step(step) if !verifiers => return Some(&step.name),
-        GraphNode::Verifier(verifier) if verifiers && verifier.instructions.is_some() => {
+        GraphNode::Step(step) if agent && !verifiers => return Some(&step.name),
+        GraphNode::Verifier(verifier) if agent && verifiers && verifier.instructions.is_some() => {
             return Some(&verifier.name);
         }
         _ => {}
     }
     openengine_cluster_server::graph_verifier::graph_node_children(node)
         .into_iter()
-        .find_map(|child| first_agent(child, verifiers))
+        .find_map(|child| first_agent(child, bindings, verifiers))
 }
 
 pub(super) fn output_type(role: Role) -> Value {

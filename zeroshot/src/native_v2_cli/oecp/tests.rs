@@ -448,6 +448,137 @@ async fn wave7_cli_contract_oecp_default_optional_authority_is_refused() {
 }
 
 #[tokio::test]
+async fn oecp_optional_authority_defaults_are_explicit_and_fail_closed() {
+    let connector = StubConnector::new(None);
+    assert_eq!(
+        connector
+            .review_cache_namespace("prod")
+            .await
+            .assert_value(),
+        None
+    );
+    assert_eq!(
+        connector
+            .default_resource_scope("prod")
+            .await
+            .assert_value(),
+        ConnectionScope::User
+    );
+    let request = crate::native_v2_review::ReviewResolutionRequest {
+        url: "https://github.com/open-engine/zeroshot/issues/1".to_owned(),
+        branch: None,
+        revision: None,
+    };
+    assert!(
+        connector
+            .resolve_review("prod", request.clone(), &profile_set_request().runtime,)
+            .await
+            .assert_error()
+            .to_string()
+            .contains("does not advertise task resolution")
+    );
+    assert!(
+        connector
+            .delegation(crate::native_v2_cli::DelegationCommand {
+                target: "prod".to_owned(),
+                action: crate::native_v2_cli::DelegationAction::List {
+                    owner: openengine_cluster_protocol::DelegationOwner::User,
+                    organization_id: None,
+                },
+            })
+            .await
+            .assert_error()
+            .to_string()
+            .contains("does not advertise delegation management")
+    );
+
+    let backend = NamedTargetCliBackend::new(StubConnector::new(None));
+    assert_eq!(
+        backend
+            .review_cache_namespace(Some("prod"))
+            .await
+            .assert_value(),
+        None
+    );
+    assert_eq!(
+        backend
+            .default_resource_scope(Some("prod"))
+            .await
+            .assert_value(),
+        ConnectionScope::User
+    );
+    assert!(
+        backend
+            .resolve_review(Some("prod"), request, &profile_set_request().runtime)
+            .await
+            .assert_error()
+            .to_string()
+            .contains("does not advertise task resolution")
+    );
+    assert!(
+        backend
+            .delegation(crate::native_v2_cli::DelegationCommand {
+                target: "prod".to_owned(),
+                action: crate::native_v2_cli::DelegationAction::List {
+                    owner: openengine_cluster_protocol::DelegationOwner::User,
+                    organization_id: None,
+                },
+            })
+            .await
+            .assert_error()
+            .to_string()
+            .contains("does not advertise delegation management")
+    );
+
+    let run_id = RunId::new("default-authority-run");
+    assert!(
+        backend
+            .run_checkpoints(
+                Some("prod"),
+                openengine_cluster_protocol::RunCheckpointsParams {
+                    run_id: run_id.clone(),
+                    after: None,
+                    limit: None,
+                },
+            )
+            .await
+            .assert_error()
+            .to_string()
+            .contains("does not advertise workspace checkpoints")
+    );
+    assert!(
+        backend
+            .run_resume(
+                Some("prod"),
+                openengine_cluster_protocol::RunResumeParams {
+                    run_id: run_id.clone(),
+                    successor_run_id: RunId::new("default-authority-successor"),
+                    from: None,
+                    connections: BTreeMap::new(),
+                    connection_resolver: None,
+                    github_token: None,
+                    git_credentials: None,
+                },
+            )
+            .await
+            .assert_error()
+            .to_string()
+            .contains("local authorization for workspace recovery is unavailable")
+    );
+    assert!(
+        backend
+            .run_discard_workspace(
+                Some("prod"),
+                openengine_cluster_protocol::RunDiscardWorkspaceParams { run_id },
+            )
+            .await
+            .assert_error()
+            .to_string()
+            .contains("does not advertise workspace recovery")
+    );
+}
+
+#[tokio::test]
 async fn wave7_cli_contract_oecp_subscription_framing_and_hosted_refusals_are_exact() {
     let connector = StubConnector::new(None);
     let requests = connector.transport.requests.clone();

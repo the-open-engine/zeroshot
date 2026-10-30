@@ -166,7 +166,7 @@ pub(crate) fn git_delivery_node() -> Value {
         "kind":"verifier","name":"deliver","worker":GIT_DELIVERY_MERGE_V2_WORKER_REF,
         "input":{"kind":"null"},"output":delivery_result_schema(DeliveryMode::Merge)
             .assert_value_with("delivery result schema"),
-        "inputBindings":[],"writeBindings":[],"timeoutMs":1000,"attempts":1,
+        "inputBindings":[],"writeBindings":[],"timeoutMs":30000,"attempts":1,
         "signals":{"delivery":crate::native_v2_delivery::delivery_signal_labels(DeliveryMode::Merge)
             .assert_value_with("delivery signals")},
         "diagnostic":crate::native_v2_delivery::delivery_diagnostic_schema()

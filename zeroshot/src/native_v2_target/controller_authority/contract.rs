@@ -62,6 +62,7 @@ pub(super) struct ControllerDescriptor {
     pub(super) workspace_checkpoints: bool,
     pub(super) node_runtime_lanes: bool,
     pub(super) runtime_harnesses: Option<Vec<openengine_cluster_protocol::RuntimeLane>>,
+    pub(super) decision_models: bool,
     pub(super) git_transport: bool,
     pub(super) comment_delivery: bool,
     pub(super) task_resolution: Option<Url>,
@@ -88,6 +89,11 @@ pub(super) fn build_controller_descriptor(
             Ok::<_, TargetAuthorityError>(catalog.lanes.clone())
         })
         .transpose()?;
+    let decision_models = wire
+        .extensions
+        .decision_models
+        .as_ref()
+        .is_some_and(|marker| marker.kind == openengine_cluster_protocol::DECISION_MODELS_KIND);
     let git_transport = wire
         .extensions
         .git_transport
@@ -113,6 +119,7 @@ pub(super) fn build_controller_descriptor(
         workspace_checkpoints,
         node_runtime_lanes,
         runtime_harnesses,
+        decision_models,
         git_transport,
         comment_delivery,
         task_resolution,

@@ -231,6 +231,8 @@ fn agent_binding(
         lane: None,
         model: worker_catalog::ModelId::new(model).assert_value(),
         effort,
+        context_window: None,
+        max_tokens: None,
         session_scope: scope,
         connections,
     }

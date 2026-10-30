@@ -7,7 +7,7 @@ set -eu
 filter='native_v2_claude::tests::redaction::'
 toolchain=$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' rust-toolchain.toml)
 test -n "$toolchain"
-test -f zeroshot/src/native_v2_claude/tests/redaction.rs
+test -f zeroshot/src/harnesses/adapters/core/claude/tests/redaction.rs
 
 if command -v cargo >/dev/null 2>&1; then
   exec cargo test --locked --package zeroshot --lib "$filter" -- --test-threads=1

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use openengine_cluster_protocol::{IdempotencyKey, RunSubmission, RunTitle};
+use openengine_cluster_protocol::{IdempotencyKey, RunSubmission, RunTitle, WorkerOutcome};
 use openengine_cluster_server::admission::VerifiedGraph;
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{Value, json};
@@ -833,4 +833,52 @@ async fn pull_request_delivery_routes_a_pre_review_git_failure_to_repair() {
             "deliveryFeedback":"git push: unfamiliar failure"
         }),
     );
+}
+
+#[tokio::test]
+async fn delivery_links_survive_state_promotion_and_terminal_projection() {
+    for (delivery, mode, label) in [
+        (
+            TemplateDelivery::PullRequest,
+            DeliveryMode::PullRequestV2,
+            DELIVERY_READY_LABEL,
+        ),
+        (
+            TemplateDelivery::Merge,
+            DeliveryMode::MergeV3,
+            DELIVERY_MERGED_LABEL,
+        ),
+    ] {
+        let (verified, initial_input) = verified_software_template(delivery).await;
+        let mut history = accepted_review_history(delivery);
+        let mut settled = settled_delivery(
+            SettledExecutionSpec {
+                execution: 4,
+                node_instance: 4,
+                node: DELIVERY_NODE,
+                settled_at: 4,
+                input: delivery_input(),
+            },
+            mode,
+            label,
+        );
+        let crate::full_v1_reducer::DurableExecutionState::Settled {
+            outcome: WorkerOutcome::Verifier { output, .. },
+            ..
+        } = &mut settled.state
+        else {
+            panic!("expected delivery receipt");
+        };
+        output["links"] = json!({
+            "url":"https://github.enterprise.example/acme/project/pull/17",
+            "commitUrl":format!("https://github.enterprise.example/acme/project/commit/{}", "b".repeat(40)),
+        });
+        let expected = output.clone();
+        history.push(settled);
+        assert_eq!(
+            reduce(&verified, &initial_input, &history).terminal,
+            Some(TerminalProjection::Succeeded { output: expected }),
+            "nested optional receipt links must survive the complete {mode:?} template",
+        );
+    }
 }

@@ -198,6 +198,7 @@ fn invocation(
         *session_scope = scope;
     }
     DriverInvocation {
+        host_context: None,
         provider_session_slot: request.invocation.reference.node_instance,
         node: request.invocation,
         role: NodeRole::Worker,

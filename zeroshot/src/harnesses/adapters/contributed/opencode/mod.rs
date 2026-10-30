@@ -35,8 +35,7 @@ use crate::native_v2_capsule::provider_process::{
 use crate::native_v2_capsule::provider_process::turn::{self, ProviderProcessStart};
 use crate::native_v2_runner::{
     AgentResponseState, DriverControl, DriverInvocation, NodeDriver, NodeRunnerError,
-    ProviderSchemaDialect, ResolvedEnvironment, render_agent_prompt_with_schema,
-    resolve_agent_response_with_schema,
+    ProviderSchemaDialect, ResolvedEnvironment, resolve_agent_response_with_schema,
 };
 
 pub use crate::native_v2_capsule::HarnessProcessEnvironment as OpenCodeProcessEnvironment;
@@ -148,17 +147,7 @@ impl OpenCodeAdapter {
         turn: OpenCodeTurn<'_>,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
         let invocation = turn.invocation;
-        let initial = render_agent_prompt_with_schema(
-            invocation.agent_instructions()?,
-            &invocation.node.input,
-            &invocation.response,
-            turn.dialect,
-        )
-        .map_err(|error| {
-            NodeRunnerError::DriverDetail(format!(
-                "OpenCode prompt could not be serialized: {error}"
-            ))
-        })?;
+        let initial = invocation.agent_prompt_with_schema(turn.dialect)?;
         let mut feedback = ProviderFailureRetry::new(
             "OpenCode",
             initial.clone(),

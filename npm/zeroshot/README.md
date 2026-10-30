@@ -14,8 +14,8 @@ runtime configuration, targets, and CLI reference.
 
 The product site is [zeroshot.sh](https://zeroshot.sh/?utm_source=npm&utm_medium=readme&utm_campaign=zeroshot).
 
-The `zeroshot`, `zeroshot-memory-init`, and `zeroshot-graph-design` managed skills share one source
-each across hosts.
+The `zeroshot`, `zeroshot-memory-init`, `zeroshot-graph-design`, and `zeroshot-plan` managed skills
+share one source each across hosts.
 They install for Codex, GitHub Copilot, and Pi at `$HOME/.agents/skills/<name>/SKILL.md`, and for
 Claude Code at `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/<name>/SKILL.md`. Reinstalling updates an unchanged
 managed copy. A conflicting or edited skill is preserved; installation fails with the exact path so

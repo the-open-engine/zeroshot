@@ -31,17 +31,56 @@ pub(crate) fn checkout_references(
     if scope.as_object().is_some_and(serde_json::Map::is_empty) {
         return Ok(Vec::new());
     }
-    let scope: CheckoutScope =
-        serde_json::from_value(scope).map_err(|_| ReviewResolveError::Identity)?;
-    let target = parse_review_url(&input.url)?;
+    // Every source-bearing scoped review must inspect the captured head before agents run.
     let Some(source) = admitted.source.as_ref() else {
         return Ok(Vec::new());
     };
+    let scope = source_scope(scope, source)?;
+    // Only the existing GitHub.com resolver prepares provider-specific comparison refs.
+    // Other publishers still verify the captured scope through their forge API.
+    let destination = &input.destination;
+    if !github_com_review(destination, source) {
+        return Ok(Vec::new());
+    }
+    let target = parse_review_url(&input.url)?;
     validate_scope(&scope, source, &target)?;
     Ok(vec![
         format!("refs/pull/{}/head", target.number),
         scope.base_revision.as_str().to_owned(),
     ])
+}
+
+fn source_scope(
+    value: serde_json::Value,
+    source: &ResolvedSource,
+) -> Result<CheckoutScope, ReviewResolveError> {
+    let scope: CheckoutScope =
+        serde_json::from_value(value).map_err(|_| ReviewResolveError::Identity)?;
+    if scope.head_revision != source.revision {
+        return Err(ReviewResolveError::Identity);
+    }
+    Ok(scope)
+}
+
+fn github_com_review(
+    destination: &crate::source_code_provider::SourceCommentDestination,
+    source: &ResolvedSource,
+) -> bool {
+    destination.provider.id().as_str()
+        == crate::source_code_provider::adapters::core::GITHUB_PROVIDER_ID
+        && destination
+            .base_url
+            .as_deref()
+            .is_none_or(|base| base == "https://github.com")
+        && github_com_source(source)
+}
+
+fn github_com_source(source: &ResolvedSource) -> bool {
+    let Some(remote) = &source.remote else {
+        return true;
+    };
+    crate::source_code_provider::adapters::core::github_repository_reference(remote.url.as_str())
+        .is_some_and(|repository| repository.eq_ignore_ascii_case(source.repository.as_str()))
 }
 
 /// Runs only after the local controller owns the workspace and has restored any checkpoint.
@@ -158,7 +197,6 @@ fn validate_scope(
             .base_repository
             .eq_ignore_ascii_case(source.repository.as_str())
         || scope.base_branch != source.branch
-        || scope.head_revision != source.revision
     {
         return Err(ReviewResolveError::Identity);
     }

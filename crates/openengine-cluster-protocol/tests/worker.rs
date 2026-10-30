@@ -12,8 +12,8 @@ mod json_read;
 
 use assert_value::AssertValue;
 use openengine_cluster_protocol::{
-    WorkerDescriptor, WorkerFailureReason, WorkerOutcome, WorkerProtocolBinding, BUILTIN_PROFILE,
-    BUILTIN_VERSION, MAX_WORKER_BINDING_VERSION_LENGTH, MAX_WORKER_PROFILE_LENGTH,
+    CredentialHandle, WorkerDescriptor, WorkerFailureReason, WorkerOutcome, WorkerProtocolBinding,
+    BUILTIN_PROFILE, BUILTIN_VERSION, MAX_WORKER_BINDING_VERSION_LENGTH, MAX_WORKER_PROFILE_LENGTH,
     MAX_WORKER_PROTOCOL_LENGTH, RUNTIME_WORKER_ERRORS,
 };
 use serde_json::json;
@@ -238,6 +238,20 @@ fn strict_autonomy_has_only_typed_fail_closed_outcomes() {
         reason: WorkerFailureReason::PolicyDenied,
     };
     assert!(serde_json::to_value(invalid_rust_value).is_err());
+}
+
+#[test]
+fn credential_handles_select_secrets_without_carrying_them() {
+    let handle = CredentialHandle::new("provider.credential@1").assert_value();
+    assert_eq!(handle.as_str(), "provider.credential@1");
+    assert_eq!(
+        serde_json::to_value(&handle).unwrap(),
+        serde_json::json!("provider.credential@1")
+    );
+    assert!(CredentialHandle::new("").is_err());
+    assert!(CredentialHandle::new("provider.credential").is_err());
+    assert!(CredentialHandle::new("provider.credential@0").is_err());
+    assert!(CredentialHandle::new(format!("x@{}", "1".repeat(4_096))).is_err());
 }
 
 #[test]

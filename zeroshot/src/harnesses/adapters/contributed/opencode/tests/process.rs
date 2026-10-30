@@ -1,9 +1,8 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::active_memory::hooks::{ActiveMemoryHooks, ActiveMemorySource, HookQuery};
-use crate::native_v2_contract::NodeInvocation;
 use crate::execution::process::HostedProcessScope;
-use crate::native_v2_candidate::test_support::{TestDirectory, environment_name};
+use crate::native_v2_candidate::test_support::TestDirectory;
 use crate::native_v2_runner::test_support::control;
 
 pub(super) fn adapter(directory: &TestDirectory, body: &str) -> OpenCodeAdapter {
@@ -31,52 +30,14 @@ pub(super) fn adapter(directory: &TestDirectory, body: &str) -> OpenCodeAdapter 
 }
 
 pub(super) fn invocation(fields: &[(&str, &str)]) -> DriverInvocation {
-    let names = fields.iter().map(|(name, _)| environment_name(name));
-    let connections = if fields.is_empty() {
-        DeclaredConnections::empty()
-    } else {
-        DeclaredConnections::single("provider", DeclaredEnvironment::new(names).assert_value())
-            .assert_value()
-    };
-    let binding = NodeRuntimeBinding::Agent {
-        lane: None,
-        model: ModelId::new("opaque/model").assert_value(),
-        effort: None,
-        session_scope: SessionScope::NodeInstance,
-        connections,
-    };
-    let environment = ResolvedEnvironment::exact(
-        &binding,
-        fields
-            .iter()
-            .map(|(name, value)| (environment_name(name), (*value).to_owned()))
-            .collect(),
-    )
-    .assert_value();
-    DriverInvocation {
-        node: NodeInvocation {
-            reference: ExecutionRef {
-                run_id: RunId::new("run-opencode"),
-                node: NodeName::new("agent").assert_value(),
-                node_instance: NodeInstanceId::new(1).assert_value(),
-                execution: ExecutionId::new(1).assert_value(),
-            },
-            worker: WorkerRef::new("agent.opencode@1").assert_value(),
-            instructions: Some(NodeInstructions::new("Exercise the adapter.").assert_value()),
-            input: Value::Null,
-            binding,
-        },
-        role: NodeRole::Worker,
-        response: NodeResponseContract::Worker {
-            output: PayloadType::Null,
-        },
-        environment,
-        session: Arc::new(OpenCodeSession {
+    crate::harnesses::adapters::contributed::test_support::invocation(
+        "opencode",
+        fields,
+        Arc::new(OpenCodeSession {
             core: ProviderSessionCore::new(),
             id: Mutex::new(None),
         }),
-        provider_session_slot: NodeInstanceId::new(1).assert_value(),
-    }
+    )
 }
 
 fn script(answer: &str) -> String {
@@ -106,10 +67,16 @@ pub(super) async fn run(
 #[tokio::test]
 async fn real_process_turn_completes_and_retains_native_session() {
     let directory = TestDirectory::new("opencode-scripted-success");
-    let adapter = adapter(&directory, &script("{\"response\":null}"));
-    let invocation = invocation(&[]);
+    let source =
+        script("{\"response\":null}").replace("cat >/dev/null", "cat > received-prompt.txt");
+    let adapter = adapter(&directory, &source);
+    let mut invocation = invocation(&[]);
+    invocation.host_context = Some("first host snapshot".to_owned());
     let session = invocation.session.clone();
     assert!(run(&adapter, invocation.clone()).await.is_ok());
+    let first = std::fs::read_to_string(adapter.config.workspace.join("received-prompt.txt"))
+        .assert_value();
+    assert!(first.starts_with("Runtime-owned execution context:\nfirst host snapshot\n\n"));
     assert_eq!(
         session
             .as_any()
@@ -121,7 +88,16 @@ async fn real_process_turn_completes_and_retains_native_session() {
             .as_deref(),
         Some("ses_fixture")
     );
-    assert!(run(&adapter, invocation).await.is_ok());
+    invocation.host_context = Some("second host snapshot".to_owned());
+    assert!(run(&adapter, invocation.clone()).await.is_ok());
+    let second = std::fs::read_to_string(adapter.config.workspace.join("received-prompt.txt"))
+        .assert_value();
+    assert!(second.starts_with("Runtime-owned execution context:\nsecond host snapshot\n\n"));
+    assert!(!second.contains("first host snapshot"));
+    assert_eq!(
+        invocation.agent_instructions().assert_value().as_str(),
+        "Exercise the adapter."
+    );
 }
 
 #[tokio::test]

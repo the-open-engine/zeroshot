@@ -2,7 +2,7 @@ use super::*;
 use crate::native_v2_cli::{BuiltinGraphTemplate, TemplateDelivery};
 use openengine_cluster_protocol::{NonEmptyVec, PayloadType, RecordField, VerifierNode};
 
-fn comment_submission() -> RunSubmission {
+pub(super) fn comment_submission() -> RunSubmission {
     let mut graph = BuiltinGraphTemplate::IssueReview
         .materialize(TemplateDelivery::Comment)
         .assert_value();
@@ -167,6 +167,52 @@ async fn invalid_review_scope_is_refused_before_execution() {
             Err(NativeV2AdmissionError::InvalidCommentDelivery(_))
         ));
     }
+}
+
+#[tokio::test]
+async fn custom_gitlab_comment_admission_needs_no_git_source() {
+    let mut submission = comment_submission();
+    submission.initial_input["url"] = json!("https://gitlab.example/group/sub/project/-/issues/7");
+    let admitted = NativeV2Admission.admit(submission).await.assert_value();
+    let input = admitted_comment_input(&admitted)
+        .assert_value()
+        .assert_value();
+    assert_eq!(input.destination.provider.id().as_str(), "source.gitlab");
+    assert_eq!(input.destination.repository, "group/sub/project");
+    assert_eq!(
+        input.destination.base_url.as_deref(),
+        Some("https://gitlab.example")
+    );
+}
+
+#[tokio::test]
+async fn selected_gitlab_prefix_survives_neutral_intent_and_concrete_comment_admission() {
+    let mut submission = comment_submission();
+    submission.initial_input["url"] =
+        json!("https://gitlab.example/install/group/sub/project/-/merge_requests/7");
+    submission.initial_input["context"]["reviewScope"] = json!({
+        "baseRepository":"group/sub/project", "baseBranch":"main", "baseRevision":"a".repeat(40),
+        "headRepository":"contributor/fork", "headBranch":"fix", "headRevision":"b".repeat(40),
+    });
+    submission.source = Some(serde_json::from_value(json!({
+        "repository":"group/sub/project", "branch":"fix", "revision":"b".repeat(40),
+        "remote":{"url":"https://gitlab.example/install/group/sub/project.git",
+            "forge":{"provider":"source.gitlab", "repository":"group/sub/project", "baseUrl":"https://gitlab.example/install"}},
+    })).assert_value());
+    let intent = RunSubmissionIntent::from(&submission);
+    NativeV2Admission
+        .validate_intent(&intent, DeliveryPolicy::Optional)
+        .await
+        .assert_value();
+    let admitted = NativeV2Admission.admit(submission).await.assert_value();
+    let input = admitted_comment_input(&admitted)
+        .assert_value()
+        .assert_value();
+    assert_eq!(input.destination.repository, "group/sub/project");
+    assert_eq!(
+        input.destination.base_url.as_deref(),
+        Some("https://gitlab.example/install")
+    );
 }
 
 #[tokio::test]

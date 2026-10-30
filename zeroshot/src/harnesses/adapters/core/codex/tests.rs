@@ -240,6 +240,8 @@ fn binding_with_model(
         lane: None,
         model: worker_catalog::ModelId::new(model).assert_value(),
         effort: Some(ReasoningEffort::Max),
+        context_window: None,
+        max_tokens: None,
         session_scope: scope,
         connections,
     }

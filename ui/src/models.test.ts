@@ -155,3 +155,16 @@ test('profile suggestions isolate both harness and provider without changing opa
     ]);
   }
 });
+
+test('decision model IDs do not enter coding-agent suggestions', () => {
+  const runtime = {
+    harness: 'codex',
+    provider: 'openai',
+    size: 'small',
+    nodes: {
+      worker: { kind: 'agent', model: 'coding-model' },
+      triage: { kind: 'decision', model: 'decision-model' },
+    },
+  };
+  assert.deepEqual(documentModels(runtime), ['coding-model']);
+});

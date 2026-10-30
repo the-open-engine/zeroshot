@@ -58,6 +58,8 @@ pub enum NativeV2AdmissionError {
     MissingRuntimeBinding { node: NodeName },
     #[error("runtime plan contains a binding for non-executable node {node}")]
     UnexpectedRuntimeBinding { node: NodeName },
+    #[error("invalid runtime binding for node {node}: {detail}")]
+    InvalidRuntimeBinding { node: NodeName, detail: String },
     #[error("agent-backed node {node} requires authored instructions")]
     MissingAgentInstructions { node: NodeName },
     #[error("Git delivery node {node} rejects authored instructions")]
@@ -284,6 +286,14 @@ impl NativeV2Admission {
             context,
         )?;
         validate_source_delivery_with_registry(source.as_ref(), &prepared.graph, context.source)?;
+        comment::resolve_comment_input_at(
+            &prepared.graph.root,
+            &prepared.initial_input,
+            source
+                .as_ref()
+                .and_then(|source| source.remote.as_ref())
+                .and_then(|remote| remote.forge.as_ref()),
+        )?;
         let verified = verify_submission(&prepared).await?;
 
         Ok(AdmittedRun {
@@ -409,7 +419,7 @@ fn prepare_submission(
     validate_executable_bindings(&declarations, &runtime, context)?;
     validate_delivery_concurrency(&graph.root)?;
     comment::validate_comment_profile(&graph)?;
-    comment::resolve_comment_input(&graph.root, &initial_input)?;
+    comment::validate_comment_input_shape(&graph.root, &initial_input)?;
 
     Ok(PreparedSubmission {
         title,
@@ -449,7 +459,9 @@ async fn verify_submission(
 }
 
 mod comment;
-pub(crate) use comment::{admitted_comment_input, comment_node};
+mod source_access;
+pub use source_access::{delivery_credential_destinations, materialize_delivery_access};
+pub(crate) use comment::{resolve_comment_input_at, admitted_comment_input, comment_node};
 mod concurrency;
 mod loop_limits;
 mod validation;
@@ -466,6 +478,7 @@ pub(crate) fn executable_runtime_roles(root: &GraphNode) -> Vec<(NodeName, bool)
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RuntimeRole {
     Agent,
+    Decision,
     GitDelivery,
     CommentDelivery,
 }
@@ -491,12 +504,10 @@ impl GraphBoundWorkerRegistry {
     ) -> Result<Self, NativeV2AdmissionError> {
         let mut resolved = BTreeMap::<WorkerRef, ResolvedDeclaration>::new();
         for declaration in declarations {
-            let role = match runtime.nodes().get(&declaration.name) {
-                Some(NodeRuntimeBinding::Agent { .. }) => RuntimeRole::Agent,
-                Some(NodeRuntimeBinding::GitDelivery { .. }) => RuntimeRole::GitDelivery,
-                Some(NodeRuntimeBinding::CommentDelivery { .. }) => RuntimeRole::CommentDelivery,
-                None => continue,
+            let Some(binding) = runtime.nodes().get(&declaration.name) else {
+                continue;
             };
+            let role = runtime_role(binding);
             if let Some(first) = resolved.get(&declaration.worker) {
                 if first.contract != declaration.contract || first.role != role {
                     return Err(NativeV2AdmissionError::InconsistentWorkerReuse {
@@ -574,3 +585,12 @@ impl WorkerRegistry for GraphBoundWorkerRegistry {
 #[cfg(test)]
 #[path = "native_v2_admission/tests.rs"]
 mod tests;
+
+fn runtime_role(binding: &NodeRuntimeBinding) -> RuntimeRole {
+    match binding {
+        NodeRuntimeBinding::Agent { .. } => RuntimeRole::Agent,
+        NodeRuntimeBinding::Decision { .. } => RuntimeRole::Decision,
+        NodeRuntimeBinding::GitDelivery { .. } => RuntimeRole::GitDelivery,
+        NodeRuntimeBinding::CommentDelivery { .. } => RuntimeRole::CommentDelivery,
+    }
+}

@@ -194,7 +194,14 @@ where
         )
         .await?;
     let connections = select_connection_requirements(requirements, context.environment)?;
-    let github_token = (context.environment)("GH_TOKEN")
+    let allow_legacy_github_token = run.target.is_none()
+        || status
+            .source
+            .as_ref()
+            .is_some_and(crate::native_v2_candidate::is_github_com_source);
+    let github_token = allow_legacy_github_token
+        .then(|| (context.environment)("GH_TOKEN"))
+        .flatten()
         .map(|value| {
             value
                 .into_string()

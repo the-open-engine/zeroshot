@@ -49,3 +49,13 @@ test('a complete runtime leaves validation to the server', () => {
   assert.equal(missingRuntimeSetting(document({})), undefined);
   assert.equal(missingRuntimeSetting(document({ harness: 'not-checked-here' })), undefined);
 });
+
+test('a decision model must be supplied before validation', () => {
+  const draft = document({ nodes: { 'worker.a': { kind: 'decision', model: '' } } });
+  assert.deepEqual(missingRuntimeSetting(draft), {
+    field: 'runtime.nodes.worker.a.model',
+    message: 'Choose a model for `worker.a`.',
+  });
+  draft.runtime.nodes['worker.a'].model = 'caller/decision';
+  assert.equal(missingRuntimeSetting(draft), undefined);
+});

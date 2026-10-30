@@ -103,7 +103,7 @@ async fn external_restore_failure_never_releases_an_allocated_capsule() {
 }
 
 const COMMENT_URL: &str = "https://github.com/acme/project/pull/17";
-const COMMENT_GH: &str = r#"#!/usr/bin/python3
+const COMMENT_GH: &str = r#"#!/usr/bin/env python3
 import json, os, pathlib, sys
 assert os.environ['GH_TOKEN'] == 'checkout-secret'
 assert sys.argv[1] == 'api'
@@ -117,7 +117,7 @@ elif endpoint == 'repos/acme/project/pulls/17':
 elif endpoint == 'repos/acme/project/issues/17/comments?per_page=100&page=1':
     result = [json.loads(posted.read_text())] if posted.exists() else []
 elif endpoint == 'repos/acme/project/issues/17/comments':
-    assert sys.argv[3:] == ['--method', 'POST', '--input', '-']
+    assert sys.argv[3:] == ['--method', 'POST', '--input', '-', '--header', 'X-GitHub-Api-Version: 2026-03-10']
     result = {'id': 23, 'html_url': 'https://github.com/acme/project/pull/17#issuecomment-23',
               'issue_url': 'https://api.github.com/repos/acme/project/issues/17',
               'body': json.load(sys.stdin)['body'], 'user': {'node_id': 'HOST_ACTOR'}}
@@ -174,7 +174,10 @@ async fn comment_fixture(
                    "linkedIssues":[]}
     });
     fixture.admitted = admit(request).await;
-    let program = fixture.root.write_executable("gh-fixture", COMMENT_GH);
+    let program = fixture.root.write_executable(
+        "gh-fixture",
+        &openengine_cluster_testkit::fixture::python3_script(COMMENT_GH),
+    );
     fs::write(
         program.with_extension("scope"),
         serde_json::to_vec(&json!({

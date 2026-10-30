@@ -3,7 +3,7 @@ use super::*;
 #[cfg(unix)]
 #[tokio::test]
 async fn private_input_and_early_output_drain_concurrently() {
-    let mut command = Command::new("/usr/bin/python3");
+    let mut command = Command::new("python3");
     command.args(["-c", "import sys; sys.stdout.write('x'*262144); sys.stdout.flush(); data=sys.stdin.buffer.read(); print(len(data))"]);
     let input = vec![b'p'; 262144];
     let output = capture_sensitive_with_input(&mut command, Duration::from_secs(5), &[], &input)
@@ -381,4 +381,135 @@ fn redaction_never_rescans_markers_or_duplicate_native_secret_aliases() {
     assert!(truncated);
     assert_eq!(text.len(), MAX_DIAGNOSTIC_BYTES);
     assert!("[REDACTED]".repeat(MAX_DIAGNOSTIC_BYTES).starts_with(&text));
+}
+
+#[test]
+fn native_credential_names_follow_the_operating_system_case_rules() {
+    for name in [
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "FORGE_PASSWORD",
+        "FORGE_API_KEY",
+        "GIT_USERNAME",
+    ] {
+        assert!(native_credential_name(name), "{name}");
+        assert_eq!(
+            native_credential_name(&name.to_ascii_lowercase()),
+            cfg!(windows),
+            "{name}"
+        );
+    }
+    for name in [
+        "PATH",
+        "GIT_CONFIG_COUNT",
+        "TOKENIZER",
+        "FORGE_TOKEN_EXPIRES_AT",
+    ] {
+        assert!(!native_credential_name(name), "{name}");
+    }
+}
+
+#[tokio::test]
+async fn native_credentials_are_private_protocol_bytes_but_never_printable_diagnostics() {
+    let root = tempfile::tempdir().unwrap();
+    for name in [
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "FORGE_PASSWORD",
+        "FORGE_API_KEY",
+        "GIT_USERNAME",
+    ]
+    .into_iter()
+    .chain(cfg!(windows).then_some("gItHuB_tOkEn"))
+    {
+        let value = format!("native-{name}-canary");
+        let mut command = local_git_command(Path::new("git"), root.path());
+        command.env(name, &value).args([
+            "-c",
+            &format!("probe.value={value}"),
+            "config",
+            "--get",
+            "probe.value",
+        ]);
+        let output = capture_sensitive(&mut command, Duration::from_secs(5), &[])
+            .await
+            .unwrap()
+            .require_success()
+            .unwrap();
+        assert_eq!(output.stdout().trim(), value);
+        assert!(output.diagnostic().stdout.contains("[REDACTED]"));
+        for printable in [
+            format!("{output}"),
+            format!("{output:?}"),
+            output.diagnostic().operator_stderr(),
+        ] {
+            assert!(!printable.contains(&value), "{name}: {printable}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn failing_git_filter_redacts_all_native_credential_fields() {
+    let repository = crate::native_v2_candidate::test_support::TestGitRepository::candidate();
+    std::fs::write(
+        repository.workspace.join(".gitattributes"),
+        "filtered.txt filter=canary\n",
+    )
+    .unwrap();
+    std::fs::write(repository.workspace.join("filtered.txt"), "input\n").unwrap();
+    let fields = [
+        ("GITHUB_TOKEN", "caller-github-token-canary"),
+        ("FORGE_PASSWORD", "caller-password-canary"),
+        ("FORGE_API_KEY", "caller-api-key-canary"),
+    ];
+    let mut command = local_git_command(Path::new("git"), &repository.workspace);
+    command.envs(fields).args([
+        "-c", "filter.canary.clean=printf '%s\\n' \"$GITHUB_TOKEN\" \"$FORGE_PASSWORD\" \"$FORGE_API_KEY\" >&2; exit 1",
+        "-c", "filter.canary.required=true", "add", "filtered.txt",
+    ]);
+    let output = capture(&mut command, Duration::from_secs(5)).await.unwrap();
+    assert_ne!(output.exit_status, Some(0));
+    assert!(output.stderr.contains("[REDACTED]"));
+    for (_, secret) in fields {
+        assert!(!format!("{output} {output:?}").contains(secret));
+    }
+}
+
+#[tokio::test]
+async fn fixed_identity_wins_over_global_and_environment_git_configuration() {
+    for environment_config in [false, true] {
+        let repository = crate::native_v2_candidate::test_support::TestGitRepository::candidate();
+        let mut command = local_git_command(Path::new("git"), &repository.workspace);
+        if environment_config {
+            let entries = [
+                ("author.name", "Caller Author"),
+                ("author.email", "author@example.invalid"),
+                ("committer.name", "Caller Committer"),
+                ("committer.email", "committer@example.invalid"),
+            ];
+            command.env("GIT_CONFIG_COUNT", entries.len().to_string());
+            for (index, (key, value)) in entries.into_iter().enumerate() {
+                command
+                    .env(format!("GIT_CONFIG_KEY_{index}"), key)
+                    .env(format!("GIT_CONFIG_VALUE_{index}"), value);
+            }
+        } else {
+            let config = repository.root.child("caller.gitconfig");
+            std::fs::write(&config, "[author]\nname=Caller Author\nemail=author@example.invalid\n[committer]\nname=Caller Committer\nemail=committer@example.invalid\n").unwrap();
+            command.env("GIT_CONFIG_GLOBAL", config);
+        }
+        command.args(["commit", "--allow-empty", "--message", "fixed identity"]);
+        capture(&mut command, Duration::from_secs(5))
+            .await
+            .unwrap()
+            .require_success()
+            .unwrap();
+        assert_eq!(
+            crate::native_v2_candidate::test_support::git_output(
+                &repository.workspace,
+                &["show", "-s", "--format=%an <%ae>|%cn <%ce>"]
+            ),
+            "Zeroshot <delivery@zeroshot.invalid>|Zeroshot <delivery@zeroshot.invalid>"
+        );
+    }
 }

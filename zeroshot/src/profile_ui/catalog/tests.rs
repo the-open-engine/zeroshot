@@ -29,12 +29,8 @@ fn delivery_choices_use_native_contracts_and_preserve_legacy_identities() {
             choice["node"]["signals"][DELIVERY_SIGNAL_FIELD],
             json!(delivery_signal_labels(mode).assert_value())
         );
-        let binding = if mode == DeliveryMode::Push {
-            json!({"kind":"git_delivery"})
-        } else {
-            json!({"kind":"git_delivery","connections":{"github":["GH_TOKEN"]}})
-        };
-        assert_eq!(choice["runtimeBinding"], binding);
+        // The selected instance supplies delivery connections at submission.
+        assert_eq!(choice["runtimeBinding"], json!({"kind":"git_delivery"}));
         assert_eq!(
             choice["node"]["input"]["fields"]["issueNumber"]["required"],
             false
@@ -155,4 +151,29 @@ fn research_editor_bindings_keep_four_sessions_and_a_fresh_reviewer() {
             mode == "push"
         );
     }
+}
+
+#[tokio::test]
+async fn decision_worker_uses_the_native_contract_and_keeps_the_model_caller_owned() {
+    let choice = workers()
+        .unwrap()
+        .into_iter()
+        .find(|value| value["runtimeKind"] == "decision")
+        .unwrap();
+    assert_eq!(choice["runtimeBinding"]["model"], "");
+    let mut node = choice["node"].clone();
+    node["name"] = json!("triage");
+    let graph = crate::native_v2_candidate::test_support::full_graph(vec![
+        node,
+        crate::native_v2_candidate::test_support::success_node(),
+    ]);
+    let mut binding = choice["runtimeBinding"].clone();
+    binding["model"] = json!("caller/model");
+    let runtime = serde_json::from_value(
+        json!({"harness":"codex","provider":"openai","size":"small","nodes":{"triage":binding}}),
+    )
+    .unwrap();
+    super::super::validate_profile(&graph, &runtime)
+        .await
+        .unwrap();
 }

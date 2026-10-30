@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 """Deterministic Copilot RPC peer; never contacts a provider."""
 import json
 import os
@@ -65,6 +65,12 @@ while (message := read()) is not None:
     if method == "connect":
         if mode == "version":
             print("launch note: gho_fake-secret", file=sys.stderr, flush=True)
+        if mode == "http_400_stderr_grammar":
+            print(
+                "400 Grammar compilation rate limit exceeded (stale stderr)",
+                file=sys.stderr,
+                flush=True,
+            )
         result = {"protocolVersion": 99 if mode == "version" else 3}
     elif method in ("session.create", "session.resume"):
         assert "COPILOT_GITHUB_TOKEN" not in os.environ
@@ -81,7 +87,7 @@ while (message := read()) is not None:
             auth = read()
             assert auth["result"]["kind"] == "token"
             assert auth["result"]["expiresIn"] > 3600
-        elif mode == "explicit_provider":
+        elif mode in ("explicit_provider", "explicit_provider_grammar_once"):
             assert "gitHubToken" not in params
             assert "gitHubTokenProviderRegistrationId" not in params
             assert "provider" in params
@@ -182,6 +188,7 @@ while (message := read()) is not None:
         result = {"sessionId": "wrong" if mode == "identity" else session}
     elif method == "session.send":
         turn += 1
+        rate_limit_attempt = None
         if mode in ("refresh", "refresh_error"):
             send({"id": "auth-refresh", "method": "gitHubToken.getToken", "params": {
                 "registrationId": registration, "host": github_host,
@@ -191,11 +198,62 @@ while (message := read()) is not None:
             assert auth["result"]["expiresIn"] > 3600
         assert params["responseFormat"]["jsonSchema"]["strict"] is True
         assert params["sessionId"] == session
+        if mode in (
+            "grammar_rate_limit_once",
+            "explicit_provider_grammar_once",
+            "grammar_rate_limit_always",
+            "correction_rate_limit_once",
+            "grammar_rate_limit_drain_error",
+        ):
+            attempts_path = os.environ["CAPTURE_PATH"] + ".grammar-rate-limit-attempts"
+            try:
+                with open(attempts_path, encoding="utf-8") as attempts_file:
+                    attempts = int(attempts_file.read())
+            except FileNotFoundError:
+                attempts = 0
+            rate_limit_attempt = attempts
+            with open(attempts_path, "w", encoding="utf-8") as attempts_file:
+                attempts_file.write(str(attempts + 1))
+            should_rate_limit = (
+                mode == "grammar_rate_limit_always"
+                or (mode in ("grammar_rate_limit_once", "explicit_provider_grammar_once") and attempts == 0)
+                or (mode == "correction_rate_limit_once" and attempts == 1)
+                or (mode == "grammar_rate_limit_drain_error" and attempts == 0)
+            )
+            if should_rate_limit:
+                event("session.error", {
+                    "message": "400 Grammar compilation rate limit exceeded. You can try again later."
+                })
+                if mode == "grammar_rate_limit_drain_error":
+                    event("assistant.usage", {
+                        "inputTokens": "invalid", "outputTokens": 1
+                    })
+                continue
+        if mode in ("http_400", "http_400_stderr_grammar"):
+            event("session.error", {"message": "HTTP 400: Invalid JSON schema"})
+            continue
         event("future.event", {"invalid": [1, 2, 3]})
         usage = {"inputTokens": 7, "outputTokens": 3}
         if mode == "permission":
             usage.update({"cacheReadTokens": 2, "cacheWriteTokens": 1})
         event("assistant.usage", usage)
+        if mode == "dispatch":
+            send({"method": "future.notification", "params": {}})
+            send({"method": "future.request", "id": 9001, "params": {}})
+            send({"method": "hooks.invoke", "id": 9002, "params": {
+                "sessionId": "other-session", "hookType": "preToolUse", "input": {}}})
+            send({"method": "hooks.invoke", "id": 9003, "params": {
+                "sessionId": session, "hookType": "preToolUse", "input": {}}})
+            replies = [read()]
+            for identifier in (9002, 9003):
+                replies.append(read())
+            assert replies[0]["id"] == 9001
+            assert replies[0]["error"]["code"] == -32601
+            assert [reply["id"] for reply in replies[1:]] == [9002, 9003]
+            assert all(reply["result"]["output"] is None for reply in replies[1:])
+            with open(os.environ["CAPTURE_PATH"] + ".dispatch", "a", encoding="utf-8") as capture:
+                for reply in replies:
+                    capture.write(json.dumps(reply) + "\n")
         if mode == "cancel":
             event("tool.execution_start", {"toolName": "ready"})
             time.sleep(60)
@@ -236,7 +294,11 @@ while (message := read()) is not None:
         if mode == "duplex":
             for _ in range(80):
                 event("future.event", {"padding": "x" * 1048576})
-        answer = "invalid" if mode in ("malformed", "closed_input_invalid") or (mode == "correction" and turn == 1) else 42
+        answer = "invalid" if (
+            mode in ("malformed", "closed_input_invalid")
+            or (mode == "correction" and turn == 1)
+            or (mode == "correction_rate_limit_once" and rate_limit_attempt == 0)
+        ) else 42
         response = {"response": {"answer": answer}}
         if mode in ("validation_secret", "validation_secret_long"):
             padding = ""

@@ -20,7 +20,8 @@ use openengine_cluster_protocol::{
     RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
     RunProfileListRequest, RunProfileListResult, RunProfileMutationResult, RunProfileName,
     RunProfileSelector, RunProfileSetRequest, RunStatusParams, RunTitle, RunWatchParams,
-    ResolvedSource, SourceBranchId, SourceRepositoryId, SourceRevisionId, SubscriptionCloseReason,
+    ResolvedSource, SourceBranchId, SourceForgeBaseUrl, SourceForgeProviderId, SourceRepositoryId,
+    SourceRevisionId, SubscriptionCloseReason,
 };
 use thiserror::Error;
 
@@ -129,6 +130,7 @@ pub struct RunCommand {
     pub target: Option<String>,
     pub cwd: Option<PathBuf>,
     pub source_connection: Option<ConnectionKey>,
+    pub source_forge: Option<RunSourceForge>,
     pub title: RunTitle,
     pub selection: RunSelection,
     pub environment: Option<RunEnvironmentInput>,
@@ -139,6 +141,13 @@ pub struct RunCommand {
     pub detach: bool,
     pub validate_only: bool,
     pub submission_key: Option<IdempotencyKey>,
+}
+
+/// Explicit instance selection for a credential-free Git remote.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunSourceForge {
+    pub provider: SourceForgeProviderId,
+    pub base_url: SourceForgeBaseUrl,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

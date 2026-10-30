@@ -83,6 +83,8 @@ fn runtime_validation_checks_default_and_each_node_override_without_effects() {
         lane: Some(RuntimeLane::new("unregistered", "provider").unwrap()),
         model: openengine_cluster_protocol::ModelId::new("opaque-model").unwrap(),
         effort: None,
+        context_window: None,
+        max_tokens: None,
         session_scope: openengine_cluster_protocol::SessionScope::Execution,
         connections: openengine_cluster_protocol::DeclaredConnections::empty(),
     };

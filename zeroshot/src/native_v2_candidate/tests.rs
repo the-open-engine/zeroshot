@@ -692,6 +692,7 @@ async fn submit_through_cli(
         NativeV2CliCommand::Run(Box::new(RunCommand {
             cwd: None,
             source_connection: None,
+            source_forge: None,
 
             environment: None,
             target: Some("candidate-platform".to_owned()),
@@ -781,6 +782,7 @@ async fn coverage_contract_candidate_builders_bind_only_to_their_admitted_lane_a
     build_local_owner_native_v2_candidate(
         &codex,
         local_candidate_config(RuntimePlanKind::Codex, &repository, github.clone()),
+        BTreeMap::new(),
     )
     .assert_value_with("owner-scoped local candidate");
 
@@ -1019,6 +1021,7 @@ fn candidate_node_lane_routes_each_agent_binding_only_to_its_own_lane() {
     let codex_agent = Arc::as_ptr(&codex).cast::<()>();
     let claude_agent = Arc::as_ptr(&claude).cast::<()>();
     let routes = CandidateNodeLane {
+        decisions: None,
         comment_delivery: None,
         default_lane: codex_openai(),
         agents: BTreeMap::from([
@@ -1052,6 +1055,7 @@ fn candidate_node_lane_routes_each_agent_binding_only_to_its_own_lane() {
     );
 
     let claude_only = CandidateNodeLane {
+        decisions: None,
         comment_delivery: None,
         default_lane: codex_openai(),
         agents: BTreeMap::from([(claude_anthropic(), CandidateAgents::new(claude))]),

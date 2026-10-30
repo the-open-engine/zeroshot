@@ -160,20 +160,29 @@ fn core_provider_conversion_round_trips_without_runtime_compatibility_policy() {
         PiProvider::OpenRouter,
         PiProvider::Gateway,
         PiProvider::Bedrock,
+        PiProvider::Github,
     ] {
         assert_eq!(value.name().parse::<PiProvider>().assert_value(), value);
         assert_eq!(ProviderId::from(value).as_str(), value.name());
     }
-    let copilot = CopilotProvider::Github;
-    assert_eq!(
-        copilot.name().parse::<CopilotProvider>().assert_value(),
-        copilot
-    );
-    assert_eq!(ProviderId::from(copilot).as_str(), copilot.name());
+    for value in [
+        CopilotProvider::Github,
+        CopilotProvider::OpenAi,
+        CopilotProvider::Anthropic,
+        CopilotProvider::OpenRouter,
+        CopilotProvider::Gateway,
+        CopilotProvider::Bedrock,
+    ] {
+        assert_eq!(
+            value.name().parse::<CopilotProvider>().assert_value(),
+            value
+        );
+        assert_eq!(ProviderId::from(value).as_str(), value.name());
+    }
     assert!("anthropic".parse::<CodexProvider>().is_err());
     assert!("openai".parse::<ClaudeProvider>().is_err());
-    assert!("openai".parse::<CopilotProvider>().is_err());
-    assert!("github".parse::<PiProvider>().is_err());
+    assert!("unsupported".parse::<CopilotProvider>().is_err());
+    assert!("unsupported".parse::<PiProvider>().is_err());
 }
 
 fn codex_plan(nodes: serde_json::Value) -> RuntimePlan {
@@ -188,7 +197,9 @@ fn mixed_lane_plan() -> RuntimePlan {
         "worker": {"kind": "agent", "model": "worker-model"},
         "review": {"kind": "agent", "lane": {"harness": "claude", "provider": "anthropic"}, "model": "review-model"},
         "same": {"kind": "agent", "lane": {"harness": "codex", "provider": "openai"}, "model": "same-model"},
-        "deliver": {"kind": "git_delivery"}
+        "deliver": {"kind": "git_delivery"},
+        "decision": {"kind": "decision", "api": "systemone", "model": "decision-model",
+                     "minProbability": 0.5, "uncertainLabel": "uncertain", "connections": {}}
     }))
 }
 
@@ -217,6 +228,7 @@ fn plan_resolves_each_binding_to_its_effective_lane() {
         Some(lane("codex", "openai"))
     );
     assert_eq!(effective_lane_of(&plan, "deliver"), None);
+    assert_eq!(effective_lane_of(&plan, "decision"), None);
     assert_eq!(
         plan.lanes().into_iter().collect::<Vec<_>>(),
         [lane("claude", "anthropic"), lane("codex", "openai")]

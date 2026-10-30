@@ -224,6 +224,7 @@ fn enabled_runtime_harnesses_have_their_own_versioned_catalog() {
     ] {
         let document = TargetDiscoveryDocument::direct(authentication)
             .with_node_runtime_lanes()
+            .with_decision_models()
             .with_runtime_harnesses(
                 TargetRuntimeHarnessesDiscovery::new(vec![lane.clone()]).assert_value(),
             );
@@ -232,6 +233,10 @@ fn enabled_runtime_harnesses_have_their_own_versioned_catalog() {
         assert_eq!(
             wire["extensions"]["node_runtime_lanes"],
             serde_json::json!({"kind":NODE_RUNTIME_LANES_KIND})
+        );
+        assert_eq!(
+            wire["extensions"]["decision_models"],
+            serde_json::json!({"kind":DECISION_MODELS_KIND})
         );
         assert_eq!(
             wire["extensions"]["runtime_harnesses"],
@@ -274,4 +279,28 @@ fn runtime_harness_catalog_rejects_duplicate_unbounded_or_malformed_entries() {
     let mut direct = TargetRuntimeHarnessesDiscovery::new(Vec::new()).assert_value();
     direct.lanes = vec![crate::RuntimeLane::new("same", "same").assert_value(); 2];
     assert!(direct.validate().is_err());
+}
+
+#[test]
+fn decision_capability_has_its_own_strict_marker_and_preserves_unknown_extensions() {
+    let value = serde_json::to_value(
+        TargetDiscoveryDocument::direct(TargetAuthentication::None).with_decision_models(),
+    )
+    .unwrap();
+    assert_eq!(
+        value["extensions"]["decision_models"],
+        serde_json::json!({"kind":DECISION_MODELS_KIND})
+    );
+    let mut changed = value.clone();
+    changed["extensions"]["future_extension"] = serde_json::json!({"unrecognized":true});
+    assert!(serde_json::from_value::<TargetDiscoveryDocument>(changed).is_ok());
+    let mut changed = value;
+    changed["extensions"]["decision_models"]["unexpected"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<TargetDiscoveryDocument>(changed).is_err());
+    assert!(
+        !TargetDiscoveryDocument::direct(TargetAuthentication::None)
+            .with_decision_models()
+            .extensions
+            .is_empty()
+    );
 }

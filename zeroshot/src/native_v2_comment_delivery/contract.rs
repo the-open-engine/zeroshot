@@ -151,17 +151,27 @@ pub fn is_matching_success_receipt(
     expected_url: &str,
     source_revision: Option<&str>,
 ) -> bool {
-    let Ok(CommentOutput { receipt }) = serde_json::from_value(output.clone()) else {
-        return false;
-    };
     let Ok(destination) =
         crate::source_code_provider::adapters::core::comment_destination(expected_url)
     else {
         return false;
     };
-    valid_receipt_fields(&receipt)
-        && receipt.destination_url == expected_url
-        && receipt_matches_destination(&receipt, &destination)
+    is_matching_success_receipt_for(output, &destination, source_revision)
+}
+
+/// Validates the final receipt against the already admitted provider and installation.
+pub fn is_matching_success_receipt_for(
+    output: &Value,
+    destination: &crate::source_code_provider::SourceCommentDestination,
+    source_revision: Option<&str>,
+) -> bool {
+    let Ok(CommentOutput { receipt }) = serde_json::from_value(output.clone()) else {
+        return false;
+    };
+    crate::source_code_provider::adapters::core::valid_comment_destination(destination)
+        && valid_receipt_fields(&receipt)
+        && receipt.destination_url == destination.url
+        && receipt_matches_destination(&receipt, destination)
         && receipt.source_revision.as_deref() == source_revision
 }
 

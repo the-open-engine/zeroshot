@@ -16,7 +16,7 @@ import {
 export type WorkerOption = {
   id: string;
   label: string;
-  runtimeKind: 'agent' | 'git_delivery' | 'comment_delivery';
+  runtimeKind: 'agent' | 'decision' | 'git_delivery' | 'comment_delivery';
   workerRefs: string[];
   node?: GraphNode;
   runtimeBinding: Binding;
@@ -31,9 +31,9 @@ export function workerOption(
     (option) => isDeliveryKind(option.runtimeKind) && option.workerRefs.includes(node.worker)
   );
   if (delivery) return delivery;
-  return binding?.kind === 'agent'
-    ? workers.find((option) => option.runtimeKind === 'agent')
-    : undefined;
+  return workers.find(
+    (option) => !isDeliveryKind(option.runtimeKind) && option.runtimeKind === binding?.kind
+  );
 }
 
 export function applyWorker(
@@ -48,7 +48,17 @@ export function applyWorker(
   const current = workerOption(node, binding, workers.length ? workers : [option]);
   if (current?.id === option.id && binding?.kind === option.runtimeKind) return document;
   let replacement: GraphNode;
-  if (isDeliveryKind(option.runtimeKind)) {
+  if (option.runtimeKind === 'decision') {
+    if (option.node?.kind !== 'verifier')
+      throw new Error('The decision contract is unavailable. Reload the editor.');
+    replacement = {
+      ...clone(option.node),
+      name,
+      worker: uniqueAgentReference(document.graph.root, name),
+      inputBindings: [],
+      writeBindings: [],
+    };
+  } else if (isDeliveryKind(option.runtimeKind)) {
     if (!option.node || option.node.kind !== 'verifier')
       throw new Error('The native delivery contract is unavailable. Reload the editor.');
     const anotherDelivery = allNodes(document.graph.root).some(

@@ -16,8 +16,7 @@ use crate::native_v2_capsule::provider_process::text::ProviderText;
 use crate::native_v2_contract::TokenUsageDelta;
 use crate::native_v2_runner::{
     AgentResponseState, DriverControl, DriverInvocation, LiveOutput, LiveOutputStream,
-    NodeRunnerError, ProviderSchemaDialect, render_agent_prompt_with_schema,
-    resolve_agent_response_with_schema,
+    NodeRunnerError, ProviderSchemaDialect, resolve_agent_response_with_schema,
 };
 
 const STARTUP_BUDGET: Duration = Duration::from_secs(60);
@@ -350,14 +349,10 @@ async fn send(process: &ProviderProcess, value: &Value) -> Result<(), NodeRunner
 }
 
 fn response_state(invocation: &DriverInvocation) -> Result<AgentResponseState, NodeRunnerError> {
-    render_agent_prompt_with_schema(
-        invocation.agent_instructions()?,
-        &invocation.node.input,
-        &invocation.response,
-        ProviderSchemaDialect::Standard,
-    )
-    .map(AgentResponseState::new)
-    .map_err(|_| failure("Hermes prompt could not be serialized"))
+    invocation
+        .agent_prompt_with_schema(ProviderSchemaDialect::Standard)
+        .map(AgentResponseState::new)
+        .map_err(|_| failure("Hermes prompt could not be serialized"))
 }
 
 fn usage(value: &Value) -> Option<TokenUsageDelta> {

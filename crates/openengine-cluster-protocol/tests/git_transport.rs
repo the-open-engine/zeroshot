@@ -53,6 +53,35 @@ fn generic_sources_keep_opaque_ids_exact_revision_and_authored_remote() {
 }
 
 #[test]
+fn forge_instances_are_explicit_canonical_and_credential_free() {
+    use openengine_cluster_protocol::SourceForgeBaseUrl;
+    for base in [
+        "https://gitlab.com",
+        "https://ghe.example:8443",
+        "https://forge.example/gitlab",
+    ] {
+        let mut wire = generic_source("https://forge.example/gitlab/team/project.git");
+        wire["remote"]["forge"]["baseUrl"] = json!(base);
+        let source: ResolvedSource = serde_json::from_value(wire.clone()).assert_value();
+        assert_eq!(serde_json::to_value(source).assert_value(), wire);
+        assert_wire_and_schema::<SourceForgeBaseUrl>(json!(base), true);
+    }
+    for base in [
+        "http://forge.example",
+        "https://user:secret@forge.example",
+        "https://forge.example?token=x",
+        "https://forge.example#secret",
+        "https://forge.example/",
+        "https://FORGE.example",
+        "https://forge.example/a/../b",
+        "https://forge.example:443",
+        "https://forge.example/path/",
+    ] {
+        assert!(SourceForgeBaseUrl::new(base).is_err(), "accepted {base}");
+    }
+}
+
+#[test]
 fn absent_remote_retains_the_legacy_github_grammar_and_bytes() {
     let source = openengine_cluster_testkit::native_v2_source_fixture();
     let wire = serde_json::to_value(&source).assert_value();

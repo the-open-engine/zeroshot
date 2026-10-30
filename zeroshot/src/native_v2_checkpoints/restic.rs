@@ -8,12 +8,12 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::Command;
 
 use crate::execution::platform::{self, FileAccess};
 
-const MAX_OUTPUT_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_RECORD_BYTES: usize = 2 * 1024 * 1024;
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(900);
 const PASSWORD_BYTES: usize = 32;
 
@@ -213,6 +213,17 @@ impl Repository {
         if self.program.in_process_test_fake {
             return self.run_test_fake(directory, arguments);
         }
+        self.run_with_timeout(directory, arguments, OPERATION_TIMEOUT)
+            .await
+    }
+
+    async fn run_with_timeout(
+        &self,
+        directory: &Path,
+        arguments: &[OsString],
+        timeout: Duration,
+    ) -> io::Result<Vec<u8>> {
+        let operation = operation_name(arguments);
         let mut environment = BTreeMap::new();
         platform::process_environment(&mut environment);
         let mut command = Command::new(&self.program.executable);
@@ -230,7 +241,9 @@ impl Repository {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        let mut child = command.spawn()?;
+        let mut child = command
+            .spawn()
+            .map_err(|error| operation_io_error(operation, "start", error))?;
         let stdout = child
             .stdout
             .take()
@@ -239,29 +252,45 @@ impl Repository {
             .stderr
             .take()
             .ok_or_else(|| io::Error::other("restic stderr is unavailable"))?;
-        let result = tokio::time::timeout(OPERATION_TIMEOUT, async {
-            tokio::try_join!(bounded_output(stdout), bounded_output(stderr), child.wait())
+        let result = tokio::time::timeout(timeout, async {
+            tokio::try_join!(
+                async {
+                    operation_output(stdout, operation == "backup")
+                        .await
+                        .map_err(|error| operation_io_error(operation, "stdout read", error))
+                },
+                async {
+                    discard_output(stderr)
+                        .await
+                        .map_err(|error| operation_io_error(operation, "stderr read", error))
+                },
+                async {
+                    child
+                        .wait()
+                        .await
+                        .map_err(|error| operation_io_error(operation, "wait", error))
+                },
+            )
         })
         .await;
-        let (output, private_diagnostic, status) = match result {
+        let (output, (), status) = match result {
             Ok(Ok(value)) => value,
-            _ => {
+            failure => {
                 let _ = child.kill().await;
                 let _ = child.wait().await;
-                return Err(io::Error::other("restic operation did not finish"));
+                return Err(match failure {
+                    Ok(Err(error)) => error,
+                    _ => io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("restic {operation} timed out"),
+                    ),
+                });
             }
         };
         if !status.success() {
-            #[cfg(test)]
-            if arguments.first().and_then(|value| value.to_str()) != Some("cat") {
-                eprintln!(
-                    "real Restic {:?} failed: {}",
-                    arguments.first(),
-                    String::from_utf8_lossy(&private_diagnostic)
-                );
-            }
-            let _ = private_diagnostic;
-            return Err(io::Error::other("restic operation failed"));
+            return Err(io::Error::other(format!(
+                "restic {operation} failed ({status})"
+            )));
         }
         Ok(output)
     }
@@ -371,16 +400,81 @@ fn arguments<const N: usize>(values: [&str; N]) -> Vec<OsString> {
     values.into_iter().map(OsString::from).collect()
 }
 
-async fn bounded_output(reader: impl tokio::io::AsyncRead + Unpin) -> io::Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    reader
-        .take(MAX_OUTPUT_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .await?;
-    if bytes.len() as u64 > MAX_OUTPUT_BYTES {
-        return Err(io::Error::other("restic output exceeds its size limit"));
+fn operation_name(arguments: &[OsString]) -> &'static str {
+    match arguments.first().and_then(|value| value.to_str()) {
+        Some("cat") => "cat",
+        Some("init") => "init",
+        Some("unlock") => "unlock",
+        Some("backup") => "backup",
+        Some("restore") => "restore",
+        _ => "operation",
     }
-    Ok(bytes)
+}
+
+fn operation_io_error(operation: &str, stage: &str, error: io::Error) -> io::Error {
+    io::Error::new(
+        error.kind(),
+        format!("restic {operation} {stage} failed ({:?})", error.kind()),
+    )
+}
+
+async fn discard_output(mut reader: impl AsyncRead + Unpin) -> io::Result<()> {
+    tokio::io::copy(&mut reader, &mut tokio::io::sink())
+        .await
+        .map(|_| ())
+}
+
+async fn operation_output(reader: impl AsyncRead + Unpin, backup: bool) -> io::Result<Vec<u8>> {
+    if !backup {
+        discard_output(reader).await?;
+        return Ok(Vec::new());
+    }
+    let mut reader = BufReader::new(reader);
+    let mut record = Vec::new();
+    let mut summary = Vec::new();
+    let mut oversized = false;
+    loop {
+        let chunk = reader.fill_buf().await?;
+        if chunk.is_empty() {
+            if !oversized {
+                retain_summary(&record, &mut summary);
+            }
+            return Ok(summary);
+        }
+        let newline = chunk.iter().position(|byte| *byte == b'\n');
+        let length = newline.unwrap_or(chunk.len());
+        append_record(&mut record, &chunk[..length], &mut oversized);
+        reader.consume(length + usize::from(newline.is_some()));
+        if newline.is_some() {
+            if !oversized {
+                retain_summary(&record, &mut summary);
+            }
+            record.clear();
+            oversized = false;
+        }
+    }
+}
+
+fn append_record(record: &mut Vec<u8>, fragment: &[u8], oversized: &mut bool) {
+    if *oversized {
+        return;
+    }
+    if record.len() + fragment.len() > MAX_RECORD_BYTES {
+        record.clear();
+        *oversized = true;
+    } else {
+        record.extend_from_slice(fragment);
+    }
+}
+
+fn retain_summary(record: &[u8], summary: &mut Vec<u8>) {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(record) else {
+        return;
+    };
+    if value["message_type"] == "summary" {
+        summary.clear();
+        summary.extend_from_slice(record);
+    }
 }
 
 #[cfg(test)]

@@ -276,10 +276,15 @@ exec "$REVIEW_FIXTURE_GIT" "$@"
 
     #[tokio::test]
     async fn scope_free_issue_comments_need_neither_git_nor_credentials() {
-        for absent in [true, false] {
+        for (url, absent) in [
+            ("https://github.com/acme/project/issues/17", true),
+            ("https://github.com/acme/project/issues/17", false),
+            ("https://ghe.example/acme/project/issues/17", false),
+            ("https://gitlab.com/acme/project/-/work_items/17", false),
+        ] {
             let repository = TestGitRepository::candidate();
             let mut admitted = review_source(&repository, &repository.base, "trusted");
-            admitted.initial_input["url"] = json!("https://github.com/acme/project/issues/17");
+            admitted.initial_input["url"] = json!(url);
             admitted.initial_input["context"]["reviewScope"] = json!({});
             if absent {
                 let mut publisher = crate::native_v2_admission::comment_node(&admitted.graph.root)
@@ -290,14 +295,91 @@ exec "$REVIEW_FIXTURE_GIT" "$@"
                     .retain(|binding| binding.target.segments()[0].as_str() != "reviewScope");
                 admitted.graph.root = GraphNode::Verifier(publisher);
             }
-            let mut bootstrap = bootstrap(&admitted, &repository, false);
-            bootstrap.github_token = Some(format!("{TOKEN}\n"));
             assert!(checkout_references(&admitted).assert_value().is_empty());
-            prepare_local_checkout(&admitted, &bootstrap)
+            prepare_without_git_or_credentials(&admitted, &repository)
                 .await
                 .assert_value();
-            assert!(!bootstrap.storage.exists());
-            assert_workspace_unchanged(&repository);
+        }
+    }
+
+    async fn prepare_without_git_or_credentials(
+        admitted: &AdmittedRun,
+        repository: &TestGitRepository,
+    ) -> Result<(), PortableControllerError> {
+        let mut bootstrap = bootstrap(admitted, repository, false);
+        bootstrap.github_token = Some(format!("{TOKEN}\n"));
+        let result = prepare_local_checkout(admitted, &bootstrap).await;
+        assert!(!bootstrap.storage.exists());
+        assert_workspace_unchanged(repository);
+        result
+    }
+
+    fn generic_review_source(
+        repository: &TestGitRepository,
+        provider: &str,
+        base: &str,
+        route: &str,
+    ) -> AdmittedRun {
+        let mut admitted = review_source(repository, &repository.base, "trusted");
+        admitted.initial_input["url"] = json!(format!("{base}/acme/project/{route}/17"));
+        admitted.source.as_mut().unwrap().remote = Some(
+            serde_json::from_value(json!({
+                "url":format!("{base}/acme/project.git"),
+                "forge":{"provider":provider,"repository":"acme/project","baseUrl":base}
+            }))
+            .assert_value(),
+        );
+        admitted
+    }
+
+    #[tokio::test]
+    async fn generic_local_reviews_validate_the_captured_head_before_github_only_ref_preparation() {
+        let source_states = ["matching", "stale", "absent"];
+        for (provider, base, route, states) in [
+            (
+                "source.github",
+                "https://ghe.example",
+                "pull",
+                source_states.as_slice(),
+            ),
+            (
+                "source.gitlab",
+                "https://gitlab.com",
+                "-/merge_requests",
+                source_states.as_slice(),
+            ),
+            // A custom installation prefix requires the attached source's explicit base URL.
+            (
+                "source.gitlab",
+                "https://gitlab.example/forge",
+                "-/merge_requests",
+                &source_states[..2],
+            ),
+        ] {
+            let repository = TestGitRepository::candidate();
+            for &source_state in states {
+                let mut admitted = generic_review_source(&repository, provider, base, route);
+                // Generic callers can select the head branch rather than the resolver's base.
+                admitted.source.as_mut().unwrap().branch =
+                    SourceBranchId::new("feature").assert_value();
+                if source_state != "matching" {
+                    admitted.initial_input["context"]["reviewScope"]["headRevision"] =
+                        json!("c".repeat(40));
+                }
+                if source_state == "absent" {
+                    admitted.source = None;
+                }
+                let result = prepare_without_git_or_credentials(&admitted, &repository).await;
+                if source_state == "stale" {
+                    let Err(PortableControllerError::Io(error)) = result else {
+                        panic!("stale {provider} review must refuse before graph dispatch")
+                    };
+                    assert_eq!(error.to_string(), ReviewResolveError::Identity.to_string());
+                } else {
+                    result.assert_value_with(&format!("{provider} {base} {source_state}"));
+                    assert!(checkout_references(&admitted).assert_value().is_empty());
+                }
+            }
         }
     }
 
@@ -451,6 +533,81 @@ exec "$REVIEW_FIXTURE_GIT" "$@"
             assert_eq!(
                 std::fs::read_to_string(repository.root.child("authenticated")).assert_value(),
                 "authenticated-fetch\n"
+            );
+        }
+    }
+}
+
+#[test]
+fn github_comment_destinations_do_not_prepare_refs_from_mirrored_or_unrelated_sources() {
+    for (provider, base, remote, repository) in [
+        (
+            "source.gitlab",
+            "https://gitlab.com",
+            "https://gitlab.com/acme/project.git",
+            "acme/project",
+        ),
+        (
+            "source.github",
+            "https://ghe.example",
+            "https://ghe.example/acme/project.git",
+            "acme/project",
+        ),
+        (
+            "source.github",
+            "https://github.com",
+            "https://github.com/acme/unrelated.git",
+            "acme/unrelated",
+        ),
+    ] {
+        let mut admitted = review();
+        admitted.source.as_mut().unwrap().remote = Some(
+            serde_json::from_value(json!({
+                "url":remote,
+                "forge":{"provider":provider, "repository":repository, "baseUrl":base},
+            }))
+            .assert_value(),
+        );
+        assert!(
+            checkout_references(&admitted).assert_value().is_empty(),
+            "GitHub.com comparison must not fetch PR refs from {remote}"
+        );
+    }
+}
+
+#[test]
+fn explicit_github_source_locators_retain_exact_review_checkout_references() {
+    for remote in [
+        "https://github.com/ACME/Project.git",
+        "ssh://git@github.com/acme/project.git",
+        "ssh://git@ssh.github.com:443/acme/project.git",
+    ] {
+        let mut admitted = review();
+        admitted.source.as_mut().unwrap().remote =
+            Some(serde_json::from_value(json!({"url":remote})).assert_value());
+        assert_eq!(
+            checkout_references(&admitted).assert_value(),
+            ["refs/pull/17/head".to_owned(), "b".repeat(40)],
+            "supported GitHub.com locator {remote}"
+        );
+    }
+}
+
+#[test]
+fn generic_forge_publishers_do_not_enter_github_review_checkout_preparation() {
+    for url in [
+        "https://gitlab.com/acme/project/-/merge_requests/17",
+        "https://ghe.example/acme/project/pull/17",
+    ] {
+        for has_source in [false, true] {
+            let mut admitted = review();
+            admitted.initial_input["url"] = json!(url);
+            if !has_source {
+                admitted.source = None;
+            }
+            assert!(
+                checkout_references(&admitted).assert_value().is_empty(),
+                "generic publisher {url} / source {has_source}"
             );
         }
     }

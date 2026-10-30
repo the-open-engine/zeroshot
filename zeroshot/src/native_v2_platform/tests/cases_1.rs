@@ -107,6 +107,45 @@ async fn allocator_defaults_are_explicit_fail_closed_and_side_effect_free() {
         CapsuleAllocationUnavailable::SourceCheckout.failure_code(),
         "source_checkout_unavailable"
     );
+    assert_eq!(
+        CapsuleAllocationUnavailable::EnvironmentSetup.failure_code(),
+        "environment_setup_failed"
+    );
+    assert_eq!(
+        CapsuleAllocationUnavailable::EnvironmentStartup.failure_code(),
+        "environment_startup_failed"
+    );
+    let quiet_runtime = crate::native_v2_candidate::test_support::codex_runtime(
+        RunSize::Small,
+        BTreeMap::from([(
+            NodeName::new("quiet").assert_value(),
+            NodeRuntimeBinding::Agent {
+                lane: None,
+                model: crate::worker_catalog::ModelId::new("quiet-model").assert_value(),
+                effort: None,
+                context_window: None,
+                max_tokens: None,
+                session_scope: SessionScope::Execution,
+                connections: DeclaredConnections::empty(),
+            },
+        )]),
+    );
+    let quiet = CapsulePreparation::quiet(&quiet_runtime).assert_value();
+    quiet
+        .progress
+        .log("ignored quiet progress")
+        .await
+        .assert_value();
+    let credentials = RunSourceCredentials {
+        github_token: Some("private-github-token".to_owned()),
+        git_credentials: None,
+    };
+    let diagnostic = format!("{credentials:?}");
+    assert!(diagnostic.contains("RunSourceCredentials"));
+    assert!(diagnostic.contains("[REDACTED]"));
+    assert!(!diagnostic.contains("private-github-token"));
+    let empty = format!("{:?}", RunSourceCredentials::default());
+    assert!(empty.contains("github_token: None"), "{empty}");
     let submission = request(Value::Null).submission;
     let admitted = NativeV2Admission
         .admit(submission)

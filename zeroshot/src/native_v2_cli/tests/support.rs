@@ -230,6 +230,7 @@ pub(in crate::native_v2_cli) struct FakeBackend {
     queued_lifecycle: bool,
     terminal_plan_state: Option<MergePlanState>,
     resume_requirements: Option<RunConnectionRequirements>,
+    resume_source: Option<Value>,
     trusted_resume_requirements: Option<RunConnectionRequirements>,
     resource_scope: Option<openengine_cluster_protocol::ConnectionScope>,
     unavailable_machine_identity: bool,
@@ -348,6 +349,11 @@ impl FakeBackend {
             trusted_resume_requirements: Some(requirements),
             ..Self::default()
         }
+    }
+
+    pub(super) fn with_resume_source(mut self, source: Value) -> Self {
+        self.resume_source = Some(source);
+        self
     }
 
     pub(super) fn with_untrusted_resume_requirements(
@@ -771,7 +777,7 @@ impl NativeV2CliBackend for FakeBackend {
             return serde_json::from_value(json!({
                 "runId":params.run_id,
                 "title":"Repair checkout",
-                "source":source(),
+                "source":self.resume_source.as_ref().cloned().unwrap_or_else(source),
                 "size":"medium",
                 "atCursor":"v2:3",
                 "status":{
@@ -1081,4 +1087,19 @@ fn target_transport_error() -> NativeV2CliError {
         origin: "https://target.example".to_owned(),
         message: "target discovery failed: connection refused".to_owned(),
     }
+}
+
+pub(super) async fn execute_with_environment(
+    command: NativeV2CliCommand,
+    backend: &FakeBackend,
+    environment: &dyn Fn(&str) -> Option<OsString>,
+) -> Result<CliOutcome, NativeV2CliError> {
+    let context = crate::native_v2_cli::execution::CliExecutionContext::new(backend, environment);
+    crate::native_v2_cli::execution::execute_native_v2_cli_with_context(
+        command,
+        &context,
+        &mut NeverDetach,
+        &mut Vec::new(),
+    )
+    .await
 }

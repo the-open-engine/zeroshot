@@ -78,7 +78,8 @@ fn fake_worker_outcome(invocation: &DriverInvocation) -> WorkerOutcome {
                 "repository": "owner/repo",
                 "targetBranch": "main",
                 "headRevision": "2222222222222222222222222222222222222222",
-                "pullRequestId": "1"
+                "pullRequestId": "1",
+                "links": {}
             }),
             signals: BTreeMap::from([(
                 serde_json::from_value(json!(DELIVERY_SIGNAL_FIELD))

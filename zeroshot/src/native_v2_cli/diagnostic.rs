@@ -185,6 +185,7 @@ fn admission_code(source: &NativeV2AdmissionError) -> &'static str {
         NativeV2AdmissionError::InvalidLoopLimit { .. } => "input.invalid_loop_limit",
         NativeV2AdmissionError::MissingRuntimeBinding { .. } => "runtime.missing_binding",
         NativeV2AdmissionError::UnexpectedRuntimeBinding { .. } => "runtime.unexpected_binding",
+        NativeV2AdmissionError::InvalidRuntimeBinding { .. } => "runtime.invalid_binding",
         NativeV2AdmissionError::MergePlanAgentGitHubToken { .. } => "runtime.invalid_environment",
         NativeV2AdmissionError::UnsupportedGraphProfile => "graph.unsupported_profile",
         _ => "request.invalid",

@@ -48,26 +48,24 @@ async fn fetch_waits_for_automatic_maintenance() {
     )
     .await
     .assert_value_with("clone source");
-    let branch = git
-        .capture(
-            &seed,
-            &["symbolic-ref".into(), "--short".into(), "HEAD".into()],
+    force_automatic_gc(&program, &workspace).await;
+    let fetched = git
+        .capture_at(
+            Some(&workspace),
+            &[
+                "fetch".into(),
+                "--no-tags".into(),
+                "origin".into(),
+                revision.trim().into(),
+            ],
         )
         .await
-        .assert_value_with("resolve branch");
-    let source = ResolvedSource {
-        remote: None,
-        repository: openengine_cluster_protocol::SourceRepositoryId::new("owner/repository")
-            .assert_value(),
-        branch: openengine_cluster_protocol::SourceBranchId::new(branch.trim()).assert_value(),
-        revision: openengine_cluster_protocol::SourceRevisionId::new(revision.trim())
-            .assert_value(),
-    };
-    git.transport(&workspace)
-        .assert_value()
-        .fetch_exact(source.revision.as_str(), source_credential("", None))
-        .await
         .assert_value_with("fetch source exact revision");
+    assert_completed_maintenance(
+        &root.read("git-trace.trace"),
+        fetched.diagnostic().stderr.as_str(),
+        &workspace,
+    );
     git.run(
         Some(&workspace),
         &["checkout".into(), "--detach".into(), revision.trim().into()],
@@ -80,29 +78,72 @@ async fn fetch_waits_for_automatic_maintenance() {
             .assert_value_with("checkout revision"),
         revision
     );
+}
 
-    let trace = root.read("git-trace.trace");
-    let maintenance: Vec<Value> = trace
+async fn force_automatic_gc(program: &Path, workspace: &Path) {
+    let git = git_process(program, Instant::now() + GIT_TIMEOUT);
+    // Keep manual maintenance on GC; Git 2.56 otherwise defaults to geometric repacking.
+    for (key, value) in [
+        ("gc.auto", "1"),
+        ("gc.autoDetach", "true"),
+        ("maintenance.strategy", "incremental"),
+    ] {
+        git.run(
+            Some(workspace),
+            &["config".into(), key.into(), value.into()],
+        )
+        .await
+        .assert_value();
+    }
+    // Git samples loose-object fanout 17. These SHA-1 blob preimages force real automatic GC.
+    for number in [0, 405, 571, 767, 877, 1249, 1327, 1630, 1649, 1671] {
+        let mut command = crate::native_v2_delivery::command::local_git_command(program, workspace);
+        command.args(["hash-object", "-w", "--stdin"]);
+        let payload = format!("synthetic loose object {number}");
+        let output = crate::native_v2_delivery::command::capture_sensitive_with_input(
+            &mut command,
+            Duration::from_secs(5),
+            &[],
+            payload.as_bytes(),
+        )
+        .await
+        .assert_value()
+        .require_success()
+        .assert_value();
+        assert!(output.stdout().starts_with("17"));
+    }
+}
+
+fn assert_completed_maintenance(trace: &str, stderr: &str, workspace: &Path) {
+    let events: Vec<Value> = trace
         .lines()
-        .map(|line| serde_json::from_str::<Value>(line).assert_value_with("Git trace event"))
-        .filter(|event| {
-            event["event"] == "child_start"
-                && event["argv"]
-                    .as_array()
-                    .is_some_and(|args| args.iter().any(|arg| arg == "maintenance"))
-        })
+        .map(|line| serde_json::from_str(line).assert_value_with("Git trace event"))
+        .collect();
+    let garbage_collectors: Vec<&Value> = events
+        .iter()
+        .filter(|event| event["event"] == "cmd_name" && event["name"] == "gc")
         .collect();
     assert!(
-        !maintenance.is_empty(),
-        "fetch must exercise automatic maintenance"
+        !garbage_collectors.is_empty(),
+        "fetch must exercise real automatic GC"
     );
-    for event in maintenance {
-        let args = event["argv"]
-            .as_array()
-            .assert_value_with("maintenance arguments");
-        assert!(args.iter().any(|arg| arg == "--no-detach"), "{event}");
-        assert!(!args.iter().any(|arg| arg == "--detach"), "{event}");
+    for collector in garbage_collectors {
+        assert!(
+            events.iter().any(|event| event["event"] == "exit"
+                && event["sid"] == collector["sid"]
+                && event["code"] == 0),
+            "automatic GC must finish before fetch returns: {collector}"
+        );
     }
+    assert!(
+        stderr.contains("Auto packing the repository for optimum performance."),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("in background"), "{stderr}");
+    assert!(
+        !workspace.join(".git/gc.pid").exists(),
+        "GC must release its process lock"
+    );
 }
 
 #[test]

@@ -33,8 +33,7 @@ use crate::native_v2_capsule::provider_process::{
 use crate::native_v2_contract::{NodeRuntimeBinding, PiProvider};
 use crate::native_v2_runner::{
     AgentResponse, DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeRunnerError,
-    ProviderSchemaDialect, ResolvedEnvironment, render_agent_prompt_with_schema,
-    resolve_agent_response_with_schema,
+    ProviderSchemaDialect, ResolvedEnvironment, resolve_agent_response_with_schema,
 };
 use command::{LOCAL_ENVIRONMENT, PiCommandRequest, command};
 use provider_document::{
@@ -78,13 +77,9 @@ fn prompt(
     dialect: ProviderSchemaDialect,
     invocation: &DriverInvocation,
 ) -> Result<String, NodeRunnerError> {
-    render_agent_prompt_with_schema(
-        invocation.agent_instructions()?,
-        &invocation.node.input,
-        &invocation.response,
-        dialect,
-    )
-    .map_err(|error| with_driver_detail(error, "Pi prompt could not be serialized"))
+    invocation
+        .agent_prompt_with_schema(dialect)
+        .map_err(|error| with_driver_detail(error, "Pi prompt could not be serialized"))
 }
 
 pub use crate::native_v2_capsule::HarnessProcessEnvironment as PiProcessEnvironment;
@@ -271,8 +266,19 @@ impl PiAdapter {
         // The gateway lane registers its own provider, carrying the caller's endpoint, key, and
         // wire protocol. The anthropic lane only retargets the endpoint and keeps Pi's Messages
         // protocol, the same escape hatch Claude Code offers through `ANTHROPIC_BASE_URL`.
-        let (model, reasoning) = match &invocation.node.binding {
-            NodeRuntimeBinding::Agent { model, effort, .. } => (model.as_str(), effort.is_some()),
+        let (model, reasoning, context_window, max_tokens) = match &invocation.node.binding {
+            NodeRuntimeBinding::Agent {
+                model,
+                effort,
+                context_window,
+                max_tokens,
+                ..
+            } => (
+                model.as_str(),
+                effort.is_some(),
+                *context_window,
+                *max_tokens,
+            ),
             _ => {
                 return Err(NodeRunnerError::DriverDetail(
                     "Pi command requires an agent runtime binding".to_owned(),
@@ -290,6 +296,8 @@ impl PiAdapter {
                         api: &api,
                         model,
                         reasoning,
+                        context_window,
+                        max_tokens,
                     },
                 ))
             }

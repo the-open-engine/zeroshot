@@ -70,6 +70,8 @@ pub async fn build_production_target_authority(
 /// Host-owned non-secret capabilities used to compose one installed target.
 #[derive(Clone)]
 pub struct ProductionHostingConfig {
+    /// Optional host facts sampled for each agent execution, including resumed attempts.
+    pub agent_context: Option<Arc<dyn crate::native_v2_runner::AgentContextProvider>>,
     /// A host-owned namespace. Platform embedders select their own tenant-scoped storage.
     pub memory_storage: Option<PathBuf>,
     /// Private diagnostics collection; the host owns the receiver and durable storage.
@@ -275,6 +277,8 @@ fn prepare_contained_submission(
     crate::harnesses::HarnessRegistry::core()
         .validate_runtime(&submission.runtime)
         .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
+    crate::native_v2_admission::materialize_delivery_access(submission)
+        .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
     materialize_contained_provider_access(&mut submission.runtime)
         .map_err(|error| TargetAuthorityError::invalid(error.to_string()))
 }
@@ -398,6 +402,7 @@ fn set_traversable_directory(_path: &std::path::Path) -> Result<(), std::io::Err
 impl Default for ProductionHostingConfig {
     fn default() -> Self {
         Self {
+            agent_context: None,
             memory_storage: None,
             operator_diagnostic_output: None,
             workspace_storage: None,

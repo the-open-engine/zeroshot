@@ -1,19 +1,13 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use openengine_cluster_protocol::{NodeInstructions, NodeName, PayloadType, RunId, WorkerRef};
+use openengine_cluster_protocol::NodeName;
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{Value, json};
 
 use super::*;
 use crate::execution::SessionScope;
 use crate::native_v2_capsule::provider_process::turn::ProviderTranscript;
-use crate::native_v2_contract::{
-    DeclaredConnections, DeclaredEnvironment, ExecutionId, ExecutionRef, NodeInstanceId,
-    NodeRuntimeBinding,
-};
-use crate::native_v2_runner::{NodeResponseContract, NodeRole};
-use crate::worker_catalog::ModelId;
 
 fn event(kind: &str, id: &str, message: &str) -> Value {
     json!({"type":kind,"sessionID":"ses_fixture","part":{"id":id,"messageID":message}})
@@ -231,13 +225,7 @@ fn declared_launch_controls_cannot_restore_native_managed_authority() {
 fn contained_contribution_derives_explicit_auth_without_native_login_reuse() {
     use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
     let lane = crate::native_v2_contract::RuntimeLane::new("opencode", "openai").assert_value();
-    let binding = NodeRuntimeBinding::Agent {
-        lane: None,
-        model: ModelId::new("opaque-model").assert_value(),
-        effort: None,
-        session_scope: SessionScope::Execution,
-        connections: DeclaredConnections::empty(),
-    };
+    let binding = crate::native_v2_runner::test_support::binding(SessionScope::Execution);
     let mut runtime = crate::native_v2_contract::RuntimePlan::new(
         lane,
         openengine_cluster_protocol::RunSize::Medium,

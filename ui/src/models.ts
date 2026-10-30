@@ -11,6 +11,7 @@ const RECENT_LIMIT = 10;
 export function documentModels(runtime: Runtime, lane?: RuntimeLane): string[] {
   const models = new Set<string>();
   for (const binding of Object.values(runtime.nodes ?? {})) {
+    if (binding?.kind === 'decision') continue;
     const effective = effectiveLane(runtime, binding);
     if (lane && (effective.harness !== lane.harness || effective.provider !== lane.provider))
       continue;

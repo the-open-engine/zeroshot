@@ -7,25 +7,26 @@ use std::time::Duration;
 use async_trait::async_trait;
 use openengine_cluster_protocol::RunId;
 use tokio::process::Command;
-use crate::native_v2_delivery::command::capture;
+use crate::native_v2_delivery::command::{GitCommandOutput, capture, capture_sensitive};
 
 use crate::native_v2_target_authority::OperatorDiagnosticStore;
+use crate::source_code_provider::SourceReviewLinks;
 
 use crate::native_v2_delivery::{
     SourceDeliveryRead, SourceDeliverySnapshot, SourceHeadReconciliation,
-    SourceReconciliationOutcome, SourceDeliveryError, SourceChecks, SourceConflictMaterialization,
-    SourceConflictOutcome, SourceConflictRequest, SourceDeliveryCredential,
-    SourceDeliveryAuthority, SourceHeadSynchronization, SourceHeadUpdateOutcome,
-    SourceMergeRequestOutcome, SourceMergeWithdrawal, SourcePushRequest, SourceReviewObservation,
-    SourceReviewReceipt, SourceReviewRequest, SourceReviewFeedback, SourceReviewFeedbackItem,
-    SourceReviewState, SourceTargetIntegration, SourceTargetReconciliation, valid_head_update,
-    valid_revision,
+    SourceReconciliationOutcome, SourceDeliveryError, SourceChecks, SourceConflictOutcome,
+    SourceConflictRequest, SourceDeliveryCredential, SourceDeliveryAuthority,
+    SourceHeadSynchronization, SourceHeadUpdateOutcome, SourceMergeRequestOutcome,
+    SourceMergeWithdrawal, SourcePushRequest, SourceReviewObservation, SourceReviewReceipt,
+    SourceReviewRequest, SourceReviewFeedback, SourceReviewFeedbackItem, SourceReviewState,
+    SourceTargetIntegration, SourceTargetReconciliation, valid_head_update, valid_revision,
 };
 
 mod api;
 mod comment;
-pub(crate) use comment::comment_destination;
-pub use comment::validate_comment_review_scope;
+mod instance;
+pub(crate) use comment::{comment_destination, comment_destination_at, validate_comment_review_scope};
+pub(super) use comment::valid_github_permalink as valid_comment_permalink;
 mod conflict;
 mod feedback;
 mod metadata;
@@ -72,6 +73,8 @@ pub struct GhCliDeliveryAuthority {
     operator_diagnostics: Option<OperatorDiagnosticReporter>,
     transport: Option<crate::native_v2_delivery::transport::GitTransport>,
     queue_effects: queue::QueueEffects,
+    base_url: openengine_cluster_protocol::SourceForgeBaseUrl,
+    instance_verified: Arc<tokio::sync::OnceCell<()>>,
 }
 
 #[derive(Clone, Debug)]
@@ -88,6 +91,9 @@ impl GhCliDeliveryAuthority {
             operator_diagnostics: None,
             transport: None,
             queue_effects: queue::QueueEffects::default(),
+            base_url: openengine_cluster_protocol::SourceForgeBaseUrl::new("https://github.com")
+                .expect("static base URL"),
+            instance_verified: Arc::new(tokio::sync::OnceCell::new()),
         }
     }
 
@@ -116,7 +122,7 @@ impl GhCliDeliveryAuthority {
                     local_environment: None,
                     deadline: self.config.push_deadline,
                 },
-                format!("https://github.com/{repository}.git"),
+                format!("{}/{repository}.git", self.base_url),
             )
         });
         if let Some(reporter) = &self.operator_diagnostics {
@@ -133,11 +139,6 @@ impl GhCliDeliveryAuthority {
     ) -> Self {
         self.operator_diagnostics = Some(OperatorDiagnosticReporter { run_id, store });
         self
-    }
-
-    fn workspace_git(&self) -> crate::native_v2_delivery::git::SystemGit {
-        crate::native_v2_delivery::git::SystemGit::new(self.config.git_program.clone())
-            .with_identity(self.config.git_identity)
     }
 
     async fn find_review(
@@ -316,7 +317,8 @@ impl GhCliDeliveryAuthority {
         if merge_method == merge_policy::MergeMethod::Queue {
             return queue::enqueue(self, review, pull_request_id, credential).await;
         }
-        let mut command = clean_command(&self.config, &self.config.gh_program, credential);
+        self.ensure_instance(credential).await?;
+        let mut command = self.api_command(credential);
         command.args([
             "pr",
             "merge",
@@ -359,6 +361,12 @@ impl GhCliDeliveryAuthority {
 
 #[async_trait]
 impl SourceDeliveryAuthority for GhCliDeliveryAuthority {
+    fn review_links(
+        &self,
+        review: &SourceReviewReceipt,
+    ) -> Result<Option<SourceReviewLinks>, SourceDeliveryError> {
+        self.canonical_review_links(review).map(Some)
+    }
     fn forge_credential_field(&self) -> Option<&'static str> {
         Some("GH_TOKEN")
     }
@@ -682,18 +690,22 @@ fn clean_command(
 }
 
 fn git_command(
-    config: &GhCliAuthorityConfig,
+    authority: &GhCliDeliveryAuthority,
     workspace: &std::path::Path,
     credential: SourceDeliveryCredential<'_>,
 ) -> Command {
-    let mut command = local_git_command(config, workspace);
+    let mut command = local_git_command(authority, workspace);
     command
         .env("GH_HOST", "github.com")
         .env("GH_TOKEN", credential.expose());
     command
 }
 
-fn local_git_command(config: &GhCliAuthorityConfig, workspace: &std::path::Path) -> Command {
+fn local_git_command(authority: &GhCliDeliveryAuthority, workspace: &std::path::Path) -> Command {
+    if let Some(transport) = &authority.transport {
+        return transport.command(workspace);
+    }
+    let config = &authority.config;
     let mut command = crate::native_v2_delivery::command::local_git_command_with_identity(
         &config.git_program,
         workspace,
@@ -701,30 +713,6 @@ fn local_git_command(config: &GhCliAuthorityConfig, workspace: &std::path::Path)
     );
     command.env("HOME", &config.home_directory);
     command
-}
-
-async fn configure_delivery_identity(
-    config: &GhCliAuthorityConfig,
-    workspace: &std::path::Path,
-) -> Result<(), SourceDeliveryError> {
-    for (key, value) in [
-        ("user.name", "Zeroshot"),
-        ("user.email", "delivery@zeroshot.invalid"),
-    ] {
-        let mut command = local_git_command(config, workspace);
-        command.args(["config", "--local", "--replace-all", key, value]);
-        bounded_status(command, config.api_deadline).await?;
-    }
-    Ok(())
-}
-
-fn git_error(error: crate::native_v2_delivery::git::GitError) -> SourceDeliveryError {
-    match error {
-        crate::native_v2_delivery::git::GitError::Command(failure) => {
-            SourceDeliveryError::Command(failure)
-        }
-        error => SourceDeliveryError::repairable(error.to_string()),
-    }
 }
 
 async fn bounded_status(
@@ -739,15 +727,17 @@ async fn bounded_git_output(
     command: &mut Command,
     deadline: Duration,
     maximum_bytes: usize,
-) -> Result<String, SourceDeliveryError> {
-    let output = capture(command, deadline).await?.require_success()?;
-    if output.stdout_truncated || output.stdout.len() > maximum_bytes {
+) -> Result<GitCommandOutput, SourceDeliveryError> {
+    let output = capture_sensitive(command, deadline, &[])
+        .await?
+        .require_success()?;
+    if output.stdout_truncated() || output.stdout().len() > maximum_bytes {
         return Err(SourceDeliveryError::api(
             None,
             format!("Git output exceeded {maximum_bytes} bytes\n{output}"),
         ));
     }
-    Ok(output.stdout)
+    Ok(output)
 }
 
 #[cfg(test)]

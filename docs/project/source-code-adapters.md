@@ -1,5 +1,5 @@
 ---
-description: "Understand local folders, Git transport and forge delivery as separate concerns, including exact source identity for contained runs."
+description: 'Understand local folders, Git transport and forge delivery as separate concerns, including exact source identity for contained runs.'
 ---
 
 # Source-code adapters
@@ -13,14 +13,16 @@ PR, and merge nodes keep their receipt, repair, cancellation, and recovery behav
 | Checkout and push over HTTPS or SSH          | Shared Git transport     |
 | Review creation, checks, feedback, and merge | Registered forge adapter |
 
-GitLab, Forgejo, and other Git hosts can use checkout and push now. Their forge APIs need adapters
-for PR and merge behavior. GitHub is the maintained forge implementation.
+GitHub (including Enterprise) and GitLab have maintained delivery adapters. Other Git hosts can
+use checkout and push; their review and merge APIs need an adapter. See
+[GitHub and GitLab delivery](../guides/forge-delivery.md) for setup and version requirements.
 
 ## Ownership and registration
 
 `zeroshot/src/source_code/provider/` contains effect-free contracts and
-`SourceCodeProviderRegistry`. Provider, repository, and review identities are bounded opaque values;
-GitHub grammar and policy belong to its implementation.
+`SourceCodeProviderRegistry`. Provider, repository, and review identities are bounded opaque values.
+Each adapter owns its repository grammar and policy. The shared source identity carries a canonical
+HTTPS web base, including an optional installation path prefix, separately from the Git locator.
 
 Maintained implementations live in `zeroshot/src/source_code/adapters/core/`. Contributions live in
 `zeroshot/src/source_code/adapters/contributed/` and register through that folder's `register` hook.
@@ -29,7 +31,9 @@ during composition. Metadata-only registration must perform no filesystem, proce
 network effects. The provider's pure `repository_from_remote` hook identifies its forge from a
 credential-free Git locator text after the run boundary validates the URL. Contracts stay independent
 of protocol and process implementations. The same registry rejects ambiguous matches; both local and named CLI
-source selection use it. Runtime registration receives the selected source and scoped shared Git transport.
+source selection use it. Explicit instance selection uses the same provider's `repository_from_remote_at`
+hook; it must prove that the forge repository matches the Git locator. Runtime registration receives
+the selected source and scoped shared Git transport.
 
 Implement `SourceCodeProvider` for descriptor and source operations, and `SourceDeliveryAuthority`
 for the existing delivery workflow. A forge owns its credential field, repository and review
@@ -67,10 +71,16 @@ The registry's coordinated delivery workflow obtains a scoped adapter through
 SourceCodeProvider.delivery_authority. Its descriptor advertises the operations that adapter
 supports. The older inspect_operation/operate contract remains available for callers of atomic
 operations; maintained adapters currently return an explicit unavailable error through that seam.
-Forge credential selection has one authority: SourceDeliveryAuthority.forge_credential_field.
+Forge credential fields and default connection requirements belong to the registered adapter.
+Generated delivery bindings remain empty until placement selects the source or comment destination;
+materialization preserves explicit connection keys and fields. Review receipt links come from the
+adapter, so consumers never construct a provider's resource paths from opaque IDs.
 
 Conversation comments are a separate operation exposed through the same registry's optional
 comment authority. Pure URL identification and capability admission do not require a Git source.
 The native publisher owns bounded create/reconciliation and a durable lineage publication store;
 the forge supplies actor, comment identity, paginated reads, creation, and exact review-scope checks.
 Comment authority does not acquire Git transport access or a model session.
+Its frozen destination includes provider and instance identity. Publication records retain that
+destination across retries, including GitLab installation prefixes. The adapter validates the exact
+resource permalink; the publisher also checks actor, body hash, and lineage marker.

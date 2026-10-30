@@ -10,6 +10,9 @@ use crate::harnesses::{HarnessBuildContext, HarnessHost, HarnessRegistry};
 use crate::native_v2_admission::NativeV2Admission;
 use crate::native_v2_candidate::test_support::{TestDirectory, full_graph, git, success_node};
 
+#[path = "tests/git_environment.rs"]
+mod git_environment;
+
 fn local_request(run_id: RunId) -> PreparedRunRequest {
     let intent = serde_json::from_value(json!({
         "title": "Hermetic local preparation",
@@ -653,6 +656,8 @@ fn relative_harness_home_overrides_resolve_against_the_invoking_directory() {
             "providers.json".to_owned(),
         ),
         ("PI_CODING_AGENT_DIR".to_owned(), "pi".to_owned()),
+        ("GH_CONFIG_DIR".to_owned(), "gh".to_owned()),
+        ("GLAB_CONFIG_DIR".to_owned(), "glab".to_owned()),
         ("PATH".to_owned(), "/usr/bin".to_owned()),
     ]));
     resolve_relative_home_overrides(&mut environment, invoking).assert_value();
@@ -663,6 +668,8 @@ fn relative_harness_home_overrides_resolve_against_the_invoking_directory() {
         ("COPILOT_HOME", "copilot"),
         ("COPILOT_PROVIDERS_CONFIG", "providers.json"),
         ("PI_CODING_AGENT_DIR", "pi"),
+        ("GH_CONFIG_DIR", "gh"),
+        ("GLAB_CONFIG_DIR", "glab"),
     ] {
         let expected = invoking.join(relative);
         assert_eq!(

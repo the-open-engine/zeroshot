@@ -86,6 +86,10 @@ pub(super) async fn review_completion(
             outcome: label,
             review: &drive.review,
             merge_revision,
+            links: drive
+                .adapter
+                .result_links(drive.response, &drive.review)
+                .map_err(DeliveryStop::Runner)?,
         },
         &diagnostic,
     )
@@ -266,6 +270,7 @@ impl NativeV2DeliveryAdapter {
                         outcome: DELIVERY_MERGED_LABEL,
                         review: &review,
                         merge_revision: Some(&merge_revision),
+                        links: self.result_links(response, &review)?,
                     },
                     "forge confirmed the exact candidate merged before queue withdrawal",
                 )

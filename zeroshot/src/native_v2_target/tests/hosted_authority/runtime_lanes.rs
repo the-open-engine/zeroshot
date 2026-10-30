@@ -196,6 +196,82 @@ fn lane_free_binding() -> Value {
     json!({"kind": "agent", "model": "opaque-model"})
 }
 
+fn decision_binding() -> Value {
+    json!({
+        "kind":"decision", "api":"systemone", "model":"caller/model",
+        "minProbability":0.85, "uncertainLabel":"uncertain",
+        "connections":{"decisions":["DECISION_ENDPOINT","DECISION_API_KEY"]}
+    })
+}
+
+#[tokio::test]
+async fn decision_submission_checks_the_exact_marker_after_only_direct_discovery() {
+    for marker in [
+        None,
+        Some("openengine.decision-models/v2"),
+        Some("openengine.decision-models/v1"),
+    ] {
+        let root = temp_root();
+        let target = RecordingTarget::spawn(move |request, origin, token| {
+            if (request.method.as_str(), request.path.as_str()) != DISCOVERY {
+                return direct_without_marker(request, origin, token);
+            }
+            let mut document = TargetDiscoveryDocument::direct(TargetAuthentication::None);
+            if let Some(kind) = marker {
+                document = document.with_decision_models();
+                document
+                    .extensions
+                    .decision_models
+                    .as_mut()
+                    .assert_value()
+                    .kind = kind.to_owned();
+            }
+            ("200 OK", serde_json::to_string(&document).assert_value())
+        })
+        .await;
+        let authority = test_http_authority(root.path("refresh-locks"));
+        let result = authority
+            .submit(
+                &direct_target(target.origin.clone()),
+                &run_request(decision_binding()),
+            )
+            .await;
+        if marker == Some("openengine.decision-models/v1") {
+            result.assert_value();
+            assert_eq!(routes(&target.stop()), [DISCOVERY, RUN]);
+        } else {
+            assert!(
+                result
+                    .assert_error()
+                    .to_string()
+                    .contains("openengine.decision-models/v1")
+            );
+            assert_eq!(routes(&target.stop()), [DISCOVERY]);
+        }
+    }
+}
+
+#[tokio::test]
+async fn unsupported_decisions_send_neither_hosted_tokens_nor_profile_or_run_bodies() {
+    for profile in [false, true] {
+        let (_root, target, record, authority) =
+            hosted_authority_with(HostedCapability::Lanes(false)).await;
+        let error = if profile {
+            authority
+                .profile_set(&record, profile_request(decision_binding()))
+                .await
+                .assert_error()
+        } else {
+            authority
+                .submit(&record, &run_request(decision_binding()))
+                .await
+                .assert_error()
+        };
+        assert!(error.to_string().contains("openengine.decision-models/v1"));
+        assert_eq!(routes(&target.stop()), [DISCOVERY, OAUTH_METADATA]);
+    }
+}
+
 fn run_request(worker: Value) -> TargetRunRequest {
     let mut request = exact_run_request();
     request.submission.runtime.nodes_mut().insert(

@@ -31,8 +31,21 @@ impl GhCliDeliveryAuthority {
         arguments: &[String],
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<Vec<u8>, SourceDeliveryError> {
-        let mut command = clean_command(&self.config, &self.config.gh_program, credential);
-        command.arg("api").args(arguments).stdout(Stdio::piped());
+        self.ensure_instance(credential).await?;
+        self.raw_api_output(arguments, credential).await
+    }
+
+    pub(super) async fn raw_api_output(
+        &self,
+        arguments: &[String],
+        credential: SourceDeliveryCredential<'_>,
+    ) -> Result<Vec<u8>, SourceDeliveryError> {
+        let mut command = self.api_command(credential);
+        command
+            .arg("api")
+            .args(arguments)
+            .args(["--header", "X-GitHub-Api-Version: 2026-03-10"])
+            .stdout(Stdio::piped());
         let context = format!("command: {:?} api {arguments:?}", self.config.gh_program);
         bounded_output(command, self.config.api_deadline, credential)
             .await

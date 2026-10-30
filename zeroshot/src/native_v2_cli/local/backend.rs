@@ -88,12 +88,31 @@ impl LocalCliBackend {
     ) -> Result<PreparedLocalRun, NativeV2CliError> {
         crate::native_v2_local::validate_workspace_state(&recovery.workspace, &self.state_root)
             .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
-        let environment = LocalConnectionStore::new(self.state_root.clone())
-            .resolve_submission(&recovery.submission, &params.connections)?;
-        let git_credentials = environment.resolve_git_source().await?;
         let mut native_environment =
-            crate::native_v2_local::capture_local_native_environment(&self.current_directory)
-                .map_err(local_error)?;
+            native_forge::capture_native_environment(&self.current_directory)?;
+        let mut submission = recovery.submission.clone();
+        native_forge::materialize_local_access(
+            &mut submission,
+            native_forge::NativeContext {
+                environment: &native_environment,
+                directory: &recovery.workspace,
+            },
+            params.github_token.is_some(),
+        )?;
+        let store = LocalConnectionStore::new(self.state_root.clone());
+        let mut connections = params.connections.clone();
+        native_forge::fill_missing(
+            &submission,
+            &mut connections,
+            &store,
+            native_forge::NativeContext {
+                environment: &native_environment,
+                directory: &recovery.workspace,
+            },
+        )
+        .await?;
+        let environment = store.resolve_submission(&submission, &connections)?;
+        let git_credentials = environment.resolve_git_source().await?;
         let (github_token, github_token_file) = crate::native_v2_local::take_github_authority(
             &mut native_environment,
             params.github_token.clone(),
@@ -109,7 +128,7 @@ impl LocalCliBackend {
         Ok(PreparedLocalRun {
             run_id: params.successor_run_id.clone(),
             delivery_run_id: self.delivery_run_id(&params.run_id, recovery)?,
-            submission: recovery.submission.clone(),
+            submission,
             environment,
             github_token,
             github_token_file,

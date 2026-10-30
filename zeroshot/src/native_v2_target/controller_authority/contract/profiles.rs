@@ -34,3 +34,7 @@ pub(super) fn build_profiles_descriptor(
         run: compile_literal_route(&base_url, &wire.route_templates.run, "run-profile")?,
     }))
 }
+
+#[cfg(test)]
+#[path = "profiles_tests.rs"]
+mod tests;

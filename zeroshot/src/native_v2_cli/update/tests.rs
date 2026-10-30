@@ -202,11 +202,13 @@ async fn wave5_cli_contract_release_metadata_and_verified_assets_are_self_consis
     let memory_skill = b"---\nname: zeroshot-memory-init\ndescription: Memory initialization\n---\n\nInitialize.\n";
     let graph_skill =
         b"---\nname: zeroshot-graph-design\ndescription: Graph design\n---\n\nDesign.\n";
+    let plan_skill = b"---\nname: zeroshot-plan\ndescription: Planning\n---\n\nPlan.\n";
     let manifest = format!(
-        "{:x}  {SKILL_ASSET}\n{:x}  zeroshot-memory-init-skill.md\n{:x}  zeroshot-graph-design-skill.md\n{:x}  {filename}\n",
+        "{:x}  {SKILL_ASSET}\n{:x}  zeroshot-memory-init-skill.md\n{:x}  zeroshot-graph-design-skill.md\n{:x}  zeroshot-plan-skill.md\n{:x}  {filename}\n",
         Sha256::digest(canonical_skill),
         Sha256::digest(memory_skill),
         Sha256::digest(graph_skill),
+        Sha256::digest(plan_skill),
         Sha256::digest(&archive),
     );
     let assets = TestServer::start(vec![
@@ -214,6 +216,7 @@ async fn wave5_cli_contract_release_metadata_and_verified_assets_are_self_consis
         fixed_response("200 OK", canonical_skill),
         fixed_response("200 OK", memory_skill),
         fixed_response("200 OK", graph_skill),
+        fixed_response("200 OK", plan_skill),
         fixed_response("200 OK", &archive),
     ]);
     let release = download_release_at(&client, ReleaseVersion([8, 2, 0]), latest, &assets.base_url)
@@ -231,6 +234,7 @@ async fn wave5_cli_contract_release_metadata_and_verified_assets_are_self_consis
         fixed_response("200 OK", canonical_skill),
         fixed_response("200 OK", memory_skill),
         fixed_response("200 OK", graph_skill),
+        fixed_response("200 OK", plan_skill),
     ]);
     let same_version = download_release_at(&client, latest, latest, &unchanged.base_url)
         .await

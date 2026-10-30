@@ -356,7 +356,7 @@ fn validate_local_repository(
 
 async fn local_git(workspace: &std::path::Path, args: &[&str]) -> Result<String, NativeV2CliError> {
     let mut command = tokio::process::Command::new("git");
-    crate::native_v2_delivery::transport::remove_repository_environment(command.as_std_mut());
+    crate::native_v2_delivery::command::remove_repository_environment(command.as_std_mut());
     command
         .current_dir(workspace)
         .arg("-c")

@@ -955,3 +955,50 @@ fn repository_overrides_use_transport_bounds_and_reject_credential_bearing_locat
     }
     assert!(parse(&format!("{prefix}{}", "r".repeat(2049 - prefix.len()))).is_err());
 }
+
+#[test]
+fn source_instance_flags_preserve_opaque_provider_and_require_a_canonical_pair() {
+    let parse = |flags: &[&str]| {
+        let mut arguments = vec![
+            "run",
+            "--title",
+            "Instance selection",
+            "--input",
+            "input.json",
+            "--profile",
+            "local:worker",
+        ];
+        arguments.extend_from_slice(flags);
+        parse_native_v2_args(args(&arguments))
+    };
+    let run = run_command(
+        parse(&[
+            "--source-provider",
+            "source.future",
+            "--source-base-url",
+            "https://forge.example.test/git",
+        ])
+        .assert_value(),
+    );
+    let selected = run.source_forge.assert_value();
+    assert_eq!(selected.provider.as_str(), "source.future");
+    assert_eq!(selected.base_url.as_str(), "https://forge.example.test/git");
+    for flags in [
+        &["--source-provider", "source.github"][..],
+        &["--source-base-url", "https://forge.example.test"][..],
+        &[
+            "--source-provider",
+            "source.gitlab",
+            "--source-base-url",
+            "http://forge.example.test",
+        ][..],
+        &[
+            "--source-provider",
+            "source.gitlab",
+            "--source-base-url",
+            "https://forge.example.test/",
+        ][..],
+    ] {
+        assert!(parse(flags).is_err());
+    }
+}

@@ -229,17 +229,30 @@ pub(crate) fn capture_local_native_environment(
     Ok(environment.into_values())
 }
 
-/// Resolves every harness home override that the invoking shell may have set relatively against
-/// the invoking directory, before the controller detaches. The variable is forwarded to the
-/// harness child, whose working directory differs, so leaving it relative would change what it
-/// points at.
+/// Resolves native configuration directories against the invoking directory before detachment.
+/// Harness children and trusted Git credential helpers can start in another workspace, so a
+/// relative override must retain the invoking shell's location.
 fn resolve_relative_home_overrides(
     environment: &mut LocalHarnessEnvironment,
     invoking_directory: &Path,
 ) -> Result<(), LocalCompositionError> {
     crate::harnesses::HarnessRegistry::local()
         .normalize_local(environment, invoking_directory)
-        .map_err(LocalCompositionError::Harness)
+        .map_err(LocalCompositionError::Harness)?;
+    for name in ["GH_CONFIG_DIR", "GLAB_CONFIG_DIR"] {
+        let Some(value) = environment.get_mut(name) else {
+            continue;
+        };
+        let path = PathBuf::from(&*value);
+        if path.is_relative() {
+            *value = invoking_directory
+                .join(path)
+                .into_os_string()
+                .into_string()
+                .map_err(|_| LocalCompositionError::NativeEnvironment)?;
+        }
+    }
+    Ok(())
 }
 
 /// A branch-independent identity proof for retrospective local history selection.
@@ -277,7 +290,7 @@ fn git_output(
     arguments: &[&str],
 ) -> Result<String, LocalCompositionError> {
     let mut command = Command::new(git_program);
-    crate::native_v2_delivery::transport::remove_repository_environment(&mut command);
+    crate::native_v2_delivery::command::remove_repository_environment(&mut command);
     let output = command
         .arg("-C")
         .arg(workspace)
@@ -412,7 +425,8 @@ fn build_local_candidate_config(
         delivery,
     };
     if owner_scoped {
-        build_local_owner_native_v2_candidate(admitted, config).map_err(Into::into)
+        build_local_owner_native_v2_candidate(admitted, config, native_environment.clone())
+            .map_err(Into::into)
     } else {
         build_local_native_v2_candidate_with_authority(
             admitted,
@@ -421,6 +435,7 @@ fn build_local_candidate_config(
                 token: github_token.map(Arc::<str>::from),
                 token_file: github_token_file,
                 validator: delivery_validator,
+                local_git_environment: Some(native_environment.clone()),
             },
         )
         .map_err(Into::into)
@@ -543,10 +558,22 @@ pub(crate) fn check_delivery_executables(
     native_environment: &BTreeMap<String, String>,
     working_directory: &Path,
 ) -> Result<(), LocalCompositionError> {
-    if crate::native_v2_admission::comment_node(&submission.graph.root).is_some()
-        && find_local_executable("gh", native_environment, working_directory).is_none()
-    {
-        return Err(LocalCompositionError::MissingDeliveryExecutable { executable: "gh" });
+    if let Some(input) = crate::native_v2_admission::resolve_comment_input_at(
+        &submission.graph.root,
+        &submission.initial_input,
+        submission
+            .source
+            .as_ref()
+            .and_then(|source| source.remote.as_ref())
+            .and_then(|remote| remote.forge.as_ref()),
+    )? {
+        let destination = input.destination;
+        if destination.provider.id().as_str()
+            == crate::source_code_provider::adapters::core::GITHUB_PROVIDER_ID
+            && find_local_executable("gh", native_environment, working_directory).is_none()
+        {
+            return Err(LocalCompositionError::MissingDeliveryExecutable { executable: "gh" });
+        }
     }
     let required = crate::native_v2_admission::delivery_capabilities(&submission.graph.root);
     match &submission.source {
@@ -612,16 +639,23 @@ fn local_comment_delivery(
     use crate::native_v2_comment_delivery::{
         LocalCommentPublicationStore, NativeV2CommentDeliveryConfig,
     };
-    use crate::source_code_provider::adapters::core::{GhCliAuthorityConfig, comment_authority};
+    use crate::source_code_provider::adapters::core::{GhCliAuthorityConfig, comment_authority_for};
     let Some(input) = crate::native_v2_admission::admitted_comment_input(admitted)? else {
         return Ok(None);
     };
-    let gh = find_local_executable("gh", environment, workspace)
-        .ok_or(LocalCompositionError::MissingDeliveryExecutable { executable: "gh" })?;
+    let destination = &input.destination;
+    let gh = if destination.provider.id().as_str()
+        == crate::source_code_provider::adapters::core::GITHUB_PROVIDER_ID
+    {
+        find_local_executable("gh", environment, workspace)
+            .ok_or(LocalCompositionError::MissingDeliveryExecutable { executable: "gh" })?
+    } else {
+        PathBuf::from("gh")
+    };
     let mut config = GhCliAuthorityConfig::hosted(runtime_home.to_owned());
     config.gh_program = gh;
-    let authority =
-        comment_authority(config, &input.url).map_err(|_| LocalCompositionError::ResolvedSource)?;
+    let authority = comment_authority_for(config, &input.destination)
+        .map_err(|_| LocalCompositionError::ResolvedSource)?;
     let state = storage
         .parent()
         .and_then(Path::parent)

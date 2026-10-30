@@ -1,11 +1,24 @@
 import { createContext, useContext } from 'react';
-import { allNodes, executable, type GraphNode } from './domain';
+import { allNodes, executable, type GraphNode, type Runtime } from './domain';
 import { setPendingEdit } from './pending-edits';
 import { numericValue } from './numeric-edit';
 
-export type NumericField = 'timeoutMs' | 'maxIterations' | 'maxItems';
+export type NumericField = 'timeoutMs' | 'maxIterations' | 'maxItems' | 'minProbability';
 type FieldDraft = { node: string; field: NumericField; text: string; base?: number | null };
 let nextScope = 0;
+
+function fieldOwner(node: GraphNode | undefined, field: NumericField, runtime?: Runtime) {
+  if (!node) return undefined;
+  if (field === 'minProbability') {
+    const binding = runtime?.nodes[node.name];
+    return node.kind === 'verifier' && binding?.kind === 'decision' ? binding : undefined;
+  }
+  const visible =
+    field === 'timeoutMs'
+      ? executable(node)
+      : node.kind === (field === 'maxIterations' ? 'loop' : 'map');
+  return visible ? node : undefined;
+}
 
 /** Unfinished numbers belong to the document, not an inspector's mounting lifetime. */
 export function createNumericDrafts() {
@@ -49,7 +62,11 @@ export function createNumericDrafts() {
     ) {
       const draft = values.get(key(node, field));
       if (!draft) return false;
-      const value = numericValue({ text: draft.text, badInput: false }, optional);
+      const value = numericValue(
+        { text: draft.text, badInput: false },
+        optional,
+        field === 'minProbability' ? 'probability' : 'positiveInteger'
+      );
       if (!value.valid) return false;
       save(value.value);
       clear(node, field);
@@ -67,16 +84,11 @@ export function createNumericDrafts() {
       }
       notify();
     },
-    prune(root: GraphNode) {
+    prune(root: GraphNode, runtime?: Runtime) {
       const nodes = new Map(allNodes(root).map((node) => [node.name, node]));
       for (const draft of [...values.values()]) {
-        const node = nodes.get(draft.node);
-        const visible =
-          node &&
-          (draft.field === 'timeoutMs'
-            ? executable(node)
-            : node.kind === (draft.field === 'maxIterations' ? 'loop' : 'map'));
-        if (!visible || (node[draft.field] ?? undefined) !== (draft.base ?? undefined))
+        const owner = fieldOwner(nodes.get(draft.node), draft.field, runtime);
+        if (!owner || (owner[draft.field] ?? undefined) !== (draft.base ?? undefined))
           clear(draft.node, draft.field);
       }
     },

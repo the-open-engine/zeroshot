@@ -24,7 +24,12 @@ export function NumberField({
   const drafts = useNumericDrafts();
   useSyncExternalStore(drafts.subscribe, drafts.version, drafts.version);
   const draft = drafts.get(node, field)?.text ?? text;
-  const parsed = numericValue({ text: draft, badInput: false }, optional);
+  const probability = field === 'minProbability';
+  const parsed = numericValue(
+    { text: draft, badInput: false },
+    optional,
+    probability ? 'probability' : 'positiveInteger'
+  );
   function commit() {
     drafts.commit(node, field, optional, onChange);
   }
@@ -51,7 +56,7 @@ export function NumberField({
       />
       {!parsed.valid && (
         <small className="error-text" role="alert">
-          Enter a whole number of at least 1.
+          {probability ? 'Enter a number from 0 to 1.' : 'Enter a whole number of at least 1.'}
         </small>
       )}
     </Field>

@@ -158,6 +158,13 @@ pub struct SourceReviewReceipt {
     pub head_revision: String,
 }
 
+/// Canonical, adapter-owned links for an identity-validated review.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceReviewLinks {
+    pub url: String,
+    pub commit_url: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceChecks {
     NotRequired,
@@ -221,6 +228,14 @@ pub enum SourceConflictOutcome {
 /// Target-owned, bounded source-provider effects. Implementations must bound every network operation.
 #[async_trait]
 pub trait SourceDeliveryAuthority: Send + Sync {
+    /// Pure presentation of a review already bound to this scoped authority.
+    fn review_links(
+        &self,
+        _review: &SourceReviewReceipt,
+    ) -> Result<Option<SourceReviewLinks>, SourceDeliveryError> {
+        Ok(None)
+    }
+
     /// One provider-owned API credential field. Git-only providers require no forge credential.
     fn forge_credential_field(&self) -> Option<&'static str> {
         None

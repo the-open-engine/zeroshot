@@ -24,6 +24,14 @@ If an unresolved product choice would materially change the outcome, propose the
 interpretation and ask one focused question. Do not submit while that decision remains unanswered.
 Suggest separate tasks only for independently useful outcomes or real prerequisites.
 
+When the work is vague or large enough to need agreed acceptance criteria, suggest planning it first
+with the separate `zeroshot-plan` skill and let the user choose; do not start planning unasked. When
+a plan file exists (`.zeroshot/plans/<id>.md`), use its Goal, Context, Acceptance criteria,
+Constraints, Decided approach and Decisions as the task. Criteria marked `Check (manual):` need a
+person or another environment: tell the run to list them rather than verify them. If the plan lists
+`depends_on`, confirm with the user that those plans are built and merged before starting it, and
+include any constraints they share that the plan does not repeat.
+
 Never start a Zeroshot run merely because the skill is available. The user must ask to use Zeroshot.
 A worker already executing inside a Zeroshot run should perform its assigned work directly, not start
 another run. A failed Platform run does not authorize silently implementing the task locally.

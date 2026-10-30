@@ -31,8 +31,8 @@ on local CLI runs and direct targets. The same sections are accepted by uniform 
 See [Active Memory](../guides/active-memory.md) for budgets, provider inheritance and opt-out examples.
 
 `harness` and `provider` form the default lane. Every agent node runs on it unless its binding
-carries its own [`lane`](#per-node-lanes). `size` applies to the whole run. Model, effort, session
-scope, and connections are chosen per node.
+carries its own [`lane`](#per-node-lanes). `size` applies to the whole run. Model, effort, context
+window, output limit, session scope, and connections are chosen per node.
 
 `size` is a run-level resource class. Zeroshot records it with the run and reports it in run
 status; the hosting target decides what resources each class receives.
@@ -68,6 +68,9 @@ Pi, Copilot, OpenCode and Hermes gateway lanes carry `GATEWAY_BASE_URL`, `GATEWA
 wire protocol as `openai-responses`, `openai-completions`, or `anthropic-messages`, so one lane
 selects the native transport and the model identifier stays opaque and caller-owned. Zeroshot
 never infers the protocol from the identifier, and an unrecognized value fails before launch.
+Pi's gateway model entry carries a node's `contextWindow` and `maxTokens` only when the caller
+has declared them; omitted limits keep Pi's own defaults. Built-in-provider endpoint overrides
+keep Pi's catalog and receive no synthesized model entry.
 
 To send Pi's `anthropic` lane to a caller-owned Messages-compatible endpoint, declare
 `ANTHROPIC_BASE_URL` with any one of the lane's credentials (`ANTHROPIC_API_KEY`,
@@ -84,22 +87,27 @@ rather than a bypass argument.
 
 ## Node bindings
 
-`kind` selects an agent, Git delivery, or comment delivery binding. Fields belonging to another
+`kind` selects an agent, decision, Git delivery, or comment delivery binding. Fields belonging to another
 kind are rejected.
 
 ### `agent`
 
-| Field          | Required | Value                                                              |
-| -------------- | -------- | ------------------------------------------------------------------ |
-| `kind`         | Yes      | `agent`                                                            |
-| `lane`         | No       | [Harness and provider](#per-node-lanes); default lane when omitted |
-| `model`        | Yes      | Provider-owned model identifier, 1 to 2,048 non-control characters |
-| `effort`       | No       | `low`, `medium`, `high`, `xhigh`, or `max`; unset when omitted     |
-| `sessionScope` | No       | `execution` (default) or `node_instance`                           |
-| `connections`  | No       | [Connection declarations](#connections); empty when omitted        |
+| Field           | Required | Value                                                              |
+| --------------- | -------- | ------------------------------------------------------------------ |
+| `kind`          | Yes      | `agent`                                                            |
+| `lane`          | No       | [Harness and provider](#per-node-lanes); default lane when omitted |
+| `model`         | Yes      | Provider-owned model identifier, 1 to 2,048 non-control characters |
+| `effort`        | No       | `low`, `medium`, `high`, `xhigh`, or `max`; unset when omitted     |
+| `contextWindow` | No       | Model context window, 1 to 10,000,000; unset when omitted          |
+| `maxTokens`     | No       | Model output limit, 1 to 10,000,000; unset when omitted            |
+| `sessionScope`  | No       | `execution` (default) or `node_instance`                           |
+| `connections`   | No       | [Connection declarations](#connections); empty when omitted        |
 
 Zeroshot passes `model` and `effort` to the harness unchanged. It keeps no model catalog and does not
-check whether a model supports the chosen effort.
+check whether a model supports the chosen effort. `contextWindow` and `maxTokens` are caller
+declarations, never inferences: they are validated at admission, emitted only into the
+`pi/gateway` model entry, and otherwise left unset for the provider to default. An absent value
+retains the provider's own limit; a present value must be a positive integer in the stated range.
 
 `sessionScope` controls provider conversation state. It does not change graph state or bindings.
 
@@ -110,6 +118,77 @@ check whether a model supports the chosen effort.
 
 If a reused session is lost, Zeroshot fails that execution with `session_lost`. It does not open a
 replacement session silently.
+
+### `decision`
+
+A decision binding evaluates one categorical question on an existing `verifier`, using the
+TypeSafe System One request and response format. It makes a direct HTTP request, with no coding
+harness or tool access. Upstream nodes must supply the evidence through ordinary input bindings.
+
+```json
+{
+  "kind": "decision",
+  "api": "systemone",
+  "model": "jev-1.14.0",
+  "minProbability": 0.85,
+  "uncertainLabel": "uncertain",
+  "connections": {
+    "decisions": ["DECISION_ENDPOINT", "DECISION_API_KEY"]
+  }
+}
+```
+
+All these fields are required. `model` is an opaque, caller-owned identifier; `minProbability`
+is a finite number from 0 to 1, inclusive. The example threshold is illustrative: evaluate it
+against your chosen model and workload. A decision has no `lane`, `effort`, or `sessionScope`.
+
+The verifier must have instructions, `attempts: 1`, and exactly one signal. Its signal declares
+at least two options plus the uncertainty label. For example, `route` can declare
+`["simple", "complex", "uncertain"]`. Describe each option in the instructions. The adapter
+sends one Choice question named `route`, with the remaining signal labels as criteria and null
+descriptions. The complete bound input becomes `state` and must be a string, record, or array.
+
+The output must be a record with exactly these required fields:
+
+| Field           | Payload type                                                |
+| --------------- | ----------------------------------------------------------- |
+| `choice`        | Enum of the options, excluding the uncertainty label        |
+| `probabilities` | Record with one required `number` field for each option     |
+| `model`         | `string`, preserving the identifier returned by the service |
+
+The diagnostic must be a record with one required string field named `message`. The adapter
+checks the complete distribution, its sum, and its agreement with the chosen option. It emits
+the chosen label when its probability is at least `minProbability`; a tie or lower probability
+emits `uncertainLabel`. Output preserves the original choice and distribution in both cases.
+This threshold uses the winning probability, rather than the provider's separate confidence
+statistic. Use normal graph guards on the signal to select an already authored branch.
+A decision binding cannot supply the postmortem's agent model. Graphs with no agent bindings
+skip Active Memory setup; mixed graphs inherit a postmortem model from an agent binding.
+
+Declare exactly `DECISION_ENDPOINT` and `DECISION_API_KEY` through named connections. Local
+runs resolve these fields from the invoking environment; hosted runs use the target's connection
+resolver. Supply the full POST endpoint, including its path:
+
+| Service                        | Example `DECISION_ENDPOINT`                          |
+| ------------------------------ | ---------------------------------------------------- |
+| TypeSafe                       | `https://api.typesafe.ai/v1/systemone`               |
+| OpenRouter                     | `https://openrouter.ai/api/v1/systemone`             |
+| Vercel TypeSafe-compatible API | `https://ai-gateway.vercel.sh/typesafe/v1/systemone` |
+
+Use that service's bearer API key and model identifier. The adapter preserves the supplied path
+and accepts additional response metadata. Endpoints must be absolute HTTP(S) URLs without
+embedded credentials, a query, or a fragment. It follows no redirects. Requests and responses
+have a 4 MiB bound and each evaluation has a sixty-second ceiling, within any shorter authored
+node timeout. Cancellation interrupts HTTP work; a failed request does not silently retry or
+become an uncertainty signal. Known usage survives invalid answers; unavailable usage remains
+incomplete. Settled outcomes use ordinary run persistence and checkpoint replay.
+
+The profile editor's **Decision model** worker creates a verifier with this contract. Choose
+the model and probability threshold, then bind its evidence inputs and configure the named
+connection. Changing option labels also requires updating the output enum and probability
+fields to match. Targets must advertise `openengine.decision-models/v1` before the CLI submits
+or stores a decision-bearing profile. Other question types and provider-specific extensions
+are outside this binding's current contract.
 
 ### `git_delivery`
 
@@ -298,15 +377,21 @@ the fields of several providers.
 
 `--uniform-runtime-config` accepts a single agent configuration and expands it into a full plan:
 
-| Field          | Required | Value                                 |
-| -------------- | -------- | ------------------------------------- |
-| `harness`      | Yes      | As in `RuntimePlan`                   |
-| `provider`     | Yes      | As in `RuntimePlan`                   |
-| `size`         | No       | As in `RuntimePlan`; default `medium` |
-| `model`        | Yes      | As in an `agent` binding              |
-| `effort`       | No       | As in an `agent` binding              |
-| `sessionScope` | No       | As in an `agent` binding              |
-| `connections`  | No       | Applied to every agent node           |
+| Field           | Required | Value                                 |
+| --------------- | -------- | ------------------------------------- |
+| `harness`       | Yes      | As in `RuntimePlan`                   |
+| `provider`      | Yes      | As in `RuntimePlan`                   |
+| `size`          | No       | As in `RuntimePlan`; default `medium` |
+| `model`         | Yes      | As in an `agent` binding              |
+| `effort`        | No       | As in an `agent` binding              |
+| `contextWindow` | No       | As in an `agent` binding              |
+| `maxTokens`     | No       | As in an `agent` binding              |
+| `sessionScope`  | No       | As in an `agent` binding              |
+| `connections`   | No       | Applied to every agent node           |
+
+`contextWindow` and `maxTokens` are available in both an exact `agent` binding and a uniform
+runtime configuration. They are caller declarations and are never inferred from the model
+identifier.
 
 Every executable node gets an `agent` binding with these values, except nodes that use a delivery
 worker. Those get a `git_delivery` binding as described below.

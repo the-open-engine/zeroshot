@@ -11,6 +11,8 @@ pub(super) fn runtime() -> RuntimePlan {
                     model: crate::worker_catalog::ModelId::new("gpt-5.6")
                         .assert_value_with("model"),
                     effort: Some(ReasoningEffort::Max),
+                    context_window: None,
+                    max_tokens: None,
                     session_scope: SessionScope::Execution,
                     connections: DeclaredConnections::single(
                         "test",
@@ -100,7 +102,7 @@ fn delivery_node() -> Value {
     })
 }
 
-fn delivery_fields() -> [&'static str; 7] {
+fn delivery_fields() -> [&'static str; 8] {
     [
         "version",
         "mode",
@@ -109,6 +111,7 @@ fn delivery_fields() -> [&'static str; 7] {
         "targetBranch",
         "headRevision",
         "pullRequestId",
+        "links",
     ]
 }
 
@@ -152,7 +155,8 @@ fn valid_input_or(input: Value) -> Value {
         "repository": "owner/repo",
         "targetBranch": "main",
         "headRevision": "1111111111111111111111111111111111111111",
-        "pullRequestId": "pending"
+        "pullRequestId": "pending",
+        "links": {}
     })
 }
 
@@ -204,6 +208,8 @@ pub(super) fn complex_runtime() -> RuntimePlan {
         lane: None,
         model: crate::worker_catalog::ModelId::new("gpt-5.6").assert_value_with("model"),
         effort: Some(ReasoningEffort::Max),
+        context_window: None,
+        max_tokens: None,
         session_scope,
         connections: DeclaredConnections::empty(),
     };

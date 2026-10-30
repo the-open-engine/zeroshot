@@ -1108,6 +1108,12 @@ Options:
 
           HTTPS uses GIT_USERNAME and GIT_PASSWORD; SSH uses GIT_SSH_PRIVATE_KEY and GIT_SSH_KNOWN_HOSTS.
 
+      --source-provider <PROVIDER>
+          Forge provider ID for the selected Git remote (for example source.github or source.gitlab)
+
+      --source-base-url <URL>
+          Public HTTPS base URL of the forge instance, including any installation path
+
       --repository <REPOSITORY>
           Repository in GitHub owner/name form or a credential-free HTTPS/SSH Git URL. Requires --target
 

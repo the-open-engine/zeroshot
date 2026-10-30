@@ -31,6 +31,15 @@ fn request_diagnostics_keep_stable_recovery_context() {
             json!({}),
         ),
         (
+            NativeV2CliError::InvalidRun(NativeV2AdmissionError::InvalidRuntimeBinding {
+                node: node(),
+                detail: "contextWindow must be in 1..=10000000".to_owned(),
+            }),
+            "runtime.invalid_binding",
+            None,
+            json!({}),
+        ),
+        (
             NativeV2CliError::InvalidRun(NativeV2AdmissionError::MergePlanAgentGitHubToken {
                 node: node(),
             }),

@@ -21,7 +21,7 @@ export function missingRuntimeSetting(doc: Document): MissingRuntimeSetting | un
     .filter(executable)
     .find((node) => {
       const binding = bindingFor(doc.runtime, node.name);
-      return binding?.kind === 'agent' && !binding.model;
+      return (binding?.kind === 'agent' || binding?.kind === 'decision') && !binding.model;
     });
   return unset
     ? {

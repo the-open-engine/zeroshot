@@ -28,6 +28,44 @@ fn coverage_contract_rpc_request_ids_are_bounded_and_never_reused_after_overflow
 }
 
 #[test]
+fn grammar_compilation_rate_limit_classification_is_narrow_and_case_insensitive() {
+    assert!(is_grammar_compilation_rate_limit(
+        "400 Grammar compilation rate limit exceeded. You can try again later."
+    ));
+    assert!(is_grammar_compilation_rate_limit(
+        "GRAMMAR COMPILATION RATE LIMIT EXCEEDED"
+    ));
+    assert!(!is_grammar_compilation_rate_limit(
+        "HTTP 400: Invalid JSON schema"
+    ));
+    assert!(!is_grammar_compilation_rate_limit(
+        "generic rate limit exceeded"
+    ));
+}
+
+#[test]
+fn grammar_compilation_retry_delay_is_exponential_bounded_and_session_staggered() {
+    let first = grammar_rate_limit_retry_delay(0, "session-0");
+    assert!((Duration::from_secs(1)..Duration::from_secs(2)).contains(&first));
+    assert_eq!(first, grammar_rate_limit_retry_delay(0, "session-0"));
+
+    let second = grammar_rate_limit_retry_delay(1, "session-0");
+    assert!((Duration::from_secs(2)..Duration::from_secs(3)).contains(&second));
+    let third = grammar_rate_limit_retry_delay(2, "session-0");
+    assert!((Duration::from_secs(4)..Duration::from_secs(5)).contains(&third));
+    let capped = grammar_rate_limit_retry_delay(usize::MAX, "session-0");
+    assert!((Duration::from_secs(8)..Duration::from_secs(9)).contains(&capped));
+
+    let staggered = (0..16)
+        .map(|index| grammar_rate_limit_retry_delay(0, &format!("session-{index}")))
+        .collect::<BTreeSet<_>>();
+    assert!(
+        staggered.len() > 1,
+        "parallel sessions should not share one delay"
+    );
+}
+
+#[test]
 fn coverage_contract_rpc_responses_validate_identity_error_shape_and_result_presence() {
     let mut pending = BTreeSet::from([1, 2, 3]);
     assert!(resolve_response_message(&mut pending, &json!({}), 1).is_err());

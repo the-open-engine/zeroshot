@@ -145,7 +145,9 @@ async fn named_target_resume_rejects_target_selected_environment_fields_before_l
             accessed.lock().assert_value().push(name.to_owned());
             Some(OsString::from("must-not-be-read"))
         };
-        let error = execute_resume_expect_error(command, &backend, &environment).await;
+        let error = execute_with_environment(command, &backend, &environment)
+            .await
+            .assert_error();
 
         assert!(error.to_string().contains("do not match the original run"));
         assert!(accessed.lock().assert_value().is_empty());
@@ -184,9 +186,7 @@ async fn assert_resume_resolves_current_values(
         "GH_TOKEN" => Some(OsString::from("fresh-github-token")),
         _ => None,
     };
-    let context = CliExecutionContext::new(&backend, &environment);
-
-    execute_native_v2_cli_with_context(command, &context, &mut NeverDetach, &mut Vec::new())
+    execute_with_environment(command, &backend, &environment)
         .await
         .assert_value();
 
@@ -219,7 +219,9 @@ async fn resume_rejects_an_invalid_github_token_before_submission() {
     let command = parse_native_v2_args(args(&["resume", "run-failed"])).assert_value();
     let oversized = "x".repeat(4_097);
     let environment = |name: &str| (name == "GH_TOKEN").then(|| OsString::from(&oversized));
-    let error = execute_resume_expect_error(command, &backend, &environment).await;
+    let error = execute_with_environment(command, &backend, &environment)
+        .await
+        .assert_error();
 
     assert!(matches!(error, NativeV2CliError::GitHubToken));
     assert_no_resume_call(&backend);
@@ -232,17 +234,6 @@ fn assert_no_resume_call(backend: &FakeBackend) {
             .iter()
             .all(|call| !matches!(call, Call::Resume { .. }))
     );
-}
-
-async fn execute_resume_expect_error(
-    command: NativeV2CliCommand,
-    backend: &FakeBackend,
-    environment: &dyn Fn(&str) -> Option<OsString>,
-) -> NativeV2CliError {
-    let context = CliExecutionContext::new(backend, environment);
-    execute_native_v2_cli_with_context(command, &context, &mut NeverDetach, &mut Vec::new())
-        .await
-        .assert_error()
 }
 
 fn merge_plan_fixture() -> FixtureFiles {
@@ -361,5 +352,112 @@ async fn plan_status_and_force_stop_keep_ordinary_command_outcomes() {
 
         assert_eq!(result.assert_value(), CliOutcome::Completed);
         assert!(output.contains("\"state\":\"expired\""));
+    }
+}
+
+fn forge_resume_source(provider: &str, base: &str) -> Value {
+    let mut retained = source();
+    retained["remote"] = json!({
+        "url":format!("{base}/open-engine/zeroshot.git"),
+        "forge":{
+            "provider":provider,
+            "repository":"open-engine/zeroshot",
+            "baseUrl":base,
+        },
+    });
+    retained
+}
+
+#[tokio::test]
+async fn resume_keeps_local_trusted_authority_and_scopes_named_github_fallback() {
+    let key = openengine_cluster_protocol::ConnectionKey::new("company-forge").assert_value();
+    for (retained, field, fallback, target) in [
+        (
+            forge_resume_source("source.github", "https://ghe.example.test"),
+            Some("GH_TOKEN"),
+            false,
+            Some("docker"),
+        ),
+        (
+            forge_resume_source("source.github", "https://company.ghe.com"),
+            Some("GH_TOKEN"),
+            false,
+            Some("docker"),
+        ),
+        (
+            forge_resume_source("source.gitlab", "https://gitlab.example.test"),
+            Some("GITLAB_TOKEN"),
+            false,
+            Some("docker"),
+        ),
+        (
+            forge_resume_source("source.github", "https://github.com"),
+            Some("GH_TOKEN"),
+            true,
+            Some("docker"),
+        ),
+        (source(), Some("GH_TOKEN"), true, Some("docker")),
+        (Value::Null, Some("GITLAB_TOKEN"), false, Some("docker")),
+        (Value::Null, None, true, None),
+    ] {
+        let name = field.map(|field| {
+            openengine_cluster_protocol::EnvironmentVariableName::new(field).assert_value()
+        });
+        let requirements = name
+            .iter()
+            .map(|name| (key.clone(), vec![name.clone()]))
+            .collect();
+        let backend =
+            FakeBackend::with_resume_requirements(requirements).with_resume_source(retained);
+        let mut arguments = vec!["resume", "run-failed"];
+        if let Some(target) = target {
+            arguments.extend(["--target", target]);
+        }
+        let command = parse_native_v2_args(args(&arguments)).assert_value();
+        let accessed = std::sync::Mutex::new(Vec::new());
+        let environment = |field: &str| {
+            accessed.lock().assert_value().push(field.to_owned());
+            match field {
+                "GH_TOKEN" => Some(OsString::from("github-connection-token")),
+                "GITLAB_TOKEN" => Some(OsString::from("gitlab-connection-token")),
+                _ => None,
+            }
+        };
+        execute_with_environment(command, &backend, &environment)
+            .await
+            .assert_value();
+        let calls = backend.calls();
+        let [
+            _,
+            Call::Resume {
+                target: actual_target,
+                params,
+            },
+        ] = calls.as_slice()
+        else {
+            panic!("resume call was not recorded");
+        };
+        assert_eq!(actual_target.as_deref(), target);
+        if let Some(name) = &name {
+            let expected_token = if field == Some("GH_TOKEN") {
+                "github-connection-token"
+            } else {
+                "gitlab-connection-token"
+            };
+            assert_eq!(params.connections[&key].as_map()[name], expected_token);
+        } else {
+            assert!(params.connections.is_empty());
+        }
+        assert_eq!(
+            params.github_token.as_deref(),
+            fallback.then_some("github-connection-token")
+        );
+        let mut expected_reads = field
+            .map(|field| vec![field.to_owned()])
+            .unwrap_or_default();
+        if fallback {
+            expected_reads.push("GH_TOKEN".to_owned());
+        }
+        assert_eq!(*accessed.lock().assert_value(), expected_reads);
     }
 }

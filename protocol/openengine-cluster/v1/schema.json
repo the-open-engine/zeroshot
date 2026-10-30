@@ -572,6 +572,17 @@
         }
       ]
     },
+    "DecisionApi": {
+      "enum": [
+        "systemone"
+      ],
+      "type": "string"
+    },
+    "DecisionProbability": {
+      "maximum": 1,
+      "minimum": 0,
+      "type": "number"
+    },
     "DeclaredConnections": {
       "additionalProperties": {
         "$ref": "#/$defs/DeclaredEnvironment"
@@ -3516,6 +3527,16 @@
             "connections": {
               "$ref": "#/$defs/DeclaredConnections"
             },
+            "contextWindow": {
+              "description": "Caller-owned model context window. Absent means the harness provider's own default.",
+              "format": "uint32",
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "effort": {
               "anyOf": [
                 {
@@ -3540,6 +3561,16 @@
                 }
               ]
             },
+            "maxTokens": {
+              "description": "Caller-owned model output limit. Absent means the harness provider's own default.",
+              "format": "uint32",
+              "maximum": 10000000,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "model": {
               "maxLength": 2048,
               "minLength": 1,
@@ -3552,6 +3583,44 @@
           "required": [
             "kind",
             "model"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "api": {
+              "$ref": "#/$defs/DecisionApi"
+            },
+            "connections": {
+              "$ref": "#/$defs/DeclaredConnections"
+            },
+            "kind": {
+              "const": "decision",
+              "type": "string"
+            },
+            "minProbability": {
+              "$ref": "#/$defs/DecisionProbability"
+            },
+            "model": {
+              "maxLength": 2048,
+              "minLength": 1,
+              "type": "string"
+            },
+            "uncertainLabel": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "api",
+            "model",
+            "minProbability",
+            "uncertainLabel",
+            "connections"
           ],
           "type": "object"
         },
@@ -5197,6 +5266,16 @@
       "additionalProperties": false,
       "description": "Optional forge identity selects one registered source-code adapter.",
       "properties": {
+        "baseUrl": {
+          "description": "Canonical web base, including an optional installation path prefix.\nOmission selects the adapter's public service default when one exists.",
+          "maxLength": 2048,
+          "minLength": 8,
+          "pattern": "^https://[^\\s?#@]+$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "provider": {
           "maxLength": 128,
           "minLength": 1,

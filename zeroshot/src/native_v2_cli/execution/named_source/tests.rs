@@ -104,7 +104,7 @@ async fn eligible_upstream_takes_precedence_and_stale_upstream_is_ambiguous() {
     add_remote(&root.0, "github", "https://github.com/owner/project.git");
 
     let (repository, remote) = select_repository(&root.0, Some("mirror")).await.unwrap();
-    assert_eq!(repository.as_str(), "https://gitlab.com/owner/project.git");
+    assert_eq!(repository.as_str(), "owner/project");
     assert_eq!(remote.as_deref(), Some("mirror"));
     assert!(select_repository(&root.0, Some("stale")).await.is_err());
 }
@@ -349,6 +349,7 @@ fn test_run_command() -> RunCommand {
         target: None,
         cwd: None,
         source_connection: None,
+        source_forge: None,
         title: RunTitle::new("Source selection").assert_value(),
         input: "unused.json".into(),
         selection: RunSelection::Profile(None),
@@ -493,7 +494,7 @@ async fn unsupported_forge_capability_is_rejected_before_source_credential_reads
         assert!(
             error
                 .to_string()
-                .contains("PR and merge delivery require a registered forge identity")
+                .contains("cannot identify the selected Git server; sign in to forge.example")
         );
         assert_eq!(reads.get(), 0, "unsupported forge read source credentials");
         assert!(
@@ -1115,4 +1116,91 @@ fn assert_public_git_source(
     assert!(metadata.forge.is_none());
     assert!(metadata.connection.is_none());
     assert!(selected.git_credentials.is_none());
+}
+
+fn explicit_forge_command(remote: &str, provider: &str, base: &str) -> RunCommand {
+    let mut command = test_run_command();
+    command.repository = Some(RunRepository::Git(GitRemoteUrl::new(remote).assert_value()));
+    command.source_forge = Some(crate::native_v2_cli::RunSourceForge {
+        provider: openengine_cluster_protocol::SourceForgeProviderId::new(provider).assert_value(),
+        base_url: openengine_cluster_protocol::SourceForgeBaseUrl::new(base).assert_value(),
+    });
+    command
+}
+
+#[tokio::test]
+async fn explicit_instance_selection_derives_repository_from_its_bound_remote() {
+    let worktree = WorktreeSourceContext {
+        root: PathBuf::from("."),
+        local_branch: None,
+        upstream: None,
+    };
+    for (remote, provider, base, repository) in [
+        (
+            "https://ghe.example.test/team/project.git",
+            "source.github",
+            "https://ghe.example.test",
+            "team/project",
+        ),
+        (
+            "https://forge.example.test/gitlab/team/subgroup/project.git",
+            "source.gitlab",
+            "https://forge.example.test/gitlab",
+            "team/subgroup/project",
+        ),
+        (
+            "git@forge.example.test:team/subgroup/project.git",
+            "source.gitlab",
+            "https://forge.example.test/gitlab",
+            "team/subgroup/project",
+        ),
+    ] {
+        let command = explicit_forge_command(remote, provider, base);
+        let (selected, _, metadata) = selected_repository(
+            &NamedSourceRequest {
+                run: &command,
+                token: None,
+                provided: &RunConnectionValues::new(),
+                required_capabilities: &[
+                    crate::source_code_provider::SourceCapability::PullRequest,
+                ],
+            },
+            &worktree,
+        )
+        .await
+        .assert_value();
+        assert_eq!(selected.as_str(), repository);
+        let identity = metadata.assert_value().forge.assert_value();
+        assert_eq!(identity.repository, selected);
+        assert_eq!(identity.provider.as_str(), provider);
+        assert_eq!(identity.base_url.assert_value().as_str(), base);
+    }
+}
+
+#[tokio::test]
+async fn explicit_instance_selection_refuses_other_hosts_prefixes_and_unknown_providers() {
+    for (remote, provider, base) in [
+        (
+            "https://other.example.test/team/project.git",
+            "source.github",
+            "https://ghe.example.test",
+        ),
+        (
+            "https://forge.example.test/other/team/project.git",
+            "source.gitlab",
+            "https://forge.example.test/gitlab",
+        ),
+        (
+            "https://forge.example.test/team/project.git",
+            "source.unknown",
+            "https://forge.example.test",
+        ),
+    ] {
+        let command = explicit_forge_command(remote, provider, base);
+        assert!(
+            resolved_remote(&command, Path::new("."), Some(remote))
+                .await
+                .is_err()
+        );
+    }
 }

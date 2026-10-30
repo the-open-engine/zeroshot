@@ -11,9 +11,9 @@
 //! override.
 //!
 //! The registered model entry carries the caller's own identifier, the chosen protocol, a display
-//! name, and whether the caller's binding asked for reasoning. Capability metadata is deliberately
-//! absent so Zeroshot never becomes a model catalog: Pi fills in its own defaults for context
-//! window, output limit, and cost.
+//! name, whether the caller's binding asked for reasoning, and any caller-declared context window
+//! and output limit. Zeroshot never becomes a model catalog: omitted limits stay unset so Pi fills
+//! in its own defaults, and nothing is ever inferred from the model identifier.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -85,6 +85,8 @@ struct EndpointDocument<'a> {
     api: Option<&'a str>,
     model: Option<&'a str>,
     reasoning: bool,
+    context_window: Option<u32>,
+    max_tokens: Option<u32>,
     /// Environment field the document interpolates as `apiKey`, or `None` to omit the field so Pi
     /// resolves its own environment credential. A present `apiKey` that does not resolve suppresses
     /// Pi's environment auth, so it is written only for a field the lane actually supplies.
@@ -92,12 +94,14 @@ struct EndpointDocument<'a> {
 }
 
 /// A caller-owned gateway endpoint: the base URL, the wire protocol the caller named, the model
-/// identifier the caller owns, and whether the binding asked for reasoning.
+/// identifier the caller owns, whether the binding asked for reasoning, and any declared limits.
 pub(super) struct GatewayDocument<'a> {
     pub(super) base_url: &'a str,
     pub(super) api: &'a str,
     pub(super) model: &'a str,
     pub(super) reasoning: bool,
+    pub(super) context_window: Option<u32>,
+    pub(super) max_tokens: Option<u32>,
 }
 
 /// Builds the provider document. The API key is read from the declared connection through Pi's
@@ -113,18 +117,22 @@ fn models_document(selection: ProviderOverride, endpoint: EndpointDocument<'_>) 
     }
     // A registered provider needs one model entry before it resolves any identifier. The entry
     // binds the caller's own identifier, and `reasoning` mirrors the binding's authored effort so
-    // Pi does not silently discard it. Context window, output limit, and cost stay unset: Pi owns
-    // those defaults rather than Zeroshot maintaining a catalog.
+    // Pi does not silently discard it. Context window and output limit are written only when the
+    // caller declared them; otherwise Pi owns those defaults rather than Zeroshot maintaining a
+    // catalog. Cost stays Pi-owned either way.
     if let Some(model) = endpoint.model {
-        provider.insert(
-            "models".to_owned(),
-            json!([{
-                "id": model,
-                "name": model,
-                "api": endpoint.api,
-                "reasoning": endpoint.reasoning,
-            }]),
-        );
+        let mut entry = serde_json::Map::new();
+        entry.insert("id".to_owned(), json!(model));
+        entry.insert("name".to_owned(), json!(model));
+        entry.insert("api".to_owned(), json!(endpoint.api));
+        entry.insert("reasoning".to_owned(), json!(endpoint.reasoning));
+        if let Some(context_window) = endpoint.context_window {
+            entry.insert("contextWindow".to_owned(), json!(context_window));
+        }
+        if let Some(max_tokens) = endpoint.max_tokens {
+            entry.insert("maxTokens".to_owned(), json!(max_tokens));
+        }
+        provider.insert("models".to_owned(), json!([entry]));
     }
     json!({ "providers": { selection.provider: Value::Object(provider) } })
 }
@@ -150,6 +158,8 @@ pub(super) fn write_gateway(
                 api: Some(document.api),
                 model: Some(document.model),
                 reasoning: document.reasoning,
+                context_window: document.context_window,
+                max_tokens: document.max_tokens,
                 api_key_field: Some(GATEWAY.api_key_field),
             },
         ),
@@ -186,6 +196,8 @@ pub(super) fn write_endpoint(
                 api: None,
                 model: None,
                 reasoning: false,
+                context_window: None,
+                max_tokens: None,
                 api_key_field,
             },
         ),

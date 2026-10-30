@@ -2,6 +2,9 @@
 pub mod hermes;
 pub mod opencode;
 
+#[cfg(all(test, unix))]
+mod test_support;
+
 pub(crate) fn register(registry: &mut crate::harnesses::HarnessRegistry) {
     registry
         .register(opencode::registration())

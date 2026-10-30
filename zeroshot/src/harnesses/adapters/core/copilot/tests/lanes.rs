@@ -104,6 +104,38 @@ async fn explicit_provider_lanes_use_native_rpc_and_keep_sessions() {
 }
 
 #[tokio::test]
+async fn explicit_provider_authentication_survives_native_grammar_retry() {
+    let mut fixture = selected(
+        CopilotProvider::OpenAi,
+        &[("OPENAI_API_KEY", "declared-provider-secret")],
+        BTreeMap::from([(
+            "COPILOT_GITHUB_TOKEN".to_owned(),
+            "wrong-native-github-token".to_owned(),
+        )]),
+    )
+    .await;
+    fixture.values.insert(
+        "TEST_MODE".to_owned(),
+        "explicit_provider_grammar_once".to_owned(),
+    );
+    verified(complete(fixture.start(1).await).await.1);
+    let capture = fixture.capture();
+    assert_eq!(method_count(&capture, "session.create"), 1);
+    assert_eq!(method_count(&capture, "session.resume"), 1);
+    for message in capture.iter().filter(|message| {
+        matches!(
+            message["method"].as_str(),
+            Some("session.create" | "session.resume")
+        )
+    }) {
+        let params = &message["params"];
+        assert_eq!(params["provider"]["apiKey"], "declared-provider-secret");
+        assert!(params.get("gitHubToken").is_none());
+        assert!(params.get("gitHubTokenProviderRegistrationId").is_none());
+    }
+}
+
+#[tokio::test]
 async fn gateway_requires_explicit_protocol_and_preserves_authored_path() {
     for (api, kind, wire) in [
         ("openai-responses", "openai", Some("responses")),
