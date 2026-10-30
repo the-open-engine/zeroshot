@@ -466,6 +466,9 @@ impl NativeV2TargetServer {
         let mut document = TargetDiscoveryDocument::direct(self.access.authentication())
             .with_node_runtime_lanes()
             .with_decision_models();
+        if let Some(catalog) = self.target.run_sizes() {
+            document = document.with_run_sizes(catalog);
+        }
         if let Some(catalog) = self.target.runtime_harnesses() {
             document = document.with_runtime_harnesses(catalog);
         }

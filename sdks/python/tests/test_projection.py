@@ -200,3 +200,12 @@ def test_old_failed_status_has_no_inferred_context() -> None:
 def test_failed_status_rejects_malformed_failure_evidence(context: object) -> None:
     with pytest.raises(ProtocolError, match="failure"):
         _status(failed_status(context))
+
+
+@pytest.mark.parametrize("size", ["small", "medium", "large", "xl", "gpu_t4"])
+def test_machine_sizes_survive_status_and_summary_projection(size: str) -> None:
+    value = local_status()
+    value["size"] = size
+    status = _status(value)
+    assert status.size == size
+    assert _summary(status).size == size

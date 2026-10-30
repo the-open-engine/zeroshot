@@ -1,4 +1,5 @@
 import type { WorkerOption } from './workers';
+import { validMachineCatalog, type MachineOption } from './machines';
 import type { Document, Template } from './domain';
 export type Summary = { id: string; name: string; isDefault: boolean };
 export type Saved = { profile: Document & Summary; revision: string };
@@ -72,6 +73,7 @@ export type Bootstrap = {
   workers?: WorkerOption[];
   runtimeSchema: any;
   harnesses?: HarnessOption[];
+  machines?: MachineOption[];
   version: number;
   workspace: WorkspaceIdentity;
 };
@@ -105,6 +107,7 @@ export function readBootstrap(value: unknown): Bootstrap {
     !Array.isArray(result.templates) ||
     !result.runtimeSchema ||
     !validHarnessCatalog(result.harnesses) ||
+    !validMachineCatalog(result.machines) ||
     !['local', 'target', 'platform'].includes(result.workspace?.kind ?? '') ||
     typeof result.workspace?.id !== 'string' ||
     !result.workspace.id.trim()

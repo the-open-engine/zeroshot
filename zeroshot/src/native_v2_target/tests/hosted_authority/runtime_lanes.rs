@@ -674,3 +674,70 @@ async fn unsupported_contribution_defaults_and_overrides_stop_before_oauth_or_re
         }
     }
 }
+
+async fn size_target(sizes: Option<Vec<openengine_cluster_protocol::RunSize>>) -> RecordingTarget {
+    RecordingTarget::spawn(move |request, origin, tokens| {
+        if (request.method.as_str(), request.path.as_str()) == DISCOVERY {
+            let mut document: Value =
+                serde_json::from_str(&hosted_discovery(origin)).assert_value();
+            if let Some(sizes) = &sizes {
+                document["extensions"]["run_sizes"] = json!({
+                    "kind": openengine_cluster_protocol::RUN_SIZES_KIND, "sizes": sizes
+                });
+            }
+            return ("200 OK", document.to_string());
+        }
+        hosted_response(request, origin, tokens, false)
+    })
+    .await
+}
+
+#[tokio::test]
+async fn unsupported_run_sizes_send_no_hosted_tokens_or_profile_or_run_bodies() {
+    use openengine_cluster_protocol::RunSize;
+    for size in [RunSize::Xl, RunSize::GpuT4] {
+        for profile in [false, true] {
+            let root = temp_root();
+            let target = size_target(None).await;
+            let (record, authority) = authenticated_authority(&root, &target.origin).await;
+            let error = if profile {
+                let mut request = profile_request(lane_free_binding());
+                request.runtime.size = size;
+                authority.profile_set(&record, request).await.assert_error()
+            } else {
+                let mut request = run_request(lane_free_binding());
+                request.submission.runtime.size = size;
+                authority.submit(&record, &request).await.assert_error()
+            };
+            assert!(
+                error
+                    .to_string()
+                    .contains(openengine_cluster_protocol::RUN_SIZES_KIND)
+            );
+            assert_eq!(routes(&target.stop()), [DISCOVERY, OAUTH_METADATA]);
+        }
+    }
+}
+
+#[tokio::test]
+async fn supported_run_sizes_preserve_the_selected_machine_in_the_hosted_request() {
+    use openengine_cluster_protocol::RunSize;
+    for size in [RunSize::Xl, RunSize::GpuT4] {
+        let root = temp_root();
+        let target = size_target(Some(vec![size])).await;
+        let (record, authority) = authenticated_authority(&root, &target.origin).await;
+        let mut request = run_request(lane_free_binding());
+        request.submission.runtime.size = size;
+        authority.submit(&record, &request).await.assert_value();
+        let requests = target.stop();
+        assert_eq!(
+            routes(&requests),
+            [DISCOVERY, OAUTH_METADATA, TOKEN, SESSION, RUN]
+        );
+        let body: Value = serde_json::from_str(&requests.last().assert_value().body).assert_value();
+        assert_eq!(
+            body["submission"]["runtime"]["size"],
+            serde_json::to_value(size).assert_value()
+        );
+    }
+}

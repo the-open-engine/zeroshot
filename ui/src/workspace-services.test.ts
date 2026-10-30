@@ -327,3 +327,35 @@ test('an old save cannot acknowledge a newly opened document, even when its cont
     /different profile/
   );
 });
+
+test('host machine metadata is bounded, unique and explicit without inventing local resources', () => {
+  const machine = {
+    size: 'large',
+    label: 'Large',
+    vcpus: 4,
+    memoryMiB: 16384,
+    diskGiB: 128,
+    laneUnits: 2,
+    gpu: null,
+  };
+  const value = { ...bootstrap(), machines: [machine] };
+  assert.deepEqual(readBootstrap(value), value);
+  assert.deepEqual(readBootstrap({ ...value, machines: [] }).machines, []);
+  for (const machines of [
+    null,
+    'large',
+    [null],
+    [machine, machine],
+    [{ ...machine, size: '' }],
+    [{ ...machine, label: 'Large\n' }],
+    [{ ...machine, laneUnits: 0 }],
+    [{ ...machine, vcpus: 1.5 }],
+    [{ ...machine, memoryMiB: Number.MAX_SAFE_INTEGER + 1 }],
+    [{ ...machine, gpu: { name: 'T4', memoryMiB: -1 } }],
+  ]) {
+    assert.throws(
+      () => readBootstrap({ ...value, machines }),
+      (cause: unknown) => cause instanceof ApiError && cause.code === 'invalid_bootstrap'
+    );
+  }
+});

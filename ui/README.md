@@ -36,6 +36,16 @@ legacy runtime schema; an explicit empty catalog offers no adapters. Local catal
 host's enabled registry. Existing unavailable selections remain visible and stay in the profile until
 the author changes them.
 
+Hosting shells may supply a `machines` array in the existing bootstrap. Each entry has `size`,
+`label`, `vcpus`, `memoryMiB`, `diskGiB`, `laneUnits`, and optional
+`gpu: {name, memoryMiB}` or `null`. The shared size picker displays these host-owned resources and
+lane weights. Starting a size with Boost uses its full `laneUnits` in Boosts for that run; ordinary
+runs do not spend Boosts merely because a size is selected. This is presentation metadata: the host
+owns admission and billing. An explicit empty list offers no machines. When the array is absent,
+the native `RunSize` schema supplies size identities without resource or pricing claims. Unavailable
+saved selections remain visible until the author changes them. Resource descriptors never enter
+the saved runtime plan.
+
 Profiles contain graphs and agent runtime configuration. Environments belong to run submission,
 not profile authoring. Plain local UI has no environment catalog or management page.
 

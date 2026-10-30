@@ -13,6 +13,14 @@ requesting an access token or submitting a run or profile, and the target enforc
 again during admission. Older targets without this extension accept only the established core
 harnesses through client preflight.
 
+Targets may advertise accepted machine size identities through
+`extensions.run_sizes: {kind: "openengine.run-sizes/v1", sizes: ["medium", "large", "xl", "gpu_t4"]}`.
+The CLI checks this catalog before requesting access tokens or submitting inline runs or profiles.
+An explicit empty list permits no sizes. Without the exact extension, client preflight retains
+`small`, `medium` and `large`; `xl` and `gpu_t4` require positive advertisement. Hosts choose machine
+resources and enforce size availability at admission. A runtime size is shared by the graph's agents,
+independently of their harness/provider lanes. Zeroshot does not define AWS shapes or billing prices.
+
 Official local builds include contributed adapters; Platform and the default target image enable
 only core adapters. See [Harness adapters](../project/harness-adapters.md) for availability and
 provider support.

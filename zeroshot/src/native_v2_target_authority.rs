@@ -93,6 +93,11 @@ impl TargetAuthorityError {
 /// environment, exact source checkout, and private capsule allocator for this target process.
 #[async_trait]
 pub trait TargetControllerFactory: Send + Sync {
+    /// An operator may explicitly advertise machine sizes supported by this target.
+    fn run_sizes(&self) -> Option<openengine_cluster_protocol::TargetRunSizesDiscovery> {
+        None
+    }
+
     /// Host-enabled lanes; absent only for older or custom factories without a catalog.
     fn runtime_harnesses(
         &self,
@@ -177,6 +182,10 @@ pub struct NativeV2TargetAuthority {
 }
 
 impl NativeV2TargetAuthority {
+    fn run_sizes(&self) -> Option<openengine_cluster_protocol::TargetRunSizesDiscovery> {
+        self.factory.run_sizes()
+    }
+
     fn runtime_harnesses(
         &self,
     ) -> Option<openengine_cluster_protocol::TargetRuntimeHarnessesDiscovery> {

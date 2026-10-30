@@ -7,11 +7,14 @@ import { ModelPicker } from './ModelPicker';
 import { modelGroups } from './models';
 import { effectiveLane } from './runtime-readiness';
 import type { HarnessOption } from './api';
+import type { MachineOption } from './machines';
+import { RunSizePicker } from './RunSizePicker';
 
 export function RuntimeEditor(p: {
   document: Document;
   schema: any;
   harnesses?: readonly HarnessOption[];
+  machines?: readonly MachineOption[];
   /** JSON path of the field the last validation rejected, e.g. `runtime.nodes.work.model`. */
   invalidField?: string;
   /** The runtime `invalidField` was found in; fields the draft changed since then are not flagged. */
@@ -122,17 +125,13 @@ export function RuntimeEditor(p: {
           ))}
         </select>
       </Field>
-      <Field label="Run size">
-        <select
-          value={doc.runtime.size}
-          aria-invalid={invalid('size', settingChanged('size'))}
-          onChange={(e) => runtimeChange('size', e.target.value)}
-        >
-          {(p.schema?.$defs?.RunSize?.enum ?? []).map((s: string) => (
-            <option key={s}>{s}</option>
-          ))}
-        </select>
-      </Field>
+      <RunSizePicker
+        value={doc.runtime.size}
+        schema={p.schema}
+        machines={p.machines}
+        invalid={invalid('size', settingChanged('size'))}
+        onChange={(value) => runtimeChange('size', value)}
+      />
       <div className="section-rule" />
       <div className="section-title model-heading">
         <span>{perAgent ? 'Agent models' : 'Model'}</span>

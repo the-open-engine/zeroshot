@@ -1189,7 +1189,7 @@ RUNTIME CONFIGURATION
     unchanged to the selected harness and
     provider; Zeroshot does not maintain or validate provider model catalogs.
 
-    Sizes are small, medium, and large.
+    Sizes are small, medium, large, xl, and gpu_t4. Named targets advertise supported sizes.
 
     Every executable graph node needs a same-named binding. Agent bindings require kind and model.
     Optional fields are effort (low, medium, high, xhigh, or max when supported), sessionScope

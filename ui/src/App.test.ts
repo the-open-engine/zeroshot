@@ -224,7 +224,7 @@ test('mounted Runtime dialog edits a draft shared by its Form and JSON views', a
     runtime: {
       harness: 'codex',
       provider: 'openai',
-      size: 'small',
+      size: 'large',
       nodes: {
         plan: { kind: 'agent', model: 'model-a', effort: 'high' },
         build: { kind: 'agent', model: 'model-b' },
@@ -233,7 +233,17 @@ test('mounted Runtime dialog edits a draft shared by its Form and JSON views', a
   });
   const bootstrap: Bootstrap = {
     version: 1,
-    workspace: { kind: 'local', id: 'runtime-dialog-test' },
+    workspace: { kind: 'platform', id: 'runtime-dialog-test' },
+    machines: [
+      {
+        size: 'large',
+        label: 'Large',
+        vcpus: 4,
+        memoryMiB: 16384,
+        diskGiB: 128,
+        laneUnits: 2,
+      },
+    ],
     templates: [],
     harnesses: [{ id: 'codex', label: 'Codex', providers: ['openai', 'gateway'] }],
     runtimeSchema: {
@@ -333,6 +343,12 @@ test('mounted Runtime dialog edits a draft shared by its Form and JSON views', a
   // Closing without changes is immediate.
   await openRuntime();
   assert.ok(dialog());
+  assert.equal(labelled('Run size').selectedOptions[0].text, 'Large · 2 lanes');
+  assert.doesNotMatch(dialog()!.textContent ?? '', /vCPU|GiB|VRAM/);
+  assert.match(
+    dialog()!.textContent ?? '',
+    /Starting this size with Boost uses 2 Boosts for the run/
+  );
   assert.equal(button(dialog()!, 'Form').getAttribute('aria-pressed'), 'true');
   assert.equal(dialog()!.textContent?.includes('Runtime JSON'), false);
   await click(button(dialog()!, 'Cancel'));

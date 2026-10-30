@@ -304,3 +304,46 @@ fn decision_capability_has_its_own_strict_marker_and_preserves_unknown_extension
             .is_empty()
     );
 }
+
+#[test]
+fn run_size_discovery_is_strict_and_independent_of_other_capabilities() {
+    let catalog = TargetRunSizesDiscovery::new(vec![
+        crate::RunSize::Medium,
+        crate::RunSize::Xl,
+        crate::RunSize::GpuT4,
+    ])
+    .assert_value();
+    let document = TargetDiscoveryDocument::direct(TargetAuthentication::HostedOauth)
+        .with_run_sizes(catalog.clone());
+    let wire = serde_json::to_value(&document).assert_value();
+    assert_eq!(
+        wire["extensions"]["run_sizes"],
+        serde_json::json!({
+            "kind": RUN_SIZES_KIND, "sizes": ["medium", "xl", "gpu_t4"]
+        })
+    );
+    assert!(!document.extensions.is_empty());
+    assert_eq!(
+        serde_json::from_value::<TargetDiscoveryDocument>(wire).assert_value(),
+        document
+    );
+    assert!(TargetRunSizesDiscovery::new(vec![crate::RunSize::Xl; 2]).is_err());
+    assert!(TargetRunSizesDiscovery::new(Vec::new()).is_ok());
+    for sizes in [serde_json::json!(["xl", "xl"]), serde_json::json!(["gpu"])] {
+        assert!(
+            serde_json::from_value::<TargetRunSizesDiscovery>(serde_json::json!({
+                "kind": RUN_SIZES_KIND, "sizes": sizes
+            }))
+            .is_err()
+        );
+    }
+    assert!(
+        serde_json::from_value::<TargetRunSizesDiscovery>(serde_json::json!({
+            "kind": RUN_SIZES_KIND, "sizes": ["xl"], "extra": true
+        }))
+        .is_err()
+    );
+    let mut invalid = catalog;
+    invalid.sizes.push(crate::RunSize::Xl);
+    assert!(invalid.validate().is_err());
+}

@@ -250,3 +250,13 @@ fn resume_debug_exposes_connection_names_but_redacts_credentials() {
     assert!(!diagnostic.contains("connection-secret"));
     assert!(!diagnostic.contains("github-secret"));
 }
+
+#[test]
+fn xl_and_gpu_sizes_round_trip_without_rewriting_machine_identity() {
+    for (wire, expected) in [("xl", RunSize::Xl), ("gpu_t4", RunSize::GpuT4)] {
+        let size: RunSize = serde_json::from_value(json!(wire)).assert_value();
+        assert_eq!(size, expected);
+        assert_eq!(serde_json::to_value(size).assert_value(), json!(wire));
+    }
+    assert!(serde_json::from_value::<RunSize>(json!("gpu")).is_err());
+}

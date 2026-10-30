@@ -103,6 +103,8 @@ fn help_explains_runtime_configuration() {
         RunSize::Small,
         RunSize::Medium,
         RunSize::Large,
+        RunSize::Xl,
+        RunSize::GpuT4,
     ]));
     let efforts = serialized_names(&exhaustive_values!(ReasoningEffort => [
         ReasoningEffort::Low,

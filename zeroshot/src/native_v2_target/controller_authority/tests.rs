@@ -166,3 +166,36 @@ fn decision_plans_require_their_exact_discovery_marker() {
     assert!(require_runtime_capabilities(&descriptor(changed), &plan).is_err());
     require_runtime_capabilities(&without_marker(), &lane_free()).assert_value();
 }
+
+#[test]
+fn requested_sizes_observe_the_exact_host_catalog_before_admission() {
+    use openengine_cluster_protocol::{RunSize, TargetRunSizesDiscovery};
+    let supported = descriptor(
+        TargetDiscoveryDocument::direct(TargetAuthentication::None).with_run_sizes(
+            TargetRunSizesDiscovery::new(vec![RunSize::Medium, RunSize::Xl, RunSize::GpuT4])
+                .assert_value(),
+        ),
+    );
+    for size in [RunSize::Medium, RunSize::Xl, RunSize::GpuT4] {
+        require_run_size(&supported, size).assert_value();
+    }
+    require_run_size(&supported, RunSize::Small).assert_error();
+    for size in [RunSize::Small, RunSize::Medium, RunSize::Large] {
+        require_run_size(&without_marker(), size).assert_value();
+    }
+    for size in [RunSize::Xl, RunSize::GpuT4] {
+        require_run_size(&without_marker(), size).assert_error();
+    }
+    let empty = descriptor(
+        TargetDiscoveryDocument::direct(TargetAuthentication::None)
+            .with_run_sizes(TargetRunSizesDiscovery::new(Vec::new()).assert_value()),
+    );
+    require_run_size(&empty, RunSize::Medium).assert_error();
+    let mut future = TargetRunSizesDiscovery::new(vec![RunSize::Xl]).assert_value();
+    future.kind = "openengine.run-sizes/v2".to_owned();
+    let future = descriptor(
+        TargetDiscoveryDocument::direct(TargetAuthentication::None).with_run_sizes(future),
+    );
+    require_run_size(&future, RunSize::Xl).assert_error();
+    require_run_size(&future, RunSize::Small).assert_value();
+}

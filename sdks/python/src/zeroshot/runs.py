@@ -127,7 +127,7 @@ class RunStatus:
     run_id: str
     title: str
     source: ResolvedSource | None
-    size: Literal["small", "medium", "large"]
+    size: Literal["small", "medium", "large", "xl", "gpu_t4"]
     cursor: str
     phase: Literal["admitted", "running", "stopping", "finished"]
     active_executions: tuple[ActiveExecution, ...] = ()
@@ -151,7 +151,7 @@ class RunSummary:
     run_id: str
     title: str
     source: ResolvedSource | None
-    size: Literal["small", "medium", "large"]
+    size: Literal["small", "medium", "large", "xl", "gpu_t4"]
     cursor: str
     phase: Literal["admitted", "running", "stopping", "finished"]
     force_stop_requested: bool

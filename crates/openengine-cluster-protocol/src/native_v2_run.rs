@@ -473,6 +473,8 @@ pub enum RunSize {
     #[serde(alias = "standard")]
     Medium,
     Large,
+    Xl,
+    GpuT4,
 }
 
 #[derive(

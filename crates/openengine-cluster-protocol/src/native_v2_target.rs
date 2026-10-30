@@ -10,6 +10,9 @@ use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 
 mod problem;
+mod run_sizes;
+
+pub use run_sizes::{RUN_SIZES_KIND, TargetRunSizesDiscovery};
 
 pub use problem::{
     MAX_TARGET_HTTP_PROBLEM_CODE_BYTES, MAX_TARGET_HTTP_PROBLEM_DETAILS_BYTES,
@@ -580,6 +583,8 @@ pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_harnesses: Option<TargetRuntimeHarnessesDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_sizes: Option<TargetRunSizesDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub decision_models: Option<TargetDecisionModelsDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git_transport: Option<TargetGitTransportDiscovery>,
@@ -627,6 +632,7 @@ impl TargetDiscoveryExtensions {
             && self.hosted_workspace_recovery.is_none()
             && self.node_runtime_lanes.is_none()
             && self.runtime_harnesses.is_none()
+            && self.run_sizes.is_none()
             && self.decision_models.is_none()
             && self.git_transport.is_none()
             && self.comment_delivery.is_none()
@@ -635,6 +641,13 @@ impl TargetDiscoveryExtensions {
 }
 
 impl TargetDiscoveryDocument {
+    /// Advertises machine sizes accepted by this host independently of billing or credentials.
+    #[must_use]
+    pub fn with_run_sizes(mut self, catalog: TargetRunSizesDiscovery) -> Self {
+        self.extensions.run_sizes = Some(catalog);
+        self
+    }
+
     /// Advertises the System One choice binding on native verifier nodes.
     #[must_use]
     pub fn with_decision_models(mut self) -> Self {

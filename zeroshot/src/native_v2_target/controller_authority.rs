@@ -604,21 +604,9 @@ fn require_runtime_capabilities(
     controller: &ControllerDescriptor,
     runtime: &RuntimePlan,
 ) -> Result<(), TargetAuthorityError> {
+    require_run_size(controller, runtime.size())?;
     require_node_runtime_lanes(controller, runtime)?;
-    let legacy = zeroshot_engine::harnesses::HarnessRegistry::core();
-    let mut required = runtime.lanes();
-    required.insert(runtime.lane());
-    for lane in required {
-        let supported = match &controller.runtime_harnesses {
-            Some(lanes) => lanes.contains(&lane),
-            None => legacy.descriptor(&lane).is_ok(),
-        };
-        if !supported {
-            return Err(authority_error(format!(
-                "target does not advertise runtime lane {lane}"
-            )));
-        }
-    }
+    require_runtime_harnesses(controller, runtime)?;
     if runtime.nodes().values().any(|binding| {
         matches!(
             binding,
@@ -639,6 +627,44 @@ fn require_runtime_capabilities(
     {
         return Err(authority_error(
             "target does not support comment delivery (openengine.comment-delivery/v1)",
+        ));
+    }
+    Ok(())
+}
+
+fn require_runtime_harnesses(
+    controller: &ControllerDescriptor,
+    runtime: &RuntimePlan,
+) -> Result<(), TargetAuthorityError> {
+    let legacy = zeroshot_engine::harnesses::HarnessRegistry::core();
+    let mut required = runtime.lanes();
+    required.insert(runtime.lane());
+    for lane in required {
+        let supported = match &controller.runtime_harnesses {
+            Some(lanes) => lanes.contains(&lane),
+            None => legacy.descriptor(&lane).is_ok(),
+        };
+        if !supported {
+            return Err(authority_error(format!(
+                "target does not advertise runtime lane {lane}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn require_run_size(
+    controller: &ControllerDescriptor,
+    size: openengine_cluster_protocol::RunSize,
+) -> Result<(), TargetAuthorityError> {
+    use openengine_cluster_protocol::RunSize;
+    let supported = match &controller.run_sizes {
+        Some(sizes) => sizes.contains(&size),
+        None => matches!(size, RunSize::Small | RunSize::Medium | RunSize::Large),
+    };
+    if !supported {
+        return Err(authority_error(
+            "target does not advertise the requested run size (openengine.run-sizes/v1)",
         ));
     }
     Ok(())

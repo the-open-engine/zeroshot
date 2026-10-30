@@ -19,7 +19,7 @@ from .runs import (
 from .source import ResolvedGitRemote, ResolvedSource, SourceForgeIdentity
 from .values import JsonValue
 
-_Size: TypeAlias = Literal["small", "medium", "large"]
+_Size: TypeAlias = Literal["small", "medium", "large", "xl", "gpu_t4"]
 _Phase: TypeAlias = Literal["admitted", "running", "stopping", "finished"]
 _Level: TypeAlias = Literal["debug", "info", "error"]
 _MAX_JAVASCRIPT_SAFE_INTEGER = 9_007_199_254_740_991
@@ -62,7 +62,7 @@ def _status(value: object) -> RunStatus:
             _enum_string(
                 root,
                 "size",
-                {"small", "medium", "large"},
+                {"small", "medium", "large", "xl", "gpu_t4"},
                 "run status",
             ),
         ),

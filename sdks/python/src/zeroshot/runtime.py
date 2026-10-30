@@ -113,7 +113,7 @@ class UniformRuntime:
             own default.
         max_tokens: Optional caller-declared model output limit. None keeps the provider's own
             default.
-        size: Native small, medium, or large run size.
+        size: Native small, medium, large, xl, or gpu_t4 run size, subject to target support.
         session_scope: execution opens a fresh session for each execution; node_instance reuses a
             live session when that graph node instance runs again.
         connections: Connection keys mapped to the exact environment field names their agent nodes

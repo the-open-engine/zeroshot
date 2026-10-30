@@ -215,6 +215,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Reusable profiles verify the authored default `maxIterations`; native-v2 run admission binds a
   present positive safe integer from caller input and re-verifies the concrete graph. An absent
   value retains the default. The generic execution and loop-entry budgets remain authoritative.
+- Targets may advertise supported sizes through the separate `openengine.run-sizes/v1` extension
+  with a unique `sizes` list. Inline run and profile clients check it before access-token acquisition;
+  an absent or different version retains only Small, Medium and Large. XL and T4 GPU require
+  explicit advertisement. Host-owned machine resources and lane costs remain outside runtime plans.
 - Runtime selection requires caller-authored `harness`, `provider`, and `model` values.
 - The run-level `harness`/`provider` pair is the default lane. An agent node binding may carry a
   typed `lane` override (`RuntimeLane`); `git_delivery` bindings cannot. Candidates build one
@@ -1046,6 +1050,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Artifact-producing work uses writing Agents; Verifiers perform independent checks/classification.
   Parallel/Map writers remain writers. Examples pass file paths and compact decisions, with separate
   files per writer and fresh directories per mapped item. Authors coordinate overlapping edits.
+- Workspace bootstrap may include `machines` descriptors with size, label, vcpus, memoryMiB,
+  diskGiB, laneUnits and optional GPU name/memoryMiB. The shared picker displays the box label and
+  lane count, and derives the Boost count from laneUnits; hardware specs stay out of the run UI.
+  An absent collection uses native size identities without
+  resource or billing claims; an explicit empty collection offers none. Unavailable authored sizes
+  stay visible and unchanged. Hosts enforce availability and billing; descriptors are not profile data.
 - Runtime schemas/workers come from native contracts in `profile_ui/catalog.rs`, compiled under
   `workspace`. Git delivery keeps its fixed contracts and explicit pull-request/merge modes. Model suggestions are non-authoritative;
   identifiers remain opaque. Missing harness/provider links to runtime settings. JSON stays lossless.
