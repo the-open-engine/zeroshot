@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+#[cfg(unix)]
 use std::sync::Arc;
 
 use openengine_cluster_protocol::NodeName;
@@ -9,6 +10,7 @@ use super::*;
 use crate::execution::SessionScope;
 use crate::native_v2_capsule::provider_process::turn::ProviderTranscript;
 
+#[cfg(unix)]
 fn node_command() -> std::process::Command {
     let executable = crate::execution::platform::find_executable(
         "node",
