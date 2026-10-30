@@ -747,6 +747,8 @@
       
         
       
+        
+      
     
     
     
@@ -919,6 +921,34 @@
     
   
     Review an issue or PR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/forge-delivery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub and GitLab delivery
   
 
     
@@ -2182,9 +2212,9 @@ their usual connections.</p>
 <h2 id="source-and-delivery-credentials">Source and delivery credentials<a class="headerlink" href="#source-and-delivery-credentials" title="Permanent link">&para;</a></h2>
 <p>Git checkout and push use shared HTTPS or SSH transport. A local push needs an attached, committed branch
 and an eligible remote; it uses the invoking user's native Git configuration and authentication when
-no source connection is selected. Push does not require GitHub or its CLI. PR and merge additionally
-require a registered forge adapter; GitHub is the maintained forge today. Other Git hosts can already
-use checkout and push.</p>
+no source connection is selected. PR and merge support GitHub (including Enterprise) and GitLab;
+see <a href="../../guides/forge-delivery/">forge setup</a> for supported versions and authentication.
+Other Git hosts support checkout and push.</p>
 <p>For local PR and merge delivery, the target branch is the current branch's upstream when configured;
 otherwise, Zeroshot uses the local branch name. Preparation verifies that the selected remote
 contains the target before agent execution. A fresh worktree may not have an upstream configured. To
@@ -2195,7 +2225,7 @@ remote access or authentication failure.</p>
 HTTPS connections declare <code>GIT_USERNAME</code> and <code>GIT_PASSWORD</code>; SSH connections declare
 <code>GIT_SSH_PRIVATE_KEY</code> and <code>GIT_SSH_KNOWN_HOSTS</code>. Explicit SSH authentication uses those pinned hosts
 and its private key. Contained runs inherit no host Git login state.</p>
-<p>Named GitHub runs retain <code>GH_TOKEN</code> checkout and delivery support. That token is not automatically
+<p>Named GitHub.com runs retain <code>GH_TOKEN</code> checkout and delivery support. That token is not automatically
 applied to another Git host. A model provider receives a connection field only when its own runtime
 binding declares it. Transport values stay out of source records, ledgers, observations, and
 checkpoint snapshots. Direct-target resume reuses the original source connection authorization and
@@ -2223,7 +2253,7 @@ See <a href="../../project/source-code-adapters/">Source-code adapters</a> for t
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-28">28 October 2026</time>
+    Last updated <time datetime="2026-10-30">30 October 2026</time>
   </span>
 
     

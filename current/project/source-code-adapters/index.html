@@ -601,6 +601,8 @@
       
         
       
+        
+      
     
     
     
@@ -773,6 +775,34 @@
     
   
     Review an issue or PR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/forge-delivery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub and GitLab delivery
   
 
     
@@ -1846,12 +1876,14 @@ PR, and merge nodes keep their receipt, repair, cancellation, and recovery behav
 </tr>
 </tbody>
 </table>
-<p>GitLab, Forgejo, and other Git hosts can use checkout and push now. Their forge APIs need adapters
-for PR and merge behavior. GitHub is the maintained forge implementation.</p>
+<p>GitHub (including Enterprise) and GitLab have maintained delivery adapters. Other Git hosts can
+use checkout and push; their review and merge APIs need an adapter. See
+<a href="../../guides/forge-delivery/">GitHub and GitLab delivery</a> for setup and version requirements.</p>
 <h2 id="ownership-and-registration">Ownership and registration<a class="headerlink" href="#ownership-and-registration" title="Permanent link">&para;</a></h2>
 <p><code>zeroshot/src/source_code/provider/</code> contains effect-free contracts and
-<code>SourceCodeProviderRegistry</code>. Provider, repository, and review identities are bounded opaque values;
-GitHub grammar and policy belong to its implementation.</p>
+<code>SourceCodeProviderRegistry</code>. Provider, repository, and review identities are bounded opaque values.
+Each adapter owns its repository grammar and policy. The shared source identity carries a canonical
+HTTPS web base, including an optional installation path prefix, separately from the Git locator.</p>
 <p>Maintained implementations live in <code>zeroshot/src/source_code/adapters/core/</code>. Contributions live in
 <code>zeroshot/src/source_code/adapters/contributed/</code> and register through that folder's <code>register</code> hook.
 The same registry proves required capabilities during preflight and returns delivery authority
@@ -1859,7 +1891,9 @@ during composition. Metadata-only registration must perform no filesystem, proce
 network effects. The provider's pure <code>repository_from_remote</code> hook identifies its forge from a
 credential-free Git locator text after the run boundary validates the URL. Contracts stay independent
 of protocol and process implementations. The same registry rejects ambiguous matches; both local and named CLI
-source selection use it. Runtime registration receives the selected source and scoped shared Git transport.</p>
+source selection use it. Explicit instance selection uses the same provider's <code>repository_from_remote_at</code>
+hook; it must prove that the forge repository matches the Git locator. Runtime registration receives
+the selected source and scoped shared Git transport.</p>
 <p>Implement <code>SourceCodeProvider</code> for descriptor and source operations, and <code>SourceDeliveryAuthority</code>
 for the existing delivery workflow. A forge owns its credential field, repository and review
 grammar, checks, policy, and authoritative merge result. Git effects reuse the shared transport.
@@ -1889,12 +1923,18 @@ when composing a candidate or allocator. Built-in placements use the contributed
 SourceCodeProvider.delivery_authority. Its descriptor advertises the operations that adapter
 supports. The older inspect_operation/operate contract remains available for callers of atomic
 operations; maintained adapters currently return an explicit unavailable error through that seam.
-Forge credential selection has one authority: SourceDeliveryAuthority.forge_credential_field.</p>
+Forge credential fields and default connection requirements belong to the registered adapter.
+Generated delivery bindings remain empty until placement selects the source or comment destination;
+materialization preserves explicit connection keys and fields. Review receipt links come from the
+adapter, so consumers never construct a provider's resource paths from opaque IDs.</p>
 <p>Conversation comments are a separate operation exposed through the same registry's optional
 comment authority. Pure URL identification and capability admission do not require a Git source.
 The native publisher owns bounded create/reconciliation and a durable lineage publication store;
 the forge supplies actor, comment identity, paginated reads, creation, and exact review-scope checks.
-Comment authority does not acquire Git transport access or a model session.</p>
+Comment authority does not acquire Git transport access or a model session.
+Its frozen destination includes provider and instance identity. Publication records retain that
+destination across retries, including GitLab installation prefixes. The adapter validates the exact
+resource permalink; the publisher also checks actor, body hash, and lineage marker.</p>
 
 
 
@@ -1915,7 +1955,7 @@ Comment authority does not acquire Git transport access or a model session.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-24">24 October 2026</time>
+    Last updated <time datetime="2026-10-30">30 October 2026</time>
   </span>
 
     

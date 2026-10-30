@@ -16,7 +16,7 @@
         <link rel="prev" href="../review-loop/">
       
       
-        <link rel="next" href="../observe-and-control/">
+        <link rel="next" href="../forge-delivery/">
       
       
         
@@ -605,6 +605,8 @@
       
         
       
+        
+      
     
     
     
@@ -876,6 +878,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../forge-delivery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub and GitLab delivery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1873,6 +1903,8 @@
 <h1 id="review-a-pull-request">Review a pull request<a class="headerlink" href="#review-a-pull-request" title="Permanent link">&para;</a></h1>
 <p>The <code>pr-review</code> template checks a PR's implementation and posts a concise Markdown comment.
 PR review uses comment delivery so comparison preparation always has an admitted publisher.
+The <code>--task-from</code> resolver supports GitHub.com; <a href="../forge-delivery/">GHE and GitLab comments</a> need
+caller-supplied graph input.
 The separate <code>issue-review</code> template retains a basic issue-proposal review; its review workflow
 will be designed separately.</p>
 <h2 id="what-the-graph-checks">What the graph checks<a class="headerlink" href="#what-the-graph-checks" title="Permanent link">&para;</a></h2>
@@ -1900,9 +1932,8 @@ completion and publication; findings or blocked tests can still appear in its re
 <code>runtime.json</code> and pass it through <code>--runtime-config</code>. The publisher is native and has no model.
 Model choices remain in the caller's runtime plan rather than the graph.</p>
 <p>Comment delivery uses the <code>github</code> connection's <code>GH_TOKEN</code>, as other GitHub delivery does.
-Provide that field through a named connection or the invoking environment. For a local run using
-a stored GitHub CLI login, resolve <code>GH_TOKEN</code> from <code>gh auth token</code> before submission. Publication
-credentials belong to the native node and are not declared on the review agents.</p>
+Provide that field through a named connection, the invoking environment, or a native <code>gh</code> login.
+Publication credentials belong to the native node and are not declared on the review agents.</p>
 <p>Local metadata resolution accepts <code>GH_TOKEN</code>, <code>GITHUB_TOKEN</code>, or a native GitHub CLI login.
 Named targets resolve metadata through their task-resolution route. Hosted targets use host-owned
 credentials; direct targets require <code>GH_TOKEN</code> or <code>GITHUB_TOKEN</code> in the invoking environment.
@@ -1964,7 +1995,7 @@ remote evidence and fails explicitly if unconfirmed; it never authorizes a blind
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-24">24 October 2026</time>
+    Last updated <time datetime="2026-10-30">30 October 2026</time>
   </span>
 
     
@@ -2017,13 +2048,13 @@ remote evidence and fails explicitly if unconfirmed; it never authorizes a blind
         
         
           
-          <a href="../observe-and-control/" class="md-footer__link md-footer__link--next" aria-label="Next: Observe and control runs">
+          <a href="../forge-delivery/" class="md-footer__link md-footer__link--next" aria-label="Next: GitHub and GitLab delivery">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Observe and control runs
+                GitHub and GitLab delivery
               </div>
             </div>
             <div class="md-footer__button md-icon">
