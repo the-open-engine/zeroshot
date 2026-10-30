@@ -2042,8 +2042,10 @@ its error lists the latest of those records, followed by the <code>zeroshot logs
 <p><code>single-worker</code> has one agent node and no independent review loop:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="go">zeroshot template show single-worker</span>
 </code></pre></div>
-<p><code>zeroshot template show software-change --delivery none</code> prints the exact graph behind the first example as the same
-<code>GraphSpec</code> accepted by <code>--graph</code> and the Python SDK.</p>
+<p><code>zeroshot template show software-change --delivery none</code> shows the graph behind the first example
+as a tree in a terminal. Names marked <code>*</code> need RuntimePlan bindings; template delivery bindings are
+supplied automatically. Add <code>--json</code> or redirect stdout to export the complete <code>GraphSpec</code> accepted
+by <code>--graph</code> and the Python SDK.</p>
 <p><code>zeroshot template show auto-research</code> prints the research graph with its default of ten iterations.
 Supply a positive <code>options.iterations</code> integer in the run input to set the admitted loop bound. It keeps
 adopted, record-only, and aborted results under <code>.zeroshot/research</code>; add <code>--push</code> to a run when every

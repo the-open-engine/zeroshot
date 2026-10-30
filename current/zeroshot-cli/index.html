@@ -3939,7 +3939,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a>
 <a id="__codelineno-34-5" name="__codelineno-34-5" href="#__codelineno-34-5"></a>Commands:
 <a id="__codelineno-34-6" name="__codelineno-34-6" href="#__codelineno-34-6"></a>  list  List built-in template names as JSON
-<a id="__codelineno-34-7" name="__codelineno-34-7" href="#__codelineno-34-7"></a>  show  Write a built-in graph template as JSON
+<a id="__codelineno-34-7" name="__codelineno-34-7" href="#__codelineno-34-7"></a>  show  Show a built-in graph as a tree in terminals, or JSON when piped
 <a id="__codelineno-34-8" name="__codelineno-34-8" href="#__codelineno-34-8"></a>  help  Print this message or the help of the given subcommand(s)
 <a id="__codelineno-34-9" name="__codelineno-34-9" href="#__codelineno-34-9"></a>
 <a id="__codelineno-34-10" name="__codelineno-34-10" href="#__codelineno-34-10"></a>Options:
@@ -3956,7 +3956,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-35-7" name="__codelineno-35-7" href="#__codelineno-35-7"></a>          Print help
 </code></pre></div>
 <h4 id="zeroshot-template-show"><code>zeroshot template show</code><a class="headerlink" href="#zeroshot-template-show" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a>Write a built-in graph template as JSON
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a>Show a built-in graph as a tree in terminals, or JSON when piped
 <a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a>
 <a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a>Usage: zeroshot template show [OPTIONS] &lt;TEMPLATE&gt;
 <a id="__codelineno-36-4" name="__codelineno-36-4" href="#__codelineno-36-4"></a>
@@ -3972,23 +3972,26 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-36-14" name="__codelineno-36-14" href="#__codelineno-36-14"></a>          - pr-review:       Review a PR diff, conditionally reproduce behavior, and post a concise report
 <a id="__codelineno-36-15" name="__codelineno-36-15" href="#__codelineno-36-15"></a>
 <a id="__codelineno-36-16" name="__codelineno-36-16" href="#__codelineno-36-16"></a>Options:
-<a id="__codelineno-36-17" name="__codelineno-36-17" href="#__codelineno-36-17"></a>      --delivery &lt;MODE&gt;
-<a id="__codelineno-36-18" name="__codelineno-36-18" href="#__codelineno-36-18"></a>          Template delivery mode. Defaults to pull_request for software-change, comment for issue-review and pr-review, otherwise none
+<a id="__codelineno-36-17" name="__codelineno-36-17" href="#__codelineno-36-17"></a>      --json
+<a id="__codelineno-36-18" name="__codelineno-36-18" href="#__codelineno-36-18"></a>          Write the complete graph as JSON even when stdout is a terminal
 <a id="__codelineno-36-19" name="__codelineno-36-19" href="#__codelineno-36-19"></a>
-<a id="__codelineno-36-20" name="__codelineno-36-20" href="#__codelineno-36-20"></a>      --push
-<a id="__codelineno-36-21" name="__codelineno-36-21" href="#__codelineno-36-21"></a>          Commit and push the managed run branch without opening a pull request
+<a id="__codelineno-36-20" name="__codelineno-36-20" href="#__codelineno-36-20"></a>      --delivery &lt;MODE&gt;
+<a id="__codelineno-36-21" name="__codelineno-36-21" href="#__codelineno-36-21"></a>          Template delivery mode. Defaults to pull_request for software-change, comment for issue-review and pr-review, otherwise none
 <a id="__codelineno-36-22" name="__codelineno-36-22" href="#__codelineno-36-22"></a>
-<a id="__codelineno-36-23" name="__codelineno-36-23" href="#__codelineno-36-23"></a>      --pr
-<a id="__codelineno-36-24" name="__codelineno-36-24" href="#__codelineno-36-24"></a>          Materialize pull-request delivery for the software-change template
+<a id="__codelineno-36-23" name="__codelineno-36-23" href="#__codelineno-36-23"></a>      --push
+<a id="__codelineno-36-24" name="__codelineno-36-24" href="#__codelineno-36-24"></a>          Commit and push the managed run branch without opening a pull request
 <a id="__codelineno-36-25" name="__codelineno-36-25" href="#__codelineno-36-25"></a>
-<a id="__codelineno-36-26" name="__codelineno-36-26" href="#__codelineno-36-26"></a>      --ship
-<a id="__codelineno-36-27" name="__codelineno-36-27" href="#__codelineno-36-27"></a>          Materialize merge delivery for the software-change template
+<a id="__codelineno-36-26" name="__codelineno-36-26" href="#__codelineno-36-26"></a>      --pr
+<a id="__codelineno-36-27" name="__codelineno-36-27" href="#__codelineno-36-27"></a>          Materialize pull-request delivery for the software-change template
 <a id="__codelineno-36-28" name="__codelineno-36-28" href="#__codelineno-36-28"></a>
-<a id="__codelineno-36-29" name="__codelineno-36-29" href="#__codelineno-36-29"></a>      --no-pr-feedback
-<a id="__codelineno-36-30" name="__codelineno-36-30" href="#__codelineno-36-30"></a>          Do not route visible pull-request feedback through the autonomous repair loop
+<a id="__codelineno-36-29" name="__codelineno-36-29" href="#__codelineno-36-29"></a>      --ship
+<a id="__codelineno-36-30" name="__codelineno-36-30" href="#__codelineno-36-30"></a>          Materialize merge delivery for the software-change template
 <a id="__codelineno-36-31" name="__codelineno-36-31" href="#__codelineno-36-31"></a>
-<a id="__codelineno-36-32" name="__codelineno-36-32" href="#__codelineno-36-32"></a>  -h, --help
-<a id="__codelineno-36-33" name="__codelineno-36-33" href="#__codelineno-36-33"></a>          Print help (see a summary with '-h')
+<a id="__codelineno-36-32" name="__codelineno-36-32" href="#__codelineno-36-32"></a>      --no-pr-feedback
+<a id="__codelineno-36-33" name="__codelineno-36-33" href="#__codelineno-36-33"></a>          Do not route visible pull-request feedback through the autonomous repair loop
+<a id="__codelineno-36-34" name="__codelineno-36-34" href="#__codelineno-36-34"></a>
+<a id="__codelineno-36-35" name="__codelineno-36-35" href="#__codelineno-36-35"></a>  -h, --help
+<a id="__codelineno-36-36" name="__codelineno-36-36" href="#__codelineno-36-36"></a>          Print help (see a summary with '-h')
 </code></pre></div>
 <h4 id="zeroshot-template-help"><code>zeroshot template help</code><a class="headerlink" href="#zeroshot-template-help" title="Permanent link">&para;</a></h4>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a>Print this message or the help of the given subcommand(s)
@@ -3997,7 +4000,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a>
 <a id="__codelineno-37-5" name="__codelineno-37-5" href="#__codelineno-37-5"></a>Commands:
 <a id="__codelineno-37-6" name="__codelineno-37-6" href="#__codelineno-37-6"></a>  list  List built-in template names as JSON
-<a id="__codelineno-37-7" name="__codelineno-37-7" href="#__codelineno-37-7"></a>  show  Write a built-in graph template as JSON
+<a id="__codelineno-37-7" name="__codelineno-37-7" href="#__codelineno-37-7"></a>  show  Show a built-in graph as a tree in terminals, or JSON when piped
 <a id="__codelineno-37-8" name="__codelineno-37-8" href="#__codelineno-37-8"></a>  help  Print this message or the help of the given subcommand(s)
 </code></pre></div>
 <h3 id="zeroshot-plan"><code>zeroshot plan</code><a class="headerlink" href="#zeroshot-plan" title="Permanent link">&para;</a></h3>

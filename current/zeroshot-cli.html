@@ -755,7 +755,7 @@ Usage: zeroshot template &lt;COMMAND&gt;
 
 Commands:
   list  List built-in template names as JSON
-  show  Write a built-in graph template as JSON
+  show  Show a built-in graph as a tree in terminals, or JSON when piped
   help  Print this message or the help of the given subcommand(s)
 
 Options:
@@ -770,7 +770,7 @@ Options:
   -h, --help
           Print help</code></pre></section>
 <section id="zeroshot-template-show"><h4><code>zeroshot template show</code></h4>
-<pre><code>Write a built-in graph template as JSON
+<pre><code>Show a built-in graph as a tree in terminals, or JSON when piped
 
 Usage: zeroshot template show [OPTIONS] &lt;TEMPLATE&gt;
 
@@ -786,6 +786,9 @@ Arguments:
           - pr-review:       Review a PR diff, conditionally reproduce behavior, and post a concise report
 
 Options:
+      --json
+          Write the complete graph as JSON even when stdout is a terminal
+
       --delivery &lt;MODE&gt;
           Template delivery mode. Defaults to pull_request for software-change, comment for issue-review and pr-review, otherwise none
 
@@ -810,7 +813,7 @@ Usage: zeroshot template help [COMMAND]
 
 Commands:
   list  List built-in template names as JSON
-  show  Write a built-in graph template as JSON
+  show  Show a built-in graph as a tree in terminals, or JSON when piped
   help  Print this message or the help of the given subcommand(s)</code></pre></section>
 <section id="zeroshot-plan"><h3><code>zeroshot plan</code></h3>
 <pre><code>Validate, submit, and observe hosted merge plans
