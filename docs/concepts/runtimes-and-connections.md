@@ -28,9 +28,8 @@ runs on its own lane's CLI. Model and connections are always chosen per node.
 
 [Harness adapters](../project/harness-adapters.md) lists available adapters and accepted
 harness/provider pairs, which apply to the default lane and to every node's lane. Admission rejects
-known-incompatible pairs, such as `codex` with `anthropic`, `claude` with `openai`, and `pi` with
-`github`. Zeroshot does not check current provider availability, and model names remain
-provider-owned.
+known-incompatible pairs, such as `codex` with `anthropic` and `claude` with `openai`. Zeroshot
+does not check current provider availability, and model names remain provider-owned.
 
 ## Uniform and exact plans
 
@@ -118,7 +117,7 @@ kinds depend on the target; Zeroshot consumes only the resolved fields declared 
 
 ## Gateways
 
-Use `provider: "gateway"` with `codex`, `claude`, or `pi` and the gateway's model identifier:
+To use a gateway, set `provider: "gateway"` and use the gateway's model identifier:
 
 ```json
 { "harness": "codex", "provider": "gateway", "model": "PROVIDER_MODEL_ID" }

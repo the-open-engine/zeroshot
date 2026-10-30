@@ -69,11 +69,11 @@ wire protocol as `openai-responses`, `openai-completions`, or `anthropic-message
 selects the native transport and the model identifier stays opaque and caller-owned. Zeroshot
 never infers the protocol from the identifier, and an unrecognized value fails before launch.
 
-To send the `anthropic` lane to a caller-owned Messages-compatible endpoint, declare
+To send Pi's `anthropic` lane to a caller-owned Messages-compatible endpoint, declare
 `ANTHROPIC_BASE_URL` with any one of the lane's credentials (`ANTHROPIC_API_KEY`,
 `ANTHROPIC_AUTH_TOKEN`, or `ANTHROPIC_OAUTH_TOKEN`); a local run also honors the invoking shell's
 `ANTHROPIC_BASE_URL`. The endpoint override interpolates the API key only when the connection
-supplies it, so a token keeps Pi's own environment authentication. The `openai` lane likewise
+supplies it, so a token keeps Pi's own environment authentication. Pi's `openai` lane likewise
 honors `OPENAI_BASE_URL` or `OPENAI_API_BASE`. Pi ignores these variables itself, so Zeroshot turns each into a provider
 override that keeps that provider's own protocol; the `openai` lane therefore needs a
 Responses-compatible endpoint, and any other protocol uses `pi/gateway`. A declared endpoint ends

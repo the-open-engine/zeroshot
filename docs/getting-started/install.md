@@ -153,8 +153,8 @@ For a long-running target, use `ghcr.io/the-open-engine/zeroshot-target`. See th
 
 ## GitHub Copilot
 
-Copilot uses your GitHub user identity and Copilot entitlement. Local runs reuse the login stored by
-`copilot login` in `COPILOT_HOME` or the system credential store. Ambient
+Copilot's `github` lane uses your GitHub user identity and Copilot entitlement. Local runs on that
+lane reuse the login stored by `copilot login` in `COPILOT_HOME` or the system credential store. Ambient
 `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` values stay in private RPC and are excluded
 from agent tool environments. For a contained target, store a user OAuth token or fine-grained
 personal token with Copilot Requests permission in the `github` connection's
