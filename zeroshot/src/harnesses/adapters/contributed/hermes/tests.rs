@@ -9,6 +9,8 @@ use super::*;
 use crate::native_v2_candidate::test_support::TestDirectory;
 use crate::native_v2_runner::test_support::control;
 
+mod command_tests;
+
 fn adapter(directory: &TestDirectory, fixture: &str) -> HermesAdapter {
     let source = openengine_cluster_testkit::fixture::python3_script(fixture);
     let executable = directory.write_executable("hermes", &source);

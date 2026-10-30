@@ -26,8 +26,8 @@ use crate::native_v2_contract::{
 use crate::native_v2_runner::{NodeHandle, NodeRunner};
 use crate::worker_catalog::ModelId;
 
-mod native_proof;
-use native_proof::NativeProof;
+mod test_support;
+use test_support::NativeProof;
 
 struct RecalledMemory {
     marker: String,
