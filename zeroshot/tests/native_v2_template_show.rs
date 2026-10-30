@@ -140,8 +140,8 @@ fn terminal_stdout(mut command: Command) -> String {
             &mut master_fd,
             &mut slave_fd,
             std::ptr::null_mut(),
-            std::ptr::null(),
-            std::ptr::null(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
         )
     };
     assert_eq!(result, 0, "openpty: {}", io::Error::last_os_error());
