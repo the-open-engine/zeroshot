@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use openengine_cluster_protocol::WorkerOutcome;
 use openengine_cluster_testkit::assertions::{AssertAt, AssertValue};
 use serde_json::json;
+use tokio::time::{advance, pause, resume, timeout};
 
 use super::*;
 use crate::execution::WorkspaceAccessMode;
@@ -21,8 +22,8 @@ use crate::native_v2_capsule::provider_process::{
 };
 use crate::native_v2_contract::NodeInvocation;
 use crate::native_v2_runner::{
-    DriverInvocation, NativeNodeRunner, NodeDriver, NodeHandle, NodeRole, NodeRunner, NodeSession,
-    ResolvedEnvironment, SessionFactory,
+    DriverInvocation, DurableOutput, NativeNodeRunner, NodeDriver, NodeHandle, NodeRole,
+    NodeRunner, NodeSession, ResolvedEnvironment, SessionFactory,
 };
 use crate::native_v2_runner::test_support::{admitted, request};
 
@@ -221,7 +222,11 @@ async fn malformed_and_oversized_configuration_is_private_and_does_not_block_reu
     }
 }
 
-const HANGING: &str = "sleep 30 & child=$!; printf '%s\\n' \"$child\" > child-pid; wait";
+const HANGING: &str = concat!(
+    "printf '%s\\n' '{\"notification\":\"private-configuration\"}'; ",
+    "printf '%s\\n' 'private-stderr' >&2; ",
+    "sleep 600 & child=$!; printf '%s\\n' \"$child\" > child-pid; wait",
+);
 
 #[tokio::test]
 async fn cancellation_reaps_descendants_before_execution_files_become_reusable() {
@@ -236,17 +241,90 @@ async fn cancellation_reaps_descendants_before_execution_files_become_reusable()
 #[tokio::test]
 async fn hung_configuration_query_expires_and_reaps_its_descendants() {
     let fixture = Fixture::new(HANGING);
-    let started = Instant::now();
-    timeout(
-        Duration::from_secs(20),
-        fixture.start("worker").await.completion(),
-    )
-    .await
-    .assert_value()
-    .assert_value();
-    assert!(started.elapsed() >= INSPECTION_BUDGET);
+    let mut handle = fixture.start("worker").await;
+    let mut output = handle.take_initial_output().assert_value();
+    wait_for_pid(&fixture.driver.workspace.join("child-pid")).await;
+    // Arm the real child's deadline before advancing; resume before OS cleanup needs polling.
+    pause();
+    advance(INSPECTION_BUDGET + Duration::from_secs(1)).await;
+    resume();
+    timeout(Duration::from_secs(20), handle.completion())
+        .await
+        .assert_value()
+        .assert_value();
+    assert_timeout_diagnostic(&mut output).await;
     assert_eq!(*fixture.driver.results.lock().assert_value(), [None]);
     fixture.assert_cleaned();
+}
+
+fn probe_completion() -> ProcessSessionOutput {
+    ProcessSessionOutput {
+        launch_evidence: crate::execution::process::ProcessLaunchEvidence::MayHaveStarted,
+        exit_code: None,
+        termination_signal: Some(libc::SIGKILL),
+        core_dumped: false,
+        stderr_tail: b"private-probe-stderr".to_vec(),
+        stderr_tail_truncated: false,
+        cancelled: false,
+        timed_out: false,
+        cleanup: crate::execution::process::ProcessCleanupEvidence::Reaped,
+        post_launch_error: None,
+    }
+}
+
+#[tokio::test]
+async fn either_timeout_observer_reports_one_private_fallback_diagnostic() {
+    for exchange_expired in [false, true] {
+        let (_cancel, control, mut output) = crate::native_v2_runner::test_support::control();
+        let mut completion = probe_completion();
+        completion.timed_out = !exchange_expired;
+        let result = if exchange_expired {
+            timeout(Duration::ZERO, std::future::pending()).await
+        } else {
+            Ok(None)
+        };
+        assert_eq!(
+            resolve_configuration(result, &Ok(completion), &control).await,
+            Ok(None)
+        );
+        drop(control);
+        assert_timeout_diagnostic(&mut output).await;
+    }
+}
+
+async fn assert_timeout_diagnostic(output: &mut DurableOutput) {
+    let diagnostic = output.recv_output().await.assert_value();
+    assert_eq!(diagnostic.stream, LiveOutputStream::System);
+    assert_eq!(
+        diagnostic.text,
+        "Native configuration inspection timed out after 60s. Continuing without Zeroshot's automatic permission bypass."
+    );
+    assert!(output.recv().await.is_err());
+}
+
+#[tokio::test]
+async fn cleanup_failure_and_cancellation_never_report_continuation() {
+    for cancelled in [false, true] {
+        let (cancel, control, mut output) = crate::native_v2_runner::test_support::control();
+        cancel.send_replace(cancelled);
+        let mut completion = probe_completion();
+        completion.timed_out = true;
+        completion.cancelled = cancelled;
+        completion.cleanup = crate::execution::process::ProcessCleanupEvidence::TimedOut;
+        assert_eq!(
+            resolve_configuration(Ok(None), &Ok(completion.clone()), &control).await,
+            Err(NodeRunnerError::CleanupUnconfirmed)
+        );
+        if cancelled {
+            completion.cleanup = crate::execution::process::ProcessCleanupEvidence::Reaped;
+            assert_eq!(
+                resolve_configuration(Ok(None), &Ok(completion), &control).await,
+                Err(NodeRunnerError::Cancelled)
+            );
+        }
+        drop(control);
+        assert!(output.recv().await.is_err());
+    }
 }
 
 async fn wait_for_pid(path: &Path) {

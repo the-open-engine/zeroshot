@@ -1,5 +1,66 @@
 use super::*;
 
+const SLOW_CONFIGURATION: &str = r#"#!/bin/sh
+set -eu
+if [ "${1-}" = app-server ]; then
+  sleep 11
+  while IFS= read -r request; do
+    case "$request" in
+      *'"method":"initialize"'*) printf '%s\n' '{"id":1,"result":{}}' ;;
+      *'"method":"config/read"'*)
+        printf '%s\n' '{"id":2,"result":{"config":{"sandbox_mode":null,"approval_policy":null,"model_provider":"internal","model_providers":{"internal":{"env_key":"INTERNAL_GATEWAY_KEY","env_http_headers":{"X-Account":"INTERNAL_ACCOUNT"}}}},"origins":{},"layers":[]}}' ;;
+      *'"method":"configRequirements/read"'*) printf '%s\n' '{"id":3,"result":{"requirements":null}}' ;;
+    esac
+  done
+  exit 0
+fi
+cat > /dev/null
+printf '%s\n' "$@" > turn-arguments
+printf '%s\n' "${INTERNAL_GATEWAY_KEY-unset}" "${INTERNAL_ACCOUNT-unset}" > turn-environment
+"#;
+
+#[tokio::test]
+async fn slow_configuration_preserves_bypass_and_native_provider_environment() {
+    let directory = TestDirectory::new("codex-slow-configuration");
+    let scripted = scripted_adapter_with(
+        &directory,
+        CodexProvider::OpenAi,
+        "codex-script",
+        &script_with_success(SLOW_CONFIGURATION),
+    );
+    let mut configuration = scripted.config.clone();
+    configuration.local_user = Some(NativeV2CodexUser {
+        home: directory.path().to_owned(),
+        codex_home: directory.path().to_owned(),
+    });
+    configuration.native_environment = LocalHarnessEnvironment::new(BTreeMap::from([
+        (
+            "INTERNAL_GATEWAY_KEY".to_owned(),
+            "custom-provider-secret".to_owned(),
+        ),
+        ("INTERNAL_ACCOUNT".to_owned(), "custom-account".to_owned()),
+    ]));
+    let workspace = configuration.workspace.clone();
+    // Use real native inspection, without the transcript fixture's injected permission policy.
+    let adapter = Arc::new(NativeV2CodexAdapter::new_local(configuration));
+    let admitted = admitted(binding(SessionScope::Execution, &[]), CodexProvider::OpenAi).await;
+    let runtime = runner(&admitted, adapter);
+    let handle = start(&runtime, &admitted, 1, &[]).await;
+    let logs = tokio::time::timeout(
+        std::time::Duration::from_secs(90),
+        complete_verified_with_logs(handle),
+    )
+    .await
+    .assert_value();
+    let arguments = fs::read_to_string(workspace.join("turn-arguments")).assert_value();
+    assert!(arguments.contains("--dangerously-bypass-approvals-and-sandbox"));
+    assert_eq!(
+        fs::read_to_string(workspace.join("turn-environment")).assert_value(),
+        "custom-provider-secret\ncustom-account\n"
+    );
+    assert!(!logs.contains("Native configuration inspection timed out"));
+}
+
 #[test]
 fn local_and_managed_openai_auth_preserve_explicit_codex_keys() {
     for has_local_user in [true, false] {

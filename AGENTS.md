@@ -296,7 +296,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   verifiers use bypass only when the native configuration query proves no authored policy; configured
   or unavailable policy keeps native behavior. Explicit cached Codex web search also prevents local
   bypass because native full access can promote cached search to live. Configuration probes have a
-  separate ten-second/4 MiB budget, never send a
+  separate sixty-second/4 MiB budget, never send a
   model prompt, suppress Claude hooks/auth helpers, and require confirmed process cleanup before the
   model turn. They do not rewrite settings files; normal native startup state may still be updated.
   Verifier nodes use the same permission handling as workers across all harnesses. Pi exposes no

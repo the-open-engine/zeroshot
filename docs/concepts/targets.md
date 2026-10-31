@@ -113,8 +113,11 @@ configured. Before each local turn, Zeroshot queries the harness's resolved sett
 a model prompt. Explicit approval, sandbox, permission rules, and managed restrictions take
 precedence, so Zeroshot adds no bypass flag in those cases. Claude shell permission controls are
 inherited locally too. If inspection fails or the CLI does not support it, the harness keeps its
-native permission behavior. Inspection adds one CLI startup per local turn and is bounded to ten
-seconds; it does not rewrite settings files, though the CLI may update its own startup state.
+native permission behavior. Inspection adds one CLI startup per local turn and is bounded to sixty
+seconds. A timeout reports that Zeroshot is continuing without its automatic permission bypass.
+The probe must finish cleanup before the model turn starts; unconfirmed cleanup stops the run and
+identifies configuration inspection in its diagnostic. Inspection does not rewrite settings files,
+though the CLI may update its own startup state.
 
 Every agent verifier node, including those in custom profiles, uses the same permission handling as
 workers. Zeroshot automatically adds instructions to inspect without modifying source, tests,
