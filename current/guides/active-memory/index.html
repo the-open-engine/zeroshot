@@ -818,6 +818,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#concurrent-maintenance-and-hosting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Concurrent maintenance and hosting
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1910,6 +1921,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#concurrent-maintenance-and-hosting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Concurrent maintenance and hosting
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2118,8 +2140,7 @@ execution history and checkpoint seeds, while its model usage contributes to run
 tool matches no card. Receipts contain the node, tool name, time and a few associated workspace
 paths; they exclude arguments and results and do not claim that a tool succeeded. The first and
 latest receipts survive a fixed 512-record cap. Hidden reasoning is not required or inspected.</p>
-<p>Local and target stores do not synchronize automatically. Platform integration and ACP integration
-are outside this version. Embedders must explicitly select a host-owned memory namespace; the
+<p>Local and target stores do not synchronize automatically. ACP integration is outside this version. Embedders must explicitly select a host-owned memory namespace; the
 generic hosting configuration does not create an organization-wide store implicitly.</p>
 <h2 id="initialize-from-local-history">Initialize from local history<a class="headerlink" href="#initialize-from-local-history" title="Permanent link">&para;</a></h2>
 <p>Use the dedicated <code>zeroshot-memory-init</code> skill to initialize memory from all qualified local run
@@ -2182,6 +2203,22 @@ Platform and Docker target history are outside this workflow.</p>
 recorded checkout now has detached HEAD. Publication uses that checkout's current runtime namespace,
 reported per run. Existing local path namespaces do not migrate automatically when a checkout later
 acquires an admitted remote source.</p>
+<h2 id="concurrent-maintenance-and-hosting">Concurrent maintenance and hosting<a class="headerlink" href="#concurrent-maintenance-and-hosting" title="Permanent link">&para;</a></h2>
+<p>Worker recall remains frozen at run startup. Immediately before postmortem, the host reads current
+scoped lessons and supplies before/current changes separately from the original delivery manifest.
+Maintenance decisions target current revisions; newly received advice is not evidence of worker use.
+Publication checks reviewed revisions atomically. A revision conflict refreshes the context and
+reinvokes maintenance while retaining validated discoveries, within the original cancellation and
+time budget. A conflict followed by an unchanged visible lesson set stops rather than repeatedly
+retrying a hidden deletion tombstone. New findings deferred by maintenance remain unpublished.
+Ordinary transport failures are not revision conflicts.</p>
+<p>Storage reads and queued writes stop on cancellation. Backends check cancellation before starting
+publication and drain started writes within a bounded storage timeout before cleanup completes.</p>
+<p>Embedding hosts may install an authenticated <code>ActiveMemoryBackend</code> through <code>ProductionHostingConfig</code>.
+Its snapshot and publication operations carry run identity; the backend must derive and enforce the
+accepted run's tenant, repository and graph scope independently of request fields. SQLite implements
+the same interface for local and direct-target runs. Hosts must return complete bounded snapshots;
+failed or partial reads must never masquerade as an empty lesson set.</p>
 
 
 
@@ -2202,7 +2239,7 @@ acquires an admitted remote source.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-24">24 October 2026</time>
+    Last updated <time datetime="2026-10-30">30 October 2026</time>
   </span>
 
     
