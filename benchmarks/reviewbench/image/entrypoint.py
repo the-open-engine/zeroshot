@@ -35,7 +35,7 @@ HOME = Path(ENV.get("HOME", "/root"))
 CONFIG = Path("/opt/rb/config")
 REPO = Path(ENV.get("RB_REPO", "/work/repo"))
 OUT = Path(ENV.get("RB_OUT", "/work/out/findings.json"))
-AGENT = ENV.get("RB_AGENT", "zeroshot-review")
+AGENT = ENV.get("RB_AGENT", "zeroshot-code-review")
 # Leaves time to stop the run and write the file inside the benchmark's 30 minutes.
 DEADLINE = float(ENV.get("RB_DEADLINE_SECONDS", "1560"))
 STATE = HOME / ".local" / "state" / "zeroshot"

@@ -3,6 +3,11 @@
 # Build from benchmarks/reviewbench: docker build -f image/Dockerfile -t rb-reviewer:dev .
 FROM ghcr.io/the-open-engine/zeroshot-target:10.24.1
 
+LABEL org.opencontainers.image.title="Zeroshot Code Review" \
+      org.opencontainers.image.description="Multi-harness Zeroshot code review graph" \
+      org.opencontainers.image.source="https://github.com/the-open-engine/zeroshot" \
+      org.opencontainers.image.licenses="MIT"
+
 # Harness configuration for every agent: no hosted web search, connectors,
 # plugins, browser or computer use. The repository and diff are all an agent reads.
 COPY image/home/ /opt/rb/home/

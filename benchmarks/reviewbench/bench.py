@@ -44,7 +44,7 @@ PROXY = os.environ.get("RB_PROXY", "http://rb-egress-proxy:3128")
 PROXY_LOG = Path(os.environ.get("RB_PROXY_LOG", WORK / "proxy-log" / "egress.jsonl"))
 MIRROR = "https://github.com/review-bench/{}.git"
 JUDGE_MODEL = "claude-sonnet-5"
-AGENT = "zeroshot-review"
+AGENT = "zeroshot-code-review"
 PR_LIMIT_SECONDS = 1800
 # Reviewer container limits: about ReviewBench's runner, a standard GitHub-hosted runner
 # (4 CPUs, 16 GB) that it shares with its driver.
