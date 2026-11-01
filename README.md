@@ -53,14 +53,14 @@ use [Zeroshot Platform](https://app.zeroshot.sh/docs).
 ## Build your own graph
 
 ```text
-worker ◄─────────────── any "no" ────┐
-  ▼                                  │
-risk check                           │
-  ├─ auth, payments or a migration?  │
-  │    ▼                             │
-  │  security review ─────────── no ─┤
-  ▼    ▼                             │
-acceptance + code review ─────── no ─┘
+worker ◄─────────── any "no" ────┐
+  ▼                              │
+risk check                       │
+  ├─ auth, payments, migration?  │
+  │    ▼                         │
+  │  security review ─────── no ─┤
+  ▼    ▼                         │
+acceptance + code review ─── no ─┘
   ▼ both yes
 deliver
 ```
