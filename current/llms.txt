@@ -2,19 +2,34 @@
 
 > Zeroshot enforces your team's QA process on coding agents. You define the process as a graph: which agents implement, which independent agents review or test the result, where rejected work goes for repair, and where a run stops. The engine runs the graph's order, routing and bounds in code, so no agent can skip a step; model output cannot add an edge or raise a bound. It is a native CLI (`zeroshot`) for Linux, macOS, and Windows. Each node can use its own harness and model. MIT licensed.
 
+## Build your own graph
+
+An example team graph: changes that touch auth, payments or a migration get a security review first, then every change goes through acceptance and code review in parallel. Any "no" goes back to the worker with the reason.
+
+```text
+worker ◄─────────── any "no" ────┐
+  ▼                              │
+risk check                       │
+  ├─ auth, payments, migration?  │
+  │    ▼                         │
+  │  security review ─────── no ─┤
+  ▼    ▼                         │
+acceptance + code review ─── no ─┘
+  ▼ both yes
+deliver
+```
+
+- Easiest start: ask your coding agent to use the `zeroshot-graph-design` skill, installed with the CLI. It reads the repository's build, test and CI setup, drafts a graph like this one, and saves it as a profile once you approve it.
+- Or start from the built-in `software-change` graph (implementation, then acceptance and code review in parallel, then bounded repair): `zeroshot template show software-change --delivery none` prints it as an editable `GraphSpec`; run your version with `--graph my-graph.json`.
+- Choose each node's harness, model, effort, and instructions, which steps run in parallel, and where failures route. Codex can implement while Claude Code reviews.
+- Save the graph with its runtime settings as a profile (`--profile`), locally or for your organization on Zeroshot Platform, so everyone runs the same process. The browser UI (`zeroshot ui`) edits profiles and shows runs.
+
 ## Why teams use it
 
 - One process for the whole team. The standards live in one graph, saved as a profile, that every engineer's tasks run through, instead of in each person's prompts and skills.
-- Independent review. In the built-in graph, separate acceptance and code-review agents decide whether the work passes, and rejected work goes to repair until both accept or the run's bounds are reached.
+- Independent review. Reviewer agents other than the one that wrote the change decide whether it passes, and rejected work goes back for repair until they accept or the run's bounds are reached.
 - You choose where a run stops: a local change, a pushed branch, a reviewed pull request, or a merge after CI.
 - It is built for teams whose agents write code faster than anyone can review it.
-
-## Make it yours
-
-- Start from the built-in `software-change` graph (implementation, then acceptance and code review in parallel, then bounded repair) and add the stages your team requires: adversarial bug-finding, end-to-end tests, or security review and a blast-radius map for changes to auth, payments, or migrations.
-- `zeroshot template show software-change --delivery none` prints the built-in graph as an editable `GraphSpec`; run your version with `--graph my-graph.json`.
-- Choose each node's harness, model, effort, and instructions, which steps run in parallel, and where failures route. Codex can implement while Claude Code reviews.
-- Save the graph with its runtime settings as a profile (`--profile`), locally or for your organization on Zeroshot Platform, so everyone runs the same process. The browser UI (`zeroshot ui`) edits profiles and shows runs.
 
 ## Also included
 
@@ -49,9 +64,11 @@ zeroshot run --title "Add JSON status output" --template software-change --deliv
 
 Replace `YOUR_MODEL_ID` with a model your installed Codex CLI supports. A valid request prints `{"valid":true}`; drop `--validate-only` to start the run. The worker edits the selected folder (`--cwd FOLDER`). `--delivery none` keeps the change local, so Git is optional; without it the run opens a pull request.
 
+If setup or a run fails, tell us at https://theopenengine.com/discord.
+
 For another harness, choose an available `harness`/`provider` pair from [Harness adapters](https://zeroshot.sh/docs/current/project/harness-adapters/). The [first-run guide](https://zeroshot.sh/docs/current/getting-started/first-run/) includes core examples. Model identifiers pass to the harness unchanged; Zeroshot keeps no model catalog.
 
-The installer needs Node.js 18+ and installs a verified native binary plus the `zeroshot` and `zeroshot-memory-init` skills for Codex, Claude Code, GitHub Copilot, and Pi. The local Codex example reuses the harness's existing login, so no API key is needed. The [install guide](https://zeroshot.sh/docs/current/getting-started/install/) says where the skills go and how to remove them.
+The installer needs Node.js 18+ and installs a verified native binary plus the `zeroshot`, `zeroshot-memory-init`, `zeroshot-graph-design`, and `zeroshot-plan` skills for Codex, Claude Code, GitHub Copilot, and Pi. The local Codex example reuses the harness's existing login, so no API key is needed. The [install guide](https://zeroshot.sh/docs/current/getting-started/install/) says where the skills go and how to remove them.
 
 The CLI is free and open source (MIT). Model calls go through your own harness login or provider account.
 
