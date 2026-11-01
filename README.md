@@ -3,7 +3,7 @@
 <picture>
   <source media="(max-width: 640px)" srcset="docs/brand/zeroshot-hero-mobile.png">
   <source media="(prefers-color-scheme: dark)" srcset="docs/brand/zeroshot-hero-dark.png">
-  <img alt="zeroshot: the agent that wrote the code should not be the one that says it works. Independent review and repair." src="docs/brand/zeroshot-hero-light.png" width="100%">
+  <img alt="zeroshot: stop babysitting your agents. Prompts are suggestions; graphs are enforced." src="docs/brand/zeroshot-hero-light.png" width="100%">
 </picture>
 
 &nbsp;
@@ -34,16 +34,13 @@
 
 Prompts are suggestions. Graphs are enforced.
 
-A skill can ask for a review, but the agent decides whether to listen. In a zeroshot graph, your QA
-process is enforced by code.
+A skill can ask for a review, but the agent decides whether to listen. In zeroshot, you define your
+team's QA process as a graph: which agents write the code, which independent agents review or test
+it, what must pass, and where rejected work goes for repair. The engine enforces the graph's order,
+routing and retry limits; model output cannot add an edge or raise a bound.
 
-zeroshot runs coding, independent review and repairs through the workflow you define.
-
-Choose the agents and models, define what must pass, and decide where rejected work goes for
-repair.
-
-The engine enforces the graph’s review gates and retry limits. Each agent can use its own model and
-harness.
+Each step can use its own harness and model. Save the graph as a profile, locally or for your
+organization on Zeroshot Platform, so everyone runs the same process.
 
 On 20 ProgramBench tasks, [a small model in a zeroshot loop](https://theopenengine.com/blog/review-loop/)
 matched a larger model's score at a median 58% of its cost. More examples on zeroshot.sh:
@@ -53,18 +50,49 @@ and [a research run](https://zeroshot.sh/#not-just-coding).
 The CLI is free and MIT licensed. Run locally, [self-host](#self-hosted-run-the-docker-target), or
 use [Zeroshot Platform](https://app.zeroshot.sh/docs).
 
-<div align="center">
-  <a href="https://zeroshot.sh/#topology">
-    <picture>
-      <source media="(prefers-reduced-motion: reduce) and (max-width: 640px)" srcset="docs/assets/product-graph-feature-mobile.png">
-      <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/product-graph-feature-wide.png">
-      <source media="(max-width: 640px)" srcset="docs/assets/product-graph-feature-mobile.gif">
-      <img src="docs/assets/product-graph-feature-wide.gif" alt="Example custom graph: a worker, parallel acceptance and code review plus a bugfinder, UI review, adversarial end-to-end testing, and delivery. Rejections return to the worker for repair." width="640">
-    </picture>
-  </a>
-  <br>
-  <em>Example custom workflow. <a href="https://zeroshot.sh/#topology">Explore the interactive graphs.</a></em>
-</div>
+## Build your own graph
+
+```text
+worker ◄──────────── any "no", with the reason ──┐
+  ▼                                              │
+risk check                                       │
+  ├─ auth, payments or a migration?              │
+  │    ▼                                         │
+  │  security review ─────────────────────── no ─┤
+  ▼    ▼                                         │
+acceptance + code review, in parallel ────── no ─┘
+  ▼ both yes
+deliver
+```
+
+An example team graph: changes that touch auth, payments or a migration get a security review
+first, then every change goes through acceptance and code review in parallel.
+[More example graphs on zeroshot.sh](https://zeroshot.sh/#topology).
+
+Paste this into Claude Code or Codex in your repo to design yours:
+
+```text
+Use the zeroshot-graph-design skill to turn how we check changes in this repo into a zeroshot graph.
+```
+
+The skill reads your build, test and CI setup, drafts a graph like the one above, and saves it as a
+profile once you approve it.
+
+Or export the built-in graph, edit the JSON, and run your version. `input.json` and `runtime.json`
+are the files from [Get started](#get-started):
+
+```bash
+zeroshot template show software-change --delivery none > my-graph.json
+zeroshot run --title "My first graph" --graph my-graph.json \
+  --uniform-runtime-config runtime.json --input input.json
+```
+
+The software-change review loop, auto-research graph, and delivery are built in. You define other
+stages, their tools, services and credentials, and where failures go for repair.
+[Build a review loop](docs/guides/review-loop.md) walks through a complete graph file with two
+independent reviewers and a repair loop. See the [graph contract](docs/reference/cluster/graph.md)
+for supported graph structures and [Prepare a runtime environment](docs/guides/runtime-environments.md)
+for dependency and service setup.
 
 ## What users say
 
@@ -167,41 +195,6 @@ For runtime configuration and credentials, see [Runtimes and connections](docs/c
 Connect GitHub and bring your own model API keys.
 [Platform setup guide →](https://app.zeroshot.sh/docs)
 
-## Build your own graph
-
-Choose each agent's model and instructions, which steps run in parallel, and when to retry.
-This example routes changes to auth, payments, or migrations through a blast-radius map and security
-review before acceptance and code review. Other changes go straight to review.
-
-<a href="https://zeroshot.sh/#topology">
-<picture>
-  <source media="(max-width: 640px)" srcset="docs/assets/product-graph-danger-mobile.png">
-  <img src="docs/assets/product-graph-danger-wide.png" alt="Example custom graph: a risk check routes auth, payments, or migration changes through blast-radius mapping and security review. All changes then pass acceptance and code review; rejection returns to the worker for repair." width="640">
-</picture>
-</a>
-
-The software-change review loop, auto-research graph, and delivery are built in. You define other
-stages, their tools, services and credentials, and where failures go for repair.
-
-Inspect the built-in graph as a starting point:
-
-```bash
-zeroshot template show software-change
-```
-
-Terminal output is a tree. Names marked `*` are executable nodes for `--runtime-config`;
-template delivery bindings are supplied automatically. Use the same delivery flags as your run to
-inspect its delivery nodes. Add `--json` or redirect stdout to export the complete graph as JSON:
-
-```bash
-zeroshot template show software-change > graph.json
-```
-
-Start with [Build a review loop](docs/guides/review-loop.md), a complete example with two independent
-reviewers and a repair loop. Adapt the reviewers’ instructions to your project. See the
-[graph contract](docs/reference/cluster/graph.md) for supported graph structures and
-[Prepare a runtime environment](docs/guides/runtime-environments.md) for dependency and service setup.
-
 ## Save and reuse a profile
 
 Each step can use its own model. Pass `--runtime-config` with one binding per node in place of
@@ -227,7 +220,8 @@ Each step can use its own model. Pass `--runtime-config` with one binding per no
 
 The same worker handles implementation, review repairs, and delivery repairs in one session.
 Both reviewers start fresh on every pass. Run `zeroshot template show software-change` to list
-the node names. See the
+the node names; names marked `*` need a binding, and template delivery bindings are supplied
+automatically. See the
 [RuntimePlan reference](docs/reference/runtime-plan.md) for every field.
 
 A profile stores a graph and its runtime settings. Use **Profiles** in the browser UI to edit and
