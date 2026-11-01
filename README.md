@@ -72,7 +72,8 @@ first, then every change goes through acceptance and code review in parallel.
 Paste this into Claude Code or Codex in your repo to design yours:
 
 ```text
-Use the zeroshot-graph-design skill to turn how we check changes in this repo into a zeroshot graph.
+Use the zeroshot-graph-design skill to turn how we check changes
+in this repo into a zeroshot graph.
 ```
 
 The skill reads your build, test and CI setup, drafts a graph like the one above, and saves it as a
