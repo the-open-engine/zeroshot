@@ -1,7 +1,8 @@
 # Zeroshot README banners
 
 Editable HTML/CSS sources and rendered light/dark desktop PNGs, plus a portrait
-mobile PNG, for the repository README.
+mobile PNG. The repository README no longer shows a banner: it said the same thing as the text
+under it and took a phone's whole first screen. The files are kept for reuse.
 The design follows [The Open Engine](https://theopenengine.com) and
 [Zeroshot](https://zeroshot.sh), inspected on October 2, 2026: warm paper,
 handwritten headings and diagrams, yellow notes, and the company mascot.
@@ -14,8 +15,8 @@ handwritten headings and diagrams, yellow notes, and the company mascot.
 - `zeroshot-hero-light.png` and `zeroshot-hero-dark.png`: 2560 × 800 exports
   from a 1280 × 400 canvas at 2× scale.
 - `zeroshot-hero-mobile.png`: 1122 × 1402 portrait banner, exported from a 561 × 701 canvas at
-  2× scale, selected by the README below 641px viewport width, before the desktop theme sources.
-  It uses the warm-paper design in both themes.
+  2× scale. The README used to select it below 641px viewport width. It uses the warm-paper design
+  in both themes.
 - `social/starred-by.html`: the "Starred by engineers at" strip under the README badges. Its
   companies come from the self-reported GitHub company field of zeroshot stargazers, each profile
   checked by hand, so the copy says "engineers at", never "used by". Marks are Simple Icons (CC0).
@@ -119,9 +120,10 @@ The documentation retains these workflow assets; the README uses the product-pag
 
 ## Social buttons
 
-`social/buttons.html` is the source for the README call-to-action, zeroshot.sh,
-and X buttons. The Discord button is the row's only filled rust button, so it reads
-as the primary action; the other buttons stay ink pills with rust icons. Exports are
+`social/buttons.html` is the source for the README's "Talk to the team and power users on Discord" and zeroshot.sh
+buttons, plus an X button the README no longer shows. The Discord button is the only filled rust
+button, so it reads as the primary action; the other buttons stay ink pills with rust icons.
+The README also dropped the theopenengine.com and LinkedIn buttons; their PNGs remain in `social/`. Exports are
 70 px tall (35 px at 2×) and are displayed at `height="30"`.
 
 Re-render both themes with the Playwright install above:
