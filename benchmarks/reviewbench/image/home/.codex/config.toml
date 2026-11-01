@@ -1,0 +1,29 @@
+# Isolation: an agent may read the repository and run local commands, nothing
+# else. Hosted tools would reach the network through the model host.
+web_search = "disabled"
+# Model metadata for gpt-6.1-sol comes from this file (the catalog Codex CLI 0.164.0 was served on
+# 2026-10-31), so Codex does not fetch its model catalog from chatgpt.com at every start.
+model_catalog_json = "/opt/rb/config/codex-model-catalog.json"
+check_for_update_on_startup = false
+
+# The container is the sandbox. Codex's own sandbox needs unprivileged user
+# namespaces, which Docker does not allow, so every command would fail.
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+
+[features]
+apps = false
+browser_use = false
+browser_use_external = false
+browser_use_full_cdp_access = false
+computer_use = false
+image_generation = false
+in_app_browser = false
+multi_agent = false
+plugins = false
+plugin_sharing = false
+remote_plugin = false
+tool_suggest = false
+
+[analytics]
+enabled = false

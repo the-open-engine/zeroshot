@@ -1,0 +1,156 @@
+{
+  "harness": "claude",
+  "provider": "anthropic",
+  "size": "medium",
+  "activeMemory": {
+    "repository": false,
+    "graph": false
+  },
+  "globalAgents": {
+    "postmortem": {
+      "enabled": false
+    }
+  },
+  "nodes": {
+    "triage": {
+      "kind": "agent",
+      "model": "claude-sonnet-5-5",
+      "effort": "medium",
+      "sessionScope": "execution",
+      "connections": {
+        "anthropic": [
+          "ANTHROPIC_API_KEY"
+        ],
+        "sandbox": [
+          "IS_SANDBOX"
+        ]
+      }
+    },
+    "unit_review_a": {
+      "kind": "agent",
+      "model": "claude-opus-5-5",
+      "effort": "high",
+      "sessionScope": "execution",
+      "connections": {
+        "anthropic": [
+          "ANTHROPIC_API_KEY"
+        ],
+        "sandbox": [
+          "IS_SANDBOX"
+        ]
+      }
+    },
+    "unit_review_b": {
+      "kind": "agent",
+      "lane": {
+        "harness": "codex",
+        "provider": "openai"
+      },
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "sessionScope": "execution"
+    },
+    "hunt_logic": {
+      "kind": "agent",
+      "lane": {
+        "harness": "codex",
+        "provider": "openai"
+      },
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "sessionScope": "execution"
+    },
+    "hunt_state": {
+      "kind": "agent",
+      "model": "claude-opus-5-5",
+      "effort": "high",
+      "sessionScope": "execution",
+      "connections": {
+        "anthropic": [
+          "ANTHROPIC_API_KEY"
+        ],
+        "sandbox": [
+          "IS_SANDBOX"
+        ]
+      }
+    },
+    "hunt_contracts": {
+      "kind": "agent",
+      "lane": {
+        "harness": "codex",
+        "provider": "openai"
+      },
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "sessionScope": "execution"
+    },
+    "hunt_errors": {
+      "kind": "agent",
+      "model": "claude-opus-5-5",
+      "effort": "high",
+      "sessionScope": "execution",
+      "connections": {
+        "anthropic": [
+          "ANTHROPIC_API_KEY"
+        ],
+        "sandbox": [
+          "IS_SANDBOX"
+        ]
+      }
+    },
+    "hunt_claims": {
+      "kind": "agent",
+      "lane": {
+        "harness": "codex",
+        "provider": "openai"
+      },
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "sessionScope": "execution"
+    },
+    "finalize_unit": {
+      "kind": "agent",
+      "lane": {
+        "harness": "codex",
+        "provider": "openai"
+      },
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "sessionScope": "execution"
+    },
+    "finalize_rest": {
+      "kind": "agent",
+      "lane": {
+        "harness": "codex",
+        "provider": "openai"
+      },
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "sessionScope": "execution"
+    },
+    "unit_review_c": {
+      "kind": "agent",
+      "lane": {
+        "harness": "codex",
+        "provider": "openai"
+      },
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "sessionScope": "execution"
+    },
+    "unit_review_d": {
+      "kind": "agent",
+      "model": "claude-opus-5-5",
+      "effort": "high",
+      "sessionScope": "execution",
+      "connections": {
+        "anthropic": [
+          "ANTHROPIC_API_KEY"
+        ],
+        "sandbox": [
+          "IS_SANDBOX"
+        ]
+      }
+    }
+  }
+}

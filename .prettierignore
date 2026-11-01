@@ -15,3 +15,6 @@ docs/zeroshot-cli.md
 docs/zeroshot-cli.html
 docs/reference/python/*.md
 docs/reference/cluster/api.md
+# ReviewBench harness: the generated review configuration and the agent instructions keep their exact bytes
+benchmarks/reviewbench/config
+benchmarks/reviewbench/graph/prompts
