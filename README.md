@@ -53,21 +53,21 @@ use [Zeroshot Platform](https://app.zeroshot.sh/docs).
 ## Build your own graph
 
 ```text
-worker ◄──────────── any "no", with the reason ──┐
-  ▼                                              │
-risk check                                       │
-  ├─ auth, payments or a migration?              │
-  │    ▼                                         │
-  │  security review ─────────────────────── no ─┤
-  ▼    ▼                                         │
-acceptance + code review, in parallel ────── no ─┘
+worker ◄─────────────── any "no" ────┐
+  ▼                                  │
+risk check                           │
+  ├─ auth, payments or a migration?  │
+  │    ▼                             │
+  │  security review ─────────── no ─┤
+  ▼    ▼                             │
+acceptance + code review ─────── no ─┘
   ▼ both yes
 deliver
 ```
 
 An example team graph: changes that touch auth, payments or a migration get a security review
-first, then every change goes through acceptance and code review in parallel.
-[More example graphs on zeroshot.sh](https://zeroshot.sh/#topology).
+first, then every change goes through acceptance and code review in parallel. Any "no" goes back to the
+worker with the reason. [More example graphs on zeroshot.sh](https://zeroshot.sh/#topology).
 
 Paste this into Claude Code or Codex in your repo to design yours:
 
