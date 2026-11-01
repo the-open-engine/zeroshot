@@ -10,14 +10,9 @@ html, body { margin: 0; width: 1280px; height: 400px; }
 .brand img { width: 33px; height: 36px; object-fit: contain; }
 [data-theme="dark"] .brand img { filter: invert(1); }
 h1 { position: absolute; margin: 0; left: 51px; top: 87px; font-size: 120px; font-weight: 400; line-height: 1; letter-spacing: -2px; }
-.description { position: absolute; top: 206px; left: 56px; margin: 0; font-size: 44px; line-height: 1.12; }
+.description { position: absolute; top: 222px; left: 56px; margin: 0; font-size: 56px; line-height: 1.12; }
 .emphasis { position: relative; display: inline-block; }
 .emphasis::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 6px; border-bottom: 2px solid var(--accent); border-radius: 50%; transform: rotate(-1deg); }
 .url { position: absolute; bottom: 29px; left: 56px; margin: 0; color: var(--muted); font: 16px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .4px; }
-.note { position: absolute; top: 40px; right: 72px; width: 264px; height: 124px; padding: 18px 23px; margin: 0; background: linear-gradient(153deg,#fbef99 0%,#f5e777 65%,#f0de68 100%); box-shadow: 2px 8px 12px #00000020; transform: rotate(3deg); color: #26221c; font-size: 34px; line-height: 1.02; }
+.note { position: absolute; top: 128px; right: 96px; width: 392px; height: 136px; padding: 24px 30px; margin: 0; background: linear-gradient(153deg,#fbef99 0%,#f5e777 65%,#f0de68 100%); box-shadow: 2px 8px 12px #00000020; transform: rotate(3deg); color: #26221c; font-size: 40px; line-height: 1.12; }
 .note .emphasis::after { border-color: #c2240c; }
-.diagram { position: absolute; top: 184px; right: 47px; width: 444px; height: 176px; overflow: visible; }
-.diagram text { font-family: "Reenie Beanie", cursive; font-size: 31px; fill: var(--ink); text-anchor: middle; }
-.diagram .stroke { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.diagram .retry { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linecap: round; stroke-dasharray: 5 5; }
-.diagram .label { fill: var(--accent); font-size: 27px; }
