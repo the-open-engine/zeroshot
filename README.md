@@ -1,18 +1,11 @@
 <div align="center">
 
-<picture>
-  <source media="(max-width: 640px)" srcset="docs/brand/zeroshot-hero-mobile.png">
-  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/zeroshot-hero-dark.png">
-  <img alt="zeroshot: stop babysitting your agents. Prompts are suggestions; graphs are enforced." src="docs/brand/zeroshot-hero-light.png" width="100%">
-</picture>
+# zeroshot
 
-&nbsp;
+**Write your QA process down as a graph. zeroshot makes every agent run follow it.**
 
-<a href="https://theopenengine.com/discord"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/discord-cta-dark.png"><img alt="Join the zeroshot community on Discord" src="docs/brand/social/discord-cta-light.png" height="30"></picture></a>
+<a href="https://theopenengine.com/discord"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/discord-cta-dark.png"><img alt="Get help on Discord" src="docs/brand/social/discord-cta-light.png" height="30"></picture></a>
 <a href="https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/zeroshot-site-dark.png"><img alt="Website · zeroshot.sh" src="docs/brand/social/zeroshot-site-light.png" height="30"></picture></a>
-<a href="https://theopenengine.com/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/website-dark.png"><img alt="The Open Engine · theopenengine.com" src="docs/brand/social/website-light.png" height="30"></picture></a>
-<a href="https://x.com/OpenEngineHQ"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/x-dark.png"><img alt="X · @OpenEngineHQ" src="docs/brand/social/x-light.png" height="30"></picture></a>
-<a href="https://www.linkedin.com/company/the-open-engine-company"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/linkedin-dark.png"><img alt="LinkedIn" src="docs/brand/social/linkedin-light.png" height="30"></picture></a>
 
 [![Release](https://img.shields.io/github/v/release/the-open-engine/zeroshot?style=flat&label=release&labelColor=171411&color=171411)](https://github.com/the-open-engine/zeroshot/releases/latest)
 [![npm](https://img.shields.io/npm/v/%40the-open-engine-company%2Fzeroshot?style=flat&labelColor=171411&color=171411)](https://www.npmjs.com/package/@the-open-engine-company/zeroshot)
@@ -28,16 +21,10 @@
 
 </div>
 
-# zeroshot
-
-**Stop babysitting your agents.**
-
-Prompts are suggestions. Graphs are enforced.
-
-A skill can ask for a review, but the agent decides whether to listen. In zeroshot, you define your
-team's QA process as a graph: which agents write the code, which independent agents review or test
-it, what must pass, and where rejected work goes for repair. The engine enforces the graph's order,
-routing and retry limits; model output cannot add an edge or raise a bound.
+A skill can ask for a review, but the agent decides whether to listen. In a zeroshot graph, you
+decide which agents write the code, which independent agents review or test it, what must pass, and
+where rejected work goes for repair. The engine enforces the graph's order, routing and retry limits;
+model output cannot add an edge or raise a bound.
 
 Each step can use its own harness and model. Save the graph as a profile, locally or for your
 organization on Zeroshot Platform, so everyone runs the same process.
@@ -94,6 +81,8 @@ stages, their tools, services and credentials, and where failures go for repair.
 independent reviewers and a repair loop. See the [graph contract](docs/reference/cluster/graph.md)
 for supported graph structures and [Prepare a runtime environment](docs/guides/runtime-environments.md)
 for dependency and service setup.
+
+Want feedback on your graph? Post it in [Discord](https://theopenengine.com/discord).
 
 ## What users say
 
@@ -190,6 +179,7 @@ A failed run with a recoverable workspace can be
 [restarted or resumed](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run).
 
 For runtime configuration and credentials, see [Runtimes and connections](docs/concepts/runtimes-and-connections.md).
+If setup or a run fails, tell us in [Discord](https://theopenengine.com/discord).
 
 ### Run on Zeroshot Platform
 

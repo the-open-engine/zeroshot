@@ -1,7 +1,8 @@
 # Zeroshot README banners
 
 Editable HTML/CSS sources and rendered light/dark desktop PNGs, plus a portrait
-mobile PNG, for the repository README.
+mobile PNG. The repository README no longer shows a banner: it said the same thing as the text
+under it and took a phone's whole first screen. The files are kept for reuse.
 The design follows [The Open Engine](https://theopenengine.com) and
 [Zeroshot](https://zeroshot.sh), inspected on October 2, 2026: warm paper,
 handwritten headings and diagrams, yellow notes, and the company mascot.
@@ -119,9 +120,10 @@ The documentation retains these workflow assets; the README uses the product-pag
 
 ## Social buttons
 
-`social/buttons.html` is the source for the README call-to-action, zeroshot.sh,
-and X buttons. The Discord button is the row's only filled rust button, so it reads
-as the primary action; the other buttons stay ink pills with rust icons. Exports are
+`social/buttons.html` is the source for the README's "Get help on Discord" and zeroshot.sh
+buttons, plus an X button the README no longer shows. The Discord button is the only filled rust
+button, so it reads as the primary action; the other buttons stay ink pills with rust icons.
+The README also dropped the theopenengine.com and LinkedIn buttons; their PNGs remain in `social/`. Exports are
 70 px tall (35 px at 2×) and are displayed at `height="30"`.
 
 Re-render both themes with the Playwright install above:
