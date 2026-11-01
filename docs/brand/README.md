@@ -15,8 +15,8 @@ handwritten headings and diagrams, yellow notes, and the company mascot.
 - `zeroshot-hero-light.png` and `zeroshot-hero-dark.png`: 2560 × 800 exports
   from a 1280 × 400 canvas at 2× scale.
 - `zeroshot-hero-mobile.png`: 1122 × 1402 portrait banner, exported from a 561 × 701 canvas at
-  2× scale, selected by the README below 641px viewport width, before the desktop theme sources.
-  It uses the warm-paper design in both themes.
+  2× scale. The README used to select it below 641px viewport width. It uses the warm-paper design
+  in both themes.
 - `social/starred-by.html`: the "Starred by engineers at" strip under the README badges. Its
   companies come from the self-reported GitHub company field of zeroshot stargazers, each profile
   checked by hand, so the copy says "engineers at", never "used by". Marks are Simple Icons (CC0).
@@ -120,7 +120,7 @@ The documentation retains these workflow assets; the README uses the product-pag
 
 ## Social buttons
 
-`social/buttons.html` is the source for the README's "Get help on Discord" and zeroshot.sh
+`social/buttons.html` is the source for the README's "Talk to the team and power users on Discord" and zeroshot.sh
 buttons, plus an X button the README no longer shows. The Discord button is the only filled rust
 button, so it reads as the primary action; the other buttons stay ink pills with rust icons.
 The README also dropped the theopenengine.com and LinkedIn buttons; their PNGs remain in `social/`. Exports are
