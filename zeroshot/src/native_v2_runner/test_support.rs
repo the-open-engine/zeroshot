@@ -158,6 +158,7 @@ pub(crate) fn request(run: &str, node: &str, identity: (u64, u64)) -> NodeRunReq
         .assert_value()
         .clone();
     NodeRunRequest {
+        dispatch: Default::default(),
         invocation: NodeInvocation {
             reference: ExecutionRef {
                 run_id: RunId::new(run),

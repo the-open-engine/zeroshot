@@ -228,3 +228,6 @@ use openengine_cluster_testkit::assertions::{AssertValue};
 
 #[path = "full_v1_reducer/checkpoints.rs"]
 mod checkpoints;
+
+#[path = "full_v1_reducer/dispatch_metadata.rs"]
+mod dispatch_metadata;

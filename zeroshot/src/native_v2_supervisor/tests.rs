@@ -62,6 +62,7 @@ enum Behavior {
 struct DriverState {
     scripts: BTreeMap<String, VecDeque<Behavior>>,
     starts: Vec<String>,
+    contexts: Vec<(ExecutionRef, crate::native_v2_runner::NodeDispatchMetadata)>,
     emissions: Vec<String>,
     cancellations: Vec<String>,
     active: usize,
@@ -133,6 +134,9 @@ impl NodeDriver for FakeDriver {
         let behavior = {
             let mut state = self.state();
             state.starts.push(node.clone());
+            state
+                .contexts
+                .push((invocation.node.reference.clone(), invocation.dispatch));
             state.active += 1;
             state.max_active = state.max_active.max(state.active);
             state

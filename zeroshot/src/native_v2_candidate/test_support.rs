@@ -110,6 +110,7 @@ impl NodeRequestFixture<'_> {
         let environment = ResolvedEnvironment::exact(&self.binding, self.environment)
             .assert_value_with("resolve test environment");
         NodeRunRequest {
+            dispatch: Default::default(),
             invocation: NodeInvocation {
                 reference: ExecutionRef {
                     run_id: RunId::new(self.run_id),
@@ -352,4 +353,33 @@ pub(crate) fn codex_runtime(
         size,
         nodes,
     )
+}
+
+/// Shell fragment used by process fixtures to record only the public execution labels.
+#[cfg(unix)]
+pub(crate) const CAPTURE_EXECUTION_ENVIRONMENT: &str = r#"
+printf '%s\n' "$ZEROSHOT_RUN_ID" "$ZEROSHOT_NODE_NAME" "$ZEROSHOT_NODE_KIND" \
+  "$ZEROSHOT_NODE_INSTANCE_ID" "$ZEROSHOT_EXECUTION_REF" \
+  "$ZEROSHOT_NODE_ATTEMPT" "$ZEROSHOT_NODE_ITERATION" >> execution-context
+"#;
+
+#[cfg(unix)]
+pub(crate) fn assert_execution_environment(
+    actual: &str,
+    reference: &ExecutionRef,
+    dispatch: crate::native_v2_runner::NodeDispatchMetadata,
+    kind: &str,
+) {
+    assert_eq!(
+        actual,
+        format!(
+            "{}\n{}\n{kind}\n{}\n{}\n{}\n{}\n",
+            reference.run_id.as_str(),
+            reference.node.as_str(),
+            reference.node_instance,
+            reference.public_execution().assert_value().as_str(),
+            dispatch.attempt,
+            dispatch.iteration
+        )
+    );
 }

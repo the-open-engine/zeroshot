@@ -5,6 +5,15 @@ import os
 import sys
 import time
 
+if "CAPTURE_EXECUTION_CONTEXT" in os.environ:
+    names = ("ZEROSHOT_RUN_ID", "ZEROSHOT_NODE_NAME", "ZEROSHOT_NODE_KIND",
+             "ZEROSHOT_NODE_INSTANCE_ID", "ZEROSHOT_EXECUTION_REF",
+             "ZEROSHOT_NODE_ATTEMPT", "ZEROSHOT_NODE_ITERATION")
+    with open("execution-context", "a", encoding="utf-8") as context:
+        context.write("".join(os.environ[name] + "\n" for name in names))
+    assert all(name not in next(arg for arg in sys.argv if arg.startswith("--secret-env-vars="))
+               for name in names)
+
 mode = os.environ.get("TEST_MODE", "success")
 expected_model = "gateway/fixture" if mode.startswith("registry") else "auto"
 expected_session_model = "gpt-5.6-sol" if mode == "registry_command" else expected_model

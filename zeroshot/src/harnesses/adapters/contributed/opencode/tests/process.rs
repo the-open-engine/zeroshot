@@ -605,3 +605,38 @@ async fn native_configuration_rejection_is_terminal_with_native_stderr() {
         1
     );
 }
+
+#[tokio::test]
+async fn dispatch_metadata_reaches_opencode_correction_processes() {
+    use crate::native_v2_candidate::test_support::{
+        CAPTURE_EXECUTION_ENVIRONMENT, assert_execution_environment,
+    };
+    use crate::native_v2_runner::NodeDispatchMetadata;
+    let directory = TestDirectory::new("opencode-dispatch-metadata");
+    let source = script("invalid answer").replace(
+        "cat >/dev/null",
+        &format!("{CAPTURE_EXECUTION_ENVIRONMENT}\ncat >/dev/null"),
+    );
+    let adapter = adapter(&directory, &source);
+    let mut visit = invocation(&[("ZEROSHOT_NODE_NAME", "spoofed")]);
+    visit.dispatch = NodeDispatchMetadata {
+        attempt: 2,
+        iteration: 3,
+    };
+    assert_eq!(
+        run(&adapter, visit.clone()).await.assert_value(),
+        WorkerOutcome::malformed()
+    );
+    let capture =
+        std::fs::read_to_string(adapter.config.workspace.join("execution-context")).assert_value();
+    let entries = capture.lines().collect::<Vec<_>>();
+    assert_eq!(entries.len(), 21);
+    for chunk in entries.chunks_exact(7) {
+        assert_execution_environment(
+            &(chunk.join("\n") + "\n"),
+            &visit.node.reference,
+            visit.dispatch,
+            "step",
+        );
+    }
+}

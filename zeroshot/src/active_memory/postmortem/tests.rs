@@ -102,6 +102,37 @@ impl NodeDriver for Driver {
                 artifacts: Vec::new(),
             });
         }
+        let mut labels = BTreeMap::from([(
+            "ZEROSHOT_NODE_NAME".to_owned(),
+            "prior-primary-node".to_owned(),
+        )]);
+        crate::native_v2_capsule::provider_process::apply_execution_environment(
+            &mut labels,
+            &invocation,
+        )
+        .assert_value();
+        assert!(name.starts_with("active_memory_"));
+        assert_eq!(
+            labels["ZEROSHOT_RUN_ID"],
+            invocation.node.reference.run_id.as_str()
+        );
+        assert_eq!(labels["ZEROSHOT_NODE_NAME"], name);
+        assert_eq!(labels["ZEROSHOT_NODE_KIND"], "verifier");
+        assert_eq!(
+            labels["ZEROSHOT_NODE_INSTANCE_ID"],
+            invocation.node.reference.node_instance.to_string()
+        );
+        assert_eq!(
+            labels["ZEROSHOT_EXECUTION_REF"],
+            invocation
+                .node
+                .reference
+                .public_execution()
+                .assert_value()
+                .as_str()
+        );
+        assert_eq!(labels["ZEROSHOT_NODE_ATTEMPT"], "1");
+        assert_eq!(labels["ZEROSHOT_NODE_ITERATION"], "0");
         self.globals.fetch_add(1, Ordering::SeqCst);
         let concurrent = if name == "active_memory_repository_maintenance" {
             self.concurrent_store.lock().assert_value().take()

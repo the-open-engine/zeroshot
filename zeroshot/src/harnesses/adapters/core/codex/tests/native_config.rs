@@ -198,6 +198,7 @@ async fn native_exec_subcommands_are_rejected_before_process_launch() {
             .await
             .assert_value();
         let invocation = DriverInvocation {
+            dispatch: request.dispatch,
             host_context: None,
             provider_session_slot: request.invocation.reference.node_instance,
             node: request.invocation,

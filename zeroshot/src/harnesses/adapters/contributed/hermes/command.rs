@@ -194,6 +194,10 @@ pub(super) fn prepare(
         environment.remove(*name);
     }
     bootstrap_environment(&mut environment, files.home())?;
+    crate::native_v2_capsule::provider_process::apply_execution_environment(
+        &mut environment,
+        invocation,
+    )?;
     let memory = memory_capability(adapter, invocation, files);
     let options = crate::harnesses::native_config::invocation_options(
         invocation,
@@ -415,6 +419,12 @@ fn declared_context(invocation: &DriverInvocation, provider: bool) -> BTreeMap<S
     invocation
         .environment
         .iter()
+        .filter(|(name, _)| {
+            !crate::native_v2_capsule::provider_process::is_execution_environment_name(
+                name.as_str(),
+                cfg!(windows),
+            )
+        })
         .filter(|(name, _)| CREDENTIALS.contains(&name.as_str()) == provider)
         .map(|(name, value)| (name.as_str().to_owned(), value.to_owned()))
         .collect()
@@ -475,7 +485,11 @@ pub(super) fn validate_connection_name(name: &str) -> Result<(), NodeRunnerError
     if reserved.contains(&upper.as_str())
         || upper.starts_with("XDG_")
         || (upper.starts_with("HERMES_") && !permission.contains(&name))
-        || upper.starts_with("ZEROSHOT_")
+        || (upper.starts_with("ZEROSHOT_")
+            && !crate::native_v2_capsule::provider_process::is_execution_environment_name(
+                name,
+                cfg!(windows),
+            ))
         || (cfg!(windows)
             && name != upper
             && (LOCAL_ENVIRONMENT.contains(&upper.as_str())

@@ -127,23 +127,23 @@ async fn hosted_case(harness: &str, verifier: bool, policy: &str, native: Option
     };
     let admitted = admission(harness, verifier, binding.clone()).await;
     let runner = hosted_runner(&fixture, harness, &admitted, pool);
-    let mut handle = runner
-        .start(
-            NodeRequestFixture {
-                run_id: "permission-test",
-                node: "work",
-                node_instance: 1,
-                execution: 1,
-                worker: "agent.work@1",
-                instructions: "Check policy.",
-                input: Value::Null,
-                binding,
-                environment: values,
-            }
-            .into_request(),
-        )
-        .await
-        .assert_value();
+    let mut request = NodeRequestFixture {
+        run_id: "permission-test",
+        node: "work",
+        node_instance: 1,
+        execution: 1,
+        worker: "agent.work@1",
+        instructions: "Check policy.",
+        input: Value::Null,
+        binding,
+        environment: values,
+    }
+    .into_request();
+    request.dispatch = crate::native_v2_runner::NodeDispatchMetadata {
+        attempt: 2,
+        iteration: 3,
+    };
+    let mut handle = runner.start(request).await.assert_value();
     let mut output = handle.take_initial_output().assert_value();
     let (logs, completion) = tokio::join!(
         async {
@@ -264,6 +264,14 @@ for name in ['CODEX_BASE_URL','OPENAI_BASE_URL','ANTHROPIC_BASE_URL',
     assert name not in os.environ, 'host setting leaked into embedded provider: ' + name
 harness, policy = os.environ['HARNESS'], os.environ['POLICY']
 verifier = os.environ['VERIFIER'] == 'true'
+assert os.environ['ZEROSHOT_RUN_ID'] == 'permission-test'
+assert os.environ['ZEROSHOT_NODE_NAME'] == 'work'
+assert os.environ['ZEROSHOT_NODE_KIND'] == ('verifier' if verifier else 'step')
+assert os.environ['ZEROSHOT_NODE_INSTANCE_ID'] == '1'
+assert os.environ['ZEROSHOT_EXECUTION_REF'].startswith('nv2-')
+assert os.environ['ZEROSHOT_NODE_ATTEMPT'] == '2'
+assert os.environ['ZEROSHOT_NODE_ITERATION'] == '3'
+
 probe = sys.argv[1:2] == ['app-server'] or '--safe-mode' in sys.argv
 if probe:
     pathlib.Path('inspection-proof').write_text('inspected')

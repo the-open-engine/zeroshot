@@ -20,6 +20,9 @@ use crate::native_v2_runner::{
 };
 use crate::worker_catalog::ReasoningEffort;
 
+mod context;
+pub(crate) use context::{apply_execution_environment, is_execution_environment_name};
+
 mod environment;
 pub(crate) use environment::{
     LocalHarnessEnvironment, current_process_environment, extend_declared_environment,

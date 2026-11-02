@@ -595,3 +595,39 @@ async fn native_fork_rejection_never_starts_a_provider_process() {
     );
     assert!(!directory.child("workspace/launched").exists());
 }
+
+#[tokio::test]
+async fn dispatch_metadata_reaches_pi_child_and_overrides_declared_copies() {
+    use crate::native_v2_candidate::test_support::{
+        CAPTURE_EXECUTION_ENVIRONMENT, assert_execution_environment,
+    };
+    use crate::native_v2_runner::NodeDispatchMetadata;
+    let directory = TestDirectory::new("pi-dispatch-metadata");
+    let body = script(&[COMPLETED_TURN]).replace(
+        "cat > /dev/null",
+        &format!("{CAPTURE_EXECUTION_ENVIRONMENT}\ncat > /dev/null"),
+    );
+    let adapter = scripted_adapter(&directory, &body);
+    let mut visit = invocation(
+        agent_binding(
+            "opaque-model",
+            None,
+            SessionScope::Execution,
+            &["ZEROSHOT_NODE_NAME"],
+        ),
+        NodeRole::Worker,
+        resolved(
+            &["ZEROSHOT_NODE_NAME"],
+            &[("ZEROSHOT_NODE_NAME", "spoofed")],
+        ),
+    );
+    visit.dispatch = NodeDispatchMetadata {
+        attempt: 2,
+        iteration: 3,
+    };
+    let (outcome, _) = run_invocation(&adapter, visit.clone(), false).await;
+    outcome.assert_value();
+    let capture =
+        std::fs::read_to_string(directory.child("workspace/execution-context")).assert_value();
+    assert_execution_environment(&capture, &visit.node.reference, visit.dispatch, "step");
+}

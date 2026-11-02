@@ -169,3 +169,138 @@ async fn gateway_correction_keeps_endpoint_auth_and_model_on_resume() {
     assert!(logs.contains("visible [REDACTED]"));
     assert!(!logs.contains("fake-gateway-key"));
 }
+
+#[tokio::test]
+async fn dispatch_metadata_survives_corrections_and_session_revisits() {
+    use crate::native_v2_candidate::test_support::{
+        CAPTURE_EXECUTION_ENVIRONMENT, assert_execution_environment,
+    };
+    use crate::native_v2_runner::NodeDispatchMetadata;
+    let directory = TestDirectory::new("codex-dispatch-metadata");
+    let source = SCRIPT.replace(
+        "set -eu",
+        &format!("set -eu\n{CAPTURE_EXECUTION_ENVIRONMENT}"),
+    );
+    let adapter =
+        scripted_adapter_with(&directory, CodexProvider::OpenAi, "codex-context", &source);
+    let admitted = admitted(
+        binding(
+            SessionScope::NodeInstance,
+            &[
+                "CAPTURE_PATH",
+                "CORRECT_OUTPUT",
+                "OPENAI_API_KEY",
+                "ZEROSHOT_NODE_NAME",
+            ],
+        ),
+        CodexProvider::OpenAi,
+    )
+    .await;
+    let runtime = runner(&admitted, adapter);
+    let values = [
+        (
+            "CAPTURE_PATH",
+            directory.child("capture").display().to_string(),
+        ),
+        ("CORRECT_OUTPUT", "true".to_owned()),
+        ("OPENAI_API_KEY", "fake-key".to_owned()),
+        ("ZEROSHOT_NODE_NAME", "spoofed".to_owned()),
+    ];
+    let mut first = request(&admitted, 1, &values);
+    first.dispatch = NodeDispatchMetadata {
+        attempt: 2,
+        iteration: 3,
+    };
+    let mut second = request(&admitted, 2, &values);
+    second.dispatch = NodeDispatchMetadata {
+        attempt: 1,
+        iteration: 4,
+    };
+    for visit in [&first, &second] {
+        let (_, result) =
+            complete_with_logs(runtime.start(visit.clone()).await.assert_value()).await;
+        result.assert_value();
+    }
+    let capture = fs::read_to_string(directory.child("workspace/execution-context")).assert_value();
+    let entries = capture.lines().collect::<Vec<_>>();
+    assert_eq!(entries.len(), 21); // First visit plus correction, then a reused session.
+    for (chunk, visit) in entries.chunks_exact(7).zip([&first, &first, &second]) {
+        assert_execution_environment(
+            &(chunk.join("\n") + "\n"),
+            &visit.invocation.reference,
+            visit.dispatch,
+            "step",
+        );
+    }
+}
+
+#[tokio::test]
+async fn dispatch_metadata_is_isolated_between_concurrent_node_instances() {
+    use crate::native_v2_candidate::test_support::{
+        CAPTURE_EXECUTION_ENVIRONMENT, assert_execution_environment,
+    };
+    use crate::native_v2_contract::NodeInstanceId;
+    use crate::native_v2_runner::NodeDispatchMetadata;
+    let directory = TestDirectory::new("codex-concurrent-metadata");
+    let capture = CAPTURE_EXECUTION_ENVIRONMENT.replace(
+        " >> execution-context",
+        " >> execution-context-$ZEROSHOT_NODE_INSTANCE_ID",
+    );
+    let source = SCRIPT.replace("set -eu", &format!("set -eu\n{capture}"));
+    let adapter =
+        scripted_adapter_with(&directory, CodexProvider::OpenAi, "codex-context", &source);
+    let admitted = admitted(
+        binding(
+            SessionScope::NodeInstance,
+            &["CAPTURE_PATH", "OPENAI_API_KEY"],
+        ),
+        CodexProvider::OpenAi,
+    )
+    .await;
+    let runtime = runner(&admitted, adapter);
+    let first_values = [
+        (
+            "CAPTURE_PATH",
+            directory.child("capture-1").display().to_string(),
+        ),
+        ("OPENAI_API_KEY", "fake-key".to_owned()),
+    ];
+    let second_values = [
+        (
+            "CAPTURE_PATH",
+            directory.child("capture-2").display().to_string(),
+        ),
+        ("OPENAI_API_KEY", "fake-key".to_owned()),
+    ];
+    let mut first = request(&admitted, 1, &first_values);
+    first.dispatch = NodeDispatchMetadata {
+        attempt: 2,
+        iteration: 3,
+    };
+    let mut second = request(&admitted, 2, &second_values);
+    second.invocation.reference.node_instance = NodeInstanceId::new(2).assert_value();
+    second.dispatch = NodeDispatchMetadata {
+        attempt: 1,
+        iteration: 4,
+    };
+    let (left, right) = tokio::join!(runtime.start(first.clone()), runtime.start(second.clone()));
+    let (left, right) = tokio::join!(
+        complete_with_logs(left.assert_value()),
+        complete_with_logs(right.assert_value())
+    );
+    left.1.assert_value();
+    right.1.assert_value();
+    for visit in [first, second] {
+        let capture = fs::read_to_string(directory.child(&format!(
+            "workspace/execution-context-{}",
+            visit.invocation.reference.node_instance
+        )))
+        .assert_value();
+        assert_execution_environment(
+            &capture,
+            &visit.invocation.reference,
+            visit.dispatch,
+            "step",
+        );
+    }
+}

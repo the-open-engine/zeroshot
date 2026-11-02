@@ -1443,3 +1443,38 @@ async fn native_session_initialization_rejection_fails_without_sending_a_prompt(
             .any(|message| message["method"] == "session.send")
     );
 }
+
+#[tokio::test]
+async fn dispatch_metadata_reaches_copilot_without_secret_filtering() {
+    use crate::native_v2_candidate::test_support::assert_execution_environment;
+    use crate::native_v2_runner::NodeDispatchMetadata;
+    let fixture = Fixture::with_values(
+        "success",
+        BTreeMap::from([
+            ("CAPTURE_EXECUTION_CONTEXT".to_owned(), "true".to_owned()),
+            ("ZEROSHOT_NODE_NAME".to_owned(), "spoofed".to_owned()),
+        ]),
+    )
+    .await;
+    let mut visit = fixture.request(1);
+    visit.dispatch = NodeDispatchMetadata {
+        attempt: 2,
+        iteration: 3,
+    };
+    fixture
+        .runtime
+        .start(visit.clone())
+        .await
+        .assert_value()
+        .completion()
+        .await
+        .assert_value();
+    let capture = std::fs::read_to_string(fixture.directory.child("workspace/execution-context"))
+        .assert_value();
+    assert_execution_environment(
+        &capture,
+        &visit.invocation.reference,
+        visit.dispatch,
+        "step",
+    );
+}
