@@ -269,3 +269,23 @@ test('portable profile JSON rejects environment references and definitions', () 
     );
   }
 });
+
+test('native configuration is lossless through document JSON and lane changes', () => {
+  const doc = fixture();
+  doc.runtime.nodes.worker = {
+    kind: 'agent',
+    model: 'opaque',
+    harnessConfig: {
+      args: ['--tools', 'Read,Grep,Glob'],
+      options: { futureNativeKey: { nested: [null, true] } },
+    },
+  };
+  assertDocument(doc);
+  const roundTrip = JSON.parse(JSON.stringify(doc)) as Document;
+  roundTrip.runtime.nodes.worker.lane = { harness: 'copilot', provider: 'github' };
+  assertDocument(roundTrip);
+  assert.deepEqual(
+    roundTrip.runtime.nodes.worker.harnessConfig,
+    doc.runtime.nodes.worker.harnessConfig
+  );
+});

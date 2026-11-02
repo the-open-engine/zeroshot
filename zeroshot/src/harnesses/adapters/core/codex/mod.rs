@@ -7,6 +7,7 @@
 
 mod command;
 pub(crate) mod memory;
+mod native_config;
 mod output;
 mod permissions;
 mod process;
@@ -156,6 +157,17 @@ impl NativeV2CodexAdapter {
                 )
             })?,
         ]);
+        let native = crate::harnesses::native_config::invocation_args(
+            invocation,
+            "codex",
+            native_config::validate,
+        )?;
+        if self.runners.is_hosted() {
+            native_config::validate_contained(&native).map_err(|detail| {
+                crate::harnesses::native_config::failure(invocation, "codex", &detail)
+            })?;
+        }
+        argv.extend(native);
         add_session_target(&mut argv, input.resume);
 
         environment.entry("TMPDIR".to_owned()).or_insert(
@@ -281,7 +293,10 @@ impl NativeV2CodexAdapter {
             if let Some(outcome) = self
                 .advance_run(&turn, &mut state)
                 .await
-                .map_err(|error| state.retry.redact_error(error))?
+                .map_err(|error| state.retry.redact_error(error))
+                .map_err(|error| {
+                    crate::harnesses::native_config::context_error(invocation, "codex", error)
+                })?
             {
                 return Ok(outcome);
             }
@@ -303,6 +318,11 @@ impl NativeV2CodexAdapter {
             Err(NodeRunnerError::Driver) => {
                 state.retry_provider_failure(turn, None).await?;
                 Ok(None)
+            }
+            Err(NodeRunnerError::DriverDetail(detail))
+                if turn.invocation.node.binding.harness_config().is_some() =>
+            {
+                Err(NodeRunnerError::DriverDetail(detail))
             }
             Err(NodeRunnerError::DriverDetail(detail)) => {
                 state.retry_provider_failure(turn, Some(&detail)).await?;
@@ -409,7 +429,14 @@ impl NativeV2CodexAdapter {
             },
         )?;
         let native_redactions = self
-            .apply_permission_default(files.clone(), &mut command, turn.control)
+            .apply_permission_default(
+                crate::harnesses::native_config::PermissionInput {
+                    files: files.clone(),
+                    config: turn.invocation.node.binding.harness_config(),
+                },
+                &mut command,
+                turn.control,
+            )
             .await?;
         crate::native_v2_capsule::provider_process::apply_execution_environment(
             &mut command.environment,
@@ -512,6 +539,9 @@ async fn resolve_codex_output(
     state: &CodexRunState,
 ) -> Result<CodexTurnAdvance, NodeRunnerError> {
     if let Some(failure) = output.failure_message() {
+        if turn.invocation.node.binding.harness_config().is_some() && !output.task_started {
+            return Err(NodeRunnerError::DriverDetail(failure.to_owned()));
+        }
         return Ok(CodexTurnAdvance::ProviderFailure(failure.to_owned()));
     }
     let response = resolve_agent_response_with_dialect(

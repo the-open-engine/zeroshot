@@ -94,8 +94,8 @@ directory's `register` function. Core implementations live beside it under `adap
 existing public `native_v2_codex`, `native_v2_claude`, `native_v2_copilot` and `native_v2_pi` module
 paths remain available to embedders.
 
-A registration supplies a descriptor, provider-access declarations, local path normalization and a
-factory. Keep descriptors pure: no credential reads, filesystem inspection, process launches or
+A registration supplies a descriptor, provider-access declarations, local path normalization, pure
+reserved-control validation for `harnessConfig`, and a factory. Keep descriptors pure: no credential reads, filesystem inspection, process launches or
 provider requests. The registry validates bounded harness/provider IDs and compatible pairs.
 Factories receive `HarnessBuildContext` and return `HarnessAdapter` with `NodeDriver` and
 `SessionFactory` implementations.
@@ -120,3 +120,18 @@ Test native bridges too, and check the core-only library:
 ```bash
 cargo check --locked --package zeroshot --lib --no-default-features
 ```
+
+## Native configuration ownership
+
+All registered adapters implement [per-node native configuration](../reference/runtime-plan.md#per-node-native-harness-configuration).
+Keep carrier parsing shared and reserved controls adapter-local. Bind configuration at the invocation
+or session boundary, never on the lane-wide adapter. Native APIs use object options; CLI arguments
+remain argument tokens. Preserve the same configuration on corrections, retries and session resumes.
+Leave unknown native names and values to native initialization. Do not add an option allowlist, portable
+permission policy, native validation prompt, or generalized inspection subprocess.
+
+Owned authentication, transport, response schemas, identity, memory hooks and containment cannot be
+replaced through overrides. Existing permission inspection only decides whether to add an automatic
+local bypass. Native initialization failure must preserve its bounded redacted cause and node/harness
+identity, settle cleanup, and skip automatic correction/fallback/retry. Focused process/session tests
+must cover forwarding, isolation, reuse and rejection for every registered adapter.

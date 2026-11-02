@@ -199,7 +199,13 @@ pub(super) fn prepare(
         invocation,
     )?;
     let memory = memory_capability(adapter, invocation, files);
+    let options = crate::harnesses::native_config::invocation_options(
+        invocation,
+        "hermes",
+        super::native_config::validate,
+    )?;
     let init = json!({
+        "options":options,
         "type":"init", "provider":adapter.config.provider, "model":model.as_str(),
         "effort":effort.map(effort_token), "sessionId":session_id,
         "dbPath":files.home().join("hermes.sqlite"), "contained":adapter.runners.is_hosted(),

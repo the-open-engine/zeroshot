@@ -181,7 +181,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   probe, custom policy parser or cache-lock management. Contained OpenCode adds `--auto` in its
   disposable capsule. Active Memory installs a separate native plugin alongside user plugins.
   Explicit `OPENCODE_PURE=true` conflicts with declared authentication because it disables the
-  required provider overlay.
+  required provider overlay. Per-node `--pure` overrides are reserved because they disable
+  runtime-owned authentication and Active Memory plugins.
   Hermes uses its installed canonical executable's interpreter and native `AIAgent`/configuration
   factories in a private process, without starting or attaching its shared gateway. A scoped import
   hook preserves native startup; `--version --help` fails closed if that hook is unavailable.
@@ -206,6 +207,29 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Caller-selected remote backends retain native containment guarantees. Native token deltas remain visible; unreported
   auxiliary or child work marks totals incomplete. Active Memory attaches native model-facing
   notices after tool-result bookkeeping, preserving native transforms and durable messages.
+- Agent bindings may carry a secret-free `harnessConfig` object (64 KiB encoded), with native
+  `args` and/or `options` carriers owned by each adapter. The effective node lane interprets it;
+  lane changes retain it without translation. Registration supplies pure reserved-control validation,
+  and the invocation/session builder applies fresh node-local overrides through native mechanisms.
+  Native option names/values and unknown JSON keys remain harness-owned. Connections own credentials;
+  model/provider, identity, transport, response contract, required memory hooks and containment stay
+  runtime-owned. Never implement overrides by writing user/project configuration. Local Claude/Codex
+  native overrides suppress automatic permission bypass and never enter arbitrary flag probes.
+  Binding clones, generated reviewers and built-in postmortem specialists retain native configuration
+  to avoid broadening restrictions; reviewer credentials and sessions retain their existing ownership.
+  Native initialization rejection is terminal in the adapter and keeps redacted diagnostics and node identity.
+  Reserve native aliases alongside long runtime-owned controls. Short-option matching belongs to
+  the adapter's parser syntax: Pi recognizes exact short tokens, so native values such as `-read`
+  must not be interpreted as a joined `-r` option. Contained Pi owns tool selection and project trust
+  under both long names and their native aliases; session forks are reserved in every placement.
+  Codex exec subcommand tokens stay runtime-owned wherever they occur; literal native option values
+  matching those tokens use `--option=value`. Claude session selectors and system-prompt file forms
+  are reserved alongside the inline/session controls they replace.
+  CLI adapters own native operand boundaries and reject unbound positional prompts/files anywhere
+  in `args`. Unknown option names remain native-owned; bind their operands explicitly with supported
+  joined syntax (`--option=value`) rather than guessing whether an unknown switch consumes a value.
+  Codex image prompt attachments and Pi model-listing invocations remain runtime-owned; they must
+  not replace or augment an admitted task through native configuration.
 - Model identifiers are opaque provider-owned strings. Do not infer a harness from a provider/model,
   maintain runtime model catalogs, or validate provider availability. Admission may reject only known
   incompatible harness/provider pairs. A caller may declare optional bounded `contextWindow` and

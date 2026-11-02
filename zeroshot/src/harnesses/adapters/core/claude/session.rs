@@ -75,7 +75,10 @@ impl NodeDriver for ClaudeAdapter {
             if let Some(outcome) = self
                 .advance_run(&turn, &mut state, &control)
                 .await
-                .map_err(|error| state.retry.redact_error(error))?
+                .map_err(|error| state.retry.redact_error(error))
+                .map_err(|error| {
+                    crate::harnesses::native_config::context_error(&invocation, "claude", error)
+                })?
             {
                 retain_session(&invocation.node, session, state.resume_id.as_deref()).await?;
                 return Ok(outcome);

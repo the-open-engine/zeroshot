@@ -385,6 +385,14 @@ pub(super) fn session_parameters(
         "enableSessionTelemetry":false, "streaming":false,
         "envValueMode":"direct", "clientName":"zeroshot",
     });
+    params
+        .as_object_mut()
+        .ok_or(NodeRunnerError::Driver)?
+        .extend(crate::harnesses::native_config::invocation_options(
+            invocation,
+            "copilot",
+            super::native_config::validate,
+        )?);
     if let Some(effort) = effort {
         params["reasoningEffort"] = json!(effort_token(*effort));
     }

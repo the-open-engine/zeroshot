@@ -986,7 +986,7 @@ async fn postmortem_inherits_an_agent_verifier_after_a_decision_verifier() {
         "runtime":{"harness":"codex","provider":"openai","size":"small","nodes":{
             "triage":{"kind":"decision","api":"systemone","model":"decision-model","minProbability":0.85,"uncertainLabel":"uncertain",
                 "connections":{"decisions":["DECISION_ENDPOINT","DECISION_API_KEY"]}},
-            "reviewer":{"kind":"agent","model":"postmortem-model"}
+            "reviewer":{"kind":"agent","model":"postmortem-model","harnessConfig":{"args":["--config","web_search=\"disabled\""]}}
         }}
     })).unwrap();
     let main = NativeV2Admission.admit(main).await.unwrap();
@@ -996,6 +996,10 @@ async fn postmortem_inherits_an_agent_verifier_after_a_decision_verifier() {
             panic!("agent binding")
         };
         assert_eq!(model.as_str(), "postmortem-model");
+        assert_eq!(
+            binding.harness_config().unwrap().args().unwrap(),
+            ["--config", "web_search=\"disabled\""]
+        );
     }
 }
 

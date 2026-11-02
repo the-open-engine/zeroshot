@@ -464,7 +464,13 @@ fn active_memory_capability_is_private_and_failed_installation_reports_unknown_d
     let source = Arc::new(MemoryFailures(std::sync::atomic::AtomicUsize::new(0)));
     let hooks = crate::active_memory::hooks::ActiveMemoryHooks::new(source.clone()).assert_value();
     let adapter = adapter.with_active_memory(Some(Arc::new(hooks)));
-    let (_, init) = prepare(&adapter, &files, &[]).assert_value();
+    let mut invocation = invocation(&[]);
+    crate::harnesses::native_config::tests::set(
+        &mut invocation.node.binding,
+        json!({"options":{"agent":{"max_turns":12}}}),
+    );
+    let (_, init) = command::prepare(&adapter, &invocation, &files, "owned-session").assert_value();
+    assert_eq!(init["options"]["agent"]["max_turns"], 12);
     let path = PathBuf::from(init["memoryCapability"].as_str().assert_value());
     assert_eq!(path, files.home().join("active-memory-capability.json"));
     let capability: Value =

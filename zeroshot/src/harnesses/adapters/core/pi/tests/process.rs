@@ -15,6 +15,7 @@ use openengine_cluster_protocol::WorkerOutcome;
 use openengine_cluster_testkit::assertions::AssertValue;
 
 use super::*;
+use serde_json::json;
 use crate::native_v2_runner::test_support::control;
 use crate::native_v2_runner::{LiveOutput, NodeDriver, NodeRunnerError};
 
@@ -357,13 +358,28 @@ async fn a_rejected_response_is_corrected_in_the_same_session() {
         first = REJECTED_ENVELOPE,
         later = STRING_ENVELOPE,
     );
+    let body = body.replace(
+        "cat > /dev/null",
+        "printf '%s\\n' \"$@\" >> native-args\ncat > /dev/null",
+    );
     let adapter = scripted_adapter(&directory, &body);
     let mut turn = scripted_invocation();
+    crate::harnesses::native_config::tests::set(
+        &mut turn.node.binding,
+        json!({"args":["--tools","read,grep"]}),
+    );
     turn.response = NodeResponseContract::Worker {
         output: PayloadType::String,
     };
     let (outcome, seen) = run_invocation(&adapter, turn, false).await;
     assert!(outcome.is_ok(), "{outcome:?}");
+    assert_eq!(
+        std::fs::read_to_string(directory.child("workspace/native-args"))
+            .unwrap()
+            .matches("read,grep")
+            .count(),
+        2
+    );
     assert!(
         seen.iter()
             .any(|output| output.text.contains("requesting correction")),
@@ -504,6 +520,146 @@ async fn exhausted_corrections_publish_only_the_last_validation_error_as_failure
         .collect::<Vec<_>>();
     assert_eq!(failures.len(), 1);
     assert!(failures[0].text.contains("final output rejected:"));
+}
+
+#[tokio::test]
+async fn native_args_are_isolated_per_node_on_the_same_adapter() {
+    let directory = TestDirectory::new("pi-native-config");
+    let source = script(&[COMPLETED_TURN]).replace(
+        "cat > /dev/null",
+        "printf '%s\\n' \"$@\" >> native-args\ncat > /dev/null",
+    );
+    let adapter = scripted_adapter(&directory, &source);
+    for config in [Some(json!({"args":["--tools","read,grep"]})), None] {
+        let mut invocation = scripted_invocation();
+        if let Some(config) = config {
+            crate::harnesses::native_config::tests::set(&mut invocation.node.binding, config);
+        }
+        run_invocation(&adapter, invocation, false)
+            .await
+            .0
+            .assert_value();
+    }
+    let capture = std::fs::read_to_string(directory.child("workspace/native-args")).assert_value();
+    assert_eq!(capture.matches("read,grep").count(), 1);
+}
+
+#[tokio::test]
+async fn native_launch_rejection_preserves_cause_without_correction() {
+    let directory = TestDirectory::new("pi-native-rejection");
+    let adapter = scripted_adapter(
+        &directory,
+        "#!/bin/sh\nprintf 'launch\\n' >> launches\nprintf '%s\\n' 'invalid --tools native-selection' >&2\nexit 2\n",
+    );
+    let mut invocation = scripted_invocation();
+    crate::harnesses::native_config::tests::set(
+        &mut invocation.node.binding,
+        json!({"args":["--tools","native-selection"]}),
+    );
+    let (result, logs) = run_invocation(&adapter, invocation, false).await;
+    let error = result.unwrap_err().to_string();
+    assert!(
+        error.contains("--tools") && error.contains("harness `pi`") && error.contains("node `"),
+        "{error}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(directory.child("workspace/launches"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
+    assert!(
+        !logs
+            .iter()
+            .any(|log| log.text.contains("requesting correction"))
+    );
+}
+
+#[tokio::test]
+async fn native_fork_rejection_never_starts_a_provider_process() {
+    let directory = TestDirectory::new("pi-native-fork-rejection");
+    let body =
+        script(&[COMPLETED_TURN]).replace("cat > /dev/null", "touch launched\ncat > /dev/null");
+    let adapter = scripted_adapter(&directory, &body);
+    let mut invocation = scripted_invocation();
+    crate::harnesses::native_config::tests::set(
+        &mut invocation.node.binding,
+        json!({"args":["--fork","caller-history.jsonl"]}),
+    );
+    let (result, _) = run_invocation(&adapter, invocation, false).await;
+    let detail = result.unwrap_err().to_string();
+    assert!(
+        detail.contains("--fork") && detail.contains("harness `pi`"),
+        "{detail}"
+    );
+    assert!(!directory.child("workspace/launched").exists());
+}
+
+#[tokio::test]
+async fn positional_native_messages_and_files_never_start_a_provider_process() {
+    for args in [
+        json!(["--no-context-files", "CONFIG_PROMPT_1", "CONFIG_PROMPT_2"]),
+        json!(["--no-context-files", "@caller-prompt.txt"]),
+        json!(["--tools", "read,grep", "CONFIG_PROMPT_1"]),
+    ] {
+        let directory = TestDirectory::new("pi-positional-rejection");
+        let body =
+            script(&[COMPLETED_TURN]).replace("cat > /dev/null", "touch launched\ncat > /dev/null");
+        let adapter = scripted_adapter(&directory, &body);
+        let mut invocation = scripted_invocation();
+        crate::harnesses::native_config::tests::set(
+            &mut invocation.node.binding,
+            json!({"args":args}),
+        );
+        let (result, logs) = run_invocation(&adapter, invocation, false).await;
+        let detail = result.unwrap_err().to_string();
+        for expected in [
+            "harness `pi`",
+            "node `",
+            "harnessConfig.args[",
+            "positional",
+        ] {
+            assert!(detail.contains(expected), "{detail}");
+        }
+        assert!(!detail.contains("CONFIG_PROMPT") && !detail.contains("caller-prompt"));
+        assert!(!directory.child("workspace/launched").exists());
+        assert!(
+            !logs
+                .iter()
+                .any(|log| log.text.contains("requesting correction"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn bound_native_option_operands_reach_pi_without_entering_the_task_prompt() {
+    let directory = TestDirectory::new("pi-bound-native-operands");
+    let body = script(&[COMPLETED_TURN]).replace(
+        "cat > /dev/null",
+        "printf '%s\\n' \"$@\" > native-args\ncat > task-prompt",
+    );
+    let adapter = scripted_adapter(&directory, &body);
+    let mut invocation = scripted_invocation();
+    crate::harnesses::native_config::tests::set(
+        &mut invocation.node.binding,
+        json!({"args":["--no-context-files","--tools","-read","--name","native display name"]}),
+    );
+    run_invocation(&adapter, invocation, false)
+        .await
+        .0
+        .assert_value();
+    let args = std::fs::read_to_string(directory.child("workspace/native-args")).assert_value();
+    assert!(
+        args.contains("--tools\n-read\n--name\nnative display name\n"),
+        "{args}"
+    );
+    let prompt = std::fs::read_to_string(directory.child("workspace/task-prompt")).assert_value();
+    assert!(prompt.contains("Exercise the Pi adapter."), "{prompt}");
+    assert!(
+        !prompt.contains("native display name") && !prompt.contains("-read"),
+        "{prompt}"
+    );
 }
 
 #[tokio::test]

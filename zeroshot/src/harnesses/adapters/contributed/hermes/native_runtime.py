@@ -302,6 +302,15 @@ def launch_policy(frame, config, provider, base_url):
     return replace(policy, config_json=json.dumps(config), terminal_json=json.dumps(terminal))
 
 
+def merge_options(config, options):
+    """Overlay only this process's native configuration, retaining unmentioned native settings."""
+    for key, value in options.items():
+        if isinstance(value, dict) and isinstance(config.get(key), dict):
+            merge_options(config[key], value)
+        else:
+            config[key] = value
+
+
 class Runtime:
     def __init__(self, emit):
         self.emit = emit
@@ -332,6 +341,7 @@ class Runtime:
         require_parseable_user_config(ignore_user_config=env_var_enabled("HERMES_IGNORE_USER_CONFIG"))
         authority = frame.get("authority") or {}
         config = present_sections(load_config_readonly())
+        merge_options(config, frame.get("options") or {})
         if frame["provider"] == "gateway":
             config.setdefault("model", {})["api_mode"] = authority.get("apiMode")
         self.auth_module = sibling("native_auth")
@@ -535,6 +545,14 @@ class Runtime:
             return str(error)
         if self.auth_module is not None and isinstance(error, self.auth_module.AuthError):
             return str(error)
+        if not self.agent and isinstance(error, (TypeError, ValueError, KeyError)):
+            detail = str(error)
+            if self.authority is not None:
+                detail = self.authority.sanitize_owned_error(detail)
+            else:
+                from agent.redact import redact_sensitive_text
+                detail = redact_sensitive_text(detail, force=True)
+            return f"Hermes native initialization failed ({type(error).__name__}): {detail[:4096]}"
         return f"Hermes native runtime failed ({type(error).__name__})."
 
 

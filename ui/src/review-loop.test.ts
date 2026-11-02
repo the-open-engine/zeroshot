@@ -305,3 +305,18 @@ test('a generated reviewer retains the authored lane without inheriting credenti
     assert.deepEqual(source, before);
   }
 });
+
+test('generated reviewer preserves native configuration without sharing its object', () => {
+  const source = document();
+  source.runtime.nodes.draft.harnessConfig = { args: ['--tools', 'Read,Grep,Glob'] };
+  const result = createReviewLoop(source, 'draft');
+  const reviewer = allNodes(result.document.graph.root).find((node) => node.kind === 'verifier')!;
+  const inherited = result.document.runtime.nodes[reviewer.name].harnessConfig!;
+  assert.deepEqual(inherited, source.runtime.nodes.draft.harnessConfig);
+  inherited.args!.push('--native-option');
+  assert.deepEqual(source.runtime.nodes.draft.harnessConfig.args, ['--tools', 'Read,Grep,Glob']);
+  assert.deepEqual(result.document.runtime.nodes.draft.harnessConfig!.args, [
+    '--tools',
+    'Read,Grep,Glob',
+  ]);
+});

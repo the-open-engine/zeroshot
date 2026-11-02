@@ -30,6 +30,7 @@ pub(crate) fn registration() -> HarnessRegistration {
         build,
         access,
         normalize_local,
+        validate_config: super::native_config::validate,
     }
 }
 

@@ -24,6 +24,7 @@ fn agent_binding() -> NodeRuntimeBinding {
         lane: None,
         model: crate::worker_catalog::ModelId::new("gpt-5.6-sol").assert_value(),
         effort: Some(ReasoningEffort::Max),
+        harness_config: None,
         context_window: None,
         max_tokens: None,
         session_scope: SessionScope::Execution,

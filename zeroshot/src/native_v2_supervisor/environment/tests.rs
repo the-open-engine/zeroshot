@@ -38,6 +38,7 @@ fn binding(key: &str, name: &EnvironmentVariableName) -> NodeRuntimeBinding {
         lane: None,
         model: ModelId::new("gpt-5.6").assert_value(),
         effort: None,
+        harness_config: None,
         context_window: None,
         max_tokens: None,
         session_scope: SessionScope::Execution,

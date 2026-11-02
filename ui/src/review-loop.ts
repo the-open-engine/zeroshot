@@ -397,6 +397,9 @@ export function createReviewLoop(
   next.runtime.nodes[reviewerName] = {
     kind: 'agent',
     model: originalRuntime.model ?? '',
+    ...(originalRuntime.harnessConfig
+      ? { harnessConfig: clone(originalRuntime.harnessConfig) }
+      : {}),
     ...(originalRuntime.effort ? { effort: originalRuntime.effort } : {}),
     ...(originalRuntime.lane ? { lane: clone(originalRuntime.lane) } : {}),
   };

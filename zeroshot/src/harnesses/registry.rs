@@ -31,6 +31,8 @@ pub struct HarnessRegistration {
     ) -> Result<HarnessAdapter, HarnessError>,
     pub(crate) access: fn(&str) -> Result<ProviderAccessContract, HarnessError>,
     pub(crate) normalize_local: fn(&mut LocalHarnessEnvironment, &Path) -> Result<(), HarnessError>,
+    pub(crate) validate_config:
+        fn(&openengine_cluster_protocol::HarnessConfiguration) -> Result<(), String>,
 }
 
 /// One enabled catalog supplies validation, authoring, discovery and adapter construction.
@@ -124,6 +126,19 @@ impl HarnessRegistry {
         self.entry(&runtime.lane())?;
         for lane in runtime.lanes() {
             self.entry(&lane)?;
+        }
+        for (name, binding) in runtime.nodes() {
+            if let Some(config) = binding.harness_config() {
+                let lane = runtime.effective_lane(binding).ok_or_else(|| {
+                    HarnessError::Configuration("agent lane is missing".to_owned())
+                })?;
+                (self.entry(&lane)?.validate_config)(config).map_err(|detail| {
+                    HarnessError::Configuration(format!(
+                        "node `{name}` harness `{}`: {detail}",
+                        lane.harness_name()
+                    ))
+                })?;
+            }
         }
         Ok(())
     }

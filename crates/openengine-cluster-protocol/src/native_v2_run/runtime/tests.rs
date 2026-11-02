@@ -1,6 +1,47 @@
 use super::*;
 
 #[test]
+fn harness_config_is_bounded_and_lossless_per_node() {
+    for config in [
+        serde_json::json!({}),
+        serde_json::json!({"args":["--tools","Read,Grep,Glob"]}),
+        serde_json::json!({"options":{"unknownNativeKey":{"nested":[null,true,42]}}}),
+    ] {
+        let wire = serde_json::json!({"kind":"agent","model":"opaque","harnessConfig":config});
+        let binding: NodeRuntimeBinding = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(binding).unwrap(), wire);
+    }
+    for config in [
+        serde_json::json!([]),
+        serde_json::json!({"args":"--tools"}),
+        serde_json::json!({"args":[42]}),
+        serde_json::json!({"args":["bad\u{0000}arg"]}),
+        serde_json::json!({"options":null}),
+        serde_json::json!({"extra":true}),
+        serde_json::json!({"options":{"large":"x".repeat(super::super::MAX_HARNESS_CONFIG_BYTES)}}),
+    ] {
+        let wire = serde_json::json!({"kind":"agent","model":"opaque","harnessConfig":config});
+        assert!(
+            serde_json::from_value::<NodeRuntimeBinding>(wire)
+                .unwrap_err()
+                .to_string()
+                .contains("harnessConfig")
+        );
+    }
+}
+
+#[test]
+fn runtime_round_trip_keeps_different_native_configs_on_one_lane() {
+    let wire = serde_json::json!({"harness":"claude","provider":"anthropic","size":"small","nodes":{
+        "writer":{"kind":"agent","model":"opaque","harnessConfig":{"args":["--tools","default"]}},
+        "reviewer":{"kind":"agent","model":"opaque","harnessConfig":{"args":["--tools","Read,Grep,Glob"]}}
+    }});
+    let runtime: super::super::RuntimePlan = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(runtime.lanes().len(), 1);
+    assert_eq!(serde_json::to_value(runtime).unwrap(), wire);
+}
+
+#[test]
 fn pr_feedback_defaults_to_consider_and_runtime_can_select_ignore() {
     let default: NodeRuntimeBinding =
         serde_json::from_value(serde_json::json!({"kind":"git_delivery"})).unwrap();
@@ -51,6 +92,7 @@ fn agent_without_a_lane_serializes_without_a_lane_key() {
         lane: None,
         model: crate::ModelId::new("worker-model").unwrap(),
         effort: None,
+        harness_config: None,
         context_window: None,
         max_tokens: None,
         session_scope: SessionScope::Execution,
@@ -89,6 +131,7 @@ fn caller_model_limits_are_optional_bounded_and_round_trip() {
         lane: None,
         model: crate::ModelId::new("worker-model").unwrap(),
         effort: None,
+        harness_config: None,
         context_window: Some(0),
         max_tokens: Some(MAX_MODEL_MAX_TOKENS + 1),
         session_scope: SessionScope::Execution,
@@ -248,6 +291,7 @@ fn caller_model_limits_reject_null_float_and_units_and_skip_other_bindings() {
             lane: None,
             model: crate::ModelId::new("worker-model").unwrap(),
             effort: None,
+            harness_config: None,
             context_window: Some(context_window),
             max_tokens: Some(max_tokens),
             session_scope: SessionScope::Execution,

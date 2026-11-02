@@ -21,6 +21,7 @@ pub(crate) fn registration() -> HarnessRegistration {
         build,
         access: |provider| parsed_provider_access(provider, super::access::provider_access),
         normalize_local,
+        validate_config: super::native_config::validate,
     }
 }
 fn normalize_local(

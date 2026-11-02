@@ -224,6 +224,13 @@ pub enum NodeRuntimeBinding {
         model: super::ModelId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         effort: Option<ReasoningEffort>,
+        /// Secret-free native options owned by this node's effective harness.
+        #[serde(
+            default,
+            rename = "harnessConfig",
+            skip_serializing_if = "Option::is_none"
+        )]
+        harness_config: Option<super::HarnessConfiguration>,
         /// Caller-owned model context window. Absent means the harness provider's own default.
         #[serde(
             default,
@@ -281,6 +288,13 @@ fn is_execution_scope(scope: &SessionScope) -> bool {
 }
 
 impl NodeRuntimeBinding {
+    #[must_use]
+    pub fn harness_config(&self) -> Option<&super::HarnessConfiguration> {
+        match self {
+            Self::Agent { harness_config, .. } => harness_config.as_ref(),
+            _ => None,
+        }
+    }
     #[must_use]
     pub const fn declared_connections(&self) -> &DeclaredConnections {
         match self {

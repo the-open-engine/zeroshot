@@ -11,6 +11,7 @@ pub(super) fn runtime() -> RuntimePlan {
                     model: crate::worker_catalog::ModelId::new("gpt-5.6")
                         .assert_value_with("model"),
                     effort: Some(ReasoningEffort::Max),
+                    harness_config: None,
                     context_window: None,
                     max_tokens: None,
                     session_scope: SessionScope::Execution,
@@ -208,6 +209,7 @@ pub(super) fn complex_runtime() -> RuntimePlan {
         lane: None,
         model: crate::worker_catalog::ModelId::new("gpt-5.6").assert_value_with("model"),
         effort: Some(ReasoningEffort::Max),
+        harness_config: None,
         context_window: None,
         max_tokens: None,
         session_scope,

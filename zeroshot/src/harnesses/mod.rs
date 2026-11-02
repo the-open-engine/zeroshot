@@ -2,6 +2,7 @@
 
 pub mod adapters;
 mod contracts;
+pub(crate) mod native_config;
 mod registry;
 pub(crate) mod runtime;
 

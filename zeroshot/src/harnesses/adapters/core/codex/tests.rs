@@ -241,6 +241,7 @@ fn binding_with_model(
         lane: None,
         model: worker_catalog::ModelId::new(model).assert_value(),
         effort: Some(ReasoningEffort::Max),
+        harness_config: None,
         context_window: None,
         max_tokens: None,
         session_scope: scope,
@@ -703,3 +704,5 @@ async fn openai_node_instance_session_resumes_the_exact_thread() {
         .await;
     assert!(homes.iter().all(|home| !Path::new(home).exists()));
 }
+
+mod native_config;

@@ -439,3 +439,90 @@ Custom graphs author delivery in both the graph and the plan.
 Official local builds include contributed OpenCode and Hermes adapters; their native CLIs are
 installed separately. See [Harness adapters](../project/harness-adapters.md) for available providers,
 target support and the shared execution and Active Memory contracts.
+
+## Per-node native harness configuration
+
+An agent binding can include optional, secret-free `harnessConfig` beside `model` and `effort`.
+It is one JSON object, bounded to 64 KiB of encoded JSON, containing only `args` (an array of
+argument strings) and/or `options` (a JSON object). Each adapter supports the carriers below.
+Omitting it preserves existing behavior. Nodes sharing a lane can have different configuration:
+
+```json
+{
+  "harness": "claude",
+  "provider": "anthropic",
+  "size": "small",
+  "nodes": {
+    "writer": { "kind": "agent", "model": "your-model" },
+    "reviewer": {
+      "kind": "agent",
+      "model": "your-model",
+      "harnessConfig": { "args": ["--tools", "Read,Grep,Glob"] }
+    }
+  }
+}
+```
+
+| Harness     | Carriers                                                                               | Example `harnessConfig`                           |
+| ----------- | -------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| Codex       | `args` for native `exec`/`exec resume` options                                         | `{"args":["--config","web_search=\"disabled\""]}` |
+| Claude Code | `args` for native print mode; one inline `--settings` JSON object is supported         | `{"args":["--tools","Read,Grep,Glob"]}`           |
+| Copilot     | `options` for native `session.create` / `session.resume` parameters                    | `{"options":{"availableTools":["view","grep"]}}`  |
+| Pi          | `args` for native JSON mode                                                            | `{"args":["--tools","read,grep"]}`                |
+| OpenCode    | `args` for native `run`; `options` for native inline configuration                     | `{"options":{"permission":{"edit":"deny"}}}`      |
+| Hermes      | `options` over its native loaded configuration before native policy/agent construction | `{"options":{"agent":{"max_turns":12}}}`          |
+
+Argument strings are passed directly, without a shell. Native options retain native semantics:
+unknown JSON keys may be accepted or ignored, and native versions may behave differently.
+Zeroshot validates the envelope and reserved controls, not a catalog of native settings or tools.
+This feature does not guarantee a read-only filesystem or protect `tests/` when an allowed native
+tool can write files.
+
+`args` configures native options; positional task messages and unbound `@file` inputs are reserved
+for Zeroshot. Each CLI adapter recognizes its native separated option operands (including Claude's
+variadic tool lists and Pi's `--tools -read`). For other option syntax, bind a value explicitly with
+the harness's joined form, such as `--native-option=value`; unknown option names still reach the
+harness. Native values are not validated or translated. A bare value after a no-value switch is
+rejected with its `harnessConfig.args` index instead of being appended or queued as another prompt.
+
+Overrides apply only to that node's invocation/session and remain present on correction turns,
+provider continuation, and node-instance revisits. Native configuration discovery remains enabled
+as before; supplied values override only supported settings. OpenCode/Hermes objects merge recursively
+with existing native objects; supplied arrays/scalars replace their native values. User and repository
+configuration files are never edited. Changing a lane preserves the authored object for review;
+the new harness interprets it without translation. JSON import/export and saved profiles retain it.
+Python `RuntimePlan` mappings accept it unchanged; `UniformRuntime(harness_config=...)` supplies the
+same object to every generated agent binding.
+
+Zeroshot reserves model/provider selection and credentials, private state, workspace/session identity,
+transport, prompt and response contracts, required hooks, and cleanup/cancellation. Conflicts identify
+the node, harness and configuration path or flag. Credentials must use declared connections. Opaque
+Claude `--settings` files and runtime-changing Codex profiles are excluded because they can replace
+owned controls; ordinary native user/project discovery still works. Contained placements also retain
+host-owned permission/resource requirements. Locally, nonempty Claude/Codex overrides suppress
+automatic permission bypass; permission inspection never becomes arbitrary CLI validation.
+
+Hook-trust bypass and session redirection are reserved, including Codex
+`--dangerously-bypass-hook-trust` and `--worktree`, Claude `--safe-mode`, `--background`/`--bg`
+and `--cloud`, and Pi `--fork`. Contained Pi also owns tool selection and project trust under
+their native aliases, including `-t`/`--tools` and `-a`/`--approve`. Local Pi tool modifiers such
+as `{"args":["--tools","-read"]}` are passed through: Pi's exact short tokens do not treat
+`-read` as the reserved `-r` option.
+OpenCode `--pure` (including joined forms) is reserved because it disables the runtime's
+authentication and Active Memory plugins.
+
+Codex `exec` subcommand tokens (`resume`, `fork`, `review`, `help`) are runtime-owned anywhere
+in `args`; if a native option needs one as a literal value, use its `--option=value` form.
+Codex prompt attachments (`--image`/`-i`) are also runtime-owned. Claude reserves `--from-pr`, `--teleport`, `--system-prompt-file`
+and `--append-system-prompt-file` to preserve session and prompt ownership.
+
+Generated review-loop reviewers and built-in auxiliary memory agents retain inherited `harnessConfig`,
+so copying a binding does not broaden its native restrictions. Reviewers still receive fresh sessions
+and do not inherit credentials. Built-in defaults are unchanged when configuration is absent. Active
+Memory installs its existing hooks/plugins independently; Claude inline settings compose with its owned
+hook in a single layer. Restrictions can prevent an auxiliary agent from completing its work.
+
+A native launch or session-initialization rejection fails the node with the native cause through
+normal bounded, redacted diagnostics and authored error routing. It does not trigger response
+correction, configuration fallback, or adapter retries of rejected initialization. Settings accepted
+or ignored by the native harness have no effective-configuration acknowledgement or added preflight.

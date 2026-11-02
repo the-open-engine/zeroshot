@@ -8,6 +8,7 @@
 #[path = "command.rs"]
 mod command;
 pub(crate) mod memory;
+mod native_config;
 #[path = "permissions.rs"]
 mod permissions;
 #[path = "session.rs"]
@@ -153,8 +154,20 @@ impl ClaudeAdapter {
         let access = agent_workspace_access(invocation.role).map_err(|error| {
             with_driver_detail(error, "Claude workspace policy rejected the node role")
         })?;
+        let mut native_arguments = self.prefix_arguments.clone();
+        let native = crate::harnesses::native_config::invocation_args(
+            invocation,
+            "claude",
+            native_config::validate,
+        )?;
+        if self.runners.is_hosted() {
+            native_config::validate_contained(&native).map_err(|detail| {
+                crate::harnesses::native_config::failure(invocation, "claude", &detail)
+            })?;
+        }
+        native_arguments.extend(native);
         let argv = claude_arguments(
-            self.prefix_arguments.clone(),
+            native_arguments,
             ClaudeTurnArguments {
                 model: model.as_str(),
                 effort: *effort,
@@ -320,8 +333,15 @@ impl ClaudeAdapter {
                 files: &files,
             },
         )?;
-        self.apply_permission_default(files.clone(), &mut command, turn.control)
-            .await?;
+        self.apply_permission_default(
+            crate::harnesses::native_config::PermissionInput {
+                files: files.clone(),
+                config: turn.invocation.node.binding.harness_config(),
+            },
+            &mut command,
+            turn.control,
+        )
+        .await?;
         turn_process::open(files, command, turn.control).await
     }
 }

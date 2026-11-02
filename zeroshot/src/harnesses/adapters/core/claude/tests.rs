@@ -262,6 +262,7 @@ fn agent_binding(
         lane: None,
         model: worker_catalog::ModelId::new(model).assert_value(),
         effort,
+        harness_config: None,
         context_window: None,
         max_tokens: None,
         session_scope: scope,
@@ -330,22 +331,17 @@ struct TestRunnerConfig {
     command: TestProviderCommand,
 }
 
-async fn runner_with_command(
-    workspace: &TestDirectory,
-    configuration: TestRunnerConfig,
-) -> NativeNodeRunner {
-    let TestRunnerConfig {
-        provider,
-        binding,
-        verifier,
-        command,
-    } = configuration;
+async fn admitted_claude(
+    provider: ClaudeProvider,
+    binding: NodeRuntimeBinding,
+    verifier: bool,
+) -> crate::native_v2_contract::AdmittedRun {
     let runtime = RuntimePlan::new(
         openengine_cluster_protocol::RuntimeLane::new("claude", (provider).name()).assert_value(),
         RunSize::Medium,
         BTreeMap::from([(NodeName::new("agent").assert_value(), binding)]),
     );
-    let admitted = admit(RunSubmission {
+    admit(RunSubmission {
         environment: None,
         title: RunTitle::new("Claude adapter test").assert_value(),
         graph: graph(verifier),
@@ -359,7 +355,20 @@ async fn runner_with_command(
         .assert_value(),
         submission_key: IdempotencyKey::new("claude-test").assert_value(),
     })
-    .await;
+    .await
+}
+
+async fn runner_with_command(
+    workspace: &TestDirectory,
+    configuration: TestRunnerConfig,
+) -> NativeNodeRunner {
+    let TestRunnerConfig {
+        provider,
+        binding,
+        verifier,
+        command,
+    } = configuration;
+    let admitted = admitted_claude(provider, binding, verifier).await;
     let mut base_environment = BTreeMap::from([
         (
             "HOME".to_owned(),

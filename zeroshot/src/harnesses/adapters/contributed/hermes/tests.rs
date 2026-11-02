@@ -302,6 +302,59 @@ async fn cancellation_waits_for_native_cleanup_of_a_detached_tool() {
     );
 }
 
+#[tokio::test]
+async fn native_options_are_isolated_and_preserved_on_revisits() {
+    let directory = TestDirectory::new("hermes-native-config");
+    let source=fixture("{\"response\":null}",true).replace("assert init['model']=='opaque/model'","assert init['model']=='opaque/model'\nwith open('native-options','a') as capture: capture.write(json.dumps(init['options'])+'\\n')");
+    let adapter = adapter(&directory, &source);
+    let mut configured = invocation(&[]);
+    crate::harnesses::native_config::tests::set(
+        &mut configured.node.binding,
+        json!({"options":{"agent":{"max_turns":12},"futureNativeKey":true}}),
+    );
+    run(&adapter, configured.clone()).await.assert_value();
+    run(&adapter, configured).await.assert_value();
+    run(&adapter, invocation(&[])).await.assert_value();
+    let configs = std::fs::read_to_string(adapter.config.workspace.join("native-options"))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(configs.len(), 3);
+    assert_eq!(configs[0]["agent"]["max_turns"], 12);
+    assert_eq!(configs[1]["agent"]["max_turns"], 12);
+    assert_eq!(configs[2], json!({}));
+}
+
+#[tokio::test]
+async fn native_initialization_error_retains_cause_and_never_receives_prompt() {
+    let directory = TestDirectory::new("hermes-native-rejection");
+    let source = r#"#!/usr/bin/env python3
+import json,sys
+print(json.dumps({'type':'ready','protocol':1}),flush=True)
+init=json.loads(sys.stdin.readline())
+assert init['options']['agent']['max_turns']=='native-value'
+print(json.dumps({'type':'error','message':'config.agent.max_turns: invalid native value'}),flush=True)
+frame=json.loads(sys.stdin.readline())
+assert frame['type']=='stop'
+print(json.dumps({'type':'closed','clean':True}),flush=True)
+"#;
+    let adapter = adapter(&directory, source);
+    let mut invocation = invocation(&[]);
+    crate::harnesses::native_config::tests::set(
+        &mut invocation.node.binding,
+        json!({"options":{"agent":{"max_turns":"native-value"}}}),
+    );
+    let detail = run(&adapter, invocation).await.unwrap_err().to_string();
+    assert!(
+        detail.contains("hermes")
+            && detail.contains("node `")
+            && detail.contains("config.agent.max_turns")
+            && detail.contains("invalid native value"),
+        "{detail}"
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn dispatch_metadata_reaches_hermes_without_stale_native_overlays() {

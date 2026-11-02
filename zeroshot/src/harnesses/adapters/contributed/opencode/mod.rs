@@ -10,6 +10,7 @@ mod auth;
 mod command;
 mod login;
 mod memory;
+mod native_config;
 mod permissions;
 mod plugin;
 mod registration;
@@ -264,6 +265,9 @@ impl NodeDriver for OpenCodeAdapter {
         self.run_session(&invocation, session, &control)
             .await
             .map_err(|error| redact_provider_error(error, &redactions))
+            .map_err(|error| {
+                crate::harnesses::native_config::context_error(&invocation, "opencode", error)
+            })
     }
 }
 

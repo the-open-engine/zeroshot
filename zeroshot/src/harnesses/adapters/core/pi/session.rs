@@ -99,7 +99,10 @@ impl NodeDriver for PiAdapter {
             if let Some(outcome) = self
                 .advance_run(&turn, &mut state, &control)
                 .await
-                .map_err(|error| state.retry.redact_error(error))?
+                .map_err(|error| state.retry.redact_error(error))
+                .map_err(|error| {
+                    crate::harnesses::native_config::context_error(&invocation, "pi", error)
+                })?
             {
                 return Ok(outcome);
             }
