@@ -1746,6 +1746,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#native-configuration-ownership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Native configuration ownership
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1858,6 +1869,17 @@
     <span class="md-ellipsis">
       
         Contribute an adapter
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#native-configuration-ownership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Native configuration ownership
       
     </span>
   </a>
@@ -2021,8 +2043,8 @@ decision and delivery nodes do not acquire a fabricated harness process.</p>
 directory's <code>register</code> function. Core implementations live beside it under <code>adapters/core/</code>;
 existing public <code>native_v2_codex</code>, <code>native_v2_claude</code>, <code>native_v2_copilot</code> and <code>native_v2_pi</code> module
 paths remain available to embedders.</p>
-<p>A registration supplies a descriptor, provider-access declarations, local path normalization and a
-factory. Keep descriptors pure: no credential reads, filesystem inspection, process launches or
+<p>A registration supplies a descriptor, provider-access declarations, local path normalization, pure
+reserved-control validation for <code>harnessConfig</code>, and a factory. Keep descriptors pure: no credential reads, filesystem inspection, process launches or
 provider requests. The registry validates bounded harness/provider IDs and compatible pairs.
 Factories receive <code>HarnessBuildContext</code> and return <code>HarnessAdapter</code> with <code>NodeDriver</code> and
 <code>SessionFactory</code> implementations.</p>
@@ -2042,6 +2064,18 @@ budgets, receipts and maintenance; missing acknowledgement means unknown deliver
 Test native bridges too, and check the core-only library:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span>check<span class="w"> </span>--locked<span class="w"> </span>--package<span class="w"> </span>zeroshot<span class="w"> </span>--lib<span class="w"> </span>--no-default-features
 </code></pre></div>
+<h2 id="native-configuration-ownership">Native configuration ownership<a class="headerlink" href="#native-configuration-ownership" title="Permanent link">&para;</a></h2>
+<p>All registered adapters implement <a href="../../reference/runtime-plan/#per-node-native-harness-configuration">per-node native configuration</a>.
+Keep carrier parsing shared and reserved controls adapter-local. Bind configuration at the invocation
+or session boundary, never on the lane-wide adapter. Native APIs use object options; CLI arguments
+remain argument tokens. Preserve the same configuration on corrections, retries and session resumes.
+Leave unknown native names and values to native initialization. Do not add an option allowlist, portable
+permission policy, native validation prompt, or generalized inspection subprocess.</p>
+<p>Owned authentication, transport, response schemas, identity, memory hooks and containment cannot be
+replaced through overrides. Existing permission inspection only decides whether to add an automatic
+local bypass. Native initialization failure must preserve its bounded redacted cause and node/harness
+identity, settle cleanup, and skip automatic correction/fallback/retry. Focused process/session tests
+must cover forwarding, isolation, reuse and rejection for every registered adapter.</p>
 
 
 
