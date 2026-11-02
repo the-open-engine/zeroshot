@@ -32,5 +32,14 @@ pub(super) fn provider_access(provider: ClaudeProvider) -> ProviderAccessContrac
             &["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"],
             &[&["AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION"]],
         ),
+        ClaudeProvider::Foundry => ProviderAccessContract::new(
+            false,
+            "foundry",
+            &["AZURE_FOUNDRY_API_KEY", "AZURE_FOUNDRY_RESOURCE"],
+            &[
+                &["AZURE_FOUNDRY_API_KEY", "AZURE_FOUNDRY_RESOURCE"],
+                &["AZURE_FOUNDRY_API_KEY", "AZURE_FOUNDRY_BASE_URL"],
+            ],
+        ),
     }
 }

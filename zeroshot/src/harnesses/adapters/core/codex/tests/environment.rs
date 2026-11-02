@@ -339,6 +339,119 @@ async fn bedrock_script_uses_the_builtin_provider_and_preserves_aws_environment(
 }
 
 #[test]
+fn foundry_environment_requires_a_connection_and_rejects_conflicting_codex_controls() {
+    for required in [
+        [
+            ("AZURE_FOUNDRY_API_KEY", "foundry-secret"),
+            ("AZURE_FOUNDRY_RESOURCE", "contoso-ai"),
+        ],
+        [
+            ("AZURE_FOUNDRY_API_KEY", "foundry-secret"),
+            ("AZURE_FOUNDRY_BASE_URL", "https://ai.contoso.example"),
+        ],
+    ] {
+        let valid = provider_environment(CodexProvider::Foundry, &required).assert_value();
+        for (name, expected) in required {
+            assert_eq!(valid.get(name).map(String::as_str), Some(expected));
+        }
+        for conflict in [
+            "CODEX_API_KEY",
+            "OPENAI_API_KEY",
+            "OPENROUTER_API_KEY",
+            "AWS_BEARER_TOKEN_BEDROCK",
+        ] {
+            let mut values = required.to_vec();
+            values.push((conflict, "conflict"));
+            assert!(
+                provider_environment(CodexProvider::Foundry, &values).is_err(),
+                "accepted conflicting {conflict}"
+            );
+        }
+    }
+    for values in [
+        vec![("AZURE_FOUNDRY_RESOURCE", "contoso-ai")],
+        vec![("AZURE_FOUNDRY_API_KEY", "foundry-secret")],
+        vec![
+            ("AZURE_FOUNDRY_API_KEY", "foundry-secret"),
+            (
+                "AZURE_FOUNDRY_BASE_URL",
+                "https://ai.contoso.example?key=secret",
+            ),
+        ],
+    ] {
+        assert!(
+            provider_environment(CodexProvider::Foundry, &values).is_err(),
+            "accepted {values:?}"
+        );
+    }
+}
+
+async fn foundry_capture(endpoint: (&'static str, &'static str)) -> String {
+    let directory = TestDirectory::new("codex-foundry");
+    let capture = directory.child("capture");
+    let adapter = scripted_adapter(&directory, CodexProvider::Foundry);
+    let admitted = admitted(
+        binding_with_model(
+            "provider-owned-deployment",
+            SessionScope::Execution,
+            &["CAPTURE_PATH", "AZURE_FOUNDRY_API_KEY", endpoint.0],
+        ),
+        CodexProvider::Foundry,
+    )
+    .await;
+    let runtime = runner(&admitted, adapter);
+    let handle = start(
+        &runtime,
+        &admitted,
+        1,
+        &[
+            ("CAPTURE_PATH", capture.display().to_string()),
+            ("AZURE_FOUNDRY_API_KEY", "fake-foundry-key".to_owned()),
+            (endpoint.0, endpoint.1.to_owned()),
+        ],
+    )
+    .await;
+    complete_verified_with_logs(handle).await;
+    fs::read_to_string(capture).assert_value()
+}
+
+#[tokio::test]
+async fn foundry_script_configures_an_azure_responses_provider_with_the_api_key_header() {
+    for (endpoint, base_url) in [
+        (
+            ("AZURE_FOUNDRY_RESOURCE", "contoso-ai"),
+            "https://contoso-ai.openai.azure.com/openai/v1",
+        ),
+        (
+            ("AZURE_FOUNDRY_BASE_URL", "https://ai.contoso.example/"),
+            "https://ai.contoso.example/openai/v1",
+        ),
+    ] {
+        let capture = foundry_capture(endpoint).await;
+        for expected in [
+            "arg=model_provider=\"foundry\"".to_owned(),
+            format!("arg=model_providers.foundry.base_url=\"{base_url}\""),
+            "arg=model_providers.foundry.env_http_headers={\"api-key\"=\"AZURE_FOUNDRY_API_KEY\"}"
+                .to_owned(),
+            "arg=model_providers.foundry.wire_api=\"responses\"".to_owned(),
+            "arg=model_providers.foundry.requires_openai_auth=false".to_owned(),
+            "arg=--model\narg=provider-owned-deployment".to_owned(),
+            "foundry_key=fake-foundry-key".to_owned(),
+            "openai_key=unset".to_owned(),
+            "codex_key=unset".to_owned(),
+        ] {
+            assert!(
+                capture.contains(&expected),
+                "missing capture evidence: {expected}"
+            );
+        }
+        assert!(!capture.contains("arg=fake-foundry-key"));
+        assert!(!capture.contains("model_providers.foundry.env_key"));
+        assert_schema_capture(&capture);
+    }
+}
+
+#[test]
 fn log_redactions_are_longest_first_and_do_not_leave_overlapping_suffixes() {
     let binding = binding(SessionScope::Execution, &["LONG_SECRET", "SHORT_SECRET"]);
     let environment = ResolvedEnvironment::exact(
@@ -408,6 +521,13 @@ fn hosted_codex_preserves_declared_endpoint_overrides_for_all_providers() {
             vec![
                 ("GATEWAY_BASE_URL", "https://gateway.example/api"),
                 ("GATEWAY_API_KEY", "gateway-secret"),
+            ],
+        ),
+        (
+            CodexProvider::Foundry,
+            vec![
+                ("AZURE_FOUNDRY_API_KEY", "foundry-secret"),
+                ("AZURE_FOUNDRY_RESOURCE", "contoso-ai"),
             ],
         ),
     ] {

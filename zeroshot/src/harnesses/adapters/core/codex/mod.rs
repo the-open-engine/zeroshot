@@ -1,4 +1,5 @@
-//! Native-v2 Codex harness for the OpenAI, OpenRouter, gateway, and Amazon Bedrock provider lanes.
+//! Native-v2 Codex harness for the OpenAI, OpenRouter, gateway, Amazon Bedrock, and Microsoft
+//! Foundry provider lanes.
 //!
 //! One adapter serves one lane, and its provider is fixed when the adapter is constructed. Model,
 //! effort, session scope, input, and declared environment remain per-node admitted values.

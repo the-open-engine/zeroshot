@@ -1180,6 +1180,8 @@ RUNTIME CONFIGURATION
     openai-responses, openai-completions, or anthropic-messages.
     Declaring ANTHROPIC_BASE_URL with ANTHROPIC_API_KEY sends the pi/anthropic lane to a
     caller-owned Anthropic Messages endpoint.
+    The codex/foundry and claude/foundry lanes require AZURE_FOUNDRY_API_KEY with either
+    AZURE_FOUNDRY_RESOURCE or AZURE_FOUNDRY_BASE_URL; the model is the Foundry deployment name.
     Known-incompatible harness/provider pairs include
     codex/anthropic and claude/openai. Local copilot/github reuses native login; contained
     copilot/github uses a user-backed GitHub connection with COPILOT_GITHUB_TOKEN.

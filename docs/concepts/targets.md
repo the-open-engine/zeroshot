@@ -55,8 +55,8 @@ check login state, so a missing login fails at that lane's first turn.
 Local Codex runs with `provider: "openai"` use the model provider and transport configured in the
 user's Codex configuration, including OpenAI-compatible proxies such as LiteLLM. Zeroshot supplies
 the runtime's model and any explicit reasoning effort, but leaves web search and sandbox network
-access to Codex's configuration. Explicit `openrouter`, `bedrock`, and `gateway` selections configure those
-providers; hosted targets use their own isolated provider setup.
+access to Codex's configuration. Explicit `openrouter`, `bedrock`, `foundry`, and `gateway` selections configure
+those providers; hosted targets use their own isolated provider setup.
 
 Local Claude runs use the current user's home and `CLAUDE_CONFIG_DIR`, when set. Local runs
 also inherit the shell's endpoint variables, including `OPENAI_BASE_URL`
@@ -64,7 +64,7 @@ for Codex and `ANTHROPIC_BASE_URL` for Claude. Declared connection values take p
 shell defaults. Hosted adapters receive declared connection values without inheriting the host's
 shell settings. Explicit gateway selections use their `GATEWAY_BASE_URL` connection value. Local
 `anthropic` runs also inherit Claude's shell provider-selection flags. Explicit `openrouter`,
-`bedrock`, and `gateway` selections retain their provider setup and reject declared transport flags
+`bedrock`, `foundry`, and `gateway` selections retain their provider setup and reject declared transport flags
 that would route to an incompatible provider.
 
 Local Copilot runs use the current user's `COPILOT_HOME` and system credential store. Ambient

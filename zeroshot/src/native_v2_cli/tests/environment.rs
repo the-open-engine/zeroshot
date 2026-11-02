@@ -473,6 +473,44 @@ async fn uniform_gateway_and_bedrock_runtime_materializes_for_every_supporting_h
 }
 
 #[tokio::test]
+async fn uniform_foundry_runtime_materializes_one_shared_connection_for_codex_and_claude() {
+    let values = [
+        ("AZURE_FOUNDRY_API_KEY", "foundry-secret"),
+        ("AZURE_FOUNDRY_RESOURCE", "contoso-ai"),
+    ];
+    let available = |name: &str| {
+        values
+            .iter()
+            .find(|(field, _)| *field == name)
+            .map(|(_, value)| OsString::from(value))
+    };
+    for harness in ["codex", "claude"] {
+        let (runtime, connections) = contained_uniform_submission(
+            &format!("Uniform foundry {harness} runtime"),
+            json!({
+                "harness":harness,
+                "provider":"foundry",
+                "model":"provider-owned-deployment"
+            }),
+            &available,
+        )
+        .await;
+        assert_eq!(runtime.pointer("/provider"), Some(&json!("foundry")));
+        assert_eq!(
+            runtime.pointer("/nodes/worker/connections/foundry"),
+            Some(&json!(["AZURE_FOUNDRY_API_KEY", "AZURE_FOUNDRY_RESOURCE"]))
+        );
+        assert_eq!(
+            connections,
+            json!({"foundry": {
+                "AZURE_FOUNDRY_API_KEY": "foundry-secret",
+                "AZURE_FOUNDRY_RESOURCE": "contoso-ai"
+            }})
+        );
+    }
+}
+
+#[tokio::test]
 async fn uniform_runtime_requires_harness_without_contacting_backend() {
     let (_files, command) = uniform_runtime_command(
         "Explicit harness",

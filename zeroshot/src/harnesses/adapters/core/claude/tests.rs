@@ -106,6 +106,15 @@ fn coverage_contract_claude_local_configuration_preserves_only_provider_compatib
     let native = BTreeMap::from([
         ("ANTHROPIC_API_KEY".to_owned(), "ambient-key".to_owned()),
         ("CLAUDE_CODE_USE_BEDROCK".to_owned(), "selector".to_owned()),
+        ("CLAUDE_CODE_USE_FOUNDRY".to_owned(), "1".to_owned()),
+        (
+            "ANTHROPIC_FOUNDRY_API_KEY".to_owned(),
+            "ambient-foundry-key".to_owned(),
+        ),
+        (
+            "ANTHROPIC_FOUNDRY_RESOURCE".to_owned(),
+            "ambient-resource".to_owned(),
+        ),
         (
             "ANTHROPIC_BASE_URL".to_owned(),
             "https://native.invalid".to_owned(),
@@ -126,6 +135,28 @@ fn coverage_contract_claude_local_configuration_preserves_only_provider_compatib
         anthropic
             .local_environment
             .contains_key("CLAUDE_CODE_USE_BEDROCK")
+    );
+    for name in [
+        "CLAUDE_CODE_USE_FOUNDRY",
+        "ANTHROPIC_FOUNDRY_API_KEY",
+        "ANTHROPIC_FOUNDRY_RESOURCE",
+    ] {
+        assert!(anthropic.local_environment.contains_key(name), "{name}");
+    }
+
+    let foundry = ClaudeAdapter::new_local(adapter_configuration(
+        ClaudeProvider::Foundry,
+        "claude",
+        native.clone(),
+    ))
+    .assert_value();
+    assert!(
+        !foundry
+            .local_environment
+            .keys()
+            .any(|name| name.starts_with("ANTHROPIC_FOUNDRY_")
+                || name.starts_with("CLAUDE_CODE_USE_")
+                || name == "ANTHROPIC_API_KEY")
     );
 
     let openrouter = ClaudeAdapter::new_local(adapter_configuration(
@@ -513,6 +544,10 @@ printf '%s\n' "${OPENROUTER_API_KEY-unset}" > openrouter-key.txt
 printf '%s\n' "${AWS_BEARER_TOKEN_BEDROCK-unset}" > bedrock-key.txt
 printf '%s\n' "${AWS_REGION-unset}" > aws-region.txt
 printf '%s\n' "${CLAUDE_CODE_USE_BEDROCK-unset}" > use-bedrock.txt
+printf '%s\n' "${ANTHROPIC_FOUNDRY_API_KEY-unset}" > foundry-key.txt
+printf '%s\n' "${ANTHROPIC_FOUNDRY_RESOURCE-unset}" > foundry-resource.txt
+printf '%s\n' "${AZURE_FOUNDRY_API_KEY-unset}" > azure-foundry-key.txt
+printf '%s\n' "${CLAUDE_CODE_USE_FOUNDRY-unset}" > use-foundry.txt
 printf '%s\n' "${UNDECLARED_AMBIENT_SENTINEL-unset}" > ambient.txt
 printf '%s\n' "$HOME" >> homes.txt
 printf '%s\n' "$TMPDIR" >> scratches.txt
