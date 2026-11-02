@@ -150,10 +150,10 @@ enum UtilityCommand {
     /// List runs as JSON.
     List(TargetRouteArgs),
 
-    /// Read a run's current status as JSON.
+    /// Read a run's current status as JSON, including separate native delivery evidence when available.
     Status(RunSelectorArgs),
 
-    /// Follow a run's durable event stream as NDJSON.
+    /// Follow durable status as NDJSON, including native delivery evidence independently of graph output.
     Watch(RunWatchArgs),
 
     /// Follow a run's log stream as NDJSON.

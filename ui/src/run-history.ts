@@ -33,6 +33,7 @@ export type RunDetail = Omit<RunSummary, 'cursor' | 'terminal'> & {
   projectionVersion: 1;
   cursor: string;
   terminal?: RunTerminal | null;
+  metadata?: { deliveryReceipt?: unknown; tokenUsage?: unknown };
   graph: Document['graph'];
   runtime: Document['runtime'];
   environment?: EnvironmentDefinition;

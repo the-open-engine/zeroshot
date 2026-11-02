@@ -26,8 +26,8 @@ Commands:
   run                Submit a graph run locally or to a named target
   update             Update this executable and managed agent skills to the newest canonical release
   list               List runs as JSON
-  status             Read a run's current status as JSON
-  watch              Follow a run's durable event stream as NDJSON
+  status             Read a run's current status as JSON, including separate native delivery evidence when available
+  watch              Follow durable status as NDJSON, including native delivery evidence independently of graph output
   logs               Follow a run's log stream as NDJSON
   attach             Attach to an execution's interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
@@ -1277,7 +1277,7 @@ Options:
 ### `zeroshot status`
 
 ```text
-Read a run's current status as JSON
+Read a run's current status as JSON, including separate native delivery evidence when available
 
 Usage: zeroshot status [OPTIONS] <RUN_ID>
 
@@ -1296,7 +1296,7 @@ Options:
 ### `zeroshot watch`
 
 ```text
-Follow a run's durable event stream as NDJSON
+Follow durable status as NDJSON, including native delivery evidence independently of graph output
 
 Usage: zeroshot watch [OPTIONS] <RUN_ID>
 
@@ -1485,8 +1485,8 @@ Commands:
   run                Submit a graph run locally or to a named target
   update             Update this executable and managed agent skills to the newest canonical release
   list               List runs as JSON
-  status             Read a run's current status as JSON
-  watch              Follow a run's durable event stream as NDJSON
+  status             Read a run's current status as JSON, including separate native delivery evidence when available
+  watch              Follow durable status as NDJSON, including native delivery evidence independently of graph output
   logs               Follow a run's log stream as NDJSON
   attach             Attach to an execution's interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON

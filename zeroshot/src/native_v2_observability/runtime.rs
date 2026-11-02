@@ -24,9 +24,7 @@ impl RuntimeObservation {
             last.run_id.clone(),
             RuntimeStatus {
                 last,
-                metadata: RunMetadata {
-                    token_usage: snapshot.token_usage.clone(),
-                },
+                metadata: run_metadata(snapshot),
                 failed: false,
                 context: snapshot.failure_context.clone(),
             },
@@ -46,7 +44,7 @@ impl RuntimeObservation {
         if cursor_sequence(&current.at_cursor)? >= cursor_sequence(&runtime.last.at_cursor)? {
             let failure = runtime.failed.then(|| runtime.last.status.clone());
             runtime.last = current;
-            runtime.metadata.token_usage = snapshot.token_usage.clone();
+            runtime.metadata = run_metadata(snapshot);
             runtime.context = snapshot.failure_context.clone();
             if snapshot.terminal.is_none()
                 && let Some(RunStatus::Finished {

@@ -390,8 +390,9 @@ impl NativeV2Supervisor {
                 .append(
                     &self.run_id,
                     vec![RunEvent::PrimaryGraphCompleted {
-                        result: terminal,
+                        result: terminal.result,
                         auxiliary_pending,
+                        delivery_execution: terminal.delivery_execution,
                     }],
                 )
                 .await?;
@@ -517,45 +518,47 @@ fn enforce_delivery_terminal(
     admitted: &AdmittedRun,
     snapshot: &RunSnapshot,
     terminal: TerminalResult,
-) -> Result<TerminalResult, NativeV2SupervisorError> {
-    let requires_delivery_receipt = policy == DeliveryPolicy::Required
+) -> Result<crate::v2_run_ledger::PrimaryGraphCompletion, NativeV2SupervisorError> {
+    let delivery_execution = confirmed_delivery_execution(admitted, snapshot);
+    let requires_delivery_execution = policy == DeliveryPolicy::Required
         || sole_delivery_node(admitted).is_some()
         || crate::native_v2_admission::comment_node(&admitted.graph.root).is_some();
     let accepted = match &terminal {
-        TerminalResult::Succeeded { output } if requires_delivery_receipt => {
-            has_required_delivery_receipt(admitted, snapshot, output)
+        TerminalResult::Succeeded { .. } if requires_delivery_execution => {
+            delivery_execution.is_some()
         }
         TerminalResult::Succeeded { .. } | TerminalResult::Failed { .. } => true,
     };
-    if accepted {
-        return Ok(terminal);
-    }
-    Ok(TerminalResult::Failed {
-        context: None,
-        reason: EnumLabel::new("delivery_unconfirmed")
-            .map_err(|_| NativeV2SupervisorError::InvalidState)?,
+    let result = if accepted {
+        terminal
+    } else {
+        TerminalResult::Failed {
+            context: None,
+            reason: EnumLabel::new("delivery_unconfirmed")
+                .map_err(|_| NativeV2SupervisorError::InvalidState)?,
+        }
+    };
+    Ok(crate::v2_run_ledger::PrimaryGraphCompletion {
+        result,
+        auxiliary_pending: false,
+        delivery_execution,
     })
 }
 
-fn has_required_delivery_receipt(
+fn confirmed_delivery_execution(
     admitted: &AdmittedRun,
     snapshot: &RunSnapshot,
-    terminal_output: &Value,
-) -> bool {
+) -> Option<ExecutionId> {
     let node = sole_delivery_node(admitted)
         .map(|(node, _)| node)
         .or_else(|| {
             crate::native_v2_admission::comment_node(&admitted.graph.root)
                 .map(|node| node.name.clone())
         });
-    let Some(node) = node else {
-        return false;
-    };
+    let node = node?;
     let writers = writer_nodes(admitted);
-    let Ok(history) = durable_history(snapshot) else {
-        return false;
-    };
-    let Some(last_writer) = history
+    let history = durable_history(snapshot).ok()?;
+    let last_writer = history
         .iter()
         .filter(|execution| writers.contains(&execution.occurrence.node))
         .filter_map(|execution| match &execution.state {
@@ -563,19 +566,16 @@ fn has_required_delivery_receipt(
             DurableExecutionState::Active | DurableExecutionState::Voided { .. } => None,
         })
         .max_by_key(|(position, _)| *position)
-        .map(|(_, execution)| execution)
-    else {
-        return false;
-    };
+        .map(|(_, execution)| execution)?;
     if last_writer.occurrence.node != node {
-        return false;
+        return None;
     }
     let DurableExecutionState::Settled {
         outcome: WorkerOutcome::Verifier { output, .. },
         ..
     } = &last_writer.state
     else {
-        return false;
+        return None;
     };
     // A receipt certifies the candidate only after every other writer has stopped mutating it,
     // including prerequisite executions restored with a workspace checkpoint.
@@ -593,9 +593,8 @@ fn has_required_delivery_receipt(
             DurableExecutionState::Active => false,
         }
     });
-    writers_settled
-        && receipt_matches_admission(admitted, output)
-        && contains_exact_value(terminal_output, output)
+    (writers_settled && receipt_matches_admission(admitted, output))
+        .then_some(last_writer.execution)
 }
 
 fn receipt_matches_admission(admitted: &AdmittedRun, output: &Value) -> bool {
@@ -617,21 +616,6 @@ fn receipt_matches_admission(admitted: &AdmittedRun, output: &Value) -> bool {
             .as_ref()
             .map(|source| source.revision.as_str()),
     )
-}
-
-fn contains_exact_value(container: &Value, expected: &Value) -> bool {
-    if container == expected {
-        return true;
-    }
-    match container {
-        Value::Array(values) => values
-            .iter()
-            .any(|value| contains_exact_value(value, expected)),
-        Value::Object(values) => values
-            .values()
-            .any(|value| contains_exact_value(value, expected)),
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => false,
-    }
 }
 
 mod controller;

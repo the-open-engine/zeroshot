@@ -52,6 +52,7 @@ def _status(value: object) -> RunStatus:
         result = _terminal_result(
             _string(root, "runId", "run status"),
             native_status.get("terminalResult"),
+            native_status.get("metadata"),
         )
     return RunStatus(
         run_id=_string(root, "runId", "run status"),
@@ -140,7 +141,12 @@ def _remote(value: object) -> ResolvedGitRemote | None:
     )
 
 
-def _terminal_result(run_id: str, value: object) -> RunResult:
+def _terminal_result(run_id: str, value: object, metadata: object = None) -> RunResult:
+    receipt = None
+    if metadata is not None:
+        fields = _mapping(metadata, "run status.status.metadata")
+        if fields.get("deliveryReceipt") is not None:
+            receipt = cast(JsonValue, dict(_mapping(fields["deliveryReceipt"], "delivery receipt")))
     terminal = _mapping(value, "run status.status.terminalResult")
     kind = _enum_string(
         terminal,
@@ -154,11 +160,13 @@ def _terminal_result(run_id: str, value: object) -> RunResult:
         return RunResult(
             run_id=run_id,
             succeeded=True,
+            delivery_receipt=receipt,
             output=cast(JsonValue, terminal["output"]),
         )
     return RunResult(
         run_id=run_id,
         succeeded=False,
+        delivery_receipt=receipt,
         failure=_string(terminal, "reason", "run status.status.terminalResult"),
         context=_failure_context(terminal.get("context")),
     )

@@ -209,3 +209,35 @@ def test_machine_sizes_survive_status_and_summary_projection(size: str) -> None:
     status = _status(value)
     assert status.size == size
     assert _summary(status).size == size
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_terminal_receipt_is_independent_of_graph_output(failed: bool) -> None:
+    value = local_status()
+    terminal = (
+        {"status": "failed", "reason": "rejected"}
+        if failed
+        else {"status": "succeeded", "output": {"summary": "authored report"}}
+    )
+    receipt = {"receipt": {"mode": "comment", "outcome": "posted"}}
+    value["status"] = {
+        "phase": "finished",
+        "terminalResult": terminal,
+        "metadata": {"deliveryReceipt": receipt},
+    }
+    result = _status(value).result
+    assert result is not None
+    assert result.succeeded is not failed
+    assert result.delivery_receipt == receipt
+    assert result.output == (None if failed else {"summary": "authored report"})
+
+
+def test_graph_output_cannot_supply_a_delivery_receipt() -> None:
+    value = local_status()
+    value["status"] = {
+        "phase": "finished",
+        "terminalResult": {"status": "succeeded", "output": {"mode": "merge", "outcome": "merged"}},
+    }
+    result = _status(value).result
+    assert result is not None
+    assert result.delivery_receipt is None

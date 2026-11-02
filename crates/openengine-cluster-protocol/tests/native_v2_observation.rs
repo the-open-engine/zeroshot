@@ -192,6 +192,7 @@ fn durable_events_carry_run_and_stable_cursor() {
                     cache_creation_input_tokens: None,
                     complete: false,
                 }),
+                delivery_receipt: None,
             },
         },
     };

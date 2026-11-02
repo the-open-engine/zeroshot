@@ -52,6 +52,7 @@ async fn local_observer_preserves_durable_primary_result_after_postmortem_proces
                     RunEvent::PrimaryGraphCompleted {
                         result: primary.clone(),
                         auxiliary_pending: true,
+                        delivery_execution: None,
                     },
                     RunEvent::RunTokenUsageObserved {
                         usage: Some(TokenUsageDelta {
