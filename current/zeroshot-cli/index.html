@@ -3250,8 +3250,8 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>  run                Submit a graph run locally or to a named target
 <a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>  update             Update this executable and managed agent skills to the newest canonical release
 <a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>  list               List runs as JSON
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>  status             Read a run's current status as JSON
-<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>  watch              Follow a run's durable event stream as NDJSON
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>  status             Read a run's current status as JSON, including separate native delivery evidence when available
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>  watch              Follow durable status as NDJSON, including native delivery evidence independently of graph output
 <a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>  logs               Follow a run's log stream as NDJSON
 <a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>  attach             Attach to an execution's interactive event stream as NDJSON
 <a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>  force-stop         Force a run to stop and write the result as JSON
@@ -4357,7 +4357,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-47-10" name="__codelineno-47-10" href="#__codelineno-47-10"></a>          Print help
 </code></pre></div>
 <h3 id="zeroshot-status"><code>zeroshot status</code><a class="headerlink" href="#zeroshot-status" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a>Read a run's current status as JSON
+<div class="highlight"><pre><span></span><code><a id="__codelineno-48-1" name="__codelineno-48-1" href="#__codelineno-48-1"></a>Read a run's current status as JSON, including separate native delivery evidence when available
 <a id="__codelineno-48-2" name="__codelineno-48-2" href="#__codelineno-48-2"></a>
 <a id="__codelineno-48-3" name="__codelineno-48-3" href="#__codelineno-48-3"></a>Usage: zeroshot status [OPTIONS] &lt;RUN_ID&gt;
 <a id="__codelineno-48-4" name="__codelineno-48-4" href="#__codelineno-48-4"></a>
@@ -4373,7 +4373,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-48-14" name="__codelineno-48-14" href="#__codelineno-48-14"></a>          Print help
 </code></pre></div>
 <h3 id="zeroshot-watch"><code>zeroshot watch</code><a class="headerlink" href="#zeroshot-watch" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a>Follow a run's durable event stream as NDJSON
+<div class="highlight"><pre><span></span><code><a id="__codelineno-49-1" name="__codelineno-49-1" href="#__codelineno-49-1"></a>Follow durable status as NDJSON, including native delivery evidence independently of graph output
 <a id="__codelineno-49-2" name="__codelineno-49-2" href="#__codelineno-49-2"></a>
 <a id="__codelineno-49-3" name="__codelineno-49-3" href="#__codelineno-49-3"></a>Usage: zeroshot watch [OPTIONS] &lt;RUN_ID&gt;
 <a id="__codelineno-49-4" name="__codelineno-49-4" href="#__codelineno-49-4"></a>
@@ -4538,8 +4538,8 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-57-15" name="__codelineno-57-15" href="#__codelineno-57-15"></a>  run                Submit a graph run locally or to a named target
 <a id="__codelineno-57-16" name="__codelineno-57-16" href="#__codelineno-57-16"></a>  update             Update this executable and managed agent skills to the newest canonical release
 <a id="__codelineno-57-17" name="__codelineno-57-17" href="#__codelineno-57-17"></a>  list               List runs as JSON
-<a id="__codelineno-57-18" name="__codelineno-57-18" href="#__codelineno-57-18"></a>  status             Read a run's current status as JSON
-<a id="__codelineno-57-19" name="__codelineno-57-19" href="#__codelineno-57-19"></a>  watch              Follow a run's durable event stream as NDJSON
+<a id="__codelineno-57-18" name="__codelineno-57-18" href="#__codelineno-57-18"></a>  status             Read a run's current status as JSON, including separate native delivery evidence when available
+<a id="__codelineno-57-19" name="__codelineno-57-19" href="#__codelineno-57-19"></a>  watch              Follow durable status as NDJSON, including native delivery evidence independently of graph output
 <a id="__codelineno-57-20" name="__codelineno-57-20" href="#__codelineno-57-20"></a>  logs               Follow a run's log stream as NDJSON
 <a id="__codelineno-57-21" name="__codelineno-57-21" href="#__codelineno-57-21"></a>  attach             Attach to an execution's interactive event stream as NDJSON
 <a id="__codelineno-57-22" name="__codelineno-57-22" href="#__codelineno-57-22"></a>  force-stop         Force a run to stop and write the result as JSON

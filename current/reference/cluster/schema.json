@@ -4708,8 +4708,11 @@
     },
     "RunMetadata": {
       "additionalProperties": false,
-      "description": "Additive metadata emitted only with a terminal run projection.",
+      "description": "Runtime-owned metadata accompanying terminal status and retained run history.",
       "properties": {
+        "deliveryReceipt": {
+          "description": "Confirmed native delivery evidence, independent of the graph's terminal output."
+        },
         "tokenUsage": {
           "anyOf": [
             {

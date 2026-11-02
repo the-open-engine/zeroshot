@@ -3149,7 +3149,7 @@ and seven days after readiness.</p>
 
 
 <h2 id="zeroshot.RunResult" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunResult</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">succeeded</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">output</span><span class="p">:</span> <span class="n">JsonValue</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">failure</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">context</span><span class="p">:</span> <span class="n">FailureContext</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">RunResult</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">succeeded</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">output</span><span class="p">:</span> <span class="n">JsonValue</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">delivery_receipt</span><span class="p">:</span> <span class="n">JsonValue</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">failure</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">context</span><span class="p">:</span> <span class="n">FailureContext</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -3194,7 +3194,21 @@ and seven days after readiness.</p>
 )
           –
           <div class="doc-md-description">
-            <p>Successful graph output, which may be JSON null.</p>
+            <p>Successful graph-authored output, which may be JSON null.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>delivery_receipt</code></b>
+              (<code><a class="autorefs autorefs-internal" title="            JsonValue: TypeAlias = None | bool | int | float | str | list['JsonValue'] | dict[str, 'JsonValue']
+
+  
+      module-attribute
+   (zeroshot.values.JsonValue)" href="../configuration/#zeroshot.JsonValue">JsonValue</a></code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Native delivery evidence, independent of output; None when unavailable.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
@@ -3361,7 +3375,7 @@ and seven days after readiness.</p>
         </li>
         <li class="doc-section-item field-body">
             <b><code>result</code></b>
-              (<code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, succeeded: bool, output: JsonValue = None, failure: str | None = None, context: FailureContext | None = None)
+              (<code><a class="autorefs autorefs-internal" title="              RunResult(*, run_id: str, succeeded: bool, output: JsonValue = None, delivery_receipt: JsonValue = None, failure: str | None = None, context: FailureContext | None = None)
 
   
       dataclass

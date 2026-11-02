@@ -2024,7 +2024,8 @@ return after submission:</p>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">zeroshot status RUN_ID</span>
 </code></pre></div>
 <p>A run ID belongs to the controller or target that created it. Pass <code>--target NAME</code> when reading one
-from a named target.</p>
+from a named target. Finished status separates graph-authored <code>terminalResult.output</code> from optional
+runtime-confirmed <code>metadata.deliveryReceipt</code>; graphs without delivery omit the receipt.</p>
 <h2 id="resume-event-and-log-streams">Resume event and log streams<a class="headerlink" href="#resume-event-and-log-streams" title="Permanent link">&para;</a></h2>
 <p><code>watch</code> follows status events; <code>logs</code> follows safe provider and controller log records. Both accept
 an opaque cursor and resume strictly after it:</p>
@@ -2096,7 +2097,7 @@ status first if another operator may already have stopped the run, or if it may 
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-24">24 October 2026</time>
+    Last updated <time datetime="2026-11-02">2 November 2026</time>
   </span>
 
     

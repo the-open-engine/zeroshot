@@ -100,8 +100,8 @@ Commands:
   run                Submit a graph run locally or to a named target
   update             Update this executable and managed agent skills to the newest canonical release
   list               List runs as JSON
-  status             Read a run&#39;s current status as JSON
-  watch              Follow a run&#39;s durable event stream as NDJSON
+  status             Read a run&#39;s current status as JSON, including separate native delivery evidence when available
+  watch              Follow durable status as NDJSON, including native delivery evidence independently of graph output
   logs               Follow a run&#39;s log stream as NDJSON
   attach             Attach to an execution&#39;s interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
@@ -1159,7 +1159,7 @@ Options:
   -h, --help
           Print help</code></pre></section>
 <section id="zeroshot-status"><h3><code>zeroshot status</code></h3>
-<pre><code>Read a run&#39;s current status as JSON
+<pre><code>Read a run&#39;s current status as JSON, including separate native delivery evidence when available
 
 Usage: zeroshot status [OPTIONS] &lt;RUN_ID&gt;
 
@@ -1174,7 +1174,7 @@ Options:
   -h, --help
           Print help</code></pre></section>
 <section id="zeroshot-watch"><h3><code>zeroshot watch</code></h3>
-<pre><code>Follow a run&#39;s durable event stream as NDJSON
+<pre><code>Follow durable status as NDJSON, including native delivery evidence independently of graph output
 
 Usage: zeroshot watch [OPTIONS] &lt;RUN_ID&gt;
 
@@ -1331,8 +1331,8 @@ Commands:
   run                Submit a graph run locally or to a named target
   update             Update this executable and managed agent skills to the newest canonical release
   list               List runs as JSON
-  status             Read a run&#39;s current status as JSON
-  watch              Follow a run&#39;s durable event stream as NDJSON
+  status             Read a run&#39;s current status as JSON, including separate native delivery evidence when available
+  watch              Follow durable status as NDJSON, including native delivery evidence independently of graph output
   logs               Follow a run&#39;s log stream as NDJSON
   attach             Attach to an execution&#39;s interactive event stream as NDJSON
   force-stop         Force a run to stop and write the result as JSON
