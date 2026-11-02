@@ -31,6 +31,10 @@ impl NodeDriver for CopilotAdapter {
         let session = crate::native_v2_capsule::provider_process::invocation_session::<
             CopilotSession,
         >(&invocation)?;
-        self.run_turn(&invocation, session, &control).await
+        self.run_turn(&invocation, session, &control)
+            .await
+            .map_err(|error| {
+                crate::harnesses::native_config::context_error(&invocation, "copilot", error)
+            })
     }
 }

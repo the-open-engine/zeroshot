@@ -8,6 +8,128 @@
 //! coverage totals keep excluding this file (`AGENTS.md`).
 
 use super::*;
+use serde_json::json;
+
+#[test]
+fn contained_native_aliases_cannot_replace_host_tools_or_project_trust() {
+    let directory = TestDirectory::new("pi-contained-native-aliases");
+    let files = files(&directory);
+    let adapter = PiAdapter::new(adapter_configuration(
+        PiProvider::Anthropic,
+        "pi",
+        BTreeMap::new(),
+    ))
+    .assert_value();
+    for args in [
+        vec!["-a"],
+        vec!["--approve"],
+        vec!["-t", "read"],
+        vec!["--tools", "read"],
+        vec!["-nt"],
+        vec!["--no-tools"],
+        vec!["-nbt"],
+        vec!["--no-builtin-tools"],
+        vec!["-xt", "read"],
+        vec!["--exclude-tools", "read"],
+        vec!["-na"],
+        vec!["--no-approve"],
+    ] {
+        let mut turn = invocation(
+            agent_binding(
+                "opaque",
+                None,
+                SessionScope::Execution,
+                &["ANTHROPIC_API_KEY"],
+            ),
+            NodeRole::Worker,
+            resolved(
+                &["ANTHROPIC_API_KEY"],
+                &[("ANTHROPIC_API_KEY", "fixture-key")],
+            ),
+        );
+        crate::harnesses::native_config::tests::set(&mut turn.node.binding, json!({"args":args}));
+        let error = adapter
+            .command_for_test(&turn, &files, "zs-owned-session")
+            .unwrap_err();
+        let detail = error.to_string();
+        for expected in [
+            "node `agent`",
+            "harness `pi`",
+            "harnessConfig.args",
+            args[0],
+        ] {
+            assert!(detail.contains(expected), "{detail}");
+        }
+    }
+}
+
+#[test]
+fn local_native_tool_modifiers_reach_the_pi_command_unchanged() {
+    let directory = TestDirectory::new("pi-native-tool-modifiers");
+    let files = files(&directory);
+    let adapter = PiAdapter::new_local(adapter_configuration(
+        PiProvider::Anthropic,
+        "pi",
+        BTreeMap::new(),
+    ))
+    .assert_value();
+    for args in [vec!["--tools", "-read"], vec!["-t", "-read,-bash"]] {
+        let mut turn = invocation(
+            agent_binding("opaque", None, SessionScope::Execution, &[]),
+            NodeRole::Worker,
+            resolved(&[], &[]),
+        );
+        crate::harnesses::native_config::tests::set(&mut turn.node.binding, json!({"args":args}));
+        let command = adapter
+            .command_for_test(&turn, &files, "zs-owned-session")
+            .assert_value();
+        assert_eq!(&command.argv[command.argv.len() - args.len()..], &args);
+        assert_eq!(
+            value(&command.argv, "--session-id").as_deref(),
+            Some("zs-owned-session")
+        );
+    }
+}
+
+#[test]
+fn native_fork_is_rejected_before_launch_in_both_placements() {
+    let directory = TestDirectory::new("pi-owned-session-history");
+    let files = files(&directory);
+    for contained in [false, true] {
+        let config = adapter_configuration(PiProvider::Anthropic, "pi", BTreeMap::new());
+        let adapter = if contained {
+            PiAdapter::new(config)
+        } else {
+            PiAdapter::new_local(config)
+        }
+        .assert_value();
+        let mut turn = invocation(
+            agent_binding(
+                "opaque",
+                None,
+                SessionScope::NodeInstance,
+                &["ANTHROPIC_API_KEY"],
+            ),
+            NodeRole::Worker,
+            resolved(
+                &["ANTHROPIC_API_KEY"],
+                &[("ANTHROPIC_API_KEY", "fixture-key")],
+            ),
+        );
+        crate::harnesses::native_config::tests::set(
+            &mut turn.node.binding,
+            json!({"args":["--fork","caller-history.jsonl"]}),
+        );
+        let detail = adapter
+            .command_for_test(&turn, &files, "zs-owned-session")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            detail.contains("--fork") && detail.contains("harnessConfig.args"),
+            "{detail}"
+        );
+    }
+}
 
 #[test]
 fn coverage_contract_pi_capsule_environment_supplies_a_home_and_default_search_path() {

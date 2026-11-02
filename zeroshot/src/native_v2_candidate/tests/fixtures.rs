@@ -38,6 +38,7 @@ pub(super) fn agent_binding(lane: Option<RuntimeLane>, model: &str) -> NodeRunti
         lane,
         model: worker_catalog::ModelId::new(model).assert_value_with("model"),
         effort: Some(ReasoningEffort::Max),
+        harness_config: None,
         context_window: None,
         max_tokens: None,
         session_scope: SessionScope::Execution,

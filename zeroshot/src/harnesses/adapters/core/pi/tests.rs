@@ -75,6 +75,7 @@ fn agent_binding(
         lane: None,
         model: ModelId::new(model).assert_value(),
         effort,
+        harness_config: None,
         context_window: None,
         max_tokens: None,
         session_scope: scope,

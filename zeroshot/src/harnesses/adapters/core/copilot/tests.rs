@@ -46,6 +46,7 @@ fn binding_for_model(names: impl Iterator<Item = String>, model: &str) -> NodeRu
         lane: None,
         model: crate::worker_catalog::ModelId::new(model).assert_value(),
         effort: None,
+        harness_config: None,
         context_window: None,
         max_tokens: None,
         session_scope: SessionScope::NodeInstance,
@@ -110,6 +111,7 @@ struct Fixture {
 }
 
 struct FixturePrompt<'a> {
+    harness_config: Option<Value>,
     instructions: &'static str,
     model: &'a str,
 }
@@ -339,6 +341,7 @@ impl Fixture {
             (directory, executable),
             values,
             FixturePrompt {
+                harness_config: None,
                 instructions: INSTRUCTIONS,
                 model: "gateway/fixture",
             },
@@ -383,6 +386,7 @@ impl Fixture {
             source,
             values,
             FixturePrompt {
+                harness_config: None,
                 instructions,
                 model: "auto",
             },
@@ -399,7 +403,10 @@ impl Fixture {
     ) -> Self {
         let (directory, executable) = source;
         let (local_user, base_environment) = native;
-        let binding = binding_for_model(values.keys().cloned(), prompt.model);
+        let mut binding = binding_for_model(values.keys().cloned(), prompt.model);
+        if let Some(config) = prompt.harness_config {
+            crate::harnesses::native_config::tests::set(&mut binding, config);
+        }
         let admitted = admitted(binding.clone(), prompt.instructions).await;
         let workspace = directory.child("workspace");
         let runtime_home = directory.child("runtime");
@@ -1324,4 +1331,115 @@ async fn final_malformed_validation_detail_survives_capsule_transport() {
     assert!(failures[0].text.contains("[REDACTED]"));
     assert!(!failures[0].text.contains("gho_fak"));
     assert!(failures[0].text.len() <= 8192);
+}
+
+async fn configured_fixture(config: Value, rejected: bool) -> Fixture {
+    let directory = TestDirectory::new("copilot-native-config");
+    let source = if rejected {
+        script().replace("session = params[\"sessionId\"]", "send({\"id\": message[\"id\"], \"error\": {\"code\": -32602, \"message\": \"session.options.availableTools: invalid native selection\"}})\n        continue\n        session = params[\"sessionId\"]")
+    } else {
+        script()
+    };
+    let executable = directory.write_executable("copilot", &source);
+    let mut values = fixture_values(&directory, "correction");
+    values.insert(auth::TOKEN.to_owned(), "gho_fake-secret".to_owned());
+    let local = local_user(&directory);
+    Fixture::with_model_configuration(
+        (directory, executable),
+        values,
+        FixturePrompt {
+            instructions: INSTRUCTIONS,
+            model: "auto",
+            harness_config: Some(config),
+        },
+        (Some(local), BTreeMap::new()),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn native_session_options_survive_correction_and_resume_and_are_isolated() {
+    let mut configured = configured_fixture(
+        json!({"options":{"availableTools":["view","grep"],"futureNativeKey":true}}),
+        false,
+    )
+    .await;
+    for execution in [1, 2] {
+        verified(complete(configured.start(execution).await).await.1);
+    }
+    let capture = configured.capture();
+    let sessions = capture
+        .iter()
+        .filter(|message| {
+            matches!(
+                message["method"].as_str(),
+                Some("session.create" | "session.resume")
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(sessions.len(), 2);
+    for session in sessions {
+        assert_eq!(session["params"]["availableTools"], json!(["view", "grep"]));
+        assert_eq!(session["params"]["futureNativeKey"], true);
+    }
+    let NodeRuntimeBinding::Agent {
+        harness_config,
+        session_scope,
+        ..
+    } = &mut configured.binding
+    else {
+        unreachable!()
+    };
+    *harness_config = None;
+    *session_scope = SessionScope::Execution;
+    let clean_admitted = admitted(configured.binding.clone(), configured.instructions).await;
+    let clean = configured
+        .runtime
+        .auxiliary_factory()
+        .fork(&clean_admitted)
+        .assert_value();
+    verified(
+        complete(clean.start(configured.request(3)).await.assert_value())
+            .await
+            .1,
+    );
+    assert!(
+        configured
+            .capture()
+            .iter()
+            .rev()
+            .find(|message| message["method"] == "session.create")
+            .is_some_and(|message| message["params"].get("availableTools").is_none())
+    );
+}
+
+#[tokio::test]
+async fn native_session_initialization_rejection_fails_without_sending_a_prompt() {
+    let fixture = configured_fixture(
+        json!({"options":{"availableTools":["native-selection"]}}),
+        true,
+    )
+    .await;
+    let (_, result) = complete(fixture.start(1).await).await;
+    let detail = result.unwrap_err().to_string();
+    assert!(
+        detail.contains("node `work`")
+            && detail.contains("copilot")
+            && detail.contains("availableTools")
+            && detail.contains("invalid native selection"),
+        "{detail}"
+    );
+    let capture = fixture.capture();
+    assert_eq!(
+        capture
+            .iter()
+            .filter(|message| message["method"] == "session.create")
+            .count(),
+        1
+    );
+    assert!(
+        !capture
+            .iter()
+            .any(|message| message["method"] == "session.send")
+    );
 }

@@ -481,7 +481,11 @@ fn native_plugin_acknowledges_builtin_and_mcp_recall_without_changing_attachment
     let files =
         ProviderExecutionFiles::for_test(directory.path(), HostedProcessScope::WriterExecution(1))
             .assert_value();
-    let invocation = invocation(&[]);
+    let mut invocation = invocation(&[]);
+    crate::harnesses::native_config::tests::set(
+        &mut invocation.node.binding,
+        json!({"options":{"permission":{"edit":"deny"}}}),
+    );
     let command = command::command(command::CommandRequest {
         adapter: &adapter,
         invocation: &invocation,
@@ -491,6 +495,7 @@ fn native_plugin_acknowledges_builtin_and_mcp_recall_without_changing_attachment
     .assert_value();
     let config: Value =
         serde_json::from_str(&command.environment["OPENCODE_CONFIG_CONTENT"]).assert_value();
+    assert_eq!(config["permission"]["edit"], "deny");
     let plugin_url = config["plugin"]
         .as_array()
         .assert_value()
@@ -546,5 +551,57 @@ console.log(JSON.stringify({output,mcp,before}));"#;
         source.failures.load(Ordering::SeqCst),
         1,
         "unsupported null output must remain unavailable rather than being acknowledged"
+    );
+}
+
+#[tokio::test]
+async fn native_args_and_config_are_isolated_and_survive_reused_sessions() {
+    let directory = TestDirectory::new("opencode-native-config");
+    let source=script("{\"response\":null}").replace("cat >/dev/null","printf '%s\\n' \"$@\" >> native-args\nprintf '%s\\n' \"$OPENCODE_CONFIG_CONTENT\" >> native-options\ncat >/dev/null");
+    let adapter = adapter(&directory, &source);
+    let mut configured = invocation(&[]);
+    crate::harnesses::native_config::tests::set(
+        &mut configured.node.binding,
+        json!({"args":["--title","native title"],"options":{"permission":{"edit":"deny"},"futureNativeKey":true}}),
+    );
+    run(&adapter, configured.clone()).await.assert_value();
+    run(&adapter, configured).await.assert_value();
+    run(&adapter, invocation(&[])).await.assert_value();
+    let args = std::fs::read_to_string(adapter.config.workspace.join("native-args")).unwrap();
+    assert_eq!(args.matches("native title").count(), 2);
+    let configs = std::fs::read_to_string(adapter.config.workspace.join("native-options"))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(configs.len(), 3);
+    assert_eq!(configs[0]["permission"]["edit"], "deny");
+    assert_eq!(configs[1]["permission"]["edit"], "deny");
+    assert!(configs[2].get("permission").is_none());
+}
+
+#[tokio::test]
+async fn native_configuration_rejection_is_terminal_with_native_stderr() {
+    let directory = TestDirectory::new("opencode-native-rejection");
+    let adapter = adapter(
+        &directory,
+        "#!/bin/sh\nprintf 'launch\\n' >> launches\nprintf '%s\\n' 'invalid --title native-value' >&2\nexit 2\n",
+    );
+    let mut invocation = invocation(&[]);
+    crate::harnesses::native_config::tests::set(
+        &mut invocation.node.binding,
+        json!({"args":["--title","native-value"]}),
+    );
+    let detail = run(&adapter, invocation).await.unwrap_err().to_string();
+    assert!(
+        detail.contains("opencode") && detail.contains("node `") && detail.contains("--title"),
+        "{detail}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(adapter.config.workspace.join("launches"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
     );
 }

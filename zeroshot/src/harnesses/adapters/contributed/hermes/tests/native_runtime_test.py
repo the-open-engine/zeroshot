@@ -25,6 +25,17 @@ def _processes(snapshot, current):
                            AccessDenied=type("Denied", (Exception,), {}))
 
 
+class NativeConfigurationTests(unittest.TestCase):
+    def test_native_options_overlay_only_selected_nested_values(self):
+        loaded = {"agent": {"max_turns": 8, "other_native_setting": True}, "toolsets": ["terminal"]}
+        runtime.merge_options(loaded, {"agent": {"max_turns": 12}, "futureNativeKey": 42})
+        self.assertEqual(loaded, {"agent": {"max_turns": 12, "other_native_setting": True},
+                                  "toolsets": ["terminal"], "futureNativeKey": 42})
+        clean = {"agent": {"max_turns": 8}}
+        runtime.merge_options(clean, {})
+        self.assertEqual(clean, {"agent": {"max_turns": 8}})
+
+
 class RuntimeProtocolTests(unittest.TestCase):
     def test_rejects_truncated_and_oversized_control_frames(self):
         for wire in (b'{"type":"stop"}', b'x' * (runtime.MAX_FRAME + 1)):

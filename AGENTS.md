@@ -197,6 +197,24 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Caller-selected remote backends retain native containment guarantees. Native token deltas remain visible; unreported
   auxiliary or child work marks totals incomplete. Active Memory attaches native model-facing
   notices after tool-result bookkeeping, preserving native transforms and durable messages.
+- Agent bindings may carry a secret-free `harnessConfig` object (64 KiB encoded), with native
+  `args` and/or `options` carriers owned by each adapter. The effective node lane interprets it;
+  lane changes retain it without translation. Registration supplies pure reserved-control validation,
+  and the invocation/session builder applies fresh node-local overrides through native mechanisms.
+  Native option names/values and unknown JSON keys remain harness-owned. Connections own credentials;
+  model/provider, identity, transport, response contract, required memory hooks and containment stay
+  runtime-owned. Never implement overrides by writing user/project configuration. Local Claude/Codex
+  native overrides suppress automatic permission bypass and never enter arbitrary flag probes.
+  Binding clones, generated reviewers and built-in postmortem specialists retain native configuration
+  to avoid broadening restrictions; reviewer credentials and sessions retain their existing ownership.
+  Native initialization rejection is terminal in the adapter and keeps redacted diagnostics and node identity.
+  Reserve native aliases alongside long runtime-owned controls. Short-option matching belongs to
+  the adapter's parser syntax: Pi recognizes exact short tokens, so native values such as `-read`
+  must not be interpreted as a joined `-r` option. Contained Pi owns tool selection and project trust
+  under both long names and their native aliases; session forks are reserved in every placement.
+  Codex exec subcommand tokens stay runtime-owned wherever they occur; literal native option values
+  matching those tokens use `--option=value`. Claude session selectors and system-prompt file forms
+  are reserved alongside the inline/session controls they replace.
 - Model identifiers are opaque provider-owned strings. Do not infer a harness from a provider/model,
   maintain runtime model catalogs, or validate provider availability. Admission may reject only known
   incompatible harness/provider pairs. A caller may declare optional bounded `contextWindow` and

@@ -208,7 +208,7 @@ pub(super) fn command(
     };
     let access = agent_workspace_access(invocation.role)
         .map_err(|error| with_driver_detail(error, "Pi workspace policy rejected the node role"))?;
-    let argv = pi_arguments(
+    let mut argv = pi_arguments(
         prefix_arguments,
         &PiCommandInput {
             provider,
@@ -219,6 +219,38 @@ pub(super) fn command(
             contained,
         },
     );
+    let native = crate::harnesses::native_config::invocation_args(
+        invocation,
+        "pi",
+        super::native_config::validate,
+    )?;
+    if contained {
+        crate::harnesses::native_config::reserved_args(
+            &native,
+            &[
+                "--tools",
+                "-t",
+                "--no-tools",
+                "-nt",
+                "--no-builtin-tools",
+                "-nbt",
+                "--exclude-tools",
+                "-xt",
+                "--extension",
+                "-e",
+                "--approve",
+                "-a",
+                "--no-approve",
+                "-na",
+                "--skill",
+                "--prompt-template",
+                "--theme",
+            ],
+            crate::harnesses::native_config::ShortOptionStyle::Exact,
+        )
+        .map_err(|detail| crate::harnesses::native_config::failure(invocation, "pi", &detail))?;
+    }
+    argv.extend(native);
     let mut environment = EnvironmentRequest {
         provider,
         native_local,

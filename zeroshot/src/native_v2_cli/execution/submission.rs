@@ -652,6 +652,8 @@ struct UniformRuntimePlan {
     effort: Option<ReasoningEffort>,
     #[serde(default, deserialize_with = "deserialize_context_window")]
     context_window: Option<u32>,
+    #[serde(default)]
+    harness_config: Option<openengine_cluster_protocol::HarnessConfiguration>,
     #[serde(default, deserialize_with = "deserialize_max_tokens")]
     max_tokens: Option<u32>,
     #[serde(default)]
@@ -735,6 +737,7 @@ impl UniformRuntimePlan {
             lane: None,
             model: self.model.clone(),
             effort: self.effort,
+            harness_config: self.harness_config.clone(),
             context_window: self.context_window,
             max_tokens: self.max_tokens,
             session_scope: self.session_scope.unwrap_or_else(|| {

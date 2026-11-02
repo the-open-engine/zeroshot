@@ -12,6 +12,7 @@
 #[path = "command.rs"]
 mod command;
 pub(crate) mod memory;
+mod native_config;
 #[path = "provider_document.rs"]
 mod provider_document;
 #[path = "session.rs"]

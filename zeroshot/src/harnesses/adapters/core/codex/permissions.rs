@@ -25,7 +25,7 @@ struct CodexConfigurationInspection {
 impl NativeV2CodexAdapter {
     pub(super) async fn apply_permission_default(
         &self,
-        files: Arc<ProviderExecutionFiles>,
+        input: crate::harnesses::native_config::PermissionInput<'_>,
         command: &mut ProcessSessionCommand,
         control: &DriverControl,
     ) -> Result<Vec<String>, NodeRunnerError> {
@@ -35,8 +35,9 @@ impl NativeV2CodexAdapter {
                 .insert(1, "--dangerously-bypass-approvals-and-sandbox".to_owned());
             return Ok(Vec::new());
         }
+        let has_overrides = input.has_overrides();
         let inspection = self
-            .inspect_configuration(files, command.clone(), control)
+            .inspect_configuration(input.files, command.clone(), control)
             .await?;
         let redactions =
             if self.config.local_user.is_some() && self.config.provider == CodexProvider::OpenAi {
@@ -55,7 +56,7 @@ impl NativeV2CodexAdapter {
             } else {
                 Vec::new()
             };
-        if inspection.permission_policy == PermissionPolicy::Unset {
+        if !has_overrides && inspection.permission_policy == PermissionPolicy::Unset {
             command
                 .argv
                 .insert(1, "--dangerously-bypass-approvals-and-sandbox".to_owned());

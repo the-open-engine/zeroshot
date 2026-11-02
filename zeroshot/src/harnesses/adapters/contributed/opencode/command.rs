@@ -151,6 +151,14 @@ pub(super) fn command(
     let mut environment = process_environment(adapter, invocation, files)?;
     let declared = declared_authority(&adapter.config.provider, &invocation.environment);
     let mut config = inline_configuration(&environment)?;
+    if let Some(native) = invocation.node.binding.harness_config() {
+        super::native_config::validate(native).map_err(|detail| {
+            crate::harnesses::native_config::failure(invocation, "opencode", &detail)
+        })?;
+        if let Some(options) = native.options() {
+            merge_options(&mut config, &Value::Object(options.clone()));
+        }
+    }
     configure_provider(adapter, invocation, &mut environment, &mut config)?;
     environment.insert(
         "OPENCODE_CONFIG_CONTENT".to_owned(),
@@ -309,7 +317,35 @@ fn arguments(
     if let Some(effort) = effort {
         argv.extend(["--variant".to_owned(), effort_token(*effort).to_owned()]);
     }
+    let native = crate::harnesses::native_config::invocation_args(
+        invocation,
+        "opencode",
+        super::native_config::validate,
+    )?;
+    if adapter.runners.is_hosted() {
+        crate::harnesses::native_config::reserved_args(
+            &native,
+            &["--auto"],
+            crate::harnesses::native_config::ShortOptionStyle::Joined,
+        )
+        .map_err(|detail| {
+            crate::harnesses::native_config::failure(invocation, "opencode", &detail)
+        })?;
+    }
+    argv.extend(native);
     Ok(argv)
+}
+
+fn merge_options(target: &mut Value, options: &Value) {
+    if let (Some(target), Some(options)) = (target.as_object_mut(), options.as_object()) {
+        for (key, value) in options {
+            if value.is_object() && target.get(key).is_some_and(Value::is_object) {
+                merge_options(&mut target[key], value);
+            } else {
+                target.insert(key.clone(), value.clone());
+            }
+        }
+    }
 }
 
 fn inline_configuration(environment: &BTreeMap<String, String>) -> Result<Value, NodeRunnerError> {

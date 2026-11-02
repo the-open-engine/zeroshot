@@ -13,6 +13,7 @@ export type Binding = {
   kind: string;
   model?: string;
   effort?: string;
+  harnessConfig?: { args?: string[]; options?: Record<string, unknown> };
   lane?: { harness: string; provider: string };
   sessionScope?: string;
   connections?: Record<string, string[]>;

@@ -9,6 +9,7 @@ mod auth;
 mod command;
 mod events;
 mod framing;
+mod native_config;
 mod provider;
 mod rpc;
 mod session;
@@ -343,7 +344,14 @@ async fn finish_rpc(
     // Stop the owned tree while draining its remaining events, including token usage.
     // Releasing an intentionally completed headless server is not a provider cancellation.
     let (completion, drained) = tokio::join!(process.release(), connection.drain());
-    let retryable_grammar_rate_limit = drained.is_ok()
+    let retryable_grammar_rate_limit = (connection.initialized
+        || connection
+            .invocation
+            .node
+            .binding
+            .harness_config()
+            .is_none())
+        && drained.is_ok()
         && matches!(
             &outcome,
             Err(NodeRunnerError::DriverDetail(detail))

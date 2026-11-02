@@ -21,14 +21,16 @@ use crate::native_v2_runner::{DriverControl, NodeRunnerError};
 impl ClaudeAdapter {
     pub(super) async fn apply_permission_default(
         &self,
-        files: Arc<ProviderExecutionFiles>,
+        input: crate::harnesses::native_config::PermissionInput<'_>,
         command: &mut ProcessSessionCommand,
         control: &DriverControl,
     ) -> Result<(), NodeRunnerError> {
         let permissive = if self.runners.is_hosted() {
             true
+        } else if input.has_overrides() {
+            false
         } else {
-            self.inspect_permission_policy(files, command.clone(), control)
+            self.inspect_permission_policy(input.files, command.clone(), control)
                 .await?
                 == PermissionPolicy::Unset
         };

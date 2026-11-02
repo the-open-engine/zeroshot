@@ -48,6 +48,7 @@ function document(harness: string, provider: string): Document {
           kind: 'agent',
           model: 'custom-original',
           effort: 'high',
+          harnessConfig: { args: ['--tools', 'Read,Grep,Glob'] },
           connections: { tools: ['TOKEN'] },
         },
         reviewer: { kind: 'agent', model: 'reviewer-model' },
@@ -91,6 +92,10 @@ test('a model chosen for one agent reaches only that runtime binding', () => {
     before.runtime.nodes.worker.connections
   );
   assert.equal(edits[0].runtime.nodes.worker.effort, 'high');
+  assert.deepEqual(
+    edits[0].runtime.nodes.worker.harnessConfig,
+    before.runtime.nodes.worker.harnessConfig
+  );
   assert.deepEqual(edits[0].runtime.nodes.reviewer, before.runtime.nodes.reviewer);
   assert.deepEqual(edits[0].runtime.nodes.delivery, before.runtime.nodes.delivery);
   assert.deepEqual(doc, before);
@@ -227,4 +232,24 @@ test('a shared picker uses the common override rather than the graph default', (
       );
     }
   );
+});
+
+test('changing the harness retains native configuration for review without translation', () => {
+  const doc = document('claude', 'anthropic');
+  const before = structuredClone(doc.runtime.nodes.worker.harnessConfig);
+  const edits: Document[] = [];
+  let harness: ReactElement<any> | undefined;
+  within(
+    () => RuntimeEditor({ document: doc, schema: {}, edit: (next) => edits.push(next) }),
+    (tree) => {
+      harness = tree.find(
+        (element) => element.type === 'select' && element.props.value === 'claude'
+      );
+    }
+  );
+  assert.ok(harness);
+  harness.props.onChange({ target: { value: 'copilot' } });
+  assert.equal(edits[0].runtime.harness, 'copilot');
+  assert.deepEqual(edits[0].runtime.nodes.worker.harnessConfig, before);
+  assert.equal(doc.runtime.harness, 'claude');
 });

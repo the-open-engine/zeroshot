@@ -1820,6 +1820,23 @@
         }
       ]
     },
+    "HarnessConfiguration": {
+      "additionalProperties": false,
+      "description": "Secret-free native configuration, at most 65536 encoded bytes. Supported carriers and reserved controls belong to the selected harness.",
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "options": {
+          "additionalProperties": true,
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "InitializeParams": {
       "additionalProperties": false,
       "properties": {
@@ -3546,6 +3563,17 @@
                   "type": "null"
                 }
               ]
+            },
+            "harnessConfig": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/HarnessConfiguration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Secret-free native options owned by this node's effective harness."
             },
             "kind": {
               "const": "agent",

@@ -4,6 +4,7 @@
 
 mod command;
 mod connection;
+mod native_config;
 mod registration;
 
 pub(crate) use registration::registration;
@@ -157,6 +158,9 @@ impl NodeDriver for HermesAdapter {
         self.run_session(&invocation, session, &control)
             .await
             .map_err(|error| redact_provider_error(error, &redactions))
+            .map_err(|error| {
+                crate::harnesses::native_config::context_error(&invocation, "hermes", error)
+            })
     }
 }
 

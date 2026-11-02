@@ -119,6 +119,7 @@ pub(super) struct CopilotRpc<'a> {
     pending: BTreeSet<u64>,
     pub(super) session_id: String,
     pub(super) response: Option<String>,
+    pub(super) initialized: bool,
     pub(super) redactions: Vec<String>,
     authentication: auth::CopilotAuthentication<'a>,
     provider: Option<&'a provider::LocalProvider>,
@@ -163,6 +164,7 @@ impl<'a> CopilotRpc<'a> {
             pending: BTreeSet::new(),
             session_id: String::new(),
             response: None,
+            initialized: false,
             redactions,
             authentication: native.authentication,
             provider: native.provider,
@@ -225,6 +227,7 @@ impl<'a> CopilotRpc<'a> {
         };
         let created = self.request(method, params).await?;
         validate_session_identity(&created, &self.session_id)?;
+        self.initialized = true;
         *turn.session.id.lock().await = Some(self.session_id.clone());
         let outcome = self.run_response(turn.agent_response).await?;
         self.detach().await?;

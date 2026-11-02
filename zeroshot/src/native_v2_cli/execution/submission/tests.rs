@@ -30,6 +30,7 @@ fn uniform(harness: &str, provider: &str) -> UniformRuntimePlan {
         size: RunSize::Small,
         model: ModelId::new("provider-owned-model").assert_value(),
         effort: None,
+        harness_config: None,
         context_window: None,
         max_tokens: None,
         session_scope: None,
@@ -162,6 +163,7 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
             lane: None,
             model: ModelId::new("wrong-kind").assert_value(),
             effort: None,
+            harness_config: None,
             context_window: None,
             max_tokens: None,
             session_scope: SessionScope::Execution,
@@ -206,7 +208,8 @@ fn uniform_runtime_threads_model_limits_into_each_agent_binding() {
         "provider": "gateway",
         "model": "provider-owned-model",
         "contextWindow": 1_000_000,
-        "maxTokens": 32_000
+        "maxTokens": 32_000,
+        "harnessConfig": {"args":["--tools","read,grep"]}
     });
     let plan: UniformRuntimePlan = serde_json::from_value(authored).assert_value();
     let runtime = plan
@@ -227,6 +230,10 @@ fn uniform_runtime_threads_model_limits_into_each_agent_binding() {
             agents += 1;
             assert_eq!(*context_window, Some(1_000_000), "{name}");
             assert_eq!(*max_tokens, Some(32_000), "{name}");
+            assert_eq!(
+                binding.harness_config().unwrap().args().unwrap(),
+                ["--tools", "read,grep"]
+            );
         }
     }
     assert!(agents > 0);

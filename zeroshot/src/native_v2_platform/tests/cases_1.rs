@@ -123,6 +123,7 @@ async fn allocator_defaults_are_explicit_fail_closed_and_side_effect_free() {
                 lane: None,
                 model: crate::worker_catalog::ModelId::new("quiet-model").assert_value(),
                 effort: None,
+                harness_config: None,
                 context_window: None,
                 max_tokens: None,
                 session_scope: SessionScope::Execution,

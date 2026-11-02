@@ -33,6 +33,7 @@ fn resolved(fields: &[&str], values: &[(&str, &str)]) -> ResolvedEnvironment {
         lane: None,
         model: crate::worker_catalog::ModelId::new("provider-model").unwrap(),
         effort: None,
+        harness_config: None,
         context_window: None,
         max_tokens: None,
         session_scope: crate::execution::SessionScope::Execution,

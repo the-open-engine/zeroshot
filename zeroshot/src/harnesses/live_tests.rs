@@ -116,6 +116,7 @@ impl LiveSettings {
             lane: None,
             model: ModelId::new(&self.model).assert_value(),
             effort: None,
+            harness_config: None,
             context_window: None,
             max_tokens: None,
             session_scope: scope,

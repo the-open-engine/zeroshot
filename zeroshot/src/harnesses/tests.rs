@@ -13,6 +13,7 @@ fn registration(id: &'static str, providers: &'static [&'static str]) -> Harness
         build: |_, _| panic!("metadata operations must not construct an adapter"),
         access: |_| panic!("metadata operations must not resolve provider access"),
         normalize_local: |_, _| panic!("metadata operations must not inspect local state"),
+        validate_config: |_| Ok(()),
     }
 }
 
@@ -83,6 +84,7 @@ fn runtime_validation_checks_default_and_each_node_override_without_effects() {
         lane: Some(RuntimeLane::new("unregistered", "provider").unwrap()),
         model: openengine_cluster_protocol::ModelId::new("opaque-model").unwrap(),
         effort: None,
+        harness_config: None,
         context_window: None,
         max_tokens: None,
         session_scope: openengine_cluster_protocol::SessionScope::Execution,

@@ -284,7 +284,19 @@ def test_uniform_runtime_encodes_model_limits_only_when_set() -> None:
 
 def test_custom_graph_and_runtime_are_forwarded_unchanged(fake_native: Path) -> None:
     graph = {"profile": "openengine.graph.full/v1", "root": {"kind": "succeed"}}
-    runtime_plan = {"harness": "codex", "provider": "openai", "size": "tiny", "nodes": {}}
+    runtime_plan = {
+        "harness": "claude",
+        "provider": "anthropic",
+        "size": "tiny",
+        "nodes": {
+            "writer": {"kind": "agent", "model": "opaque"},
+            "reviewer": {
+                "kind": "agent",
+                "model": "opaque",
+                "harnessConfig": {"args": ["--tools", "Read,Grep,Glob"]},
+            },
+        },
+    }
     request = RunRequest(
         title="Exact request",
         graph=GraphSpec.from_dict(graph),
@@ -605,3 +617,15 @@ def test_merge_plan_requires_a_hosted_target(fake_native: Path) -> None:
 
     asyncio.run(exercise())
     assert read_invocations(fake_native) == []
+
+
+def test_uniform_runtime_passes_native_configuration_without_shared_mutable_values() -> None:
+    config = {"args": ["--tools", "Read,Grep,Glob"]}
+    selected = UniformRuntime(
+        harness="claude", provider="anthropic", model="opaque", harness_config=config
+    )
+    encoded = selected.to_dict()
+    assert encoded["harnessConfig"] == config
+    config["args"] = ["changed"]
+    assert encoded["harnessConfig"] == {"args": ["--tools", "Read,Grep,Glob"]}
+    assert "harnessConfig" not in runtime().to_dict()

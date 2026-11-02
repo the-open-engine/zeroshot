@@ -20,6 +20,7 @@ impl CodexEmission {
 
 pub(super) struct CodexOutput {
     pub(super) thread_id: Option<String>,
+    pub(super) task_started: bool,
     thread_failure: Option<String>,
     final_message: Option<String>,
     terminal: Option<CodexTerminal>,
@@ -126,6 +127,7 @@ impl CodexOutput {
     fn empty() -> Self {
         Self {
             thread_id: None,
+            task_started: false,
             thread_failure: None,
             final_message: None,
             terminal: None,
@@ -232,6 +234,9 @@ impl CodexOutput {
         let Some(event_type) = event.get("type").and_then(Value::as_str) else {
             return AcceptedLine::Malformed;
         };
+        if event_type == "turn.started" {
+            self.task_started = true;
+        }
         if event_type == "thread.started" {
             return self.accept_thread(&event);
         }
