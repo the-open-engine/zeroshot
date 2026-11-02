@@ -120,11 +120,13 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
         ("codex", "openrouter", true),
         ("codex", "gateway", true),
         ("codex", "bedrock", true),
+        ("codex", "foundry", true),
         ("codex", "anthropic", false),
         ("claude", "anthropic", true),
         ("claude", "openrouter", true),
         ("claude", "gateway", true),
         ("claude", "bedrock", true),
+        ("claude", "foundry", true),
         ("claude", "openai", false),
         ("pi", "anthropic", true),
         ("pi", "openai", true),
@@ -132,6 +134,8 @@ fn wave6_cli_contract_uniform_runtime_and_template_bindings_preserve_authority()
         ("pi", "gateway", true),
         ("pi", "bedrock", true),
         ("pi", "github", true),
+        ("pi", "foundry", false),
+        ("copilot", "foundry", false),
         ("pi", "unregistered-provider", false),
     ] {
         let runtime = uniform(harness, provider)

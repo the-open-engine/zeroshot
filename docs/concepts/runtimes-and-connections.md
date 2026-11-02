@@ -74,14 +74,15 @@ effective lane and the selected execution placement. Local adapters can reuse na
 [Harness adapters](../project/harness-adapters.md). Lanes requiring a connection and contained targets
 receive these canonical requirements:
 
-| Provider     | Connection key | Fields                                   |
-| ------------ | -------------- | ---------------------------------------- |
-| `openai`     | `openai`       | `OPENAI_API_KEY`                         |
-| `openrouter` | `openrouter`   | `OPENROUTER_API_KEY`                     |
-| `anthropic`  | `anthropic`    | `ANTHROPIC_API_KEY`                      |
-| `gateway`    | `gateway`      | `GATEWAY_BASE_URL`, `GATEWAY_API_KEY`    |
-| `bedrock`    | `bedrock`      | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_REGION` |
-| `github`     | `github`       | `COPILOT_GITHUB_TOKEN`                   |
+| Provider     | Connection key | Fields                                            |
+| ------------ | -------------- | ------------------------------------------------- |
+| `openai`     | `openai`       | `OPENAI_API_KEY`                                  |
+| `openrouter` | `openrouter`   | `OPENROUTER_API_KEY`                              |
+| `anthropic`  | `anthropic`    | `ANTHROPIC_API_KEY`                               |
+| `gateway`    | `gateway`      | `GATEWAY_BASE_URL`, `GATEWAY_API_KEY`             |
+| `bedrock`    | `bedrock`      | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_REGION`          |
+| `foundry`    | `foundry`      | `AZURE_FOUNDRY_API_KEY`, `AZURE_FOUNDRY_RESOURCE` |
+| `github`     | `github`       | `COPILOT_GITHUB_TOKEN`                            |
 
 Pi, Copilot, OpenCode and Hermes gateway runs additionally require `GATEWAY_API`, which names the wire protocol
 (`openai-responses`, `openai-completions`, or `anthropic-messages`). The Codex and Claude gateway
@@ -146,6 +147,30 @@ preserves that path. For OpenRouter, use `https://openrouter.ai/api/v1` with Cod
 `https://openrouter.ai/api` with Claude. Base URLs must use HTTP(S) and cannot contain embedded
 credentials, query parameters, or fragments. Both fields remain connection values, outside runtime
 JSON and run history. Exact plans declare these fields under any chosen connection key.
+
+## Microsoft Foundry
+
+The `codex` and `claude` harnesses reach models deployed in a Microsoft Foundry resource with
+`provider: "foundry"`. The model is the Foundry deployment name:
+
+```json
+{ "harness": "claude", "provider": "foundry", "model": "FOUNDRY_DEPLOYMENT_NAME" }
+```
+
+Store the API key with the resource name:
+
+```console
+zeroshot connection set foundry --field AZURE_FOUNDRY_API_KEY --field AZURE_FOUNDRY_RESOURCE
+```
+
+For a custom domain, declare `AZURE_FOUNDRY_BASE_URL` instead of `AZURE_FOUNDRY_RESOURCE`, set to
+the resource root without an API path. Exactly one of the two must be present. Claude Code runs in its
+native Foundry mode against `https://RESOURCE.services.ai.azure.com/anthropic`, or the root URL
+followed by `/anthropic`. Codex uses the Azure OpenAI v1 Responses API at
+`https://RESOURCE.openai.azure.com/openai/v1`, or the root URL followed by `/openai/v1`, and sends the
+key in the `api-key` header. One connection therefore serves a run that mixes Codex and Claude nodes
+on the same resource. Foundry lanes accept API keys only; Microsoft Entra ID authentication is not
+supported.
 
 Docker runtimes can prepare shared tools, project dependencies, and services with setup and
 startup hooks. See [Prepare a runtime environment](../guides/runtime-environments.md) for the

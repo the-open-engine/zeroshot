@@ -79,7 +79,7 @@ fn with_connection_fallback(
     let fallback = merged
         .entry(ConnectionKey::new(contract.connection_key)?)
         .or_default();
-    for name in contract.required_fields {
+    for name in fallback_fields(&existing, contract) {
         let name = EnvironmentVariableName::new(*name)?;
         if !existing.contains(&name) {
             fallback.insert(name);
@@ -91,6 +91,29 @@ fn with_connection_fallback(
             .map(|(key, fields)| DeclaredEnvironment::new(fields).map(|fields| (key, fields)))
             .collect::<Result<Vec<_>, _>>()?,
     )
+}
+
+/// Completes the accepted field set that the authored fields already started, so a partial
+/// connection never gains fields from an alternative form such as a second endpoint. Without any
+/// overlap the canonical requirements apply; ties keep the earlier, canonical set.
+fn fallback_fields(
+    existing: &BTreeSet<EnvironmentVariableName>,
+    contract: ProviderAccessContract,
+) -> &'static [&'static str] {
+    let overlap = |fields: &[&str]| {
+        fields
+            .iter()
+            .filter(|field| existing.iter().any(|name| name.as_str() == **field))
+            .count()
+    };
+    contract
+        .accepted_field_sets
+        .iter()
+        .rev()
+        .max_by_key(|fields| overlap(fields))
+        .filter(|fields| overlap(fields) > 0)
+        .copied()
+        .unwrap_or(contract.required_fields)
 }
 
 #[cfg(test)]

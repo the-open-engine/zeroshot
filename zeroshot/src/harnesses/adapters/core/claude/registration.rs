@@ -17,7 +17,7 @@ pub(crate) fn registration() -> HarnessRegistration {
         descriptor: HarnessDescriptor {
             id: "claude",
             label: "Claude Code",
-            providers: &["anthropic", "openrouter", "gateway", "bedrock"],
+            providers: &["anthropic", "openrouter", "gateway", "bedrock", "foundry"],
             executable: "claude",
             source: HarnessSource::Core,
         },

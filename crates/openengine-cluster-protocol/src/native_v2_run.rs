@@ -490,6 +490,7 @@ pub enum CodexProvider {
     OpenRouter,
     Gateway,
     Bedrock,
+    Foundry,
 }
 
 #[derive(
@@ -502,6 +503,7 @@ pub enum ClaudeProvider {
     OpenRouter,
     Gateway,
     Bedrock,
+    Foundry,
 }
 
 /// Provider lanes owned by the Pi harness.
@@ -607,12 +609,14 @@ native_provider_names!(CodexProvider, {
     CodexProvider::OpenRouter => "openrouter",
     CodexProvider::Gateway => "gateway",
     CodexProvider::Bedrock => "bedrock",
+    CodexProvider::Foundry => "foundry",
 });
 native_provider_names!(ClaudeProvider, {
     ClaudeProvider::Anthropic => "anthropic",
     ClaudeProvider::OpenRouter => "openrouter",
     ClaudeProvider::Gateway => "gateway",
     ClaudeProvider::Bedrock => "bedrock",
+    ClaudeProvider::Foundry => "foundry",
 });
 native_provider_names!(PiProvider, {
     PiProvider::Github => "github",

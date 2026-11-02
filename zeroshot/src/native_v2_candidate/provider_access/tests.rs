@@ -123,6 +123,18 @@ fn contained_and_non_native_lanes_receive_canonical_fallbacks() {
             json!({"bedrock":["AWS_BEARER_TOKEN_BEDROCK","AWS_REGION"]}),
         ),
         (
+            "claude",
+            "foundry",
+            ProviderAccessPlacement::Contained,
+            json!({"foundry":["AZURE_FOUNDRY_API_KEY","AZURE_FOUNDRY_RESOURCE"]}),
+        ),
+        (
+            "codex",
+            "foundry",
+            ProviderAccessPlacement::Local,
+            json!({"foundry":["AZURE_FOUNDRY_API_KEY","AZURE_FOUNDRY_RESOURCE"]}),
+        ),
+        (
             "pi",
             "anthropic",
             ProviderAccessPlacement::Contained,
@@ -188,6 +200,59 @@ fn authored_access_wins_and_partial_connections_receive_only_missing_fields() {
             "internal":["GATEWAY_BASE_URL"]
         })
     );
+}
+
+#[test]
+fn partial_foundry_connections_complete_the_endpoint_form_already_declared() {
+    for harness in ["codex", "claude"] {
+        let mut base_url = runtime(
+            harness,
+            "foundry",
+            json!({"internal":["AZURE_FOUNDRY_BASE_URL"]}),
+        );
+        materialize_provider_access(&mut base_url, ProviderAccessPlacement::Contained)
+            .assert_value();
+        assert_eq!(
+            requirements(&base_url),
+            json!({
+                "foundry":["AZURE_FOUNDRY_API_KEY"],
+                "github":["GH_TOKEN"],
+                "internal":["AZURE_FOUNDRY_BASE_URL"]
+            })
+        );
+
+        let mut resource = runtime(
+            harness,
+            "foundry",
+            json!({"internal":["AZURE_FOUNDRY_RESOURCE"]}),
+        );
+        materialize_provider_access(&mut resource, ProviderAccessPlacement::Contained)
+            .assert_value();
+        assert_eq!(
+            requirements(&resource),
+            json!({
+                "foundry":["AZURE_FOUNDRY_API_KEY"],
+                "github":["GH_TOKEN"],
+                "internal":["AZURE_FOUNDRY_RESOURCE"]
+            })
+        );
+
+        let mut key_only = runtime(
+            harness,
+            "foundry",
+            json!({"internal":["AZURE_FOUNDRY_API_KEY"]}),
+        );
+        materialize_provider_access(&mut key_only, ProviderAccessPlacement::Contained)
+            .assert_value();
+        assert_eq!(
+            requirements(&key_only),
+            json!({
+                "foundry":["AZURE_FOUNDRY_RESOURCE"],
+                "github":["GH_TOKEN"],
+                "internal":["AZURE_FOUNDRY_API_KEY"]
+            })
+        );
+    }
 }
 
 #[test]

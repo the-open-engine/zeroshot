@@ -162,6 +162,81 @@ fn bedrock_environment_sets_control_and_rejects_missing_or_conflicting_values() 
 }
 
 #[test]
+fn foundry_environment_translates_the_connection_and_rejects_conflicts() {
+    let resource = provider_environment(
+        ClaudeProvider::Foundry,
+        &[
+            ("AZURE_FOUNDRY_API_KEY", "foundry-secret"),
+            ("AZURE_FOUNDRY_RESOURCE", "contoso-ai"),
+        ],
+    )
+    .assert_value();
+    assert_eq!(resource["ANTHROPIC_FOUNDRY_API_KEY"], "foundry-secret");
+    assert_eq!(resource["ANTHROPIC_FOUNDRY_RESOURCE"], "contoso-ai");
+    assert_eq!(resource["CLAUDE_CODE_USE_FOUNDRY"], "1");
+    assert!(!resource.contains_key("ANTHROPIC_FOUNDRY_BASE_URL"));
+    assert!(
+        !resource
+            .keys()
+            .any(|name| name.starts_with("AZURE_FOUNDRY_"))
+    );
+
+    let base_url = provider_environment(
+        ClaudeProvider::Foundry,
+        &[
+            ("AZURE_FOUNDRY_API_KEY", "foundry-secret"),
+            ("AZURE_FOUNDRY_BASE_URL", "https://ai.contoso.example/"),
+        ],
+    )
+    .assert_value();
+    assert_eq!(
+        base_url["ANTHROPIC_FOUNDRY_BASE_URL"],
+        "https://ai.contoso.example/anthropic"
+    );
+    assert!(!base_url.contains_key("ANTHROPIC_FOUNDRY_RESOURCE"));
+
+    for values in [
+        vec![("AZURE_FOUNDRY_RESOURCE", "contoso-ai")],
+        vec![("AZURE_FOUNDRY_API_KEY", "foundry-secret")],
+        vec![
+            ("AZURE_FOUNDRY_API_KEY", "foundry-secret"),
+            ("AZURE_FOUNDRY_RESOURCE", "contoso.ai"),
+        ],
+        vec![
+            ("AZURE_FOUNDRY_API_KEY", "foundry-secret"),
+            ("AZURE_FOUNDRY_RESOURCE", "contoso-ai"),
+            ("AZURE_FOUNDRY_BASE_URL", "https://ai.contoso.example"),
+        ],
+    ] {
+        let error = provider_environment(ClaudeProvider::Foundry, &values)
+            .expect_err("invalid Foundry connection accepted");
+        assert!(!error.to_string().contains("foundry-secret"));
+    }
+
+    for conflict in [
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+        "OPENROUTER_API_KEY",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "ANTHROPIC_FOUNDRY_API_KEY",
+        "ANTHROPIC_FOUNDRY_BASE_URL",
+        "ANTHROPIC_FOUNDRY_RESOURCE",
+    ] {
+        let values = [
+            ("AZURE_FOUNDRY_API_KEY", "foundry-secret"),
+            ("AZURE_FOUNDRY_RESOURCE", "contoso-ai"),
+            (conflict, "conflict"),
+        ];
+        assert!(
+            provider_environment(ClaudeProvider::Foundry, &values).is_err(),
+            "accepted conflicting {conflict}"
+        );
+    }
+}
+
+#[test]
 fn gateway_environment_rejects_conflicting_provider_credentials() {
     let required = [
         ("GATEWAY_BASE_URL", "https://gateway.example/api"),
@@ -257,6 +332,13 @@ fn explicit_providers_reject_active_incompatible_transports_only() {
                 (AWS_REGION, "us-east-1"),
             ],
         ),
+        (
+            ClaudeProvider::Foundry,
+            vec![
+                ("AZURE_FOUNDRY_API_KEY", "foundry-secret"),
+                ("AZURE_FOUNDRY_RESOURCE", "contoso-ai"),
+            ],
+        ),
     ] {
         for name in [
             "CLAUDE_CODE_USE_BEDROCK",
@@ -268,7 +350,8 @@ fn explicit_providers_reject_active_incompatible_transports_only() {
             "CLAUDE_CODE_USE_GATEWAY",
         ] {
             let compatible = provider == ClaudeProvider::Bedrock
-                && matches!(name, "CLAUDE_CODE_USE_BEDROCK" | "CLAUDE_CODE_USE_MANTLE");
+                && matches!(name, "CLAUDE_CODE_USE_BEDROCK" | "CLAUDE_CODE_USE_MANTLE")
+                || provider == ClaudeProvider::Foundry && name == "CLAUDE_CODE_USE_FOUNDRY";
             for active in ["1", "true", "TRUE", " true ", "yes", "on"] {
                 let mut values = credentials.clone();
                 values.push((name, active));

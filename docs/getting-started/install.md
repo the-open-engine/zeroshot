@@ -129,7 +129,7 @@ runtime JSON for a contained target:
 zeroshot connection set openai --field OPENAI_API_KEY
 ```
 
-Use `openrouter`, `anthropic`, `bedrock`, or `gateway` as the connection key when the effective
+Use `openrouter`, `anthropic`, `bedrock`, `foundry`, or `gateway` as the connection key when the effective
 runtime declares that provider. [Runtimes and connections](../concepts/runtimes-and-connections.md)
 lists the automatic requirements and explains the separation.
 

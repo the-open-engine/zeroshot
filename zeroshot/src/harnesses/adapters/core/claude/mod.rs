@@ -1,6 +1,7 @@
 //! Claude CLI adapter for native-v2 graph nodes.
 //!
-//! One adapter serves one Anthropic, OpenRouter, gateway, or Amazon Bedrock lane.
+//! One adapter serves one Anthropic, OpenRouter, gateway, Amazon Bedrock, or Microsoft Foundry
+//! lane.
 //! Admission has already selected the model, effort, session scope, and declared environment for
 //! each node. Only the local adapter inherits the current user's harness configuration environment.
 
@@ -100,9 +101,9 @@ impl ClaudeAdapter {
             });
         }
         if !inherit_selectors {
-            adapter
-                .local_environment
-                .retain(|name, _| !name.starts_with("CLAUDE_CODE_USE_"));
+            adapter.local_environment.retain(|name, _| {
+                !name.starts_with("CLAUDE_CODE_USE_") && !name.starts_with("ANTHROPIC_FOUNDRY_")
+            });
         }
         Ok(adapter)
     }

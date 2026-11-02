@@ -14,7 +14,7 @@ pub(crate) fn registration() -> HarnessRegistration {
         descriptor: HarnessDescriptor {
             id: "codex",
             label: "Codex",
-            providers: &["openai", "openrouter", "gateway", "bedrock"],
+            providers: &["openai", "openrouter", "gateway", "bedrock", "foundry"],
             executable: "codex",
             source: HarnessSource::Core,
         },

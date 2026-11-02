@@ -191,6 +191,26 @@ fn both_harness_provider_enums_round_trip_bedrock() {
 }
 
 #[test]
+fn both_harness_provider_enums_round_trip_foundry() {
+    assert_eq!(
+        serde_json::to_value(CodexProvider::Foundry).assert_value(),
+        json!("foundry")
+    );
+    assert_eq!(
+        serde_json::from_value::<CodexProvider>(json!("foundry")).assert_value(),
+        CodexProvider::Foundry
+    );
+    assert_eq!(
+        serde_json::to_value(ClaudeProvider::Foundry).assert_value(),
+        json!("foundry")
+    );
+    assert_eq!(
+        serde_json::from_value::<ClaudeProvider>(json!("foundry")).assert_value(),
+        ClaudeProvider::Foundry
+    );
+}
+
+#[test]
 fn submit_rejects_removed_ship_and_inventory_is_closed() {
     let mut wire = json!({ "runId": "run-1", "submission": submission() });
     json_insert::json_insert(&mut wire, "", "ship", json!(false));
