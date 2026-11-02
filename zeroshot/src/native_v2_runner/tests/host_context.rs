@@ -44,8 +44,13 @@ async fn host_context_is_fresh_on_reused_sessions_and_auxiliary_agents() {
         .assert_value()
         .with_agent_context(Some(context.clone()));
     for execution in 1..=2 {
+        let mut visit = request("context", "looped", (1, execution));
+        visit.dispatch = NodeDispatchMetadata {
+            attempt: 2,
+            iteration: execution,
+        };
         runner
-            .start(request("context", "looped", (1, execution)))
+            .start(visit)
             .await
             .assert_value()
             .completion()
@@ -66,6 +71,15 @@ async fn host_context_is_fresh_on_reused_sessions_and_auxiliary_agents() {
     assert_eq!(context.0.load(Ordering::SeqCst), 3);
     let invocations = driver.invocations.lock().assert_value();
     for (index, invocation) in invocations.iter().enumerate() {
+        let expected = if index < 2 {
+            NodeDispatchMetadata {
+                attempt: 2,
+                iteration: index as u64 + 1,
+            }
+        } else {
+            NodeDispatchMetadata::default()
+        };
+        assert_eq!(invocation.dispatch, expected);
         let context = format!("shared capacity snapshot {index}");
         assert_eq!(invocation.host_context.as_deref(), Some(context.as_str()));
         let instructions = invocation.agent_instructions().assert_value();

@@ -55,6 +55,38 @@ remain native. Declared connections override native dotenv values. Remote backen
 containment limits. Missing native acknowledgement makes cleanup unconfirmed and fails execution;
 unreported child usage makes totals incomplete.
 
+## Execution environment
+
+Every per-node harness child process receives these public, nonsecret execution labels, including
+agent verifiers and host-owned auxiliary agents. Local and contained launches use the same contract.
+
+| Variable                    | Value                                                                                                                            |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `ZEROSHOT_RUN_ID`           | Owning run's existing ID.                                                                                                        |
+| `ZEROSHOT_NODE_NAME`        | Authored node name, or the auxiliary agent's host-owned name.                                                                    |
+| `ZEROSHOT_NODE_KIND`        | Graph kind: `step` or `verifier`.                                                                                                |
+| `ZEROSHOT_NODE_INSTANCE_ID` | Existing run-scoped node instance; mapped items have distinct identities, while retries and loop revisits retain their instance. |
+| `ZEROSHOT_EXECUTION_REF`    | Opaque public execution selector shared with logs, attach and diagnostics.                                                       |
+| `ZEROSHOT_NODE_ATTEMPT`     | One-based reducer attempt within the current node visit.                                                                         |
+| `ZEROSHOT_NODE_ITERATION`   | One-based iteration of the innermost enclosing authored loop; `0` outside loops.                                                 |
+
+For outer iteration 3 and inner iteration 2, a node inside the inner loop sees iteration `2`.
+A node in the outer body after the inner loop sees `3`. The inner count restarts at `1` on the
+next outer visit; a node after all loops sees `0`. Map indices do not affect iteration values.
+
+Reducer retries keep the iteration and advance the attempt. Fresh loop visits follow the reducer's
+attempt reset. Harness continuations, provider retries, structured-output corrections and configuration
+inspection launches retain the dispatch metadata; spawning a process never advances either number.
+Auxiliary agents use their own run, node and execution identities, iteration `0` outside authored
+loops, and attempt `1` unless the host request explicitly represents a retry of that visit.
+
+Zeroshot applies these labels after environment merges, replacing stale incoming values, with
+case-insensitive names on Windows. It never changes the controller's process environment or puts
+labels in credential connections. Descendant tools and hooks may inherit them subject to native
+harness filtering; remote tool backends retain their own environment policies. Descendants can keep
+or change inherited labels, so they are not secrets or evidence of authorization. Native control,
+decision and delivery nodes do not acquire a fabricated harness process.
+
 ## Contribute an adapter
 
 Add an implementation under `zeroshot/src/harnesses/adapters/contributed/` and register it in that
@@ -70,7 +102,8 @@ Factories receive `HarnessBuildContext` and return `HarnessAdapter` with `NodeDr
 
 Adapters own native protocols, authentication translation and permission handling, including their
 environment allowlists and home/path expansion. Use shared process and session helpers for private
-execution files, bounded streaming, cancellation and cleanup. Support workers and verifiers with
+execution files, bounded streaming, cancellation and cleanup. Apply the shared
+`provider_process::apply_execution_environment` helper after environment merges for every agent launch. Support workers and verifiers with
 authoritative response validation, bounded corrections, reusable sessions, live output and usage
 that reports uncertainty when totals are incomplete.
 

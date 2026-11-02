@@ -114,6 +114,7 @@ fn invocation(
     environment: ResolvedEnvironment,
 ) -> DriverInvocation {
     DriverInvocation {
+        dispatch: Default::default(),
         host_context: None,
         node: NodeInvocation {
             reference: execution_ref(),

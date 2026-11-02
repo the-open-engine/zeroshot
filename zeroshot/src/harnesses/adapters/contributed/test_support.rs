@@ -47,6 +47,7 @@ pub(super) fn invocation(
     }
     .into_request();
     DriverInvocation {
+        dispatch: Default::default(),
         host_context: None,
         node: request.invocation,
         role: NodeRole::Worker,

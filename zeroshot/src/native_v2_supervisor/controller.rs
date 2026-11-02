@@ -78,9 +78,16 @@ impl NativeV2Supervisor {
         active
             .cancellations
             .insert(invocation.reference.execution, cancel);
+        let pending = start::PendingNode {
+            invocation,
+            dispatch: crate::native_v2_runner::NodeDispatchMetadata {
+                attempt: dispatch.attempt.get(),
+                iteration: dispatch.iteration,
+            },
+        };
         active
             .tasks
-            .spawn(self.clone().run_pending_node(invocation, timeout, receiver));
+            .spawn(self.clone().run_pending_node(pending, timeout, receiver));
         Ok(())
     }
 

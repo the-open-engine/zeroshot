@@ -164,6 +164,10 @@ impl NativeV2CodexAdapter {
                 .scratch_text()
                 .map_err(|error| NodeRunnerError::DriverDetail(error.to_string()))?,
         );
+        crate::native_v2_capsule::provider_process::apply_execution_environment(
+            &mut environment,
+            invocation,
+        )?;
         let mut command = ProcessSessionCommand {
             program: executable,
             argv,
@@ -407,6 +411,10 @@ impl NativeV2CodexAdapter {
         let native_redactions = self
             .apply_permission_default(files.clone(), &mut command, turn.control)
             .await?;
+        crate::native_v2_capsule::provider_process::apply_execution_environment(
+            &mut command.environment,
+            turn.invocation,
+        )?;
         retry.extend_redactions(&native_redactions);
         let process = match open_process(files, command, turn.control).await? {
             ProcessOpen::Ready(process) => process,

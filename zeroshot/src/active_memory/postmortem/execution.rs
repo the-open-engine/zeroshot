@@ -183,6 +183,7 @@ async fn run_role_inner(
         return Err(PostmortemError::Preparation);
     }
     let request = NodeRunRequest {
+        dispatch: Default::default(),
         invocation,
         environment,
     };

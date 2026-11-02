@@ -25,6 +25,25 @@ async fn drives_every_full_v1_construct_through_the_real_reducer() {
     assert_eq!(harness.driver.starts("loop_check"), 2);
     assert_eq!(harness.driver.starts("map_check"), 2);
     assert!(harness.driver.max_active() >= 2);
+    let contexts = harness.driver.state().contexts.clone();
+    let loop_contexts = contexts
+        .iter()
+        .filter(|(reference, _)| reference.node.as_str() == "loop_check")
+        .map(|(_, dispatch)| (dispatch.attempt, dispatch.iteration))
+        .collect::<Vec<_>>();
+    assert_eq!(loop_contexts, vec![(1, 1), (1, 2)]);
+    assert!(
+        contexts
+            .iter()
+            .filter(|(reference, _)| reference.node.as_str() != "loop_check")
+            .all(|(_, dispatch)| dispatch.attempt == 1 && dispatch.iteration == 0)
+    );
+    let mapped = contexts
+        .iter()
+        .filter(|(reference, _)| reference.node.as_str() == "map_check")
+        .map(|(reference, _)| reference.node_instance)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(mapped.len(), 2);
     let stored = stored_run(&harness.ledger).await;
     let loop_visits = stored
         .snapshot

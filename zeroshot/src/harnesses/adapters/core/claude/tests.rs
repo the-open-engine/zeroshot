@@ -629,6 +629,7 @@ async fn verifier_result_is_normalized_to_the_closed_worker_outcome() {
         "fake-claude.sh",
         r#"
 set -eu
+printf '%s\n' "$ZEROSHOT_NODE_KIND" "$ZEROSHOT_NODE_ITERATION" > verifier.context
 cat > verifier.prompt
 printf '%s\n' "$@" > verifier.args
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"verifier-session"}'
@@ -670,6 +671,7 @@ printf '%s%s%s%s\n' \
             .read("verifier.prompt")
             .contains("Runtime-owned verifier guidance:")
     );
+    assert_eq!(workspace.read("verifier.context"), "verifier\n0\n");
     let arguments = workspace.read("verifier.args");
     assert!(!arguments.contains("--permission-mode"));
     assert!(!arguments.contains("--tools"));
@@ -739,3 +741,60 @@ exec sleep 30
 
 #[path = "tests/failure.rs"]
 mod failure;
+
+#[tokio::test]
+async fn dispatch_metadata_reaches_claude_corrections() {
+    use crate::native_v2_candidate::test_support::{
+        CAPTURE_EXECUTION_ENVIRONMENT, assert_execution_environment,
+    };
+    use crate::native_v2_runner::NodeDispatchMetadata;
+    let workspace = TestDirectory::new("claude-dispatch-metadata");
+    workspace.write(
+        "fake-claude.sh",
+        &format!("{CAPTURE_EXECUTION_ENVIRONMENT}\n{SUCCESS_SCRIPT}"),
+    );
+    let binding = agent_binding(
+        "opaque-model",
+        None,
+        SessionScope::Execution,
+        &[ANTHROPIC_KEY, "CORRECT_OUTPUT", "ZEROSHOT_NODE_ITERATION"],
+    );
+    let runner = runner(
+        &workspace,
+        ClaudeProvider::Anthropic,
+        binding.clone(),
+        false,
+    )
+    .await;
+    let mut visit = request(
+        binding,
+        1,
+        &[
+            (ANTHROPIC_KEY, "fake"),
+            ("CORRECT_OUTPUT", "true"),
+            ("ZEROSHOT_NODE_ITERATION", "999"),
+        ],
+    );
+    visit.dispatch = NodeDispatchMetadata {
+        attempt: 2,
+        iteration: 3,
+    };
+    runner
+        .start(visit.clone())
+        .await
+        .assert_value()
+        .completion()
+        .await
+        .assert_value();
+    let capture = workspace.read("execution-context");
+    let entries = capture.lines().collect::<Vec<_>>();
+    assert_eq!(entries.len(), 14);
+    for chunk in entries.chunks_exact(7) {
+        assert_execution_environment(
+            &(chunk.join("\n") + "\n"),
+            &visit.invocation.reference,
+            visit.dispatch,
+            "step",
+        );
+    }
+}
