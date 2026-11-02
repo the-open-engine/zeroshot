@@ -1725,6 +1725,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#execution-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution environment
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#contribute-an-adapter" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1830,6 +1841,17 @@
       Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#execution-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution environment
+      
+    </span>
+  </a>
+  
+</li>
       
         <li class="md-nav__item">
   <a href="#contribute-an-adapter" class="md-nav__link">
@@ -1939,6 +1961,61 @@ factories without attaching to its shared gateway. Local profiles, plugins, MCP 
 remain native. Declared connections override native dotenv values. Remote backends retain native
 containment limits. Missing native acknowledgement makes cleanup unconfirmed and fails execution;
 unreported child usage makes totals incomplete.</p>
+<h2 id="execution-environment">Execution environment<a class="headerlink" href="#execution-environment" title="Permanent link">&para;</a></h2>
+<p>Every per-node harness child process receives these public, nonsecret execution labels, including
+agent verifiers and host-owned auxiliary agents. Local and contained launches use the same contract.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ZEROSHOT_RUN_ID</code></td>
+<td>Owning run's existing ID.</td>
+</tr>
+<tr>
+<td><code>ZEROSHOT_NODE_NAME</code></td>
+<td>Authored node name, or the auxiliary agent's host-owned name.</td>
+</tr>
+<tr>
+<td><code>ZEROSHOT_NODE_KIND</code></td>
+<td>Graph kind: <code>step</code> or <code>verifier</code>.</td>
+</tr>
+<tr>
+<td><code>ZEROSHOT_NODE_INSTANCE_ID</code></td>
+<td>Existing run-scoped node instance; mapped items have distinct identities, while retries and loop revisits retain their instance.</td>
+</tr>
+<tr>
+<td><code>ZEROSHOT_EXECUTION_REF</code></td>
+<td>Opaque public execution selector shared with logs, attach and diagnostics.</td>
+</tr>
+<tr>
+<td><code>ZEROSHOT_NODE_ATTEMPT</code></td>
+<td>One-based reducer attempt within the current node visit.</td>
+</tr>
+<tr>
+<td><code>ZEROSHOT_NODE_ITERATION</code></td>
+<td>One-based iteration of the innermost enclosing authored loop; <code>0</code> outside loops.</td>
+</tr>
+</tbody>
+</table>
+<p>For outer iteration 3 and inner iteration 2, a node inside the inner loop sees iteration <code>2</code>.
+A node in the outer body after the inner loop sees <code>3</code>. The inner count restarts at <code>1</code> on the
+next outer visit; a node after all loops sees <code>0</code>. Map indices do not affect iteration values.</p>
+<p>Reducer retries keep the iteration and advance the attempt. Fresh loop visits follow the reducer's
+attempt reset. Harness continuations, provider retries, structured-output corrections and configuration
+inspection launches retain the dispatch metadata; spawning a process never advances either number.
+Auxiliary agents use their own run, node and execution identities, iteration <code>0</code> outside authored
+loops, and attempt <code>1</code> unless the host request explicitly represents a retry of that visit.</p>
+<p>Zeroshot applies these labels after environment merges, replacing stale incoming values, with
+case-insensitive names on Windows. It never changes the controller's process environment or puts
+labels in credential connections. Descendant tools and hooks may inherit them subject to native
+harness filtering; remote tool backends retain their own environment policies. Descendants can keep
+or change inherited labels, so they are not secrets or evidence of authorization. Native control,
+decision and delivery nodes do not acquire a fabricated harness process.</p>
 <h2 id="contribute-an-adapter">Contribute an adapter<a class="headerlink" href="#contribute-an-adapter" title="Permanent link">&para;</a></h2>
 <p>Add an implementation under <code>zeroshot/src/harnesses/adapters/contributed/</code> and register it in that
 directory's <code>register</code> function. Core implementations live beside it under <code>adapters/core/</code>;
@@ -1951,7 +2028,8 @@ Factories receive <code>HarnessBuildContext</code> and return <code>HarnessAdapt
 <code>SessionFactory</code> implementations.</p>
 <p>Adapters own native protocols, authentication translation and permission handling, including their
 environment allowlists and home/path expansion. Use shared process and session helpers for private
-execution files, bounded streaming, cancellation and cleanup. Support workers and verifiers with
+execution files, bounded streaming, cancellation and cleanup. Apply the shared
+<code>provider_process::apply_execution_environment</code> helper after environment merges for every agent launch. Support workers and verifiers with
 authoritative response validation, bounded corrections, reusable sessions, live output and usage
 that reports uncertainty when totals are incomplete.</p>
 <p>Install the native Active Memory hook, plugin or bridge in the adapter. Shared memory owns recall
