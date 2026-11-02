@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::native_v2_capsule::gateway;
+use crate::native_v2_capsule::{foundry, gateway};
 use crate::native_v2_capsule::provider_process::effort_token;
 use crate::native_v2_contract::{CodexProvider, NodeRuntimeBinding};
 use crate::native_v2_runner::{NodeRunnerError, ResolvedEnvironment};
@@ -54,6 +54,20 @@ pub(super) fn configure_provider_auth(
     match provider {
         CodexProvider::OpenAi => configure_openai_auth(values, has_local_user),
         CodexProvider::Bedrock => configure_bedrock_auth(values),
+        CodexProvider::Foundry => {
+            if [
+                CODEX_API_KEY,
+                OPENAI_API_KEY,
+                "OPENROUTER_API_KEY",
+                AWS_BEARER_TOKEN_BEDROCK,
+            ]
+            .iter()
+            .any(|name| values.contains_key(*name))
+            {
+                return Err(NodeRunnerError::Driver);
+            }
+            foundry::connection(values).map(|_| ())
+        }
         CodexProvider::Gateway => {
             if [
                 CODEX_API_KEY,
@@ -119,6 +133,7 @@ pub(super) fn add_provider_args(
             CodexProvider::OpenRouter => "model_provider=\"openrouter\"".to_owned(),
             CodexProvider::Bedrock => "model_provider=\"amazon-bedrock\"".to_owned(),
             CodexProvider::Gateway => "model_provider=\"gateway\"".to_owned(),
+            CodexProvider::Foundry => "model_provider=\"foundry\"".to_owned(),
         },
     ]);
     if provider == CodexProvider::OpenRouter {
@@ -147,6 +162,31 @@ pub(super) fn add_provider_args(
             "model_providers.gateway.wire_api=\"responses\"".to_owned(),
             "--config".to_owned(),
             "model_providers.gateway.requires_openai_auth=false".to_owned(),
+        ]);
+    }
+    if provider == CodexProvider::Foundry {
+        let base_url = match foundry::connection(environment)?.0 {
+            foundry::Endpoint::Resource(resource) => {
+                format!("https://{resource}.openai.azure.com/openai/v1")
+            }
+            foundry::Endpoint::BaseUrl(root) => format!("{root}/openai/v1"),
+        };
+        let base_url = serde_json::to_string(&base_url).map_err(|_| NodeRunnerError::Driver)?;
+        // Azure documents the `api-key` header; Codex reads its value from the environment.
+        argv.extend([
+            "--config".to_owned(),
+            "model_providers.foundry.name=\"Microsoft Foundry\"".to_owned(),
+            "--config".to_owned(),
+            format!("model_providers.foundry.base_url={base_url}"),
+            "--config".to_owned(),
+            format!(
+                "model_providers.foundry.env_http_headers={{\"api-key\"=\"{}\"}}",
+                foundry::API_KEY
+            ),
+            "--config".to_owned(),
+            "model_providers.foundry.wire_api=\"responses\"".to_owned(),
+            "--config".to_owned(),
+            "model_providers.foundry.requires_openai_auth=false".to_owned(),
         ]);
     }
     Ok(())

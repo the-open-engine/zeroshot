@@ -13,7 +13,7 @@ async fn corrected_output(
             "openai/gpt-5.6-sol",
         )),
         CodexProvider::Gateway => Some(("GATEWAY_API_KEY", "fake-gateway-key", "opaque/model")),
-        CodexProvider::Bedrock => None,
+        CodexProvider::Bedrock | CodexProvider::Foundry => None,
     }
     .assert_value_with("correction fixture supports OpenAI, OpenRouter, and gateway");
     let (credential_name, credential_value, model) = configuration;

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::native_v2_contract::ClaudeProvider;
-use crate::native_v2_capsule::gateway;
+use crate::native_v2_capsule::{foundry, gateway};
 use crate::native_v2_capsule::provider_process::{effort_token, with_driver_detail};
 use crate::native_v2_runner::{DriverInvocation, NodeRunnerError};
 use crate::worker_catalog::ReasoningEffort;
@@ -21,6 +21,9 @@ pub(super) const LOCAL_ENVIRONMENT: &[&str] = &[
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_BEDROCK_BASE_URL",
     "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
+    "ANTHROPIC_FOUNDRY_API_KEY",
+    "ANTHROPIC_FOUNDRY_BASE_URL",
+    "ANTHROPIC_FOUNDRY_RESOURCE",
     "CLAUDE_CODE_USE_ANTHROPIC_AWS",
     "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
     "CLAUDE_CODE_USE_BEDROCK",
@@ -39,6 +42,9 @@ pub(super) const ANTHROPIC_KEY: &str = "ANTHROPIC_API_KEY";
 const ANTHROPIC_BASE_URL: &str = "ANTHROPIC_BASE_URL";
 const CLAUDE_CODE_OAUTH_REFRESH_TOKEN: &str = "CLAUDE_CODE_OAUTH_REFRESH_TOKEN";
 const CLAUDE_CODE_OAUTH_TOKEN: &str = "CLAUDE_CODE_OAUTH_TOKEN";
+const ANTHROPIC_FOUNDRY_API_KEY: &str = "ANTHROPIC_FOUNDRY_API_KEY";
+const ANTHROPIC_FOUNDRY_BASE_URL: &str = "ANTHROPIC_FOUNDRY_BASE_URL";
+const ANTHROPIC_FOUNDRY_RESOURCE: &str = "ANTHROPIC_FOUNDRY_RESOURCE";
 
 pub(super) struct ClaudeTurnArguments<'a> {
     pub(super) model: &'a str,
@@ -93,6 +99,43 @@ pub(super) fn configure_bedrock(
         return Err(NodeRunnerError::Driver);
     }
     environment.insert("CLAUDE_CODE_USE_BEDROCK".to_owned(), "1".to_owned());
+    Ok(())
+}
+
+/// Translates the shared Foundry connection into Claude Code's native Foundry settings.
+pub(super) fn configure_foundry(
+    environment: &mut BTreeMap<String, String>,
+) -> Result<(), NodeRunnerError> {
+    if [
+        ANTHROPIC_TOKEN,
+        ANTHROPIC_KEY,
+        CLAUDE_CODE_OAUTH_REFRESH_TOKEN,
+        CLAUDE_CODE_OAUTH_TOKEN,
+        OPENROUTER_KEY,
+        AWS_BEARER_TOKEN_BEDROCK,
+        ANTHROPIC_FOUNDRY_API_KEY,
+        ANTHROPIC_FOUNDRY_BASE_URL,
+        ANTHROPIC_FOUNDRY_RESOURCE,
+    ]
+    .iter()
+    .any(|name| environment.contains_key(*name))
+    {
+        return Err(NodeRunnerError::Driver);
+    }
+    let (endpoint, api_key) = foundry::connection(environment)?;
+    let endpoint = match endpoint {
+        foundry::Endpoint::Resource(resource) => (ANTHROPIC_FOUNDRY_RESOURCE, resource.to_owned()),
+        foundry::Endpoint::BaseUrl(root) => {
+            (ANTHROPIC_FOUNDRY_BASE_URL, format!("{root}/anthropic"))
+        }
+    };
+    let api_key = api_key.to_owned();
+    for name in foundry::FIELDS {
+        environment.remove(name);
+    }
+    environment.insert(endpoint.0.to_owned(), endpoint.1);
+    environment.insert(ANTHROPIC_FOUNDRY_API_KEY.to_owned(), api_key);
+    environment.insert("CLAUDE_CODE_USE_FOUNDRY".to_owned(), "1".to_owned());
     Ok(())
 }
 
@@ -178,6 +221,14 @@ pub(super) fn configure_provider(
                     )
                 })?;
         }
+        ClaudeProvider::Foundry => {
+            configure_foundry(environment).map_err(|error| {
+                    with_driver_detail(
+                        error,
+                        "Claude Foundry credentials are missing or conflict with other provider credentials",
+                    )
+                })?;
+        }
     }
     Ok(())
 }
@@ -201,7 +252,8 @@ fn validate_provider_selection(
         "CLAUDE_CODE_USE_GATEWAY",
     ] {
         let compatible = provider == ClaudeProvider::Bedrock
-            && matches!(name, "CLAUDE_CODE_USE_BEDROCK" | "CLAUDE_CODE_USE_MANTLE");
+            && matches!(name, "CLAUDE_CODE_USE_BEDROCK" | "CLAUDE_CODE_USE_MANTLE")
+            || provider == ClaudeProvider::Foundry && name == "CLAUDE_CODE_USE_FOUNDRY";
         let active = environment.get(name).is_some_and(|value| {
             matches!(
                 value.trim().to_ascii_lowercase().as_str(),

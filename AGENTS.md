@@ -252,9 +252,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   selecting their native Responses, Completions or Messages transport; they never infer it from a model.
   Codex uses Responses with bearer authentication; Claude uses Messages with
   `x-api-key`. Preserve caller-owned base paths and model identifiers without protocol detection.
+- The Codex and Claude `foundry` lanes share `AZURE_FOUNDRY_API_KEY` with exactly one of
+  `AZURE_FOUNDRY_RESOURCE` or `AZURE_FOUNDRY_BASE_URL` (a resource root). Claude translates them to
+  its native `ANTHROPIC_FOUNDRY_*` settings with `CLAUDE_CODE_USE_FOUNDRY=1` and drops the shared
+  names; Codex configures an Azure v1 Responses provider that sends the key in `api-key`.
 - Local Codex `openai` runs inherit the user's configured model provider and transport, including
   OpenAI-compatible proxies. Preserve declared `OPENAI_API_KEY` for custom provider authentication
-  while supplying the native `CODEX_API_KEY` alias. Hosted runs and explicit OpenRouter/Bedrock/gateway
+  while supplying the native `CODEX_API_KEY` alias. Hosted runs and explicit OpenRouter/Bedrock/Foundry/gateway
   selections retain adapter-owned provider setup.
 - The Pi lane forwards its own ambient allowlist into the local child the way the Claude and Codex
   lanes do, merging those values only into names the adapter and the declared connections left
@@ -265,7 +269,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Local runs preserve shell endpoint settings, Claude configuration directories and permission controls;
   declared connection values take precedence. Hosted adapters do not inherit ambient settings.
   Endpoint and Claude control variables in declared connections are passed to the harness; active
-  transport selectors cannot contradict an explicitly selected OpenRouter, Bedrock, or gateway lane.
+  transport selectors cannot contradict an explicitly selected OpenRouter, Bedrock, Foundry, or gateway lane.
 - Provider access defaults are materialized from the authored runtime at the execution-placement
   boundary. Omitted connections remain omitted in author-owned local profiles. Local Codex/OpenAI,
   Claude/Anthropic, Copilot/GitHub and its OpenAI/Anthropic/OpenRouter BYOK lanes, Pi/Anthropic,

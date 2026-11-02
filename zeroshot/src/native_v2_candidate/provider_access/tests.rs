@@ -123,6 +123,18 @@ fn contained_and_non_native_lanes_receive_canonical_fallbacks() {
             json!({"bedrock":["AWS_BEARER_TOKEN_BEDROCK","AWS_REGION"]}),
         ),
         (
+            "claude",
+            "foundry",
+            ProviderAccessPlacement::Contained,
+            json!({"foundry":["AZURE_FOUNDRY_API_KEY","AZURE_FOUNDRY_RESOURCE"]}),
+        ),
+        (
+            "codex",
+            "foundry",
+            ProviderAccessPlacement::Local,
+            json!({"foundry":["AZURE_FOUNDRY_API_KEY","AZURE_FOUNDRY_RESOURCE"]}),
+        ),
+        (
             "pi",
             "anthropic",
             ProviderAccessPlacement::Contained,

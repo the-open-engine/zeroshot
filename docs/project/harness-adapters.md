@@ -8,8 +8,8 @@ Official local builds include every adapter below. Install each native CLI separ
 
 | Harness ID | Providers                                                           | Distribution |
 | ---------- | ------------------------------------------------------------------- | ------------ |
-| `codex`    | `openai`, `openrouter`, `gateway`, `bedrock`                        | Core         |
-| `claude`   | `anthropic`, `openrouter`, `gateway`, `bedrock`                     | Core         |
+| `codex`    | `openai`, `openrouter`, `gateway`, `bedrock`, `foundry`             | Core         |
+| `claude`   | `anthropic`, `openrouter`, `gateway`, `bedrock`, `foundry`          | Core         |
 | `copilot`  | `github`, `openai`, `anthropic`, `openrouter`, `gateway`, `bedrock` | Core         |
 | `pi`       | `anthropic`, `openai`, `openrouter`, `gateway`, `bedrock`, `github` | Core         |
 | `opencode` | `openai`, `anthropic`, `openrouter`, `bedrock`, `gateway`, `github` | Contributed  |
@@ -31,6 +31,8 @@ also require `GATEWAY_API`: `openai-responses`, `openai-completions` or `anthrop
 Codex always uses Responses; Claude always uses Messages. Copilot's Bedrock lane uses AWS's
 OpenAI-compatible Responses endpoint with `AWS_BEARER_TOKEN_BEDROCK` and `AWS_REGION`; an optional
 `AWS_BEDROCK_BASE_URL` preserves a custom endpoint. Models must support the chosen native API.
+Codex and Claude `foundry` lanes share one Microsoft Foundry connection; see
+[Microsoft Foundry](../concepts/runtimes-and-connections.md#microsoft-foundry).
 
 Local native login works for Codex/OpenAI, Claude/Anthropic, Copilot/GitHub and its OpenAI,
 Anthropic and OpenRouter BYOK lanes, and Pi/Anthropic, OpenAI and GitHub. OpenCode and Hermes retain

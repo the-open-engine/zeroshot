@@ -39,6 +39,15 @@ fn provider_fixture(provider: ClaudeProvider) -> ProviderFixture {
                 (AWS_REGION, "us-east-1"),
             ],
         },
+        ClaudeProvider::Foundry => ProviderFixture {
+            model: "provider-owned-deployment",
+            provider_value: "foundry-fake",
+            environment: vec!["AZURE_FOUNDRY_API_KEY", "AZURE_FOUNDRY_RESOURCE"],
+            values: vec![
+                ("AZURE_FOUNDRY_API_KEY", "foundry-fake"),
+                ("AZURE_FOUNDRY_RESOURCE", "contoso-ai"),
+            ],
+        },
     }
 }
 
@@ -55,11 +64,19 @@ fn assert_provider_environment(
         workspace.read("bedrock-key.txt"),
         workspace.read("aws-region.txt"),
         workspace.read("use-bedrock.txt"),
+        workspace.read("foundry-key.txt"),
+        workspace.read("foundry-resource.txt"),
+        workspace.read("azure-foundry-key.txt"),
+        workspace.read("use-foundry.txt"),
     ]
     .map(|value| value.trim().to_owned());
     let expected = match provider {
         ClaudeProvider::Anthropic => [
             provider_value,
+            "unset",
+            "unset",
+            "unset",
+            "unset",
             "unset",
             "unset",
             "unset",
@@ -75,11 +92,19 @@ fn assert_provider_environment(
             "unset",
             "unset",
             "unset",
+            "unset",
+            "unset",
+            "unset",
+            "unset",
         ],
         ClaudeProvider::Gateway => [
             provider_value,
             "unset",
             "https://gateway.example/anthropic",
+            "unset",
+            "unset",
+            "unset",
+            "unset",
             "unset",
             "unset",
             "unset",
@@ -92,6 +117,23 @@ fn assert_provider_environment(
             "unset",
             provider_value,
             "us-east-1",
+            "1",
+            "unset",
+            "unset",
+            "unset",
+            "unset",
+        ],
+        ClaudeProvider::Foundry => [
+            "unset",
+            "unset",
+            "unset",
+            "unset",
+            "unset",
+            "unset",
+            "unset",
+            provider_value,
+            "contoso-ai",
+            "unset",
             "1",
         ],
     }
@@ -106,6 +148,7 @@ async fn scripted_provider_commands_are_exact_and_ambient_free() {
         ClaudeProvider::OpenRouter,
         ClaudeProvider::Bedrock,
         ClaudeProvider::Gateway,
+        ClaudeProvider::Foundry,
     ] {
         let workspace = TestDirectory::new("claude-command");
         workspace.write("fake-claude.sh", SUCCESS_SCRIPT);

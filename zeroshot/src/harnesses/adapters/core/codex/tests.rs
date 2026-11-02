@@ -61,6 +61,7 @@ prompt=$(/usr/bin/cat)
   /usr/bin/printf 'codex_key=%s\n' "${CODEX_API_KEY-unset}"
   /usr/bin/printf 'bedrock_key=%s\n' "${AWS_BEARER_TOKEN_BEDROCK-unset}"
   /usr/bin/printf 'aws_region=%s\n' "${AWS_REGION-unset}"
+  /usr/bin/printf 'foundry_key=%s\n' "${AZURE_FOUNDRY_API_KEY-unset}"
   /usr/bin/printf 'path=%s\n' "${PATH-unset}"
   /usr/bin/printf 'home=%s\n' "${HOME-unset}"
   /usr/bin/printf 'scratch=%s\n' "$TMPDIR"
