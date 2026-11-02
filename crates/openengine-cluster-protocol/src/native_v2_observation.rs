@@ -128,12 +128,15 @@ pub struct TokenUsage {
     pub complete: bool,
 }
 
-/// Additive metadata emitted only with a terminal run projection.
+/// Runtime-owned metadata accompanying terminal status and retained run history.
 #[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<TokenUsage>,
+    /// Confirmed native delivery evidence, independent of the graph's terminal output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery_receipt: Option<serde_json::Value>,
 }
 
 /// One currently active graph-leaf execution.

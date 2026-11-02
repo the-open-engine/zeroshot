@@ -407,7 +407,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   bindings; the trusted publisher rechecks them before effects. At most one publisher runs,
   outside loops/maps, after every other execution and cleanup, with no later executable work.
   Native output and review results preserve the complete `receipt` record, including absent optional
-  provenance. Terminal success must contain that exact native output. Generic local comment graphs need no
+  provenance. Terminal metadata exposes the confirmed native output as `deliveryReceipt`, independently of graph output. Generic local comment graphs need no
   Git source; contained placement requirements remain unchanged.
 - Comment publication is write-once per root delivery identity and node. A scoped publication
   store durably records intent before POST and confirmation before a receipt. Local/direct

@@ -41,7 +41,8 @@ use runtime::RuntimeObservation;
 mod projection;
 use projection::{
     bounded_attach_output, changes_public_status, log_notification, opaque_execution,
-    require_active_reference, resolve_public_execution, status_from_snapshot, status_result,
+    require_active_reference, resolve_public_execution, run_metadata, status_from_snapshot,
+    status_result,
 };
 
 #[cfg(test)]

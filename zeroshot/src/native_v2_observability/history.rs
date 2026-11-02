@@ -75,7 +75,7 @@ impl RunHistoryService {
             "version":1, "projectionVersion":1,
             "runId":id, "title":stored.admitted.title, "createdAt":created_at(id),
             "phase":stored.snapshot.phase,"cursor":stored.snapshot.cursor,
-            "terminal":stored.snapshot.terminal,"historyAvailable":true,
+            "terminal":stored.snapshot.terminal,"metadata":super::run_metadata(&stored.snapshot),"historyAvailable":true,
             "graph":graph, "runtime":stored.admitted.runtime,
             "initialInput":stored.admitted.initial_input,"source":stored.admitted.source,
             "observation":observation,
@@ -220,6 +220,11 @@ fn project_event(event: &mut Value) {
     match event["kind"].as_str() {
         Some("node_started" | "execution_voided") => stringify_reference(&mut event["reference"]),
         Some("node_completed") => stringify_reference(&mut event["completion"]["reference"]),
+        Some("primary_graph_completed") => {
+            if let Some(id) = event["delivery_execution"].as_u64() {
+                event["delivery_execution"] = Value::String(id.to_string());
+            }
+        }
         Some("safe_log" | "token_usage_observed") => {
             if let Some(id) = event["execution"].as_u64() {
                 event["execution"] = Value::String(id.to_string());

@@ -308,3 +308,130 @@ async fn failure_fallback_refreshes_recorded_evidence_without_replacing_its_firs
     service.runtime_failed_with_cause(&run_id, "still later failure");
     assert_eq!(service.status(params).await.assert_value(), terminal);
 }
+
+#[tokio::test]
+async fn status_watch_and_history_retain_independent_delivery_evidence_after_restart() {
+    let run_id = uuid::Uuid::now_v7().to_string();
+    let (ledger, run_id) = ledger_run(&run_id).await;
+    let worker = reference(&run_id, "worker", 1);
+    let receipt = serde_json::json!({"receipt":{"mode":"comment","outcome":"posted","url":"https://github.com/acme/project/issues/1#issuecomment-2"}});
+    let outcome = WorkerOutcome::Verifier {
+        output: receipt.clone(),
+        signals: BTreeMap::new(),
+        diagnostic: Value::Null,
+        artifacts: Vec::new(),
+    };
+    ledger
+        .append(
+            &run_id,
+            vec![
+                RunEvent::RunStarted,
+                started(&worker),
+                RunEvent::NodeCompleted {
+                    completion: NodeCompletion {
+                        reference: worker.clone(),
+                        outcome,
+                    },
+                },
+            ],
+        )
+        .await
+        .assert_value();
+    let service = NativeV2Observability::new(ledger.clone());
+    let (_, mut watch) = service
+        .watch(RunWatchParams {
+            run_id: run_id.clone(),
+            from_cursor: Some(Cursor::new("v2:3")),
+        })
+        .await
+        .assert_value();
+    let result = TerminalResult::Succeeded {
+        output: serde_json::json!({"summary":"authored report"}),
+    };
+    ledger
+        .append(
+            &run_id,
+            vec![
+                RunEvent::PrimaryGraphCompleted {
+                    result: result.clone(),
+                    auxiliary_pending: false,
+                    delivery_execution: Some(worker.execution),
+                },
+                RunEvent::Terminal {
+                    result: result.clone(),
+                },
+            ],
+        )
+        .await
+        .assert_value();
+    let watched = watch.read_available().await.assert_value();
+    let RunStatus::Finished {
+        terminal_result,
+        metadata,
+    } = &watched.last().assert_value().status
+    else {
+        panic!("missing finished watch")
+    };
+    assert_eq!(terminal_result, &result);
+    assert_eq!(metadata.delivery_receipt.as_ref(), Some(&receipt));
+    drop(service);
+    let restarted = NativeV2Observability::new(ledger);
+    let status = restarted
+        .status(RunStatusParams {
+            run_id: run_id.clone(),
+        })
+        .await
+        .assert_value();
+    let RunStatus::Finished {
+        terminal_result,
+        metadata,
+    } = status.status
+    else {
+        panic!("missing finished status")
+    };
+    assert_eq!(terminal_result, result);
+    assert_eq!(metadata.delivery_receipt, Some(receipt.clone()));
+    let definition = restarted.history().definition(&run_id).await.assert_value();
+    assert_eq!(definition.terminal, Some(result));
+    assert_eq!(definition.metadata.delivery_receipt, Some(receipt));
+}
+
+#[tokio::test]
+async fn receipt_reference_does_not_duplicate_native_output_in_bounded_primary_event() {
+    let (ledger, run_id) = ledger_run("receipt-event-size").await;
+    let worker = reference(&run_id, "worker", 1);
+    let receipt = serde_json::json!({"native":"x".repeat(8192)});
+    let outcome = WorkerOutcome::Verifier {
+        output: receipt.clone(),
+        signals: BTreeMap::new(),
+        diagnostic: Value::Null,
+        artifacts: Vec::new(),
+    };
+    let result = TerminalResult::Succeeded {
+        output: Value::String("x".repeat(crate::v2_run_ledger::MAX_EVENT_BYTES - 256)),
+    };
+    ledger
+        .append(
+            &run_id,
+            vec![
+                RunEvent::RunStarted,
+                started(&worker),
+                RunEvent::NodeCompleted {
+                    completion: NodeCompletion {
+                        reference: worker.clone(),
+                        outcome,
+                    },
+                },
+                RunEvent::PrimaryGraphCompleted {
+                    result: result.clone(),
+                    auxiliary_pending: false,
+                    delivery_execution: Some(worker.execution),
+                },
+                RunEvent::Terminal { result },
+            ],
+        )
+        .await
+        .assert_value();
+    let stored = ledger.get(&run_id).await.assert_value().assert_value();
+    assert_eq!(stored.snapshot.delivery_receipt(), Some(receipt));
+}

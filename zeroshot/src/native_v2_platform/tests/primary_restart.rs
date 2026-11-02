@@ -68,6 +68,7 @@ async fn seed_tail(
         RunEvent::PrimaryGraphCompleted {
             result: outcome(failed),
             auxiliary_pending: pending,
+            delivery_execution: None,
         },
     ];
     if pending {

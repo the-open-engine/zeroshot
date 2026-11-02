@@ -89,7 +89,8 @@ declare partial implementation. PR comparison uses the admitted head against its
 the captured base revision, including fork heads; publication refuses a changed review scope.
 The graph accepts PR context; select `issue-review` with an issue URL for the separate basic path.
 
-The result contains a `receipt` with the comment permalink, identity, and body hash. Comment
+The built-in result retains a `receipt`; authoritative evidence is in `status.metadata.deliveryReceipt`,
+with the comment permalink, identity, and body hash. Comment
 publication never commits or pushes the review workspace. A custom graph can supply `{url, body}`
 directly without an agent or local repository.
 

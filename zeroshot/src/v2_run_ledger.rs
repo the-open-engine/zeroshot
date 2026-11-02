@@ -167,6 +167,35 @@ impl RunSnapshot {
         }
     }
 
+    pub(crate) fn delivery_receipt(&self) -> Option<Value> {
+        let execution = self.primary_graph.as_ref()?.delivery_execution?;
+        self.execution_output(execution).cloned()
+    }
+
+    fn execution_output(&self, execution: ExecutionId) -> Option<&Value> {
+        let outcome = if let Some(node) = self.executions.get(&execution) {
+            let NodeState::Completed { outcome, .. } = &node.state else {
+                return None;
+            };
+            outcome
+        } else {
+            let prior = self
+                .execution_seed
+                .iter()
+                .find(|prior| prior.execution == execution)?;
+            let crate::full_v1_reducer::DurableExecutionState::Settled { outcome, .. } =
+                &prior.state
+            else {
+                return None;
+            };
+            outcome
+        };
+        match outcome {
+            WorkerOutcome::Verifier { output, .. } => Some(output),
+            _ => None,
+        }
+    }
+
     pub fn active_executions(&self) -> impl Iterator<Item = &NodeSnapshot> {
         self.executions
             .values()
@@ -180,6 +209,8 @@ pub struct PrimaryGraphCompletion {
     pub result: TerminalResult,
     /// Until terminal finalization, a controller crash may hide unreported auxiliary usage.
     pub auxiliary_pending: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery_execution: Option<ExecutionId>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -260,6 +291,8 @@ pub enum RunEvent {
     PrimaryGraphCompleted {
         result: TerminalResult,
         auxiliary_pending: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delivery_execution: Option<ExecutionId>,
     },
     ForceStopRequested,
     Terminal {

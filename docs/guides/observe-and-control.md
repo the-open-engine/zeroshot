@@ -44,7 +44,8 @@ zeroshot status RUN_ID
 ```
 
 A run ID belongs to the controller or target that created it. Pass `--target NAME` when reading one
-from a named target.
+from a named target. Finished status separates graph-authored `terminalResult.output` from optional
+runtime-confirmed `metadata.deliveryReceipt`; graphs without delivery omit the receipt.
 
 ## Resume event and log streams
 

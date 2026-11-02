@@ -230,8 +230,8 @@ with that worker's fixed input/output, signal, and diagnostic contracts and no a
 The node reads a required discussion `url` and report `body`, plus optional captured `reviewScope`.
 Its URL and present scope bind directly from required caller input; they cannot change before
 publication. A graph permits one trusted delivery node, and comment publication must follow all
-other executable work and cleanup, outside loops and maps. The exact confirmed receipt must appear
-in terminal output. See [Review an issue or pull request](../guides/review.md).
+other executable work and cleanup, outside loops and maps. The confirmed native result appears in `status.metadata.deliveryReceipt`, independently of
+graph-authored terminal output. See [Review an issue or pull request](../guides/review.md).
 
 ## Per-node lanes
 

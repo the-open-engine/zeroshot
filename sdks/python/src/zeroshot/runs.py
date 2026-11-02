@@ -90,7 +90,8 @@ class RunResult:
     Args:
         run_id: Public durable run identity.
         succeeded: Whether the graph completed successfully.
-        output: Successful graph output, which may be JSON null.
+        output: Successful graph-authored output, which may be JSON null.
+        delivery_receipt: Native delivery evidence, independent of output; None when unavailable.
         failure: Stable nonempty failure reason when succeeded is false.
         context: Structured safe failure evidence, or None for older run data.
     """
@@ -98,6 +99,7 @@ class RunResult:
     run_id: str
     succeeded: bool
     output: JsonValue = None
+    delivery_receipt: JsonValue = None
     failure: str | None = None
     context: FailureContext | None = None
 

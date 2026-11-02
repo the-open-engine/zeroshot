@@ -54,3 +54,11 @@ fn history_problem_vocabulary_round_trips_including_incomplete() {
         );
     }
 }
+
+#[test]
+fn projected_delivery_execution_ids_never_use_javascript_numbers() {
+    let execution = 9_007_199_254_740_993_u64;
+    let mut event = json!({"kind":"primary_graph_completed","delivery_execution":execution});
+    super::super::project_event(&mut event);
+    assert_eq!(event["delivery_execution"], json!(execution.to_string()));
+}

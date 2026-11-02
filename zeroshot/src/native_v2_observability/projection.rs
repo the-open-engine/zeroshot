@@ -41,10 +41,15 @@ pub(super) fn status_from_snapshot(
                 .terminal
                 .clone()
                 .ok_or(NativeV2ObservationError::InvalidState)?,
-            metadata: RunMetadata {
-                token_usage: snapshot.token_usage.clone(),
-            },
+            metadata: run_metadata(snapshot),
         }),
+    }
+}
+
+pub(super) fn run_metadata(snapshot: &RunSnapshot) -> RunMetadata {
+    RunMetadata {
+        token_usage: snapshot.token_usage.clone(),
+        delivery_receipt: snapshot.delivery_receipt(),
     }
 }
 

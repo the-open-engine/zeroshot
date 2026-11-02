@@ -161,6 +161,8 @@ pub struct RunDefinition {
     pub phase: RunPhase,
     pub cursor: Cursor,
     pub terminal: Option<TerminalResult>,
+    #[serde(default)]
+    pub metadata: openengine_cluster_protocol::RunMetadata,
     pub history_available: bool,
     pub graph: GraphSpec,
     pub runtime: RuntimePlan,

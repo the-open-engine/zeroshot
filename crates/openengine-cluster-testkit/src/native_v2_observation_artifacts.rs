@@ -146,6 +146,7 @@ fn watch_fixture() -> Value {
                         cache_creation_input_tokens: Some(TokenCount::new(100).assert_value()),
                         complete: true,
                     }),
+                delivery_receipt: None,
                 },
             },
         }

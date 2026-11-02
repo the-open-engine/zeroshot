@@ -312,6 +312,7 @@ async fn primary_failure_retains_its_diagnostics_across_auxiliary_interruption()
                             context: None,
                         },
                         auxiliary_pending: true,
+                        delivery_execution: None,
                     },
                 ],
             )

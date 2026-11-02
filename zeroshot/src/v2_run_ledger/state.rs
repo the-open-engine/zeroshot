@@ -116,7 +116,10 @@ fn apply_event_kind(
         RunEvent::PrimaryGraphCompleted {
             result,
             auxiliary_pending,
-        } => apply_primary_graph_completed(snapshot, result, *auxiliary_pending),
+            delivery_execution,
+        } => {
+            apply_primary_graph_completed(snapshot, result, *auxiliary_pending, delivery_execution)
+        }
         RunEvent::ForceStopRequested => apply_force_stop(snapshot),
         RunEvent::Terminal { result } => apply_terminal(snapshot, result),
     }
@@ -432,6 +435,7 @@ fn apply_primary_graph_completed(
     snapshot: &mut RunSnapshot,
     result: &TerminalResult,
     auxiliary_pending: bool,
+    delivery_execution: &Option<ExecutionId>,
 ) -> Result<(), RunLedgerError> {
     if !matches!(snapshot.phase, RunPhase::Running | RunPhase::Stopping) {
         return Err(RunLedgerError::InvalidEvent(
@@ -448,9 +452,15 @@ fn apply_primary_graph_completed(
             "primary graph still has active executions",
         ));
     }
+    if delivery_execution.is_some_and(|execution| snapshot.execution_output(execution).is_none()) {
+        return Err(RunLedgerError::InvalidEvent(
+            "delivery evidence references no completed verifier",
+        ));
+    }
     snapshot.primary_graph = Some(PrimaryGraphCompletion {
         result: result.clone(),
         auxiliary_pending,
+        delivery_execution: *delivery_execution,
     });
     Ok(())
 }
