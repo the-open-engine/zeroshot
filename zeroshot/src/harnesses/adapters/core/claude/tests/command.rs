@@ -323,6 +323,42 @@ async fn native_tool_selection_survives_correction_and_reused_session() {
 }
 
 #[tokio::test]
+async fn native_tools_compose_with_foundry_on_correction_and_revisit() {
+    let workspace = TestDirectory::new("claude-foundry-native-config");
+    workspace.write("fake-claude.sh", SUCCESS_SCRIPT);
+    let fixture = provider_fixture(ClaudeProvider::Foundry);
+    let mut environment = fixture.environment;
+    environment.push("CORRECT_OUTPUT");
+    let mut binding = agent_binding("opaque", None, SessionScope::NodeInstance, &environment);
+    crate::harnesses::native_config::tests::set(
+        &mut binding,
+        json!({"args":["--tools","Read,Grep,Glob"]}),
+    );
+    let runner = runner(&workspace, ClaudeProvider::Foundry, binding.clone(), false).await;
+    for (execution, correct_output) in [(1, "true"), (2, "false")] {
+        let mut values = fixture.values.clone();
+        values.push(("CORRECT_OUTPUT", correct_output));
+        let handle = runner
+            .start(request(binding.clone(), execution, &values))
+            .await
+            .assert_value();
+        super::failure::complete_with_durable(handle)
+            .await
+            .1
+            .assert_value();
+    }
+    for name in ["initial.args", "resumed.args"] {
+        let args = workspace.read(name);
+        assert!(args.contains("--tools\nRead,Grep,Glob\n"), "{args}");
+        assert!(!args.contains("--dangerously-skip-permissions"), "{args}");
+        assert!(!args.contains(fixture.provider_value), "{args}");
+    }
+    assert_resumed_session(&workspace.read("resumed.args"));
+    assert_eq!(workspace.read("homes.txt").lines().count(), 3);
+    assert_provider_environment(&workspace, ClaudeProvider::Foundry, fixture.provider_value);
+}
+
+#[tokio::test]
 async fn native_configuration_rejection_fails_once_with_node_and_cause() {
     let workspace = TestDirectory::new("claude-native-rejection");
     workspace.write("fake-claude.sh", "printf 'launch\\n' >> launches\nprintf '%s\\n' 'error: invalid --tools native-selection' >&2\nexit 2\n");
