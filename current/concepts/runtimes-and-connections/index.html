@@ -628,6 +628,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#microsoft-foundry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Microsoft Foundry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#renewable-local-github-delivery-credentials" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1933,6 +1944,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#microsoft-foundry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Microsoft Foundry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#renewable-local-github-delivery-credentials" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2063,6 +2085,11 @@ receive these canonical requirements:</p>
 <td><code>AWS_BEARER_TOKEN_BEDROCK</code>, <code>AWS_REGION</code></td>
 </tr>
 <tr>
+<td><code>foundry</code></td>
+<td><code>foundry</code></td>
+<td><code>AZURE_FOUNDRY_API_KEY</code>, <code>AZURE_FOUNDRY_RESOURCE</code></td>
+</tr>
+<tr>
 <td><code>github</code></td>
 <td><code>github</code></td>
 <td><code>COPILOT_GITHUB_TOKEN</code></td>
@@ -2114,6 +2141,22 @@ preserves that path. For OpenRouter, use <code>https://openrouter.ai/api/v1</cod
 <code>https://openrouter.ai/api</code> with Claude. Base URLs must use HTTP(S) and cannot contain embedded
 credentials, query parameters, or fragments. Both fields remain connection values, outside runtime
 JSON and run history. Exact plans declare these fields under any chosen connection key.</p>
+<h2 id="microsoft-foundry">Microsoft Foundry<a class="headerlink" href="#microsoft-foundry" title="Permanent link">&para;</a></h2>
+<p>The <code>codex</code> and <code>claude</code> harnesses reach models deployed in a Microsoft Foundry resource with
+<code>provider: "foundry"</code>. The model is the Foundry deployment name:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">"harness"</span><span class="p">:</span><span class="w"> </span><span class="s2">"claude"</span><span class="p">,</span><span class="w"> </span><span class="nt">"provider"</span><span class="p">:</span><span class="w"> </span><span class="s2">"foundry"</span><span class="p">,</span><span class="w"> </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"FOUNDRY_DEPLOYMENT_NAME"</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p>Store the API key with the resource name:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="go">zeroshot connection set foundry --field AZURE_FOUNDRY_API_KEY --field AZURE_FOUNDRY_RESOURCE</span>
+</code></pre></div>
+<p>For a custom domain, declare <code>AZURE_FOUNDRY_BASE_URL</code> instead of <code>AZURE_FOUNDRY_RESOURCE</code>, set to
+the resource root without an API path. Exactly one of the two must be present. Claude Code runs in its
+native Foundry mode against <code>https://RESOURCE.services.ai.azure.com/anthropic</code>, or the root URL
+followed by <code>/anthropic</code>. Codex uses the Azure OpenAI v1 Responses API at
+<code>https://RESOURCE.openai.azure.com/openai/v1</code>, or the root URL followed by <code>/openai/v1</code>, and sends the
+key in the <code>api-key</code> header. One connection therefore serves a run that mixes Codex and Claude nodes
+on the same resource. Foundry lanes accept API keys only; Microsoft Entra ID authentication is not
+supported.</p>
 <p>Docker runtimes can prepare shared tools, project dependencies, and services with setup and
 startup hooks. See <a href="../../guides/runtime-environments/">Prepare a runtime environment</a> for the
 installation conventions, resume behavior, and direct-target ownership boundary.</p>
@@ -2158,7 +2201,7 @@ resume selects the caller's current executable again.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-30">30 October 2026</time>
+    Last updated <time datetime="2026-11-02">2 November 2026</time>
   </span>
 
     
