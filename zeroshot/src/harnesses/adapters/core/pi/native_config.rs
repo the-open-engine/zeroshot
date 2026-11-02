@@ -11,6 +11,7 @@ pub(crate) fn validate(config: &HarnessConfiguration) -> Result<(), String> {
             "--model",
             "-m",
             "--models",
+            "--list-models",
             "--api-key",
             "--thinking",
             "--mode",
@@ -39,5 +40,18 @@ pub(crate) fn validate(config: &HarnessConfiguration) -> Result<(), String> {
             "--export",
         ],
         native_config::ShortOptionStyle::Exact,
+    )?;
+    // Pi consumes one whole token for these options, including values such as "-read".
+    // Unknown extension flags support --name=value; never infer an operand for a switch.
+    native_config::option_args(
+        &args,
+        native_config::ShortOptionStyle::Exact,
+        |arg| match arg {
+            "--name" | "-n" | "--tools" | "-t" | "--exclude-tools" | "-xt" | "--extension"
+            | "-e" | "--skill" | "--prompt-template" | "--theme" | "--use-theme" | "--tui-mode" => {
+                Some(native_config::ArgumentValues::One)
+            }
+            _ => None,
+        },
     )
 }

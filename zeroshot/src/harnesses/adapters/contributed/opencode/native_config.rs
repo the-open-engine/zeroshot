@@ -46,17 +46,28 @@ pub(crate) fn validate(config: &HarnessConfiguration) -> Result<(), String> {
             "--port",
             "--hostname",
             "--password",
+            "-p",
             "--username",
+            "-u",
             "--file",
             "-f",
             "--prompt",
             "--command",
             "--config",
+            "--pure",
             "--help",
             "-h",
             "--version",
             "-v",
         ],
         native_config::ShortOptionStyle::Joined,
+    )?;
+    native_config::option_args(
+        &args,
+        native_config::ShortOptionStyle::Joined,
+        |arg| match arg {
+            "--title" | "--log-level" => Some(native_config::ArgumentValues::Optional),
+            _ => None,
+        },
     )
 }

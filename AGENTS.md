@@ -181,7 +181,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   probe, custom policy parser or cache-lock management. Contained OpenCode adds `--auto` in its
   disposable capsule. Active Memory installs a separate native plugin alongside user plugins.
   Explicit `OPENCODE_PURE=true` conflicts with declared authentication because it disables the
-  required provider overlay.
+  required provider overlay. Per-node `--pure` overrides are reserved because they disable
+  runtime-owned authentication and Active Memory plugins.
   Hermes uses its installed canonical executable's interpreter and native `AIAgent`/configuration
   factories in a private process, without starting or attaching its shared gateway. A scoped import
   hook preserves native startup; `--version --help` fails closed if that hook is unavailable.
@@ -224,6 +225,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Codex exec subcommand tokens stay runtime-owned wherever they occur; literal native option values
   matching those tokens use `--option=value`. Claude session selectors and system-prompt file forms
   are reserved alongside the inline/session controls they replace.
+  CLI adapters own native operand boundaries and reject unbound positional prompts/files anywhere
+  in `args`. Unknown option names remain native-owned; bind their operands explicitly with supported
+  joined syntax (`--option=value`) rather than guessing whether an unknown switch consumes a value.
+  Codex image prompt attachments and Pi model-listing invocations remain runtime-owned; they must
+  not replace or augment an admitted task through native configuration.
 - Model identifiers are opaque provider-owned strings. Do not infer a harness from a provider/model,
   maintain runtime model catalogs, or validate provider availability. Admission may reject only known
   incompatible harness/provider pairs. A caller may declare optional bounded `contextWindow` and

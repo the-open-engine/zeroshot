@@ -117,6 +117,30 @@ fn unknown_native_json_options_are_left_to_native_semantics() {
     }
 }
 
+#[cfg(feature = "contributed-harnesses")]
+#[test]
+fn opencode_pure_mode_is_rejected_at_admission() {
+    let registry = crate::harnesses::HarnessRegistry::local();
+    for flag in ["--pure", "--pure=true", "--pure=1", "--pure=false"] {
+        for args in [json!([flag]), json!(["--title", "native title", flag])] {
+            let runtime: RuntimePlan = serde_json::from_value(json!({
+                "harness":"opencode", "provider":"anthropic", "size":"small", "nodes":{
+                    "configured-node":{"kind":"agent","model":"opaque","harnessConfig":{"args":args}}
+                }
+            })).unwrap();
+            let detail = registry.validate_runtime(&runtime).unwrap_err().to_string();
+            for expected in [
+                "configured-node",
+                "opencode",
+                "harnessConfig.args",
+                "--pure",
+            ] {
+                assert!(detail.contains(expected), "{detail}");
+            }
+        }
+    }
+}
+
 #[test]
 fn hook_trust_workspace_and_transport_controls_are_rejected_at_admission() {
     let registry = crate::harnesses::HarnessRegistry::local();
@@ -124,7 +148,12 @@ fn hook_trust_workspace_and_transport_controls_are_rejected_at_admission() {
         (
             "codex",
             "openai",
-            vec!["--dangerously-bypass-hook-trust", "--worktree"],
+            vec![
+                "--dangerously-bypass-hook-trust",
+                "--worktree",
+                "--image",
+                "-i",
+            ],
         ),
         (
             "claude",
@@ -139,7 +168,11 @@ fn hook_trust_workspace_and_transport_controls_are_rejected_at_admission() {
                 "--remote-control",
             ],
         ),
-        ("pi", "anthropic", vec!["--fork", "--no-extensions", "-ne"]),
+        (
+            "pi",
+            "anthropic",
+            vec!["--fork", "--no-extensions", "-ne", "--list-models"],
+        ),
     ] {
         for flag in flags {
             for args in [
@@ -234,7 +267,7 @@ fn codex_literal_option_values_can_use_subcommand_names() {
         let runtime: RuntimePlan = serde_json::from_value(json!({
             "harness":"codex", "provider":"openai", "size":"small", "nodes":{
                 "configured-node":{"kind":"agent","model":"opaque","harnessConfig":{
-                    "args":[format!("--image={value}"), "--config", format!("future_native_key=\"{value}\"")]
+                    "args":[format!("--config=future_native_key=\"{value}\""), "--config", format!("another_native_key=\"{value}\"")]
                 }}
             }
         })).unwrap();
@@ -266,5 +299,242 @@ fn claude_prompt_files_and_session_selectors_are_rejected_at_admission() {
             }
             assert!(!detail.contains("native-value"));
         }
+    }
+}
+
+#[test]
+fn cli_admission_rejects_unbound_prompt_and_file_inputs() {
+    let registry = crate::harnesses::HarnessRegistry::local();
+    for (harness, provider, args) in [
+        (
+            "pi",
+            "anthropic",
+            json!(["--no-context-files", "CONFIG_PROMPT_1", "CONFIG_PROMPT_2"]),
+        ),
+        ("pi", "anthropic", json!(["-nc", "@caller-prompt.txt"])),
+        (
+            "pi",
+            "anthropic",
+            json!(["--tools", "read,grep", "CONFIG_PROMPT_1"]),
+        ),
+        (
+            "pi",
+            "anthropic",
+            json!(["--future-extension=value", "CONFIG_PROMPT_1"]),
+        ),
+        (
+            "codex",
+            "openai",
+            json!(["--skip-git-repo-check", "CONFIG_PROMPT_1"]),
+        ),
+        (
+            "codex",
+            "openai",
+            json!(["--color", "never", "@caller-prompt.txt"]),
+        ),
+        (
+            "claude",
+            "anthropic",
+            json!(["--disable-slash-commands", "CONFIG_PROMPT_1"]),
+        ),
+        (
+            "claude",
+            "anthropic",
+            json!(["--debug", "mcp", "CONFIG_PROMPT_1"]),
+        ),
+        (
+            "claude",
+            "anthropic",
+            json!(["--settings", "{}", "@caller-prompt.txt"]),
+        ),
+        (
+            "opencode",
+            "openai",
+            json!(["--thinking", "CONFIG_PROMPT_1"]),
+        ),
+        (
+            "opencode",
+            "openai",
+            json!(["--title", "native title", "CONFIG_PROMPT_1"]),
+        ),
+    ] {
+        if !registry
+            .descriptors()
+            .any(|descriptor| descriptor.id == harness)
+        {
+            continue;
+        }
+        let runtime: RuntimePlan = serde_json::from_value(json!({
+            "harness":harness, "provider":provider, "size":"small", "nodes":{
+                "configured-node":{"kind":"agent","model":"opaque","harnessConfig":{"args":args}}
+            }
+        }))
+        .unwrap();
+        let detail = registry.validate_runtime(&runtime).unwrap_err().to_string();
+        for expected in [
+            "configured-node",
+            harness,
+            "harnessConfig.args[",
+            "positional",
+            "owned",
+        ] {
+            assert!(detail.contains(expected), "{detail}");
+        }
+        assert!(
+            !detail.contains("CONFIG_PROMPT") && !detail.contains("caller-prompt"),
+            "{detail}"
+        );
+    }
+}
+
+#[test]
+fn cli_admission_keeps_bound_native_operands_and_unknown_option_names() {
+    let registry = crate::harnesses::HarnessRegistry::local();
+    for (harness, provider, args) in [
+        (
+            "pi",
+            "anthropic",
+            json!([
+                "--tools",
+                "-read",
+                "--name",
+                "@literal-name",
+                "--future-extension=value"
+            ]),
+        ),
+        (
+            "pi",
+            "anthropic",
+            json!(["-xt", "read,grep", "-n", "native name"]),
+        ),
+        (
+            "codex",
+            "openai",
+            json!([
+                "-cweb_search=\"disabled\"",
+                "--color",
+                "never",
+                "--future-option=value"
+            ]),
+        ),
+        (
+            "codex",
+            "openai",
+            json!(["--sandbox", "read-only", "--add-dir", "native directory"]),
+        ),
+        (
+            "claude",
+            "anthropic",
+            json!([
+                "--tools",
+                "Read",
+                "Grep",
+                "Glob",
+                "--settings",
+                "{}",
+                "--debug",
+                "mcp"
+            ]),
+        ),
+        (
+            "claude",
+            "anthropic",
+            json!([
+                "--tools=Read",
+                "Grep",
+                "--debug",
+                "--no-chrome",
+                "--future-option=value"
+            ]),
+        ),
+        ("claude", "anthropic", json!(["--tools", ""])),
+        (
+            "opencode",
+            "openai",
+            json!([
+                "--title",
+                "native title",
+                "--log-level",
+                "DEBUG",
+                "--future-option=value"
+            ]),
+        ),
+    ] {
+        if !registry
+            .descriptors()
+            .any(|descriptor| descriptor.id == harness)
+        {
+            continue;
+        }
+        let runtime: RuntimePlan = serde_json::from_value(json!({
+            "harness":harness, "provider":provider, "size":"small", "nodes":{
+                "configured-node":{"kind":"agent","model":"opaque","harnessConfig":{"args":args}}
+            }
+        }))
+        .unwrap();
+        registry
+            .validate_runtime(&runtime)
+            .unwrap_or_else(|error| panic!("{harness}: {error}"));
+        assert_eq!(
+            runtime
+                .nodes()
+                .values()
+                .next()
+                .unwrap()
+                .harness_config()
+                .unwrap()
+                .args()
+                .unwrap(),
+            serde_json::from_value::<Vec<String>>(args).unwrap()
+        );
+    }
+}
+
+#[test]
+fn reserved_joined_credentials_report_the_option_without_its_value() {
+    let registry = crate::harnesses::HarnessRegistry::local();
+    if !registry
+        .descriptors()
+        .any(|descriptor| descriptor.id == "opencode")
+    {
+        return;
+    }
+    for option in ["-p", "-u"] {
+        let runtime: RuntimePlan = serde_json::from_value(json!({
+            "harness":"opencode", "provider":"openai", "size":"small", "nodes":{
+                "configured-node":{"kind":"agent","model":"opaque","harnessConfig":{
+                    "args":[format!("{option}private-value")]
+                }}
+            }
+        }))
+        .unwrap();
+        let detail = registry.validate_runtime(&runtime).unwrap_err().to_string();
+        assert!(
+            detail.contains(option) && detail.contains("harnessConfig.args"),
+            "{detail}"
+        );
+        assert!(!detail.contains("private-value"), "{detail}");
+    }
+}
+
+#[test]
+fn dangling_native_operands_cannot_consume_runtime_session_targets() {
+    let registry = crate::harnesses::HarnessRegistry::local();
+    for (harness, provider, args) in [
+        ("codex", "openai", json!(["--config"])),
+        ("claude", "anthropic", json!(["--settings"])),
+        ("pi", "anthropic", json!(["--tools"])),
+    ] {
+        let runtime: RuntimePlan = serde_json::from_value(json!({
+            "harness":harness, "provider":provider, "size":"small", "nodes":{
+                "configured-node":{"kind":"agent","model":"opaque","harnessConfig":{"args":args}}
+            }
+        }))
+        .unwrap();
+        let detail = registry.validate_runtime(&runtime).unwrap_err().to_string();
+        assert!(
+            detail.contains("harnessConfig.args[0]") && detail.contains("requires an operand"),
+            "{detail}"
+        );
     }
 }

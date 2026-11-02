@@ -607,6 +607,41 @@ async fn native_configuration_rejection_is_terminal_with_native_stderr() {
 }
 
 #[tokio::test]
+async fn per_node_pure_mode_is_rejected_before_launch_with_or_without_owned_plugins() {
+    let directory = TestDirectory::new("opencode-pure-native-config");
+    for memory in [false, true] {
+        for fields in [&[][..], &[("ANTHROPIC_API_KEY", "declared-key")][..]] {
+            let mut adapter = adapter(
+                &directory,
+                "#!/bin/sh\nprintf 'launch\\n' >> launches\nexit 0\n",
+            );
+            if memory {
+                let source = Arc::new(RecallMemory {
+                    callbacks: AtomicUsize::new(0),
+                    failures: AtomicUsize::new(0),
+                });
+                adapter = adapter.with_active_memory(Some(Arc::new(
+                    ActiveMemoryHooks::new(source).assert_value(),
+                )));
+            }
+            for flag in ["--pure", "--pure=true", "--pure=1", "--pure=false"] {
+                let mut visit = invocation(fields);
+                crate::harnesses::native_config::tests::set(
+                    &mut visit.node.binding,
+                    json!({"args":["--title","native title",flag]}),
+                );
+                let detail = run(&adapter, visit).await.unwrap_err().to_string();
+                for expected in ["node `", "opencode", "harnessConfig.args", "--pure"] {
+                    assert!(detail.contains(expected), "{detail}");
+                }
+                assert!(!detail.contains("declared-key"));
+                assert!(!adapter.config.workspace.join("launches").exists());
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn dispatch_metadata_reaches_opencode_correction_processes() {
     use crate::native_v2_candidate::test_support::{
         CAPTURE_EXECUTION_ENVIRONMENT, assert_execution_environment,

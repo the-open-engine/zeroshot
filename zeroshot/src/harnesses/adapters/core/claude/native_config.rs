@@ -59,6 +59,34 @@ pub(crate) fn validate(config: &HarnessConfiguration) -> Result<(), String> {
         ],
         native_config::ShortOptionStyle::Joined,
     )?;
+    native_config::option_args(
+        &args,
+        native_config::ShortOptionStyle::Joined,
+        |arg| match arg {
+            "--settings"
+            | "--permission-mode"
+            | "--permission-prompts"
+            | "--debug-file"
+            | "--name"
+            | "-n"
+            | "--max-turns"
+            | "--max-budget-usd"
+            | "--max-thinking-tokens"
+            | "--autocompact"
+            | "--plugin-dir"
+            | "--plugin-url"
+            | "--system-prompt-snapshot"
+            | "--remote-control-session-name-prefix" => Some(native_config::ArgumentValues::One),
+            "--debug" | "-d" | "--prompt-suggestions" => {
+                Some(native_config::ArgumentValues::Optional)
+            }
+            "--tools" | "--allowedTools" | "--allowed-tools" | "--disallowedTools"
+            | "--disallowed-tools" | "--add-dir" | "--mcp-config" | "--file" => {
+                Some(native_config::ArgumentValues::Many)
+            }
+            _ => None,
+        },
+    )?;
     let mut iter = args.iter();
     let mut settings_seen = false;
     while let Some(arg) = iter.next() {

@@ -478,6 +478,13 @@ Zeroshot validates the envelope and reserved controls, not a catalog of native s
 This feature does not guarantee a read-only filesystem or protect `tests/` when an allowed native
 tool can write files.
 
+`args` configures native options; positional task messages and unbound `@file` inputs are reserved
+for Zeroshot. Each CLI adapter recognizes its native separated option operands (including Claude's
+variadic tool lists and Pi's `--tools -read`). For other option syntax, bind a value explicitly with
+the harness's joined form, such as `--native-option=value`; unknown option names still reach the
+harness. Native values are not validated or translated. A bare value after a no-value switch is
+rejected with its `harnessConfig.args` index instead of being appended or queued as another prompt.
+
 Overrides apply only to that node's invocation/session and remain present on correction turns,
 provider continuation, and node-instance revisits. Native configuration discovery remains enabled
 as before; supplied values override only supported settings. OpenCode/Hermes objects merge recursively
@@ -501,10 +508,12 @@ and `--cloud`, and Pi `--fork`. Contained Pi also owns tool selection and projec
 their native aliases, including `-t`/`--tools` and `-a`/`--approve`. Local Pi tool modifiers such
 as `{"args":["--tools","-read"]}` are passed through: Pi's exact short tokens do not treat
 `-read` as the reserved `-r` option.
+OpenCode `--pure` (including joined forms) is reserved because it disables the runtime's
+authentication and Active Memory plugins.
 
 Codex `exec` subcommand tokens (`resume`, `fork`, `review`, `help`) are runtime-owned anywhere
-in `args`; if a native option needs one as a literal value, use its `--option=value` form (for
-example, `--image=review`). Claude also reserves `--from-pr`, `--teleport`, `--system-prompt-file`
+in `args`; if a native option needs one as a literal value, use its `--option=value` form.
+Codex prompt attachments (`--image`/`-i`) are also runtime-owned. Claude reserves `--from-pr`, `--teleport`, `--system-prompt-file`
 and `--append-system-prompt-file` to preserve session and prompt ownership.
 
 Generated review-loop reviewers and built-in auxiliary memory agents retain inherited `harnessConfig`,

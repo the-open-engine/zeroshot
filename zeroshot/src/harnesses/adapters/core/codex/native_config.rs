@@ -30,6 +30,8 @@ pub(crate) fn validate(config: &HarnessConfiguration) -> Result<(), String> {
             "--output-schema",
             "--output-last-message",
             "-o",
+            "--image",
+            "-i",
             "--session",
             "--last",
             "--all",
@@ -44,6 +46,25 @@ pub(crate) fn validate(config: &HarnessConfiguration) -> Result<(), String> {
             "-V",
         ],
         native_config::ShortOptionStyle::Joined,
+    )?;
+    native_config::option_args(
+        &args,
+        native_config::ShortOptionStyle::Joined,
+        |arg| match arg {
+            "--config"
+            | "-c"
+            | "--enable"
+            | "--disable"
+            | "--sandbox"
+            | "-s"
+            | "--ask-for-approval"
+            | "-a"
+            | "--add-dir"
+            | "--color"
+            | "--thread-source"
+            | "--cyber-access-program" => Some(native_config::ArgumentValues::One),
+            _ => None,
+        },
     )?;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {

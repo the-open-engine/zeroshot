@@ -597,6 +597,72 @@ async fn native_fork_rejection_never_starts_a_provider_process() {
 }
 
 #[tokio::test]
+async fn positional_native_messages_and_files_never_start_a_provider_process() {
+    for args in [
+        json!(["--no-context-files", "CONFIG_PROMPT_1", "CONFIG_PROMPT_2"]),
+        json!(["--no-context-files", "@caller-prompt.txt"]),
+        json!(["--tools", "read,grep", "CONFIG_PROMPT_1"]),
+    ] {
+        let directory = TestDirectory::new("pi-positional-rejection");
+        let body =
+            script(&[COMPLETED_TURN]).replace("cat > /dev/null", "touch launched\ncat > /dev/null");
+        let adapter = scripted_adapter(&directory, &body);
+        let mut invocation = scripted_invocation();
+        crate::harnesses::native_config::tests::set(
+            &mut invocation.node.binding,
+            json!({"args":args}),
+        );
+        let (result, logs) = run_invocation(&adapter, invocation, false).await;
+        let detail = result.unwrap_err().to_string();
+        for expected in [
+            "harness `pi`",
+            "node `",
+            "harnessConfig.args[",
+            "positional",
+        ] {
+            assert!(detail.contains(expected), "{detail}");
+        }
+        assert!(!detail.contains("CONFIG_PROMPT") && !detail.contains("caller-prompt"));
+        assert!(!directory.child("workspace/launched").exists());
+        assert!(
+            !logs
+                .iter()
+                .any(|log| log.text.contains("requesting correction"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn bound_native_option_operands_reach_pi_without_entering_the_task_prompt() {
+    let directory = TestDirectory::new("pi-bound-native-operands");
+    let body = script(&[COMPLETED_TURN]).replace(
+        "cat > /dev/null",
+        "printf '%s\\n' \"$@\" > native-args\ncat > task-prompt",
+    );
+    let adapter = scripted_adapter(&directory, &body);
+    let mut invocation = scripted_invocation();
+    crate::harnesses::native_config::tests::set(
+        &mut invocation.node.binding,
+        json!({"args":["--no-context-files","--tools","-read","--name","native display name"]}),
+    );
+    run_invocation(&adapter, invocation, false)
+        .await
+        .0
+        .assert_value();
+    let args = std::fs::read_to_string(directory.child("workspace/native-args")).assert_value();
+    assert!(
+        args.contains("--tools\n-read\n--name\nnative display name\n"),
+        "{args}"
+    );
+    let prompt = std::fs::read_to_string(directory.child("workspace/task-prompt")).assert_value();
+    assert!(prompt.contains("Exercise the Pi adapter."), "{prompt}");
+    assert!(
+        !prompt.contains("native display name") && !prompt.contains("-read"),
+        "{prompt}"
+    );
+}
+
+#[tokio::test]
 async fn dispatch_metadata_reaches_pi_child_and_overrides_declared_copies() {
     use crate::native_v2_candidate::test_support::{
         CAPTURE_EXECUTION_ENVIRONMENT, assert_execution_environment,

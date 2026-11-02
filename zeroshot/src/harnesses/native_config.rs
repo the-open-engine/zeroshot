@@ -31,25 +31,88 @@ pub(crate) fn reserved_args(
 ) -> Result<(), String> {
     for arg in args {
         let flag = arg.split('=').next().unwrap_or(arg);
-        if flag == "--"
-            || reserved.iter().any(|owned| {
-                if owned.starts_with("--") {
-                    flag == *owned
-                } else {
-                    match short_options {
-                        ShortOptionStyle::Exact => arg.as_str() == *owned,
-                        ShortOptionStyle::Joined => {
-                            flag == *owned || (owned.len() == 2 && flag.starts_with(owned))
-                        }
+        let owned = reserved.iter().find(|owned| {
+            if owned.starts_with("--") {
+                flag == **owned
+            } else {
+                match short_options {
+                    ShortOptionStyle::Exact => arg.as_str() == **owned,
+                    ShortOptionStyle::Joined => {
+                        flag == **owned || (owned.len() == 2 && flag.starts_with(**owned))
                     }
                 }
-            })
-        {
-            return Err(format!("harnessConfig.args: {flag} is owned by Zeroshot"));
+            }
+        });
+        if let Some(owned) = owned.copied().or((flag == "--").then_some("--")) {
+            return Err(format!("harnessConfig.args: {owned} is owned by Zeroshot"));
         }
     }
-    if args.first().is_some_and(|arg| !arg.starts_with('-')) {
-        return Err("harnessConfig.args must start with a native option".to_owned());
+    Ok(())
+}
+
+/// Native token consumption, not an allowlist of option names or values.
+pub(crate) enum ArgumentValues {
+    One,
+    Optional,
+    Many,
+}
+
+/// Reject prompt/file positionals without guessing whether an unknown switch takes a value.
+/// Adapters describe their native separated operands; other values must be joined to the option.
+pub(crate) fn option_args(
+    args: &[String],
+    short_options: ShortOptionStyle,
+    values: fn(&str) -> Option<ArgumentValues>,
+) -> Result<(), String> {
+    let mut index = 0;
+    while let Some(arg) = args.get(index) {
+        if !arg.starts_with('-') || matches!(arg.as_str(), "-" | "--") {
+            return Err(format!(
+                "harnessConfig.args[{index}]: positional prompt/file input is owned by Zeroshot; use --option=value to bind an operand for unrecognized native option syntax"
+            ));
+        }
+        let raw_flag = arg.split('=').next().unwrap_or(arg);
+        let flag = match short_options {
+            ShortOptionStyle::Joined if !raw_flag.starts_with("--") => {
+                raw_flag.get(..2).unwrap_or(raw_flag)
+            }
+            _ => raw_flag,
+        };
+        let attached = arg.contains('=') || flag.len() < raw_flag.len();
+        match values(flag) {
+            Some(ArgumentValues::One) if !attached => {
+                if index + 1 == args.len() {
+                    return Err(format!(
+                        "harnessConfig.args[{index}]: native option requires an operand"
+                    ));
+                }
+                index += 1;
+            }
+            Some(ArgumentValues::Optional) if !attached => {
+                if args
+                    .get(index + 1)
+                    .is_some_and(|next| !next.starts_with('-'))
+                {
+                    index += 1;
+                }
+            }
+            Some(ArgumentValues::Many) => {
+                let start = index;
+                while args
+                    .get(index + 1)
+                    .is_some_and(|next| !next.starts_with('-'))
+                {
+                    index += 1;
+                }
+                if !attached && index == start {
+                    return Err(format!(
+                        "harnessConfig.args[{start}]: native option requires an operand"
+                    ));
+                }
+            }
+            _ => {}
+        }
+        index += 1;
     }
     Ok(())
 }
