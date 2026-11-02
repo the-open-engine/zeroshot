@@ -434,6 +434,7 @@ impl Engine<'_> {
             execution,
             occurrence: visit.occurrence,
             attempt: visit.attempt,
+            iteration: traversal.loop_iterations.last().copied().unwrap_or(0),
             worker: spec.worker.clone(),
             input,
         });
@@ -468,6 +469,7 @@ impl Engine<'_> {
             execution,
             occurrence: previous.occurrence,
             attempt,
+            iteration: traversal.loop_iterations.last().copied().unwrap_or(0),
             worker: spec.worker.clone(),
             input,
         });

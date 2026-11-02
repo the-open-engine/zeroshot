@@ -236,6 +236,10 @@ pub(super) fn command(
             .scratch_text()
             .map_err(|error| NodeRunnerError::DriverDetail(error.to_string()))?,
     );
+    crate::native_v2_capsule::provider_process::apply_execution_environment(
+        &mut environment,
+        invocation,
+    )?;
     Ok(ProcessSessionCommand {
         program: executable.to_owned(),
         argv,

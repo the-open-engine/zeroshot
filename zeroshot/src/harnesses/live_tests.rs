@@ -234,15 +234,29 @@ async fn registered_harness_live_memory_sessions_and_verifier_contract() {
         failures: Mutex::new(Vec::new()),
     });
     let hooks = Arc::new(ActiveMemoryHooks::new(memory.clone()).assert_value());
+    let mut context = settings.context(&registry, directory.child("runtime"));
+    let labels = directory.child("execution-labels.jsonl");
+    let wrapper = format!(
+        r#"#!/usr/bin/env python3
+import json, os, sys
+names = ('ZEROSHOT_RUN_ID','ZEROSHOT_NODE_NAME','ZEROSHOT_NODE_KIND',
+         'ZEROSHOT_NODE_INSTANCE_ID','ZEROSHOT_EXECUTION_REF','ZEROSHOT_NODE_ATTEMPT','ZEROSHOT_NODE_ITERATION')
+with open({labels}, 'a', encoding='utf-8') as output:
+    output.write(json.dumps({{name:os.environ[name] for name in names}})+'\n')
+os.execv({program}, [{program}, *sys.argv[1:]])
+"#,
+        labels = serde_json::to_string(&labels).assert_value(),
+        program = serde_json::to_string(&context.executable).assert_value()
+    );
+    context.executable = directory.write_executable(
+        "live-harness-labels",
+        &openengine_cluster_testkit::fixture::python3_script(&wrapper),
+    );
     let runner = build_local_native_v2_candidate(
         &admitted,
         NativeV2CandidateConfig {
             active_memory: Some(hooks),
-            lanes: vec![
-                registry
-                    .configure(settings.context(&registry, directory.child("runtime")))
-                    .assert_value(),
-            ],
+            lanes: vec![registry.configure(context).assert_value()],
             workspace: settings.workspace.clone(),
             delivery: None,
             comment_delivery: None,
@@ -270,8 +284,22 @@ async fn registered_harness_live_memory_sessions_and_verifier_contract() {
         .into_request();
         let before = memory.queries.lock().assert_value().len();
         let proof_before = native_proof.as_ref().map_or(0, NativeProof::tool_calls);
+        let reference = request.invocation.reference.clone();
         let mut handle = runner.start(request).await.assert_value();
         let result = completion(&mut handle).await;
+        let captured = std::fs::read_to_string(&labels).assert_value();
+        let last: Value =
+            serde_json::from_str(captured.lines().last().assert_value()).assert_value();
+        assert_eq!(
+            last,
+            json!({
+                "ZEROSHOT_RUN_ID":run, "ZEROSHOT_NODE_NAME":node,
+                "ZEROSHOT_NODE_KIND":if node == "verifier" { "verifier" } else { "step" },
+                "ZEROSHOT_NODE_INSTANCE_ID":identity.0.to_string(),
+                "ZEROSHOT_EXECUTION_REF":reference.public_execution().assert_value().as_str(),
+                "ZEROSHOT_NODE_ATTEMPT":"1", "ZEROSHOT_NODE_ITERATION":"0",
+            })
+        );
         match result.outcome {
             WorkerOutcome::Verified { output, .. } | WorkerOutcome::Verifier { output, .. } => {
                 assert!(output.to_string().contains(&memory.marker))

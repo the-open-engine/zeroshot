@@ -198,6 +198,10 @@ pub(crate) fn extend_declared_environment(
     resolved: &ResolvedEnvironment,
 ) -> Result<(), NodeRunnerError> {
     for (name, value) in resolved.iter() {
+        // Dispatch labels are supplied after all merges, never by a connection or a prior node.
+        if super::is_execution_environment_name(name.as_str(), cfg!(windows)) {
+            continue;
+        }
         if value.contains('\0') || environment.contains_key(name.as_str()) {
             return Err(NodeRunnerError::Driver);
         }

@@ -145,10 +145,19 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   in `harnesses/adapters/core`; contributions live in `harnesses/adapters/contributed` and register
   explicitly. Protocol harness/provider IDs are bounded opaque strings; registry admission owns
   pair compatibility. Each adapter owns its native environment allowlist and home/path expansion;
-  shared process helpers keep only common environment and transport mechanics. Existing public
-  core module paths remain available for embedders. Core and contributed adapters implement the same
-  complete execution and Active Memory contracts. The distinction controls distribution and maintenance
-  ownership only.
+  shared process helpers keep only common environment and transport mechanics. Every adapter applies
+  `provider_process::apply_execution_environment` after environment merges to expose the public
+  `ZEROSHOT_RUN_ID`, `ZEROSHOT_NODE_NAME`, `ZEROSHOT_NODE_KIND` (`step`/`verifier`),
+  `ZEROSHOT_NODE_INSTANCE_ID`, `ZEROSHOT_EXECUTION_REF`, `ZEROSHOT_NODE_ATTEMPT` and
+  `ZEROSHOT_NODE_ITERATION` labels. Reducer leaf traversal supplies the innermost loop iteration
+  (zero outside loops) and reducer attempt through transient `NodeDispatchMetadata`; durable
+  invocations/checkpoints and credential connections remain unchanged. Corrections and continuations
+  retain dispatch labels; auxiliary agents supply their own identities with initial attempt one and
+  iteration zero. Host labels override stale values, including Windows case aliases, without changing
+  controller environment or native descendant filtering. Labels are not authorization evidence.
+  Existing public core module paths remain available for embedders. Core and contributed adapters
+  implement the same complete execution and Active Memory contracts. The distinction controls
+  distribution and maintenance ownership only.
   Native memory hook/extension installation belongs to the adapter; shared memory owns the broker,
   frozen recall budgets, receipts and maintenance. Contributions never acquire a separate runtime
   or reduced feature path. Official local builds enable `contributed-harnesses`; target images and

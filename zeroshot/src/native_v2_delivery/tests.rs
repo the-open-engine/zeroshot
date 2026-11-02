@@ -1083,6 +1083,7 @@ async fn start_with_adapter_token(
     }
     runner
         .start(NodeRunRequest {
+            dispatch: Default::default(),
             invocation: NodeInvocation {
                 reference: ExecutionRef {
                     run_id: RunId::new(request.run_id),

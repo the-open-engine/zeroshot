@@ -720,6 +720,7 @@ async fn default_claude_environment_owns_private_session_home_until_completion()
     let mut handle = capsule
         .runner
         .start(NodeRunRequest {
+            dispatch: Default::default(),
             invocation: NodeInvocation {
                 reference: ExecutionRef {
                     run_id: run_id.clone(),

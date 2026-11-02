@@ -121,6 +121,7 @@ async fn invocation(endpoint: &str, key: &str) -> DriverInvocation {
     let adapter = DecisionAdapter::new().unwrap();
     let session = adapter.open(&node, &environment).await.unwrap();
     DriverInvocation {
+        dispatch: Default::default(),
         host_context: None,
         node,
         role: NodeRole::Verifier,
@@ -396,6 +397,7 @@ async fn native_candidate_runs_a_decision_without_starting_a_harness() {
     let run_id = invocation.node.reference.run_id.clone();
     let mut handle = runner
         .start(NodeRunRequest {
+            dispatch: Default::default(),
             invocation: invocation.node,
             environment: invocation.environment,
         })

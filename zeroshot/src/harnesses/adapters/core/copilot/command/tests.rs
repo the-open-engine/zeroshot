@@ -12,6 +12,14 @@ fn windows_secret_environment_names_are_case_insensitive_and_canonical() {
         "HELPER_SECRET"
     );
     assert!(!private_command_environment_name_for_platform(
+        "ZEROSHOT_NODE_NAME",
+        false
+    ));
+    assert!(!private_command_environment_name_for_platform(
+        "Zeroshot_Node_Iteration",
+        true
+    ));
+    assert!(!private_command_environment_name_for_platform(
         "Gh_Token", true
     ));
     assert!(!private_command_environment_name_for_platform(

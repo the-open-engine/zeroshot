@@ -513,6 +513,7 @@ async fn start_delivery(fixture: &OwnershipFixture) -> crate::native_v2_runner::
     .assert_value();
     runner
         .start(NodeRunRequest {
+            dispatch: Default::default(),
             invocation: contract::NodeInvocation {
                 reference: contract::ExecutionRef {
                     run_id: RunId::new("ownership-handoff"),

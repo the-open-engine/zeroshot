@@ -53,6 +53,7 @@ pub enum Decision {
         execution: ExecutionId,
         occurrence: StructuralOccurrence,
         attempt: PositiveInteger,
+        iteration: u64,
         worker: WorkerRef,
         input: Value,
     },

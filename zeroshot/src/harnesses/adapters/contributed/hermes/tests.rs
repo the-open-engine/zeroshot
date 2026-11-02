@@ -301,3 +301,28 @@ async fn cancellation_waits_for_native_cleanup_of_a_detached_tool() {
         Some(libc::ESRCH)
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn dispatch_metadata_reaches_hermes_without_stale_native_overlays() {
+    use crate::native_v2_candidate::test_support::assert_execution_environment;
+    use crate::native_v2_runner::NodeDispatchMetadata;
+    let directory = TestDirectory::new("hermes-dispatch-metadata");
+    let source = fixture("{\"response\":null}", true).replace("assert init['model']=='opaque/model'", r#"
+assert init['model']=='opaque/model'
+names = ('ZEROSHOT_RUN_ID','ZEROSHOT_NODE_NAME','ZEROSHOT_NODE_KIND',
+         'ZEROSHOT_NODE_INSTANCE_ID','ZEROSHOT_EXECUTION_REF','ZEROSHOT_NODE_ATTEMPT','ZEROSHOT_NODE_ITERATION')
+pathlib.Path('execution-context').write_text(''.join(os.environ[name]+'\n' for name in names))
+assert not any(name in init['declaredEnvironment'] for name in names)
+"#);
+    let adapter = adapter(&directory, &source);
+    let mut visit = invocation(&[("ZEROSHOT_NODE_NAME", "spoofed")]);
+    visit.dispatch = NodeDispatchMetadata {
+        attempt: 2,
+        iteration: 3,
+    };
+    run(&adapter, visit.clone()).await.assert_value();
+    let capture =
+        std::fs::read_to_string(adapter.config.workspace.join("execution-context")).assert_value();
+    assert_execution_environment(&capture, &visit.node.reference, visit.dispatch, "step");
+}

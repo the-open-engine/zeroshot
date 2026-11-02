@@ -66,7 +66,11 @@ pub(super) fn command(
     local_provider: Option<&provider::LocalProvider>,
 ) -> Result<ProcessSessionCommand, NodeRunnerError> {
     validate_command_environment(config, invocation, local_provider)?;
-    let environment = process_environment(config, invocation, files, local_provider)?;
+    let mut environment = process_environment(config, invocation, files, local_provider)?;
+    crate::native_v2_capsule::provider_process::apply_execution_environment(
+        &mut environment,
+        invocation,
+    )?;
     let mode = agent_workspace_access(invocation.role)?;
     let model = agent_model(invocation)?;
     let mut argv = [
@@ -241,6 +245,7 @@ fn private_command_environment_name(name: &str) -> bool {
 
 fn private_command_environment_name_for_platform(name: &str, windows: bool) -> bool {
     !name.is_empty()
+        && !crate::native_v2_capsule::provider_process::is_execution_environment_name(name, windows)
         && !auth::is_credential_for_platform(name, windows)
         && !provider::is_configuration_for_platform(name, windows)
         && !reserved_process_environment_for_platform(name, windows)

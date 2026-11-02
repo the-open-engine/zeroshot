@@ -2,18 +2,23 @@ use super::*;
 use super::resolution::InitialEnvironment;
 use tokio::time::Instant;
 
+pub(super) struct PendingNode {
+    pub(super) invocation: NodeInvocation,
+    pub(super) dispatch: crate::native_v2_runner::NodeDispatchMetadata,
+}
+
 impl NativeV2Supervisor {
     pub(super) async fn run_pending_node(
         self,
-        invocation: NodeInvocation,
+        pending: PendingNode,
         timeout: Option<Duration>,
         cancel: oneshot::Receiver<ExecutionInterrupt>,
     ) -> FinishedDispatch {
         let started = Instant::now();
-        let reference = invocation.reference.clone();
+        let reference = pending.invocation.reference.clone();
         let deadline = timeout.map(|duration| started + duration);
         let result = self
-            .prepare_and_run(invocation, deadline, cancel)
+            .prepare_and_run(pending, deadline, cancel)
             .await
             .unwrap_or_else(DispatchResult::StartFailure);
         FinishedDispatch {
@@ -26,10 +31,14 @@ impl NativeV2Supervisor {
 
     async fn prepare_and_run(
         &self,
-        invocation: NodeInvocation,
+        pending: PendingNode,
         deadline: Option<Instant>,
         mut cancel: oneshot::Receiver<ExecutionInterrupt>,
     ) -> Result<DispatchResult, NativeV2SupervisorError> {
+        let PendingNode {
+            invocation,
+            dispatch,
+        } = pending;
         let environment = match self
             .resolve_initial_environment(&invocation, deadline, &mut cancel)
             .await?
@@ -41,6 +50,7 @@ impl NativeV2Supervisor {
             return Ok(stopped);
         }
         let request = NodeRunRequest {
+            dispatch,
             invocation,
             environment,
         };

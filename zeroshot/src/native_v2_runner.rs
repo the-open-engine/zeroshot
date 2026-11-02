@@ -65,8 +65,27 @@ pub(crate) async fn refresh_environment(
     environment::refreshed(environment).await
 }
 
+/// Transient reducer dispatch facts, separate from durable invocations and provider sessions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NodeDispatchMetadata {
+    /// One-based reducer attempt within the current node visit.
+    pub attempt: u64,
+    /// Innermost authored loop iteration, or zero outside authored loops.
+    pub iteration: u64,
+}
+
+impl Default for NodeDispatchMetadata {
+    fn default() -> Self {
+        Self {
+            attempt: 1,
+            iteration: 0,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct NodeRunRequest {
+    pub dispatch: NodeDispatchMetadata,
     pub invocation: NodeInvocation,
     pub environment: ResolvedEnvironment,
 }
@@ -178,6 +197,7 @@ pub trait AgentContextProvider: Send + Sync {
 
 #[derive(Clone)]
 pub struct DriverInvocation {
+    pub dispatch: NodeDispatchMetadata,
     /// Transient host context; never part of the authored graph or durable invocation.
     pub host_context: Option<String>,
     pub node: NodeInvocation,
@@ -564,6 +584,7 @@ async fn execute(
         None
     };
     let driver_invocation = DriverInvocation {
+        dispatch: task.request.dispatch,
         host_context,
         node: task.request.invocation.clone(),
         role: task.role,
