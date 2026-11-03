@@ -16,13 +16,23 @@
 
 </div>
 
-Agents write code faster than anyone can review it. You can tell an agent to get its work reviewed,
-but it decides whether to listen. With zeroshot you write down how you check changes: which agents
-write the code, which ones review or test it, what has to pass, and where rejected work goes back
-for repair. The engine runs every task through that graph, and the agents can't skip a step or add
-one. Reviewers are separate agents that start fresh on every pass and accept only with evidence. A
-"no" sends the work back to the writer with the reason, then through every review again, until they
-all say yes. Each agent can run its own tool and model, so Claude can write while Codex reviews.
+Agents write code faster than anyone can review it, and an agent that checks its own work stops when
+it thinks it's done. In [our study](https://theopenengine.com/blog/review-loop/), all 100 sessions told
+to build a program and check it stopped after one pass and did no better than a single attempt.
+
+zeroshot gives the verdict to reviewers instead:
+
+- **Independent:** separate agents in fresh sessions, and they can run a different model, so they
+  don't share the writer's context.
+- **Adversarial:** their job is to find what's wrong, and they accept only with evidence.
+- **Non-negotiable:** a rejection goes back to the writer with the reason. The writer can't skip it
+  or argue past it.
+- **In cycles:** the fix goes through every review again, until all of them say yes or the round
+  limit is hit.
+
+Prompts are suggestions. Graphs are enforced. You write down how you check changes, and the engine
+runs every task through that graph: agents can't skip a step or add one. Each agent can run its own
+tool and model, so Claude can write while Codex reviews.
 
 ```text
 worker ◄─────────── any "no" ────┐
