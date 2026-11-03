@@ -2,7 +2,7 @@
 
 # zeroshot
 
-**Write your team's QA process down as a graph. zeroshot makes every agent run follow it.**
+**Write your QA process down as a graph. zeroshot makes every agent run follow it.**
 
 [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Discord](https://theopenengine.com/discord) · [Docs](https://zeroshot.sh/docs/) · [Blog](https://theopenengine.com/blog/)
 
@@ -17,10 +17,10 @@
 </div>
 
 Agents write code faster than anyone can review it. You can tell an agent to get its work reviewed,
-but it decides whether to listen. With zeroshot you write down how your team checks changes: which
-agents write the code, which ones review or test it, what has to pass, and where rejected work goes
-back for repair. The engine runs every task through that graph, and the agents can't skip a step or
-add one. Each agent can run its own tool and model, so Claude can write while Codex reviews.
+but it decides whether to listen. With zeroshot you write down how you check changes: which agents
+write the code, which ones review or test it, what has to pass, and where rejected work goes back
+for repair. The engine runs every task through that graph, and the agents can't skip a step or add
+one. Each agent can run its own tool and model, so Claude can write while Codex reviews.
 
 ```text
 worker ◄─────────── any "no" ────┐
@@ -34,6 +34,12 @@ acceptance + code review ─── no ─┘
   ▼ both yes
 deliver
 ```
+
+The graph is built around your repo and your QA requirements, not a fixed pipeline.
+
+See the difference on zeroshot.sh: [a flight game](https://zeroshot.sh/#flight-demo) and
+[a landing page](https://zeroshot.sh/#design-reviewer), each built by an agent alone and again through
+a zeroshot graph.
 
 ## Get started
 
@@ -107,6 +113,8 @@ zeroshot target add local --url http://127.0.0.1:8080 --direct
 > fuckin google.
 >
 > — Fav
+
+Talk to the founders and power users in [Discord](https://theopenengine.com/discord).
 
 ## Docs
 
