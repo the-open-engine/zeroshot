@@ -243,30 +243,27 @@ it('documented run flags exist in the generated CLI reference', () => {
   assert.deepEqual(unknown, [], 'documented flags the CLI does not accept');
 });
 
-it('the llms.txt quick start matches the README first run', () => {
+it('the llms.txt quick start matches the first-run guide', () => {
   const llms = read(LLMS);
   const echoed = (file) => {
     const match = llms.match(new RegExp(`echo '([^']+)' > ${file.replace('.', '\\.')}`));
     assert.ok(match, `${LLMS} must write ${file} in its quick start`);
     return JSON.parse(match[1]);
   };
-  const readme = read('README.md');
-  const readmeJson = (key) => {
-    const block = [...readme.matchAll(/```json\n([\s\S]*?)\n```/g)].find(([, body]) =>
-      body.includes(`"${key}"`)
-    );
-    assert.ok(block, `README.md must show the first-run ${key} JSON`);
-    return JSON.parse(block[1]);
+  const guideJson = (name) => {
+    const example = titledJson(FIRST_RUN, name).find(({ title }) => title === name);
+    assert.ok(example, `${FIRST_RUN} must show the first-run ${name}`);
+    return example.value;
   };
-  assert.deepEqual(echoed('input.json'), readmeJson('task'));
-  assert.deepEqual(echoed('runtime.json'), readmeJson('harness'));
+  assert.deepEqual(echoed('input.json'), guideJson('input.json'));
+  assert.deepEqual(echoed('runtime.json'), guideJson('runtime.json'));
 
   const command = (file) => {
     const run = documentedRuns(file).find(({ words }) => words.includes('software-change'));
     assert.ok(run, `${file} must show the first run`);
     return run.words.filter((word) => word !== '--validate-only');
   };
-  assert.deepEqual(command(LLMS), command('README.md'));
+  assert.deepEqual(command(LLMS), command(FIRST_RUN));
 });
 
 it('the first-run guide covers core harnesses from the canonical catalog', () => {
