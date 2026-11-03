@@ -108,6 +108,8 @@ zeroshot target add local --url http://127.0.0.1:8080 --direct
 >
 > — Fav
 
+Talk to the founders and power users in [Discord](https://theopenengine.com/discord).
+
 ## Docs
 
 - [Build a review loop](docs/guides/review-loop.md): a complete graph with two reviewers and a repair loop
