@@ -111,8 +111,8 @@ can leave the `ui` feature disabled.
 ## Prepare a local run
 
 Choose an existing working folder with `--cwd FOLDER`, or use the invoking folder. Local runs without
-Git delivery do not need a repository. Install each native harness CLI named by the runtime plan and
-put it on `PATH`. Official local builds include contributed OpenCode and Hermes adapters; see
+Git delivery do not need a repository. Install a current version of each native harness CLI named by
+the runtime plan and put it on `PATH`. Official local builds include contributed OpenCode and Hermes adapters; see
 [Harness adapters](../project/harness-adapters.md) for availability and provider support.
 
 Local GitHub pull request delivery (`--pr` or `--ship`) also needs the GitHub CLI, `gh`, on `PATH`.
