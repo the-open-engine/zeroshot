@@ -16,11 +16,19 @@
 
 </div>
 
-Agents write code faster than anyone can review it. You can tell an agent to get its work reviewed,
-but it decides whether to listen. With zeroshot you write down how you check changes: which agents
-write the code, which ones review or test it, what has to pass, and where rejected work goes back
-for repair. The engine runs every task through that graph, and the agents can't skip a step or add
-one. Each agent can run its own tool and model, so Claude can write while Codex reviews.
+Agents write code faster than anyone can review it, and the agent that wrote the code is a poor judge
+of it: it shares the context that produced the bugs, and it stops as soon as it thinks it's done. In
+[our study](https://theopenengine.com/blog/review-loop/), all 100 sessions told to check their own work
+stopped after one pass.
+
+zeroshot moves the checking to other agents. You define the process as a graph: who writes, who
+reviews or tests, what has to pass, and where rejected work goes. The reviewers are **independent**:
+each starts in a fresh session and can run a different model than the writer, so it doesn't inherit
+the writer's assumptions. They're **adversarial**: their job is to find what's wrong, and they only
+accept work they have evidence for. Their feedback is **non-negotiable**: a rejection goes back to
+the writer with the reason, and the engine won't let any agent skip a review or call its own work
+done. And it runs in **cycles**: the fix goes through every review again until they all accept, or
+the round limit is hit.
 
 ```text
 worker ◄─────────── any "no" ────┐
@@ -133,8 +141,8 @@ they write code.
 
 ## Community
 
-Ask questions and share graphs in [Discord](https://theopenengine.com/discord). Report bugs in
-[GitHub Issues](https://github.com/the-open-engine/zeroshot/issues).
+Ask questions or join as a contributor in [Discord](https://theopenengine.com/discord). Report bugs
+in [GitHub Issues](https://github.com/the-open-engine/zeroshot/issues).
 
 ## Development
 
