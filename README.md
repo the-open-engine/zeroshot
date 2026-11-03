@@ -35,6 +35,9 @@ acceptance + code review ─── no ─┘
 deliver
 ```
 
+See it work on zeroshot.sh: [a flight game](https://zeroshot.sh/#flight-demo) and
+[a landing page](https://zeroshot.sh/#design-reviewer).
+
 ## Get started
 
 Install it once:
