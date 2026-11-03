@@ -269,6 +269,10 @@ impl LocalRunProfileStore {
         let mut encoded = serde_json::to_vec(stored)
             .map_err(|_| local_message("local profile store could not be encoded"))?;
         encoded.push(b'\n');
+        // Accepted writes must remain readable through the store's JSON parser.
+        serde_json::from_slice::<StoredProfiles>(&encoded).map_err(|_| {
+            local_message("local profile store could not be read back before saving")
+        })?;
         let result = (|| {
             let file = OpenOptions::new()
                 .write(true)
