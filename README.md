@@ -20,7 +20,9 @@ Agents write code faster than anyone can review it. You can tell an agent to get
 but it decides whether to listen. With zeroshot you write down how you check changes: which agents
 write the code, which ones review or test it, what has to pass, and where rejected work goes back
 for repair. The engine runs every task through that graph, and the agents can't skip a step or add
-one. Each agent can run its own tool and model, so Claude can write while Codex reviews.
+one. Reviewers are separate agents that start fresh on every pass and accept only with evidence. A
+"no" sends the work back to the writer with the reason, then through every review again, until they
+all say yes. Each agent can run its own tool and model, so Claude can write while Codex reviews.
 
 ```text
 worker ◄─────────── any "no" ────┐
@@ -133,8 +135,8 @@ they write code.
 
 ## Community
 
-Ask questions and share graphs in [Discord](https://theopenengine.com/discord). Report bugs in
-[GitHub Issues](https://github.com/the-open-engine/zeroshot/issues).
+Ask questions or join as a contributor in [Discord](https://theopenengine.com/discord). Report bugs
+in [GitHub Issues](https://github.com/the-open-engine/zeroshot/issues).
 
 ## Development
 
