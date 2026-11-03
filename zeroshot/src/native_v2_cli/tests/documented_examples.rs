@@ -199,7 +199,7 @@ fn shell_words_follow_the_documented_quoting() {
 #[test]
 fn every_documented_run_command_parses() {
     let runs = documented_runs();
-    for source in ["README.md:", "docs/llms.txt:"] {
+    for source in ["docs/getting-started/first-run.md:", "docs/llms.txt:"] {
         assert!(
             runs.iter().any(|run| run.location.starts_with(source)),
             "no `zeroshot run` example found in {source}"
