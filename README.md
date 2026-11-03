@@ -16,15 +16,16 @@
 
 </div>
 
-Agents write code faster than anyone can review it, and asking an agent to check its own work
-doesn't fix that. In [our study](https://theopenengine.com/blog/review-loop/), all 100 sessions told
-to check their own work stopped after one pass.
+Agents write code faster than anyone can review it, and the agent that wrote the code is a poor judge
+of it: it shares the context that produced the bugs, and it stops as soon as it thinks it's done. In
+[our study](https://theopenengine.com/blog/review-loop/), all 100 sessions told to check their own work
+stopped after one pass.
 
-With zeroshot you write down how changes get checked, and other agents do the checking. Each
-reviewer starts in a fresh session, can run a different model than the writer (Claude writes, Codex
-reviews), and only accepts work it has evidence for. A rejection goes back to the writer with the
-reason, and the fix goes through every review again. The engine enforces the graph, so no agent can
-skip a review or call its own work done.
+zeroshot moves the checking to other agents. You define the process as a graph: who writes, who
+reviews or tests, what has to pass, and where rejected work goes. Reviewers start in fresh sessions,
+can run a different model than the writer, and only accept work they have evidence for. A rejection
+goes back to the writer with the reason, and the fix goes through every review again. The engine
+owns the graph, so no agent can skip a review or decide its own work is done.
 
 ```text
 worker ◄─────────── any "no" ────┐
