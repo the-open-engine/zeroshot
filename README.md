@@ -65,8 +65,9 @@ done means. Then:
 zeroshot it
 ```
 
-The worker builds from the plan and the reviewers judge the result against those criteria. Your agent
-follows the run and tells you what got rejected and what got fixed. Watch it live with `zeroshot ui`.
+The worker builds from the plan and the reviewers judge the result against those criteria. When the
+run finishes, your agent tells you what got rejected and what got fixed. Watch it live with
+`zeroshot ui`.
 
 Runs happen on your machine with the login your agent already uses, subscriptions included. The CLI
 is free and MIT licensed.
