@@ -21,9 +21,9 @@ for "done" over "correct". In [our study](https://theopenengine.com/blog/review-
 sessions told to check their own work stopped after one pass.
 
 zeroshot fixes this with independent agents that check each other's work, following a graph you
-define for your repo. Reviewers start in a fresh session, can run a different model, and can't lie
-about code they didn't write. Fail the check? The reason goes back to the writer, and the fix goes
-through every review again until it actually works.
+define for your repo. Reviewers start in a fresh session, can run a different model, and aren't
+grading their own work. Fail the check? The reason goes back to the writer, and the fix goes through
+every review again until it actually works.
 
 ```text
 worker ◄─────────── any "no" ────┐
@@ -96,6 +96,18 @@ or taken through your CI and review comments to a merge.
 Runs happen on your machine with the login your agent already uses, subscriptions included. The CLI
 is free and MIT licensed.
 
+## Skills
+
+`npm install` adds four skills to Claude Code (`~/.claude/skills`) and to Codex, Copilot CLI and Pi
+(`~/.agents/skills`). Ask for them by name, or just say what you want.
+
+| Skill                   | What it does                                                            | Try                                     |
+| ----------------------- | ----------------------------------------------------------------------- | --------------------------------------- |
+| `zeroshot-graph-design` | Reads your repo, asks a few questions, designs the graph, saves it      | "design a zeroshot graph for this repo" |
+| `zeroshot-plan`         | Turns an idea or issue into a plan with checkable acceptance criteria   | "plan this with zeroshot: ..."          |
+| `zeroshot`              | Starts, follows and troubleshoots runs, locally or on zeroshot Platform | "zeroshot it"                           |
+| `zeroshot-memory-init`  | Builds Active Memory from your past runs                                | "initialize zeroshot memory"            |
+
 ## Run it for the whole team
 
 Ask your agent to save the graph to [zeroshot Platform](https://app.zeroshot.sh/docs) instead, and
@@ -112,6 +124,74 @@ docker run --detach --restart unless-stopped --name zeroshot-target \
 
 zeroshot target add local --url http://127.0.0.1:8080 --direct
 ```
+
+## Architecture
+
+zeroshot is an engine that runs a graph of coding agents and owns the control flow.
+
+- The graph says which agents run, in what order, what each must return, and where results go.
+- Admission checks the graph, its bounds, the runtime plan and the input before anything runs.
+- The engine runs a node, checks its typed output, records it, then picks the next edge. Model
+  output can't add an edge or raise a bound.
+- Each node runs on its own harness and model through an adapter.
+- Every event lands in a durable ledger, so a crashed run can resume.
+
+```text
+your agent + zeroshot skills
+        │
+        ▼
+zeroshot CLI ── graph + runtime plan + task
+        │       admission: schema, bounds, runtime, input
+        ▼
+target ──────── local │ Docker │ zeroshot Platform
+        │
+        ▼
+┌──────────────────────── engine ──────────────────────────┐
+│ run node → check typed output → record state → next edge │
+└───────────┬──────────────────────────────┬───────────────┘
+            ▼                              ▼
+   harness adapters                 durable ledger
+   Claude Code · Codex ·            every event, resumable
+   Copilot CLI · Pi
+            │
+            ▼
+   delivery: local │ branch │ PR │ merge
+```
+
+## Command reference
+
+The easiest way to use zeroshot is through your agent: the skills run these commands for you. For
+scripts, CI or debugging:
+
+```bash
+# Run
+zeroshot run --title "Add CSV export" --profile local:my-graph --input input.json
+zeroshot run --title "Add CSV export" --profile local:my-graph --input input.json --validate-only
+
+# Follow
+zeroshot list
+zeroshot status RUN_ID
+zeroshot watch RUN_ID
+zeroshot logs RUN_ID
+zeroshot ui                  # browser UI at http://127.0.0.1:4173/ui/
+
+# Control
+zeroshot resume RUN_ID
+zeroshot force-stop RUN_ID
+
+# Graphs and profiles
+zeroshot template list
+zeroshot template show software-change
+zeroshot profile list
+zeroshot profile set my-graph --graph graph.json --runtime-config runtime.json
+zeroshot profile default my-graph
+
+# Targets
+zeroshot target login platform
+zeroshot target add my-target --url https://zeroshot.example.com
+```
+
+Every command and flag is in the [CLI reference](docs/zeroshot-cli.md).
 
 ## What users say
 
