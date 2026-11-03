@@ -35,8 +35,11 @@ acceptance + code review ─── no ─┘
 deliver
 ```
 
-See it work on zeroshot.sh: [a flight game](https://zeroshot.sh/#flight-demo) and
-[a landing page](https://zeroshot.sh/#design-reviewer).
+The graph is built around your repo and your QA requirements, not a fixed pipeline.
+
+See the difference on zeroshot.sh: [a flight game](https://zeroshot.sh/#flight-demo) and
+[a landing page](https://zeroshot.sh/#design-reviewer), each built by an agent alone and again through
+a zeroshot graph.
 
 ## Get started
 
