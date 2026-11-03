@@ -44,6 +44,14 @@ See the difference on zeroshot.sh: [a flight game](https://zeroshot.sh/#flight-d
 [a landing page](https://zeroshot.sh/#design-reviewer), each built by an agent alone and again through
 a zeroshot graph.
 
+## Who is this for?
+
+- Senior engineers who care about correctness and reproducibility
+- Teams automating PR workflows and code review gates
+- Infra/platform teams standardizing agentic workflows
+- Open-source maintainers working through issue backlogs
+- AI power users who want verification, not vibes
+
 ## Get started
 
 Install it once:
