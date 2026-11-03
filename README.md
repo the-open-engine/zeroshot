@@ -4,19 +4,23 @@
 
 **Write your team's QA process down as a graph. zeroshot makes every agent run follow it.**
 
-[zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Discord](https://theopenengine.com/discord) · [Docs](https://zeroshot.sh/docs/)
+[zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Discord](https://theopenengine.com/discord) · [Docs](https://zeroshot.sh/docs/) · [Blog](https://theopenengine.com/blog/)
 
 [![Release](https://img.shields.io/github/v/release/the-open-engine/zeroshot?style=flat&label=release&labelColor=171411&color=171411)](https://github.com/the-open-engine/zeroshot/releases/latest)
 [![Build](https://img.shields.io/github/actions/workflow/status/the-open-engine/zeroshot/ci.yml?branch=main&style=flat&label=build&labelColor=171411)](https://github.com/the-open-engine/zeroshot/actions/workflows/ci.yml?query=branch%3Amain)
 [![License: MIT](https://img.shields.io/badge/license-MIT-171411?style=flat)](LICENSE)
 
+&nbsp;
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/starred-by-dark.png"><img alt="Starred by engineers at 300+ companies, including Google, Microsoft, Amazon, NVIDIA, Meta, GitHub and Cloudflare" src="docs/brand/social/starred-by-light.png" width="435"></picture>
+
 </div>
 
-You can tell an agent to get its work reviewed, but it decides whether to listen. With zeroshot you
-write down how your team checks changes: which agents write the code, which ones review or test it,
-what has to pass, and where rejected work goes back for repair. The engine runs every task through
-that graph, and the agents can't skip a step or add one. Each agent can run its own tool and model,
-so Claude can write while Codex reviews.
+Agents write code faster than anyone can review it. You can tell an agent to get its work reviewed,
+but it decides whether to listen. With zeroshot you write down how your team checks changes: which
+agents write the code, which ones review or test it, what has to pass, and where rejected work goes
+back for repair. The engine runs every task through that graph, and the agents can't skip a step or
+add one. Each agent can run its own tool and model, so Claude can write while Codex reviews.
 
 ```text
 worker ◄─────────── any "no" ────┐
@@ -68,6 +72,9 @@ zeroshot it
 The worker builds from the plan and the reviewers judge the result against those criteria. When the
 run finishes, your agent tells you what got rejected and what got fixed. Watch it live with
 `zeroshot ui`.
+
+The graph also decides where finished work goes: kept local, pushed as a branch, opened as a PR,
+or taken through your CI and review comments to a merge.
 
 Runs happen on your machine with the login your agent already uses, subscriptions included. The CLI
 is free and MIT licensed.
