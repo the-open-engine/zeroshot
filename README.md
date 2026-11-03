@@ -16,20 +16,14 @@
 
 </div>
 
-Agents write code faster than anyone can review it, and the agent that wrote the code is a poor judge
-of it: it shares the context that produced the bugs, and it stops as soon as it thinks it's done. In
-[our study](https://theopenengine.com/blog/review-loop/), all 100 sessions told to check their own work
-stopped after one pass.
+Single-agent sessions degrade. Context gets buried under thousands of tokens, and the model optimizes
+for "done" over "correct". In [our study](https://theopenengine.com/blog/review-loop/), all 100
+sessions told to check their own work stopped after one pass.
 
-zeroshot moves the checking to other agents. You define the process as a graph, and it's
-**customizable**: who writes, who reviews or tests, what has to pass, where rejected work goes, and
-which tool and model runs each step. The reviewers are **independent**: each starts in a fresh
-session and can run a different model than the writer, so it doesn't inherit the writer's
-assumptions. They're **adversarial**: their job is to find what's wrong, and they only accept work
-they have evidence for. Their feedback is **non-negotiable**: a rejection goes back to the writer
-with the reason, and the engine won't let any agent skip a review or call its own work done. And it
-runs in **cycles**: the fix goes through every review again until they all accept, or the round
-limit is hit.
+zeroshot fixes this with independent agents that check each other's work, following a graph you
+define for your repo. Reviewers start in a fresh session, can run a different model, and can't lie
+about code they didn't write. Fail the check? The reason goes back to the writer, and the fix goes
+through every review again until it actually works.
 
 ```text
 worker ◄─────────── any "no" ────┐
