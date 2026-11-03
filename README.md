@@ -21,14 +21,15 @@ of it: it shares the context that produced the bugs, and it stops as soon as it 
 [our study](https://theopenengine.com/blog/review-loop/), all 100 sessions told to check their own work
 stopped after one pass.
 
-zeroshot moves the checking to other agents. You define the process as a graph: who writes, who
-reviews or tests, what has to pass, and where rejected work goes. The reviewers are **independent**:
-each starts in a fresh session and can run a different model than the writer, so it doesn't inherit
-the writer's assumptions. They're **adversarial**: their job is to find what's wrong, and they only
-accept work they have evidence for. Their feedback is **non-negotiable**: a rejection goes back to
-the writer with the reason, and the engine won't let any agent skip a review or call its own work
-done. And it runs in **cycles**: the fix goes through every review again until they all accept, or
-the round limit is hit.
+zeroshot moves the checking to other agents. You define the process as a graph, and it's
+**customizable**: who writes, who reviews or tests, what has to pass, where rejected work goes, and
+which tool and model runs each step. The reviewers are **independent**: each starts in a fresh
+session and can run a different model than the writer, so it doesn't inherit the writer's
+assumptions. They're **adversarial**: their job is to find what's wrong, and they only accept work
+they have evidence for. Their feedback is **non-negotiable**: a rejection goes back to the writer
+with the reason, and the engine won't let any agent skip a review or call its own work done. And it
+runs in **cycles**: the fix goes through every review again until they all accept, or the round
+limit is hit.
 
 ```text
 worker ◄─────────── any "no" ────┐
