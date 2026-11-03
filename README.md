@@ -138,24 +138,20 @@ zeroshot is an engine that runs a graph of coding agents and owns the control fl
 
 ```text
 your agent + zeroshot skills
-        │
-        ▼
-zeroshot CLI ── graph + runtime plan + task
-        │       admission: schema, bounds, runtime, input
-        ▼
-target ──────── local │ Docker │ zeroshot Platform
-        │
-        ▼
-┌──────────────────────── engine ──────────────────────────┐
-│ run node → check typed output → record state → next edge │
-└───────────┬──────────────────────────────┬───────────────┘
-            ▼                              ▼
-   harness adapters                 durable ledger
-   Claude Code · Codex ·            every event, resumable
-   Copilot CLI · Pi
-            │
-            ▼
-   delivery: local │ branch │ PR │ merge
+      │
+      ▼
+zeroshot CLI ── checks the graph
+      │         before anything runs
+      ▼
+target ──────── local · Docker · Platform
+      │
+      ▼
+engine ──────── runs a node, checks its
+      │         output, picks the next edge
+      ├──▶ harness adapters: Claude Code,
+      │    Codex, Copilot CLI, Pi
+      ├──▶ durable ledger: resumable runs
+      └──▶ delivery: local, branch, PR, merge
 ```
 
 ## Command reference
