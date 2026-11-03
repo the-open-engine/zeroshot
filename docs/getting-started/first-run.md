@@ -7,6 +7,8 @@ description: 'Run the built-in software-change graph in a local folder with Git 
 This example runs the built-in `software-change` graph in a local folder, with Git delivery disabled.
 The template normally creates a PR; this example explicitly uses `--delivery none`.
 Git is optional. Add `--cwd FOLDER` to select another folder; input files stay relative to the invoking folder.
+Use a project that already has a status command for this example, or replace the task with a change
+that fits your project.
 
 !!! warning "The worker edits the selected folder"
 
@@ -25,7 +27,8 @@ The template expects an object with a `task` string:
 ## 2. Choose the runtime
 
 A uniform runtime applies one agent configuration to every agent node. Replace the model placeholder
-with an identifier accepted by the selected provider.
+with an identifier accepted by the selected provider. Install and sign in to the selected native CLI
+first; check its version with `codex --version`, `claude --version`, `copilot --version`, or `pi --version`.
 
 ```json title="runtime.json"
 {
@@ -77,15 +80,11 @@ native login and credential requirements.
 ## 3. Check the request without starting it
 
 `--validate-only` materializes the template and uniform runtime, then admits the request with its
-initial input. It does not contact a target or start a run.
+initial input. It does not contact a target, launch a harness, or start a run. The commands below
+use one line so they can be pasted into Bash, PowerShell, or Command Prompt.
 
 ```console
-zeroshot run \
-  --title "Add JSON status output" \
-  --template software-change --delivery none \
-  --input input.json \
-  --uniform-runtime-config runtime.json \
-  --validate-only
+zeroshot run --title "Add JSON status output" --template software-change --delivery none --input input.json --uniform-runtime-config runtime.json --validate-only
 ```
 
 Successful validation writes `{"valid":true}`. A rejected request names the input, graph, or runtime
@@ -96,11 +95,7 @@ problem; the selected target checks connection availability later, when it recei
 Remove `--validate-only`:
 
 ```console
-zeroshot run \
-  --title "Add JSON status output" \
-  --template software-change --delivery none \
-  --input input.json \
-  --uniform-runtime-config runtime.json
+zeroshot run --title "Add JSON status output" --template software-change --delivery none --input input.json --uniform-runtime-config runtime.json
 ```
 
 The foreground command streams newline-delimited JSON while the run advances. Ctrl-C closes that
