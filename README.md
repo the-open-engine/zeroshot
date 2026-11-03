@@ -106,7 +106,7 @@ is free and MIT licensed.
 | `zeroshot-graph-design` | Reads your repo, asks a few questions, designs the graph, saves it      | "design a zeroshot graph for this repo" |
 | `zeroshot-plan`         | Turns an idea or issue into a plan with checkable acceptance criteria   | "plan this with zeroshot: ..."          |
 | `zeroshot`              | Starts, follows and troubleshoots runs, locally or on zeroshot Platform | "zeroshot it"                           |
-| `zeroshot-memory-init`  | Builds Active Memory from your past runs                                | "initialize zeroshot memory"            |
+| `zeroshot-memory-init`  | Builds Active Memory from your past local runs                          | "initialize zeroshot memory"            |
 
 ## Run it for the whole team
 
