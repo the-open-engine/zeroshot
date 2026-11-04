@@ -45,6 +45,18 @@ fn lane_free() -> RuntimePlan {
 }
 
 #[test]
+fn unsupported_targets_refuse_checkpoint_opt_out_before_submission() {
+    let mut plan = lane_free();
+    plan.workspace_checkpoints = false;
+    assert_eq!(
+        require_runtime_capabilities(&with_marker(), &plan)
+            .assert_error()
+            .to_string(),
+        "this target does not support disabling workspace checkpoints"
+    );
+}
+
+#[test]
 fn lane_bearing_plans_are_refused_by_targets_without_the_exact_marker() {
     let mut other_kind =
         TargetDiscoveryDocument::direct(TargetAuthentication::None).with_node_runtime_lanes();

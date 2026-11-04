@@ -607,6 +607,11 @@ fn require_runtime_capabilities(
     require_run_size(controller, runtime.size())?;
     require_node_runtime_lanes(controller, runtime)?;
     require_runtime_harnesses(controller, runtime)?;
+    if !runtime.workspace_checkpoints {
+        return Err(authority_error(
+            "this target does not support disabling workspace checkpoints",
+        ));
+    }
     if runtime.nodes().values().any(|binding| {
         matches!(
             binding,

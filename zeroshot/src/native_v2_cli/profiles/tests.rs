@@ -388,3 +388,16 @@ fn checked_profile_edits_enforce_workspace_and_revision_preconditions() {
         Err(ProfileSaveConflict::Workspace)
     ));
 }
+
+#[test]
+fn saved_profiles_preserve_workspace_checkpoint_opt_out() {
+    let root = tempfile::tempdir().assert_value();
+    let store = LocalRunProfileStore::new(root.path().to_owned());
+    let mut request = profile_request("checkpoint-off", "worker", false);
+    request.runtime.workspace_checkpoints = false;
+    store.set(request).assert_value();
+    let saved = LocalRunProfileStore::new(root.path().to_owned())
+        .show(selector("checkpoint-off"))
+        .assert_value();
+    assert!(!saved.runtime.workspace_checkpoints);
+}

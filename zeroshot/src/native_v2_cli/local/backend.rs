@@ -36,11 +36,22 @@ impl LocalCliBackend {
     fn checkpoint_selection(
         &self,
         params: &openengine_cluster_protocol::RunResumeParams,
+        enabled: bool,
     ) -> Result<Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>, NativeV2CliError>
     {
         use crate::native_v2_supervisor::checkpoints::{
             CheckpointRestore, CheckpointRestoreSelection, latest_available, restore_selection,
         };
+        if !enabled {
+            return match &params.from {
+                Some(openengine_cluster_protocol::RunResumeFrom::Checkpoint { .. }) => {
+                    Err(local_message(
+                        "workspace checkpoint restore is unavailable because workspaceCheckpoints is false",
+                    ))
+                }
+                _ => Ok(None),
+            };
+        }
         let directory = self.paths(&params.run_id)?.storage().join("checkpoints");
         let selection = restore_selection(params.from.as_ref());
         if matches!(&selection, CheckpointRestoreSelection::Latest)
@@ -59,8 +70,9 @@ impl LocalCliBackend {
         params: openengine_cluster_protocol::RunResumeParams,
         mut recovery: LocalRecoveryDocument,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
+        let checkpoint =
+            self.checkpoint_selection(&params, recovery.submission.runtime.workspace_checkpoints)?;
         let prepared = self.prepare_successor(&params, &recovery).await?;
-        let checkpoint = self.checkpoint_selection(&params)?;
         recovery.successor_run_id = Some(params.successor_run_id.clone());
         self.write_recovery_document(&params.run_id, &recovery)?;
         if let Err(error) = self

@@ -316,6 +316,12 @@ pub(crate) fn sole_delivery_node(admitted: &AdmittedRun) -> Option<(NodeName, De
 pub(crate) fn writer_nodes(admitted: &AdmittedRun) -> BTreeSet<NodeName> {
     executable_declarations(&admitted.graph.root)
         .into_iter()
+        .filter(|declaration| {
+            !matches!(
+                admitted.runtime.nodes().get(&declaration.name),
+                Some(NodeRuntimeBinding::Decision { .. })
+            )
+        })
         .map(|declaration| declaration.name)
         .collect()
 }

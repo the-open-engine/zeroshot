@@ -5244,6 +5244,10 @@
         },
         "size": {
           "$ref": "#/$defs/RunSize"
+        },
+        "workspaceCheckpoints": {
+          "description": "Local workspace snapshots. Run history remains durable when disabled.",
+          "type": "boolean"
         }
       },
       "required": [

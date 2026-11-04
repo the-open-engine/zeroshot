@@ -605,6 +605,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   attempt's delivery identity so every successor reuses the same delivery branch and pull request.
   Successor composition explicitly authorizes a fresh delivery adapter to adopt that lineage-owned
   branch; ordinary fresh adapters still reject unexplained existing run branches.
+- Runtime plans accept `workspaceCheckpoints`, defaulting to true and omitted from the wire at
+  that default. Local opt-out leaves the existing executor and durable ledger intact, skips Restic
+  construction and snapshot cleanup, and refuses selected checkpoint restoration before credential
+  resolution. Named/contained targets currently refuse opt-out explicitly. Decision bindings are
+  not workspace writers. Executable steps remain conservative potential writers.
 - `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
   retained workspace recovery. Default resume starts a fresh graph on the latest retained workspace;
   checkpoint resume restores a private input snapshot and settled prerequisite executions. Neither

@@ -278,6 +278,11 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
 fn prepare_contained_submission(
     submission: &mut openengine_cluster_protocol::RunSubmission,
 ) -> Result<(), TargetAuthorityError> {
+    if !submission.runtime.workspace_checkpoints {
+        return Err(TargetAuthorityError::invalid(
+            "this target does not support disabling workspace checkpoints",
+        ));
+    }
     if submission.source.is_none() {
         return Err(TargetAuthorityError::invalid(
             "contained runs require a resolved Git source",

@@ -300,6 +300,34 @@ fn runtime_plan_constructor_preserves_existing_wire_defaults() {
 }
 
 #[test]
+fn workspace_checkpoints_default_on_and_explicit_false_survives_round_trip() {
+    let mut plan = codex_plan(serde_json::json!({}));
+    assert!(plan.workspace_checkpoints);
+    assert!(
+        serde_json::to_value(&plan)
+            .assert_value()
+            .get("workspaceCheckpoints")
+            .is_none()
+    );
+    plan.workspace_checkpoints = false;
+    let wire = serde_json::to_value(&plan).assert_value();
+    assert_eq!(wire["workspaceCheckpoints"], false);
+    assert_eq!(
+        serde_json::from_value::<RuntimePlan>(wire.clone()).assert_value(),
+        plan
+    );
+    for invalid in [
+        serde_json::json!(null),
+        serde_json::json!("off"),
+        serde_json::json!(0),
+    ] {
+        let mut document = wire.clone();
+        document["workspaceCheckpoints"] = invalid;
+        assert!(serde_json::from_value::<RuntimePlan>(document).is_err());
+    }
+}
+
+#[test]
 fn profile_name_is_a_compact_cli_safe_identifier() {
     for valid in ["default", "software-change", "team_v2.1"] {
         assert!(RunProfileName::new(valid).is_ok());

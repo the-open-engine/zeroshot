@@ -366,6 +366,7 @@ async fn native_candidate_runs_a_decision_without_starting_a_harness() {
         .await
         .unwrap();
     assert!(admitted.runtime.lanes().is_empty());
+    assert!(crate::native_v2_admission::writer_nodes(&admitted).is_empty());
     let directory = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let memory_path = state.path().join("memory.sqlite");

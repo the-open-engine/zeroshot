@@ -70,7 +70,7 @@ fn checkpoint_cleanup_fixture(
     (directory, repository, cleanup)
 }
 
-struct NeverDispatched;
+pub(super) struct NeverDispatched;
 
 #[async_trait]
 impl NodeRunner for NeverDispatched {

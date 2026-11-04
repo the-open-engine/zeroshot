@@ -647,6 +647,8 @@ struct UniformRuntimePlan {
     provider: openengine_cluster_protocol::ProviderId,
     #[serde(default = "medium_size")]
     size: RunSize,
+    #[serde(default = "default_workspace_checkpoints")]
+    workspace_checkpoints: bool,
     model: ModelId,
     #[serde(default)]
     effort: Option<ReasoningEffort>,
@@ -664,6 +666,10 @@ struct UniformRuntimePlan {
     active_memory: ActiveMemoryConfig,
     #[serde(default)]
     global_agents: GlobalAgentsConfig,
+}
+
+const fn default_workspace_checkpoints() -> bool {
+    true
 }
 
 const fn medium_size() -> RunSize {
@@ -761,6 +767,7 @@ impl UniformRuntimePlan {
             harness,
             provider: self.provider,
             size: self.size,
+            workspace_checkpoints: self.workspace_checkpoints,
             active_memory: self.active_memory,
             global_agents: self.global_agents,
             nodes,
