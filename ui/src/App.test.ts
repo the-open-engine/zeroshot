@@ -100,23 +100,56 @@ const profile = (): Document => ({
   runtime: { harness: 'codex', provider: 'openai', size: 'small', nodes: {} },
 });
 
-test('mounted App applies graph JSON and saves the edited profile', async (t) => {
+const authoring: WorkspaceServices['authoring'] = {
+  validate: async () => {},
+  outcome: async (document) => document,
+  data: async (document) => document,
+};
+
+async function mountApp(t: TestContext, services: WorkspaceServices, bootstrap: Bootstrap) {
   let unmount: (() => Promise<void>) | undefined;
   t.after(async () => unmount?.());
   const browser = installBrowser(t);
   const server = await createViteTestServer(t);
   const { App } = await server.ssrLoadModule('/src/App.tsx');
   const { createRoot } = await import('react-dom/client');
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  unmount = async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  };
+  await act(async () => root.render(createElement(App, { services, bootstrap })));
+  await act(async () => new Promise<void>((resolve) => setImmediate(resolve)));
+  return { browser, container };
+}
+
+function enabledSaveButton(container: HTMLElement) {
+  const save = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent?.trim() === 'Save profile'
+  );
+  assert.ok(save);
+  assert.equal(save.disabled, false);
+  return save;
+}
+
+function savedProfileCall() {
+  let resolveSaved!: (profile: SaveProfile) => void;
+  const savedCall = new Promise<SaveProfile>((resolve) => {
+    resolveSaved = resolve;
+  });
+  return { savedCall, resolveSaved };
+}
+
+test('mounted App applies graph JSON and saves the edited profile', async (t) => {
   const bootstrap: Bootstrap = {
     version: 1,
     workspace: { kind: 'local', id: 'app-test' },
     templates: [],
     runtimeSchema: {},
   };
-  let resolveSaved!: (profile: SaveProfile) => void;
-  const savedCall = new Promise<SaveProfile>((resolve) => {
-    resolveSaved = resolve;
-  });
+  const { savedCall, resolveSaved } = savedProfileCall();
   const services: WorkspaceServices = {
     mount: new URL('https://example.test/ui/'),
     catalog: async () => bootstrap,
@@ -133,22 +166,10 @@ test('mounted App applies graph JSON and saves the edited profile', async (t) =>
         return { profile: { ...next, id: 'profile-1', isDefault: false }, revision: 'r2' };
       },
     },
-    authoring: {
-      validate: async () => {},
-      outcome: async (document) => document,
-      data: async (document) => document,
-    },
+    authoring,
     history: {} as WorkspaceServices['history'],
   };
-  const container = document.createElement('div');
-  document.body.append(container);
-  const root = createRoot(container);
-  unmount = async () => {
-    await act(async () => root.unmount());
-    container.remove();
-  };
-  await act(async () => root.render(createElement(App, { services, bootstrap })));
-  await act(async () => new Promise<void>((resolve) => setImmediate(resolve)));
+  const { browser, container } = await mountApp(t, services, bootstrap);
 
   const graphButton = container.querySelector<HTMLButtonElement>('[aria-label="Graph JSON"]');
   assert.ok(graphButton);
@@ -173,11 +194,7 @@ test('mounted App applies graph JSON and saves the edited profile', async (t) =>
   await act(async () => apply.click());
   assert.equal(container.querySelector('[aria-label="JSON source"]'), null);
   assert.match(container.textContent ?? '', /Unsaved/);
-  const save = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (button) => button.textContent?.trim() === 'Save profile'
-  );
-  assert.ok(save);
-  assert.equal(save.disabled, false);
+  const save = enabledSaveButton(container);
   let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
     await act(async () => {
@@ -196,8 +213,6 @@ test('mounted App applies graph JSON and saves the edited profile', async (t) =>
   assert.deepEqual(saved.graph.policy, { reviewed: true });
   assert.equal(saved.expectedRevision, 'r1');
   assert.match(container.textContent ?? '', /Profile saved/);
-  await unmount();
-  unmount = undefined;
 });
 
 test('mounted Runtime dialog edits a draft shared by its Form and JSON views', async (t) => {
@@ -596,3 +611,90 @@ test('opening another profile closes the Runtime draft, and saves feed model sug
   await unmount();
   unmount = undefined;
 });
+
+test(
+  'script inspector omits instructions and saves after editing and clearing its timeout',
+  { timeout: 5000 },
+  async (t) => {
+    const script = profile();
+    script.graph.root.children = [
+      {
+        kind: 'step',
+        name: 'retrieve',
+        worker: 'script.retrieve@1',
+        attempts: 1,
+        input: { kind: 'null' },
+        output: { kind: 'null' },
+        inputBindings: [],
+        writeBindings: [],
+        timeoutMs: 1000,
+      },
+    ];
+    script.runtime.nodes.retrieve = { kind: 'script', command: ['python3', 'retrieve.py'] };
+    const bootstrap: Bootstrap = {
+      version: 1,
+      workspace: { kind: 'local', id: 'script-inspector-test' },
+      templates: [],
+      runtimeSchema: {},
+    };
+    const saves: SaveProfile[] = [];
+    const { savedCall, resolveSaved } = savedProfileCall();
+    const services: WorkspaceServices = {
+      mount: new URL('https://example.test/ui/'),
+      catalog: async () => bootstrap,
+      profiles: {
+        list: async () => ({ profiles: [{ id: 'script', name: script.name, isDefault: false }] }),
+        load: async () => ({
+          profile: { ...script, id: 'script', isDefault: false },
+          revision: 'r1',
+        }),
+        save: async (next) => {
+          assert.equal(Object.hasOwn(next.graph.root.children[0], 'instructions'), false);
+          saves.push(next);
+          resolveSaved(next);
+          return { profile: { ...next, id: 'script', isDefault: false }, revision: 'r2' };
+        },
+      },
+      authoring,
+      history: {} as WorkspaceServices['history'],
+    };
+    const { browser, container } = await mountApp(t, services, bootstrap);
+    const identity = [...container.querySelectorAll<HTMLElement>('.workflow-node-identity')].find(
+      (element) => element.textContent === 'retrieve'
+    );
+    assert.ok(identity);
+    await act(async () => identity.click());
+    const inspector = container.querySelector<HTMLElement>('[aria-label="Profile inspector"]');
+    assert.ok(inspector);
+    const labels = () => [...inspector.querySelectorAll('label')];
+    assert.equal(
+      labels().some((label) => label.textContent === 'Instructions'),
+      false
+    );
+    for (const text of ['2000', '']) {
+      const label = labels().find((label) => label.textContent === 'Timeout (ms)');
+      assert.ok(label);
+      const field = document.getElementById(label.htmlFor) as HTMLInputElement;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')!.set!.call(
+          field,
+          text
+        );
+        field.dispatchEvent(new browser.Event('input', { bubbles: true }));
+      });
+      await act(async () => {
+        field.dispatchEvent(new browser.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      });
+    }
+    const save = enabledSaveButton(container);
+    await act(async () => {
+      save.click();
+      await savedCall;
+    });
+    assert.equal(saves.length, 1);
+    assert.equal(Object.hasOwn(saves[0].graph.root.children[0], 'timeoutMs'), false);
+    assert.equal(Object.hasOwn(saves[0].graph.root.children[0], 'instructions'), false);
+    assert.deepEqual(saves[0].runtime.nodes.retrieve, script.runtime.nodes.retrieve);
+    assert.match(container.textContent ?? '', /Profile saved/);
+  }
+);

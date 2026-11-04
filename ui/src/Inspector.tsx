@@ -361,14 +361,16 @@ function ActivitySettings({
       )}
       {executable(node) && !delivery && (
         <>
-          <Field label="Instructions">
-            <textarea
-              rows={7}
-              value={node.instructions ?? ''}
-              onChange={(e) => graphChange('instructions', e.target.value)}
-              placeholder="What should this agent do?"
-            />
-          </Field>
+          {binding?.kind !== 'script' && (
+            <Field label="Instructions">
+              <textarea
+                rows={7}
+                value={node.instructions ?? ''}
+                onChange={(e) => graphChange('instructions', e.target.value)}
+                placeholder="What should this agent do?"
+              />
+            </Field>
+          )}
           {binding?.kind === 'decision' && (
             <DecisionControls node={node.name} binding={binding} onChange={bindingChange} />
           )}
