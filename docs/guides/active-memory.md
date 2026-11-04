@@ -30,8 +30,8 @@ repository-qualified scope. It keeps or adapts one canonical card and retires re
 while still deciding every supplied ID/revision. Distinct causes and operations remain separate.
 
 There is no findings count quota. Discovery returns every distinct lesson that qualifies; zero new
-lessons is valid. A lesson needs evidence of expensive failure or substantial exploration,
-a concrete recommendation and a reason to expect reuse. Task summaries, generic advice and facts
+lessons is valid. A lesson needs observed non-obvious learning, a concrete recommendation and a
+reason to expect reuse. Task summaries, generic advice and facts
 obvious from nearby code do not qualify. Titles have at most 96 UTF-8 bytes; recommendations have
 at most 640. The store keeps evidence pointers and provenance separately from the injected card.
 Use stable paths and identifiers in advice. Admission detects common literal root-relative `file:line` pointers; semantic maintenance

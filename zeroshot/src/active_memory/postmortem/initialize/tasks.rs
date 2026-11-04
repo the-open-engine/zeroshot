@@ -120,7 +120,7 @@ const RETROSPECTIVE_INSTRUCTION: &str = concat!(
     "Read current source in workspace before source-dependent judgments. The complete exact authored graph is at context.initialization_graph_file if the evidence graph is truncated. ",
     "Graph lessons remain tied to that exact hash; never migrate them to another graph version. The final maintenance pass checks tracked and nonignored source; ",
     "ignored/generated files cannot be current authority. Do not execute git commands. Write only your response file; do not alter source or memory state. ",
-    "Native tool receipts are unavailable, so exploration without durable qualifying failure evidence cannot be admitted.",
+    "Native tool receipts are unavailable; use observed historical completions and transcripts.",
 );
 
 pub(super) async fn discovery(
