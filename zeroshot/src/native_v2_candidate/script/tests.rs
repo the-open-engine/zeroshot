@@ -77,7 +77,7 @@ async fn script_exchanges_large_json_preserves_literal_arguments_and_redacts_std
     let adapter = ScriptAdapter::new(directory.path().to_owned(), None);
     let literal = "$(touch must-not-exist); literal argument";
     let data = "x".repeat(1024 * 1024);
-    let invocation = invocation(
+    let mut invocation = invocation(
         &adapter,
         vec![
             executable.to_string_lossy().into_owned(),
@@ -86,6 +86,10 @@ async fn script_exchanges_large_json_preserves_literal_arguments_and_redacts_std
         json!({"text":data}),
     )
     .await;
+    invocation.environment = invocation.environment.with_variables(&BTreeMap::from([(
+        EnvironmentVariableName::new("PREFIX").unwrap(),
+        "private-script-".to_owned(),
+    )]));
     let (_cancel, control, mut durable) =
         crate::native_v2_runner::test_support::control_with_capacity(16);
     let result = adapter.run(invocation, control).await.unwrap();
@@ -106,7 +110,8 @@ async fn script_exchanges_large_json_preserves_literal_arguments_and_redacts_std
     );
     let log = durable.recv_output().await.unwrap();
     assert!(!log.text.contains("private-script-fixture-key"));
-    assert!(log.text.contains("[redacted]"));
+    assert!(!log.text.contains("fixture-key"));
+    assert!(log.text.contains("[REDACTED]"));
 }
 
 #[tokio::test]

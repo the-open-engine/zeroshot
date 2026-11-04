@@ -15,7 +15,9 @@ use crate::execution::process::{
     LocalProcessRunner, MAX_PROCESS_MESSAGE_BYTES, ProcessLaunchEvidence, ProcessSessionCommand,
     ProcessStdout,
 };
-use crate::native_v2_capsule::provider_process::{apply_execution_environment, send_process_input};
+use crate::native_v2_capsule::provider_process::{
+    apply_execution_environment, safe_provider_text, send_process_input,
+};
 use crate::native_v2_contract::{NodeInvocation, NodeRuntimeBinding, parse_token_usage_delta};
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeDriver,
@@ -264,12 +266,11 @@ async fn read_stdout(
 }
 
 fn redact(text: &str, environment: &ResolvedEnvironment) -> String {
-    environment
+    let redactions = environment
         .iter()
-        .filter(|(_, value)| !value.is_empty())
-        .fold(text.replace('\0', "�"), |text, (_, value)| {
-            text.replace(value, "[redacted]")
-        })
+        .map(|(_, value)| value.to_owned())
+        .collect::<Vec<_>>();
+    safe_provider_text(text, &redactions)
 }
 
 async fn log(control: &DriverControl, message: &str) -> Result<(), NodeRunnerError> {
