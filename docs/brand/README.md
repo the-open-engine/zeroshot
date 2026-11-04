@@ -187,10 +187,42 @@ const { pathToFileURL } = require('node:url');
 JS
 ```
 
+## README example graph
+
+Under "Get started", the README shows zeroshot.sh's example graph from issue to merge: the
+drawing in the page's `#one-graph` section, without the section's headline. It is an illustrative
+custom graph, not a recording or the built-in template; the end-to-end test is a custom addition.
+The README's opening graph stays a text block, so agents that fetch it as plain text can read it.
+
+- `diagram-sources/example-graph-{wide,tall}.svg`: the page's wide and tall drawings, frozen on
+  November 4, 2026 from zeroshot-landing-page `846a4bd` (`index.html` and `styles.css`). Each file
+  inlines both themes' colours, the loop's rules and its 31.8-second run. HTML entities are written
+  as characters so the files parse as XML.
+- `../assets/example-graph-{wide,tall}-{light,dark}.gif`: the run, 1,590 frames at 50 fps,
+  looping. Wide is 1760px (880px at 2×); tall is 800px (400px at 2×), and the README picks it
+  below 641px viewport width.
+- `../assets/example-graph-{wide,tall}-{light,dark}.png`: the page's reduced-motion still, with no
+  moving dot and the passing ticks shown, for readers who turn motion off.
+
+The page owns the drawing. When its drawing or run changes, refresh the sources first from a
+checkout of [zeroshot-landing-page](https://github.com/the-open-engine/zeroshot-landing-page) at
+the commit that is live on zeroshot.sh, then re-render all eight. With the Playwright install
+described above and FFmpeg on PATH, from the repository root:
+
+```sh
+python3 docs/brand/freeze-example-graph.py ../zeroshot-landing-page .
+NODE_PATH=/tmp/open-engine-banner-tools/node_modules node docs/brand/render-example-graph.cjs
+```
+
+The renderer only reads the frozen sources. It checks that every animation runs the
+31.8-second loop, pauses them and seeks each frame. Update the commit and date above when you
+refresh.
+
 ## Product-page graph exports
 
-The README no longer shows these exports: its example graph is a text block, so it stays sharp at
-any width, works in both themes, and is readable by agents that fetch the README as plain text.
+The README no longer shows these exports. Its opening example graph is a text block, so it stays
+sharp at any width, works in both themes, and is readable by agents that fetch the README as plain
+text.
 The exports below are kept for reuse. They come from <https://zeroshot.sh/#topology>, captured on
 October 19, 2026.
 The source panels are `graph-panel-feature` (Ship a feature) and `graph-panel-danger` (A risky

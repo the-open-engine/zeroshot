@@ -93,6 +93,21 @@ run finishes, your agent tells you what got rejected and what got fixed. Watch i
 The graph also decides where finished work goes: kept local, pushed as a branch, opened as a PR,
 or taken through your CI and review comments to a merge.
 
+<p align="center">
+  <a href="https://zeroshot.sh/?utm_source=github&amp;utm_medium=readme&amp;utm_campaign=zeroshot#one-graph">
+    <picture>
+      <source media="(prefers-reduced-motion: reduce) and (max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/example-graph-tall-dark.png">
+      <source media="(prefers-reduced-motion: reduce) and (max-width: 640px)" srcset="docs/assets/example-graph-tall-light.png">
+      <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="docs/assets/example-graph-wide-dark.png">
+      <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/example-graph-wide-light.png">
+      <source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/example-graph-tall-dark.gif">
+      <source media="(max-width: 640px)" srcset="docs/assets/example-graph-tall-light.gif">
+      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/example-graph-wide-dark.gif">
+      <img alt="An example graph: goal, worker, parallel acceptance and code review, end-to-end test, PR, CI, then merge. A failed review, test or CI run returns through repair, implementation and review before delivery is retried. This illustrative animation is not a recorded run." src="docs/assets/example-graph-wide-light.gif">
+    </picture>
+  </a>
+</p>
+
 Runs happen on your machine with the login your agent already uses, subscriptions included. The CLI
 is free and MIT licensed.
 
