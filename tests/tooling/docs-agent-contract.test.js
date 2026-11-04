@@ -81,6 +81,25 @@ const exampleFiles = () =>
 const allRuns = () => exampleFiles().flatMap(documentedRuns);
 const flagName = (word) => word.split('=')[0];
 
+it('README links and images point to existing local files', () => {
+  const markdown = read('README.md');
+  const links = [...markdown.matchAll(/\]\(([^\s)]+)(?:\s+"[^"]*")?\)/g)].map((match) => match[1]);
+  const images = [...markdown.matchAll(/(?:src|srcset)="([^"]+)"/g)].flatMap((match) =>
+    match[1].split(',').map((candidate) => candidate.trim().split(/\s+/)[0])
+  );
+  const local = [...links, ...images].filter(
+    (target) => target && !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(target)
+  );
+  assert.ok(local.length > 0, 'README must link its local documentation');
+  for (const target of local) {
+    const filename = decodeURIComponent(target.split(/[?#]/)[0]);
+    assert.ok(
+      fs.existsSync(path.resolve(root, filename)),
+      `README references missing file: ${target}`
+    );
+  }
+});
+
 // JSON examples in fenced blocks titled `name` or `name for ...`.
 function titledJson(file, name) {
   const pattern = /```json title="([^"]+)"\n([\s\S]*?)\n\s*```/g;

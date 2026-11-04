@@ -254,13 +254,15 @@ describe('CI efficiency contract', () => {
       group: '${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}',
       'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
     });
-    assert.match(source, /git diff --no-renames --name-only -z/);
+    assert.match(source, /bash \.github\/select-ci-lanes\.sh/);
+    assert.match(read('.github/select-ci-lanes.sh'), /git diff --no-renames --name-only -z/);
     assert.deepEqual(Object.keys(workflow.jobs.classify.outputs), [
       'native',
       'python',
       'tooling',
       'npm',
       'docs',
+      'readme',
     ]);
   });
 
