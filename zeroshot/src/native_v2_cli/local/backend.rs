@@ -203,6 +203,16 @@ impl NativeV2CliBackend for LocalCliBackend {
         target: Option<&str>,
         request: RunProfileListRequest,
     ) -> Result<RunProfileListResult, NativeV2CliError> {
+        self.profile_list_with_problems(target, request)
+            .await?
+            .into_protocol()
+    }
+
+    async fn profile_list_with_problems(
+        &self,
+        target: Option<&str>,
+        request: RunProfileListRequest,
+    ) -> Result<CliProfileListResult, NativeV2CliError> {
         require_local(target)?;
         LocalRunProfileStore::production()?.list(request)
     }

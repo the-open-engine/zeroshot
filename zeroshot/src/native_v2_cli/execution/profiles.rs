@@ -47,7 +47,7 @@ async fn list<B: NativeV2CliBackend>(
 ) -> Result<(), NativeV2CliError> {
     let scope = resolve_scope(&route, backend).await?;
     let result = backend
-        .profile_list(route.target.as_deref(), RunProfileListRequest { scope })
+        .profile_list_with_problems(route.target.as_deref(), RunProfileListRequest { scope })
         .await?;
     write_json(output, &result)
 }

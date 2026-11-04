@@ -48,6 +48,12 @@ the saved runtime plan.
 Profiles contain graphs and agent runtime configuration. Environments belong to run submission,
 not profile authoring. Plain local UI has no environment catalog or management page.
 
+Local profile lists return readable metadata in `profiles` and malformed entries in optional `problems`,
+with each entry's name, default status and diagnostic. The sidebar shows these problems alongside
+usable profiles. Graph/runtime schemas are checked when a profile is opened; unrelated saves and
+metadata operations preserve incompatible entries. Target v1 profile responses retain their original
+`profiles`-only contract; diagnostics are local CLI/UI data. Invalid shared store JSON remains a store error.
+
 For frontend development, keep the native server running:
 
 ```sh

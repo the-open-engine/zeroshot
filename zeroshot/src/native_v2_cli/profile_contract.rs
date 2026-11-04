@@ -1,6 +1,48 @@
-use openengine_cluster_protocol::{RunProfileName, RunProfileScope};
+use openengine_cluster_protocol::{
+    RunProfileListResult, RunProfileName, RunProfileScope, RunProfileSummary,
+};
+use serde::Serialize;
 
-use super::{RunGraph, RunRuntime};
+use super::{NativeV2CliError, RunGraph, RunRuntime};
+
+/// Local CLI/UI listing diagnostics; the target's v1 wire result remains unchanged.
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliProfileListResult {
+    pub profiles: Vec<RunProfileSummary>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub problems: Vec<CliProfileProblem>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliProfileProblem {
+    pub name: RunProfileName,
+    pub scope: RunProfileScope,
+    pub is_default: bool,
+    pub message: String,
+}
+
+impl From<RunProfileListResult> for CliProfileListResult {
+    fn from(value: RunProfileListResult) -> Self {
+        Self {
+            profiles: value.profiles,
+            problems: Vec::new(),
+        }
+    }
+}
+
+impl CliProfileListResult {
+    /// Legacy callers cannot represent partial listings, so retain their explicit failure.
+    pub(crate) fn into_protocol(self) -> Result<RunProfileListResult, NativeV2CliError> {
+        if let Some(problem) = self.problems.into_iter().next() {
+            return Err(NativeV2CliError::Local(problem.message));
+        }
+        Ok(RunProfileListResult {
+            profiles: self.profiles,
+        })
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RunSelection {

@@ -976,6 +976,7 @@ function ProfileSidebar({ model }: { model: AppModel }) {
     setModalError,
     setModal,
     profiles,
+    profileProblems,
     doc,
     base,
     load,
@@ -1018,7 +1019,15 @@ function ProfileSidebar({ model }: { model: AppModel }) {
             )}
           </button>
         ))}
-        {!profiles.length && !loading && <div className="no-profiles">No saved profiles</div>}
+        {profileProblems.map((problem) => (
+          <div key={problem.name} className="no-profiles" role="status">
+            {problem.message}
+            {problem.isDefault && ' (default profile)'}
+          </div>
+        ))}
+        {!profiles.length && !profileProblems.length && !loading && (
+          <div className="no-profiles">No saved profiles</div>
+        )}
         {doc && !base && (
           <div className="draft-item">
             <FilePlus2 size={16} />
