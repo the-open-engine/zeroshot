@@ -1,7 +1,8 @@
 use super::*;
 
 use openengine_cluster_protocol::{
-    Cursor, NodeName, PositiveInteger, RunId, TerminalResult, WorkerFailureReason,
+    ControlSource, GraphNode, NodeName, PositiveInteger, RunId, TerminalResult, WorkerErrorCode,
+    WorkerFailureReason, WorkerOutcome,
 };
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{Value, json};
@@ -106,20 +107,6 @@ impl Case {
             .collect()
     }
 
-    fn standard_rounds(&mut self, verdicts: &[&str], scope: &[u64]) -> Vec<String> {
-        verdicts
-            .iter()
-            .filter_map(|verdict| {
-                let references = self.round(
-                    &["worker"],
-                    &[("acceptance", verdict), ("code", "accepted")],
-                    scope,
-                );
-                (*verdict == "rejected").then(|| references[0].clone())
-            })
-            .collect()
-    }
-
     fn impact(&self) -> ImpactEvidence {
         ImpactEvidence::new(
             MainRunFacts {
@@ -145,17 +132,6 @@ fn collect_bindings(node: &GraphNode, bindings: &mut serde_json::Map<String, Val
     }
 }
 
-async fn repair_case() -> Case {
-    let mut case = Case::new(review_loop()).await;
-    case.standard_rounds(&["rejected", "rejected", "accepted"], &[]);
-    case
-}
-
-fn assert_repair_abstention(mut case: Case) {
-    case.standard_rounds(&["rejected", "rejected", "accepted"], &[]);
-    assert!(case.impact().episodes.is_empty());
-}
-
 fn state() -> Value {
     let array = json!({"kind":"array","items":{"kind":"null"}});
     let fields = BTreeMap::from([("items", json!({"type":array,"required":true}))]);
@@ -168,9 +144,7 @@ fn worker(name: &str) -> Value {
 }
 
 fn reviewer(name: &str) -> Value {
-    json!({"kind":"verifier","name":name,"worker":"verifier.test@1","instructions":"Review the task.",
-        "input":{"kind":"null"},"output":{"kind":"null"},"inputBindings":[],"writeBindings":[],"attempts":1,
-        "signals":{"verdict":["accepted","rejected"]},"diagnostic":{"kind":"null"}})
+    crate::active_memory::postmortem::tests::review_node(name)
 }
 
 fn sequence(name: &str, children: Vec<Value>) -> Value {
@@ -260,396 +234,250 @@ fn reviewed(verdict: &str) -> WorkerOutcome {
     }
 }
 
-fn assert_worker_references(evidence: &ImpactEvidence, references: &[String]) {
-    let episode = evidence.episodes.get("worker").assert_value();
-    assert_eq!(
-        episode.failure_references,
-        references.iter().cloned().collect()
-    );
-    for role in [Role::Graph, Role::Repository] {
-        assert!(episode.allows(role, references));
+fn reference(case: &Case, execution: ExecutionId) -> String {
+    completion_reference(&case.snapshot.executions[&execution]).assert_value()
+}
+
+fn observation(seq: u64, node: &str, execution: ExecutionId) -> ToolObservation {
+    ToolObservation {
+        seq,
+        node_id: node.to_owned(),
+        execution_id: execution.get(),
+        timestamp_ms: seq.max(1),
+        tool_name: "read_file".to_owned(),
+        paths: vec!["src/provider.rs".to_owned()],
     }
 }
 
-#[tokio::test]
-async fn standard_error_exit_review_loops_attribute_distinct_repair_rounds_to_the_worker() {
-    let tail = parallel(
-        "reviews",
-        vec![
-            reviewer("acceptance"),
-            reviewer("code"),
-            sequence(
-                "testing",
-                vec![
-                    reviewer("tests"),
-                    error_exit("test_result", "tests", reviewer("adversary")),
-                ],
-            ),
-        ],
-    );
-    let body = sequence(
-        "iteration",
-        vec![
-            worker("worker"),
-            error_exit("worker_result", "worker", tail),
-        ],
-    );
-    let mut case = Case::new(looped(
-        "review_loop",
-        body,
-        Some(until(&["acceptance", "code", "tests", "adversary"])),
-        10,
-    ))
-    .await;
-    let mut anchors = Vec::new();
-    for verdict in ["rejected", "rejected", "accepted"] {
-        let references = case.round(
-            &["worker"],
-            &[
-                ("acceptance", verdict),
-                ("code", "accepted"),
-                ("tests", "accepted"),
-                ("adversary", "accepted"),
-            ],
-            &[],
-        );
-        if verdict == "rejected" {
-            anchors.push(references[0].clone());
-        }
-    }
-    let evidence = case.impact();
-    assert_worker_references(&evidence, &anchors);
-    assert_eq!(evidence.episodes.len(), 1);
-    assert!(evidence.tools.is_empty());
-}
-
-#[tokio::test]
-async fn two_rejected_reviewers_in_one_round_do_not_count_as_two_repairs() {
-    let mut case = Case::new(review_loop()).await;
-    case.round(
-        &["worker"],
-        &[("acceptance", "rejected"), ("code", "rejected")],
-        &[],
-    );
-    case.round(
-        &["worker"],
-        &[("acceptance", "accepted"), ("code", "accepted")],
-        &[],
-    );
-    assert!(case.impact().episodes.is_empty());
-}
-
-#[tokio::test]
-async fn successful_inner_loops_repeated_by_an_outer_loop_are_not_rejections() {
-    let mut case = Case::new(looped("outer", review_loop(), None, 3)).await;
-    case.standard_rounds(&["accepted", "accepted", "accepted"], &[]);
-    assert!(case.impact().episodes.is_empty());
-}
-
-#[tokio::test]
-async fn failed_active_voided_and_retried_visits_abstain_from_review_attribution() {
-    let states = [
-        NodeState::Active,
-        NodeState::Voided {
-            at: cursor_for(100),
-            reason: ExecutionVoidReason::ParallelJoin,
+fn with_tools(case: &Case, tools: Vec<ToolObservation>) -> ImpactEvidence {
+    ImpactEvidence::new(
+        MainRunFacts {
+            run_id: &case.snapshot.run_id,
+            admitted: &case.admitted,
+            snapshot: &case.snapshot,
+            primary_terminal: &case.terminal,
+            ledger: &case.ledger,
         },
-        NodeState::Completed {
-            at: cursor_for(100),
-            outcome: WorkerOutcome::Error {
-                code: WorkerErrorCode::Malformed,
-                reason: WorkerFailureReason::MalformedResult,
-            },
+        tools,
+    )
+}
+
+#[tokio::test]
+async fn every_observed_completion_is_evidence_without_outcome_or_count_thresholds() {
+    for outcome in [
+        verified(),
+        reviewed("accepted"),
+        reviewed("rejected"),
+        WorkerOutcome::Error {
+            code: WorkerErrorCode::Crash,
+            reason: WorkerFailureReason::DeclaredFailure,
         },
-        NodeState::Completed {
-            at: cursor_for(100),
-            outcome: WorkerOutcome::Error {
-                code: WorkerErrorCode::Crash,
-                reason: WorkerFailureReason::DeclaredFailure,
-            },
+        WorkerOutcome::Error {
+            code: WorkerErrorCode::Timeout,
+            reason: WorkerFailureReason::DeclaredFailure,
         },
-    ];
-    for state in states {
-        let mut case = repair_case().await;
-        let changed = case
-            .snapshot
-            .executions
-            .get_mut(&ExecutionId::new(3).assert_value())
-            .assert_value();
-        changed.state = state;
-        let evidence = case.impact();
-        assert!(!evidence.episodes.contains_key("worker"));
-        if matches!(
-            case.snapshot.executions[&ExecutionId::new(3).assert_value()].outcome(),
-            Some(WorkerOutcome::Error {
-                code: WorkerErrorCode::Crash,
-                ..
-            })
-        ) {
-            assert_eq!(
-                evidence.episodes["code"].failure_references,
-                BTreeSet::from(["v2:100".to_owned()])
-            );
-        }
-    }
-    let mut case = repair_case().await;
-    case.snapshot
-        .executions
-        .get_mut(&ExecutionId::new(3).assert_value())
-        .assert_value()
-        .attempt = PositiveInteger::new(2).assert_value();
-    assert!(case.impact().episodes.is_empty());
-}
-
-#[tokio::test]
-async fn a_false_error_guard_cannot_masquerade_as_a_rejected_review() {
-    for guard in [
-        error("acceptance"),
-        json!({"kind":"all","guards":[accepted("acceptance"), error("code")]}),
-    ] {
-        let mut case = Case::new(looped("review_loop", review_body(), Some(guard), 10)).await;
-        case.standard_rounds(&["accepted", "accepted", "accepted"], &[]);
-        assert!(case.impact().episodes.is_empty());
-    }
-}
-
-#[tokio::test]
-async fn unobserved_error_exit_siblings_remain_unknown() {
-    let guard = json!({"kind":"any","guards":[until(&["acceptance", "code"]), error("outside")]});
-    let body = sequence(
-        "iteration",
-        vec![
-            worker("worker"),
-            parallel(
-                "reviews",
-                vec![
-                    reviewer("acceptance"),
-                    reviewer("code"),
-                    reviewer("outside"),
-                ],
-            ),
-        ],
-    );
-    let case = Case::new(looped("review_loop", body, Some(guard), 10)).await;
-    assert_repair_abstention(case);
-}
-
-#[tokio::test]
-async fn distinct_map_items_cannot_pool_rejections_to_reach_the_cost_threshold() {
-    let mut case = Case::new(mapped(review_loop())).await;
-    for scope in [&[0][..], &[1][..]] {
-        case.standard_rounds(&["rejected", "accepted"], scope);
-    }
-    assert!(case.impact().episodes.is_empty());
-}
-
-#[tokio::test]
-async fn eligible_map_item_references_do_not_include_another_items_verdicts() {
-    let mut case = Case::new(mapped(review_loop())).await;
-    let mut anchors = Vec::new();
-    for verdict in ["rejected", "rejected", "accepted"] {
-        anchors.extend(case.standard_rounds(&[verdict], &[0]));
-        case.standard_rounds(&["accepted"], &[1]);
-    }
-    assert_worker_references(&case.impact(), &anchors);
-}
-
-#[tokio::test]
-async fn a_failed_reviewer_in_another_map_item_prevents_global_error_absence() {
-    let mut case = Case::new(mapped(review_loop())).await;
-    case.standard_rounds(&["rejected", "rejected", "accepted"], &[0]);
-    case.visit("worker", verified(), &[1]);
-    case.visit("acceptance", reviewed("accepted"), &[1]);
-    case.visit(
-        "code",
         WorkerOutcome::Error {
             code: WorkerErrorCode::Malformed,
             reason: WorkerFailureReason::MalformedResult,
         },
-        &[1],
-    );
-    assert!(case.impact().episodes.is_empty());
-}
-
-#[test]
-fn review_branches_without_a_full_join_are_outside_the_supported_shape() {
-    let mut body = review_body();
-    body["children"][1]["join"] = json!({"kind":"any"});
-    let graph: GraphNode = serde_json::from_value(body).assert_value();
-    assert!(ReviewLoop::new(&graph, &BTreeSet::new()).is_none());
-}
-
-#[tokio::test]
-async fn nested_intermediate_rejections_do_not_become_outer_worker_evidence() {
-    let body = sequence(
-        "outer_iteration",
-        vec![
-            worker("outer_worker"),
-            review_loop(),
-            reviewer("outer_check"),
-        ],
-    );
-    let mut case = Case::new(looped(
-        "outer",
-        body,
-        Some(until(&["acceptance", "outer_check"])),
-        2,
-    ))
-    .await;
-    let mut anchors = Vec::new();
-    for _ in 0..2 {
-        case.visit("outer_worker", verified(), &[]);
-        anchors.extend(case.standard_rounds(&["rejected", "rejected", "accepted"], &[]));
-        case.visit("outer_check", reviewed("rejected"), &[]);
+        WorkerOutcome::Error {
+            code: WorkerErrorCode::Refusal,
+            reason: WorkerFailureReason::DeclaredFailure,
+        },
+    ] {
+        let mut case = Case::new(review_loop()).await;
+        let name = if matches!(outcome, WorkerOutcome::Verifier { .. }) {
+            "acceptance"
+        } else {
+            "worker"
+        };
+        let execution = case.visit(name, outcome, &[]);
+        let own = reference(&case, execution);
+        let evidence = case.impact();
+        let episode = &evidence.episodes[name];
+        assert_eq!(episode.completion_references, BTreeSet::from([own.clone()]));
+        assert!(episode.allows(std::slice::from_ref(&own)));
+        assert!(evidence.references().contains(&own));
     }
-    let evidence = case.impact();
-    assert_worker_references(&evidence, &anchors);
-    assert_eq!(evidence.episodes.len(), 1);
+}
+
+fn retry_guard(name: &str) -> Value {
+    json!({"kind":"map","name":name,"state":state(),
+        "over":{"source":"state","path":["items"]},"maxItems":1,"promotedStatePaths":[],
+        "body":{"kind":"fail","name":format!("{name}_invalid"),"reason":"invalid_retry_state"}})
 }
 
 #[tokio::test]
-async fn exhausted_final_rounds_cannot_borrow_successors_from_outer_reentry() {
-    let inner = looped(
-        "review_loop",
-        review_body(),
-        Some(until(&["acceptance", "code"])),
-        1,
-    );
-    let mut case = Case::new(looped("outer", inner, None, 3)).await;
-    case.standard_rounds(&["rejected", "rejected", "rejected"], &[]);
-    assert!(case.impact().episodes.is_empty());
-}
-
-#[tokio::test]
-async fn only_serial_prefix_workers_receive_review_cost() {
-    let body = sequence(
-        "iteration",
-        vec![
-            worker("worker"),
-            worker("helper"),
-            parallel("reviews", vec![reviewer("acceptance"), reviewer("code")]),
-        ],
-    );
-    let work = looped(
-        "review_loop",
+async fn production_retry_guard_maps_do_not_hide_rejected_review_completions() {
+    let mut body = review_body();
+    let reviews = body["children"]
+        .as_array_mut()
+        .assert_value()
+        .pop()
+        .assert_value();
+    body["children"].as_array_mut().assert_value().push(error_exit(
+        "worker_result",
+        "worker",
+        sequence("review_result", vec![reviews, json!({
+            "kind":"choice","name":"retry_result","state":state(),"promotedStatePaths":[],
+            "branches":[{"when":control("acceptance",ControlSource::Signal,&["rejected"]),
+                "node":retry_guard("review_retry")}],
+            "otherwise":retry_guard("delivery_retry")
+        })]),
+    ));
+    let mut case = Case::new(looped(
+        "change_loop",
         body,
         Some(until(&["acceptance", "code"])),
         10,
-    );
-    let unrelated = looped("unrelated_loop", worker("unrelated"), None, 2);
-    let mut case = Case::new(parallel("branches", vec![work, unrelated])).await;
-    let mut anchors = Vec::new();
-    for verdict in ["rejected", "rejected", "accepted"] {
+    ))
+    .await;
+    let mut rejected = BTreeSet::new();
+    for _ in 0..4 {
         let references = case.round(
-            &["worker", "helper"],
-            &[("acceptance", verdict), ("code", "accepted")],
+            &["worker"],
+            &[("acceptance", "rejected"), ("code", "accepted")],
             &[],
         );
-        if verdict == "rejected" {
-            anchors.push(references[0].clone());
-        }
-    }
-    for _ in 0..2 {
-        case.visit("unrelated", verified(), &[]);
+        rejected.insert(references[0].clone());
     }
     let evidence = case.impact();
-    assert_worker_references(&evidence, &anchors);
     assert_eq!(
-        evidence.episodes["helper"].failure_references,
-        anchors.into_iter().collect()
+        evidence.episodes["acceptance"].completion_references,
+        rejected
     );
-    assert_eq!(evidence.episodes.len(), 2);
+    assert!(!evidence.episodes["worker"].allows(&rejected.into_iter().collect::<Vec<_>>()));
 }
 
 #[tokio::test]
-async fn seeded_history_cannot_prove_complete_rounds_or_error_absence() {
-    let mut case = repair_case().await;
-    let node = case.snapshot.executions.values().next().assert_value();
+async fn nested_map_and_loop_completions_remain_available_without_inferred_worker_blame() {
+    let mut case = Case::new(mapped(looped("outer", review_loop(), None, 2))).await;
+    let mut expected = BTreeSet::new();
+    for scope in [&[0][..], &[1][..]] {
+        case.visit("worker", verified(), scope);
+        let check = case.visit("acceptance", reviewed("rejected"), scope);
+        expected.insert(reference(&case, check));
+    }
+    let evidence = case.impact();
+    assert_eq!(
+        evidence.episodes["acceptance"].completion_references,
+        expected
+    );
+    assert!(!evidence.episodes["worker"].allows(&expected.into_iter().collect::<Vec<_>>()));
+}
+
+#[tokio::test]
+async fn retry_seed_and_incomplete_siblings_do_not_hide_a_real_completion() {
+    let mut case = Case::new(review_loop()).await;
+    let worker = case.visit("worker", verified(), &[]);
+    let check = case.visit("acceptance", reviewed("rejected"), &[]);
+    let sibling = case.visit("code", reviewed("accepted"), &[]);
+    case.snapshot
+        .executions
+        .get_mut(&check)
+        .assert_value()
+        .attempt = PositiveInteger::new(2).assert_value();
+    let seed = &case.snapshot.executions[&worker];
     case.snapshot.execution_seed.push(DurableExecution {
         dispatch_position: HistoryPosition::new(1).assert_value(),
-        node_instance: node.reference.node_instance,
-        execution: node.reference.execution,
-        occurrence: node.occurrence.clone(),
-        attempt: node.attempt,
-        input: node.input.clone(),
+        node_instance: seed.reference.node_instance,
+        execution: seed.reference.execution,
+        occurrence: seed.occurrence.clone(),
+        attempt: seed.attempt,
+        input: seed.input.clone(),
         state: DurableExecutionState::Settled {
             position: HistoryPosition::new(2).assert_value(),
             outcome: verified(),
         },
     });
-    assert!(case.impact().episodes.is_empty());
-}
-
-#[tokio::test]
-async fn incomplete_or_overlapping_rounds_cannot_prove_review_repairs() {
-    for overlap in [false, true] {
-        let mut case = repair_case().await;
-        if overlap {
-            case.snapshot
-                .executions
-                .get_mut(&ExecutionId::new(3).assert_value())
-                .assert_value()
-                .state = NodeState::Completed {
-                at: Cursor::new("v2:100"),
-                outcome: reviewed("accepted"),
-            };
-        } else {
-            case.snapshot
-                .executions
-                .remove(&ExecutionId::new(3).assert_value());
-        }
-        assert!(case.impact().episodes.is_empty());
-    }
-}
-
-#[tokio::test]
-async fn repeated_response_format_failures_and_latency_do_not_create_review_cost() {
-    let mut case = Case::new(review_loop()).await;
-    for _ in 0..2 {
-        case.visit(
-            "worker",
-            WorkerOutcome::Error {
-                code: WorkerErrorCode::Malformed,
-                reason: WorkerFailureReason::MalformedResult,
-            },
-            &[],
-        );
-    }
-    assert!(case.impact().episodes.is_empty());
-    case.snapshot.executions.clear();
-    case.standard_rounds(&["accepted", "accepted", "accepted"], &[]);
-    for node in case.snapshot.executions.values_mut() {
-        node.started_at = cursor_for(cursor_sequence(&node.started_at).assert_value() * 1_000_000);
-        if let NodeState::Completed { at, .. } = &mut node.state {
-            *at = cursor_for(cursor_sequence(at).assert_value() * 1_000_000);
-        }
-    }
-    let evidence = case.impact();
-    assert!(evidence.episodes.is_empty());
-    assert!(evidence.tools.is_empty());
-}
-
-#[test]
-fn exploration_cost_must_be_proved_by_the_cited_tool_receipts() {
-    let mut episode = ImpactEpisode::default();
-    for (reference, time) in [
-        ("hook:1", 1),
-        ("hook:2", 100),
-        ("hook:3", 200),
-        ("hook:4", 300001),
+    for sibling_state in [
+        NodeState::Active,
+        NodeState::Voided {
+            at: cursor_for(100),
+            reason: ExecutionVoidReason::ParallelJoin,
+        },
     ] {
-        episode.tool_references.insert(reference.to_owned());
-        episode.tool_timestamps.insert(reference.to_owned(), time);
-        episode.time(time);
+        case.snapshot
+            .executions
+            .get_mut(&sibling)
+            .assert_value()
+            .state = sibling_state;
+        let evidence = case.impact();
+        assert!(evidence.episodes["acceptance"].allows(&[reference(&case, check)]));
+        assert!(!evidence.episodes.contains_key("code"));
     }
-    let references = |values: [&str; 3]| values.into_iter().map(str::to_owned).collect::<Vec<_>>();
-    assert!(!episode.allows(
-        Role::Repository,
-        &references(["hook:1", "hook:2", "hook:3"])
-    ));
-    assert!(episode.allows(
-        Role::Repository,
-        &references(["hook:1", "hook:2", "hook:4"])
-    ));
-    assert!(!episode.allows(Role::Graph, &references(["hook:1", "hook:2", "hook:4"])));
+}
+
+#[tokio::test]
+async fn one_short_tool_observation_is_evidence_for_either_discovery_specialist() {
+    let mut case = Case::new(review_loop()).await;
+    let worker = case.visit("worker", verified(), &[]);
+    case.snapshot
+        .executions
+        .get_mut(&worker)
+        .assert_value()
+        .state = NodeState::Active;
+    let evidence = with_tools(&case, vec![observation(1, "worker", worker)]);
+    let episode = &evidence.episodes["worker"];
+    assert!(episode.completion_references.is_empty());
+    assert!(episode.allows(&["hook:1".to_owned()]));
+    assert_eq!(evidence.tools.len(), 1);
+}
+
+#[tokio::test]
+async fn evidence_eligibility_requires_a_reference_owned_by_the_named_main_node() {
+    let mut case = Case::new(review_loop()).await;
+    let worker = case.visit("worker", verified(), &[]);
+    let reviewer = case.visit("acceptance", reviewed("rejected"), &[]);
+    let own = reference(&case, worker);
+    let other = reference(&case, reviewer);
+    let evidence = case.impact();
+    let episode = &evidence.episodes["worker"];
+    for refs in [
+        vec![],
+        vec![other.clone()],
+        vec!["v2:999".to_owned()],
+        vec!["node:worker".to_owned()],
+    ] {
+        assert!(!episode.allows(&refs));
+    }
+    assert!(episode.allows(&[own, other]));
+}
+
+#[tokio::test]
+async fn malformed_foreign_and_auxiliary_tool_observations_are_excluded() {
+    let mut case = Case::new(review_loop()).await;
+    let worker = case.visit("worker", verified(), &[]);
+    let mut auxiliary = case.snapshot.executions[&worker].clone();
+    let auxiliary_id = ExecutionId::new(999).assert_value();
+    auxiliary.reference.execution = auxiliary_id;
+    auxiliary.reference.node = "active_memory_repository".parse().assert_value();
+    auxiliary.occurrence.node = auxiliary.reference.node.clone();
+    case.snapshot.executions.insert(auxiliary_id, auxiliary);
+    let mut zero_time = observation(3, "worker", worker);
+    zero_time.timestamp_ms = 0;
+    let mut long_name = observation(4, "worker", worker);
+    long_name.tool_name = "x".repeat(129);
+    let mut many_paths = observation(5, "worker", worker);
+    many_paths.paths = vec!["src/provider.rs".to_owned(); 5];
+    let evidence = with_tools(
+        &case,
+        vec![
+            observation(1, "worker", worker),
+            observation(2, "acceptance", worker),
+            observation(0, "worker", worker),
+            zero_time,
+            long_name,
+            many_paths,
+            observation(6, "active_memory_repository", auxiliary_id),
+            observation(7, "worker", ExecutionId::new(998).assert_value()),
+        ],
+    );
+    assert_eq!(evidence.tools.len(), 1);
+    assert_eq!(
+        evidence.episodes["worker"].tool_references,
+        BTreeSet::from(["hook:1".to_owned()])
+    );
+    assert!(!evidence.episodes.contains_key("active_memory_repository"));
+    assert!(!evidence.references().contains("hook:6"));
 }

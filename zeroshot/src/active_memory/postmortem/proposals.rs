@@ -43,8 +43,8 @@ pub(super) enum ProposalRejection {
     Node,
     #[error("invalid evidence references")]
     References,
-    #[error("cited references do not prove the required main-run cost for this node")]
-    Cost,
+    #[error("cited references do not include observed main-run evidence for this node")]
+    Evidence,
     #[error("current repository source does not verify the proposed associations")]
     Source,
     #[error("invalid lesson scope")]
@@ -457,9 +457,9 @@ impl<'a> ProposalContext<'a> {
             .impact
             .episodes
             .get(&candidate.node_id)
-            .is_some_and(|episode| episode.allows(role, &candidate.references))
+            .is_some_and(|episode| episode.allows(&candidate.references))
         {
-            return Err(ProposalRejection::Cost);
+            return Err(ProposalRejection::Evidence);
         }
         if role == Role::Repository {
             self.repository_discovery_source(&candidate)

@@ -73,7 +73,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   or renumber volatile positions. Postmortem transcript collection scans bounded ledger pages and reclaims its fixed
   byte budget from the largest execution tail, preserving earlier worker evidence under late reviewer
   output rather than using a global last-record window. Replay observes cancellation between bounded
-  reads; final context trimming shrinks the largest arrays and retains per-execution transcript tails. Discovery has no findings count
+  reads; final context trimming shrinks the largest evidence collections and retains per-execution transcript tails. Discovery has no findings count
   quota: impact, recurrence, current evidence and usefulness determine admission. Shared transactions
   are bounded by serialized bytes and store capacity rather than a mutation count quota. Their work runs
   before runner closure/cleanup, preserves the durably latched primary outcome and its failure
@@ -101,13 +101,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   context, not model compliance. Missing carrier acknowledgement, failed provider startup or bounded
   transport failure makes maintenance evidence unknown. Callback frames have absolute I/O deadlines
   so a stalled child cannot keep the resident broker or run cleanup alive indefinitely.
-  Interrupted auxiliary work marks run usage incomplete. New lessons require observed costly main
-  work; a routine response-format correction alone cannot qualify. Bounded in-memory native tool
-  receipts support this check across all harnesses without retaining arguments or tool results.
-  Review-cost proof counts distinct complete rejected rounds in one map scope and attributes them
-  to participating serial-prefix workers. Supported inner loops are checked independently; nested
-  wrapper loops, seeded history and ambiguous rounds abstain. Error-exit absence requires every
-  durable visit of that node to be settled without error; missing controls are never assumed false.
+  Interrupted auxiliary work marks run usage incomplete. Discovery includes authentic main-run
+  agent completions and bounded native tool receipts across all graph shapes, retries and locally
+  observed resumed work. No failure-count, tool-count or duration threshold gates proposals.
+  Specialists assess significance, novelty, causal attribution and reuse; routine corrections and
+  generic advice alone are insufficient. Proposals must cite observed evidence for their executed
+  agent node; repository lessons also require verified current source. Execution occurrences and
+  attempts preserve map-item and retry identity without inferring causal blame from node names.
+  Imported history and auxiliary output never become fabricated current-run evidence.
   The dedicated `zeroshot-memory-init` product skill initializes local history through one
   resumable `memory init --directory DIR` command: isolated per-run discovery stays staged until
   separate graph/repository maintenance has covered every card against its recorded current checkout.
