@@ -204,16 +204,19 @@ The README's opening graph stays a text block, so agents that fetch it as plain 
 - `../assets/example-graph-{wide,tall}-{light,dark}.png`: the page's reduced-motion still, with no
   moving dot and the passing ticks shown, for readers who turn motion off.
 
-With the Playwright install described above and FFmpeg on PATH, re-render all eight from the
-repository root:
+The page owns the drawing. When its drawing or run changes, refresh the sources first from a
+checkout of [zeroshot-landing-page](https://github.com/the-open-engine/zeroshot-landing-page) at
+the commit that is live on zeroshot.sh, then re-render all eight. With the Playwright install
+described above and FFmpeg on PATH, from the repository root:
 
 ```sh
+python3 docs/brand/freeze-example-graph.py ../zeroshot-landing-page .
 NODE_PATH=/tmp/open-engine-banner-tools/node_modules node docs/brand/render-example-graph.cjs
 ```
 
-The renderer checks that every animation runs the 31.8-second loop, pauses them and seeks each
-frame. When the page's drawing or run changes, refresh the sources from the page; it owns the
-drawing.
+The renderer only reads the frozen sources. It checks that every animation runs the
+31.8-second loop, pauses them and seeks each frame. Update the commit and date above when you
+refresh.
 
 ## Product-page graph exports
 
