@@ -1,5 +1,22 @@
 use super::*;
 
+fn validate_checkpoint_policy(
+    enabled: bool,
+    from: Option<&openengine_cluster_protocol::RunResumeFrom>,
+) -> Result<(), NativeV2CliError> {
+    if !enabled
+        && matches!(
+            from,
+            Some(openengine_cluster_protocol::RunResumeFrom::Checkpoint { .. })
+        )
+    {
+        return Err(local_message(
+            "workspace checkpoint restore is unavailable because workspaceCheckpoints is false",
+        ));
+    }
+    Ok(())
+}
+
 impl LocalCliBackend {
     async fn resume_local(
         &self,
@@ -42,15 +59,9 @@ impl LocalCliBackend {
         use crate::native_v2_supervisor::checkpoints::{
             CheckpointRestore, CheckpointRestoreSelection, latest_available, restore_selection,
         };
+        validate_checkpoint_policy(enabled, params.from.as_ref())?;
         if !enabled {
-            return match &params.from {
-                Some(openengine_cluster_protocol::RunResumeFrom::Checkpoint { .. }) => {
-                    Err(local_message(
-                        "workspace checkpoint restore is unavailable because workspaceCheckpoints is false",
-                    ))
-                }
-                _ => Ok(None),
-            };
+            return Ok(None);
         }
         let directory = self.paths(&params.run_id)?.storage().join("checkpoints");
         let selection = restore_selection(params.from.as_ref());
@@ -320,6 +331,18 @@ impl NativeV2CliBackend for LocalCliBackend {
     ) -> Result<CliRunForceResult, NativeV2CliError> {
         require_local(target)?;
         self.force_local(params).await.map(Into::into)
+    }
+
+    async fn validate_resume_selection(
+        &self,
+        command: &crate::native_v2_cli::RunResumeCommand,
+    ) -> Result<(), NativeV2CliError> {
+        require_local(command.run.target.as_deref())?;
+        let recovery = self.read_recovery_document(&command.run.run_id)?;
+        validate_checkpoint_policy(
+            recovery.submission.runtime.workspace_checkpoints,
+            command.from.as_ref(),
+        )
     }
 
     async fn run_checkpoints(

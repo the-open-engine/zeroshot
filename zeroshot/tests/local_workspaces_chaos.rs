@@ -773,3 +773,33 @@ fn selected_plain_folder_checkpoint_restores_bytes_and_a_fresh_worker_session() 
     );
     active.stop();
 }
+
+#[test]
+fn disabled_checkpoint_resume_rejects_policy_before_collecting_credentials() {
+    let fixture = WorkspaceFixture::new();
+    let path = fixture.launch.join("runtime.json");
+    let mut runtime: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    runtime["workspaceCheckpoints"] = json!(false);
+    write_json(&path, &runtime);
+    let run_id = fixture.failed_folder_run();
+    let starts = fixture.provider_starts();
+    for credential in ["GH_TOKEN", "OPENAI_API_KEY"] {
+        let output = fixture
+            .command(&["resume", &run_id, "--from-checkpoint", "entry-1"])
+            .env("FIXTURE_MODE", "finish")
+            .env(credential, "")
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("workspaceCheckpoints is false"),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(fixture.provider_starts(), starts);
+        assert_eq!(
+            fixture.json(&["status", &run_id])["workspaceRecovery"]["recoverable"],
+            true
+        );
+    }
+}
