@@ -11,7 +11,7 @@ import {
   wrapParallelActivities,
 } from './workflow-authoring';
 import type { WorkflowEdge } from './workflow-projection';
-import { type Bootstrap, type Summary } from './api';
+import { type Bootstrap, type ProfileProblem, type Summary } from './api';
 import { effectiveLane, missingRuntimeSetting } from './runtime-readiness';
 import type { WorkspaceServices } from './workspace-services';
 import { createHostedProfile, useHostWorkspace } from './use-host-workspace';
@@ -88,6 +88,7 @@ function useAppState({ services, bootstrap, host }: AppProps) {
     window.addEventListener('hashchange', changed);
     return () => window.removeEventListener('hashchange', changed);
   }, []);
+  const [profileProblems, setProfileProblems] = useState<ProfileProblem[]>([]);
   const [profiles, setProfiles] = useState<Summary[]>([]),
     [doc, setDoc] = useState<Document>(),
     [base, setBase] = useState<Document>(),
@@ -173,7 +174,11 @@ function useAppState({ services, bootstrap, host }: AppProps) {
       : stringify(runtimeDraft) !== stringify(runtimeInitial));
   const modalDirty = (modal === 'json' && json !== jsonInitial) || runtimeDirty;
   usePendingText(modalDirty);
-  const refresh = () => services.profiles.list().then((r) => setProfiles(r.profiles));
+  const refresh = () =>
+    services.profiles.list().then((result) => {
+      setProfiles(result.profiles);
+      setProfileProblems(result.problems ?? []);
+    });
   const positionKey = doc?.name ? storage.layout(doc.name) : '';
   const savedModels = (harness: string, provider: string) =>
     recentModels(storage.recentModels(harness, provider));
@@ -234,6 +239,8 @@ function useAppState({ services, bootstrap, host }: AppProps) {
     defaultsPage,
     profiles,
     setProfiles,
+    profileProblems,
+    setProfileProblems,
     doc,
     setDoc,
     base,
@@ -328,6 +335,7 @@ function useProfileEffects(
     storage,
     setLoading,
     setProfiles,
+    setProfileProblems,
     setNotice,
     setError,
     doc,
@@ -361,6 +369,7 @@ function useProfileEffects(
       .then(async (list) => {
         if (!live) return;
         setProfiles(list.profiles);
+        setProfileProblems(list.problems ?? []);
         const draft = loadDraft(storage.draft);
         if (draft) {
           adopt(draft.document, draft.base, draft.revision, draft.positions);

@@ -6,13 +6,17 @@ use std::path::{Path, PathBuf};
 use fs2::FileExt;
 use openengine_cluster_protocol::{
     RunProfile, RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
-    RunProfileListRequest, RunProfileListResult, RunProfileMutationResult, RunProfileName,
-    RunProfileScope, RunProfileSelector, RunProfileSetRequest, RunProfileSummary,
+    RunProfileListRequest, RunProfileMutationResult, RunProfileName, RunProfileScope,
+    RunProfileSelector, RunProfileSetRequest, RunProfileSummary,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::value::{RawValue, to_raw_value};
 
 use super::support::{CommitPaths, cleanup_temporary, write_and_commit};
-use super::{NativeV2CliError, absolute_user_path, nonempty_environment};
+use super::{
+    CliProfileListResult, CliProfileProblem, NativeV2CliError, absolute_user_path,
+    nonempty_environment,
+};
 
 const PROFILES_FILE: &str = "profiles.json";
 const PROFILES_LOCK_FILE: &str = "profiles.lock";
@@ -21,17 +25,17 @@ const PROFILES_LOCK_FILE: &str = "profiles.lock";
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct StoredProfiles {
     #[serde(default)]
-    profiles: BTreeMap<RunProfileName, StoredProfile>,
+    profiles: BTreeMap<RunProfileName, Box<RawValue>>,
     #[serde(default)]
     default: Option<RunProfileName>,
 }
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct StoredProfile {
+struct StoredProfile<G, R> {
     id: String,
-    graph: openengine_cluster_protocol::GraphSpec,
-    runtime: openengine_cluster_protocol::RuntimePlan,
+    graph: G,
+    runtime: R,
 }
 
 #[derive(Clone)]
@@ -93,23 +97,30 @@ impl LocalRunProfileStore {
     pub(crate) fn list(
         &self,
         request: RunProfileListRequest,
-    ) -> Result<RunProfileListResult, NativeV2CliError> {
+    ) -> Result<CliProfileListResult, NativeV2CliError> {
         require_local_scope(request.scope)?;
         let lock = self.lock()?;
         FileExt::lock_shared(&lock).map_err(local_io)?;
         let stored = self.read()?;
-        Ok(RunProfileListResult {
-            profiles: stored
-                .profiles
-                .iter()
-                .map(|(name, profile)| RunProfileSummary {
-                    id: profile.id.clone(),
-                    is_default: stored.default.as_ref() == Some(name),
-                    name: name.clone(),
+        let mut result = CliProfileListResult::default();
+        for (name, value) in stored.profiles {
+            let is_default = stored.default.as_ref() == Some(&name);
+            match stored_profile(&value, &name) {
+                Ok(profile) => result.profiles.push(RunProfileSummary {
+                    id: profile.id,
+                    name,
                     scope: RunProfileScope::User,
-                })
-                .collect(),
-        })
+                    is_default,
+                }),
+                Err(_) => result.problems.push(CliProfileProblem {
+                    message: format!("profile {name} has malformed metadata"),
+                    name,
+                    scope: RunProfileScope::User,
+                    is_default,
+                }),
+            }
+        }
+        Ok(result)
     }
 
     pub(crate) fn show(
@@ -120,7 +131,7 @@ impl LocalRunProfileStore {
         let lock = self.lock()?;
         FileExt::lock_shared(&lock).map_err(local_io)?;
         let stored = self.read()?;
-        profile(&stored, &selector.name).ok_or_else(|| {
+        profile(&stored, &selector.name)?.ok_or_else(|| {
             NativeV2CliError::Local(format!("profile {} was not found", selector.name))
         })
     }
@@ -168,36 +179,29 @@ impl LocalRunProfileStore {
         expected: Option<Option<&str>>,
     ) -> Result<Option<RunProfileMutationResult>, NativeV2CliError> {
         let mut stored = self.read()?;
-        if let Some(expected) = expected {
-            let current = profile(&stored, &request.name)
-                .as_ref()
-                .map(profile_revision)
-                .transpose()?;
+        let id = if let Some(expected) = expected {
+            let previous = profile(&stored, &request.name)?;
+            let current = previous.as_ref().map(profile_revision).transpose()?;
             if current.as_deref() != expected {
                 return Ok(None);
             }
+            previous.map(|profile| profile.id)
+        } else {
+            stored
+                .profiles
+                .get(&request.name)
+                .map(|value| stored_profile(value, &request.name).map(|profile| profile.id))
+                .transpose()?
         }
-        let id = stored
-            .profiles
-            .get(&request.name)
-            .map(|profile| profile.id.clone())
-            .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-        stored.profiles.insert(
-            request.name.clone(),
-            StoredProfile {
-                id,
-                graph: request.graph,
-                runtime: request.runtime,
-            },
-        );
+        .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         if request.set_default {
             stored.default = Some(request.name.clone());
         }
+        let is_default = stored.default.as_ref() == Some(&request.name);
+        let (value, profile) = encode_profile(id, request, is_default)?;
+        stored.profiles.insert(profile.name.clone(), value);
         self.write(&stored)?;
-        Ok(Some(RunProfileMutationResult {
-            profile: profile(&stored, &request.name)
-                .ok_or_else(|| local_message("stored profile disappeared"))?,
-        }))
+        Ok(Some(RunProfileMutationResult { profile }))
     }
 
     pub(crate) fn delete(
@@ -327,15 +331,56 @@ fn read_workspace_id(path: &Path) -> Result<Option<String>, NativeV2CliError> {
     Ok(Some(id.to_string()))
 }
 
-fn profile(stored: &StoredProfiles, name: &RunProfileName) -> Option<RunProfile> {
-    let value = stored.profiles.get(name)?;
-    Some(RunProfile {
-        id: value.id.clone(),
+fn encode_profile(
+    id: String,
+    request: RunProfileSetRequest,
+    is_default: bool,
+) -> Result<(Box<RawValue>, RunProfile), NativeV2CliError> {
+    let value = to_raw_value(&StoredProfile {
+        id,
+        graph: request.graph,
+        runtime: request.runtime,
+    })
+    .map_err(|_| local_message("local profile store could not be encoded"))?;
+    let profile = decode_profile(&value, &request.name, is_default)
+        .map_err(|_| local_message("local profile store could not be read back before saving"))?;
+    Ok((value, profile))
+}
+
+// Borrow payload slices when inspecting metadata; only selected payloads become typed graphs.
+fn stored_profile<'a>(
+    value: &'a RawValue,
+    name: &RunProfileName,
+) -> Result<StoredProfile<&'a RawValue, &'a RawValue>, NativeV2CliError> {
+    serde_json::from_str(value.get())
+        .map_err(|_| local_message(format!("profile {name} has malformed metadata")))
+}
+
+fn profile(
+    stored: &StoredProfiles,
+    name: &RunProfileName,
+) -> Result<Option<RunProfile>, NativeV2CliError> {
+    let Some(value) = stored.profiles.get(name) else {
+        return Ok(None);
+    };
+    decode_profile(value, name, stored.default.as_ref() == Some(name)).map(Some)
+}
+
+fn decode_profile(
+    value: &RawValue,
+    name: &RunProfileName,
+    is_default: bool,
+) -> Result<RunProfile, NativeV2CliError> {
+    let value = stored_profile(value, name)?;
+    Ok(RunProfile {
+        id: value.id,
         name: name.clone(),
         scope: RunProfileScope::User,
-        graph: value.graph.clone(),
-        runtime: value.runtime.clone(),
-        is_default: stored.default.as_ref() == Some(name),
+        graph: serde_json::from_str(value.graph.get())
+            .map_err(|_| local_message(format!("profile {name} has a malformed graph")))?,
+        runtime: serde_json::from_str(value.runtime.get())
+            .map_err(|_| local_message(format!("profile {name} has a malformed runtime")))?,
+        is_default,
     })
 }
 

@@ -8,5 +8,13 @@
   },
   "targets": {
     "exclude": [".github/scripts/test-windows-host.ps1", "scripts/test-windows.ps1"]
+  },
+  "documentation": {
+    "bindings": [
+      {
+        "source": "ui/src/api.ts",
+        "document": "ui/README.md"
+      }
+    ]
   }
 }

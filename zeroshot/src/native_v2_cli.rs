@@ -628,6 +628,15 @@ pub trait NativeV2CliBackend: Send + Sync {
         ))
     }
 
+    /// CLI presentation may carry local diagnostics without extending target protocol responses.
+    async fn profile_list_with_problems(
+        &self,
+        target: Option<&str>,
+        request: RunProfileListRequest,
+    ) -> Result<CliProfileListResult, NativeV2CliError> {
+        self.profile_list(target, request).await.map(Into::into)
+    }
+
     async fn profile_show(
         &self,
         _target: Option<&str>,

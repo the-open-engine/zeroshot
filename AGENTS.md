@@ -1063,6 +1063,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Profiles use `LocalRunProfileStore` and `NativeV2Admission::validate_profile`. Saves check content
   revision and the bootstrap workspace UUID under the CLI's store lock. Identity persists with the
   store; replacement rejects stale tabs, including creation requests without a prior revision.
+  Local storage retains complete profile entries as raw JSON. Listing borrows graph/runtime slices
+  to inspect metadata and returns malformed entries separately in `problems`, without inventing IDs
+  or hiding names. Only selected payloads become typed graphs/runtimes; selecting a malformed named
+  or default profile fails explicitly rather than falling through to another scope. Deletion, default
+  selection and unrelated saves preserve incompatible entries. Listing diagnostics belong to the local
+  CLI/UI result, never the target's `zeroshot.run-profiles/v1` wire result. Legacy backend methods retain
+  explicit failure when they cannot represent partial listings; the CLI diagnostic method defaults to
+  wrapping unchanged target results. New entries are decoded through the selected-profile reader before
+  publication so accepted writes remain readable; unchanged entries stay opaque. Shared store envelope
+  corruption still fails closed. Checked saves decode the selected profile for its revision.
 - Drafts/layout are scoped to workspace identity. Saves acknowledge only their captured document
   generation; imports carry no foreign revision. Pending numeric text belongs to the document,
   survives inspector navigation, and commits only when valid. Navigation must preserve unsaved work.

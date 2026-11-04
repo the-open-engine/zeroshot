@@ -295,14 +295,18 @@ fn unreadable_profile_writes_preserve_existing_profiles_and_defaults() {
         .set(profile_request("alpha", "worker", true))
         .assert_value()
         .profile;
-    store
-        .set(nested_profile_request("nested", 61))
-        .assert_value();
+    // Separate payload decoding can read the old 61/62 boundary and one further level.
+    for depth in [61, 62, 63] {
+        store
+            .set(nested_profile_request("nested", depth))
+            .assert_value();
+        store.show(selector("nested")).assert_value();
+    }
     let path = root.path().join(PROFILES_FILE);
     let before = std::fs::read(&path).assert_value();
 
     for name in ["deep", "alpha"] {
-        let mut request = nested_profile_request(name, 62);
+        let mut request = nested_profile_request(name, 64);
         request.set_default = true;
         assert!(matches!(
             store.set(request),
@@ -332,12 +336,337 @@ fn unreadable_profile_writes_preserve_existing_profiles_and_defaults() {
 fn unreadable_initial_profile_does_not_create_a_store() {
     let root = tempfile::tempdir().assert_value();
     let store = LocalRunProfileStore::new(root.path().to_path_buf());
-    assert!(store.set(nested_profile_request("deep", 62)).is_err());
+    assert!(store.set(nested_profile_request("deep", 64)).is_err());
     assert!(!root.path().join(PROFILES_FILE).exists());
     store
-        .set(nested_profile_request("nested", 61))
+        .set(nested_profile_request("nested", 63))
         .assert_value();
     store.show(selector("nested")).assert_value();
+}
+
+fn temporary_store() -> (tempfile::TempDir, LocalRunProfileStore) {
+    let root = tempfile::tempdir().assert_value();
+    let store = LocalRunProfileStore::new(root.path().to_path_buf());
+    (root, store)
+}
+
+fn read_profile_json(store: &LocalRunProfileStore) -> serde_json::Value {
+    serde_json::from_slice(&std::fs::read(store.root.join(PROFILES_FILE)).assert_value())
+        .assert_value()
+}
+
+fn edit_profile_entry(
+    store: &LocalRunProfileStore,
+    edit: impl FnOnce(&mut serde_json::Value),
+) -> serde_json::Value {
+    let mut encoded = read_profile_json(store);
+    let entry = &mut encoded["profiles"]["broken"];
+    edit(entry);
+    let changed = entry.clone();
+    std::fs::write(
+        store.root.join(PROFILES_FILE),
+        serde_json::to_vec(&encoded).assert_value(),
+    )
+    .assert_value();
+    changed
+}
+
+fn replace_profile_payload(store: &LocalRunProfileStore, field: &str) -> serde_json::Value {
+    edit_profile_entry(store, |entry| {
+        entry[field] = json!({"futureFormat": {"children": [1, "two"]}});
+    })
+}
+
+fn assert_profile_payload_unchanged(store: &LocalRunProfileStore, expected: &serde_json::Value) {
+    assert_eq!(&read_profile_json(store)["profiles"]["broken"], expected);
+}
+
+fn assert_profile_error<T>(result: Result<T, NativeV2CliError>, expected: &str) {
+    match result {
+        Err(NativeV2CliError::Local(message)) => assert_eq!(message, expected),
+        Err(error) => panic!("unexpected profile error: {error}"),
+        Ok(_) => panic!("expected profile error: {expected}"),
+    }
+}
+
+#[test]
+fn incompatible_payloads_do_not_block_other_profiles_or_metadata_operations() {
+    for field in ["graph", "runtime"] {
+        let (_root, store) = temporary_store();
+        let healthy = store
+            .set(profile_request("healthy", "worker", true))
+            .assert_value()
+            .profile;
+        let broken = store
+            .set(profile_request("broken", "worker", false))
+            .assert_value()
+            .profile;
+        let incompatible = replace_profile_payload(&store, field);
+
+        let listed = store
+            .list(RunProfileListRequest {
+                scope: RunProfileScope::User,
+            })
+            .assert_value()
+            .profiles;
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].name.as_str(), "broken");
+        assert_eq!(listed[0].id, broken.id);
+        assert!(!listed[0].is_default);
+        assert_eq!(listed[1].name, healthy.name);
+        assert!(listed[1].is_default);
+        assert_eq!(store.show(selector("healthy")).assert_value(), healthy);
+        assert!(matches!(
+            store.show(selector("broken")),
+            Err(NativeV2CliError::Local(message))
+                if message == format!("profile broken has a malformed {field}")
+        ));
+
+        let edited = store
+            .set(profile_request("healthy", "reviewer", false))
+            .assert_value()
+            .profile;
+        assert_eq!(edited.id, healthy.id);
+        assert!(edited.is_default);
+        store
+            .set(profile_request("new", "worker", false))
+            .assert_value();
+        store
+            .set_default(RunProfileDefaultRequest {
+                scope: RunProfileScope::User,
+                name: Some(broken.name.clone()),
+            })
+            .assert_value();
+        assert!(!store.show(selector("healthy")).assert_value().is_default);
+        assert!(
+            store
+                .list(RunProfileListRequest {
+                    scope: RunProfileScope::User
+                })
+                .assert_value()
+                .profiles[0]
+                .is_default
+        );
+        assert_profile_payload_unchanged(&store, &incompatible);
+
+        assert!(store.delete(selector("broken")).assert_value().deleted);
+        assert_eq!(
+            store
+                .list(RunProfileListRequest {
+                    scope: RunProfileScope::User
+                })
+                .assert_value()
+                .profiles
+                .iter()
+                .filter(|profile| profile.is_default)
+                .count(),
+            0
+        );
+        assert_eq!(
+            store.show(selector("new")).assert_value().name.as_str(),
+            "new"
+        );
+    }
+}
+
+#[test]
+fn incompatible_profile_can_be_replaced_without_decoding_its_old_payloads() {
+    for field in ["graph", "runtime"] {
+        let (_root, store) = temporary_store();
+        let original = store
+            .set(profile_request("broken", "worker", true))
+            .assert_value()
+            .profile;
+        replace_profile_payload(&store, field);
+
+        let request = profile_request("broken", "reviewer", false);
+        let expected = RunProfile {
+            id: original.id,
+            name: request.name.clone(),
+            scope: request.scope,
+            graph: request.graph.clone(),
+            runtime: request.runtime.clone(),
+            is_default: true,
+        };
+        assert_eq!(store.set(request).assert_value().profile, expected);
+        assert_eq!(store.show(selector("broken")).assert_value(), expected);
+    }
+}
+
+#[cfg(feature = "ui")]
+fn exercise_checked_metadata_isolation(store: &LocalRunProfileStore) {
+    let path = store.root.join(PROFILES_FILE);
+    let workspace = store.workspace_id().assert_value();
+    let revision = profile_revision(&store.show(selector("healthy")).assert_value()).assert_value();
+    assert!(
+        store
+            .set_checked(
+                profile_request("healthy", "checked", false),
+                Some(&revision),
+                &workspace
+            )
+            .assert_value()
+            .is_ok()
+    );
+    let before = std::fs::read(&path).assert_value();
+    assert!(
+        store
+            .set_checked(
+                profile_request("broken", "worker", false),
+                Some("stale"),
+                &workspace
+            )
+            .is_err()
+    );
+    assert_eq!(std::fs::read(&path).assert_value(), before);
+}
+
+#[test]
+fn malformed_profile_metadata_is_isolated_preserved_and_removable() {
+    for corruption in ["entry", "id", "graph", "runtime", "extra"] {
+        let (_root, store) = temporary_store();
+        let healthy = store
+            .set(profile_request("healthy", "worker", true))
+            .assert_value()
+            .profile;
+        store
+            .set(profile_request("broken", "worker", false))
+            .assert_value();
+        let damaged = edit_profile_entry(&store, |entry| match corruption {
+            "entry" => *entry = json!(null),
+            "id" => entry["id"] = json!(17),
+            "extra" => entry["futureMetadata"] = json!({"preserve": true}),
+            missing => {
+                entry.as_object_mut().assert_value().remove(missing);
+            }
+        });
+
+        let listed = store
+            .list(RunProfileListRequest {
+                scope: RunProfileScope::User,
+            })
+            .assert_value();
+        assert_eq!(listed.profiles.len(), 1);
+        assert_eq!(listed.profiles[0].id, healthy.id);
+        assert_eq!(
+            serde_json::to_value(&listed).assert_value()["problems"][0]["name"],
+            "broken"
+        );
+        assert!(
+            listed.clone().into_protocol().is_err(),
+            "legacy results cannot silently discard profile problems"
+        );
+        assert_eq!(
+            listed.problems,
+            vec![CliProfileProblem {
+                name: selector("broken").name,
+                scope: RunProfileScope::User,
+                is_default: false,
+                message: "profile broken has malformed metadata".to_owned(),
+            }]
+        );
+        assert_eq!(store.show(selector("healthy")).assert_value(), healthy);
+        assert_profile_error(
+            store.show(selector("broken")),
+            "profile broken has malformed metadata",
+        );
+
+        store
+            .set(profile_request("healthy", "reviewer", false))
+            .assert_value();
+        store
+            .set(profile_request("new", "worker", false))
+            .assert_value();
+        store
+            .set_default(RunProfileDefaultRequest {
+                scope: RunProfileScope::User,
+                name: Some(selector("broken").name),
+            })
+            .assert_value();
+        assert!(
+            store
+                .list(RunProfileListRequest {
+                    scope: RunProfileScope::User
+                })
+                .assert_value()
+                .problems[0]
+                .is_default
+        );
+        assert_profile_payload_unchanged(&store, &damaged);
+
+        #[cfg(feature = "ui")]
+        exercise_checked_metadata_isolation(&store);
+
+        assert!(store.delete(selector("broken")).assert_value().deleted);
+        let listed = store
+            .list(RunProfileListRequest {
+                scope: RunProfileScope::User,
+            })
+            .assert_value();
+        assert_eq!(listed.profiles.len(), 2);
+        assert!(listed.problems.is_empty());
+        assert!(!listed.profiles.iter().any(|profile| profile.is_default));
+        let wire = listed.into_protocol().assert_value();
+        let presented = CliProfileListResult::from(wire.clone());
+        assert!(presented.problems.is_empty());
+        assert_eq!(
+            serde_json::to_value(presented).assert_value(),
+            serde_json::to_value(wire).assert_value()
+        );
+    }
+}
+
+#[cfg(feature = "ui")]
+#[test]
+fn checked_saves_decode_only_the_selected_profile_and_preserve_incompatible_payloads() {
+    for field in ["graph", "runtime"] {
+        let (_root, store) = temporary_store();
+        let workspace = store.workspace_id().assert_value();
+        let healthy = store
+            .set(profile_request("healthy", "worker", false))
+            .assert_value()
+            .profile;
+        store
+            .set(profile_request("broken", "worker", false))
+            .assert_value();
+        let incompatible = replace_profile_payload(&store, field);
+        let revision = profile_revision(&healthy).assert_value();
+
+        let saved = store
+            .set_checked(
+                profile_request("healthy", "reviewer", true),
+                Some(&revision),
+                &workspace,
+            )
+            .assert_value()
+            .unwrap_or_else(|_| panic!("healthy profile unexpectedly conflicted"))
+            .profile;
+        assert_eq!(saved.id, healthy.id);
+        assert!(saved.is_default);
+        assert_ne!(profile_revision(&saved).assert_value(), revision);
+        assert!(
+            store
+                .set_checked(profile_request("new", "worker", false), None, &workspace)
+                .assert_value()
+                .is_ok()
+        );
+        assert_profile_payload_unchanged(&store, &incompatible);
+
+        let before = std::fs::read(store.root.join(PROFILES_FILE)).assert_value();
+        assert!(matches!(
+            store.set_checked(
+                profile_request("broken", "reviewer", false),
+                Some("stale-revision"),
+                &workspace,
+            ),
+            Err(NativeV2CliError::Local(message))
+                if message == format!("profile broken has a malformed {field}")
+        ));
+        assert_eq!(
+            std::fs::read(store.root.join(PROFILES_FILE)).assert_value(),
+            before
+        );
+    }
 }
 
 #[cfg(feature = "ui")]
