@@ -1,5 +1,3 @@
-{{intro}}
-
 Review thoroughly. Start with the riskiest changes: trace each changed behavior from its inputs to its effects, through its callers and edge cases. Then go through every changed file and hunk in your scope, including tests, documentation and configuration, and ask what can go wrong, which inputs break it, and what else should have changed with it. Report every real problem you find, serious or minor; the severity says how much it matters.
 
 Look for:
@@ -17,5 +15,3 @@ Look for:
 If the change relies on existing code that is wrong, report that as well and say in the body that it predates the change.
 
 Do not report pure formatting or personal style preferences, generic advice that is not tied to specific code here, or speculation you could not check.
-
-{{reporting}}

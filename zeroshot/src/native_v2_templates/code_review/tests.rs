@@ -114,7 +114,7 @@ fn discovery() -> Vec<&'static str> {
     UNIT_REVIEWERS
         .iter()
         .map(|(node, _)| *node)
-        .chain(HUNTERS)
+        .chain(HUNTERS.map(|(node, _)| node))
         .collect()
 }
 
@@ -254,7 +254,7 @@ async fn reviewers_finalizers_and_report_receive_their_exact_inputs() {
             assert_eq!(review["context"], context, "{node}");
             assert_eq!(review["instructions"], INSTRUCTIONS, "{node}");
             assert_eq!(review[SUMMARY], "Rejects stale writes.", "{node}");
-            if HUNTERS.contains(&node.as_str()) {
+            if HUNTERS.iter().any(|(hunter, _)| *hunter == node) {
                 assert_eq!(review[UNITS], units(2), "{node}");
             } else {
                 let index = review["unitName"]
@@ -284,7 +284,7 @@ async fn reviewers_finalizers_and_report_receive_their_exact_inputs() {
                     "{node}"
                 );
             }
-            for hunter in HUNTERS {
+            for (hunter, _) in HUNTERS {
                 assert_eq!(
                     finalizer[findings_field(hunter)],
                     json!([finding(SHARED_FILE, hunter)]),
@@ -345,7 +345,7 @@ async fn a_change_without_units_still_gets_the_whole_change_review() {
     let mut run = Run::new(&graph, initial);
     let triage_input = run.advance(TRIAGE, triaged(0));
     assert_eq!(triage_input["instructions"], "");
-    let mut hunters = HUNTERS.to_vec();
+    let mut hunters = HUNTERS.map(|(node, _)| node).to_vec();
     hunters.sort_unstable();
     assert_eq!(dispatched(&run.reduce()), hunters);
     run.settle_stage(&discovery(), reviewed);
@@ -355,6 +355,28 @@ async fn a_change_without_units_still_gets_the_whole_change_review() {
     let report_input = run.advance(REPORT, verified(json!({"body":"No actionable findings."})));
     assert_eq!(report_input[UNIT_FINAL], json!([]));
     assert_eq!(report_input[REST_FINAL], json!([]));
+    assert_eq!(dispatched(&run.reduce()), [DELIVERY_NODE]);
+}
+
+#[tokio::test]
+async fn the_maximum_unit_count_reaches_delivery_without_losing_findings() {
+    let graph = graph(TemplateDelivery::Comment).await;
+    let mut run = Run::new(&graph, input());
+    let reviews = run.review(MAX_UNITS as usize);
+    assert_eq!(
+        reviews.len(),
+        MAX_UNITS as usize * UNIT_REVIEWERS.len() + HUNTERS.len()
+    );
+    run.finalize();
+    let report = run.advance(REPORT, verified(json!({"body":"Review complete."})));
+    let finalized = report[UNIT_FINAL].as_array().assert_value();
+    assert_eq!(finalized.len(), MAX_UNITS as usize);
+    for (index, findings) in finalized.iter().enumerate() {
+        assert_eq!(
+            findings,
+            &json!([finding(&format!("src/{index}.rs"), "final")])
+        );
+    }
     assert_eq!(dispatched(&run.reduce()), [DELIVERY_NODE]);
 }
 
@@ -369,23 +391,18 @@ async fn a_failure_before_the_report_publishes_nothing() {
     );
     assert_failed(&run.reduce(), "triage_failed");
 
-    for (failing, code, reason) in [
-        (
-            "unit_design",
-            WorkerErrorCode::Refusal,
-            "units_design_failed",
-        ),
-        (
-            "unit_broad_b",
-            WorkerErrorCode::Timeout,
-            "units_broad_b_failed",
-        ),
-        (
-            "hunt_errors",
-            WorkerErrorCode::Malformed,
-            "hunt_errors_failed",
-        ),
-    ] {
+    for (index, failing) in discovery().into_iter().enumerate() {
+        let code = match index % 3 {
+            0 => WorkerErrorCode::Refusal,
+            1 => WorkerErrorCode::Timeout,
+            _ => WorkerErrorCode::Malformed,
+        };
+        let name = if HUNTERS.iter().any(|(hunter, _)| *hunter == failing) {
+            failing.to_owned()
+        } else {
+            map_name(failing)
+        };
+        let reason = format!("{name}_failed");
         let mut run = Run::new(&graph, input());
         run.advance(TRIAGE, triaged(2));
         let mut failure = Some(code);
@@ -395,7 +412,7 @@ async fn a_failure_before_the_report_publishes_nothing() {
                 None => reviewed(node, input),
             }
         });
-        assert_failed(&run.reduce(), reason);
+        assert_failed(&run.reduce(), &reason);
     }
 
     let mut run = Run::new(&graph, input());
@@ -403,7 +420,7 @@ async fn a_failure_before_the_report_publishes_nothing() {
     assert!(
         reviews
             .iter()
-            .all(|(node, _)| HUNTERS.contains(&node.as_str()))
+            .all(|(node, _)| HUNTERS.iter().any(|(hunter, _)| *hunter == node))
     );
     assert_failed(&run.reduce(), "units_broad_a_failed");
 
@@ -510,6 +527,12 @@ fn every_agent_has_complete_instructions_for_the_pr_review_input() {
         assert!(text.contains("`instructions`"), "{name}");
         if name != REPORT {
             assert!(text.contains("context.reviewScope.baseRevision"), "{name}");
+            assert!(
+                text.contains(
+                    "Do not install dependencies or start applications, services or browsers"
+                ),
+                "{name}"
+            );
         }
     }
     for finalizer in [FINALIZE_UNIT, FINALIZE_REST] {
@@ -520,14 +543,5 @@ fn every_agent_has_complete_instructions_for_the_pr_review_input() {
                 "{finalizer} omits {field}"
             );
         }
-    }
-    for (fragment, _) in PROMPTS {
-        let text = prompt(fragment).assert_value();
-        assert!(
-            agents
-                .values()
-                .any(|instructions| instructions.contains(&text)),
-            "{fragment} is unused"
-        );
     }
 }

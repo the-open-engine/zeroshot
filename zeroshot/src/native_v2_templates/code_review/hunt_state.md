@@ -1,5 +1,1 @@
-{{intro}}
-
 You hunt one kind of failure across the whole change: state. Look for races and unsafe concurrent access, ordering assumptions, retries and repeated deliveries that are not idempotent, caches that go stale, lifecycle problems in initialization, re-entry and shutdown, resources that are never released, and partial updates that leave inconsistent state.
-
-{{hunt}}

@@ -14,79 +14,53 @@ const UNIT_FINAL: &str = "unitFinal";
 const REST_FINAL: &str = "restFinal";
 /// Triage is asked for at most six units; the maps leave room for two more.
 const MAX_UNITS: u64 = 8;
-const MAX_PROMPT_DEPTH: u8 = 4;
+
+/// Compose fixed instruction fragments at compile time.
+macro_rules! prompt {
+    ($($part:literal),+ $(,)?) => {
+        concat!($(include_str!(concat!("code_review/", $part, ".md")), "\n\n",)+)
+    };
+}
+
+const UNIT_REVIEW_PROMPT: &str =
+    prompt!("intro", "standards", "unit_review", "reporting", "severity");
 
 /// Reviewers of every unit and their instructions. The two broad reviews run independently.
 const UNIT_REVIEWERS: [(&str, &str); 4] = [
-    ("unit_broad_a", "unit_review"),
-    ("unit_broad_b", "unit_review"),
-    ("unit_depth", "unit_depth"),
-    ("unit_design", "unit_design"),
-];
-/// Reviewers of the whole change, each hunting one kind of failure with the same-named instructions.
-const HUNTERS: [&str; 5] = [
-    "hunt_logic",
-    "hunt_state",
-    "hunt_contracts",
-    "hunt_errors",
-    "hunt_claims",
-];
-
-/// Instruction files. `{{name}}` includes the named file.
-const PROMPTS: [(&str, &str); 18] = [
-    ("finalize", include_str!("code_review/finalize.md")),
+    ("unit_broad_a", UNIT_REVIEW_PROMPT),
+    ("unit_broad_b", UNIT_REVIEW_PROMPT),
     (
-        "finalize_rest",
-        include_str!("code_review/finalize_rest.md"),
+        "unit_depth",
+        prompt!("intro", "unit_depth", "reporting", "severity"),
     ),
     (
-        "finalize_steps",
-        include_str!("code_review/finalize_steps.md"),
+        "unit_design",
+        prompt!("intro", "unit_design", "reporting", "severity"),
     ),
-    ("hunt", include_str!("code_review/hunt.md")),
-    ("hunt_claims", include_str!("code_review/hunt_claims.md")),
+];
+/// Reviewers of the whole change, each hunting one kind of failure.
+const HUNTERS: [(&str, &str); 5] = [
+    (
+        "hunt_logic",
+        prompt!("intro", "hunt_logic", "hunt", "reporting", "severity"),
+    ),
+    (
+        "hunt_state",
+        prompt!("intro", "hunt_state", "hunt", "reporting", "severity"),
+    ),
     (
         "hunt_contracts",
-        include_str!("code_review/hunt_contracts.md"),
+        prompt!("intro", "hunt_contracts", "hunt", "reporting", "severity"),
     ),
-    ("hunt_errors", include_str!("code_review/hunt_errors.md")),
-    ("hunt_logic", include_str!("code_review/hunt_logic.md")),
-    ("hunt_state", include_str!("code_review/hunt_state.md")),
-    ("intro", include_str!("code_review/intro.md")),
-    ("report", include_str!("code_review/report.md")),
-    ("reporting", include_str!("code_review/reporting.md")),
-    ("severity", include_str!("code_review/severity.md")),
-    ("standards", include_str!("code_review/standards.md")),
-    ("triage", include_str!("code_review/triage.md")),
-    ("unit_depth", include_str!("code_review/unit_depth.md")),
-    ("unit_design", include_str!("code_review/unit_design.md")),
-    ("unit_review", include_str!("code_review/unit_review.md")),
+    (
+        "hunt_errors",
+        prompt!("intro", "hunt_errors", "hunt", "reporting", "severity"),
+    ),
+    (
+        "hunt_claims",
+        prompt!("intro", "hunt_claims", "hunt", "reporting", "severity"),
+    ),
 ];
-
-fn prompt(name: &str) -> Result<String, BuiltinTemplateError> {
-    expand(name, 0)
-}
-
-fn expand(name: &str, depth: u8) -> Result<String, BuiltinTemplateError> {
-    let text = PROMPTS
-        .iter()
-        .find(|(key, _)| *key == name)
-        .map(|(_, text)| text.trim())
-        .filter(|_| depth <= MAX_PROMPT_DEPTH)
-        .ok_or(BuiltinTemplateError::InvalidStaticContract)?;
-    let mut expanded = String::new();
-    let mut rest = text;
-    while let Some((before, after)) = rest.split_once("{{") {
-        let (included, after) = after
-            .split_once("}}")
-            .ok_or(BuiltinTemplateError::InvalidStaticContract)?;
-        expanded.push_str(before);
-        expanded.push_str(&expand(included, depth + 1)?);
-        rest = after;
-    }
-    expanded.push_str(rest);
-    Ok(expanded)
-}
 
 fn findings_type() -> Result<PayloadType, BuiltinTemplateError> {
     let severity = PayloadType::Enum {
@@ -131,7 +105,7 @@ fn reviewer_findings() -> Result<Vec<(String, PayloadType)>, BuiltinTemplateErro
         .map(|(node, _)| (findings_field(node), array(findings.clone())));
     let hunters = HUNTERS
         .iter()
-        .map(|node| (findings_field(node), findings.clone()));
+        .map(|(node, _)| (findings_field(node), findings.clone()));
     Ok(units.chain(hunters).collect())
 }
 
@@ -171,7 +145,7 @@ fn from_unit(name: &str) -> Result<DataSelector, BuiltinTemplateError> {
 /// Each `(field, type, state field)` output is written to state.
 fn agent(
     name: &str,
-    instructions_name: &str,
+    instructions_text: &str,
     extra: Vec<(String, PayloadType, DataSelector)>,
     outputs: Vec<(&str, PayloadType, &str)>,
 ) -> Result<GraphNode, BuiltinTemplateError> {
@@ -204,7 +178,7 @@ fn agent(
             "builtin.agent.code-review-{}@1",
             name.replace('_', "-")
         ))?,
-        instructions: Some(instructions(&prompt(instructions_name)?)?),
+        instructions: Some(instructions(instructions_text)?),
         input,
         output,
         input_bindings,
@@ -218,13 +192,13 @@ fn agent(
 
 fn findings_agent(
     name: &str,
-    instructions_name: &str,
+    instructions_text: &str,
     extra: Vec<(String, PayloadType, DataSelector)>,
     target: &str,
 ) -> Result<GraphNode, BuiltinTemplateError> {
     agent(
         name,
-        instructions_name,
+        instructions_text,
         extra,
         vec![(FINDINGS, findings_type()?, target)],
     )
@@ -233,7 +207,7 @@ fn findings_agent(
 fn triage() -> Result<GraphNode, BuiltinTemplateError> {
     agent(
         TRIAGE,
-        TRIAGE,
+        prompt!("intro", "triage"),
         Vec::new(),
         vec![
             (SUMMARY, PayloadType::String, SUMMARY),
@@ -331,14 +305,14 @@ fn parallel(
 
 fn discover(state: &PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
     let mut branches = Vec::new();
-    for (node, instructions_name) in UNIT_REVIEWERS {
+    for (node, instructions_text) in UNIT_REVIEWERS {
         let target = findings_field(node);
-        let reviewer = findings_agent(node, instructions_name, unit_inputs(true)?, &target)?;
+        let reviewer = findings_agent(node, instructions_text, unit_inputs(true)?, &target)?;
         branches.push(unit_map(&map_name(node), state, reviewer, &target)?);
     }
-    for node in HUNTERS {
+    for (node, text) in HUNTERS {
         let inputs = vec![summary_input()?, units_input()?];
-        branches.push(findings_agent(node, node, inputs, &findings_field(node))?);
+        branches.push(findings_agent(node, text, inputs, &findings_field(node))?);
     }
     let promoted = reviewer_findings()?
         .into_iter()
@@ -350,10 +324,20 @@ fn discover(state: &PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
 fn finalize(state: &PayloadType) -> Result<GraphNode, BuiltinTemplateError> {
     let mut unit_fields = unit_inputs(false)?;
     unit_fields.extend(findings_inputs()?);
-    let finalize_unit = findings_agent(FINALIZE_UNIT, "finalize", unit_fields, UNIT_FINAL)?;
+    let finalize_unit = findings_agent(
+        FINALIZE_UNIT,
+        prompt!("intro", "finalize", "finalize_steps", "severity"),
+        unit_fields,
+        UNIT_FINAL,
+    )?;
     let mut rest_inputs = vec![summary_input()?, units_input()?];
     rest_inputs.extend(findings_inputs()?);
-    let finalize_rest = findings_agent(FINALIZE_REST, FINALIZE_REST, rest_inputs, REST_FINAL)?;
+    let finalize_rest = findings_agent(
+        FINALIZE_REST,
+        prompt!("intro", "finalize_rest", "finalize_steps", "severity"),
+        rest_inputs,
+        REST_FINAL,
+    )?;
     parallel(
         "finalize",
         state,
@@ -369,7 +353,7 @@ fn report() -> Result<GraphNode, BuiltinTemplateError> {
     let findings = findings_type()?;
     agent(
         REPORT,
-        REPORT,
+        prompt!("report"),
         vec![
             (
                 UNIT_FINAL.to_owned(),
@@ -470,7 +454,7 @@ pub(super) fn code_review_graph(
     for (node, _) in UNIT_REVIEWERS {
         review_checks.push(map_failed(&map_name(node), node)?);
     }
-    for node in HUNTERS {
+    for (node, _) in HUNTERS {
         review_checks.push(agent_failed(node)?);
     }
     let reviewed = sequence(

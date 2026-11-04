@@ -455,8 +455,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   disprove and rewrite `{file,startLine,endLine,severity,title,body}` findings, and a report agent
   renders one Markdown comment. Every agent is a read-only verifier with two attempts and no deadline.
   One choice per agent or map keeps each guard's control space under the verifier ceiling; any
-  agent error or map overflow fails before publication. Instructions are `include_str!` fragments
-  composed through `{{name}}`. The supplied runtime splits agents across Claude Code and Codex;
+  agent error or map overflow fails before publication. Instructions concatenate fixed `include_str!` fragments at compile time; there is no runtime
+  prompt parser. Inspectors do not install dependencies or start applications, services or browsers.
+  The report stays under 12,000 characters and 48,000 UTF-8 bytes to leave room for the publisher header. The supplied runtime splits agents across Claude Code and Codex;
   model choices remain caller-authored.
 - Built-in template selection defaults to PR delivery for `software-change`, comment delivery for
   `pr-review`, `code-review` and `issue-review`, and no delivery for the other templates. Explicit supported delivery choices override

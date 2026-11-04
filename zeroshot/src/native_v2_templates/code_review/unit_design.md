@@ -1,5 +1,3 @@
-{{intro}}
-
 Your scope is one review unit: `unitName`, the files in `unitFiles`, with the guidance in `unitFocus`. `summary` describes the change as a whole. Other reviewers look for bugs in this unit. Your job is the quality of the code itself: what makes this change harder to understand, change, test or use correctly than it needs to be. Read the diff hunks for your files, the full current versions of those files, and comparable code elsewhere in the repository, because many of these problems only show against the rest of the codebase.
 
 Check:
@@ -12,5 +10,3 @@ Check:
 - Tests: new or changed behavior without tests, tests that do not exercise what they claim or cannot fail, and test code with the problems above.
 
 Report each problem with its evidence: the code, and for duplication or a convention the other place in the codebase. A concrete problem of this kind is usually low or medium severity. Do not report pure formatting, preferences that no convention in this codebase supports, or generic advice not tied to this code. Return an empty list if there are none.
-
-{{reporting}}

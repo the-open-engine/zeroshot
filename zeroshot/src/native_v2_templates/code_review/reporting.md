@@ -8,6 +8,4 @@ Write each finding as follows:
 - `body` explains what is wrong, the input or condition that triggers it, the consequence, and a suggested fix, naming the code involved.
 - `severity` follows the scale below.
 
-{{severity}}
-
 Do not modify any files.

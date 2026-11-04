@@ -9,6 +9,7 @@ their findings, and posts them as one Markdown comment. It takes the same input 
 [`pr-review`](review.md) and publishes through the same comment delivery. `pr-review` reproduces
 the changed behavior through the full local stack and posts a short verdict. `code-review` reads
 the change and reports every verified finding with its location, severity and suggested fix.
+It does not install dependencies or start applications, services or browsers.
 
 ## What the graph does
 
@@ -79,3 +80,6 @@ The input and result match [`pr-review`](review.md#input-and-result). `--task-fr
 issues. Optional caller `instructions` can narrow the review or declare a partial implementation.
 Like `pr-review`, the template requires comment delivery. The result retains the comment
 `receipt`, and each agent's findings stay in run history.
+
+With prepared JSON passed through `--input`, the local checkout's upstream must name the captured
+PR base branch, for example `origin/main`. `--task-from` supplies that source identity itself.

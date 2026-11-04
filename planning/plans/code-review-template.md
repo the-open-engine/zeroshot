@@ -69,10 +69,10 @@ run
 ## Prompts
 
 Port `benchmarks/reviewbench/graph/prompts/` from the `benchmarks/reviewbench` branch to
-`zeroshot/src/native_v2_templates/code_review/`. Keep the `{{name}}` fragment files and expand
-them at materialization with a small function over a fixed `include_str!` table. A unit test
-asserts that no placeholder remains and that every node stays under
-`MAX_NODE_INSTRUCTIONS_BYTES`.
+`zeroshot/src/native_v2_templates/code_review/`. Concatenate the fixed `include_str!` fragments at compile time. Shared instructions keep
+inspection separate from full-stack reproduction: agents do not install dependencies or start
+applications, services or browsers. A unit test checks complete instructions for every agent;
+materialization enforces `MAX_NODE_INSTRUCTIONS_BYTES`.
 
 - Replace `diffPath`, `changedFiles` and `repository` with the `pr-review` wording: inspect the
   admitted head's diff against its merge base with `context.reviewScope.baseRevision`. Triage
@@ -85,8 +85,8 @@ asserts that no placeholder remains and that every node stays under
 - New `report.md`: a one-line result, then one bullet per finding ordered by severity, with the
   severity, `path:start-end`, the title, and the trigger, impact and fix in at most three
   sentences. It removes duplicates and leaves out praise, change summaries and revisions, which
-  the publisher header already records. The body stays far below the publisher's
-  `MAX_BODY_BYTES` (60 KiB).
+  the publisher header already records. The body stays under 12,000 characters and 48,000 UTF-8 bytes, leaving room for the
+  publisher header within `MAX_BODY_BYTES` (60 KiB).
 
 ## Code
 
@@ -122,6 +122,9 @@ with the new node names:
   - A failure in triage, any reviewer, finalization or the report, and a unit overflow, publish
     nothing and fail with the failing node's reason.
   - A crashed agent is retried once; a second crash fails the run.
+  - All eight allowed units retain their final findings through report dispatch.
+  - CLI run, profile creation and template export default to comment delivery for both PR templates;
+    both reject `--delivery none`.
   - The initial input type equals the `pr-review` one, and issue input is rejected.
 - Template lists: `native_v2_templates/tests.rs`, `native_v2_cli/tests.rs` (`template list`),
   `zeroshot/tests/native_v2_template_show.rs` (cases and tree checks),
