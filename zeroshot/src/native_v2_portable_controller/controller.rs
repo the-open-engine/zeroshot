@@ -310,20 +310,7 @@ where
     let mut runtime = runtime_factory(&prepared.admitted)
         .map_err(|_| PortableControllerError::RuntimeUnavailable)?;
     runtime.execution_seed = execution_seed;
-    runtime.cleanup = Arc::new(PortableCheckpointCleanup {
-        inner: runtime.cleanup,
-        directory: prepared.paths.storage().join("checkpoints"),
-        repository: bootstrap.checkpoint_repository.clone(),
-    });
-    runtime.checkpoints = Some(Arc::new(
-        crate::native_v2_supervisor::checkpoints::ResticCheckpointStore::new(
-            prepared.paths.storage().join("checkpoints"),
-            bootstrap.checkpoint_repository.clone(),
-            bootstrap.workspace.clone(),
-            crate::native_v2_admission::writer_nodes(&prepared.admitted),
-        )
-        .map_err(|error| PortableControllerError::Io(error.0))?,
-    ));
+    let runtime = configure_workspace_checkpoints(prepared, bootstrap, runtime)?;
     Ok(PreparedRuntime {
         runtime: Some(runtime),
         workspace_identity: Some(workspace_identity),
@@ -331,11 +318,39 @@ where
     })
 }
 
+fn configure_workspace_checkpoints(
+    prepared: &PreparedControllerStart,
+    bootstrap: &PortableControllerBootstrap,
+    mut runtime: PortableRuntime,
+) -> Result<PortableRuntime, PortableControllerError> {
+    runtime.checkpoints = None;
+    if prepared.admitted.runtime.workspace_checkpoints {
+        runtime.cleanup = Arc::new(PortableCheckpointCleanup {
+            inner: runtime.cleanup,
+            directory: prepared.paths.storage().join("checkpoints"),
+            repository: bootstrap.checkpoint_repository.clone(),
+        });
+        runtime.checkpoints = Some(Arc::new(
+            crate::native_v2_supervisor::checkpoints::ResticCheckpointStore::new(
+                prepared.paths.storage().join("checkpoints"),
+                bootstrap.checkpoint_repository.clone(),
+                bootstrap.workspace.clone(),
+                crate::native_v2_admission::writer_nodes(&prepared.admitted),
+            )
+            .map_err(|error| PortableControllerError::Io(error.0))?,
+        ));
+    }
+    Ok(runtime)
+}
+
 async fn restore_execution_seed(
     bootstrap: &PortableControllerBootstrap,
 ) -> Result<Vec<crate::full_v1_reducer::DurableExecution>, PortableControllerError> {
     match &bootstrap.checkpoint {
         Some(selection) => {
+            if !bootstrap.submission.runtime.workspace_checkpoints {
+                return Err(PortableControllerError::CheckpointsDisabled);
+            }
             crate::native_v2_supervisor::checkpoints::restore(selection, &bootstrap.workspace)
                 .await
                 .map_err(|error| PortableControllerError::Io(error.0))

@@ -175,7 +175,7 @@ where
     B: NativeV2CliBackend,
     W: Write,
 {
-    let run = command.run;
+    let run = &command.run;
     let status = context
         .backend
         .run_status(
@@ -190,6 +190,8 @@ where
             "run does not have a recoverable workspace".to_owned(),
         ));
     }
+    context.backend.validate_resume_selection(&command).await?;
+    let run = command.run;
     let requirements = context
         .backend
         .authorize_resume_connection_requirements(
@@ -211,9 +213,8 @@ where
             value
                 .into_string()
                 .map_err(|_| NativeV2CliError::GitHubToken)
+                .and_then(validate_github_token)
         })
-        .transpose()?
-        .map(validate_github_token)
         .transpose()?;
     let result = context
         .backend

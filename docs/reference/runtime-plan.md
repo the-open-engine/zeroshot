@@ -25,6 +25,18 @@ machine-readable contract.
 | `size`     | `small`, `medium`, or `large`                                                      |
 | `nodes`    | Object mapping each executable graph node name to a [node binding](#node-bindings) |
 
+Optional `workspaceCheckpoints` is a boolean that defaults to `true`. Local CLI runs may set it
+to `false` to skip workspace snapshot storage and the Restic dependency. Run history, structured
+outputs, usage, and logs remain durable. Restart uses the retained workspace and original graph
+input. Selected workspace-checkpoint resume is unavailable when snapshots were disabled.
+This controls file snapshots, not external side effects or node retry semantics.
+The current named targets reject opt-out explicitly.
+The field is accepted in exact and uniform runtime plans and is preserved in saved profiles.
+
+```json
+{"workspaceCheckpoints": false}
+```
+
 Optional `activeMemory` controls repository and graph recall/collection independently, and
 `globalAgents.postmortem` configures the built-in after-run specialists. Both default to enabled
 on local CLI runs and direct targets. The same sections are accepted by uniform runtime files.

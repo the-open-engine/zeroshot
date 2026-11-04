@@ -791,3 +791,16 @@ async fn assert_running_claude_home_if_root(
     );
     fs::write(run_path.join("workspace/release-provider"), "").assert_value();
 }
+
+#[test]
+fn unsupported_contained_targets_refuse_workspace_checkpoint_opt_out() {
+    let mut request = submission(runtime(BTreeSet::new()), &"a".repeat(40), "local-folder");
+    request.runtime.workspace_checkpoints = false;
+    let error = prepare_contained_submission(&mut request).assert_error();
+    assert_eq!(error.kind(), TargetAuthorityErrorKind::Invalid);
+    assert!(
+        error
+            .message()
+            .contains("does not support disabling workspace checkpoints")
+    );
+}

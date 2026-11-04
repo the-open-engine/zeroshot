@@ -28,6 +28,7 @@ fn uniform(harness: &str, provider: &str) -> UniformRuntimePlan {
         harness: openengine_cluster_protocol::HarnessId::new(harness).assert_value(),
         provider: openengine_cluster_protocol::ProviderId::new(provider).assert_value(),
         size: RunSize::Small,
+        workspace_checkpoints: true,
         model: ModelId::new("provider-owned-model").assert_value(),
         effort: None,
         harness_config: None,
@@ -55,6 +56,7 @@ fn uniform_runtime_preserves_authored_memory_controls_for_every_harness() {
             "harness": harness,
             "provider": provider,
             "model": "provider-owned-model",
+            "workspaceCheckpoints": false,
             "activeMemory": {"repository": false, "graph": true, "budgetBytes": 512},
             "globalAgents": {"postmortem": {"enabled": false, "sourceNode": "worker", "timeoutMs": 1000}}
         });
@@ -63,6 +65,7 @@ fn uniform_runtime_preserves_authored_memory_controls_for_every_harness() {
             .materialize(&graph, PullRequestFeedback::Consider, None)
             .assert_value();
         let serialized = serde_json::to_value(runtime).assert_value();
+        assert_eq!(serialized["workspaceCheckpoints"], false);
         assert_eq!(
             serialized["activeMemory"], authored["activeMemory"],
             "{harness}"
@@ -76,6 +79,7 @@ fn uniform_runtime_preserves_authored_memory_controls_for_every_harness() {
             "harness": harness, "provider": provider, "model": "provider-owned-model"
         }))
         .assert_value();
+        assert!(defaults.workspace_checkpoints);
         assert_eq!(defaults.active_memory, ActiveMemoryConfig::default());
         assert_eq!(defaults.global_agents, GlobalAgentsConfig::default());
     }

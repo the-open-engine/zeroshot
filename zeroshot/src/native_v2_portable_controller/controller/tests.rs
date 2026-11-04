@@ -574,3 +574,40 @@ fn final_contract_workspace_monitor_distinguishes_continue_loss_and_owner_shutdo
         WorkspaceMonitorAction::Stop
     );
 }
+
+#[tokio::test]
+async fn workspace_checkpoint_store_follows_runtime_policy() {
+    use crate::native_v2_portable_controller::tests::{bootstrap, submission, NeverDispatched};
+    for enabled in [false, true] {
+        let root = tempfile::tempdir().assert_value();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).assert_value();
+        let storage = root.path().join("state");
+        let mut submitted = submission("checkpoint-policy");
+        submitted.runtime.workspace_checkpoints = enabled;
+        let bootstrap = bootstrap(
+            RunId::new("checkpoint-policy"),
+            submitted,
+            workspace,
+            storage,
+        );
+        let prepared = prepare_controller_start(&bootstrap).await.assert_value();
+        let runtime = prepare_runtime(&prepared, &bootstrap, |_| {
+            Ok::<_, std::io::Error>(PortableRuntime {
+                checkpoints: None,
+                execution_seed: Vec::new(),
+                runner: Arc::new(NeverDispatched),
+                cleanup: Arc::new(super::super::engine::ConfirmedCleanup),
+            })
+        })
+        .await
+        .assert_value()
+        .runtime
+        .assert_value();
+        assert_eq!(runtime.checkpoints.is_some(), enabled);
+        if !enabled {
+            assert!(!bootstrap.checkpoint_repository.exists());
+            assert!(!prepared.paths.storage().join("checkpoints").exists());
+        }
+    }
+}

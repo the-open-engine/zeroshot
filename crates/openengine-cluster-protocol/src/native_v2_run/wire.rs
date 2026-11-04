@@ -21,6 +21,12 @@ pub struct RuntimePlan {
     pub harness: HarnessId,
     pub provider: ProviderId,
     pub size: RunSize,
+    /// Local workspace snapshots. Run history remains durable when disabled.
+    #[serde(
+        default = "default_workspace_checkpoints",
+        skip_serializing_if = "workspace_checkpoints_enabled"
+    )]
+    pub workspace_checkpoints: bool,
     #[serde(default, skip_serializing_if = "ActiveMemoryConfig::is_default")]
     pub active_memory: ActiveMemoryConfig,
     #[serde(default, skip_serializing_if = "GlobalAgentsConfig::is_default")]
@@ -39,6 +45,7 @@ impl RuntimePlan {
             harness: lane.harness,
             provider: lane.provider,
             size,
+            workspace_checkpoints: true,
             active_memory: ActiveMemoryConfig::default(),
             global_agents: GlobalAgentsConfig::default(),
             nodes,
@@ -132,6 +139,14 @@ impl RuntimePlan {
         }
         requirements
     }
+}
+
+const fn default_workspace_checkpoints() -> bool {
+    true
+}
+
+const fn workspace_checkpoints_enabled(enabled: &bool) -> bool {
+    *enabled
 }
 
 /// Immutable, secret-free native-v2 submission admitted by the selected target.

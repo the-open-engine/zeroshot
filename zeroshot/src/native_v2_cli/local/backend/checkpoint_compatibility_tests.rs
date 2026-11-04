@@ -20,29 +20,59 @@ fn params(from: Option<RunResumeFrom>) -> openengine_cluster_protocol::RunResume
 #[test]
 fn legacy_resume_uses_the_retained_workspace_but_checkpoint_selection_stays_strict() {
     let root = TestDirectory::new("llr");
-    let backend = LocalCliBackend::new(
-        root.path().to_owned(),
-        PathBuf::from("zeroshot"),
-        root.path().to_owned(),
-        PathBuf::from("git"),
-    );
+    let backend = backend(&root);
 
     for from in [None, Some(RunResumeFrom::Restart {})] {
         assert!(
             backend
-                .checkpoint_selection(&params(from))
+                .checkpoint_selection(&params(from), true)
                 .assert_value()
                 .is_none()
         );
     }
     let selected = backend
-        .checkpoint_selection(&params(Some(RunResumeFrom::Checkpoint {
-            checkpoint_id: CheckpointId::new("entry-1").assert_value(),
-        })))
+        .checkpoint_selection(
+            &params(Some(RunResumeFrom::Checkpoint {
+                checkpoint_id: CheckpointId::new("entry-1").assert_value(),
+            })),
+            true,
+        )
         .assert_value()
         .assert_value();
     assert!(matches!(
         selected.selection,
         CheckpointRestoreSelection::Checkpoint { .. }
     ));
+}
+
+#[test]
+fn disabled_workspace_checkpoints_allow_restart_but_reject_snapshot_restore() {
+    let root = TestDirectory::new("checkpoint-policy");
+    let backend = backend(&root);
+    for from in [None, Some(RunResumeFrom::Restart {})] {
+        assert!(
+            backend
+                .checkpoint_selection(&params(from), false)
+                .assert_value()
+                .is_none()
+        );
+    }
+    let error = backend
+        .checkpoint_selection(
+            &params(Some(RunResumeFrom::Checkpoint {
+                checkpoint_id: CheckpointId::new("entry-1").assert_value(),
+            })),
+            false,
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("workspaceCheckpoints is false"));
+}
+
+fn backend(root: &TestDirectory) -> LocalCliBackend {
+    LocalCliBackend::new(
+        root.path().to_owned(),
+        PathBuf::from("zeroshot"),
+        root.path().to_owned(),
+        PathBuf::from("git"),
+    )
 }
