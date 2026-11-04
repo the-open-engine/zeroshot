@@ -16,21 +16,20 @@
 
 </div>
 
-Turn your team's development and QA process into a graph that agents execute. Define who builds,
-what gets checked, where rejected work goes, and what must pass before delivery. Reuse that process
-across tasks, with the agents and models you choose.
+zeroshot is a framework for building and running your own agent workflows. Define the agents,
+models, checks, branches, and repair loops. Start with a built-in graph or build your own.
+The engine enforces execution order, allowed transitions, and retry limits.
 
-Think CI starting at the issue. The engine owns the execution order and allowed transitions. Agents
-do the work and make the judgments. Model output can't add an edge or raise a retry bound.
+Think CI starting at the issue. Agents do the work and make the judgments. Model output can't add
+an edge or raise a retry bound.
 
-## Your engineering process, executable
+## Build your own graph
 
 A task can move through implementation, independent review, repairs, and delivery without you
 coordinating each handoff. The graph defines the process, including parallel work, conditional
 reviews, and bounded repair loops.
 
-For example, a graph for a team that requires extra review for sensitive changes might look like
-this.
+For example, you might want extra review for changes to authentication, payments, or migrations:
 
 ```text
 worker ◄─────────── any "no" ────┐
@@ -128,6 +127,50 @@ or taken through your CI and review comments to a merge.
 
 Runs happen on your machine with the login your agent already uses, subscriptions included. The CLI
 is free and MIT licensed.
+
+### Customize a graph from the CLI
+
+You can also edit and run graph files directly. From your repo, export the built-in workflow with
+delivery disabled, so accepted changes stay local:
+
+```bash
+zeroshot template show software-change --delivery none > graph.json
+```
+
+Edit `graph.json` to change agent instructions, review criteria, branches, or repair limits.
+The [review loop guide](docs/guides/review-loop.md) includes a complete custom graph with two
+parallel reviewers and a bounded repair loop.
+
+Create `input.json` with a task for your repo:
+
+```json
+{ "task": "Let users export their data as CSV, with tests." }
+```
+
+Create `runtime.json` to choose the harness and model. This example uses your local Codex login;
+replace `YOUR_MODEL_ID` with a model your provider supports:
+
+```json
+{ "harness": "codex", "provider": "openai", "model": "YOUR_MODEL_ID" }
+```
+
+Validate the graph, input, and runtime before starting any agents:
+
+```bash
+zeroshot run --title "Add CSV export" --graph graph.json \
+  --input input.json --uniform-runtime-config runtime.json --validate-only
+```
+
+Then run it. The worker edits the selected repo:
+
+```bash
+zeroshot run --title "Add CSV export" --graph graph.json \
+  --input input.json --uniform-runtime-config runtime.json
+```
+
+The uniform runtime uses one model for all agents. You can also
+[choose a different harness or model per node](docs/guides/review-loop.md#cross-vendor-review)
+and [save the graph as a reusable profile](docs/zeroshot-cli.md#zeroshot-profile-set).
 
 ## Skills
 
