@@ -41,9 +41,7 @@ deliver
 Reviewers start in fresh sessions and can use different models. Build your own graph or adapt a
 template, then save it as a [reusable profile](docs/zeroshot-cli.md#zeroshot-profile-set).
 
-See what changes with review: [flight game](https://zeroshot.sh/#flight-demo) ·
-[landing page](https://zeroshot.sh/#design-reviewer) ·
-[self-review study](https://theopenengine.com/blog/review-loop/).
+See more graph examples on [zeroshot.sh](https://zeroshot.sh/#one-graph).
 
 ## Get started
 
