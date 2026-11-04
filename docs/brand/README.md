@@ -187,10 +187,39 @@ const { pathToFileURL } = require('node:url');
 JS
 ```
 
+## README example graph
+
+Under "Get started", the README shows zeroshot.sh's example graph from issue to merge: the
+drawing in the page's `#one-graph` section, without the section's headline. It is an illustrative
+custom graph, not a recording or the built-in template; the end-to-end test is a custom addition.
+The README's opening graph stays a text block, so agents that fetch it as plain text can read it.
+
+- `diagram-sources/example-graph-{wide,tall}.svg`: the page's wide and tall drawings, frozen on
+  November 4, 2026 from zeroshot-landing-page `846a4bd` (`index.html` and `styles.css`). Each file
+  inlines both themes' colours, the loop's rules and its 31.8-second run. HTML entities are written
+  as characters so the files parse as XML.
+- `../assets/example-graph-{wide,tall}-{light,dark}.gif`: the run, 1,590 frames at 50 fps,
+  looping. Wide is 1760px (880px at 2×); tall is 800px (400px at 2×), and the README picks it
+  below 641px viewport width.
+- `../assets/example-graph-{wide,tall}-{light,dark}.png`: the page's reduced-motion still, with no
+  moving dot and the passing ticks shown, for readers who turn motion off.
+
+With the Playwright install described above and FFmpeg on PATH, re-render all eight from the
+repository root:
+
+```sh
+NODE_PATH=/tmp/open-engine-banner-tools/node_modules node docs/brand/render-example-graph.cjs
+```
+
+The renderer checks that every animation runs the 31.8-second loop, pauses them and seeks each
+frame. When the page's drawing or run changes, refresh the sources from the page; it owns the
+drawing.
+
 ## Product-page graph exports
 
-The README no longer shows these exports: its example graph is a text block, so it stays sharp at
-any width, works in both themes, and is readable by agents that fetch the README as plain text.
+The README no longer shows these exports. Its opening example graph is a text block, so it stays
+sharp at any width, works in both themes, and is readable by agents that fetch the README as plain
+text.
 The exports below are kept for reuse. They come from <https://zeroshot.sh/#topology>, captured on
 October 19, 2026.
 The source panels are `graph-panel-feature` (Ship a feature) and `graph-panel-danger` (A risky
