@@ -475,7 +475,7 @@ describe('v8 hard cutover contract', () => {
     assert.match(dockerfile, /VOLUME \["\/var\/lib\/zeroshot"\]/);
     assert.doesNotMatch(dockerfile, /VOLUME \["\/var\/lib\/zeroshot\//);
     assert.match(targetReadme, /zeroshot-data:\/var\/lib\/zeroshot(?:\s|\\)/);
-    assert.match(readme, /zeroshot-data:\/var\/lib\/zeroshot(?:\s|\\)/);
+    assert.match(readme, /\]\(docker\/zeroshot-target\/README\.md\)/);
   });
 
   it('keeps repository-owned agent guidance aligned with v8', () => {
