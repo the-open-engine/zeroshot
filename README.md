@@ -134,6 +134,10 @@ is free and MIT licensed.
 `npm install` adds four skills to Claude Code (`~/.claude/skills`) and to Codex, Copilot CLI and Pi
 (`~/.agents/skills`). Ask for them by name, or just say what you want.
 
+Set `ZEROSHOT_SKIP_SKILLS=1` for npm installation and `zeroshot update` to skip user-scope skill
+installation. Export it in your shell configuration to keep future updates from recreating removed
+skills; existing skill files stay untouched. See the [install guide](docs/getting-started/install.md).
+
 | Skill                   | What it does                                                            | Try                                     |
 | ----------------------- | ----------------------------------------------------------------------- | --------------------------------------- |
 | `zeroshot-graph-design` | Reads your repo, asks a few questions, designs the graph, saves it      | "design a zeroshot graph for this repo" |

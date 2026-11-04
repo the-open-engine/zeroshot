@@ -38,8 +38,22 @@ The package installs the `zeroshot`, `zeroshot-memory-init`, `zeroshot-graph-des
 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/<name>`. No agent selection or
 per-project installation is needed. npm 7 and newer do not run uninstall hooks; after removing the
 package, remove only unmodified managed skill directories from these locations.
-When set, `CLAUDE_CONFIG_DIR` must be absolute so the global skills have stable locations.
+With automatic skill installation enabled, `CLAUDE_CONFIG_DIR` must be absolute when set so the
+global skills have stable locations.
 Use `zeroshot-graph-design` for a guided interview to design a graph for your repository.
+
+To install or update only the executables, set `ZEROSHOT_SKIP_SKILLS=1`:
+
+```console
+ZEROSHOT_SKIP_SKILLS=1 npm install --global @the-open-engine-company/zeroshot
+ZEROSHOT_SKIP_SKILLS=1 zeroshot update
+```
+
+Only the exact value `1` enables the opt-out. Both commands skip all user-scope skill installation
+and leave existing skills untouched, even when destinations conflict or are unwritable.
+Export the variable in your shell configuration to keep future updates from recreating skills you
+remove. In PowerShell, set `$env:ZEROSHOT_SKIP_SKILLS = '1'` before running either command.
+Unset the variable to restore automatic installation and refresh of unchanged managed skills.
 
 See [Active Memory storage and backups](../guides/active-memory.md#persistence-and-run-completion)
 for the local lesson database and how to preserve it when moving or reinstalling Zeroshot.

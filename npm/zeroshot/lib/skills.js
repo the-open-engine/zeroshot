@@ -137,9 +137,11 @@ function installAt(location, canonical, managed) {
 }
 
 function installSkills(options = {}) {
+  const environment = options.environment ?? process.env;
+  if (environment.ZEROSHOT_SKIP_SKILLS === '1') return [];
+
   const packageRoot = options.packageRoot || path.resolve(__dirname, '..');
   const homeDirectory = options.homeDirectory ?? os.homedir();
-  const environment = options.environment ?? process.env;
   const uid = options.uid ?? (typeof process.getuid === 'function' ? process.getuid() : undefined);
   const sources = SKILL_NAMES.map((skill) => {
     const canonical = fs.readFileSync(path.join(packageRoot, 'skills', skill, 'SKILL.md'), 'utf8');

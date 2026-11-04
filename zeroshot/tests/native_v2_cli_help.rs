@@ -298,6 +298,7 @@ fn update_help_explains_the_verified_in_place_release_flow() {
             "newest canonical release",
             "managed agent skill",
             "user-edited skills are preserved",
+            "zeroshot_skip_skills=1",
             "usage: zeroshot update",
         ],
     );

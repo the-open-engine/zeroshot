@@ -31,11 +31,17 @@ fallback, or compatibility artifact.
 The npm installer copies every managed skill to `$HOME/.agents/skills/<skill-name>` for Codex,
 GitHub Copilot, and Pi, and to `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/<skill-name>` for Claude
 Code. Each skill has one canonical source across hosts. These fixed user scopes are installed
-unconditionally so agents added later need no Zeroshot reinstall.
+by default so agents added later need no Zeroshot reinstall.
 Package updates and `zeroshot update` replace only an unchanged managed copy. An edited or
 conflicting skill is preserved and fails installation visibly. npm 7 and newer provide no uninstall
 lifecycle, so users remove unchanged managed copies from these documented paths when they uninstall
 the package.
+
+Setting `ZEROSHOT_SKIP_SKILLS=1` opts out of user-scope skill installation in both npm postinstall
+and `zeroshot update`. Only the exact value `1` enables it. Executables still install and update;
+existing skills are untouched, and missing skills stay absent. Skill destinations are not inspected
+or written, so conflicts and unwritable paths cannot block an opted-out installation. Self-update
+also skips downloading skill assets. Keep the setting in the environment for later updates.
 
 Older updaters install only the skills they know. If `zeroshot-graph-design` or `zeroshot-plan` is
 missing after an executable upgrade, run `zeroshot update` again. The current updater installs or
