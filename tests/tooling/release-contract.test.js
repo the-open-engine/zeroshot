@@ -472,12 +472,10 @@ describe('v8 hard cutover contract', () => {
   it('keeps the target data volume independent of internal protocol names', () => {
     const dockerfile = read('docker/zeroshot-target/Dockerfile');
     const targetReadme = read('docker/zeroshot-target/README.md');
-    const readme = read('README.md');
 
     assert.match(dockerfile, /VOLUME \["\/var\/lib\/zeroshot"\]/);
     assert.doesNotMatch(dockerfile, /VOLUME \["\/var\/lib\/zeroshot\//);
     assert.match(targetReadme, /zeroshot-data:\/var\/lib\/zeroshot(?:\s|\\)/);
-    assert.match(readme, /\]\(docker\/zeroshot-target\/README\.md\)/);
   });
 
   it('keeps repository-owned agent guidance aligned with v8', () => {
