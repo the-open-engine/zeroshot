@@ -1,5 +1,5 @@
 site_name: Zeroshot
-site_description: Zeroshot enforces your team's QA process on coding agents as a graph you define. Versioned docs for the CLI, protocol, and Python SDK.
+site_description: The engine for autonomous software production. A workflow engine for coding agents, code review and QA automation. CLI, protocol and Python SDK docs.
 site_url: https://zeroshot.sh/docs/
 repo_url: https://github.com/the-open-engine/zeroshot
 repo_name: the-open-engine/zeroshot
