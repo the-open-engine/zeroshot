@@ -9,7 +9,7 @@ python -m pip install the-open-engine-zeroshot
 Import the package as `zeroshot`. Pip selects the wheel for your OS and CPU.
 See the [Python SDK guide](https://zeroshot.sh/docs/current/guides/python-sdk/) for setup and examples.
 
-Zeroshot enforces your team's QA process on coding agents as a graph you define. `zeroshot` is a
+zeroshot is the open-source engine for autonomous software production. Its workflow engine orchestrates coding agents through a graph of implementation, code review, testing and repair. `zeroshot` is a
 typed async client for its run engine. Each platform wheel contains the
 matching `zeroshot` executable. Python supplies async calls and typed result objects; the executable
 remains authoritative for graph validation, run state, template expansion, and runtime/provider

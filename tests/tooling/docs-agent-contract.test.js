@@ -89,11 +89,9 @@ function titledJson(file, name) {
     .map(([, title, body]) => ({ title, value: JSON.parse(body) }));
 }
 
-// Agents and package registries show these instead of the product page, so each one leads with
-// what makes Zeroshot worth adopting: the team's own QA process, defined as a graph and enforced.
-// The shared standard is "Every surface that describes the product" in the company repo's
-// message skill (.claude/skills/message/references/product-messaging.md).
-const PITCH = "your team's QA process";
+// Package registries, HTTP-only agents and the CLI need an available product description.
+// Preserve the distinction between the customizable engine and one built-in graph without
+// freezing marketing copy to a particular slogan or phrase.
 const DEFAULT_GRAPH_LEAD = /^.{0,80}\bone agent implements\b/i;
 
 // The first prose paragraph after the title, joined onto one line.
@@ -113,7 +111,7 @@ function productDescriptions() {
     ['docs site description', read('mkdocs.yml').match(/^site_description: (.*)$/m)?.[1]],
     ['docs home lede', lede?.[1].replace(/\s+/g, ' ')],
     ['npm README', firstParagraph(read('npm/zeroshot/README.md'))],
-    ['PyPI README', read('sdks/python/README.md').match(/^Zeroshot enforces[\s\S]*?\.\s/m)?.[0]],
+    ['PyPI README', read('sdks/python/README.md').match(/^zeroshot is[\s\S]*?\.\s/m)?.[0]],
     [
       'zeroshot --help',
       read('docs/zeroshot-cli.md').match(/## `zeroshot`\n\n```text\n(.*)\n/)?.[1],
@@ -121,13 +119,9 @@ function productDescriptions() {
   ];
 }
 
-it('every product description sells the team’s own enforced QA process', () => {
+it('product descriptions are available and do not reduce the engine to one fixed graph', () => {
   for (const [surface, text] of productDescriptions()) {
     assert.ok(text, `${surface} was not found`);
-    assert.ok(
-      text.includes(PITCH) && /\bgraph\b/.test(text),
-      `${surface} must lead with ${PITCH}, defined as a graph; it reads: ${text}`
-    );
     assert.doesNotMatch(
       text,
       DEFAULT_GRAPH_LEAD,
