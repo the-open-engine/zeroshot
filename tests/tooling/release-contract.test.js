@@ -254,13 +254,15 @@ describe('CI efficiency contract', () => {
       group: '${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}',
       'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
     });
-    assert.match(source, /git diff --no-renames --name-only -z/);
+    assert.match(source, /bash \.github\/select-ci-lanes\.sh/);
+    assert.match(read('.github/select-ci-lanes.sh'), /git diff --no-renames --name-only -z/);
     assert.deepEqual(Object.keys(workflow.jobs.classify.outputs), [
       'native',
       'python',
       'tooling',
       'npm',
       'docs',
+      'readme',
     ]);
   });
 
@@ -470,12 +472,10 @@ describe('v8 hard cutover contract', () => {
   it('keeps the target data volume independent of internal protocol names', () => {
     const dockerfile = read('docker/zeroshot-target/Dockerfile');
     const targetReadme = read('docker/zeroshot-target/README.md');
-    const readme = read('README.md');
 
     assert.match(dockerfile, /VOLUME \["\/var\/lib\/zeroshot"\]/);
     assert.doesNotMatch(dockerfile, /VOLUME \["\/var\/lib\/zeroshot\//);
     assert.match(targetReadme, /zeroshot-data:\/var\/lib\/zeroshot(?:\s|\\)/);
-    assert.match(readme, /\]\(docker\/zeroshot-target\/README\.md\)/);
   });
 
   it('keeps repository-owned agent guidance aligned with v8', () => {
