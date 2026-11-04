@@ -16,10 +16,18 @@
 
 </div>
 
-zeroshot is a framework for building and running your own multi-agent workflows. Define the
-topology of your graph and choose the agents and models. The engine enforces its execution.
+Single agents have a reliability ceiling. As context grows and complexity compounds, requirements
+get buried, assumptions go unchallenged, and shortcuts become harder to catch. The agent can
+optimize for completion while losing track of what correctness requires.
 
-Think CI starting at the issue.
+Independent, adversarial review creates a way through that ceiling. A reviewer starts with fresh
+context and looks for reasons the work should fail. Rejection turns those failures into concrete
+repair tasks. Each revision faces renewed scrutiny, allowing the system to recover from mistakes
+that would otherwise survive all the way to “done.”
+
+zeroshot is a multi-agent framework built around this cycle. Define your graph topology, choose
+your agents and models, and make independent approval a requirement for delivery. The engine
+enforces the process.
 
 ## Build your own graph
 
@@ -38,8 +46,8 @@ acceptance + code review ─── no ─┘
 deliver
 ```
 
-Reviewers start in fresh sessions and can use different models. Build your own graph or adapt a
-template, then save it as a [reusable profile](docs/zeroshot-cli.md#zeroshot-profile-set).
+Build your own graph or adapt a template, then save it as a
+[reusable profile](docs/zeroshot-cli.md#zeroshot-profile-set).
 
 See more graph examples on [zeroshot.sh](https://zeroshot.sh/#one-graph).
 
