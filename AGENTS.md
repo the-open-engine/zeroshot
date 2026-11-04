@@ -31,6 +31,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - That package owns the canonical `zeroshot`, `zeroshot-memory-init`, `zeroshot-graph-design`, and
   `zeroshot-plan` skills and installs managed copies for Codex, GitHub Copilot, Pi, and Claude Code
   at their user scopes. Do not fork skills by host.
+  `ZEROSHOT_SKIP_SKILLS=1` opts out of all user-scope skill handling in npm postinstall and
+  `zeroshot update`; only the exact value `1` enables it. Executables still install/update, existing
+  skills stay untouched, and updates skip skill downloads. Keep default managed-copy protections
+  when the opt-out is unset.
 - The target image is `ghcr.io/the-open-engine/zeroshot-target`.
 - The Python distribution is `the-open-engine-zeroshot`; its import package remains `zeroshot`.
 - Python SDK tags are `zeroshot-python-vZEROSHOT_SDK` and package versions are
@@ -73,7 +77,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   or renumber volatile positions. Postmortem transcript collection scans bounded ledger pages and reclaims its fixed
   byte budget from the largest execution tail, preserving earlier worker evidence under late reviewer
   output rather than using a global last-record window. Replay observes cancellation between bounded
-  reads; final context trimming shrinks the largest arrays and retains per-execution transcript tails. Discovery has no findings count
+  reads; final context trimming shrinks the largest evidence collections and retains per-execution transcript tails. Discovery has no findings count
   quota: impact, recurrence, current evidence and usefulness determine admission. Shared transactions
   are bounded by serialized bytes and store capacity rather than a mutation count quota. Their work runs
   before runner closure/cleanup, preserves the durably latched primary outcome and its failure
@@ -101,13 +105,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   context, not model compliance. Missing carrier acknowledgement, failed provider startup or bounded
   transport failure makes maintenance evidence unknown. Callback frames have absolute I/O deadlines
   so a stalled child cannot keep the resident broker or run cleanup alive indefinitely.
-  Interrupted auxiliary work marks run usage incomplete. New lessons require observed costly main
-  work; a routine response-format correction alone cannot qualify. Bounded in-memory native tool
-  receipts support this check across all harnesses without retaining arguments or tool results.
-  Review-cost proof counts distinct complete rejected rounds in one map scope and attributes them
-  to participating serial-prefix workers. Supported inner loops are checked independently; nested
-  wrapper loops, seeded history and ambiguous rounds abstain. Error-exit absence requires every
-  durable visit of that node to be settled without error; missing controls are never assumed false.
+  Interrupted auxiliary work marks run usage incomplete. Discovery includes authentic main-run
+  agent completions and bounded native tool receipts across all graph shapes, retries and locally
+  observed resumed work. No failure-count, tool-count or duration threshold gates proposals.
+  Specialists assess significance, novelty, causal attribution and reuse; routine corrections and
+  generic advice alone are insufficient. Proposals must cite observed evidence for their executed
+  agent node; repository lessons also require verified current source. Execution occurrences and
+  attempts preserve map-item and retry identity without inferring causal blame from node names.
+  Imported history and auxiliary output never become fabricated current-run evidence.
   The dedicated `zeroshot-memory-init` product skill initializes local history through one
   resumable `memory init --directory DIR` command: isolated per-run discovery stays staged until
   separate graph/repository maintenance has covered every card against its recorded current checkout.
@@ -1067,6 +1072,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Profiles use `LocalRunProfileStore` and `NativeV2Admission::validate_profile`. Saves check content
   revision and the bootstrap workspace UUID under the CLI's store lock. Identity persists with the
   store; replacement rejects stale tabs, including creation requests without a prior revision.
+  Local storage retains complete profile entries as raw JSON. Listing borrows graph/runtime slices
+  to inspect metadata and returns malformed entries separately in `problems`, without inventing IDs
+  or hiding names. Only selected payloads become typed graphs/runtimes; selecting a malformed named
+  or default profile fails explicitly rather than falling through to another scope. Deletion, default
+  selection and unrelated saves preserve incompatible entries. Listing diagnostics belong to the local
+  CLI/UI result, never the target's `zeroshot.run-profiles/v1` wire result. Legacy backend methods retain
+  explicit failure when they cannot represent partial listings; the CLI diagnostic method defaults to
+  wrapping unchanged target results. New entries are decoded through the selected-profile reader before
+  publication so accepted writes remain readable; unchanged entries stay opaque. Shared store envelope
+  corruption still fails closed. Checked saves decode the selected profile for its revision.
 - Drafts/layout are scoped to workspace identity. Saves acknowledge only their captured document
   generation; imports carry no foreign revision. Pending numeric text belongs to the document,
   survives inspector navigation, and commits only when valid. Navigation must preserve unsaved work.

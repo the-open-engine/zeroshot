@@ -100,6 +100,24 @@ const profile = (): Document => ({
   runtime: { harness: 'codex', provider: 'openai', size: 'small', nodes: {} },
 });
 
+async function submitProfileSave(button: HTMLButtonElement, savedCall: Promise<SaveProfile>) {
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await act(async () => {
+      button.click();
+      await Promise.race([
+        savedCall,
+        new Promise<never>((_, reject) => {
+          deadline = setTimeout(() => reject(new Error('Profile save was not called.')), 2000);
+        }),
+      ]);
+    });
+  } finally {
+    if (deadline) clearTimeout(deadline);
+  }
+  return savedCall;
+}
+
 const authoring: WorkspaceServices['authoring'] = {
   validate: async () => {},
   outcome: async (document) => document,
@@ -156,6 +174,9 @@ test('mounted App applies graph JSON and saves the edited profile', async (t) =>
     profiles: {
       list: async () => ({
         profiles: [{ id: 'profile-1', name: profile().name, isDefault: false }],
+        problems: [
+          { name: 'broken', isDefault: false, message: 'profile broken has malformed metadata' },
+        ],
       }),
       load: async () => ({
         profile: { ...profile(), id: 'profile-1', isDefault: false },
@@ -171,6 +192,10 @@ test('mounted App applies graph JSON and saves the edited profile', async (t) =>
   };
   const { browser, container } = await mountApp(t, services, bootstrap);
 
+  assert.match(
+    container.querySelector('.profile-sidebar')?.textContent ?? '',
+    /profile broken has malformed metadata/
+  );
   const graphButton = container.querySelector<HTMLButtonElement>('[aria-label="Graph JSON"]');
   assert.ok(graphButton);
   await act(async () => graphButton.click());
@@ -195,21 +220,7 @@ test('mounted App applies graph JSON and saves the edited profile', async (t) =>
   assert.equal(container.querySelector('[aria-label="JSON source"]'), null);
   assert.match(container.textContent ?? '', /Unsaved/);
   const save = enabledSaveButton(container);
-  let deadline: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await act(async () => {
-      save.click();
-      await Promise.race([
-        savedCall,
-        new Promise<never>((_, reject) => {
-          deadline = setTimeout(() => reject(new Error('Profile save was not called.')), 2000);
-        }),
-      ]);
-    });
-  } finally {
-    if (deadline) clearTimeout(deadline);
-  }
-  const saved = await savedCall;
+  const saved = await submitProfileSave(save, savedCall);
   assert.deepEqual(saved.graph.policy, { reviewed: true });
   assert.equal(saved.expectedRevision, 'r1');
   assert.match(container.textContent ?? '', /Profile saved/);

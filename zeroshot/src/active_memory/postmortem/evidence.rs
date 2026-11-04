@@ -205,6 +205,7 @@ fn render(
         .map(|node| {
             references.insert(format!("node:{}", node.reference.node.as_str()));
             json!({"node":node.reference.node,"execution":node.reference.execution,
+            "occurrence":node.occurrence,"attempt":node.attempt,"started_at":node.started_at,
             "state":bounded_json(&node.state,1024),"input":bounded_json(&node.input,512)})
         })
         .collect::<Vec<_>>();
@@ -214,9 +215,7 @@ fn render(
         "primary_terminal":request.primary_terminal, "initial_input":bounded_json(&request.admitted.initial_input,4096),
         "authored_graph":bounded_json(&request.admitted.graph,16384),
         "impact_episodes":impact.episodes,"tool_observations":impact.tools,
-        "impact_policy":{"minimum_failures_or_rejected_repairs":2,"minimum_exploration_ms":300000,
-            "minimum_distinct_tool_observations":3,"exploration_eligible_for":"repository",
-            "ordinary_output_corrections_count_as_failures":false},
+        "impact_policy":{"assessment":"specialist","provenance":"observed_main_run"},
         "executions":executions, "records":records.into_iter().map(|(reference,text)|json!({"execution":execution_by_reference.get(&reference),"reference":reference,"event":text})).collect::<Vec<_>>(),
         "evidence_truncated":tail.truncated,
     });

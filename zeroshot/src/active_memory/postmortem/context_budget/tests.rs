@@ -153,3 +153,68 @@ fn unshrinkable_evidence_preserves_the_complete_nonempty_delivery_manifest() {
     assert!(document["evidence"]["omitted_reason"].is_string());
     assert!(encoded_size(&document) <= BASE_BYTES);
 }
+
+#[test]
+fn long_run_completion_index_is_thinned_without_losing_transcripts_or_node_citations() {
+    let references = (1..=20_000)
+        .map(|sequence| format!("v2:{sequence}"))
+        .collect::<std::collections::BTreeSet<_>>();
+    let references = references
+        .into_iter()
+        .map(Value::String)
+        .collect::<Vec<_>>();
+    let input = json!({"evidence":{
+        "records":[{"execution":1,"reference":"v2:1","event":"worker finding"}],
+        "executions":[{"node":"worker","execution":1,"occurrence":{"node":"worker","map_indices":[2]},"attempt":2}],
+        "tool_observations":[{"seq":1,"node_id":"worker"}],
+        "impact_episodes":{
+            "worker":{"completion_references":references,"tool_references":["hook:1"]},
+            "reviewer":{"completion_references":["v2:20001"],"tool_references":[]}
+        }
+    }});
+    assert!(encoded_size(&input) > BASE_BYTES);
+    let document = base(input.clone());
+    assert!(encoded_size(&document) <= BASE_BYTES);
+    assert_eq!(document["evidence"]["evidence_truncated"], true);
+    assert!(document["evidence"]["omitted_reason"].is_null());
+    for key in ["records", "executions", "tool_observations"] {
+        assert_eq!(document["evidence"][key], input["evidence"][key]);
+    }
+    let retained = document["evidence"]["impact_episodes"]["worker"]["completion_references"]
+        .as_array()
+        .unwrap();
+    assert!(!retained.is_empty() && retained.len() < references.len());
+    assert_eq!(retained.first(), Some(&json!("v2:1")));
+    assert_eq!(retained.last(), Some(&json!("v2:20000")));
+    assert!(
+        retained
+            .iter()
+            .all(|reference| references.contains(reference))
+    );
+    assert_eq!(
+        document["evidence"]["impact_episodes"]["reviewer"],
+        input["evidence"]["impact_episodes"]["reviewer"]
+    );
+}
+
+#[test]
+fn too_many_node_indexes_retain_bounded_authentic_entries() {
+    let episodes = (1..=2000)
+        .map(|node| {
+            (
+                format!("worker_{node:04}_{}", "x".repeat(80)),
+                json!({"completion_references":[format!("v2:{node}")],"tool_references":[]}),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    let document = base(json!({"evidence":{"impact_episodes":episodes}}));
+    let retained = document["evidence"]["impact_episodes"].as_object().unwrap();
+    assert!(!retained.is_empty() && retained.len() < episodes.len());
+    assert!(
+        retained
+            .iter()
+            .all(|(node, entry)| episodes.get(node) == Some(entry))
+    );
+    assert_eq!(document["evidence"]["evidence_truncated"], true);
+    assert!(encoded_size(&document) <= BASE_BYTES);
+}

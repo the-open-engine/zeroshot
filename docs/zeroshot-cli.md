@@ -1250,7 +1250,7 @@ ENVIRONMENT PREPARATION
 ```text
 Update this executable and managed agent skills to the newest canonical release.
 
-Downloads the declared archive and agent skills from the latest GitHub Release, verifies their SHA256SUMS entries and the executable version, then replaces this executable and any unchanged Zeroshot-managed skill copies. User-edited skills are preserved and reported as conflicts. The executable's directory must be writable; Zeroshot does not elevate privileges.
+Downloads the declared archive and agent skills from the latest GitHub Release, verifies their SHA256SUMS entries and the executable version, then replaces this executable and any unchanged Zeroshot-managed skill copies. User-edited skills are preserved and reported as conflicts. The executable's directory must be writable; Zeroshot does not elevate privileges. Set ZEROSHOT_SKIP_SKILLS=1 to skip skill downloads and installation while updating the executable.
 
 Usage: zeroshot update
 

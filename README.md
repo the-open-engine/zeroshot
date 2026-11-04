@@ -2,7 +2,7 @@
 
 # zeroshot
 
-**Write your QA process down as a graph. zeroshot makes every agent run follow it.**
+**An open-source engine for autonomous software production.**
 
 [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Discord](https://theopenengine.com/discord) · [Docs](https://zeroshot.sh/docs/) · [Blog](https://theopenengine.com/blog/)
 
@@ -16,14 +16,20 @@
 
 </div>
 
-Single-agent sessions degrade. Context gets buried under thousands of tokens, and the model optimizes
-for "done" over "correct". In [our study](https://theopenengine.com/blog/review-loop/), all 100
-sessions told to check their own work stopped after one pass.
+zeroshot is a framework for building and running your own agent workflows. Define the agents,
+models, checks, branches, and repair loops. Start with a built-in graph or build your own.
+The engine enforces execution order, allowed transitions, and retry limits.
 
-zeroshot fixes this with independent agents that check each other's work, following a graph you
-define for your repo. Reviewers start in a fresh session, can run a different model, and aren't
-grading their own work. Fail the check? The reason goes back to the writer, and the fix goes through
-every review again until it actually works.
+Think CI starting at the issue. Agents do the work and make the judgments. Model output can't add
+an edge or raise a retry bound.
+
+## Build your own graph
+
+A task can move through implementation, independent review, repairs, and delivery without you
+coordinating each handoff. The graph defines the process, including parallel work, conditional
+reviews, and bounded repair loops.
+
+For example, you might want extra review for changes to authentication, payments, or migrations:
 
 ```text
 worker ◄─────────── any "no" ────┐
@@ -38,7 +44,18 @@ acceptance + code review ─── no ─┘
 deliver
 ```
 
-The graph is built around your repo and your QA requirements, not a fixed pipeline.
+Ask for a CSV export, and the worker implements it. If acceptance review finds that the export
+includes another user's data, the rejection goes back to the worker. The revised change goes
+through the reviews again. This example delivers only after its required reviews approve, and
+stops if the configured repair bound is exhausted.
+
+Reviewers start in a fresh session and can run a different model. Independent review matters. In
+[our study](https://theopenengine.com/blog/review-loop/), all 100 sessions told to check their own
+work stopped after one pass.
+
+This is one graph you can build. Shape the roles, checks, branches, and repair paths around your
+repo's requirements, then save the process as a reusable profile. Delivery can keep accepted work
+local, push a branch, open a PR, or take it through CI and review feedback to a merge.
 
 See the difference on zeroshot.sh: [a flight game](https://zeroshot.sh/#flight-demo) and
 [a landing page](https://zeroshot.sh/#design-reviewer), each built by an agent alone and again through
@@ -93,13 +110,74 @@ run finishes, your agent tells you what got rejected and what got fixed. Watch i
 The graph also decides where finished work goes: kept local, pushed as a branch, opened as a PR,
 or taken through your CI and review comments to a merge.
 
+<p align="center">
+  <a href="https://zeroshot.sh/?utm_source=github&amp;utm_medium=readme&amp;utm_campaign=zeroshot#one-graph">
+    <picture>
+      <source media="(prefers-reduced-motion: reduce) and (max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/example-graph-tall-dark.png">
+      <source media="(prefers-reduced-motion: reduce) and (max-width: 640px)" srcset="docs/assets/example-graph-tall-light.png">
+      <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="docs/assets/example-graph-wide-dark.png">
+      <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/example-graph-wide-light.png">
+      <source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/example-graph-tall-dark.gif">
+      <source media="(max-width: 640px)" srcset="docs/assets/example-graph-tall-light.gif">
+      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/example-graph-wide-dark.gif">
+      <img alt="An example graph: goal, worker, parallel acceptance and code review, end-to-end test, PR, CI, then merge. A failed review, test or CI run returns through repair, implementation and review before delivery is retried. This illustrative animation is not a recorded run." src="docs/assets/example-graph-wide-light.gif">
+    </picture>
+  </a>
+</p>
+
 Runs happen on your machine with the login your agent already uses, subscriptions included. The CLI
 is free and MIT licensed.
+
+### Customize a graph from the CLI
+
+You can also edit and run graph files directly. From your repo, export the built-in workflow with
+delivery disabled, so accepted changes stay local:
+
+```bash
+zeroshot template show software-change --delivery none > graph.json
+```
+
+Edit `graph.json` to change agent instructions, review criteria, branches, or repair limits.
+The [review loop guide](docs/guides/review-loop.md) includes a complete custom graph with two
+parallel reviewers and a bounded repair loop.
+
+Create `input.json` with a task for your repo:
+
+```json
+{ "task": "Let users export their data as CSV, with tests." }
+```
+
+Create `runtime.json` to choose the harness and model. This example uses your local Codex login;
+replace `YOUR_MODEL_ID` with a model your provider supports:
+
+```json
+{ "harness": "codex", "provider": "openai", "model": "YOUR_MODEL_ID" }
+```
+
+Validate the graph, input, and runtime before starting any agents:
+
+```bash
+zeroshot run --title "Add CSV export" --graph graph.json \
+  --input input.json --uniform-runtime-config runtime.json --validate-only
+```
+
+Then run it. The worker edits the selected repo:
+
+```bash
+zeroshot run --title "Add CSV export" --graph graph.json \
+  --input input.json --uniform-runtime-config runtime.json
+```
+
+The uniform runtime uses one model for all agents. You can also
+[choose a different harness or model per node](docs/guides/review-loop.md#cross-vendor-review)
+and [save the graph as a reusable profile](docs/zeroshot-cli.md#zeroshot-profile-set).
 
 ## Skills
 
 `npm install` adds four skills to Claude Code (`~/.claude/skills`) and to Codex, Copilot CLI and Pi
 (`~/.agents/skills`). Ask for them by name, or just say what you want.
+
+Set `ZEROSHOT_SKIP_SKILLS=1` to [skip automatic skill installation](docs/getting-started/install.md).
 
 | Skill                   | What it does                                                            | Try                                     |
 | ----------------------- | ----------------------------------------------------------------------- | --------------------------------------- |

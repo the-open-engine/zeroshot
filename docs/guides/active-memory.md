@@ -30,31 +30,27 @@ repository-qualified scope. It keeps or adapts one canonical card and retires re
 while still deciding every supplied ID/revision. Distinct causes and operations remain separate.
 
 There is no findings count quota. Discovery returns every distinct lesson that qualifies; zero new
-lessons is valid. A lesson needs evidence of expensive failure or substantial exploration,
-a concrete recommendation and a reason to expect reuse. Task summaries, generic advice and facts
+lessons is valid. A lesson needs observed non-obvious learning, a concrete recommendation and a
+reason to expect reuse. Task summaries, generic advice and facts
 obvious from nearby code do not qualify. Titles have at most 96 UTF-8 bytes; recommendations have
 at most 640. The store keeps evidence pointers and provenance separately from the injected card.
 Use stable paths and identifiers in advice. Admission detects common literal root-relative `file:line` pointers; semantic maintenance
 also checks other positional forms. Legacy cards remain readable; maintenance must adapt
 them to stable guidance or defer, rather than keep or merely renumber their source positions.
 
-Discovery checks observed main-run cost before accepting a proposal. Two timeout/crash completions
-or two provably rejected review-loop visits can qualify. Repository discovery also accepts
-exploration with at least three distinct tool callbacks spanning five minutes. A single ordinary
-response-format correction does not qualify. Graph discovery requires the repeated-failure path.
-Review cost is counted by distinct rejected rounds within one map scope, attributed to the workers
-in that round's serial prefix. Supported layouts use a worker prefix followed by direct verifiers
-or all-join verifier groups; error-only choice wrappers require a proven branch. The scanner checks
-supported inner loops separately and skips enclosing nested loops or maps, incomplete/ambiguous
-rounds, seeded histories and unsupported guards. Error exits are false only when every recorded
-visit of that node has a settled non-error outcome; absent or unknown outcomes are not proof.
-Repository discoveries also need a current file citation and a matching file, folder or verified
-identifier association. These conservative checks establish cost;
-the specialist must still establish
-what was learned, why it recurs and whether current source supports it. Maintenance can update
-supplied lessons even when discovery has no eligible evidence. Rejected discovery proposals log the failed
-validation stage (including card field errors) without logging the proposed lesson text. Exploration
-proof must come from the cited hooks themselves, rather than uncited tools elsewhere in the run.
+Discovery includes observed agent completions and tool receipts without requiring a particular
+graph shape, failure count, tool count or elapsed duration. Maps, nested loops, retries and partial
+history do not exclude locally observed evidence. Execution occurrences and attempts keep their
+identities visible; shared node names alone do not establish causal attribution.
+The specialist assesses significance, novelty, attribution and expected reuse. A quick discovery
+or single meaningful failure may justify a lesson; generic advice, waiting time and routine
+response-format corrections alone do not.
+Every proposal must cite an observed main-run completion or tool receipt for its actual agent
+node. Related reviewer evidence may support a worker lesson. Repository discoveries also need a
+current file citation and a matching file, folder or verified identifier association. Imported
+history and auxiliary agents never supply fabricated current-run evidence. Maintenance can update
+supplied lessons independently of discovery. Rejected discovery proposals log the failed
+validation stage (including card field errors) without logging the proposed lesson text.
 Postmortem history is read in bounded pages; its fixed transcript budget reclaims old records
 from the execution consuming the most space, so a verbose late reviewer cannot displace all
 worker evidence. Reads stop between bounded pages on cancellation. Final context trimming shrinks

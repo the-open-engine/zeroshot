@@ -50,7 +50,7 @@ impl LoadedRun {
             .await
             .map_err(|_| invalid("historical main-run evidence unavailable"))?;
         evidence.document["initialization"] = json!({"historical":true,"native_tool_receipts_available":false,
-            "limitation":"Tool exploration receipts were not persisted; only durable proven failure/review episodes can qualify. Do not infer tool activity from model latency."});
+            "limitation":"Tool receipts were not persisted. Use recorded completions and transcripts; do not infer tool activity from model latency."});
         Ok(evidence)
     }
 }
