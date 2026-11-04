@@ -135,17 +135,19 @@ fn planned_step<'a>(
     let binding = bindings
         .get(&step.name)
         .ok_or(NodeRunnerError::InvalidRole)?;
-    if !matches!(binding, NodeRuntimeBinding::Agent { .. }) {
-        return Err(NodeRunnerError::InvalidRole);
-    }
-    let instructions = step
-        .instructions
-        .as_ref()
-        .ok_or(NodeRunnerError::InvalidRole)?;
+    let instructions = match binding {
+        NodeRuntimeBinding::Agent { .. } => Some(
+            step.instructions
+                .as_ref()
+                .ok_or(NodeRunnerError::InvalidRole)?,
+        ),
+        NodeRuntimeBinding::Script { .. } if step.instructions.is_none() => None,
+        _ => return Err(NodeRunnerError::InvalidRole),
+    };
     Ok((
         &step.name,
         &step.worker,
-        Some(instructions),
+        instructions,
         binding,
         NodeRole::Worker,
         NodeResponseContract::Worker {
@@ -187,6 +189,7 @@ fn planned_verifier_role<'a>(
     NodeRunnerError,
 > {
     match binding {
+        NodeRuntimeBinding::Script { .. } => Err(NodeRunnerError::InvalidRole),
         NodeRuntimeBinding::Agent { .. } | NodeRuntimeBinding::Decision { .. } => Ok((
             NodeRole::Verifier,
             Some(

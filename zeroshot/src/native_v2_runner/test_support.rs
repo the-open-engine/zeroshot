@@ -458,9 +458,15 @@ use openengine_cluster_testkit::assertions::{AssertValue};
 /// A driver control for tests that drive one turn directly: nothing is cancelled, the live channel
 /// holds one event, and the caller drains the durable channel it gets back.
 pub(crate) fn control() -> (watch::Sender<bool>, DriverControl, DurableOutput) {
+    control_with_capacity(1)
+}
+
+pub(crate) fn control_with_capacity(
+    capacity: usize,
+) -> (watch::Sender<bool>, DriverControl, DurableOutput) {
     let (cancel, cancellation) = watch::channel(false);
     let (live_output, _) = broadcast::channel(1);
-    let (durable_output, durable) = super::output::durable_event_channel_with_capacity(1);
+    let (durable_output, durable) = super::output::durable_event_channel_with_capacity(capacity);
     (
         cancel,
         DriverControl {

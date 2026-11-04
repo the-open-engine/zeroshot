@@ -1,8 +1,6 @@
 //! Stateless TypeSafe-compatible decisions on existing verifier nodes.
-use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -18,6 +16,8 @@ use crate::native_v2_runner::{
     DriverControl, DriverInvocation, NodeDriver, NodeRunnerError, NodeSession, ResolvedEnvironment,
     LiveOutput, LiveOutputStream, SessionFactory,
 };
+
+use super::stateless::StatelessSession;
 
 pub(crate) mod contract;
 use contract::{API_KEY, ENDPOINT, DecisionContract, validate_contract};
@@ -58,6 +58,31 @@ impl From<NodeRunnerError> for DecisionFailure {
     }
 }
 
+async fn decision_outcome(
+    result: Result<WorkerOutcome, DecisionFailure>,
+    control: &DriverControl,
+) -> Result<WorkerOutcome, NodeRunnerError> {
+    match result {
+        Ok(outcome) => Ok(outcome),
+        Err(failure) => {
+            control
+                .emit_final(LiveOutput::new(LiveOutputStream::Error, failure.message)?)
+                .await?;
+            Ok(match failure.code {
+                WorkerErrorCode::Refusal => WorkerOutcome::authentication_refusal(),
+                WorkerErrorCode::Malformed => WorkerOutcome::malformed(),
+                code => WorkerOutcome::declared_failure(code),
+            })
+        }
+    }
+}
+
+#[derive(Default)]
+struct DecisionObservation {
+    usage: Option<crate::native_v2_contract::TokenUsageDelta>,
+    http: Option<Value>,
+}
+
 pub(crate) struct DecisionAdapter {
     client: reqwest::Client,
 }
@@ -76,13 +101,16 @@ impl DecisionAdapter {
     async fn evaluate(
         &self,
         invocation: &DriverInvocation,
-        usage: &mut Option<crate::native_v2_contract::TokenUsageDelta>,
+        observed: &mut DecisionObservation,
     ) -> Result<WorkerOutcome, DecisionFailure> {
         let contract = validate_contract(&invocation.response, &invocation.node.binding)?;
         let body = request_body(invocation, &contract)?;
         let (endpoint, key) = connection(&invocation.environment)?;
-        let value = self.exchange(endpoint, key, body).await?;
-        *usage = parse_token_usage_delta(value.get("usage"), None, None);
+        let timer = super::timing::ExecutionTiming::start()?;
+        let response = self.exchange(endpoint, key, body).await;
+        observed.http = Some(timer.finish("decision_http", response.is_ok()));
+        let value = response?;
+        observed.usage = parse_token_usage_delta(value.get("usage"), None, None);
         normalize(value, &contract, &invocation.node.binding, key)
             .map_err(|error| DecisionFailure::new(WorkerErrorCode::Malformed, error.to_string()))
     }
@@ -300,21 +328,6 @@ fn validate_answer(
     Ok(())
 }
 
-struct DecisionSession(AtomicBool);
-
-#[async_trait]
-impl NodeSession for DecisionSession {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    async fn is_live(&self) -> bool {
-        !self.0.load(Ordering::Acquire)
-    }
-    async fn close(&self) {
-        self.0.store(true, Ordering::Release);
-    }
-}
-
 #[async_trait]
 impl SessionFactory for DecisionAdapter {
     async fn open(
@@ -326,7 +339,7 @@ impl SessionFactory for DecisionAdapter {
             return Err(NodeRunnerError::InvalidRole);
         }
         connection(environment)?;
-        Ok(Arc::new(DecisionSession(AtomicBool::new(false))))
+        Ok(Arc::new(StatelessSession::default()))
     }
 }
 
@@ -337,31 +350,23 @@ impl NodeDriver for DecisionAdapter {
         invocation: DriverInvocation,
         mut control: DriverControl,
     ) -> Result<WorkerOutcome, NodeRunnerError> {
-        let mut usage = None;
+        let mut observed = DecisionObservation::default();
         let result = tokio::select! {
             biased;
             () = control.cancelled() => Err(NodeRunnerError::Cancelled),
-            result = tokio::time::timeout(REQUEST_TIMEOUT, self.evaluate(&invocation, &mut usage)) => {
+            result = tokio::time::timeout(REQUEST_TIMEOUT, self.evaluate(&invocation, &mut observed)) => {
                 Ok(result.unwrap_or_else(|_| Err(DecisionFailure::new(
                     WorkerErrorCode::Timeout,
                     "decision evaluation timed out",
                 ))))
             }
         };
-        control.record_token_usage(usage).await?;
-        match result? {
-            Ok(outcome) => Ok(outcome),
-            Err(failure) => {
-                control
-                    .emit_final(LiveOutput::new(LiveOutputStream::Error, failure.message)?)
-                    .await?;
-                Ok(match failure.code {
-                    WorkerErrorCode::Refusal => WorkerOutcome::authentication_refusal(),
-                    WorkerErrorCode::Malformed => WorkerOutcome::malformed(),
-                    code => WorkerOutcome::declared_failure(code),
-                })
-            }
+        control.record_token_usage(observed.usage).await?;
+        let outcome = decision_outcome(result?, &control).await?;
+        if let Some(timing) = observed.http {
+            super::timing::publish(&control, timing).await?;
         }
+        Ok(outcome)
     }
 }
 

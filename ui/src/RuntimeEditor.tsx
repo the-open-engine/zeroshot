@@ -161,6 +161,8 @@ export function RuntimeEditor(p: {
             <small>
               {kind(n.name) === 'comment_delivery' ? 'Comment delivery' : 'Git delivery'}
             </small>
+          ) : kind(n.name) === 'script' ? (
+            <small>Script: {bindingFor(doc.runtime, n.name)?.command?.join(' ')}</small>
           ) : kind(n.name) === 'decision' ? (
             <DecisionControls
               node={n.name}

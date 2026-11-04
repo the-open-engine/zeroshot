@@ -1,3 +1,4 @@
+use serde_json::json;
 use openengine_cluster_testkit::assertions::AssertValue;
 
 use super::*;
@@ -307,4 +308,27 @@ fn profile_name_is_a_compact_cli_safe_identifier() {
     for invalid in ["", "-leading", "has space", "has/slash"] {
         assert!(RunProfileName::new(invalid).is_err());
     }
+}
+
+#[test]
+fn script_commands_are_bounded_and_do_not_accept_agent_fields() {
+    for command in [
+        json!([]),
+        json!([""]),
+        json!(["\0"]),
+        json!(["x".repeat(8193)]),
+    ] {
+        assert!(
+            serde_json::from_value::<NodeRuntimeBinding>(
+                json!({"kind":"script", "command":command})
+            )
+            .is_err()
+        );
+    }
+    let binding = json!({"kind":"script", "command":["python3", "a b.py", "$(literal)"]});
+    let parsed: NodeRuntimeBinding = serde_json::from_value(binding.clone()).assert_value();
+    assert_eq!(serde_json::to_value(&parsed).assert_value(), binding);
+    let mut invalid = binding;
+    invalid["model"] = json!("unused");
+    assert!(serde_json::from_value::<NodeRuntimeBinding>(invalid).is_err());
 }

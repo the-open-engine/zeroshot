@@ -199,3 +199,14 @@ fn requested_sizes_observe_the_exact_host_catalog_before_admission() {
     require_run_size(&future, RunSize::Xl).assert_error();
     require_run_size(&future, RunSize::Small).assert_value();
 }
+
+#[test]
+fn script_bindings_are_refused_before_remote_submission() {
+    let plan = runtime(json!({"kind":"script", "command":["python3", "retrieve.py"]}));
+    assert_eq!(
+        require_runtime_capabilities(&with_marker(), &plan)
+            .assert_error()
+            .to_string(),
+        "script bindings currently require local execution"
+    );
+}

@@ -96,7 +96,10 @@ impl NodeResponseContract {
         self.parse_agent_value(value)
     }
 
-    fn parse_agent_value(&self, value: Value) -> Result<WorkerOutcome, NodeResponseError> {
+    pub(crate) fn parse_agent_value(
+        &self,
+        value: Value,
+    ) -> Result<WorkerOutcome, NodeResponseError> {
         let outcome = match self {
             Self::Worker { .. } => WorkerOutcome::Verified {
                 output: value,

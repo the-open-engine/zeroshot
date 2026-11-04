@@ -87,8 +87,34 @@ rather than a bypass argument.
 
 ## Node bindings
 
-`kind` selects an agent, decision, Git delivery, or comment delivery binding. Fields belonging to another
+`kind` selects an agent, script, decision, Git delivery, or comment delivery binding. Fields belonging to another
 kind are rejected.
+
+### `script`
+
+A script binding executes a caller-owned program on an existing `step`, using the step's typed
+input and output. The step must omit `instructions`. This initial implementation is local only.
+Named targets and contained placements reject script bindings.
+
+```json
+{"kind":"script", "command":["python3", "retrieve.py"], "connections":{}}
+```
+
+`command` is an executable followed by literal arguments. Zeroshot does not invoke a shell.
+There must be 1 to 128 entries, each at most 8,192 bytes, with no NUL characters and at most
+65,536 bytes in total. The executable must be nonblank. Paths resolve from the run workspace.
+Scripts inherit a small process environment for executable lookup, the user's home directory,
+temporary files and locale. Public run variables and explicitly declared connection fields are
+added through the existing connection resolver. Other ambient credentials are not inherited.
+
+The program receives one JSON value on stdin, followed by EOF, and must exit zero with exactly
+one JSON value on stdout. Zeroshot validates that value against the step's output schema.
+Input and output are each bounded at 8 MiB. Stderr is retained as bounded diagnostics with
+resolved connection values redacted. A nonzero exit becomes `crash`, and invalid or oversized
+JSON becomes `malformed`. The ordinary graph error and retry rules apply. Cancellation and the
+step's optional `timeoutMs` terminate the process tree through the shared process runner.
+Script steps record zero native model tokens. Services started separately by the application
+may keep indexes or models warm across script invocations. Service lifecycle is application owned.
 
 ### `agent`
 
