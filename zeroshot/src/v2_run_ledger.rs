@@ -31,6 +31,7 @@ mod state;
 
 pub(crate) use state::{
     apply_event, cursor_for, cursor_sequence, initial_cursor, prepare_event, validate_create,
+    validate_event,
 };
 
 pub const INITIAL_CURSOR: &str = "v2:0";

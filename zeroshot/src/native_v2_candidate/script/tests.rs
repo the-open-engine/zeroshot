@@ -68,6 +68,15 @@ async fn prepared(directory: &TestDirectory, source: &str) -> (ScriptAdapter, Dr
     (adapter, request)
 }
 
+async fn run_script(
+    adapter: &ScriptAdapter,
+    invocation: DriverInvocation,
+) -> (WorkerOutcome, crate::native_v2_runner::DurableOutput) {
+    let (_cancel, control, durable) =
+        crate::native_v2_runner::test_support::control_with_capacity(16);
+    (adapter.run(invocation, control).await.unwrap(), durable)
+}
+
 #[tokio::test]
 async fn script_exchanges_large_json_preserves_literal_arguments_and_redacts_stderr() {
     let directory = TestDirectory::new("script-json");
@@ -76,7 +85,7 @@ async fn script_exchanges_large_json_preserves_literal_arguments_and_redacts_std
     ));
     let adapter = ScriptAdapter::new(directory.path().to_owned(), None);
     let literal = "$(touch must-not-exist); literal argument";
-    let data = "x".repeat(1024 * 1024);
+    let data = "x".repeat(512 * 1024);
     let mut invocation = invocation(
         &adapter,
         vec![
@@ -90,9 +99,7 @@ async fn script_exchanges_large_json_preserves_literal_arguments_and_redacts_std
         EnvironmentVariableName::new("PREFIX").unwrap(),
         "private-script-".to_owned(),
     )]));
-    let (_cancel, control, mut durable) =
-        crate::native_v2_runner::test_support::control_with_capacity(16);
-    let result = adapter.run(invocation, control).await.unwrap();
+    let (result, mut durable) = run_script(&adapter, invocation).await;
     let WorkerOutcome::Verified { output, .. } = result else {
         panic!("expected script success")
     };
@@ -136,9 +143,7 @@ async fn invalid_json_wrong_schema_nonzero_exit_and_oversized_output_fail() {
     ] {
         let directory = TestDirectory::new(label);
         let (adapter, invocation) = prepared(&directory, source).await;
-        let (_cancel, control, _durable) =
-            crate::native_v2_runner::test_support::control_with_capacity(16);
-        let result = adapter.run(invocation, control).await.unwrap();
+        let (result, _durable) = run_script(&adapter, invocation).await;
         assert!(
             matches!(result, WorkerOutcome::Error { code, .. } if code == expected),
             "{label}: {result:?}"
@@ -181,12 +186,118 @@ async fn truncated_stderr_cannot_publish_a_credential_fragment() {
     let directory = TestDirectory::new("script-truncated-secret");
     let (adapter, invocation) = prepared(&directory,
         "import os\nprint(os.environ['SCRIPT_TOKEN'] + 'x' * (64 * 1024 - 8), file=sys.stderr)\nprint('{\"result\":\"ok\"}')\n").await;
-    let (_cancel, control, mut durable) =
-        crate::native_v2_runner::test_support::control_with_capacity(16);
-    let outcome = adapter.run(invocation, control).await.unwrap();
+    let (outcome, mut durable) = run_script(&adapter, invocation).await;
     assert!(matches!(outcome, WorkerOutcome::Verified { .. }));
     let diagnostic = durable.recv_output().await.unwrap();
     assert!(diagnostic.text.contains("diagnostics omitted"));
     assert!(!diagnostic.text.contains("ture-key"));
     assert!(!diagnostic.text.contains("xxxxxxxx"));
+}
+
+#[tokio::test]
+async fn schema_diagnostics_redact_credentials_before_truncation() {
+    let directory = TestDirectory::new("script-schema-secret");
+    let (adapter, mut invocation) = prepared(
+        &directory,
+        "import json, os\nprint(json.dumps('x' * 8000 + os.environ['SCRIPT_TOKEN']))\n",
+    )
+    .await;
+    invocation.response = NodeResponseContract::Worker {
+        output: serde_json::from_value(json!({"kind":"enum", "values":["allowed"]})).unwrap(),
+    };
+    invocation.environment = ResolvedEnvironment::exact(
+        &invocation.node.binding,
+        BTreeMap::from([(
+            EnvironmentVariableName::new("SCRIPT_TOKEN").unwrap(),
+            "private-script-fixture-key".repeat(16),
+        )]),
+    )
+    .unwrap();
+    let (outcome, mut durable) = run_script(&adapter, invocation).await;
+    assert!(matches!(
+        outcome,
+        WorkerOutcome::Error {
+            code: WorkerErrorCode::Malformed,
+            ..
+        }
+    ));
+    let diagnostic = durable.recv_output().await.unwrap();
+    assert!(diagnostic.text.contains("violates declared schema"));
+    assert!(diagnostic.text.contains("[REDACTED]"));
+    assert!(!diagnostic.text.contains("private-script-fixture"));
+}
+
+#[tokio::test]
+async fn output_at_the_serialized_event_boundary_persists_or_becomes_malformed() {
+    use openengine_cluster_protocol::{IdempotencyKey, Sha256Digest};
+    use crate::native_v2_runner::test_support::{admitted, node_started};
+    use crate::v2_run_ledger::{CreateRun, MAX_EVENT_BYTES, RunLedger, sqlite::SqliteRunLedger};
+
+    for excess in [0, 1, 256] {
+        let directory = TestDirectory::new("script-event-size");
+        let (adapter, invocation) = prepared(
+            &directory,
+            "import json\nprint(json.dumps({'result':'x' * 1}))\n",
+        )
+        .await;
+        let reference = invocation.node.reference;
+        let empty_event = RunEvent::NodeCompleted {
+            completion: NodeCompletion {
+                reference: reference.clone(),
+                outcome: WorkerOutcome::Verified {
+                    output: json!({"result":""}),
+                    artifacts: vec![],
+                },
+            },
+        };
+        let envelope = serde_json::to_vec(&empty_event).unwrap().len();
+        let source = format!(
+            "import json\nprint(json.dumps({{'result':'x' * {}}}))\n",
+            MAX_EVENT_BYTES - envelope + excess,
+        );
+        let (_, invocation) = prepared(&directory, &source).await;
+        let (outcome, _durable) = run_script(&adapter, invocation).await;
+        if excess == 0 {
+            assert!(matches!(outcome, WorkerOutcome::Verified { .. }));
+        } else {
+            assert!(matches!(
+                outcome,
+                WorkerOutcome::Error {
+                    code: WorkerErrorCode::Malformed,
+                    ..
+                }
+            ));
+        }
+        let ledger = SqliteRunLedger::open_in_memory().unwrap();
+        ledger
+            .create_or_get(CreateRun {
+                run_id: reference.run_id.clone(),
+                submission_key: IdempotencyKey::new("script-size").unwrap(),
+                submission_digest: Sha256Digest::new("a".repeat(64)).unwrap(),
+                admitted: admitted(),
+            })
+            .await
+            .unwrap();
+        let expected = outcome.clone();
+        let stored = ledger
+            .append(
+                &reference.run_id,
+                vec![
+                    RunEvent::RunStarted,
+                    node_started(&reference, json!({})),
+                    RunEvent::NodeCompleted {
+                        completion: NodeCompletion {
+                            reference: reference.clone(),
+                            outcome,
+                        },
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            stored.snapshot.executions[&reference.execution].outcome(),
+            Some(&expected)
+        );
+    }
 }

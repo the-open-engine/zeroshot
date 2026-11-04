@@ -18,12 +18,15 @@ use crate::execution::process::{
 use crate::native_v2_capsule::provider_process::{
     apply_execution_environment, safe_provider_text, send_process_input,
 };
-use crate::native_v2_contract::{NodeInvocation, NodeRuntimeBinding, parse_token_usage_delta};
+use crate::native_v2_contract::{
+    NodeCompletion, NodeInvocation, NodeRuntimeBinding, parse_token_usage_delta,
+};
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NodeDriver,
     NodeResponseContract, NodeRunnerError, NodeSession, ResolvedEnvironment, SessionFactory,
     bounded_log_text,
 };
+use crate::v2_run_ledger::{RunEvent, validate_event};
 
 pub(crate) struct ScriptAdapter {
     workspace: PathBuf,
@@ -122,20 +125,13 @@ impl ScriptAdapter {
         if let Some((code, message)) = process_failure(&output.process) {
             return fail(control, code, message).await;
         }
-        parse_output(
-            &bytes,
-            &invocation.response,
-            &invocation.environment,
-            control,
-        )
-        .await
+        parse_output(&bytes, invocation, control).await
     }
 }
 
 async fn parse_output(
     bytes: &[u8],
-    response: &NodeResponseContract,
-    environment: &ResolvedEnvironment,
+    invocation: &DriverInvocation,
     control: &DriverControl,
 ) -> Result<WorkerOutcome, NodeRunnerError> {
     let value = match serde_json::from_slice(bytes) {
@@ -149,16 +145,36 @@ async fn parse_output(
             .await;
         }
     };
-    match response.parse_agent_value(value) {
-        Ok(outcome) => Ok(outcome),
+    let outcome = match invocation.response.parse_agent_value(value) {
+        Ok(outcome) => outcome,
         Err(error) => {
-            fail(
+            return fail(
                 control,
                 WorkerErrorCode::Malformed,
                 &redact(
-                    &format!("script output violates declared schema: {error}"),
-                    environment,
+                    &format!(
+                        "script output violates declared schema: {}",
+                        error.diagnostic()
+                    ),
+                    &invocation.environment,
                 ),
+            )
+            .await;
+        }
+    };
+    let event = RunEvent::NodeCompleted {
+        completion: NodeCompletion {
+            reference: invocation.node.reference.clone(),
+            outcome,
+        },
+    };
+    match (validate_event(&event), event) {
+        (Ok(()), RunEvent::NodeCompleted { completion }) => Ok(completion.outcome),
+        _ => {
+            fail(
+                control,
+                WorkerErrorCode::Malformed,
+                "script output exceeds the 1 MiB durable event limit",
             )
             .await
         }

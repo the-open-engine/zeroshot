@@ -109,8 +109,9 @@ added through the existing connection resolver. Other ambient credentials are no
 
 The program receives one JSON value on stdin, followed by EOF, and must exit zero with exactly
 one JSON value on stdout. Zeroshot validates that value against the step's output schema.
-Input and output are each bounded at 8 MiB. Complete stderr is retained as bounded diagnostics
-with resolved connection values redacted. Truncated stderr is omitted because its cut boundary
+Process input and output are each bounded at 8 MiB. A result must also fit the ledger's
+1 MiB serialized completion event, including execution metadata. Complete stderr is retained
+as bounded diagnostics with resolved connection values redacted. Truncated stderr is omitted because its cut boundary
 may split a credential. A nonzero exit becomes `crash`, and invalid or oversized
 JSON becomes `malformed`. The ordinary graph error and retry rules apply. Cancellation and the
 step's optional `timeoutMs` terminate the process tree through the shared process runner.

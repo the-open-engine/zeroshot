@@ -188,6 +188,11 @@ impl NodeResponseContract {
 pub(crate) struct NodeResponseError(Box<str>);
 
 impl NodeResponseError {
+    /// Complete transient diagnostic, for credential redaction before public truncation.
+    pub(crate) fn diagnostic(&self) -> &str {
+        &self.0
+    }
+
     fn new(message: String) -> Self {
         // Keep original text transiently until the provider can redact credentials. Display
         // bounds correction prompts; public diagnostics are bounded only after redaction.
