@@ -2,7 +2,7 @@
 
 # zeroshot
 
-**Write your QA process down as a graph. zeroshot makes every agent run follow it.**
+**An open-source engine for autonomous software production.**
 
 [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Discord](https://theopenengine.com/discord) · [Docs](https://zeroshot.sh/docs/) · [Blog](https://theopenengine.com/blog/)
 
@@ -16,14 +16,21 @@
 
 </div>
 
-Single-agent sessions degrade. Context gets buried under thousands of tokens, and the model optimizes
-for "done" over "correct". In [our study](https://theopenengine.com/blog/review-loop/), all 100
-sessions told to check their own work stopped after one pass.
+Turn your team's development and QA process into a graph that agents execute. Define who builds,
+what gets checked, where rejected work goes, and what must pass before delivery. Reuse that process
+across tasks, with the agents and models you choose.
 
-zeroshot fixes this with independent agents that check each other's work, following a graph you
-define for your repo. Reviewers start in a fresh session, can run a different model, and aren't
-grading their own work. Fail the check? The reason goes back to the writer, and the fix goes through
-every review again until it actually works.
+Think CI starting at the issue. The engine owns the execution order and allowed transitions. Agents
+do the work and make the judgments. Model output can't add an edge or raise a retry bound.
+
+## Your engineering process, executable
+
+A task can move through implementation, independent review, repairs, and delivery without you
+coordinating each handoff. The graph defines the process, including parallel work, conditional
+reviews, and bounded repair loops.
+
+For example, a graph for a team that requires extra review for sensitive changes might look like
+this.
 
 ```text
 worker ◄─────────── any "no" ────┐
@@ -38,7 +45,18 @@ acceptance + code review ─── no ─┘
 deliver
 ```
 
-The graph is built around your repo and your QA requirements, not a fixed pipeline.
+Ask for a CSV export, and the worker implements it. If acceptance review finds that the export
+includes another user's data, the rejection goes back to the worker. The revised change goes
+through the reviews again. This example delivers only after its required reviews approve, and
+stops if the configured repair bound is exhausted.
+
+Reviewers start in a fresh session and can run a different model. Independent review matters. In
+[our study](https://theopenengine.com/blog/review-loop/), all 100 sessions told to check their own
+work stopped after one pass.
+
+This is one graph you can build. Shape the roles, checks, branches, and repair paths around your
+repo's requirements, then save the process as a reusable profile. Delivery can keep accepted work
+local, push a branch, open a PR, or take it through CI and review feedback to a merge.
 
 See the difference on zeroshot.sh: [a flight game](https://zeroshot.sh/#flight-demo) and
 [a landing page](https://zeroshot.sh/#design-reviewer), each built by an agent alone and again through
