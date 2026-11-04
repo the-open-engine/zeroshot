@@ -589,13 +589,17 @@ async fn four_specialists_share_run_authority_and_publish_scoped_lessons_without
     assert_eq!(fixture.driver.globals.load(Ordering::SeqCst), 4);
     assert_eq!(fixture.driver.closed.load(Ordering::SeqCst), 5);
     let lessons = fixture.lessons().await;
-    assert_eq!(lessons.len(), 1);
+    assert_eq!(lessons.len(), 2);
     assert!(
         lessons
             .iter()
             .any(|lesson| matches!(lesson.scope, LessonScope::Repository { .. }))
     );
-    // Exploration alone establishes repository cost; graph guidance requires repeated repairs.
+    assert!(
+        lessons
+            .iter()
+            .any(|lesson| matches!(lesson.scope, LessonScope::Graph { .. }))
+    );
     let stored = fixture
         .ledger
         .get(&fixture.run_id)
@@ -786,19 +790,284 @@ async fn reordered_associations_do_not_duplicate_an_existing_lesson() {
 }
 
 #[tokio::test]
-async fn one_ordinary_output_correction_cannot_create_graph_or_repository_lessons() {
+async fn specialist_assessed_lessons_can_use_one_short_main_run_observation() {
     let fixture = self::fixture(Default::default(), None, true).await;
-    *fixture.driver.worker_message.lock().assert_value() = Some(
-        "Final output rejected once; correction returned the required bare JSON object.".to_owned(),
-    );
-    let mut ordinary = candidate("worker");
-    ordinary["references"] = json!(["node:worker", "repository:src/provider.rs"]);
-    ordinary["title"] = json!("Return bare JSON");
-    ordinary["recommendation"] = json!("Return the required JSON object without Markdown fences.");
-    fixture.output("graph", json!({"lessons":[ordinary.clone()]}));
-    fixture.output("repository", json!({"lessons":[ordinary]}));
+    fixture.substantial_exploration();
+    fixture
+        .source
+        .observations
+        .lock()
+        .assert_value()
+        .truncate(1);
+    let mut proposed = candidate("worker");
+    proposed["references"] = json!(["hook:1", "repository:src/provider.rs"]);
+    fixture.output("graph", json!({"lessons":[proposed.clone()]}));
+    fixture.output("repository", json!({"lessons":[proposed]}));
     fixture.drive().await;
-    assert!(fixture.lessons().await.is_empty());
+    assert_eq!(fixture.lessons().await.len(), 2);
+}
+
+pub(super) fn review_node(name: &str) -> Value {
+    json!({"kind":"verifier","name":name,"worker":"verifier.test@1","instructions":"Review the task.",
+        "input":{"kind":"null"},"output":{"kind":"null"},"inputBindings":[],"writeBindings":[],"attempts":1,
+        "signals":{"verdict":["accepted","rejected"]},"diagnostic":{"kind":"null"}})
+}
+
+fn empty_proposal_context<'a>(
+    config: proposals::LessonContext<'a>,
+    request: &'a PostmortemRequest,
+    evidence: &'a evidence::FrozenEvidence,
+) -> proposals::ProposalContext<'a> {
+    proposals::ProposalContext::new(
+        config,
+        request,
+        evidence,
+        Some(SuppliedMemoryManifest {
+            lessons: Vec::new(),
+        }),
+    )
+}
+
+#[tokio::test]
+async fn worker_lessons_can_cite_their_own_completion_and_related_rejected_review() {
+    use crate::full_v1_reducer::StructuralOccurrence;
+    use crate::native_v2_contract::{ExecutionId, ExecutionRef, NodeCompletion, NodeInstanceId};
+    use openengine_cluster_protocol::{NodeName, PositiveInteger};
+    let fixture = self::fixture(Default::default(), None, true).await;
+    let mut graph = serde_json::to_value(&fixture.admitted.graph).assert_value();
+    graph.as_object_mut().assert_value().remove("bounds");
+    graph["root"]["children"]
+        .as_array_mut()
+        .assert_value()
+        .insert(1, review_node("reviewer"));
+    let mut runtime = serde_json::to_value(&fixture.admitted.runtime).assert_value();
+    runtime["nodes"]["reviewer"] = runtime["nodes"]["worker"].clone();
+    let submission = serde_json::from_value(json!({
+        "title":"Worker review evidence","submissionKey":"worker-review-evidence","initialInput":null,
+        "graph":graph,"runtime":runtime
+    })).assert_value();
+    let admitted = NativeV2Admission.admit(submission).await.assert_value();
+    let ledger = Arc::new(FakeRunLedger::new());
+    ledger
+        .create_or_get(CreateRun {
+            run_id: fixture.run_id.clone(),
+            submission_key: IdempotencyKey::new("worker-review-evidence").assert_value(),
+            submission_digest: Sha256Digest::new("0".repeat(64)).assert_value(),
+            admitted: admitted.clone(),
+        })
+        .await
+        .assert_value();
+    ledger
+        .append(&fixture.run_id, vec![RunEvent::RunStarted])
+        .await
+        .assert_value();
+    let mut references = Vec::new();
+    for (number, name, outcome) in [
+        (
+            1,
+            "worker",
+            WorkerOutcome::Verified {
+                output: Value::Null,
+                artifacts: Vec::new(),
+            },
+        ),
+        (
+            2,
+            "reviewer",
+            WorkerOutcome::Verifier {
+                output: Value::Null,
+                signals: BTreeMap::from([(
+                    "verdict".parse().assert_value(),
+                    "rejected".parse().assert_value(),
+                )]),
+                diagnostic: Value::Null,
+                artifacts: Vec::new(),
+            },
+        ),
+    ] {
+        let name: NodeName = name.parse().assert_value();
+        let reference = ExecutionRef {
+            run_id: fixture.run_id.clone(),
+            node: name.clone(),
+            node_instance: NodeInstanceId::new(number).assert_value(),
+            execution: ExecutionId::new(number).assert_value(),
+        };
+        let result = ledger
+            .append(
+                &fixture.run_id,
+                vec![
+                    RunEvent::NodeStarted {
+                        reference: reference.clone(),
+                        occurrence: StructuralOccurrence {
+                            node: name,
+                            map_indices: Vec::new(),
+                        },
+                        attempt: PositiveInteger::new(1).assert_value(),
+                        input: Value::Null,
+                    },
+                    RunEvent::NodeCompleted {
+                        completion: NodeCompletion { reference, outcome },
+                    },
+                ],
+            )
+            .await
+            .assert_value();
+        references.push(
+            result
+                .events
+                .last()
+                .assert_value()
+                .cursor
+                .as_str()
+                .to_owned(),
+        );
+    }
+    let stored = ledger
+        .get(&fixture.run_id)
+        .await
+        .assert_value()
+        .assert_value();
+    let request = PostmortemRequest {
+        run_id: fixture.run_id.clone(),
+        environment: Arc::new(
+            RunEnvironment::exact_for_admitted(&admitted, BTreeMap::new()).assert_value(),
+        ),
+        admitted,
+        snapshot: stored.snapshot,
+        primary_terminal: TerminalResult::Succeeded {
+            output: Value::Null,
+        },
+        ledger,
+    };
+    let evidence = evidence::collect(&request, Vec::new()).await.assert_value();
+    assert!(
+        references
+            .iter()
+            .all(|reference| evidence.references.contains(reference))
+    );
+    assert!(evidence.impact.episodes["worker"].allows(&references));
+    let mut query = fixture.query.clone();
+    query.graph_hash = Some(
+        request
+            .admitted
+            .graph
+            .identity()
+            .assert_value()
+            .as_str()
+            .to_owned(),
+    );
+    let snapshot = fixture.store.lock().await.snapshot(&query).assert_value();
+    let workspace = fixture._directory.path().join("workspace");
+    let context = empty_proposal_context(
+        proposals::LessonContext {
+            snapshot: &snapshot,
+            repository: &query.repository,
+            graph_hash: query.graph_hash.as_deref().assert_value(),
+            workspace: &workspace,
+        },
+        &request,
+        &evidence,
+    );
+    let mut proposed = candidate("worker");
+    proposed["references"] = json!(references);
+    proposed["costly_recurring_reason"] =
+        json!("The rejected review exposed omitted OAuth controls that recur in provider changes.");
+    let mutations = context
+        .mutations(plan::Role::Graph, &json!({}), json!({"lessons":[proposed]}))
+        .assert_value();
+    assert_eq!(mutations.len(), 1);
+    fixture
+        .store
+        .lock()
+        .await
+        .apply_batch(&mutations)
+        .assert_value();
+    let persisted = fixture
+        .store
+        .lock()
+        .await
+        .snapshot(&query)
+        .assert_value()
+        .lessons;
+    assert_eq!(persisted.len(), 1);
+    assert_eq!(persisted[0].evidence.node_id, "worker");
+    assert_eq!(persisted[0].evidence.references, references);
+}
+
+#[tokio::test]
+async fn discovery_rejects_valid_main_run_references_owned_only_by_another_node() {
+    use crate::native_v2_contract::ExecutionId;
+    use crate::v2_run_ledger::NodeState;
+    let fixture = self::fixture(Default::default(), None, true).await;
+    fixture.drive().await;
+    let mut request = fixture.postmortem_request().await;
+    let mut other = request
+        .snapshot
+        .executions
+        .values()
+        .next()
+        .assert_value()
+        .clone();
+    let other_name: openengine_cluster_protocol::NodeName = "another_worker".parse().assert_value();
+    let binding = request
+        .admitted
+        .runtime
+        .nodes()
+        .get(&other.reference.node)
+        .assert_value()
+        .clone();
+    request
+        .admitted
+        .runtime
+        .nodes_mut()
+        .insert(other_name.clone(), binding);
+    other.reference.node = other_name.clone();
+    other.occurrence.node = other_name;
+    other.reference.execution = ExecutionId::new(2).assert_value();
+    other.state = NodeState::Active;
+    request
+        .snapshot
+        .executions
+        .insert(other.reference.execution, other);
+    let evidence = evidence::collect(
+        &request,
+        vec![ToolObservation {
+            seq: 1,
+            node_id: "another_worker".to_owned(),
+            execution_id: 2,
+            timestamp_ms: 1,
+            tool_name: "read_file".to_owned(),
+            paths: vec!["src/provider.rs".to_owned()],
+        }],
+    )
+    .await
+    .assert_value();
+    assert!(evidence.references.contains("hook:1"));
+    let snapshot = fixture
+        .store
+        .lock()
+        .await
+        .snapshot(&fixture.query)
+        .assert_value();
+    let workspace = fixture._directory.path().join("workspace");
+    let context = empty_proposal_context(
+        proposals::LessonContext {
+            snapshot: &snapshot,
+            repository: &fixture.query.repository,
+            graph_hash: fixture.query.graph_hash.as_deref().assert_value(),
+            workspace: &workspace,
+        },
+        &request,
+        &evidence,
+    );
+    let mut proposed = candidate("worker");
+    proposed["references"] = json!(["hook:1", "repository:src/provider.rs"]);
+    for role in [plan::Role::Graph, plan::Role::Repository] {
+        assert!(matches!(
+            context.mutations(role, &json!({}), json!({"lessons":[proposed.clone()]})),
+            Err(proposals::ProposalRejection::Evidence)
+        ));
+    }
 }
 
 #[tokio::test]
@@ -847,8 +1116,8 @@ async fn repository_discovery_requires_current_source_and_concrete_verified_asso
 }
 
 #[tokio::test]
-async fn fewer_than_three_tools_or_short_exploration_cannot_claim_high_impact() {
-    for timestamps in [vec![1, 300001], vec![1, 150001, 299999]] {
+async fn fewer_tools_and_short_exploration_remain_available_for_specialist_assessment() {
+    for timestamps in [vec![1, 300001], vec![1, 2, 3]] {
         let fixture = self::fixture(Default::default(), None, true).await;
         fixture.substantial_exploration();
         let observations = fixture.source.tool_observations();
@@ -860,17 +1129,19 @@ async fn fewer_than_three_tools_or_short_exploration_cannot_claim_high_impact() 
                 observation
             })
             .collect();
-        fixture.output("repository", json!({"lessons":[candidate("worker")]}));
+        let mut proposed = candidate("worker");
+        proposed["references"] = json!(["hook:1", "hook:2", "repository:src/provider.rs"]);
+        fixture.output("repository", json!({"lessons":[proposed]}));
         fixture.drive().await;
-        assert!(fixture.lessons().await.is_empty());
+        assert_eq!(fixture.lessons().await.len(), 1);
     }
 }
 
 #[test]
 fn specialist_prompts_distinguish_evidence_from_replacements_and_require_whole_advice_validity() {
     let maintenance = plan::Role::RepositoryMaintenance.instruction();
-    assert!(maintenance.contains("ENTIRE recommendation"));
-    assert!(maintenance.contains("Keep still REQUIRES nonempty references and reason"));
+    assert!(maintenance.contains("entire recommendation"));
+    assert!(maintenance.contains("Keep requires nonempty references and reason"));
     assert!(
         plan::Role::Graph
             .instruction()
@@ -879,50 +1150,33 @@ fn specialist_prompts_distinguish_evidence_from_replacements_and_require_whole_a
 }
 
 #[tokio::test]
-async fn repeated_failed_main_completions_are_eligible_but_malformed_outputs_are_not() {
-    use crate::native_v2_contract::ExecutionId;
+async fn single_observed_main_completion_is_eligible_regardless_of_qualitative_failure_kind() {
     use crate::v2_run_ledger::{NodeState, cursor_for};
     use openengine_cluster_protocol::{WorkerErrorCode, WorkerFailureReason};
     let fixture = self::fixture(Default::default(), None, true).await;
     fixture.drive().await;
     let mut request = fixture.postmortem_request().await;
-    let template = request
-        .snapshot
-        .executions
-        .values()
-        .next()
-        .assert_value()
-        .clone();
-    for (code, eligible) in [
-        (WorkerErrorCode::Timeout, true),
-        (WorkerErrorCode::Crash, true),
-        (WorkerErrorCode::Malformed, false),
+    for code in [
+        WorkerErrorCode::Timeout,
+        WorkerErrorCode::Crash,
+        WorkerErrorCode::Malformed,
+        WorkerErrorCode::Refusal,
     ] {
-        request.snapshot.executions.clear();
-        for number in [1, 2] {
-            let mut node = template.clone();
-            node.reference.execution = ExecutionId::new(number).assert_value();
-            node.state = NodeState::Completed {
-                at: cursor_for(number),
-                outcome: WorkerOutcome::Error {
-                    code,
-                    reason: WorkerFailureReason::DeclaredFailure,
-                },
-            };
-            request
-                .snapshot
-                .executions
-                .insert(node.reference.execution, node);
-        }
+        request
+            .snapshot
+            .executions
+            .values_mut()
+            .next()
+            .assert_value()
+            .state = NodeState::Completed {
+            at: cursor_for(1),
+            outcome: WorkerOutcome::Error {
+                code,
+                reason: WorkerFailureReason::DeclaredFailure,
+            },
+        };
         let impact = impact::ImpactEvidence::new(&request, Vec::new());
-        let episode = impact.episodes.get("worker");
-        let references = vec!["v2:1".to_owned(), "v2:2".to_owned()];
-        for role in [plan::Role::Graph, plan::Role::Repository] {
-            assert_eq!(
-                episode.is_some_and(|episode| episode.allows(role, &references)),
-                eligible
-            );
-        }
+        assert!(impact.episodes["worker"].allows(&["v2:1".to_owned()]));
     }
 }
 

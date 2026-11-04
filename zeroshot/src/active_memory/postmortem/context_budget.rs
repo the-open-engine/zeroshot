@@ -15,7 +15,7 @@ pub(super) fn base(mut value: Value) -> Value {
     while encoded_size(&value) > BASE_BYTES {
         value["evidence"]["evidence_truncated"] = json!(true);
         let evidence = &mut value["evidence"];
-        if shrink_largest_array(evidence)
+        if shrink_largest_evidence(evidence)
             || shrink_string(evidence, "authored_graph")
             || shrink_string(evidence, "initial_input")
         {
@@ -55,9 +55,14 @@ pub(super) fn add_object(document: &mut Value, key: &str, id: &str, item: Value)
     false
 }
 
-fn shrink_largest_array(document: &mut Value) -> bool {
-    let mut sizes = ["records", "executions", "tool_observations"]
-        .map(|key| (encoded_size(&document[key]), key));
+fn shrink_largest_evidence(document: &mut Value) -> bool {
+    let mut sizes = [
+        "records",
+        "executions",
+        "tool_observations",
+        "impact_episodes",
+    ]
+    .map(|key| (encoded_size(&document[key]), key));
     sizes.sort_by_key(|item| std::cmp::Reverse(item.0));
     sizes
         .into_iter()
@@ -95,6 +100,9 @@ fn shrink_records(items: &mut Vec<Value>) -> bool {
 }
 
 fn shrink_array(document: &mut Value, key: &str) -> bool {
+    if key == "impact_episodes" {
+        return shrink_episodes(document);
+    }
     let Some(items) = document.get_mut(key).and_then(Value::as_array_mut) else {
         return false;
     };
@@ -119,6 +127,42 @@ fn shrink_array(document: &mut Value, key: &str) -> bool {
         items.drain(..items.len().div_ceil(2));
     } else {
         items.truncate(items.len() / 2);
+    }
+    true
+}
+
+fn shrink_episodes(document: &mut Value) -> bool {
+    let Some(episodes) = document["impact_episodes"].as_object_mut() else {
+        return false;
+    };
+    let largest = episodes
+        .values_mut()
+        .filter_map(Value::as_object_mut)
+        .flat_map(|episode| episode.values_mut())
+        .filter_map(Value::as_array_mut)
+        .filter(|references| references.len() > 1)
+        .max_by_key(|references| references.len());
+    if let Some(references) = largest {
+        references.sort_by_key(|reference| {
+            reference
+                .as_str()
+                .and_then(|text| text.split_once(':')?.1.parse::<u64>().ok())
+        });
+        let count = references.len() / 2;
+        let start = (references.len() - count) / 2;
+        references.drain(start..start + count);
+        return true;
+    }
+    if episodes.len() <= 1 {
+        return false;
+    }
+    let remove = episodes
+        .keys()
+        .take(episodes.len() / 2)
+        .cloned()
+        .collect::<Vec<_>>();
+    for key in remove {
+        episodes.remove(&key);
     }
     true
 }

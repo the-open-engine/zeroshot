@@ -6,8 +6,8 @@ async fn rejected_discovery_reports_the_gate_without_publishing_proposal_text() 
         ("node_id", json!("invented_node"), "unknown executed node"),
         (
             "references",
-            json!(["hook:1", "hook:2", "repository:src/provider.rs"]),
-            "required main-run cost",
+            json!(["node:worker", "repository:src/provider.rs"]),
+            "observed main-run evidence for this node",
         ),
         (
             "references",
