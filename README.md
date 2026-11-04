@@ -16,18 +16,15 @@
 
 </div>
 
-zeroshot is a framework for building and running your own agent workflows. Define the agents,
-models, checks, branches, and repair loops. Start with a built-in graph or build your own.
-The engine enforces execution order, allowed transitions, and retry limits.
+zeroshot is a framework for building and running your own multi-agent workflows. Define the
+topology of your graph, choose the agents and models, and set the checks and repair loops.
+Start with a built-in graph or build your own. The engine enforces the execution of your graph.
 
-Think CI starting at the issue. Agents do the work and make the judgments. Model output can't add
-an edge or raise a retry bound.
+Think CI starting at the issue.
 
 ## Build your own graph
 
-A task can move through implementation, independent review, repairs, and delivery without you
-coordinating each handoff. The graph defines the process, including parallel work, conditional
-reviews, and bounded repair loops.
+Run agents in parallel, branch on their outputs, and loop back when a check fails.
 
 For example, you might want extra review for changes to authentication, payments, or migrations:
 
@@ -209,8 +206,7 @@ zeroshot is an engine that runs a graph of coding agents and owns the control fl
 
 - The graph says which agents run, in what order, what each must return, and where results go.
 - Admission checks the graph, its bounds, the runtime plan and the input before anything runs.
-- The engine runs a node, checks its typed output, records it, then picks the next edge. Model
-  output can't add an edge or raise a bound.
+- The engine runs a node, checks its typed output, records it, then picks the next edge.
 - Each node runs on its own harness and model through an adapter.
 - Every event lands in a durable ledger, so a crashed run can resume.
 
