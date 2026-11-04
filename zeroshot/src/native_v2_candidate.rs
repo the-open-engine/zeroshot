@@ -32,6 +32,9 @@ use crate::native_v2_runner::{
 };
 
 pub(crate) mod decision;
+mod script;
+mod stateless;
+mod timing;
 
 #[cfg(test)]
 #[path = "native_v2_candidate/tests.rs"]
@@ -97,6 +100,8 @@ pub enum NativeV2CandidateError {
     RuntimeMismatch,
     #[error("agent and delivery adapters must use the same run workspace")]
     WorkspaceMismatch,
+    #[error("script bindings currently require local execution")]
+    ScriptLocalOnly,
     #[error(transparent)]
     Harness(#[from] crate::harnesses::HarnessError),
     #[error(transparent)]
@@ -209,6 +214,22 @@ fn build_candidate(
     trusted: TrustedDeliveryCapabilities,
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
     validate_config(admitted, &config)?;
+    let scripts = if admitted
+        .runtime
+        .nodes()
+        .values()
+        .any(|binding| matches!(binding, NodeRuntimeBinding::Script { .. }))
+    {
+        if !placement.is_local() {
+            return Err(NativeV2CandidateError::ScriptLocalOnly);
+        }
+        Some(script::ScriptAdapter::new(
+            config.workspace.clone(),
+            trusted.local_git_environment.as_ref(),
+        ))
+    } else {
+        None
+    };
     let NativeV2CandidateConfig {
         lanes,
         delivery,
@@ -268,9 +289,10 @@ fn build_candidate(
     assemble_runner(
         admitted,
         agents,
-        CandidateDeliveries {
+        CandidateBindings {
             git: delivery,
             comment: comment_delivery,
+            scripts,
         },
         placement,
     )
@@ -366,7 +388,7 @@ fn validate_config(
 fn assemble_runner(
     admitted: &AdmittedRun,
     agents: BTreeMap<RuntimeLane, CandidateAgents>,
-    deliveries: CandidateDeliveries,
+    deliveries: CandidateBindings,
     placement: CandidatePlacement,
 ) -> Result<NativeNodeRunner, NativeV2CandidateError> {
     let routes = Arc::new(CandidateNodeLane {
@@ -374,6 +396,7 @@ fn assemble_runner(
         agents,
         delivery: deliveries.git,
         comment_delivery: deliveries.comment,
+        scripts: deliveries.scripts,
         decisions: admitted
             .runtime
             .nodes()
@@ -390,7 +413,8 @@ fn assemble_runner(
     })
 }
 
-struct CandidateDeliveries {
+struct CandidateBindings {
+    scripts: Option<script::ScriptAdapter>,
     git: Option<Arc<NativeV2DeliveryAdapter>>,
     comment: Option<Arc<NativeV2CommentDeliveryAdapter>>,
 }
@@ -404,6 +428,7 @@ struct CandidateAgents {
 /// Routes only by the admitted closed binding: agent nodes use their effective lane's adapter,
 /// never another lane's, and the graph-visible delivery verifier uses trusted Git delivery.
 struct CandidateNodeLane {
+    scripts: Option<script::ScriptAdapter>,
     decisions: Option<crate::native_v2_candidate::decision::DecisionAdapter>,
     default_lane: RuntimeLane,
     agents: BTreeMap<RuntimeLane, CandidateAgents>,
@@ -421,7 +446,8 @@ impl CandidateNodeLane {
                 .agents
                 .get(&lane.clone().unwrap_or_else(|| self.default_lane.clone()))
                 .ok_or(NodeRunnerError::Driver),
-            NodeRuntimeBinding::Decision { .. }
+            NodeRuntimeBinding::Script { .. }
+            | NodeRuntimeBinding::Decision { .. }
             | NodeRuntimeBinding::GitDelivery { .. }
             | NodeRuntimeBinding::CommentDelivery { .. } => Err(NodeRunnerError::Driver),
         }
@@ -450,6 +476,28 @@ impl CandidateNodeLane {
     }
 }
 
+async fn open_binding<T: SessionFactory>(
+    adapter: Option<&T>,
+    invocation: &NodeInvocation,
+    environment: &ResolvedEnvironment,
+) -> Result<Arc<dyn NodeSession>, NodeRunnerError> {
+    adapter
+        .ok_or(NodeRunnerError::Driver)?
+        .open(invocation, environment)
+        .await
+}
+
+async fn run_binding<T: NodeDriver>(
+    adapter: Option<&T>,
+    invocation: DriverInvocation,
+    control: DriverControl,
+) -> Result<openengine_cluster_protocol::WorkerOutcome, NodeRunnerError> {
+    adapter
+        .ok_or(NodeRunnerError::Driver)?
+        .run(invocation, control)
+        .await
+}
+
 #[async_trait]
 impl SessionFactory for CandidateNodeLane {
     async fn open(
@@ -464,26 +512,17 @@ impl SessionFactory for CandidateNodeLane {
                     .open(invocation, environment)
                     .await
             }
+            NodeRuntimeBinding::Script { .. } => {
+                open_binding(self.scripts.as_ref(), invocation, environment).await
+            }
             NodeRuntimeBinding::Decision { .. } => {
-                self.decisions
-                    .as_ref()
-                    .ok_or(NodeRunnerError::Driver)?
-                    .open(invocation, environment)
-                    .await
+                open_binding(self.decisions.as_ref(), invocation, environment).await
             }
             NodeRuntimeBinding::CommentDelivery { .. } => {
-                self.comment_delivery
-                    .as_ref()
-                    .ok_or(NodeRunnerError::Driver)?
-                    .open(invocation, environment)
-                    .await
+                open_binding(self.comment_delivery.as_deref(), invocation, environment).await
             }
             NodeRuntimeBinding::GitDelivery { .. } => {
-                self.delivery
-                    .as_ref()
-                    .ok_or(NodeRunnerError::Driver)?
-                    .open(invocation, environment)
-                    .await
+                open_binding(self.delivery.as_deref(), invocation, environment).await
             }
         }
     }
@@ -498,26 +537,17 @@ impl NodeDriver for CandidateNodeLane {
     ) -> Result<openengine_cluster_protocol::WorkerOutcome, NodeRunnerError> {
         match &invocation.node.binding {
             NodeRuntimeBinding::Agent { .. } => self.run_agent(invocation, control).await,
+            NodeRuntimeBinding::Script { .. } => {
+                run_binding(self.scripts.as_ref(), invocation, control).await
+            }
             NodeRuntimeBinding::Decision { .. } => {
-                self.decisions
-                    .as_ref()
-                    .ok_or(NodeRunnerError::Driver)?
-                    .run(invocation, control)
-                    .await
+                run_binding(self.decisions.as_ref(), invocation, control).await
             }
             NodeRuntimeBinding::CommentDelivery { .. } => {
-                self.comment_delivery
-                    .as_ref()
-                    .ok_or(NodeRunnerError::Driver)?
-                    .run(invocation, control)
-                    .await
+                run_binding(self.comment_delivery.as_deref(), invocation, control).await
             }
             NodeRuntimeBinding::GitDelivery { .. } => {
-                self.delivery
-                    .as_ref()
-                    .ok_or(NodeRunnerError::Driver)?
-                    .run(invocation, control)
-                    .await
+                run_binding(self.delivery.as_deref(), invocation, control).await
             }
         }
     }

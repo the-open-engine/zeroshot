@@ -100,7 +100,8 @@ impl RuntimePlan {
             NodeRuntimeBinding::Agent { lane, .. } => {
                 Some(lane.clone().unwrap_or_else(|| self.lane()))
             }
-            NodeRuntimeBinding::Decision { .. }
+            NodeRuntimeBinding::Script { .. }
+            | NodeRuntimeBinding::Decision { .. }
             | NodeRuntimeBinding::GitDelivery { .. }
             | NodeRuntimeBinding::CommentDelivery { .. } => None,
         }

@@ -203,7 +203,9 @@ pub(super) fn materialize_local_access(
                     NodeRuntimeBinding::CommentDelivery { .. } => {
                         comment_forge(submission).ok().flatten()
                     }
-                    NodeRuntimeBinding::Agent { .. } | NodeRuntimeBinding::Decision { .. } => None,
+                    NodeRuntimeBinding::Agent { .. }
+                    | NodeRuntimeBinding::Decision { .. }
+                    | NodeRuntimeBinding::Script { .. } => None,
                 }?;
                 (forge.provider.as_str() == GITHUB
                     && base_url(&forge).is_ok_and(|base| base.as_str() == "https://github.com"))
@@ -297,7 +299,9 @@ fn binding_forge(
     match binding {
         NodeRuntimeBinding::GitDelivery { .. } => Ok(source_forge(submission)),
         NodeRuntimeBinding::CommentDelivery { .. } => comment_forge(submission),
-        NodeRuntimeBinding::Agent { .. } | NodeRuntimeBinding::Decision { .. } => Ok(None),
+        NodeRuntimeBinding::Agent { .. }
+        | NodeRuntimeBinding::Decision { .. }
+        | NodeRuntimeBinding::Script { .. } => Ok(None),
     }
 }
 

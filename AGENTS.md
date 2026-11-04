@@ -241,6 +241,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `maxTokens` on an agent binding; they are declarations rather than catalog knowledge, are written
   only to the Pi gateway model entry when supplied, and stay absent so the provider keeps its own
   defaults otherwise. Never infer either value from the model identifier.
+- A `script` binding executes an argv program on an existing step without instructions. The local
+  adapter in `native_v2_candidate::script` uses the shared process runner, bounded JSON stdin/stdout,
+  authoritative output validation, connection redaction and confirmed process-tree cleanup. It does
+  not invoke a shell or inherit ambient provider keys. Local-only placement is enforced both before
+  remote submission and at candidate construction. Keep service lifecycle outside the runtime.
 - A `decision` runtime binding runs one TypeSafe-compatible System One Choice request on an
   existing verifier, without a harness, tools, host context, or Active Memory. The verifier's
   instructions supply its question and its single signal supplies the options, excluding the

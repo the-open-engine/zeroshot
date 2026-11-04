@@ -96,7 +96,10 @@ impl NodeResponseContract {
         self.parse_agent_value(value)
     }
 
-    fn parse_agent_value(&self, value: Value) -> Result<WorkerOutcome, NodeResponseError> {
+    pub(crate) fn parse_agent_value(
+        &self,
+        value: Value,
+    ) -> Result<WorkerOutcome, NodeResponseError> {
         let outcome = match self {
             Self::Worker { .. } => WorkerOutcome::Verified {
                 output: value,
@@ -185,6 +188,11 @@ impl NodeResponseContract {
 pub(crate) struct NodeResponseError(Box<str>);
 
 impl NodeResponseError {
+    /// Complete transient diagnostic, for credential redaction before public truncation.
+    pub(crate) fn diagnostic(&self) -> &str {
+        &self.0
+    }
+
     fn new(message: String) -> Self {
         // Keep original text transiently until the provider can redact credentials. Display
         // bounds correction prompts; public diagnostics are bounded only after redaction.
