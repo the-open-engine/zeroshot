@@ -37,11 +37,8 @@ conflicting skill is preserved and fails installation visibly. npm 7 and newer p
 lifecycle, so users remove unchanged managed copies from these documented paths when they uninstall
 the package.
 
-Setting `ZEROSHOT_SKIP_SKILLS=1` opts out of user-scope skill installation in both npm postinstall
-and `zeroshot update`. Only the exact value `1` enables it. Executables still install and update;
-existing skills are untouched, and missing skills stay absent. Skill destinations are not inspected
-or written, so conflicts and unwritable paths cannot block an opted-out installation. Self-update
-also skips downloading skill assets. Keep the setting in the environment for later updates.
+Set `ZEROSHOT_SKIP_SKILLS=1` to skip skill installation during npm install and `zeroshot update`.
+Executables still install or update, and existing skills stay untouched.
 
 Older updaters install only the skills they know. If `zeroshot-graph-design` or `zeroshot-plan` is
 missing after an executable upgrade, run `zeroshot update` again. The current updater installs or
