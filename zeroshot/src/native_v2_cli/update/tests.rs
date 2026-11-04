@@ -10,6 +10,26 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use super::*;
 
+fn rerun_without_skill_opt_out(test_name: &str) -> bool {
+    if std::env::var_os("ZEROSHOT_SKIP_SKILLS").is_none() {
+        return false;
+    }
+    // Unset the opt-out only in a child, preserving concurrent tests' environment.
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", test_name, "--nocapture"])
+        .env_remove("ZEROSHOT_SKIP_SKILLS")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+    true
+}
+
 fn assert_release_versions_are_canonical_and_ordered() {
     assert_eq!(
         ReleaseVersion::parse("8.2.1").assert_value().to_string(),
@@ -166,6 +186,11 @@ async fn bounded_download_accepts_success_and_rejects_status_and_both_oversize_f
 
 #[tokio::test]
 async fn wave5_cli_contract_release_metadata_and_verified_assets_are_self_consistent() {
+    if rerun_without_skill_opt_out(
+        "native_v2_cli::update::tests::wave5_cli_contract_release_metadata_and_verified_assets_are_self_consistent",
+    ) {
+        return;
+    }
     let metadata = TestServer::start(vec![
         fixed_response("200 OK", br#"{"tag_name":"v8.2.1"}"#),
         fixed_response("200 OK", br#"{"tag_name":"8.2.1"}"#),
@@ -882,6 +907,11 @@ async fn skill_opt_out_updates_executables_without_touching_user_skills() {
 
 #[tokio::test]
 async fn a_verified_but_invalid_auxiliary_skill_aborts_release_preparation() {
+    if rerun_without_skill_opt_out(
+        "native_v2_cli::update::tests::a_verified_but_invalid_auxiliary_skill_aborts_release_preparation",
+    ) {
+        return;
+    }
     let canonical = b"---\nname: zeroshot\n---\n";
     let memory = b"---\nname: zeroshot-memory-init\n---\n";
     let graph = b"---\nname: zeroshot-graph-design\n---\n";
