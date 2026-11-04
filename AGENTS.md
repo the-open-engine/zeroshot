@@ -433,8 +433,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Mapped runtime failures and overflow stop before publication; failed checks and environment
   blockers return evidence for the report. All model choices remain caller-authored; the supplied
   PR runtime binds the three independent agents to `gpt-6.1-sol` with `xhigh`. Negative findings
-  are successful reviews. Selecting either review template defaults to comment
-  delivery. PR review currently requires comment delivery for comparison preparation; issue review
+  are successful reviews. Selecting a review template defaults to comment
+  delivery. PR and code review currently require comment delivery for comparison preparation; issue review
   also supports `--delivery none`. Local review never switches/resets a worktree and rejects tracked changes or a
   mismatched PR head. Explicit submission-key retries retain prepared input/source and authored
   configuration within the selected target/credential identity. Human login attempts rotate a private
@@ -447,8 +447,19 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   the controller's workspace lease, after checkpoint restoration and before dispatch.
   Targets advertise comment delivery and
   task resolution through separate versioned discovery extensions.
+- `code-review` reuses the `pr-review` input type and review continuation, so `--task-from`,
+  comparison preparation and comment publication are unchanged. Triage returns a summary and at most
+  six units (maps allow eight; overflow fails). Per-unit maps run two broad, a depth and a design
+  reviewer beside five whole-change hunters (logic, state, contracts, errors, claims); the claims
+  hunter checks linked issue acceptance criteria. Per-unit and remaining-file finalizers merge, try to
+  disprove and rewrite `{file,startLine,endLine,severity,title,body}` findings, and a report agent
+  renders one Markdown comment. Every agent is a read-only verifier with two attempts and no deadline.
+  One choice per agent or map keeps each guard's control space under the verifier ceiling; any
+  agent error or map overflow fails before publication. Instructions are `include_str!` fragments
+  composed through `{{name}}`. The supplied runtime splits agents across Claude Code and Codex;
+  model choices remain caller-authored.
 - Built-in template selection defaults to PR delivery for `software-change`, comment delivery for
-  `pr-review` and `issue-review`, and no delivery for the other templates. Explicit supported delivery choices override
+  `pr-review`, `code-review` and `issue-review`, and no delivery for the other templates. Explicit supported delivery choices override
   these defaults. Run, profile creation, template export, and editor ordering agree; Python leaves
   unspecified delivery to Rust rather than maintaining a second default catalog. Custom graphs and
   saved profiles retain their authored delivery nodes and bindings.

@@ -15,15 +15,17 @@ pub enum BuiltinGraphTemplate {
     AutoResearch,
     IssueReview,
     PrReview,
+    CodeReview,
 }
 
 impl BuiltinGraphTemplate {
-    pub(crate) const ALL: [Self; 5] = [
+    pub(crate) const ALL: [Self; 6] = [
         Self::SingleWorker,
         Self::SoftwareChange,
         Self::AutoResearch,
         Self::IssueReview,
         Self::PrReview,
+        Self::CodeReview,
     ];
 
     #[must_use]
@@ -39,6 +41,7 @@ impl BuiltinGraphTemplate {
             Self::AutoResearch => "auto-research",
             Self::IssueReview => "issue-review",
             Self::PrReview => "pr-review",
+            Self::CodeReview => "code-review",
         }
     }
 
@@ -50,6 +53,7 @@ impl BuiltinGraphTemplate {
             "auto-research" => Some(Self::AutoResearch),
             "issue-review" => Some(Self::IssueReview),
             "pr-review" => Some(Self::PrReview),
+            "code-review" => Some(Self::CodeReview),
             _ => None,
         }
     }
@@ -57,7 +61,7 @@ impl BuiltinGraphTemplate {
     pub(crate) const fn default_delivery(self) -> TemplateDelivery {
         match self {
             Self::SoftwareChange => TemplateDelivery::PullRequest,
-            Self::IssueReview | Self::PrReview => TemplateDelivery::Comment,
+            Self::IssueReview | Self::PrReview | Self::CodeReview => TemplateDelivery::Comment,
             _ => TemplateDelivery::None,
         }
     }
@@ -83,6 +87,7 @@ impl BuiltinGraphTemplate {
             Self::AutoResearch => auto_research_graph(delivery),
             Self::IssueReview => super::review::issue_review_graph(delivery),
             Self::PrReview => super::pr_review::pr_review_graph(delivery),
+            Self::CodeReview => super::code_review::code_review_graph(delivery),
         }
     }
 
@@ -109,9 +114,11 @@ impl BuiltinGraphTemplate {
         let connections = DeclaredConnections::empty();
         let name = match self {
             Self::AutoResearch => "checkpoint_delivery",
-            Self::SingleWorker | Self::SoftwareChange | Self::IssueReview | Self::PrReview => {
-                DELIVERY_NODE
-            }
+            Self::SingleWorker
+            | Self::SoftwareChange
+            | Self::IssueReview
+            | Self::PrReview
+            | Self::CodeReview => DELIVERY_NODE,
         };
         Ok(Some((
             node_name(name)?,
@@ -136,7 +143,7 @@ impl BuiltinGraphTemplate {
             Self::IssueReview => {
                 matches!(delivery, TemplateDelivery::None | TemplateDelivery::Comment)
             }
-            Self::PrReview => delivery == TemplateDelivery::Comment,
+            Self::PrReview | Self::CodeReview => delivery == TemplateDelivery::Comment,
         };
         if supported {
             Ok(())

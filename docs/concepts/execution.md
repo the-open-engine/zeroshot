@@ -76,8 +76,8 @@ read and stop commands.
 
 ## Built-in templates are ordinary graphs
 
-The executable contains `single-worker`, `software-change`, and `auto-research`. Each produces the
-public `GraphSpec` that custom submissions use:
+The executable contains `single-worker`, `software-change`, `auto-research`, `issue-review`,
+`pr-review`, and `code-review`. Each produces the public `GraphSpec` that custom submissions use:
 
 ```console
 zeroshot template list
@@ -86,6 +86,9 @@ zeroshot template show software-change
 
 In a terminal, `template show` prints a tree and marks executable node names with `*`.
 Use `--json` or redirect stdout to export the complete `GraphSpec`.
+
+The review templates post their report as an issue or PR comment. See
+[Review an issue or PR](../guides/review.md) and [Review a PR in depth](../guides/code-review.md).
 
 `software-change` has four delivery choices and opens a pull request by default. `--delivery none`
 keeps the accepted change local. `--push` publishes the managed run branch without opening a pull

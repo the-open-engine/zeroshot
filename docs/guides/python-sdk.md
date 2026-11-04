@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
 Opening a client captures the current folder; the default preset is `Preset("software-change")`.
 An omitted delivery selector uses the native template default: a PR for `software-change`, a comment
-for `pr-review` and `issue-review`. PR publication requires Git and credentials for a
+for `pr-review`, `code-review` and `issue-review`. PR publication requires Git and credentials for a
 [supported forge](forge-delivery.md). Local delivery can reuse native `gh` or `glab` login.
 Use `Preset("software-change", delivery="none")` for local changes without publication.
 Per-run `cwd=` paths resolve from that captured folder, or `LocalTarget.workspace` when supplied.

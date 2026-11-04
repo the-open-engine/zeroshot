@@ -1,6 +1,7 @@
 # Code-review built-in template
 
-Status: draft, 2026-11-04. The implementation follows in this branch's pull request.
+Status: implemented in this branch's pull request, 2026-11-04. The sections describe the code as
+built.
 
 Authority: the user's request to ship the multi-reviewer review graph from the
 `benchmarks/reviewbench` branch as a built-in template that matches `pr-review` in input and
@@ -50,6 +51,9 @@ run
 - Fail closed: an agent error, a failed map item or a map overflow routes to a `fail` node before
   `report` and `deliver`, following `after_agent` and `reproduction_error` in `pr_review.rs`. The
   source graph tolerated reviewer failures only because its benchmark imposed deadlines.
+- The checks run as a chain of one choice per map or agent, in graph order, each failing with its
+  own reason such as `units_design_failed` or `hunt_errors_failed`. A single choice over all nine
+  reviewers exceeds the verifier's ceiling of 65,536 control assignments.
 
 | Node                           | Instructions       | Role                                                 |
 | ------------------------------ | ------------------ | ---------------------------------------------------- |
@@ -116,18 +120,21 @@ with the new node names:
     `reviewScope`) and the receipt result.
   - Zero units still runs the hunters and `finalize_rest`.
   - A failure in triage, any reviewer, finalization or the report, and a unit overflow, publish
-    nothing.
+    nothing and fail with the failing node's reason.
+  - A crashed agent is retried once; a second crash fails the run.
   - The initial input type equals the `pr-review` one, and issue input is rejected.
 - Template lists: `native_v2_templates/tests.rs`, `native_v2_cli/tests.rs` (`template list`),
   `zeroshot/tests/native_v2_template_show.rs` (cases and tree checks),
-  `profile_ui/catalog/tests.rs`, `native_v2_cli/execution/submission/tests.rs`
-  (`template_validation_input`) and `native_v2_supervisor/tests/delivery_gate.rs`.
+  `profile_ui/catalog/tests.rs`, `profile_ui/tests.rs`,
+  `native_v2_cli/execution/submission/tests.rs` (`template_validation_input`) and
+  `native_v2_supervisor/tests/delivery_gate.rs`. The template-variant counts grow from 10 to 11.
 
 ## Docs
 
 - New `docs/guides/code-review.md` with a front-matter description and a `mkdocs.yml` nav entry,
   linked from `docs/guides/review.md`.
-- Mention the template in `docs/guides/python-sdk.md` and `npm/zeroshot/skills/zeroshot/SKILL.md`.
+- Mention the template in `docs/guides/python-sdk.md`, `docs/concepts/execution.md`,
+  `docs/index.md` and `npm/zeroshot/skills/zeroshot/SKILL.md`.
 - Add an `AGENTS.md` entry next to `pr-review` and to the delivery-defaults bullet.
 - Regenerate the CLI docs with `cargo run -p zeroshot --example generate_cli_docs -- --write`,
   and verify them with `--check`.

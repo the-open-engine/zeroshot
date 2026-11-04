@@ -23,6 +23,8 @@ const CASES: &[(&str, &[&str])] = &[
     ("issue-review", &["--delivery", "comment"]),
     ("pr-review", &[]),
     ("pr-review", &["--delivery", "comment"]),
+    ("code-review", &[]),
+    ("code-review", &["--delivery", "comment"]),
 ];
 
 fn command(template: &str, options: &[&str]) -> Command {
@@ -114,6 +116,13 @@ fn terminal_defaults_to_tree_and_explicit_json_overrides_it_for_every_delivery_v
             "pr-review" => {
                 assert!(tree.contains("reproducer *  step"));
                 assert!(tree.contains("map  over state."));
+                assert!(tree.contains("deliver *"));
+            }
+            "code-review" => {
+                assert!(tree.contains("discover  par  wait for all"));
+                assert!(tree.contains("map  over state.units; max 8 items"));
+                assert!(tree.contains("unit_depth *  verifier  2 attempts"));
+                assert!(tree.contains("report *  verifier  2 attempts"));
                 assert!(tree.contains("deliver *"));
             }
             _ => {}

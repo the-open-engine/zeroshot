@@ -112,9 +112,9 @@ When no saved profile fits and the user has not asked for Platform, run the buil
 
 ## Review an issue or pull request
 
-The `pr-review` and `issue-review` templates post reports as comments by default.
+The `pr-review`, `code-review` and `issue-review` templates post reports as comments by default.
 PR review classifies whether reproduction is necessary, runs required full-stack checks (including
-a browser for UI changes), then checks the diff and linked issue coverage. Its final report is concise. PR review uses comment delivery; issue review also supports `--delivery none` for a report without publication. Supply an issue or PR URL through `--task-from`, which resolves
+a browser for UI changes), then checks the diff and linked issue coverage. Its final report is concise. `code-review` takes the same PR input and runs parallel specialist reviewers whose verified findings become one comment. Both PR templates use comment delivery; issue review also supports `--delivery none` for a report without publication. Supply an issue or PR URL through `--task-from`, which resolves
 title/body and pins source before execution:
 
 ```console

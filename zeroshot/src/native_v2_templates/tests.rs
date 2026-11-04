@@ -31,7 +31,12 @@ fn catalog_and_template_inputs_are_closed() {
             BuiltinGraphTemplate::AutoResearch,
             BuiltinGraphTemplate::IssueReview,
             BuiltinGraphTemplate::PrReview,
+            BuiltinGraphTemplate::CodeReview,
         ]
+    );
+    assert_eq!(
+        BuiltinGraphTemplate::parse("code-review"),
+        Some(BuiltinGraphTemplate::CodeReview)
     );
     assert_eq!(
         BuiltinGraphTemplate::parse("software-change"),

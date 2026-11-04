@@ -57,7 +57,7 @@ fn delivery_choices_use_native_contracts_and_preserve_legacy_identities() {
 #[tokio::test]
 async fn template_variants_keep_exact_factory_graphs_and_admit_with_factory_bindings() {
     let templates = templates().assert_value();
-    assert_eq!(templates.len(), 10);
+    assert_eq!(templates.len(), 11);
     for template in templates {
         let kind =
             BuiltinGraphTemplate::parse(template["name"].as_str().assert_value()).assert_value();
@@ -105,6 +105,7 @@ fn first_template_choices_use_their_default_delivery_bindings() {
     for (template, kind) in [
         (BuiltinGraphTemplate::IssueReview, "comment_delivery"),
         (BuiltinGraphTemplate::PrReview, "comment_delivery"),
+        (BuiltinGraphTemplate::CodeReview, "comment_delivery"),
         (BuiltinGraphTemplate::SoftwareChange, "git_delivery"),
     ] {
         let choice = choices
