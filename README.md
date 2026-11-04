@@ -24,9 +24,7 @@ Think CI starting at the issue.
 
 ## Build your own graph
 
-Run agents in parallel, branch on their outputs, and loop back when a check fails.
-
-For example, you might want extra review for changes to authentication, payments, or migrations:
+This graph adds a security review when a change touches authentication, payments, or migrations:
 
 ```text
 worker ◄─────────── any "no" ────┐
