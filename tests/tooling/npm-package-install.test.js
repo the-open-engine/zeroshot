@@ -141,6 +141,16 @@ it('packs and installs the published npm surface on the current host', async (t)
       skills.requireCompleteSkillInstall(results, sink, sink);
     },
   };
+  const skipOptions = {
+    ...installOptions,
+    environment: { ZEROSHOT_SKIP_SKILLS: '1' },
+  };
+  const skippedDestination = await installed.install(skipOptions);
+  assert.deepEqual(fs.readFileSync(skippedDestination), binary);
+  assert.deepEqual(fs.readdirSync(homeDirectory), []);
+  assert.deepEqual(skillRuns.pop(), []);
+  requested.length = 0;
+
   const destination = await installed.install(installOptions);
 
   assert.deepEqual(fs.readFileSync(destination), binary);
@@ -196,6 +206,31 @@ it('packs and installs the published npm surface on the current host', async (t)
     ]
   );
   assert.deepEqual(fs.readFileSync(agentSkill), edited);
+  const claudeRoot = path.join(homeDirectory, '.claude');
+  fs.rmSync(claudeRoot, { recursive: true });
+  fs.writeFileSync(claudeRoot, 'blocked destination');
+  const removedSkill = path.join(homeDirectory, '.agents', 'skills', 'zeroshot-plan');
+  fs.rmSync(removedSkill, { recursive: true });
+  const replacement = Buffer.from('updated executable without skill changes\n');
+  const replacementArchive = createArchive([
+    { name: selected.executable, contents: replacement },
+    { name: selected.resticExecutable, contents: restic },
+  ]);
+  assert.equal(
+    await installed.install({
+      ...skipOptions,
+      fetchBuffer: async (url) =>
+        url.endsWith('/SHA256SUMS')
+          ? Buffer.from(`${sha256(replacementArchive)}  ${filename}\n`)
+          : replacementArchive,
+    }),
+    destination
+  );
+  assert.deepEqual(fs.readFileSync(destination), replacement);
+  assert.deepEqual(skillRuns[3], []);
+  assert.deepEqual(fs.readFileSync(agentSkill), edited);
+  assert.equal(fs.readFileSync(claudeRoot, 'utf8'), 'blocked destination');
+  assert.equal(fs.existsSync(removedSkill), false);
   assert.deepEqual(
     requested.map((url) => url.split('/').at(-1)),
     ['SHA256SUMS', filename, 'SHA256SUMS', filename, 'SHA256SUMS', filename]

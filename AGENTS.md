@@ -31,6 +31,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - That package owns the canonical `zeroshot`, `zeroshot-memory-init`, `zeroshot-graph-design`, and
   `zeroshot-plan` skills and installs managed copies for Codex, GitHub Copilot, Pi, and Claude Code
   at their user scopes. Do not fork skills by host.
+  `ZEROSHOT_SKIP_SKILLS=1` opts out of all user-scope skill handling in npm postinstall and
+  `zeroshot update`; only the exact value `1` enables it. Executables still install/update, existing
+  skills stay untouched, and updates skip skill downloads. Keep default managed-copy protections
+  when the opt-out is unset.
 - The target image is `ghcr.io/the-open-engine/zeroshot-target`.
 - The Python distribution is `the-open-engine-zeroshot`; its import package remains `zeroshot`.
 - Python SDK tags are `zeroshot-python-vZEROSHOT_SDK` and package versions are

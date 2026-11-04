@@ -21,7 +21,20 @@ Claude Code at `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/<name>/SKILL.md`. Rei
 managed copy. A conflicting or edited skill is preserved; installation fails with the exact path so
 the conflict cannot pass unnoticed.
 
-When set, `CLAUDE_CONFIG_DIR` must be absolute so the managed skills have stable locations.
+Set `ZEROSHOT_SKIP_SKILLS=1` to install or update only the executables:
+
+```sh
+ZEROSHOT_SKIP_SKILLS=1 npm install --global @the-open-engine-company/zeroshot
+ZEROSHOT_SKIP_SKILLS=1 zeroshot update
+```
+
+Only the exact value `1` enables this opt-out. Export it in your shell configuration to keep later
+installs and updates from recreating removed skills. Existing skills are left untouched, and skill
+conflicts or unwritable destinations do not block executable installation. Unset it to restore
+automatic skill installation.
+
+With automatic skill installation enabled, `CLAUDE_CONFIG_DIR` must be absolute when set so the
+managed skills have stable locations.
 
 npm 7 and newer do not run uninstall lifecycle scripts. After uninstalling the package, remove the
 managed skill directories above manually if their `SKILL.md` files are still unmodified managed copies.
