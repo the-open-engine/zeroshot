@@ -222,16 +222,17 @@ async fn publish_stderr(
     environment: &ResolvedEnvironment,
     control: &DriverControl,
 ) -> Result<(), NodeRunnerError> {
+    if output.stderr_tail_truncated {
+        // A byte-truncated tail can start inside a credential. Omit it entirely.
+        return log(
+            control,
+            "script stderr exceeded the retained diagnostic tail (diagnostics omitted)",
+        )
+        .await;
+    }
     let stderr = redact(&String::from_utf8_lossy(&output.stderr_tail), environment);
     if !stderr.is_empty() {
         log(control, &stderr).await?;
-    }
-    if output.stderr_tail_truncated {
-        log(
-            control,
-            "script stderr exceeded the retained diagnostic tail",
-        )
-        .await?;
     }
     Ok(())
 }

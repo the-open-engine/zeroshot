@@ -162,7 +162,7 @@ export function RuntimeEditor(p: {
               {kind(n.name) === 'comment_delivery' ? 'Comment delivery' : 'Git delivery'}
             </small>
           ) : kind(n.name) === 'script' ? (
-            <small>Script: {bindingFor(doc.runtime, n.name)?.command?.join(' ')}</small>
+            <small>Script: {scriptCommandLabel(bindingFor(doc.runtime, n.name)?.command)}</small>
           ) : kind(n.name) === 'decision' ? (
             <DecisionControls
               node={n.name}
@@ -183,6 +183,14 @@ export function RuntimeEditor(p: {
       ))}
     </>
   );
+}
+
+function scriptCommandLabel(command: unknown): string {
+  return Array.isArray(command) &&
+    command.length > 0 &&
+    command.every((arg) => typeof arg === 'string')
+    ? command.join(' ')
+    : 'Invalid command';
 }
 
 type ModelPickerProps = Parameters<typeof ModelPicker>[0];

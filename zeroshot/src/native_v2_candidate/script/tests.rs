@@ -170,3 +170,18 @@ async fn cancellation_settles_the_owned_script_process() {
         Err(NodeRunnerError::Cancelled)
     ));
 }
+
+#[tokio::test]
+async fn truncated_stderr_cannot_publish_a_credential_fragment() {
+    let directory = TestDirectory::new("script-truncated-secret");
+    let (adapter, invocation) = prepared(&directory,
+        "import os\nprint(os.environ['SCRIPT_TOKEN'] + 'x' * (64 * 1024 - 8), file=sys.stderr)\nprint('{\"result\":\"ok\"}')\n").await;
+    let (_cancel, control, mut durable) =
+        crate::native_v2_runner::test_support::control_with_capacity(16);
+    let outcome = adapter.run(invocation, control).await.unwrap();
+    assert!(matches!(outcome, WorkerOutcome::Verified { .. }));
+    let diagnostic = durable.recv_output().await.unwrap();
+    assert!(diagnostic.text.contains("diagnostics omitted"));
+    assert!(!diagnostic.text.contains("ture-key"));
+    assert!(!diagnostic.text.contains("xxxxxxxx"));
+}
