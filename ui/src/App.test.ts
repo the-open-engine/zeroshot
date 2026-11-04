@@ -663,9 +663,18 @@ test(
       (element) => element.textContent === 'retrieve'
     );
     assert.ok(identity);
+    const card = identity.closest('.react-flow__node')!;
+    assert.match(card.textContent ?? '', /python3 retrieve.py/);
+    assert.doesNotMatch(card.textContent ?? '', /Choose model/);
     await act(async () => identity.click());
     const inspector = container.querySelector<HTMLElement>('[aria-label="Profile inspector"]');
     assert.ok(inspector);
+    assert.equal(inspector.querySelector('h2')?.textContent, 'Script');
+    assert.match(
+      inspector.querySelector('[aria-label="Script command"]')?.textContent ?? '',
+      /python3 retrieve.py/
+    );
+    assert.doesNotMatch(inspector.textContent ?? '', /Unrecognized worker binding/);
     const labels = () => [...inspector.querySelectorAll('label')];
     assert.equal(
       labels().some((label) => label.textContent === 'Instructions'),

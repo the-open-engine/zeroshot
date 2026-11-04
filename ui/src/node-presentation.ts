@@ -11,8 +11,15 @@ import {
   Check,
   X,
 } from 'lucide-react';
-import { bindingFor, executable, labels, type Document, type GraphNode } from './domain';
-import { isDeliveryKind, workerOption, type WorkerOption } from './workers';
+import {
+  bindingFor,
+  executable,
+  labels,
+  type Binding,
+  type Document,
+  type GraphNode,
+} from './domain';
+import { isDeliveryKind, scriptCommandLabel, workerOption, type WorkerOption } from './workers';
 
 export const nodeIcons: Record<string, typeof Bot> = {
   step: Bot,
@@ -44,7 +51,7 @@ export function nodePresentation(document: Document, node: GraphNode, workers: W
         : 'Git delivery'
       : activityLabel(node.kind, binding?.kind),
     delivery,
-    detail: delivery ? deliveryDetail(worker, comment) : binding?.model,
+    detail: delivery ? deliveryDetail(worker, comment) : activityDetail(binding),
   };
 }
 
@@ -55,6 +62,11 @@ function deliveryDetail(worker: WorkerOption | undefined, comment: boolean): str
   return 'Git delivery';
 }
 
-function activityLabel(nodeKind: string, bindingKind?: string): string {
+function activityDetail(binding: Binding | undefined): string | undefined {
+  return binding?.kind === 'script' ? scriptCommandLabel(binding.command) : binding?.model;
+}
+
+export function activityLabel(nodeKind: string, bindingKind?: string): string {
+  if (bindingKind === 'script') return 'Script';
   return bindingKind === 'decision' ? 'Decision' : labels[nodeKind];
 }

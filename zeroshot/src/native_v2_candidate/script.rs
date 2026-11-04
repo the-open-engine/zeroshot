@@ -16,7 +16,8 @@ use crate::execution::process::{
     ProcessStdout,
 };
 use crate::native_v2_capsule::provider_process::{
-    apply_execution_environment, safe_provider_text, send_process_input,
+    LocalHarnessEnvironment, apply_execution_environment, current_process_environment,
+    safe_provider_text, send_process_input,
 };
 use crate::native_v2_contract::{
     NodeCompletion, NodeInvocation, NodeRuntimeBinding, parse_token_usage_delta,
@@ -33,36 +34,45 @@ pub(crate) struct ScriptAdapter {
     environment: BTreeMap<String, String>,
 }
 
+fn script_environment(captured: &LocalHarnessEnvironment) -> BTreeMap<String, String> {
+    let mut environment = [
+        "PATH",
+        "USERPROFILE",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "SystemRoot",
+        "SYSTEMROOT",
+        "WINDIR",
+        "PATHEXT",
+        "LANG",
+        "LC_ALL",
+    ]
+    .into_iter()
+    .filter_map(|name| {
+        captured
+            .get(name)
+            .map(|value| (name.to_owned(), value.clone()))
+    })
+    .collect::<BTreeMap<_, _>>();
+    if let Some(home) = captured.user_home() {
+        environment.insert("HOME".to_owned(), home.clone());
+        #[cfg(windows)]
+        environment
+            .entry("USERPROFILE".to_owned())
+            .or_insert_with(|| home.clone());
+    }
+    environment
+}
+
 impl ScriptAdapter {
     pub(crate) fn new(workspace: PathBuf, captured: Option<&BTreeMap<String, String>>) -> Self {
-        let ambient;
-        let captured = match captured {
-            Some(captured) => captured,
-            None => {
-                ambient = std::env::vars().collect();
-                &ambient
-            }
-        };
-        let environment = captured
-            .iter()
-            .filter(|(key, _)| {
-                matches!(
-                    key.as_str(),
-                    "PATH"
-                        | "HOME"
-                        | "TMPDIR"
-                        | "TEMP"
-                        | "TMP"
-                        | "SystemRoot"
-                        | "SYSTEMROOT"
-                        | "WINDIR"
-                        | "PATHEXT"
-                        | "LANG"
-                        | "LC_ALL"
-                )
-            })
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
+        let captured = LocalHarnessEnvironment::new(
+            captured
+                .cloned()
+                .unwrap_or_else(current_process_environment),
+        );
+        let environment = script_environment(&captured);
         Self {
             workspace,
             environment,
@@ -356,3 +366,6 @@ impl NodeDriver for ScriptAdapter {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod environment_tests;

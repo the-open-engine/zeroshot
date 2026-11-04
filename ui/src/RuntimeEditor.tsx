@@ -1,4 +1,4 @@
-import { isDeliveryKind } from './workers';
+import { isDeliveryKind, scriptCommandLabel } from './workers';
 import { DecisionControls } from './DecisionControls';
 import { useState } from 'react';
 import { allNodes, bindingFor, clone, executable, type Document, type Runtime } from './domain';
@@ -183,14 +183,6 @@ export function RuntimeEditor(p: {
       ))}
     </>
   );
-}
-
-function scriptCommandLabel(command: unknown): string {
-  return Array.isArray(command) &&
-    command.length > 0 &&
-    command.every((arg) => typeof arg === 'string')
-    ? command.join(' ')
-    : 'Invalid command';
 }
 
 type ModelPickerProps = Parameters<typeof ModelPicker>[0];
