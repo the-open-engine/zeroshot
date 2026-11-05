@@ -2,7 +2,7 @@
 
 # zeroshot
 
-**An open-source engine for autonomous software production.**
+**A multi-agent orchestration framework for autonomous software development.**
 
 [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Discord](https://theopenengine.com/discord) · [Docs](https://zeroshot.sh/docs/) · [Blog](https://theopenengine.com/blog/)
 
@@ -10,17 +10,13 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/the-open-engine/zeroshot/ci.yml?branch=main&style=flat&label=build&labelColor=171411)](https://github.com/the-open-engine/zeroshot/actions/workflows/ci.yml?query=branch%3Amain)
 [![License: MIT](https://img.shields.io/badge/license-MIT-171411?style=flat)](LICENSE)
 
-&nbsp;
-
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/brand/social/starred-by-dark.png"><img alt="Starred by engineers at 300+ companies, including Google, Microsoft, Amazon, NVIDIA, Meta, GitHub and Cloudflare" src="docs/brand/social/starred-by-light.png" width="435"></picture>
-
 </div>
 
 Single agents have a reliability ceiling. As context grows and complexity compounds, requirements
-get buried, assumptions go unchallenged, and shortcuts become harder to catch. The agent can
-optimize for completion while losing track of what correctness requires.
+get buried, assumptions go unchallenged, and shortcuts start to accumulate. The agent will
+optimize for completion and lose track of what correctness requires.
 
-Independent, adversarial review creates a way through that ceiling. A reviewer starts with fresh
+Independent, adversarial review fixes that. A reviewer starts with fresh
 context and looks for reasons the work should fail. Rejection turns those failures into concrete
 repair tasks. Each revision faces renewed scrutiny, allowing the system to recover from mistakes
 that would otherwise survive all the way to “done.”
@@ -31,23 +27,38 @@ enforces the process.
 
 ## Build your own graph
 
-This graph adds a security review when a change touches authentication, payments, or migrations:
+An example graph: independent reviews, end-to-end testing, and CI must pass before merge.
 
 ```text
-worker ◄─────────── any "no" ────┐
-  ▼                              │
-risk check                       │
-  ├─ auth, payments, migration?  │
-  │    ▼                         │
-  │  security review ─────── no ─┤
-  ▼    ▼                         │
-acceptance + code review ─── no ─┘
-  ▼ both yes
-deliver
+                           ┌─────────────────┐
+                           │       Goal      │
+                           └────────┬────────┘
+                                    ▼
+┌───────────────┐          ┌─────────────────┐
+│     Repair    ├─────────▶┤      Worker     │
+└───────┬───────┘          └────────┬────────┘
+        ▲             ┌─────────────┴─────────────┐
+        │             ▼                           ▼
+        │  ┌─────────────────────┐     ┌─────────────────────┐
+        │  │  Acceptance review  │     │     Code review     │
+        │  └──────────┬──────────┘     └──────────┬──────────┘
+        │             │                           │
+        │             └─────────────┬─────────────┘
+        ├◀─── either rejects ───────┤
+        │                           │  both approve
+        │                           ▼
+        │                  ┌─────────────────┐
+        ├◀───── fail ──────┤ End-to-end test │
+        │                  └────────┬────────┘
+        │                           ▼  pass
+        │                        ┌─────┐     ┌─────┐        ┌───────┐
+        │                        │  PR ├────▶┤  CI ├─pass──▶┤ Merge │
+        │                        └─────┘     └──┬──┘        └───────┘
+        └◀───────────── fail ───────────────────┘
 ```
 
-Build your own graph or adapt a template, then save it as a
-[reusable profile](docs/zeroshot-cli.md#zeroshot-profile-set).
+Save your graph as a [reusable profile](docs/zeroshot-cli.md#zeroshot-profile-set)
+and run the same process across tasks.
 
 See more graph examples on [zeroshot.sh](https://zeroshot.sh/#one-graph).
 
@@ -63,7 +74,8 @@ This installs skills for Claude Code, Codex, Copilot CLI and Pi. Open your agent
 design a zeroshot graph for this repo
 ```
 
-It reads the repo and helps you choose the graph, models, and delivery. Then plan a task:
+The skill reads your repo and builds the graph with you: agents, models, review gates, and
+delivery. Then plan a task:
 
 ```text
 plan this with zeroshot: let users export their data as CSV
@@ -75,8 +87,8 @@ Run the plan:
 zeroshot it
 ```
 
-Watch with `zeroshot ui`. Runs happen locally using your agent's existing login, subscriptions
-included. See [installation options](docs/getting-started/install.md) to skip skill installation.
+Run locally with your agent's existing login and subscription. Watch with `zeroshot ui`.
+See [installation options](docs/getting-started/install.md) to skip skill installation.
 
 ### Edit a graph directly
 
