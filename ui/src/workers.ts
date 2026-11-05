@@ -93,3 +93,11 @@ export function applyWorker(
 export function isDeliveryKind(kind: unknown): boolean {
   return kind === 'git_delivery' || kind === 'comment_delivery';
 }
+
+export function scriptCommandLabel(command: unknown): string {
+  return Array.isArray(command) &&
+    command.length > 0 &&
+    command.every((arg) => typeof arg === 'string')
+    ? command.join(' ')
+    : 'Invalid command';
+}

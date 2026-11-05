@@ -45,9 +45,9 @@ impl SessionFactory for DeliveryLoopLane {
                 SessionFactory::open(self.delivery.as_ref(), invocation, environment).await
             }
             NodeRuntimeBinding::Agent { .. } => Ok(Arc::new(RepairSession)),
-            NodeRuntimeBinding::Decision { .. } | NodeRuntimeBinding::CommentDelivery { .. } => {
-                Err(NodeRunnerError::InvalidRole)
-            }
+            NodeRuntimeBinding::Script { .. }
+            | NodeRuntimeBinding::Decision { .. }
+            | NodeRuntimeBinding::CommentDelivery { .. } => Err(NodeRunnerError::InvalidRole),
         }
     }
 }

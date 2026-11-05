@@ -310,9 +310,9 @@ impl SessionFactory for DeliveryLane {
         environment: &ResolvedEnvironment,
     ) -> Result<Arc<dyn NodeSession>, NodeRunnerError> {
         match invocation.binding {
-            NodeRuntimeBinding::Decision { .. } | NodeRuntimeBinding::CommentDelivery { .. } => {
-                Err(NodeRunnerError::InvalidRole)
-            }
+            NodeRuntimeBinding::Script { .. }
+            | NodeRuntimeBinding::Decision { .. }
+            | NodeRuntimeBinding::CommentDelivery { .. } => Err(NodeRunnerError::InvalidRole),
             NodeRuntimeBinding::GitDelivery { .. } => {
                 SessionFactory::open(&self.delivery, invocation, environment).await
             }

@@ -477,6 +477,7 @@ pub(crate) fn executable_runtime_roles(root: &GraphNode) -> Vec<(NodeName, bool)
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RuntimeRole {
+    Script,
     Agent,
     Decision,
     GitDelivery,
@@ -588,6 +589,7 @@ mod tests;
 
 fn runtime_role(binding: &NodeRuntimeBinding) -> RuntimeRole {
     match binding {
+        NodeRuntimeBinding::Script { .. } => RuntimeRole::Script,
         NodeRuntimeBinding::Agent { .. } => RuntimeRole::Agent,
         NodeRuntimeBinding::Decision { .. } => RuntimeRole::Decision,
         NodeRuntimeBinding::GitDelivery { .. } => RuntimeRole::GitDelivery,

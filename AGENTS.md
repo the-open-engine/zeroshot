@@ -241,6 +241,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `maxTokens` on an agent binding; they are declarations rather than catalog knowledge, are written
   only to the Pi gateway model entry when supplied, and stay absent so the provider keeps its own
   defaults otherwise. Never infer either value from the model identifier.
+- A `script` binding executes an argv program on an existing step without instructions. The local
+  adapter in `native_v2_candidate::script` uses the shared process runner, bounded JSON stdin/stdout,
+  authoritative output validation, connection redaction and confirmed process-tree cleanup. It does
+  not invoke a shell or inherit ambient provider keys. Local-only placement is enforced both before
+  remote submission and at candidate construction. Keep service lifecycle outside the runtime.
 - A `decision` runtime binding runs one TypeSafe-compatible System One Choice request on an
   existing verifier, without a harness, tools, host context, or Active Memory. The verifier's
   instructions supply its question and its single signal supplies the options, excluding the
@@ -1196,7 +1201,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Python test doubles use `openengine_cluster_testkit::fixture::python3_script`, which resolves
   the test PATH's actual interpreter before entering a pinned or cleared child environment.
 - `.opcore.json` owns the full-source Opcore policy. `.github/workflows/opcore.yml` runs the Fast
-  provider and Cargo with warnings denied on every PR and main commit. Cargo uses the complete checkout
+  provider and Cargo with warnings denied except for root-README-only changes, identified by the
+  shared CI classifier. Cargo uses the complete checkout
   because Opcore's Rust snapshot omits embedded Python assets. The two exact PowerShell exclusions
   reflect unsupported parsing; the Windows native CI lane still runs those scripts.
 - Preserve bounded values, explicit overflow, cancellation safety, and exact source provenance at
@@ -1233,7 +1239,12 @@ python -m mkdocs build --strict
 ## Release convention
 
 - CI has native, Python, repository-tooling, npm-package, and strict-documentation lanes plus stable
-  aggregate `required`. On PRs, that aggregate waits for Greptile's latest review check on the exact
+  aggregate `required`. Root-README-only changes use a lightweight README lane for formatting, local
+  links, and documentation contracts, without Rust or distribution checks. Mixed changes keep every
+  applicable lane. `.github/select-ci-lanes.sh` shares history selection between CI and Opcore;
+  empty, unavailable, or manually dispatched history selects full checks. The README lane participates
+  in `required`, and missing or failed results block delivery.
+  On PRs, that aggregate waits for Greptile's latest review check on the exact
   head to complete; findings remain review input for the worker rather than automatic CI failures.
   Merge groups use the completed PR gate because Greptile does not review merge-group commits.
   Native changes also require macOS product and test compilation with the UI

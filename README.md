@@ -16,11 +16,18 @@
 
 </div>
 
-zeroshot is a framework for building and running your own multi-agent workflows. Define the
-topology of your graph, choose the agents and models, and set the checks and repair loops.
-Start with a built-in graph or build your own. The engine enforces the execution of your graph.
+Single agents have a reliability ceiling. As context grows and complexity compounds, requirements
+get buried, assumptions go unchallenged, and shortcuts become harder to catch. The agent can
+optimize for completion while losing track of what correctness requires.
 
-Think CI starting at the issue.
+Independent, adversarial review creates a way through that ceiling. A reviewer starts with fresh
+context and looks for reasons the work should fail. Rejection turns those failures into concrete
+repair tasks. Each revision faces renewed scrutiny, allowing the system to recover from mistakes
+that would otherwise survive all the way to “done.”
+
+zeroshot is a multi-agent framework built around this cycle. Define your graph topology, choose
+your agents and models, and make independent approval a requirement for delivery. The engine
+enforces the process.
 
 ## Build your own graph
 
@@ -39,227 +46,54 @@ acceptance + code review ─── no ─┘
 deliver
 ```
 
-Ask for a CSV export, and the worker implements it. If acceptance review finds that the export
-includes another user's data, the rejection goes back to the worker. The revised change goes
-through the reviews again. This example delivers only after its required reviews approve, and
-stops if the configured repair bound is exhausted.
+Build your own graph or adapt a template, then save it as a
+[reusable profile](docs/zeroshot-cli.md#zeroshot-profile-set).
 
-Reviewers start in a fresh session and can run a different model. Independent review matters. In
-[our study](https://theopenengine.com/blog/review-loop/), all 100 sessions told to check their own
-work stopped after one pass.
-
-This is one graph you can build. Shape the roles, checks, branches, and repair paths around your
-repo's requirements, then save the process as a reusable profile. Delivery can keep accepted work
-local, push a branch, open a PR, or take it through CI and review feedback to a merge.
-
-See the difference on zeroshot.sh: [a flight game](https://zeroshot.sh/#flight-demo) and
-[a landing page](https://zeroshot.sh/#design-reviewer), each built by an agent alone and again through
-a zeroshot graph.
-
-## Who is this for?
-
-- Senior engineers who care about correctness and reproducibility
-- Teams automating PR workflows and code review gates
-- Infra/platform teams standardizing agentic workflows
-- Open-source maintainers working through issue backlogs
-- AI power users who want verification, not vibes
+See more graph examples on [zeroshot.sh](https://zeroshot.sh/#one-graph).
 
 ## Get started
-
-Install it once:
 
 ```bash
 npm install -g @the-open-engine-company/zeroshot
 ```
 
-This also installs the zeroshot skills for Claude Code, Codex, Copilot CLI and Pi. Open one of them
-in your repo and ask:
+This installs skills for Claude Code, Codex, Copilot CLI and Pi. Open your agent in a repo and ask:
 
 ```text
-Use the zeroshot-graph-design skill to turn how we check changes
-in this repo into a zeroshot graph.
+design a zeroshot graph for this repo
 ```
 
-It reads your build, test and CI setup, asks how you want changes delivered, and shows you the graph
-and every agent's instructions before saving anything. Then it asks which models to use and saves the
-graph, as your default if you want.
-
-Then plan the work before you hand it over:
+It reads the repo and helps you choose the graph, models, and delivery. Then plan a task:
 
 ```text
 plan this with zeroshot: let users export their data as CSV
 ```
 
-Your agent reads the code, asks only what changes the outcome, and writes a plan where every
-acceptance criterion comes with a check: a test, a command or an end-to-end scenario. You decide what
-done means. Then:
+Run the plan:
 
 ```text
 zeroshot it
 ```
 
-The worker builds from the plan and the reviewers judge the result against those criteria. When the
-run finishes, your agent tells you what got rejected and what got fixed. Watch it live with
-`zeroshot ui`.
+Watch with `zeroshot ui`. Runs happen locally using your agent's existing login, subscriptions
+included. See [installation options](docs/getting-started/install.md) to skip skill installation.
 
-The graph also decides where finished work goes: kept local, pushed as a branch, opened as a PR,
-or taken through your CI and review comments to a merge.
+### Edit a graph directly
 
-<p align="center">
-  <a href="https://zeroshot.sh/?utm_source=github&amp;utm_medium=readme&amp;utm_campaign=zeroshot#one-graph">
-    <picture>
-      <source media="(prefers-reduced-motion: reduce) and (max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/example-graph-tall-dark.png">
-      <source media="(prefers-reduced-motion: reduce) and (max-width: 640px)" srcset="docs/assets/example-graph-tall-light.png">
-      <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="docs/assets/example-graph-wide-dark.png">
-      <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/example-graph-wide-light.png">
-      <source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="docs/assets/example-graph-tall-dark.gif">
-      <source media="(max-width: 640px)" srcset="docs/assets/example-graph-tall-light.gif">
-      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/example-graph-wide-dark.gif">
-      <img alt="An example graph: goal, worker, parallel acceptance and code review, end-to-end test, PR, CI, then merge. A failed review, test or CI run returns through repair, implementation and review before delivery is retried. This illustrative animation is not a recorded run." src="docs/assets/example-graph-wide-light.gif">
-    </picture>
-  </a>
-</p>
-
-Runs happen on your machine with the login your agent already uses, subscriptions included. The CLI
-is free and MIT licensed.
-
-### Customize a graph from the CLI
-
-You can also edit and run graph files directly. From your repo, export the built-in workflow with
-delivery disabled, so accepted changes stay local:
+Export a template with Git delivery disabled:
 
 ```bash
 zeroshot template show software-change --delivery none > graph.json
 ```
 
-Edit `graph.json` to change agent instructions, review criteria, branches, or repair limits.
-The [review loop guide](docs/guides/review-loop.md) includes a complete custom graph with two
-parallel reviewers and a bounded repair loop.
+Edit the graph, choose a runtime, and run it. The [review loop guide](docs/guides/review-loop.md)
+has complete graph, input, and runtime files; the [CLI quick start](docs/getting-started/first-run.md)
+shows validation and execution.
 
-Create `input.json` with a task for your repo:
+## Hosting
 
-```json
-{ "task": "Let users export their data as CSV, with tests." }
-```
-
-Create `runtime.json` to choose the harness and model. This example uses your local Codex login;
-replace `YOUR_MODEL_ID` with a model your provider supports:
-
-```json
-{ "harness": "codex", "provider": "openai", "model": "YOUR_MODEL_ID" }
-```
-
-Validate the graph, input, and runtime before starting any agents:
-
-```bash
-zeroshot run --title "Add CSV export" --graph graph.json \
-  --input input.json --uniform-runtime-config runtime.json --validate-only
-```
-
-Then run it. The worker edits the selected repo:
-
-```bash
-zeroshot run --title "Add CSV export" --graph graph.json \
-  --input input.json --uniform-runtime-config runtime.json
-```
-
-The uniform runtime uses one model for all agents. You can also
-[choose a different harness or model per node](docs/guides/review-loop.md#cross-vendor-review)
-and [save the graph as a reusable profile](docs/zeroshot-cli.md#zeroshot-profile-set).
-
-## Skills
-
-`npm install` adds four skills to Claude Code (`~/.claude/skills`) and to Codex, Copilot CLI and Pi
-(`~/.agents/skills`). Ask for them by name, or just say what you want.
-
-Set `ZEROSHOT_SKIP_SKILLS=1` to [skip automatic skill installation](docs/getting-started/install.md).
-
-| Skill                   | What it does                                                            | Try                                     |
-| ----------------------- | ----------------------------------------------------------------------- | --------------------------------------- |
-| `zeroshot-graph-design` | Reads your repo, asks a few questions, designs the graph, saves it      | "design a zeroshot graph for this repo" |
-| `zeroshot-plan`         | Turns an idea or issue into a plan with checkable acceptance criteria   | "plan this with zeroshot: ..."          |
-| `zeroshot`              | Starts, follows and troubleshoots runs, locally or on zeroshot Platform | "zeroshot it"                           |
-| `zeroshot-memory-init`  | Builds Active Memory from your past local runs                          | "initialize zeroshot memory"            |
-
-## Run it for the whole team
-
-Ask your agent to save the graph to [zeroshot Platform](https://app.zeroshot.sh/docs) instead, and
-everyone's tasks go through the same process. Platform runs work in parallel, off your laptops, on
-your own model API keys.
-
-To keep execution on your own infrastructure, run the Docker target:
-
-```bash
-docker run --detach --restart unless-stopped --name zeroshot-target \
-  -p 127.0.0.1:8080:8080 \
-  -v zeroshot-data:/var/lib/zeroshot \
-  ghcr.io/the-open-engine/zeroshot-target:latest
-
-zeroshot target add local --url http://127.0.0.1:8080 --direct
-```
-
-## Architecture
-
-zeroshot is an engine that runs a graph of coding agents and owns the control flow.
-
-- The graph says which agents run, in what order, what each must return, and where results go.
-- Admission checks the graph, its bounds, the runtime plan and the input before anything runs.
-- The engine runs a node, checks its typed output, records it, then picks the next edge.
-- Each node runs on its own harness and model through an adapter.
-- Every event lands in a durable ledger, so a crashed run can resume.
-
-```text
-your agent + zeroshot skills
-      │
-      ▼
-zeroshot CLI ── checks the graph
-      │         before anything runs
-      ▼
-target ──────── local · Docker · Platform
-      │
-      ▼
-engine ──────── runs a node, checks its
-      │         output, picks the next edge
-      ├──▶ harness adapters: Claude Code,
-      │    Codex, Copilot CLI, Pi
-      ├──▶ durable ledger: resumable runs
-      └──▶ delivery: local, branch, PR, merge
-```
-
-## Command reference
-
-The easiest way to use zeroshot is through your agent: the skills run these commands for you. For
-scripts, CI or debugging:
-
-```bash
-# Run
-zeroshot run --title "Add CSV export" --profile local:my-graph --input input.json
-zeroshot run --title "Add CSV export" --profile local:my-graph --input input.json --validate-only
-
-# Follow
-zeroshot list
-zeroshot status RUN_ID
-zeroshot watch RUN_ID
-zeroshot logs RUN_ID
-zeroshot ui                  # browser UI at http://127.0.0.1:4173/ui/
-
-# Control
-zeroshot resume RUN_ID
-zeroshot force-stop RUN_ID
-
-# Graphs and profiles
-zeroshot template list
-zeroshot template show software-change
-zeroshot profile list
-zeroshot profile set my-graph --graph graph.json --runtime-config runtime.json
-zeroshot profile default my-graph
-
-# Targets
-zeroshot target login platform
-zeroshot target add my-target --url https://zeroshot.example.com
-```
-
-Every command and flag is in the [CLI reference](docs/zeroshot-cli.md).
+Run locally, [self-host with Docker](docker/zeroshot-target/README.md), or share graphs and run
+on [zeroshot Platform](https://app.zeroshot.sh/docs) using your own model API keys.
 
 ## What users say
 
@@ -273,39 +107,17 @@ Every command and flag is in the [CLI reference](docs/zeroshot-cli.md).
 >
 > — Fav
 
-Talk to the founders and power users in [Discord](https://theopenengine.com/discord).
-
 ## Docs
 
-- [Build a review loop](docs/guides/review-loop.md): a complete graph with two reviewers and a repair loop
-- [Graph contract](docs/reference/cluster/graph.md)
-- [Delivery to GitHub and GitLab](docs/guides/forge-delivery.md): `software-change` defaults to PR delivery.
-  Runs can also stay local, push a branch or merge.
-- [Auto-research](docs/concepts/execution.md#built-in-templates-are-ordinary-graphs) and
-  [Active Memory](docs/guides/active-memory.md)
-- [CLI reference](docs/zeroshot-cli.md) and [first run from the CLI](docs/getting-started/first-run.md)
-- [Target image guide](docker/zeroshot-target/README.md), [Python SDK](sdks/python/README.md),
-  [Cluster API](https://zeroshot.sh/docs/current/reference/cluster/api/)
+- [Graph contract](docs/reference/cluster/graph.md) and [execution](docs/concepts/execution.md)
+- [CLI reference](docs/zeroshot-cli.md), [Python SDK](sdks/python/README.md), and [Cluster API](https://zeroshot.sh/docs/current/reference/cluster/api/)
+- [Delivery](docs/guides/forge-delivery.md): `software-change` defaults to PR delivery. Runs can also stay local, push a branch, or merge.
+- [Active Memory](docs/guides/active-memory.md)
 
-[Opcore](https://github.com/the-open-engine/opcore) gives coding agents feedback on each edit while
-they write code.
+## Contributing
 
-## Community
-
-Ask questions or join as a contributor in [Discord](https://theopenengine.com/discord). Report bugs
-in [GitHub Issues](https://github.com/the-open-engine/zeroshot/issues).
-
-## Development
-
-```bash
-npm ci
-npm run check
-cargo test --workspace # Unix; Windows: powershell -NoProfile -File scripts/test-windows.ps1
-```
-
-See [UI development](ui/README.md), [CONTRIBUTING.md](CONTRIBUTING.md),
-[PUBLISHING.md](PUBLISHING.md) and [SECURITY.md](SECURITY.md).
-
-## License
+[Development guide](CONTRIBUTING.md) · [UI development](ui/README.md) ·
+[Publishing](PUBLISHING.md) · [Security](SECURITY.md) ·
+[Issues](https://github.com/the-open-engine/zeroshot/issues) · [Discord](https://theopenengine.com/discord)
 
 MIT. See [LICENSE](LICENSE).
