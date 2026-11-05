@@ -1,2 +1,0 @@
-[console_scripts]
-mkdocs-get-deps = mkdocs_get_deps.__main__:cli
