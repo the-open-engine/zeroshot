@@ -2,7 +2,7 @@
 
 # zeroshot
 
-**Independent, adversarial review with mechanically enforced execution.**
+**A multi-agent orchestration framework for autonomous software development.**
 
 [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Discord](https://theopenengine.com/discord) · [Docs](https://zeroshot.sh/docs/) · [Blog](https://theopenengine.com/blog/)
 
