@@ -15,8 +15,8 @@ mod hosted_runs;
 mod http_error;
 mod profiles;
 
-use hosted_runs::{build_hosted_runs_descriptor, build_merge_plans_descriptor};
-pub(super) use hosted_runs::{HostedRunsDescriptor, MergePlansDescriptor};
+use hosted_runs::{build_hosted_runs_descriptor, build_stacks_descriptor};
+pub(super) use hosted_runs::{HostedRunsDescriptor, StacksDescriptor};
 #[cfg(feature = "ui")]
 pub(super) use history::{RunHistoryDescriptor, build_run_history_descriptor};
 pub(super) use http_error::{http_error, read_success_json, read_success_json_with_limit};
@@ -48,7 +48,7 @@ pub(super) struct HostedAuthDescriptor {
     pub(super) device_grant_type: String,
     pub(super) session_endpoint: Url,
     pub(super) hosted_runs: HostedRunsDescriptor,
-    pub(super) merge_plans: Option<MergePlansDescriptor>,
+    pub(super) stacks: Option<StacksDescriptor>,
     pub(super) connections: Option<ConnectionsDescriptor>,
     pub(super) run_profiles: Option<RunProfilesDescriptor>,
     pub(super) delegations: Option<Url>,
@@ -462,7 +462,7 @@ pub(super) fn build_auth_descriptor(
         device_grant_type: oauth.device_grant_type.clone(),
         session_endpoint: same_origin_path(origin, &session.route_template)?,
         hosted_runs,
-        merge_plans: capabilities.merge_plans,
+        stacks: capabilities.stacks,
         connections: capabilities.connections,
         run_profiles: capabilities.run_profiles,
         delegations: wire
@@ -478,7 +478,7 @@ pub(super) fn build_auth_descriptor(
 }
 
 struct OptionalCapabilities {
-    merge_plans: Option<MergePlansDescriptor>,
+    stacks: Option<StacksDescriptor>,
     connections: Option<ConnectionsDescriptor>,
     run_profiles: Option<RunProfilesDescriptor>,
 }
@@ -488,7 +488,7 @@ fn build_optional_capabilities(
     extensions: &openengine_cluster_protocol::TargetDiscoveryExtensions,
 ) -> Result<OptionalCapabilities, TargetAuthorityError> {
     Ok(OptionalCapabilities {
-        merge_plans: build_merge_plans_descriptor(origin, extensions)?,
+        stacks: build_stacks_descriptor(origin, extensions)?,
         connections: build_connections_descriptor(origin, extensions)?,
         run_profiles: build_profiles_descriptor(origin, extensions)?,
     })

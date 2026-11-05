@@ -8,7 +8,7 @@ use openengine_cluster_client::{
 };
 use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
-    ConnectionMutationResult, ConnectionSetRequest, Cursor, MergePlan, MergePlanId,
+    ConnectionMutationResult, ConnectionSetRequest, Cursor, Stack, StackId,
     RunAttachEventNotification, RunAttachParams, RunForceParams, RunListParams,
     RunConnectionRequirements, RunLogEventNotification, RunLogsParams, RunProfile,
     RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
@@ -20,7 +20,7 @@ use tokio::sync::mpsc;
 use super::{
     CliRunForceResult, CliRunListResult, CliRunStatus, CliRunStatusResult,
     CliRunWatchEventNotification, CliSubscription, CliSubscriptionItem, NativeV2CliBackend,
-    NativeV2CliError, PreparedMergePlanRequest, PreparedRunRequest, TargetAdd,
+    NativeV2CliError, PreparedStackRequest, PreparedRunRequest, TargetAdd,
 };
 
 #[path = "oecp/errors.rs"]
@@ -252,28 +252,28 @@ where
             .await
     }
 
-    async fn merge_plan_submit(
+    async fn stack_submit(
         &self,
         target: &str,
-        request: PreparedMergePlanRequest,
-    ) -> Result<MergePlan, NativeV2CliError> {
-        self.connector.merge_plan_submit(target, request).await
+        request: PreparedStackRequest,
+    ) -> Result<Stack, NativeV2CliError> {
+        self.connector.stack_submit(target, request).await
     }
 
-    async fn merge_plan_status(
+    async fn stack_status(
         &self,
         target: &str,
-        plan_id: MergePlanId,
-    ) -> Result<MergePlan, NativeV2CliError> {
-        self.connector.merge_plan_status(target, plan_id).await
+        stack_id: StackId,
+    ) -> Result<Stack, NativeV2CliError> {
+        self.connector.stack_status(target, stack_id).await
     }
 
-    async fn merge_plan_force(
+    async fn stack_force(
         &self,
         target: &str,
-        plan_id: MergePlanId,
-    ) -> Result<MergePlan, NativeV2CliError> {
-        self.connector.merge_plan_force(target, plan_id).await
+        stack_id: StackId,
+    ) -> Result<Stack, NativeV2CliError> {
+        self.connector.stack_force(target, stack_id).await
     }
 
     async fn run_submit(

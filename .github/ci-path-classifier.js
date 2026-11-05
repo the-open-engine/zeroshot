@@ -54,6 +54,9 @@ const TOOLING_PATHS = new Set([
 const MULTI_LANE_PATHS = new Map([
   ['.github/workflows/release-python.yml', ['python', 'tooling']],
   ['distribution/zeroshot-targets.json', ['native', 'npm']],
+  // stack-manifests.test.js validates the guide's and the zeroshot-plan skill's stack manifests;
+  // native changes, including the stack validator, already select the tooling lane that runs it.
+  ['docs/guides/stacks.md', ['docs', 'tooling']],
   ['docs/reference/cluster/api.md', ['native', 'docs']],
   ['docs/zeroshot-cli.html', ['native', 'docs']],
   ['docs/zeroshot-cli.md', ['native', 'docs']],
@@ -61,6 +64,7 @@ const MULTI_LANE_PATHS = new Map([
   // docs-agent-contract.test.js checks the package's product description and README.
   ['npm/zeroshot/README.md', ['npm', 'docs']],
   ['npm/zeroshot/package.json', ['npm', 'docs']],
+  ['npm/zeroshot/skills/zeroshot-plan/SKILL.md', ['npm', 'tooling']],
   ['package-lock.json', ['tooling', 'npm']],
   ['package.json', ['tooling', 'npm']],
   ['scripts/distribution.js', ['native', 'npm']],

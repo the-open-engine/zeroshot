@@ -7,7 +7,7 @@ use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
     ConnectionMutationResult, ConnectionSetRequest,
 };
-use openengine_cluster_protocol::{MergePlan, MergePlanId, MergePlanSubmitRequest};
+use openengine_cluster_protocol::{Stack, StackId, StackSubmitRequest};
 use openengine_cluster_protocol::{
     RunForceParams, RunListParams, RunLogEventNotification, RunLogsParams, RunStatusParams,
     RunSubmitResult, RunWatchParams, TargetOecpSessionRequest, TargetRunRequest,
@@ -151,26 +151,26 @@ pub trait TargetControlAuthority: Send + Sync {
     ) -> Result<RunSubmitResult, TargetAuthorityError> {
         Err(TargetAuthorityError::new("profile runs are unavailable"))
     }
-    async fn merge_plan_submit(
+    async fn stack_submit(
         &self,
         _target: &TargetRecord,
-        _request: &MergePlanSubmitRequest,
-    ) -> Result<MergePlan, TargetAuthorityError> {
-        merge_plan_unavailable()
+        _request: &StackSubmitRequest,
+    ) -> Result<Stack, TargetAuthorityError> {
+        stack_unavailable()
     }
-    async fn merge_plan_status(
+    async fn stack_status(
         &self,
         _target: &TargetRecord,
-        _plan_id: &MergePlanId,
-    ) -> Result<MergePlan, TargetAuthorityError> {
-        merge_plan_unavailable()
+        _stack_id: &StackId,
+    ) -> Result<Stack, TargetAuthorityError> {
+        stack_unavailable()
     }
-    async fn merge_plan_force(
+    async fn stack_force(
         &self,
         _target: &TargetRecord,
-        _plan_id: &MergePlanId,
-    ) -> Result<MergePlan, TargetAuthorityError> {
-        merge_plan_unavailable()
+        _stack_id: &StackId,
+    ) -> Result<Stack, TargetAuthorityError> {
+        stack_unavailable()
     }
     async fn hosted_run_resume(
         &self,
@@ -226,10 +226,8 @@ pub trait TargetControlAuthority: Send + Sync {
     ) -> Result<CliRunForceResult, TargetAuthorityError>;
 }
 
-fn merge_plan_unavailable<T>() -> Result<T, TargetAuthorityError> {
-    Err(TargetAuthorityError::new(
-        "hosted merge plans are unavailable",
-    ))
+fn stack_unavailable<T>() -> Result<T, TargetAuthorityError> {
+    Err(TargetAuthorityError::new("hosted stacks are unavailable"))
 }
 
 fn profile_unavailable<T>() -> Result<T, TargetAuthorityError> {

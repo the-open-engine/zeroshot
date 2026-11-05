@@ -1,0 +1,51 @@
+{#- Template for "Yields" sections in docstrings.
+
+This template renders a list of documented yielded values (generators) in the format
+specified with the [`docstring_section_style`][] configuration option.
+
+Context:
+  section (griffe.DocstringSectionAttributes): The section to render.
+-#}
+
+{% block logs scoped %}
+  {#- Logging block.
+
+  This block can be used to log debug messages, deprecation messages, warnings, etc.
+  -#}
+  {{ log.debug() }}
+{% endblock %}
+
+{% import "language.html.jinja" as lang with context %}
+{#- Language module providing the `t` translation method. -#}
+
+<table class="field-list">
+  <colgroup>
+    <col class="field-name" />
+    <col class="field-body" />
+  </colgroup>
+  <tbody valign="top">
+    <tr class="field">
+      <th class="field-name">{{ section.title or lang.t("Yields:") }}</th>
+      <td class="field-body">
+        <ul class="first simple">
+          {% for yields in section.value %}
+            <li>
+              {% if yields.name %}<b></code>{{ yields.name }}</code></b>{% endif %}
+              {% if yields.annotation %}
+                {% with expression = yields.annotation, backlink_type = "yielded-by" %}
+                  {% if yields.name %}({% endif %}
+                  <code>{% include "expression.html.jinja" with context %}</code>
+                  {% if yields.name %}){% endif %}
+                {% endwith %}
+              {% endif %}
+              –
+              <div class="doc-md-description">
+                {{ yields.description|convert_markdown(heading_level, html_id, autoref_hook=autoref_hook) }}
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      </td>
+    </tr>
+  </tbody>
+</table>

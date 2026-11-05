@@ -1,0 +1,87 @@
+{#- Template for type parameters.
+
+This template renders the type parameters of a generic obj.
+It iterates over the type parameters of the object to rebuild the signature.
+The signature is the list of type parameters of a generic object, including their names, default values, and bound or constraints.
+
+Context:
+  obj (griffe.Object): The object to render.
+  config (dict): The configuration options.
+-#}
+
+{%- if config.show_signature_type_parameters -%}
+  {%- block logs scoped -%}
+    {#- Logging block.
+
+    This block can be used to log debug messages, deprecation messages, warnings, etc.
+    -#}
+    {{ log.debug("Rendering type parameters") }}
+  {%- endblock logs -%}
+
+  {%- with ns = namespace(annotation="", equal="=", default=False) -%}
+    {%- if obj.is_generic -%}
+      [
+      {%- for type_parameter in obj.type_parameters -%}
+        {#- Prepare type bound or constraints. -#}
+        {%- if config.show_signature_annotations and type_parameter.annotation is not none -%}
+          {%- set ns.equal = " = " -%}
+          {%- if config.separate_signature and config.signature_crossrefs -%}
+            {%- with expression = type_parameter.annotation -%}
+              {%- set ns.annotation -%}: {% include "expression.html.jinja" with context %}{%- endset -%}
+            {%- endwith -%}
+          {%- else -%}
+            {%- set ns.annotation = ": " + type_parameter.annotation|safe -%}
+          {%- endif -%}
+        {%- else -%}
+          {%- set ns.equal = "=" -%}
+          {%- set ns.annotation = "" -%}
+        {%- endif -%}
+
+        {#- Prepare default value. -#}
+        {%- if type_parameter.default is not none -%}
+          {%- set ns.default = True -%}
+        {%- else -%}
+          {%- set ns.default = False -%}
+        {%- endif -%}
+
+        {#- Prepare name. -#}
+        {%- set type_param_prefix -%}
+          {%- if type_parameter.kind == "type-var-tuple" -%}
+            *
+          {%- elif type_parameter.kind == "param-spec" -%}
+            **
+          {%- endif -%}
+        {%- endset -%}
+
+        {#- Render type parameter name with optional cross-reference to its heading. -#}
+        {{ type_param_prefix }}
+        {%- if config.separate_signature and config.type_parameter_headings and config.signature_crossrefs -%}
+          {%- filter stash_crossref(length=type_parameter.name|length) -%}
+            <autoref identifier="{{ obj.path }}[{{ type_param_prefix }}{{ type_parameter.name }}]" optional>{{ type_parameter.name }}</autoref>
+          {%- endfilter -%}
+        {%- else -%}
+          {{ type_parameter.name }}
+        {%- endif -%}
+
+        {#- Render type parameter bound or constraints. -#}
+        {{ ns.annotation }}
+
+        {#- Render type parameter default value. -#}
+        {%- if ns.default -%}
+          {{ ns.equal }}
+          {%- if config.signature_crossrefs and config.separate_signature -%}
+            {%- with expression = type_parameter.default -%}
+              {%- include "expression.html.jinja" with context -%}
+            {%- endwith -%}
+          {%- else -%}
+            {{ type_parameter.default|safe }}
+          {%- endif -%}
+        {%- endif -%}
+
+        {%- if not loop.last %}, {% endif -%}
+      {%- endfor -%}
+      ]
+    {%- endif -%}
+
+  {%- endwith -%}
+{%- endif -%}

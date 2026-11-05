@@ -14,7 +14,7 @@ use openengine_cluster_protocol::{
     RunCheckpointsResult, RunResumeFrom, ConnectionDeleteRequest, ConnectionDeleteResult,
     ConnectionKey, ConnectionListRequest, ConnectionListResult, ConnectionMutationResult,
     ConnectionScope, ConnectionSetRequest, Cursor, EnvironmentVariableName, ExecutionRef,
-    IdempotencyKey, MergePlan, MergePlanId, MergePlanRunRequest, MergePlanSource,
+    IdempotencyKey, Stack, StackDelivery, StackId, StackRunRequest, StackSource,
     RunAttachEventNotification, RunAttachParams, RunConnectionRequirements, RunConnectionValues,
     RunForceParams, RunId, RunListParams, RunLogEventNotification, RunLogsParams, RunProfile,
     RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
@@ -240,22 +240,23 @@ impl fmt::Debug for PreparedRunRequest {
     }
 }
 
-/// CLI-materialized hosted merge plan with an explicit unresolved source selector.
+/// CLI-materialized hosted stack with an explicit unresolved source selector.
 #[derive(Clone, PartialEq)]
-pub struct PreparedMergePlanRequest {
+pub struct PreparedStackRequest {
     pub submission_key: IdempotencyKey,
     pub title: RunTitle,
     pub expires_at: String,
-    pub source: MergePlanSource,
+    pub delivery: StackDelivery,
+    pub source: StackSource,
     pub profile: RunProfileSelector,
-    pub runs: Vec<MergePlanRunRequest>,
+    pub runs: Vec<StackRunRequest>,
     pub environment: Option<openengine_cluster_protocol::RuntimeEnvironment>,
     pub connections: RunConnectionValues,
     pub github_token: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MergePlanSubmitCommand {
+pub struct StackSubmitCommand {
     pub target: String,
     pub file: PathBuf,
     pub detach: bool,
@@ -263,9 +264,9 @@ pub struct MergePlanSubmitCommand {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MergePlanSelector {
+pub struct StackSelector {
     pub target: String,
-    pub plan_id: MergePlanId,
+    pub stack_id: StackId,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -361,13 +362,13 @@ pub enum NativeV2CliCommand {
         delivery: TemplateDelivery,
         json: bool,
     },
-    PlanValidate {
+    StackValidate {
         file: PathBuf,
     },
-    PlanSubmit(MergePlanSubmitCommand),
-    PlanStatus(MergePlanSelector),
-    PlanWatch(MergePlanSelector),
-    PlanForceStop(MergePlanSelector),
+    StackSubmit(StackSubmitCommand),
+    StackStatus(StackSelector),
+    StackWatch(StackSelector),
+    StackForceStop(StackSelector),
     Run(Box<RunCommand>),
     List {
         target: Option<String>,
@@ -401,10 +402,13 @@ impl NativeV2CliCommand {
         }
     }
 
-    fn is_plan_operation(&self) -> bool {
+    fn is_stack_operation(&self) -> bool {
         matches!(
             self,
-            Self::PlanSubmit(_) | Self::PlanStatus(_) | Self::PlanWatch(_) | Self::PlanForceStop(_)
+            Self::StackSubmit(_)
+                | Self::StackStatus(_)
+                | Self::StackWatch(_)
+                | Self::StackForceStop(_)
         )
     }
 
@@ -507,8 +511,8 @@ pub enum NativeV2CliError {
     },
     #[error("{0}")]
     RunFailed(Box<RunFailure>),
-    #[error("merge plan finished unsuccessfully")]
-    MergePlanFailed,
+    #[error("stack finished unsuccessfully")]
+    StackFailed,
     #[error("could not write CLI output: {0}")]
     Output(#[from] std::io::Error),
     #[error("could not encode CLI output: {0}")]
@@ -677,33 +681,33 @@ pub trait NativeV2CliBackend: Send + Sync {
         ))
     }
 
-    async fn merge_plan_submit(
+    async fn stack_submit(
         &self,
         _target: &str,
-        _request: PreparedMergePlanRequest,
-    ) -> Result<MergePlan, NativeV2CliError> {
+        _request: PreparedStackRequest,
+    ) -> Result<Stack, NativeV2CliError> {
         Err(NativeV2CliError::Target(
-            "target does not advertise merge plans".to_owned(),
+            "target does not advertise stacks".to_owned(),
         ))
     }
 
-    async fn merge_plan_status(
+    async fn stack_status(
         &self,
         _target: &str,
-        _plan_id: MergePlanId,
-    ) -> Result<MergePlan, NativeV2CliError> {
+        _stack_id: StackId,
+    ) -> Result<Stack, NativeV2CliError> {
         Err(NativeV2CliError::Target(
-            "target does not advertise merge plans".to_owned(),
+            "target does not advertise stacks".to_owned(),
         ))
     }
 
-    async fn merge_plan_force(
+    async fn stack_force(
         &self,
         _target: &str,
-        _plan_id: MergePlanId,
-    ) -> Result<MergePlan, NativeV2CliError> {
+        _stack_id: StackId,
+    ) -> Result<Stack, NativeV2CliError> {
         Err(NativeV2CliError::Target(
-            "target does not advertise merge plans".to_owned(),
+            "target does not advertise stacks".to_owned(),
         ))
     }
 

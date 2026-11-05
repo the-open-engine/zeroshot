@@ -1,0 +1,23 @@
+{#- Summary of attributes. -#}
+
+{% block logs scoped %}
+  {#- Logging block.
+
+  This block can be used to log debug messages, deprecation messages, warnings, etc.
+  -#}
+{% endblock logs %}
+
+{% if not obj.docstring.parsed | selectattr("kind.value", "eq", "attributes") | list %}
+  {% with section = obj.attributes
+      |filter_objects(
+        filters=config.filters,
+        members_list=members_list,
+        inherited_members=config.inherited_members,
+        keep_no_docstrings=config.show_if_no_docstring,
+      )
+      |order_members(config.members_order, members_list)
+      |as_attributes_section(check_public=not members_list)
+    %}
+    {% if section %}{% include "docstring/attributes.html.jinja" with context %}{% endif %}
+  {% endwith %}
+{% endif %}

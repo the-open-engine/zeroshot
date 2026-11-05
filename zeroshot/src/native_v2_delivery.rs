@@ -514,10 +514,15 @@ fn valid_observation(review: &SourceReviewReceipt, observation: &SourceReviewObs
         && observation.head_revision == review.head_revision
 }
 
-fn delivery_branch(run_id: &str) -> String {
+/// Head branch that Git delivery pushes for a delivery run and opens its pull request from.
+///
+/// The branch depends only on the delivery run ID, which recovery successors inherit from the
+/// root attempt, so first delivery, preflight, and every resumed attempt use the same branch.
+#[must_use]
+pub fn delivery_head_branch(delivery_run_id: &RunId) -> String {
     use sha2::{Digest, Sha256};
 
-    let digest = Sha256::digest(run_id.as_bytes());
+    let digest = Sha256::digest(delivery_run_id.as_str().as_bytes());
     let suffix = digest
         .get(..10)
         .unwrap_or(digest.as_slice())

@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use openengine_cluster_protocol::{
-    ConnectionScope, EnvironmentVariableName, ExecutionRef, MergePlanId, RunAttachParams,
+    ConnectionScope, EnvironmentVariableName, ExecutionRef, StackId, RunAttachParams,
     RunDiscardWorkspaceParams, RunForceParams, RunListParams, RunLogsParams, RunProfileName,
     RunProfileScope, RunResumeParams, RunStatusParams, RunTitle, RunWatchParams, RuntimePlan,
     SourceBranchId, SourceRevisionId, StaticConnectionValues,
@@ -393,13 +393,13 @@ async fn wave5_cli_contract_default_backend_bounds_recovery_and_redacts_requests
     let runtime = runtime();
     assert!(
         backend
-            .merge_plan_status("target", MergePlanId::new("plan-default"))
+            .stack_status("target", StackId::new("plan-default"))
             .await
             .is_err()
     );
     assert!(
         backend
-            .merge_plan_force("target", MergePlanId::new("plan-default"))
+            .stack_force("target", StackId::new("plan-default"))
             .await
             .is_err()
     );

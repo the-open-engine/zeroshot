@@ -22,7 +22,7 @@ Commands:
   connection         Inspect and manage named runtime connections
   profile            Manage reusable graph/runtime profiles
   template           Inspect built-in graph templates
-  plan               Validate, submit, and observe hosted merge plans
+  stack              Validate, submit, and observe hosted stacks of dependent runs
   run                Submit a graph run locally or to a named target
   update             Update this executable and managed agent skills to the newest canonical release
   list               List runs as JSON
@@ -891,19 +891,19 @@ Commands:
   help  Print this message or the help of the given subcommand(s)
 ```
 
-### `zeroshot plan`
+### `zeroshot stack`
 
 ```text
-Validate, submit, and observe hosted merge plans
+Validate, submit, and observe hosted stacks of dependent runs
 
-Usage: zeroshot plan <COMMAND>
+Usage: zeroshot stack <COMMAND>
 
 Commands:
-  validate    Validate a merge-plan manifest without contacting a target
-  submit      Atomically submit every node in a merge-plan manifest
-  status      Read a merge plan's aggregate status as JSON
-  watch       Poll a merge plan and stream changed snapshots as NDJSON
-  force-stop  Force every nonterminal run in a merge plan to stop
+  validate    Validate a stack manifest without contacting a target
+  submit      Atomically submit every node in a stack manifest
+  status      Read a stack's aggregate status as JSON
+  watch       Poll a stack and stream changed snapshots as NDJSON
+  force-stop  Force every nonterminal run in a stack to stop
   help        Print this message or the help of the given subcommand(s)
 
 Options:
@@ -914,8 +914,9 @@ MANIFEST
 The JSON manifest is strict and self-contained:
 
   {
-    "schema": "zeroshot.merge-plan/v1",
+    "schema": "zeroshot.stack/v1",
     "title": "Release checkout update",
+    "delivery": "merge",
     "source": {"repository": "owner/repo", "branch": "main"},
     "profile": "org:software-change",
     "expiresAt": "<RFC3339 timestamp within 7 days>",
@@ -925,42 +926,55 @@ The JSON manifest is strict and self-contained:
     }
   }
 
-Every run uses the same source and profile. The profile must contain exactly one current Git merge delivery node;
-pull-request delivery is rejected. Agent bindings must not declare `GH_TOKEN`; only the Git delivery
-binding may declare it. `needs` gates readiness but does not pass output between runs.
+Every run uses the same source and profile. Agent bindings must not declare `GH_TOKEN`; only the Git
+delivery binding may declare it. `needs` gates readiness but does not pass output between runs.
+
+DELIVERY
+`delivery` is required and selects how every run lands:
+
+  merge                  Each run merges into the base branch before the runs that need it start.
+                         The profile must contain exactly one Git merge delivery node (merge@2 or
+                         merge@3). A run may need several runs.
+  stacked_pull_requests  Each run opens a pull request against the branch of the run before it, so
+                         the stack arrives as a chain of pull requests and nothing is merged. The
+                         profile must contain exactly one pull-request delivery node (pr@2).
+                         Validation and submission turn the runs into one linear stack: each run
+                         needs only the run before it, in dependency order with ties broken by run
+                         name. `zeroshot stack validate` prints that order.
+
 Platform assigns every run ID atomically at submission. After a node's dependencies succeed, Platform
-materializes it against an exact source revision. Once materialization completes, `readyAt` is set
-and the node's queue deadline is the earlier of `expiresAt` and seven days after `readyAt`.
-`expiresAt` must be in the future and no more than
-seven days away. Plans cannot be edited or retried in place.
+materializes it against an exact source branch and revision, reported as `sourceBranch` and
+`sourceRevision`. Once materialization completes, `readyAt` is set and the node's queue deadline is
+the earlier of `expiresAt` and seven days after `readyAt`. `expiresAt` must be in the future and no
+more than seven days away. Stacks cannot be edited or retried in place.
 ```
 
-#### `zeroshot plan validate`
+#### `zeroshot stack validate`
 
 ```text
-Validate a merge-plan manifest without contacting a target
+Validate a stack manifest without contacting a target
 
-Usage: zeroshot plan validate <FILE>
+Usage: zeroshot stack validate <FILE>
 
 Arguments:
   <FILE>
-          Merge-plan manifest JSON file
+          Stack manifest JSON file
 
 Options:
   -h, --help
           Print help
 ```
 
-#### `zeroshot plan submit`
+#### `zeroshot stack submit`
 
 ```text
-Atomically submit every node in a merge-plan manifest
+Atomically submit every node in a stack manifest
 
-Usage: zeroshot plan submit [OPTIONS] --target <NAME> --submission-key <KEY> <FILE>
+Usage: zeroshot stack submit [OPTIONS] --target <NAME> --submission-key <KEY> <FILE>
 
 Arguments:
   <FILE>
-          Merge-plan manifest JSON file
+          Stack manifest JSON file
 
 Options:
       --target <NAME>
@@ -970,22 +984,22 @@ Options:
           Stable idempotency key for safely retrying the atomic submission
 
   -d, --detach
-          Return after atomic submission instead of polling plan status
+          Return after atomic submission instead of polling stack status
 
   -h, --help
           Print help
 ```
 
-#### `zeroshot plan status`
+#### `zeroshot stack status`
 
 ```text
-Read a merge plan's aggregate status as JSON
+Read a stack's aggregate status as JSON
 
-Usage: zeroshot plan status --target <NAME> <PLAN_ID>
+Usage: zeroshot stack status --target <NAME> <STACK_ID>
 
 Arguments:
-  <PLAN_ID>
-          Immutable merge-plan ID
+  <STACK_ID>
+          Immutable stack ID
 
 Options:
       --target <NAME>
@@ -995,16 +1009,16 @@ Options:
           Print help
 ```
 
-#### `zeroshot plan watch`
+#### `zeroshot stack watch`
 
 ```text
-Poll a merge plan and stream changed snapshots as NDJSON
+Poll a stack and stream changed snapshots as NDJSON
 
-Usage: zeroshot plan watch --target <NAME> <PLAN_ID>
+Usage: zeroshot stack watch --target <NAME> <STACK_ID>
 
 Arguments:
-  <PLAN_ID>
-          Immutable merge-plan ID
+  <STACK_ID>
+          Immutable stack ID
 
 Options:
       --target <NAME>
@@ -1014,16 +1028,16 @@ Options:
           Print help
 ```
 
-#### `zeroshot plan force-stop`
+#### `zeroshot stack force-stop`
 
 ```text
-Force every nonterminal run in a merge plan to stop
+Force every nonterminal run in a stack to stop
 
-Usage: zeroshot plan force-stop --target <NAME> <PLAN_ID>
+Usage: zeroshot stack force-stop --target <NAME> <STACK_ID>
 
 Arguments:
-  <PLAN_ID>
-          Immutable merge-plan ID
+  <STACK_ID>
+          Immutable stack ID
 
 Options:
       --target <NAME>
@@ -1033,19 +1047,19 @@ Options:
           Print help
 ```
 
-#### `zeroshot plan help`
+#### `zeroshot stack help`
 
 ```text
 Print this message or the help of the given subcommand(s)
 
-Usage: zeroshot plan help [COMMAND]
+Usage: zeroshot stack help [COMMAND]
 
 Commands:
-  validate    Validate a merge-plan manifest without contacting a target
-  submit      Atomically submit every node in a merge-plan manifest
-  status      Read a merge plan's aggregate status as JSON
-  watch       Poll a merge plan and stream changed snapshots as NDJSON
-  force-stop  Force every nonterminal run in a merge plan to stop
+  validate    Validate a stack manifest without contacting a target
+  submit      Atomically submit every node in a stack manifest
+  status      Read a stack's aggregate status as JSON
+  watch       Poll a stack and stream changed snapshots as NDJSON
+  force-stop  Force every nonterminal run in a stack to stop
   help        Print this message or the help of the given subcommand(s)
 ```
 
@@ -1481,7 +1495,7 @@ Commands:
   connection         Inspect and manage named runtime connections
   profile            Manage reusable graph/runtime profiles
   template           Inspect built-in graph templates
-  plan               Validate, submit, and observe hosted merge plans
+  stack              Validate, submit, and observe hosted stacks of dependent runs
   run                Submit a graph run locally or to a named target
   update             Update this executable and managed agent skills to the newest canonical release
   list               List runs as JSON

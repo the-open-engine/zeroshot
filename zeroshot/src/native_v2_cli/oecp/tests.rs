@@ -7,7 +7,7 @@ use openengine_cluster_client::{
 };
 use openengine_cluster_protocol::{
     ConnectionKey, ConnectionScope, EnvironmentVariableName, ExecutionRef, IdempotencyKey,
-    MergePlanSource, RequestId, RunId, RunProfileName, RunProfileScope, RunTitle, SourceBranchId,
+    StackSource, RequestId, RunId, RunProfileName, RunProfileScope, RunTitle, SourceBranchId,
     SourceRepositoryId, StaticConnectionValues, SubscriptionCloseReason, SubscriptionId,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
@@ -258,13 +258,14 @@ fn profile_set_request() -> RunProfileSetRequest {
     }
 }
 
-fn merge_plan_request() -> PreparedMergePlanRequest {
-    PreparedMergePlanRequest {
+fn stack_request() -> PreparedStackRequest {
+    PreparedStackRequest {
         environment: None,
-        submission_key: IdempotencyKey::new("oecp-merge-plan").assert_value(),
-        title: RunTitle::new("OECP merge plan").assert_value(),
+        submission_key: IdempotencyKey::new("oecp-stack").assert_value(),
+        title: RunTitle::new("OECP stack").assert_value(),
         expires_at: "2026-09-24T00:00:00Z".to_owned(),
-        source: MergePlanSource {
+        delivery: openengine_cluster_protocol::StackDelivery::Merge,
+        source: StackSource {
             repository: SourceRepositoryId::new("open-engine/zeroshot").assert_value(),
             branch: SourceBranchId::new("main").assert_value(),
         },
@@ -377,27 +378,27 @@ async fn wave7_cli_contract_oecp_default_optional_authority_is_refused() {
     ));
     assert!(
         backend
-            .merge_plan_submit("prod", merge_plan_request())
+            .stack_submit("prod", stack_request())
             .await
             .assert_error()
             .to_string()
-            .contains("does not advertise merge plans")
+            .contains("does not advertise stacks")
     );
     assert!(
         backend
-            .merge_plan_status("prod", MergePlanId::new("plan"))
+            .stack_status("prod", StackId::new("plan"))
             .await
             .assert_error()
             .to_string()
-            .contains("does not advertise merge plans")
+            .contains("does not advertise stacks")
     );
     assert!(
         backend
-            .merge_plan_force("prod", MergePlanId::new("plan"))
+            .stack_force("prod", StackId::new("plan"))
             .await
             .assert_error()
             .to_string()
-            .contains("does not advertise merge plans")
+            .contains("does not advertise stacks")
     );
 
     let run_id = RunId::new("run-contract");

@@ -88,7 +88,8 @@ connection fields their own bindings declare.
 ## Scope and limits
 
 GitHub.com-only features include `--task-from`, Platform repository browsing and App/OAuth setup,
-inbound commands, and hosted merge plans. For GHE or GitLab comments, supply the graph input directly.
+inbound commands, and hosted [stacks](stacks.md). For GHE or GitLab comments, supply the graph input
+directly.
 
 Delivery preserves review identity across retries and confirms the integrated revision before
 reporting a merge. Comment retries reuse the original publication; captured MR scopes refuse stale

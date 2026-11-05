@@ -59,13 +59,13 @@ section { margin-block: 2.5rem; }
 <li><a href="#zeroshot-template-list"><code>zeroshot template list</code></a></li>
 <li><a href="#zeroshot-template-show"><code>zeroshot template show</code></a></li>
 <li><a href="#zeroshot-template-help"><code>zeroshot template help</code></a></li>
-<li><a href="#zeroshot-plan"><code>zeroshot plan</code></a></li>
-<li><a href="#zeroshot-plan-validate"><code>zeroshot plan validate</code></a></li>
-<li><a href="#zeroshot-plan-submit"><code>zeroshot plan submit</code></a></li>
-<li><a href="#zeroshot-plan-status"><code>zeroshot plan status</code></a></li>
-<li><a href="#zeroshot-plan-watch"><code>zeroshot plan watch</code></a></li>
-<li><a href="#zeroshot-plan-force-stop"><code>zeroshot plan force-stop</code></a></li>
-<li><a href="#zeroshot-plan-help"><code>zeroshot plan help</code></a></li>
+<li><a href="#zeroshot-stack"><code>zeroshot stack</code></a></li>
+<li><a href="#zeroshot-stack-validate"><code>zeroshot stack validate</code></a></li>
+<li><a href="#zeroshot-stack-submit"><code>zeroshot stack submit</code></a></li>
+<li><a href="#zeroshot-stack-status"><code>zeroshot stack status</code></a></li>
+<li><a href="#zeroshot-stack-watch"><code>zeroshot stack watch</code></a></li>
+<li><a href="#zeroshot-stack-force-stop"><code>zeroshot stack force-stop</code></a></li>
+<li><a href="#zeroshot-stack-help"><code>zeroshot stack help</code></a></li>
 <li><a href="#zeroshot-run"><code>zeroshot run</code></a></li>
 <li><a href="#zeroshot-update"><code>zeroshot update</code></a></li>
 <li><a href="#zeroshot-list"><code>zeroshot list</code></a></li>
@@ -96,7 +96,7 @@ Commands:
   connection         Inspect and manage named runtime connections
   profile            Manage reusable graph/runtime profiles
   template           Inspect built-in graph templates
-  plan               Validate, submit, and observe hosted merge plans
+  stack              Validate, submit, and observe hosted stacks of dependent runs
   run                Submit a graph run locally or to a named target
   update             Update this executable and managed agent skills to the newest canonical release
   list               List runs as JSON
@@ -815,17 +815,17 @@ Commands:
   list  List built-in template names as JSON
   show  Show a built-in graph as a tree in terminals, or JSON when piped
   help  Print this message or the help of the given subcommand(s)</code></pre></section>
-<section id="zeroshot-plan"><h3><code>zeroshot plan</code></h3>
-<pre><code>Validate, submit, and observe hosted merge plans
+<section id="zeroshot-stack"><h3><code>zeroshot stack</code></h3>
+<pre><code>Validate, submit, and observe hosted stacks of dependent runs
 
-Usage: zeroshot plan &lt;COMMAND&gt;
+Usage: zeroshot stack &lt;COMMAND&gt;
 
 Commands:
-  validate    Validate a merge-plan manifest without contacting a target
-  submit      Atomically submit every node in a merge-plan manifest
-  status      Read a merge plan&#39;s aggregate status as JSON
-  watch       Poll a merge plan and stream changed snapshots as NDJSON
-  force-stop  Force every nonterminal run in a merge plan to stop
+  validate    Validate a stack manifest without contacting a target
+  submit      Atomically submit every node in a stack manifest
+  status      Read a stack&#39;s aggregate status as JSON
+  watch       Poll a stack and stream changed snapshots as NDJSON
+  force-stop  Force every nonterminal run in a stack to stop
   help        Print this message or the help of the given subcommand(s)
 
 Options:
@@ -836,8 +836,9 @@ MANIFEST
 The JSON manifest is strict and self-contained:
 
   {
-    &quot;schema&quot;: &quot;zeroshot.merge-plan/v1&quot;,
+    &quot;schema&quot;: &quot;zeroshot.stack/v1&quot;,
     &quot;title&quot;: &quot;Release checkout update&quot;,
+    &quot;delivery&quot;: &quot;merge&quot;,
     &quot;source&quot;: {&quot;repository&quot;: &quot;owner/repo&quot;, &quot;branch&quot;: &quot;main&quot;},
     &quot;profile&quot;: &quot;org:software-change&quot;,
     &quot;expiresAt&quot;: &quot;&lt;RFC3339 timestamp within 7 days&gt;&quot;,
@@ -847,34 +848,47 @@ The JSON manifest is strict and self-contained:
     }
   }
 
-Every run uses the same source and profile. The profile must contain exactly one current Git merge delivery node;
-pull-request delivery is rejected. Agent bindings must not declare `GH_TOKEN`; only the Git delivery
-binding may declare it. `needs` gates readiness but does not pass output between runs.
-Platform assigns every run ID atomically at submission. After a node&#39;s dependencies succeed, Platform
-materializes it against an exact source revision. Once materialization completes, `readyAt` is set
-and the node&#39;s queue deadline is the earlier of `expiresAt` and seven days after `readyAt`.
-`expiresAt` must be in the future and no more than
-seven days away. Plans cannot be edited or retried in place.</code></pre></section>
-<section id="zeroshot-plan-validate"><h4><code>zeroshot plan validate</code></h4>
-<pre><code>Validate a merge-plan manifest without contacting a target
+Every run uses the same source and profile. Agent bindings must not declare `GH_TOKEN`; only the Git
+delivery binding may declare it. `needs` gates readiness but does not pass output between runs.
 
-Usage: zeroshot plan validate &lt;FILE&gt;
+DELIVERY
+`delivery` is required and selects how every run lands:
+
+  merge                  Each run merges into the base branch before the runs that need it start.
+                         The profile must contain exactly one Git merge delivery node (merge@2 or
+                         merge@3). A run may need several runs.
+  stacked_pull_requests  Each run opens a pull request against the branch of the run before it, so
+                         the stack arrives as a chain of pull requests and nothing is merged. The
+                         profile must contain exactly one pull-request delivery node (pr@2).
+                         Validation and submission turn the runs into one linear stack: each run
+                         needs only the run before it, in dependency order with ties broken by run
+                         name. `zeroshot stack validate` prints that order.
+
+Platform assigns every run ID atomically at submission. After a node&#39;s dependencies succeed, Platform
+materializes it against an exact source branch and revision, reported as `sourceBranch` and
+`sourceRevision`. Once materialization completes, `readyAt` is set and the node&#39;s queue deadline is
+the earlier of `expiresAt` and seven days after `readyAt`. `expiresAt` must be in the future and no
+more than seven days away. Stacks cannot be edited or retried in place.</code></pre></section>
+<section id="zeroshot-stack-validate"><h4><code>zeroshot stack validate</code></h4>
+<pre><code>Validate a stack manifest without contacting a target
+
+Usage: zeroshot stack validate &lt;FILE&gt;
 
 Arguments:
   &lt;FILE&gt;
-          Merge-plan manifest JSON file
+          Stack manifest JSON file
 
 Options:
   -h, --help
           Print help</code></pre></section>
-<section id="zeroshot-plan-submit"><h4><code>zeroshot plan submit</code></h4>
-<pre><code>Atomically submit every node in a merge-plan manifest
+<section id="zeroshot-stack-submit"><h4><code>zeroshot stack submit</code></h4>
+<pre><code>Atomically submit every node in a stack manifest
 
-Usage: zeroshot plan submit [OPTIONS] --target &lt;NAME&gt; --submission-key &lt;KEY&gt; &lt;FILE&gt;
+Usage: zeroshot stack submit [OPTIONS] --target &lt;NAME&gt; --submission-key &lt;KEY&gt; &lt;FILE&gt;
 
 Arguments:
   &lt;FILE&gt;
-          Merge-plan manifest JSON file
+          Stack manifest JSON file
 
 Options:
       --target &lt;NAME&gt;
@@ -884,18 +898,18 @@ Options:
           Stable idempotency key for safely retrying the atomic submission
 
   -d, --detach
-          Return after atomic submission instead of polling plan status
+          Return after atomic submission instead of polling stack status
 
   -h, --help
           Print help</code></pre></section>
-<section id="zeroshot-plan-status"><h4><code>zeroshot plan status</code></h4>
-<pre><code>Read a merge plan&#39;s aggregate status as JSON
+<section id="zeroshot-stack-status"><h4><code>zeroshot stack status</code></h4>
+<pre><code>Read a stack&#39;s aggregate status as JSON
 
-Usage: zeroshot plan status --target &lt;NAME&gt; &lt;PLAN_ID&gt;
+Usage: zeroshot stack status --target &lt;NAME&gt; &lt;STACK_ID&gt;
 
 Arguments:
-  &lt;PLAN_ID&gt;
-          Immutable merge-plan ID
+  &lt;STACK_ID&gt;
+          Immutable stack ID
 
 Options:
       --target &lt;NAME&gt;
@@ -903,14 +917,14 @@ Options:
 
   -h, --help
           Print help</code></pre></section>
-<section id="zeroshot-plan-watch"><h4><code>zeroshot plan watch</code></h4>
-<pre><code>Poll a merge plan and stream changed snapshots as NDJSON
+<section id="zeroshot-stack-watch"><h4><code>zeroshot stack watch</code></h4>
+<pre><code>Poll a stack and stream changed snapshots as NDJSON
 
-Usage: zeroshot plan watch --target &lt;NAME&gt; &lt;PLAN_ID&gt;
+Usage: zeroshot stack watch --target &lt;NAME&gt; &lt;STACK_ID&gt;
 
 Arguments:
-  &lt;PLAN_ID&gt;
-          Immutable merge-plan ID
+  &lt;STACK_ID&gt;
+          Immutable stack ID
 
 Options:
       --target &lt;NAME&gt;
@@ -918,14 +932,14 @@ Options:
 
   -h, --help
           Print help</code></pre></section>
-<section id="zeroshot-plan-force-stop"><h4><code>zeroshot plan force-stop</code></h4>
-<pre><code>Force every nonterminal run in a merge plan to stop
+<section id="zeroshot-stack-force-stop"><h4><code>zeroshot stack force-stop</code></h4>
+<pre><code>Force every nonterminal run in a stack to stop
 
-Usage: zeroshot plan force-stop --target &lt;NAME&gt; &lt;PLAN_ID&gt;
+Usage: zeroshot stack force-stop --target &lt;NAME&gt; &lt;STACK_ID&gt;
 
 Arguments:
-  &lt;PLAN_ID&gt;
-          Immutable merge-plan ID
+  &lt;STACK_ID&gt;
+          Immutable stack ID
 
 Options:
       --target &lt;NAME&gt;
@@ -933,17 +947,17 @@ Options:
 
   -h, --help
           Print help</code></pre></section>
-<section id="zeroshot-plan-help"><h4><code>zeroshot plan help</code></h4>
+<section id="zeroshot-stack-help"><h4><code>zeroshot stack help</code></h4>
 <pre><code>Print this message or the help of the given subcommand(s)
 
-Usage: zeroshot plan help [COMMAND]
+Usage: zeroshot stack help [COMMAND]
 
 Commands:
-  validate    Validate a merge-plan manifest without contacting a target
-  submit      Atomically submit every node in a merge-plan manifest
-  status      Read a merge plan&#39;s aggregate status as JSON
-  watch       Poll a merge plan and stream changed snapshots as NDJSON
-  force-stop  Force every nonterminal run in a merge plan to stop
+  validate    Validate a stack manifest without contacting a target
+  submit      Atomically submit every node in a stack manifest
+  status      Read a stack&#39;s aggregate status as JSON
+  watch       Poll a stack and stream changed snapshots as NDJSON
+  force-stop  Force every nonterminal run in a stack to stop
   help        Print this message or the help of the given subcommand(s)</code></pre></section>
 <section id="zeroshot-run"><h3><code>zeroshot run</code></h3>
 <pre><code>Submit a graph run locally or to a named target.
@@ -1327,7 +1341,7 @@ Commands:
   connection         Inspect and manage named runtime connections
   profile            Manage reusable graph/runtime profiles
   template           Inspect built-in graph templates
-  plan               Validate, submit, and observe hosted merge plans
+  stack              Validate, submit, and observe hosted stacks of dependent runs
   run                Submit a graph run locally or to a named target
   update             Update this executable and managed agent skills to the newest canonical release
   list               List runs as JSON

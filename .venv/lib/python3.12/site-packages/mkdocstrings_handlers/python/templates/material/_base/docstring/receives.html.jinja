@@ -1,0 +1,122 @@
+{#- Template for "Receives" sections in docstrings.
+
+This template renders a list of documented received values (generators) in the format
+specified with the [`docstring_section_style`][] configuration option.
+
+Context:
+  section (griffe.DocstringSectionAttributes): The section to render.
+-#}
+
+{% block logs scoped %}
+  {#- Logging block.
+
+  This block can be used to log debug messages, deprecation messages, warnings, etc.
+  -#}
+  {{ log.debug("Rendering receives section") }}
+{% endblock logs %}
+
+{% import "language.html.jinja" as lang with context %}
+{#- Language module providing the `t` translation method. -#}
+
+{% if config.docstring_section_style == "table" %}
+  {% block table_style scoped %}
+    {#- Block for the `table` section style. -#}
+    {% set name_column = section.value|selectattr("name")|any %}
+    <p><span class="doc-section-title">{{ section.title or lang.t("Receives:") }}</span></p>
+    <table>
+      <thead>
+        <tr>
+          {% if name_column %}<th>{{ lang.t("Name") }}</th>{% endif %}
+          <th>{{ lang.t("Type") }}</th>
+          <th>{{ lang.t("Description") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for receives in section.value %}
+          <tr class="doc-section-item">
+            {% if name_column %}<td>{% if receives.name %}<code>{{ receives.name }}</code>{% endif %}</td>{% endif %}
+            <td>
+              {% if receives.annotation %}
+                {% with expression = receives.annotation, backlink_type = "received-by" %}
+                  <code>{% include "expression.html.jinja" with context %}</code>
+                {% endwith %}
+              {% endif %}
+            </td>
+            <td>
+              <div class="doc-md-description">
+                {{ receives.description|convert_markdown(heading_level, html_id, autoref_hook=autoref_hook) }}
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endblock table_style %}
+{% elif config.docstring_section_style == "list" %}
+  {% block list_style scoped %}
+    {#- Block for the `list` section style. -#}
+    <p><span class="doc-section-title">{{ section.title or lang.t("Receives:") }}</span></p>
+    <ul>
+      {% for receives in section.value %}
+        <li class="doc-section-item field-body">
+          {% if receives.name %}<b><code>{{ receives.name }}</code></b>{% endif %}
+          {% if receives.annotation %}
+            {% with expression = receives.annotation, backlink_type = "received-by" %}
+              {% if receives.name %} ({% endif %}
+              <code>{% include "expression.html.jinja" with context %}</code>
+              {% if receives.name %}){% endif %}
+            {% endwith %}
+          {% endif %}
+          –
+          <div class="doc-md-description">
+            {{ receives.description|convert_markdown(heading_level, html_id, autoref_hook=autoref_hook) }}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endblock list_style %}
+{% elif config.docstring_section_style == "spacy" %}
+  {% block spacy_style scoped %}
+    {#- Block for the `spacy` section style. -#}
+    <table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">{{ (section.title or lang.t("RECEIVES")).rstrip(":").upper() }}</span></th>
+          <th><span>{{ lang.t("DESCRIPTION") }}</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for receives in section.value %}
+          <tr class="doc-section-item">
+            <td>
+              {% if receives.name %}
+                <code>{{ receives.name }}</code>
+              {% elif receives.annotation %}
+                <span class="doc-receives-annotation">
+                  {% with expression = receives.annotation, backlink_type = "received-by" %}
+                    <code>{% include "expression.html.jinja" with context %}</code>
+                  {% endwith %}
+                </span>
+              {% endif %}
+            </td>
+            <td class="doc-receives-details">
+              <div class="doc-md-description">
+                {{ receives.description|convert_markdown(heading_level, html_id, autoref_hook=autoref_hook) }}
+              </div>
+              {% if receives.name and receives.annotation %}
+                <p>
+                  <span class="doc-receives-annotation">
+                    <b>{{ lang.t("TYPE:") }}</b>
+                    {% with expression = receives.annotation, backlink_type = "received-by" %}
+                      <code>{% include "expression.html.jinja" with context %}</code>
+                    {% endwith %}
+                  </span>
+                </p>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endblock spacy_style %}
+{% endif %}

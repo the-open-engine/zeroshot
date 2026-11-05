@@ -94,7 +94,7 @@ impl NativeV2DeliveryAdapter {
                 review_id: String::new(),
                 repository: self.config.target.repository.clone(),
                 target_branch: self.config.target.target_branch.clone(),
-                head_branch: delivery_branch(self.config.delivery_run_id.as_str()),
+                head_branch: delivery_head_branch(&self.config.delivery_run_id),
                 head_revision: String::new(),
             });
         let diagnostic = format!(

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use openengine_cluster_protocol::MergePlanState;
+use openengine_cluster_protocol::StackState;
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::json;
 
@@ -236,7 +236,7 @@ fn assert_no_resume_call(backend: &FakeBackend) {
     );
 }
 
-fn merge_plan_fixture() -> FixtureFiles {
+fn stack_fixture(delivery: &str, runs: Value) -> FixtureFiles {
     let expires = time::OffsetDateTime::now_utc() + time::Duration::days(1);
     let expires_at = format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
@@ -250,19 +250,24 @@ fn merge_plan_fixture() -> FixtureFiles {
     FixtureFiles::new(
         graph(),
         json!({
-            "schema":"zeroshot.merge-plan/v1",
+            "schema":"zeroshot.stack/v1",
             "title":"Release",
+            "delivery":delivery,
             "source":{"repository":"open-engine/zeroshot","branch":"main"},
             "profile":"org:software-change",
             "expiresAt":expires_at,
-            "runs":{"build":{"input":{"task":"fail"}}}
+            "runs":runs
         }),
     )
 }
 
-fn plan_submit_command(file: &Path, detach: bool) -> NativeV2CliCommand {
+fn merge_stack_fixture() -> FixtureFiles {
+    stack_fixture("merge", json!({"build":{"input":{"task":"fail"}}}))
+}
+
+fn stack_submit_command(file: &Path, detach: bool) -> NativeV2CliCommand {
     let mut values = vec![
-        OsString::from("plan"),
+        OsString::from("stack"),
         OsString::from("submit"),
         file.as_os_str().to_owned(),
         OsString::from("--target"),
@@ -276,82 +281,184 @@ fn plan_submit_command(file: &Path, detach: bool) -> NativeV2CliCommand {
     parse_native_v2_args(values).assert_value()
 }
 
-async fn execute_plan(
+async fn execute_stack(
     command: NativeV2CliCommand,
-    state: MergePlanState,
+    backend: &FakeBackend,
 ) -> (Result<CliOutcome, NativeV2CliError>, String) {
-    let backend = FakeBackend::with_terminal_plan_state(state);
     let environment = |name: &str| (name == "GH_TOKEN").then(|| OsString::from("test-token"));
-    let context = CliExecutionContext::new(&backend, &environment);
+    let context = CliExecutionContext::new(backend, &environment);
     let mut output = Vec::new();
     let result =
         execute_native_v2_cli_with_context(command, &context, &mut NeverDetach, &mut output).await;
     (result, String::from_utf8(output).assert_value())
 }
 
-#[tokio::test]
-async fn foreground_plan_submit_reports_a_terminal_failure_after_printing_it() {
-    let files = merge_plan_fixture();
-    let command = plan_submit_command(&files.input, false);
+async fn execute_terminal_stack(
+    command: NativeV2CliCommand,
+    state: StackState,
+) -> (Result<CliOutcome, NativeV2CliError>, String) {
+    execute_stack(command, &FakeBackend::with_terminal_stack_state(state)).await
+}
 
-    let (result, output) = execute_plan(command, MergePlanState::Failed).await;
+#[tokio::test]
+async fn foreground_stack_submit_reports_a_terminal_failure_after_printing_it() {
+    let files = merge_stack_fixture();
+    let command = stack_submit_command(&files.input, false);
+
+    let (result, output) = execute_terminal_stack(command, StackState::Failed).await;
 
     assert!(matches!(
         result.assert_error(),
-        NativeV2CliError::MergePlanFailed
+        NativeV2CliError::StackFailed
     ));
-    assert!(output.contains("\"planId\":\"plan-public\""));
+    assert!(output.contains("\"stackId\":\"stack-public\""));
     assert!(output.contains("\"state\":\"failed\""));
 }
 
 #[tokio::test]
-async fn plan_watch_reports_each_unsuccessful_terminal_state_after_printing_it() {
+async fn stack_watch_reports_each_unsuccessful_terminal_state_after_printing_it() {
     for (state, expected) in [
-        (MergePlanState::Failed, "failed"),
-        (MergePlanState::Cancelled, "cancelled"),
-        (MergePlanState::Expired, "expired"),
+        (StackState::Failed, "failed"),
+        (StackState::Cancelled, "cancelled"),
+        (StackState::Expired, "expired"),
     ] {
-        let command =
-            parse_native_v2_args(args(&["plan", "watch", "plan-public", "--target", "prod"]))
-                .assert_value();
+        let command = parse_native_v2_args(args(&[
+            "stack",
+            "watch",
+            "stack-public",
+            "--target",
+            "prod",
+        ]))
+        .assert_value();
 
-        let (result, output) = execute_plan(command, state).await;
+        let (result, output) = execute_terminal_stack(command, state).await;
 
-        assert!(matches!(
-            result.assert_error(),
-            NativeV2CliError::MergePlanFailed
-        ));
+        let error = result.assert_error();
+        assert!(matches!(error, NativeV2CliError::StackFailed));
+        assert_eq!(error.to_string(), "stack finished unsuccessfully");
         assert!(output.contains(&format!("\"state\":\"{expected}\"")));
     }
 }
 
 #[tokio::test]
-async fn detached_plan_submit_does_not_project_a_terminal_failure() {
-    let files = merge_plan_fixture();
-    let command = plan_submit_command(&files.input, true);
+async fn detached_stack_submit_does_not_project_a_terminal_failure() {
+    let files = merge_stack_fixture();
+    let command = stack_submit_command(&files.input, true);
 
-    let (result, output) = execute_plan(command, MergePlanState::Failed).await;
+    let (result, output) = execute_terminal_stack(command, StackState::Failed).await;
 
     assert_eq!(result.assert_value(), CliOutcome::Detached);
     assert!(output.contains("\"state\":\"failed\""));
 }
 
 #[tokio::test]
-async fn plan_status_and_force_stop_keep_ordinary_command_outcomes() {
+async fn stack_status_and_force_stop_keep_ordinary_command_outcomes() {
     for operation in ["status", "force-stop"] {
         let command = parse_native_v2_args(args(&[
-            "plan",
+            "stack",
             operation,
-            "plan-public",
+            "stack-public",
             "--target",
             "prod",
         ]))
         .assert_value();
 
-        let (result, output) = execute_plan(command, MergePlanState::Expired).await;
+        let (result, output) = execute_terminal_stack(command, StackState::Expired).await;
 
         assert_eq!(result.assert_value(), CliOutcome::Completed);
         assert!(output.contains("\"state\":\"expired\""));
+    }
+}
+
+fn diamond_runs() -> Value {
+    json!({
+        "base":{"input":{"task":"base"}},
+        "right":{"needs":["base"],"input":{"task":"right"}},
+        "left":{"needs":["base"],"input":{"task":"left"}},
+        "top":{"needs":["right","left"],"input":{"task":"top"}}
+    })
+}
+
+fn submitted_needs(backend: &FakeBackend) -> Vec<(String, Vec<String>)> {
+    let submitted = backend.submitted_stacks();
+    assert_eq!(submitted.len(), 1);
+    submitted[0]
+        .runs
+        .iter()
+        .map(|run| {
+            (
+                run.name.as_str().to_owned(),
+                run.needs
+                    .iter()
+                    .map(|need| need.as_str().to_owned())
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn stacked_pull_request_submission_sends_one_linear_stack() {
+    let files = stack_fixture("stacked_pull_requests", diamond_runs());
+    let backend =
+        FakeBackend::with_stack_profile(StackState::Succeeded, TemplateDelivery::PullRequest);
+
+    let (result, _) = execute_stack(stack_submit_command(&files.input, true), &backend).await;
+
+    assert_eq!(result.assert_value(), CliOutcome::Detached);
+    assert_eq!(
+        backend.submitted_stacks()[0].delivery,
+        openengine_cluster_protocol::StackDelivery::StackedPullRequests
+    );
+    let expected: Vec<(String, Vec<String>)> = vec![
+        ("base".to_owned(), vec![]),
+        ("left".to_owned(), vec!["base".to_owned()]),
+        ("right".to_owned(), vec!["left".to_owned()]),
+        ("top".to_owned(), vec!["right".to_owned()]),
+    ];
+    assert_eq!(submitted_needs(&backend), expected);
+}
+
+#[tokio::test]
+async fn merge_stack_submission_keeps_fan_in() {
+    let files = stack_fixture("merge", diamond_runs());
+    let backend = FakeBackend::with_stack_profile(StackState::Succeeded, TemplateDelivery::Merge);
+
+    let (result, _) = execute_stack(stack_submit_command(&files.input, true), &backend).await;
+
+    assert_eq!(result.assert_value(), CliOutcome::Detached);
+    assert_eq!(
+        backend.submitted_stacks()[0].delivery,
+        openengine_cluster_protocol::StackDelivery::Merge
+    );
+    assert_eq!(
+        submitted_needs(&backend)[3],
+        (
+            "top".to_owned(),
+            vec!["left".to_owned(), "right".to_owned()]
+        )
+    );
+}
+
+#[tokio::test]
+async fn stack_submission_rejects_a_profile_for_the_other_delivery() {
+    for (delivery, template) in [
+        ("stacked_pull_requests", TemplateDelivery::Merge),
+        ("merge", TemplateDelivery::PullRequest),
+    ] {
+        let files = stack_fixture(delivery, diamond_runs());
+        let backend = FakeBackend::with_stack_profile(StackState::Succeeded, template);
+
+        let (result, output) =
+            execute_stack(stack_submit_command(&files.input, true), &backend).await;
+
+        let error = result.assert_error().to_string();
+        assert!(
+            error.contains(&format!("stack delivery \"{delivery}\" requires")),
+            "{error}"
+        );
+        assert!(output.is_empty());
+        assert!(backend.submitted_stacks().is_empty());
     }
 }
 

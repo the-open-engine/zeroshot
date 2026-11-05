@@ -1,0 +1,122 @@
+{#- Template for "Returns" sections in docstrings.
+
+This template renders a list of documented returned values in the format
+specified with the [`docstring_section_style`][] configuration option.
+
+Context:
+  section (griffe.DocstringSectionAttributes): The section to render.
+-#}
+
+{% block logs scoped %}
+  {#- Logging block.
+
+  This block can be used to log debug messages, deprecation messages, warnings, etc.
+  -#}
+  {{ log.debug("Rendering returns section") }}
+{% endblock logs %}
+
+{% import "language.html.jinja" as lang with context %}
+{#- Language module providing the `t` translation method. -#}
+
+{% if config.docstring_section_style == "table" %}
+  {% block table_style scoped %}
+    {#- Block for the `table` section style. -#}
+    {% set name_column = section.value|selectattr("name")|any %}
+    <p><span class="doc-section-title">{{ section.title or lang.t("Returns:") }}</span></p>
+    <table>
+      <thead>
+        <tr>
+          {% if name_column %}<th>{{ lang.t("Name") }}</th>{% endif %}
+          <th>{{ lang.t("Type") }}</th>
+          <th>{{ lang.t("Description") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for returns in section.value %}
+          <tr class="doc-section-item">
+            {% if name_column %}<td>{% if returns.name %}<code>{{ returns.name }}</code>{% endif %}</td>{% endif %}
+            <td>
+              {% if returns.annotation %}
+                {% with expression = returns.annotation, backlink_type = "returned-by" %}
+                  <code>{% include "expression.html.jinja" with context %}</code>
+                {% endwith %}
+              {% endif %}
+            </td>
+            <td>
+              <div class="doc-md-description">
+                {{ returns.description|convert_markdown(heading_level, html_id, autoref_hook=autoref_hook) }}
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endblock table_style %}
+{% elif config.docstring_section_style == "list" %}
+  {% block list_style scoped %}
+    {#- Block for the `list` section style. -#}
+    <p><span class="doc-section-title">{{ section.title or lang.t("Returns:") }}</span></p>
+    <ul>
+      {% for returns in section.value %}
+        <li class="doc-section-item field-body">
+          {% if returns.name %}<b><code>{{ returns.name }}</code></b>{% endif %}
+          {% if returns.annotation %}
+            {% with expression = returns.annotation, backlink_type = "returned-by" %}
+              {% if returns.name %} ({% endif %}
+              <code>{% include "expression.html.jinja" with context %}</code>
+              {% if returns.name %}){% endif %}
+            {% endwith %}
+          {% endif %}
+          –
+          <div class="doc-md-description">
+            {{ returns.description|convert_markdown(heading_level, html_id, autoref_hook=autoref_hook) }}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endblock list_style %}
+{% elif config.docstring_section_style == "spacy" %}
+  {% block spacy_style scoped %}
+    {#- Block for the `spacy` section style. -#}
+    <table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">{{ (section.title or lang.t("RETURNS")).rstrip(":").upper() }}</span></th>
+          <th><span>{{ lang.t("DESCRIPTION").upper() }}</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for returns in section.value %}
+          <tr class="doc-section-item">
+            <td>
+              {% if returns.name %}
+                <code>{{ returns.name }}</code>
+              {% elif returns.annotation %}
+                <span class="doc-returns-annotation">
+                  {% with expression = returns.annotation, backlink_type = "returned-by" %}
+                    <code>{% include "expression.html.jinja" with context %}</code>
+                  {% endwith %}
+                </span>
+              {% endif %}
+            </td>
+            <td class="doc-returns-details">
+              <div class="doc-md-description">
+                {{ returns.description|convert_markdown(heading_level, html_id, autoref_hook=autoref_hook) }}
+              </div>
+              {% if returns.name and returns.annotation %}
+                <p>
+                  <span class="doc-returns-annotation">
+                    <b>{{ lang.t("TYPE:") }}</b>
+                    {% with expression = returns.annotation, backlink_type = "returned-by" %}
+                      <code>{% include "expression.html.jinja" with context %}</code>
+                    {% endwith %}
+                  </span>
+                </p>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endblock spacy_style %}
+{% endif %}

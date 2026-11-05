@@ -71,6 +71,16 @@ it('selects native checks and their established dependent lanes', () => {
   });
 });
 
+it('runs the stack manifest tooling test when the stack validator changes', () => {
+  for (const pathname of [
+    'zeroshot/src/native_v2_cli/execution/stacks.rs',
+    'crates/openengine-cluster-protocol/src/native_v2_hosted/stack.rs',
+  ]) {
+    assert.equal(classifyPath(pathname), 'native', pathname);
+    assert.equal(classifyPaths([pathname]).tooling, true, pathname);
+  }
+});
+
 it('keeps npm-only changes out of native, Python, and docs checks', () => {
   assert.equal(classifyPath('npm/zeroshot/install.js'), 'npm');
   assert.deepEqual(selections(classifyPaths(['npm/zeroshot/install.js'])), {
@@ -131,6 +141,14 @@ it('preserves explicit cross-lane ownership', () => {
     [
       'npm/zeroshot/README.md',
       { native: false, python: false, tooling: false, npm: true, docs: true },
+    ],
+    [
+      'npm/zeroshot/skills/zeroshot-plan/SKILL.md',
+      { native: false, python: false, tooling: true, npm: true, docs: false },
+    ],
+    [
+      'docs/guides/stacks.md',
+      { native: false, python: false, tooling: true, npm: false, docs: true },
     ],
   ]);
   for (const [pathname, expected] of cases) {

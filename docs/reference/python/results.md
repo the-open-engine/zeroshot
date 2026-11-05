@@ -1,5 +1,5 @@
 ---
-description: "Python API reference for run results, summaries, statuses, log events, execution details, source identity and failure diagnostics."
+description: "Python API reference for run results, summaries, statuses, stack statuses, log events, execution details, source identity and failure diagnostics."
 ---
 
 # Result models
@@ -11,12 +11,12 @@ description: "Python API reference for run results, summaries, statuses, log eve
         - FailureContext
         - FailureDiagnostic
         - LogEvent
-        - MergePlanRunStatus
-        - MergePlanStatus
         - ResolvedGitRemote
         - ResolvedSource
         - RunResult
         - RunStatus
         - RunSummary
         - SourceForgeIdentity
+        - StackRunStatus
+        - StackStatus
       show_if_no_docstring: false

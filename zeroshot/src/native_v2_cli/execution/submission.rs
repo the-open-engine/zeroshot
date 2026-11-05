@@ -133,8 +133,8 @@ pub fn try_execute_native_v2_static_with_terminal(
         return Ok(Some(CliOutcome::Completed));
     }
     let outcome = match command {
-        NativeV2CliCommand::PlanValidate { file } => {
-            return super::merge_plans::validate_file(file, output).map(Some);
+        NativeV2CliCommand::StackValidate { file } => {
+            return super::stacks::validate_file(file, output).map(Some);
         }
         NativeV2CliCommand::TemplateList => execute_template_list(output)?,
         NativeV2CliCommand::TemplateShow {

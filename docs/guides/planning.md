@@ -134,3 +134,14 @@ Give the plan's Goal, Context, Acceptance criteria, Constraints, Decided approac
 the task of a run, for example through the `zeroshot` skill. The acceptance verifier then judges the
 change against criteria you agreed on. Starting the run is the decision to build the plan; nothing
 in the plan starts a run by itself.
+
+## Run dependent plans as a stack
+
+When the skill splits work into plans linked by `depends_on`, it offers to write a
+[stack](stacks.md) manifest next to them, `.zeroshot/plans/<id>.stack.json`, named after the first
+plan. The manifest has one run per plan, named after the plan's id, whose task is that plan's Goal,
+Context, Acceptance criteria, Constraints, Decided approach and Decisions, and whose `needs` follow
+`depends_on`. The skill asks for or leaves the rest to you: the hosted profile, the deadline and
+`delivery`, which is either `merge`, to merge each plan before the plans that depend on it start, or
+`stacked_pull_requests`, to get one pull request per plan stacked on the one before it. Check it with
+`zeroshot stack validate` and submit it with `zeroshot stack submit`.

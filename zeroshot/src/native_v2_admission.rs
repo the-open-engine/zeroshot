@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
     ArtifactResultProfile, AutonomyPolicy, CapabilityPolicy, GraphNode, GraphProfile, GraphSpec,
-    MediaType, NodeName, PayloadValueError, RedactionClass, TypeId, WorkerContract,
+    MediaType, NodeName, PayloadValueError, RedactionClass, StackDelivery, TypeId, WorkerContract,
     WorkerDescriptor, WorkerProtocolBinding, WorkerRef,
 };
 use openengine_cluster_server::admission::{GraphVerifier, VerificationError};
@@ -22,12 +22,20 @@ use thiserror::Error;
 
 use crate::native_v2_contract::{
     AdmittedRun, GIT_DELIVERY_MERGE_V2_WORKER_REF, GIT_DELIVERY_MERGE_V3_WORKER_REF,
-    NodeRuntimeBinding, RunSubmission, RunSubmissionIntent, RuntimePlan,
+    GIT_DELIVERY_PR_V2_WORKER_REF, NodeRuntimeBinding, RunSubmission, RunSubmissionIntent,
+    RuntimePlan,
 };
 use crate::native_v2_delivery::GITHUB_TOKEN_ENV;
 use openengine_cluster_protocol::MAX_DECLARED_ENVIRONMENT_NAMES;
 
 pub(crate) const MAX_AGENT_VERIFIER_ATTEMPTS: u64 = 2;
+
+const fn stack_delivery_node(delivery: &StackDelivery) -> &'static str {
+    match delivery {
+        StackDelivery::Merge => "Git merge delivery node (merge@2 or merge@3)",
+        StackDelivery::StackedPullRequests => "Git pull-request delivery node (pr@2)",
+    }
+}
 
 /// Host policy for graph-visible Git delivery.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -83,10 +91,14 @@ pub enum NativeV2AdmissionError {
     InvalidCommentDelivery(String),
     #[error("invalid source delivery: {0}")]
     InvalidSourceDelivery(String),
-    #[error("merge plans require exactly one graph-visible Git merge delivery node")]
-    MergeDeliveryRequired,
-    #[error("merge-plan agent node {node} must not declare GH_TOKEN")]
-    MergePlanAgentGitHubToken { node: NodeName },
+    #[error(
+        "stack delivery {:?} requires exactly one graph-visible {}",
+        .delivery.as_str(),
+        stack_delivery_node(.delivery)
+    )]
+    StackDeliveryRequired { delivery: StackDelivery },
+    #[error("stack agent node {node} must not declare GH_TOKEN")]
+    StackAgentGitHubToken { node: NodeName },
     #[error(
         "run declares {found} unique environment names; maximum is {MAX_DECLARED_ENVIRONMENT_NAMES}"
     )]
@@ -190,24 +202,27 @@ impl NativeV2Admission {
             .map_err(Into::into)
     }
 
-    /// Validates a reusable profile for merge-plan use, requiring merge rather than PR delivery.
-    pub(crate) async fn validate_merge_profile(
+    /// Validates a reusable profile for a stack whose sole delivery node matches its delivery.
+    pub(crate) async fn validate_stack_profile(
         &self,
         graph: &GraphSpec,
         runtime: &RuntimePlan,
+        delivery: StackDelivery,
     ) -> Result<(), NativeV2AdmissionError> {
         self.validate_profile(graph, runtime, DeliveryPolicy::Required)
             .await?;
-        let has_merge = executable_declarations(&graph.root)
+        let workers: &[&str] = match delivery {
+            StackDelivery::Merge => &[
+                GIT_DELIVERY_MERGE_V2_WORKER_REF,
+                GIT_DELIVERY_MERGE_V3_WORKER_REF,
+            ],
+            StackDelivery::StackedPullRequests => &[GIT_DELIVERY_PR_V2_WORKER_REF],
+        };
+        if !executable_declarations(&graph.root)
             .iter()
-            .any(|declaration| {
-                matches!(
-                    declaration.worker.as_str(),
-                    GIT_DELIVERY_MERGE_V2_WORKER_REF | GIT_DELIVERY_MERGE_V3_WORKER_REF
-                )
-            });
-        if !has_merge {
-            return Err(NativeV2AdmissionError::MergeDeliveryRequired);
+            .any(|declaration| workers.contains(&declaration.worker.as_str()))
+        {
+            return Err(NativeV2AdmissionError::StackDeliveryRequired { delivery });
         }
         if let Some(node) = runtime.nodes().iter().find_map(|(node, binding)| {
             let NodeRuntimeBinding::Agent { connections, .. } = binding else {
@@ -218,7 +233,7 @@ impl NativeV2Admission {
                 .any(|name| name.as_str() == GITHUB_TOKEN_ENV)
                 .then_some(node.clone())
         }) {
-            return Err(NativeV2AdmissionError::MergePlanAgentGitHubToken { node });
+            return Err(NativeV2AdmissionError::StackAgentGitHubToken { node });
         }
         Ok(())
     }

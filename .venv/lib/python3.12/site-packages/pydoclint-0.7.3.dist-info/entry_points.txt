@@ -1,0 +1,5 @@
+[console_scripts]
+pydoclint = pydoclint.main:main
+
+[flake8.extension]
+DOC = pydoclint.flake8_entry:Plugin

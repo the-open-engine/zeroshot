@@ -15,10 +15,8 @@ from typing import TypedDict, Unpack, overload
 
 from ._binary import resolve_binary
 from ._process import NativeProcess
-from ._projection import _log_event, _plan_status, _status, _summary
+from ._projection import _log_event, _stack_status, _status, _summary
 from .errors import ClientClosedError, InvalidRequestError, ProtocolError, TargetError
-from .plan_errors import MergePlanWaitTimeout
-from .plans import MergePlanRequest, MergePlanStatus
 from .run_errors import RunWaitTimeout
 from .runs import LogEvent, RunRequest, RunResult, RunStatus, RunSummary
 from .runtime import (
@@ -31,6 +29,8 @@ from .runtime import (
     Target,
     UniformRuntime,
 )
+from .stack_errors import StackWaitTimeout
+from .stacks import StackRequest, StackStatus
 from .values import JsonValue
 
 _Runtime = UniformRuntime | RuntimePlan
@@ -82,7 +82,7 @@ class _RunOptions(_SubmitOptions, total=False):
 
 
 class Client:
-    """Submit and observe Zeroshot graph runs and hosted merge plans.
+    """Submit and observe Zeroshot graph runs and hosted stacks.
 
     Args:
         target: Local target by default, an unauthenticated direct target, or a named hosted target.
@@ -225,14 +225,14 @@ class Client:
         """
         return await self._submit(task, _overrides(options, _SubmitOptions.__annotations__))
 
-    async def submit_plan(self, request: MergePlanRequest) -> MergePlan:
-        """Validate and atomically submit one merge-only DAG to a hosted target.
+    async def submit_stack(self, request: StackRequest) -> Stack:
+        """Validate and atomically submit one stack of runs to a hosted target.
 
         Args:
-            request: Immutable plan metadata, profile selector, and static run DAG.
+            request: Immutable stack metadata, profile selector, delivery mode, and static run DAG.
 
         Returns:
-            A durable merge-plan handle bound to this client's hosted target.
+            A durable stack handle bound to this client's hosted target.
 
         Raises:
             InvalidRequestError: If this client does not use HostedTarget or validation fails.
@@ -243,13 +243,13 @@ class Client:
         submission_key = (
             request.submission_key if request.submission_key is not None else _submission_key()
         )
-        with tempfile.TemporaryDirectory(prefix="zeroshot-python-plan-") as directory:
-            manifest = _write_json(Path(directory) / "plan.json", request.to_dict())
-            await self._native(static=True).json(["plan", "validate", str(manifest)])
+        with tempfile.TemporaryDirectory(prefix="zeroshot-python-stack-") as directory:
+            manifest = _write_json(Path(directory) / "stack.json", request.to_dict())
+            await self._native(static=True).json(["stack", "validate", str(manifest)])
             await self._ready()
             value = await self._native().json(
                 [
-                    "plan",
+                    "stack",
                     "submit",
                     str(manifest),
                     *self._route_arguments(),
@@ -258,14 +258,14 @@ class Client:
                     "--detach",
                 ]
             )
-        status = _plan_status(value)
-        return MergePlan(self, status.plan_id)
+        status = _stack_status(value)
+        return Stack(self, status.stack_id)
 
-    def get_plan(self, plan_id: str) -> MergePlan:
-        """Reconstruct a durable hosted merge-plan handle without target I/O.
+    def get_stack(self, stack_id: str) -> Stack:
+        """Reconstruct a durable hosted stack handle without target I/O.
 
         Args:
-            plan_id: Opaque server-assigned plan identity.
+            stack_id: Opaque server-assigned stack identity.
 
         Returns:
             A handle resolved lazily against this client's named hosted target.
@@ -275,7 +275,7 @@ class Client:
             InvalidRequestError: If this client does not use HostedTarget.
         """
         self._require_hosted_target()
-        return MergePlan(self, plan_id)
+        return Stack(self, stack_id)
 
     async def _submit(self, request: str | RunRequest, overrides: _SubmitOptions) -> Run:
         self._ensure_open()
@@ -497,26 +497,26 @@ class Client:
         self._ensure_open()
         if not isinstance(self.target, HostedTarget):
             raise InvalidRequestError(
-                "merge plans require a named hosted target",
+                "stacks require a named hosted target",
                 code="target.hosted_required",
             )
         return self.target
 
-    async def _plan_status(self, plan_id: str) -> MergePlanStatus:
+    async def _stack_status(self, stack_id: str) -> StackStatus:
         self._require_hosted_target()
         await self._ready()
-        value = await self._native().json(["plan", "status", plan_id, *self._route_arguments()])
-        return _plan_status(value)
+        value = await self._native().json(["stack", "status", stack_id, *self._route_arguments()])
+        return _stack_status(value)
 
-    async def _plan_watch(self, plan_id: str) -> AsyncGenerator[MergePlanStatus, None]:
+    async def _stack_watch(self, stack_id: str) -> AsyncGenerator[StackStatus, None]:
         self._require_hosted_target()
         await self._ready()
-        stream = self._native().json_lines(["plan", "watch", plan_id, *self._route_arguments()])
+        stream = self._native().json_lines(["stack", "watch", stack_id, *self._route_arguments()])
         unsuccessful_terminal_yielded = False
         try:
             async with aclosing(stream) as values:
                 async for value in values:
-                    status = _plan_status(value)
+                    status = _stack_status(value)
                     unsuccessful_terminal_yielded = unsuccessful_terminal_yielded or (
                         status.terminal and not status.succeeded
                     )
@@ -525,11 +525,13 @@ class Client:
             if not unsuccessful_terminal_yielded:
                 raise
 
-    async def _plan_force_stop(self, plan_id: str) -> MergePlanStatus:
+    async def _stack_force_stop(self, stack_id: str) -> StackStatus:
         self._require_hosted_target()
         await self._ready()
-        value = await self._native().json(["plan", "force-stop", plan_id, *self._route_arguments()])
-        return _plan_status(value)
+        value = await self._native().json(
+            ["stack", "force-stop", stack_id, *self._route_arguments()]
+        )
+        return _stack_status(value)
 
     async def _status(self, run_id: str) -> RunStatus:
         await self._ready()
@@ -569,51 +571,58 @@ class Client:
         return _status(value)
 
 
-class MergePlan:
-    """Durable hosted merge-plan handle bound to one Client target."""
+class Stack:
+    """Durable hosted stack handle bound to one Client target.
+
+    A "stacked_pull_requests" stack is complete once every pull request is open; Zeroshot never
+    merges, retargets, or restacks them. Merge them from the bottom up: GitHub moves a child pull
+    request onto the base branch when its merged parent's branch is deleted. A squash-merged parent
+    leaves the child to rebase onto the base branch, and changes pushed to a parent pull request
+    during review are not restacked, so rebase the pull requests above it by hand.
+    """
 
     __slots__ = ("_client", "_id")
 
-    def __init__(self, client: Client, plan_id: str) -> None:
+    def __init__(self, client: Client, stack_id: str) -> None:
         self._client = client
-        self._id = plan_id
+        self._id = stack_id
 
     @property
     def id(self) -> str:
-        """Return the opaque server-assigned merge-plan identity."""
+        """Return the opaque server-assigned stack identity."""
         return self._id
 
-    async def status(self) -> MergePlanStatus:
-        """Read the plan's current aggregate status."""
-        return await self._client._plan_status(self.id)
+    async def status(self) -> StackStatus:
+        """Read the stack's current aggregate status."""
+        return await self._client._stack_status(self.id)
 
-    def watch(self) -> AsyncIterator[MergePlanStatus]:
-        """Poll and yield changed aggregate snapshots until the plan is terminal.
+    def watch(self) -> AsyncIterator[StackStatus]:
+        """Poll and yield changed aggregate snapshots until the stack is terminal.
 
         Cancelling or closing the iterator detaches observation and leaves runs active.
         """
-        return self._client._plan_watch(self.id)
+        return self._client._stack_watch(self.id)
 
-    async def wait(self, *, wait_timeout: float | None = None) -> MergePlanStatus:
-        """Wait for a terminal aggregate status without controlling plan lifetime.
+    async def wait(self, *, wait_timeout: float | None = None) -> StackStatus:
+        """Wait for a terminal aggregate status without controlling stack lifetime.
 
         Args:
             wait_timeout: Non-negative observation deadline in seconds. None waits indefinitely.
 
         Raises:
             ValueError: If wait_timeout is negative.
-            MergePlanWaitTimeout: If observation expires; it carries this durable handle.
+            StackWaitTimeout: If observation expires; it carries this durable handle.
             TargetError: If the selected target is unavailable.
             ProtocolError: If native output is malformed.
         """
         if wait_timeout is not None and wait_timeout < 0:
             raise ValueError("wait_timeout must be non-negative")
 
-        async def observe() -> MergePlanStatus:
+        async def observe() -> StackStatus:
             current = await self.status()
             if current.terminal:
                 return current
-            stream = self._client._plan_watch(self.id)
+            stream = self._client._stack_watch(self.id)
             async with aclosing(stream) as statuses:
                 async for status in statuses:
                     if status.terminal:
@@ -621,7 +630,7 @@ class MergePlan:
             current = await self.status()
             if current.terminal:
                 return current
-            raise ProtocolError("Zeroshot plan watch closed before a terminal status")
+            raise ProtocolError("Zeroshot stack watch closed before a terminal status")
 
         if wait_timeout is None:
             return await observe()
@@ -629,11 +638,11 @@ class MergePlan:
             async with asyncio.timeout(wait_timeout):
                 return await observe()
         except TimeoutError as error:
-            raise MergePlanWaitTimeout(self, wait_timeout) from error
+            raise StackWaitTimeout(self, wait_timeout) from error
 
-    async def force_stop(self) -> MergePlanStatus:
+    async def force_stop(self) -> StackStatus:
         """Force every nonterminal run to stop and wait for aggregate termination."""
-        status = await self._client._plan_force_stop(self.id)
+        status = await self._client._stack_force_stop(self.id)
         if status.terminal:
             return status
         return await self.wait()

@@ -1,0 +1,387 @@
+from __future__ import annotations
+
+import json
+import logging
+import os
+import stat
+import sys
+import textwrap
+from abc import ABC, abstractmethod
+from argparse import Action, ArgumentTypeError
+from ast import literal_eval
+from collections import OrderedDict
+from pathlib import Path
+from typing import TYPE_CHECKING, Final, cast
+
+if TYPE_CHECKING:
+    from argparse import ArgumentParser, Namespace
+    from collections.abc import Sequence
+    from typing import Any, NoReturn
+
+    from python_discovery import PythonInfo
+
+    from virtualenv.app_data.base import AppData
+    from virtualenv.config.cli.parser import VirtualEnvOptions
+
+from os.path import commonpath
+
+from virtualenv.util.path import safe_delete, write_file
+from virtualenv.util.subprocess import LogCmd, run_cmd
+from virtualenv.util.text import collapse_line_boundaries
+from virtualenv.version import __version__
+
+from .pyenv_cfg import PyEnvCfg
+
+HERE = Path(os.path.abspath(__file__)).parent
+DEBUG_SCRIPT = HERE / "debug.py"
+LOGGER = logging.getLogger(__name__)
+
+
+class CreatorMeta:
+    def __init__(self) -> None:
+        self.error = None
+
+
+class Creator(ABC):
+    """A class that given a python Interpreter creates a virtual environment."""
+
+    def __init__(self, options: VirtualEnvOptions, interpreter: PythonInfo) -> None:
+        """Construct a new virtual environment creator.
+
+        :param options: the CLI option as parsed from :meth:`add_parser_arguments`
+        :param interpreter: the interpreter to create virtual environment from
+
+        """
+        self.interpreter = interpreter
+        self._debug = None
+        self.dest = Path(options.dest)
+        self.clear = options.clear
+        self.no_vcs_ignore = options.no_vcs_ignore
+        self.venv_redirect = options.venv_redirect
+        self.pyenv_cfg = (
+            PyEnvCfg(OrderedDict(), self.dest / "pyvenv.cfg") if self.clear else PyEnvCfg.from_folder(self.dest)
+        )
+        self.app_data = options.app_data
+        self.env = options.env
+        self.prompt = getattr(options, "prompt", None)
+
+    if TYPE_CHECKING:
+
+        @property
+        def exe(self) -> Path: ...
+
+        @property
+        def env_name(self) -> str: ...
+
+        @property
+        def bin_dir(self) -> Path: ...
+
+        @property
+        def script_dir(self) -> Path: ...
+
+        @property
+        def libs(self) -> list[Path]: ...
+
+        @property
+        def purelib(self) -> Path: ...
+
+        @property
+        def platlib(self) -> Path: ...
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({', '.join(f'{k}={v}' for k, v in self._args())})"
+
+    def _args(self) -> list[tuple[str, Any]]:
+        return [
+            ("dest", str(self.dest)),
+            ("clear", self.clear),
+            ("no_vcs_ignore", self.no_vcs_ignore),
+            ("venv_redirect", self.venv_redirect),
+        ]
+
+    @classmethod
+    def can_create(cls, interpreter: PythonInfo) -> CreatorMeta | bool | None:  # ruff:ignore[unused-class-method-argument]
+        """Determine if we can create a virtual environment.
+
+        :param interpreter: the interpreter in question
+
+        :returns: ``None`` if we can't create, any other object otherwise that will be forwarded to
+            :meth:`add_parser_arguments`
+
+        """
+        return True
+
+    @classmethod
+    def add_parser_arguments(
+        cls,
+        parser: ArgumentParser,
+        interpreter: PythonInfo,  # ruff:ignore[unused-class-method-argument]
+        meta: CreatorMeta,  # ruff:ignore[unused-class-method-argument]
+        app_data: AppData,  # ruff:ignore[unused-class-method-argument]
+    ) -> None:
+        """Add CLI arguments for the creator.
+
+        :param parser: the CLI parser
+        :param app_data: the application data folder
+        :param interpreter: the interpreter we're asked to create virtual environment for
+        :param meta: value as returned by :meth:`can_create`
+
+        """
+
+        class Destination(Action):
+            def __call__(
+                self,
+                parser: ArgumentParser,
+                namespace: Namespace,
+                values: str | Sequence[str] | None,
+                option_string: str | None = None,
+            ) -> None:
+                raw: Final = cast("str", values)
+                try:
+                    namespace.dest = cls.validate_dest(raw)
+                except ArgumentTypeError as exception:
+                    parser.error(f"argument {option_string or self.dest}: {exception}")
+                destination: Final = Path(os.path.abspath(raw))
+                namespace.dest_is_link = destination.is_symlink() or (
+                    os.name == "nt"
+                    and destination.exists()
+                    and bool(destination.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+                )
+
+        parser.add_argument(
+            "dest",
+            help="directory to create virtualenv at",
+            action=Destination,
+        )
+        parser.add_argument(
+            "--clear",
+            dest="clear",
+            action="store_true",
+            help="remove the destination directory if exist before starting (will overwrite files otherwise)",
+            default=False,
+        )
+        parser.add_argument(
+            "--no-vcs-ignore",
+            dest="no_vcs_ignore",
+            action="store_true",
+            help="don't create VCS ignore directive in the destination directory",
+            default=False,
+        )
+        parser.add_argument(
+            "--venv-redirect",
+            dest="venv_redirect",
+            action="store_const",
+            const=True,
+            help="point a PEP-832 .venv redirect file next to the destination at the created environment, even outside "
+            "a project folder; unset, virtualenv does so only beside a pyproject.toml with no .venv yet",
+            default=None,
+        )
+        parser.add_argument(
+            "--no-venv-redirect",
+            dest="venv_redirect",
+            action="store_const",
+            const=False,
+            help="write no PEP-832 .venv redirect file",
+            default=None,
+        )
+
+    @abstractmethod
+    def create(self) -> None:
+        """Perform the virtual environment creation."""
+        raise NotImplementedError
+
+    @classmethod
+    def validate_dest(cls, raw_value: str) -> str:  # ruff:ignore[complex-structure]
+        """Not blank, a directory if it exists, no path separator in the path, valid chars and must be write-able."""
+
+        def non_write_able(dest: Path, value: Path) -> NoReturn:
+            if dest.exists() and not dest.is_dir():
+                msg = f"the destination {value} is inside {dest}, which is not a directory"
+                raise ArgumentTypeError(msg)
+            common = Path(commonpath([str(value), str(dest)]))
+            msg = f"the destination {dest.relative_to(common)} is not write-able at {common}"
+            raise ArgumentTypeError(msg)
+
+        # an empty value, often an unset shell variable, resolves to the working directory (on Windows so do spaces)
+        # and --clear would delete it
+        if not raw_value.strip():
+            msg = f"destination {raw_value!r} must not be empty or whitespace; pass . to use the current directory"
+            raise ArgumentTypeError(msg)
+        # the file system must be able to encode
+        # note in newer CPython this is always utf-8 https://www.python.org/dev/peps/pep-0529/
+        encoding = sys.getfilesystemencoding()
+        refused = OrderedDict()
+        kwargs = {"errors": "ignore"} if encoding != "mbcs" else {}
+        for char in str(raw_value):
+            try:
+                trip = char.encode(encoding, **kwargs).decode(encoding)
+                if trip == char:
+                    continue
+                raise ValueError(trip)  # ruff:ignore[raise-within-try]
+            except ValueError:
+                refused[char] = None
+        if refused:
+            bad = "".join(refused.keys())
+            msg = f"the file system codec ({encoding}) cannot handle characters {bad!r} within {raw_value!r}"
+            raise ArgumentTypeError(msg)
+        value = Path(raw_value)
+        if value.exists() and not value.is_dir():
+            msg = f"the destination {value} already exists and is not a directory"
+            raise ArgumentTypeError(msg)
+        dest = Path(os.path.abspath(str(value))).resolve()  # on Windows absolute does not imply resolve so use both
+        for destination in (raw_value, str(dest)):
+            if os.pathsep in destination:
+                msg = (
+                    f"destination {destination!r} must not contain the path separator ({os.pathsep})"
+                    f" as this would break the activation scripts"
+                )
+                raise ArgumentTypeError(msg)
+        value = dest
+        while dest:
+            if dest.exists():
+                if dest.is_dir() and os.access(str(dest), os.W_OK):
+                    break
+                non_write_able(dest, value)
+            base, _ = dest.parent, dest.name
+            if base == dest:
+                non_write_able(dest, value)  # pragma: no cover
+            dest = base
+        return str(value)
+
+    def run(self) -> None:
+        if self.dest.exists() and self.clear:
+            LOGGER.debug("delete %s", self.dest)
+            safe_delete(self.dest)
+        self.create()
+        self.add_cachedir_tag()
+        self.set_pyenv_cfg()
+        if not self.no_vcs_ignore:
+            self.setup_ignore_vcs()
+        if self.venv_redirect is not False:
+            self.point_venv_redirect()
+
+    def add_cachedir_tag(self) -> None:
+        """Generate a file indicating that this is not meant to be backed up."""
+        cachedir_tag_file = self.dest / "CACHEDIR.TAG"
+        if not cachedir_tag_file.exists():
+            cachedir_tag_text = textwrap.dedent("""
+                Signature: 8a477f597d28d172789f06886806bc55
+                # This file is a cache directory tag created by Python virtualenv.
+                # For information about cache directory tags, see:
+                #   https://bford.info/cachedir/
+            """).strip()
+            write_file(cachedir_tag_file, cachedir_tag_text.encode("utf-8"))
+
+    def set_pyenv_cfg(self) -> None:
+        self.pyenv_cfg.content = OrderedDict()
+        system_executable = self.interpreter.system_executable or self.interpreter.executable
+        assert system_executable is not None  # ruff:ignore[assert]
+        self.pyenv_cfg["home"] = os.path.dirname(os.path.abspath(system_executable))
+        self.pyenv_cfg["implementation"] = self.interpreter.implementation
+        version_info = self.interpreter.version_info
+        self.pyenv_cfg["python-version"] = f"{version_info.major}.{version_info.minor}"
+        self.pyenv_cfg["version_info"] = ".".join(str(i) for i in version_info)
+        self.pyenv_cfg["version"] = ".".join(str(i) for i in version_info[:3])
+        self.pyenv_cfg["executable"] = os.path.realpath(system_executable)
+        self.pyenv_cfg["command"] = f"{sys.executable} -m virtualenv {self.dest}"
+        self.pyenv_cfg["virtualenv"] = __version__
+        if self.prompt is not None:
+            prompt_value = os.path.basename(os.getcwd()) if self.prompt == "." else self.prompt
+            self.pyenv_cfg["prompt"] = prompt_value
+
+    def setup_ignore_vcs(self) -> None:
+        """Generate ignore instructions for version control systems."""
+        # mark this folder to be ignored by VCS, handle https://www.python.org/dev/peps/pep-0610/#registered-vcs
+        git_ignore = self.dest / ".gitignore"
+        if not git_ignore.exists():
+            write_file(git_ignore, b"# created by virtualenv automatically\n*\n")
+        # Mercurial - does not support the .hgignore file inside a subdirectory directly, but only if included via the
+        # subinclude directive from root, at which point on might as well ignore the directory itself, see
+        # https://www.selenic.com/mercurial/hgignore.5.html for more details
+        # Bazaar - does not support ignore files in sub-directories, only at root level via .bzrignore
+        # Subversion - does not support ignore files, requires direct manipulation with the svn tool
+
+    def point_venv_redirect(self) -> None:
+        """Point the ``.venv`` redirect file of the parent folder at the environment, per PEP-832 (provisional)."""
+        if self.dest.name == ".venv":  # the environment is the .venv itself, no redirect needed
+            return
+        redirect = self.dest.parent / ".venv"
+        if self.venv_redirect is None and (
+            redirect.exists() or redirect.is_symlink() or not (self.dest.parent / "pyproject.toml").is_file()
+        ):  # unset: claim the default only for a project folder that has none yet
+            return
+        if redirect.is_symlink() or redirect.is_dir():
+            LOGGER.debug("%s keeps being the default environment", redirect)
+            return
+        if redirect.exists() and not _points_at_virtualenv(redirect):
+            LOGGER.debug("%s points at an environment virtualenv did not create, leaving it", redirect)
+            return
+        if collapse_line_boundaries(self.dest.name) != self.dest.name or self.dest.name != self.dest.name.strip():
+            LOGGER.warning(
+                "could not point %s at %s - the name contains a line boundary or surrounding whitespace",
+                redirect,
+                self.dest,
+            )
+            return
+        try:
+            write_file(redirect, f"{self.dest.name}\n".encode())
+        except OSError as exc:
+            LOGGER.warning("could not point %s at %s - %s", redirect, self.dest, exc)
+
+    @property
+    def debug(self) -> dict[str, Any] | None:
+        """Debug information about the virtual environment (only valid after :meth:`create` has run)."""
+        if self._debug is None and self.exe is not None:
+            self._debug = get_env_debug_info(self.exe, self.debug_script(), self.app_data, self.env)
+        return self._debug
+
+    @staticmethod
+    def debug_script() -> Path:
+        return DEBUG_SCRIPT
+
+
+def _points_at_virtualenv(redirect: Path) -> bool:
+    try:
+        line = redirect.read_text(encoding="utf-8").removesuffix("\n")  # universal newlines already turned \r\n into \n
+        return bool(line) and "virtualenv" in PyEnvCfg.from_folder(redirect.parent / line)
+    except (OSError, UnicodeDecodeError, ValueError):  # unreadable, so not a redirect virtualenv can claim
+        return False
+
+
+def get_env_debug_info(env_exe: Path, debug_script: Path, app_data: AppData, env: dict[str, str]) -> dict[str, Any]:
+    env = env.copy()
+    env.pop("PYTHONPATH", None)
+
+    with app_data.ensure_extracted(debug_script) as debug_script_extracted:
+        cmd = [str(env_exe), str(debug_script_extracted)]
+        LOGGER.debug("debug via %r", LogCmd(cmd))
+        code, out, err = run_cmd(cmd, env)
+
+    try:
+        result = _parse_debug_output(code, out, err)
+    except Exception as exception:  # ruff:ignore[blind-except]
+        return {"out": out, "err": err, "returncode": code, "exception": repr(exception)}
+    if "sys" in result and "path" in result["sys"]:
+        del result["sys"]["path"][0]
+    return result
+
+
+def _parse_debug_output(code: int, out: str, err: str) -> dict[str, Any]:
+    if code != 0:
+        if out:
+            result = literal_eval(out)
+        elif code == 2 and "file" in err:  # ruff:ignore[magic-value-comparison]
+            raise OSError(err)
+        else:
+            raise Exception(err)  # ruff:ignore[raise-vanilla-class]
+    else:
+        result = json.loads(out)
+    if err:
+        result["err"] = err
+    return result
+
+
+__all__ = [
+    "Creator",
+    "CreatorMeta",
+]

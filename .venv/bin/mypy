@@ -1,0 +1,6 @@
+#!/var/lib/zeroshot/native-v2/runs/2c245a056855aa6a6c7b7ee27676756c9712ac3b1961e36b722886d3b766cec1/workspace/.venv/bin/python
+import sys
+from mypy.__main__ import console_entry
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(console_entry())

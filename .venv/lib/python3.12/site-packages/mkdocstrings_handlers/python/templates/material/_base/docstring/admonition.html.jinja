@@ -1,0 +1,20 @@
+{#- Template for admonitions in docstrings.
+
+This template renders admonitions using the `details` HTML element.
+
+Context:
+  section (griffe.DocstringSectionAdmonition): The section to render.
+-#}
+
+{% block logs scoped %}
+  {#- Logging block.
+
+  This block can be used to log debug messages, deprecation messages, warnings, etc.
+  -#}
+  {{ log.debug("Rendering admonition") }}
+{% endblock logs %}
+
+<details class="{{ section.value.kind }}" open>
+  <summary>{{ section.title|convert_markdown(heading_level, html_id, strip_paragraph=True, autoref_hook=autoref_hook) }}</summary>
+  {{ section.value.contents|convert_markdown(heading_level, html_id, autoref_hook=autoref_hook) }}
+</details>

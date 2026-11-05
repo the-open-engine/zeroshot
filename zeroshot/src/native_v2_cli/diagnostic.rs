@@ -186,7 +186,7 @@ fn admission_code(source: &NativeV2AdmissionError) -> &'static str {
         NativeV2AdmissionError::MissingRuntimeBinding { .. } => "runtime.missing_binding",
         NativeV2AdmissionError::UnexpectedRuntimeBinding { .. } => "runtime.unexpected_binding",
         NativeV2AdmissionError::InvalidRuntimeBinding { .. } => "runtime.invalid_binding",
-        NativeV2AdmissionError::MergePlanAgentGitHubToken { .. } => "runtime.invalid_environment",
+        NativeV2AdmissionError::StackAgentGitHubToken { .. } => "runtime.invalid_environment",
         NativeV2AdmissionError::UnsupportedGraphProfile => "graph.unsupported_profile",
         _ => "request.invalid",
     }
@@ -203,7 +203,7 @@ fn admission_node(source: &NativeV2AdmissionError) -> Option<String> {
         | NativeV2AdmissionError::UnsupportedDeliveryWorker { node, .. }
         | NativeV2AdmissionError::DeliveryWorkerRequiresBinding { node, .. }
         | NativeV2AdmissionError::InvalidDeliveryContract { node, .. }
-        | NativeV2AdmissionError::MergePlanAgentGitHubToken { node } => Some(node.to_string()),
+        | NativeV2AdmissionError::StackAgentGitHubToken { node } => Some(node.to_string()),
         _ => None,
     }
 }
@@ -212,7 +212,7 @@ fn admission_details(source: &NativeV2AdmissionError) -> Value {
     match source {
         NativeV2AdmissionError::DeliveryNodeCount { found, .. } => json!({"found": found}),
         NativeV2AdmissionError::DeclaredEnvironmentTooLarge { found } => json!({"found": found}),
-        NativeV2AdmissionError::MergePlanAgentGitHubToken { .. } => {
+        NativeV2AdmissionError::StackAgentGitHubToken { .. } => {
             json!({"environment": GITHUB_TOKEN_ENV})
         }
         _ => json!({}),

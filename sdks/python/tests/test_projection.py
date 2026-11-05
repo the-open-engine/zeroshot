@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from zeroshot._projection import _log_event, _plan_status, _status, _summary
+from zeroshot._projection import _log_event, _stack_status, _status, _summary
 from zeroshot.errors import ProtocolError
 
 
@@ -38,9 +38,9 @@ def test_log_event_rejects_missing_timestamp() -> None:
         _log_event(value)
 
 
-def plan_status() -> dict[str, object]:
+def stack_status() -> dict[str, object]:
     return {
-        "planId": "plan-1",
+        "stackId": "stack-1",
         "title": "Release",
         "state": "queued",
         "repository": "owner/repo",
@@ -53,6 +53,7 @@ def plan_status() -> dict[str, object]:
                 "runId": "run-1",
                 "state": "blocked",
                 "needs": [],
+                "sourceBranch": None,
                 "sourceRevision": None,
                 "readyAt": None,
                 "queueExpiresAt": None,
@@ -64,21 +65,32 @@ def plan_status() -> dict[str, object]:
     }
 
 
-def test_merge_plan_projection_preserves_explicit_nullable_fields() -> None:
-    status = _plan_status(plan_status())
-    assert status.plan_id == "plan-1"
+def test_stack_projection_preserves_explicit_nullable_fields() -> None:
+    status = _stack_status(stack_status())
+    assert status.stack_id == "stack-1"
+    assert status.runs[0].source_branch is None
     assert status.runs[0].source_revision is None
     assert status.runs[0].waiting_reason == "dependencies_pending"
     assert not status.terminal
 
 
-def test_merge_plan_projection_rejects_omitted_nullable_fields() -> None:
-    value = plan_status()
+def test_stack_projection_preserves_the_stacked_source_branch() -> None:
+    value = stack_status()
     runs = value["runs"]
     assert isinstance(runs, list)
-    del runs[0]["queueExpiresAt"]
-    with pytest.raises(ProtocolError, match="queueExpiresAt"):
-        _plan_status(value)
+    runs[0]["sourceBranch"] = "zeroshot/v2-0123456789abcdef0123"
+    status = _stack_status(value)
+    assert status.runs[0].source_branch == "zeroshot/v2-0123456789abcdef0123"
+
+
+@pytest.mark.parametrize("field", ["sourceBranch", "queueExpiresAt"])
+def test_stack_projection_rejects_omitted_nullable_fields(field: str) -> None:
+    value = stack_status()
+    runs = value["runs"]
+    assert isinstance(runs, list)
+    del runs[0][field]
+    with pytest.raises(ProtocolError, match=field):
+        _stack_status(value)
 
 
 def local_status() -> dict[str, object]:

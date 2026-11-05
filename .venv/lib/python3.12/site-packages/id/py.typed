@@ -1,0 +1,4 @@
+`id` is a project providing helpers for making OIDC identities.
+This PEP 561 marker file exists to let the type checkers know that this project
+has type annotations declared. Additionally, this is useful
+for type-checking our own tests since they make corresponding imports.

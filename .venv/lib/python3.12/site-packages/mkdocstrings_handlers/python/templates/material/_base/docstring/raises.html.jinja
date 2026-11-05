@@ -1,0 +1,102 @@
+{#- Template for "Raises" sections in docstrings.
+
+This template renders a list of documented exceptions in the format
+specified with the [`docstring_section_style`][] configuration option.
+
+Context:
+  section (griffe.DocstringSectionAttributes): The section to render.
+-#}
+
+{% block logs scoped %}
+  {#- Logging block.
+
+  This block can be used to log debug messages, deprecation messages, warnings, etc.
+  -#}
+  {{ log.debug("Rendering raises section") }}
+{% endblock logs %}
+
+{% import "language.html.jinja" as lang with context %}
+{#- Language module providing the `t` translation method. -#}
+
+{% if config.docstring_section_style == "table" %}
+  {% block table_style scoped %}
+    {#- Block for the `table` section style. -#}
+    <p><span class="doc-section-title">{{ section.title or lang.t("Raises:") }}</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>{{ lang.t("Type") }}</th>
+          <th>{{ lang.t("Description") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for raises in section.value %}
+          <tr class="doc-section-item">
+            <td>
+              {% if raises.annotation %}
+                {% with expression = raises.annotation, backlink_type = "raised-by" %}
+                  <code>{% include "expression.html.jinja" with context %}</code>
+                {% endwith %}
+              {% endif %}
+            </td>
+            <td>
+              <div class="doc-md-description">
+                {{ raises.description|convert_markdown(heading_level, html_id, autoref_hook=autoref_hook) }}
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endblock table_style %}
+{% elif config.docstring_section_style == "list" %}
+  {% block list_style scoped %}
+    {#- Block for the `list` section style. -#}
+    <p><span class="doc-section-title">{{ lang.t(section.title) or lang.t("Raises:") }}</span></p>
+    <ul>
+      {% for raises in section.value %}
+        <li class="doc-section-item field-body">
+          {% if raises.annotation %}
+            {% with expression = raises.annotation, backlink_type = "raised-by" %}
+              <code>{% include "expression.html.jinja" with context %}</code>
+            {% endwith %}
+            –
+          {% endif %}
+          <div class="doc-md-description">
+            {{ raises.description|convert_markdown(heading_level, html_id, autoref_hook=autoref_hook) }}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endblock list_style %}
+{% elif config.docstring_section_style == "spacy" %}
+  {% block spacy_style scoped %}
+    {#- Block for the `spacy` section style. -#}
+    <table>
+      <thead>
+        <tr>
+          <th><span class="doc-section-title">{{ (section.title or lang.t("RAISES")).rstrip(":").upper() }}</span></th>
+          <th><span>{{ lang.t("DESCRIPTION") }}</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for raises in section.value %}
+          <tr class="doc-section-item">
+            <td>
+              <span class="doc-raises-annotation">
+                {% with expression = raises.annotation, backlink_type = "raised-by" %}
+                  <code>{% include "expression.html.jinja" with context %}</code>
+                {% endwith %}
+              </span>
+            </td>
+            <td class="doc-raises-details">
+              <div class="doc-md-description">
+                {{ raises.description|convert_markdown(heading_level, html_id, autoref_hook=autoref_hook) }}
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endblock spacy_style %}
+{% endif %}

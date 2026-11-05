@@ -77,10 +77,10 @@ enum CliCommand {
         command: TemplateCommand,
     },
 
-    /// Validate, submit, and observe hosted merge plans.
-    Plan {
+    /// Validate, submit, and observe hosted stacks of dependent runs.
+    Stack {
         #[command(subcommand)]
-        command: PlanCommand,
+        command: StackCommand,
     },
 
     /// Submit a graph run locally or to a named target.
@@ -196,8 +196,9 @@ enum UtilityCommand {
 The JSON manifest is strict and self-contained:
 
   {
-    "schema": "zeroshot.merge-plan/v1",
+    "schema": "zeroshot.stack/v1",
     "title": "Release checkout update",
+    "delivery": "merge",
     "source": {"repository": "owner/repo", "branch": "main"},
     "profile": "org:software-change",
     "expiresAt": "<RFC3339 timestamp within 7 days>",
@@ -207,29 +208,42 @@ The JSON manifest is strict and self-contained:
     }
   }
 
-Every run uses the same source and profile. The profile must contain exactly one current Git merge delivery node;
-pull-request delivery is rejected. Agent bindings must not declare `GH_TOKEN`; only the Git delivery
-binding may declare it. `needs` gates readiness but does not pass output between runs.
+Every run uses the same source and profile. Agent bindings must not declare `GH_TOKEN`; only the Git
+delivery binding may declare it. `needs` gates readiness but does not pass output between runs.
+
+DELIVERY
+`delivery` is required and selects how every run lands:
+
+  merge                  Each run merges into the base branch before the runs that need it start.
+                         The profile must contain exactly one Git merge delivery node (merge@2 or
+                         merge@3). A run may need several runs.
+  stacked_pull_requests  Each run opens a pull request against the branch of the run before it, so
+                         the stack arrives as a chain of pull requests and nothing is merged. The
+                         profile must contain exactly one pull-request delivery node (pr@2).
+                         Validation and submission turn the runs into one linear stack: each run
+                         needs only the run before it, in dependency order with ties broken by run
+                         name. `zeroshot stack validate` prints that order.
+
 Platform assigns every run ID atomically at submission. After a node's dependencies succeed, Platform
-materializes it against an exact source revision. Once materialization completes, `readyAt` is set
-and the node's queue deadline is the earlier of `expiresAt` and seven days after `readyAt`.
-`expiresAt` must be in the future and no more than
-seven days away. Plans cannot be edited or retried in place."#)]
-enum PlanCommand {
-    /// Validate a merge-plan manifest without contacting a target.
-    Validate(PlanFileArgs),
+materializes it against an exact source branch and revision, reported as `sourceBranch` and
+`sourceRevision`. Once materialization completes, `readyAt` is set and the node's queue deadline is
+the earlier of `expiresAt` and seven days after `readyAt`. `expiresAt` must be in the future and no
+more than seven days away. Stacks cannot be edited or retried in place."#)]
+enum StackCommand {
+    /// Validate a stack manifest without contacting a target.
+    Validate(StackFileArgs),
 
-    /// Atomically submit every node in a merge-plan manifest.
-    Submit(PlanSubmitArgs),
+    /// Atomically submit every node in a stack manifest.
+    Submit(StackSubmitArgs),
 
-    /// Read a merge plan's aggregate status as JSON.
-    Status(PlanSelectorArgs),
+    /// Read a stack's aggregate status as JSON.
+    Status(StackSelectorArgs),
 
-    /// Poll a merge plan and stream changed snapshots as NDJSON.
-    Watch(PlanSelectorArgs),
+    /// Poll a stack and stream changed snapshots as NDJSON.
+    Watch(StackSelectorArgs),
 
-    /// Force every nonterminal run in a merge plan to stop.
-    ForceStop(PlanSelectorArgs),
+    /// Force every nonterminal run in a stack to stop.
+    ForceStop(StackSelectorArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -652,15 +666,15 @@ struct RunArgs {
 }
 
 #[derive(Debug, Args)]
-struct PlanFileArgs {
-    /// Merge-plan manifest JSON file.
+struct StackFileArgs {
+    /// Stack manifest JSON file.
     #[arg(value_name = "FILE")]
     file: PathBuf,
 }
 
 #[derive(Debug, Args)]
-struct PlanSubmitArgs {
-    /// Merge-plan manifest JSON file.
+struct StackSubmitArgs {
+    /// Stack manifest JSON file.
     #[arg(value_name = "FILE")]
     file: PathBuf,
 
@@ -672,16 +686,16 @@ struct PlanSubmitArgs {
     #[arg(long, value_name = "KEY")]
     submission_key: String,
 
-    /// Return after atomic submission instead of polling plan status.
+    /// Return after atomic submission instead of polling stack status.
     #[arg(short = 'd', long)]
     detach: bool,
 }
 
 #[derive(Debug, Args)]
-struct PlanSelectorArgs {
-    /// Immutable merge-plan ID.
-    #[arg(value_name = "PLAN_ID")]
-    plan_id: String,
+struct StackSelectorArgs {
+    /// Immutable stack ID.
+    #[arg(value_name = "STACK_ID")]
+    stack_id: String,
 
     /// Use this named hosted target.
     #[arg(long, value_name = "NAME")]

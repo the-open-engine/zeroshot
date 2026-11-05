@@ -139,7 +139,7 @@ async fn push_publishes_the_admitted_candidate_without_integrating_target_drift(
                 "rev-parse",
                 &format!(
                     "refs/heads/{}",
-                    delivery_branch("updated-target-before-push")
+                    delivery_head_branch(&RunId::new("updated-target-before-push"))
                 )
             ]
         ),
@@ -186,7 +186,7 @@ async fn updated_target_workflow_is_integrated_and_reviewed_before_first_push() 
                     "rev-parse",
                     &format!(
                         "refs/heads/{}",
-                        delivery_branch("updated-target-before-push")
+                        delivery_head_branch(&RunId::new("updated-target-before-push"))
                     )
                 ]
             ),
