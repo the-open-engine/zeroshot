@@ -19,14 +19,7 @@ export function EnvironmentEditor({ value, onChange }: Props) {
   return (
     <section aria-label="Run environment">
       <div className="section-title">Environment</div>
-      <p className="helper">
-        Setup and startup run on Docker targets. Workers and reviewers share the environment and
-        workspace for the whole run. Both scripts run again on resume.
-      </p>
-      <Field
-        label="Setup script"
-        hint="Runs as root before checkout or restore. Install system packages here."
-      >
+      <Field label="Setup script">
         <textarea
           className="mono"
           rows={5}
@@ -36,10 +29,7 @@ export function EnvironmentEditor({ value, onChange }: Props) {
           onChange={(event) => scriptChange('setup', event.target.value)}
         />
       </Field>
-      <Field
-        label="Startup script"
-        hint="Runs as the workspace user in the project directory before any node starts."
-      >
+      <Field label="Startup script">
         <textarea
           className="mono"
           rows={5}
@@ -49,11 +39,6 @@ export function EnvironmentEditor({ value, onChange }: Props) {
           onChange={(event) => scriptChange('startup', event.target.value)}
         />
       </Field>
-      <p className="helper">
-        Make startup idempotent: preserve existing workspace files on resume. Install shared tools
-        in <code>$ZEROSHOT_TOOLS</code>; its <code>bin</code> directory is on every agent’s PATH.
-        Install project dependencies in the workspace. Shell exports stay inside each script.
-      </p>
       <EnvironmentVariables value={value} onChange={onChange} />
       <div className="section-rule" />
       <PreparationConnections
@@ -93,10 +78,6 @@ function EnvironmentVariables({ value, onChange }: Props) {
   }
   return (
     <div aria-label="Environment variables">
-      <p className="helper">
-        These values are saved in the environment and passed to scripts and agents. Use connections
-        for secrets. Keep PATH and harness home settings platform-managed.
-      </p>
       {Object.entries(variables).map(([name, entry]) => (
         <div className="runtime-variable" key={name}>
           <ControlText

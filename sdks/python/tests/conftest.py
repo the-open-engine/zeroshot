@@ -36,12 +36,12 @@ def projection(run_id, status, cursor):
         "status": status,
     }
 
-def plan_projection(state):
+def stack_projection(state):
     terminal = state in ("succeeded", "failed", "cancelled", "expired")
-    node_state = state if state != "running" else "running"
+    run_state = state if state != "running" else "running"
     return {
-        "planId": "01900000-0000-7000-8000-000000000010",
-        "title": "Fake plan",
+        "stackId": "01900000-0000-7000-8000-000000000010",
+        "title": "Fake stack",
         "state": state,
         "repository": "owner/repo",
         "branch": "main",
@@ -50,8 +50,9 @@ def plan_projection(state):
         "runs": [{
             "name": "build",
             "runId": "01900000-0000-7000-8000-000000000011",
-            "state": node_state,
+            "state": run_state,
             "needs": [],
+            "sourceBranch": None if state == "queued" else "main",
             "sourceRevision": None if state == "queued" else "0" * 40,
             "readyAt": None if state == "queued" else "2026-09-10T00:01:00Z",
             "queueExpiresAt": "2026-09-11T00:01:00Z",
@@ -67,9 +68,9 @@ for name in ("--input", "--graph", "--runtime-config", "--uniform-runtime-config
     if path:
         with open(path, encoding="utf-8") as stream:
             entry[name] = json.load(stream)
-if args[:2] in (["plan", "validate"], ["plan", "submit"]):
+if args[:2] in (["stack", "validate"], ["stack", "submit"]):
     with open(args[2], encoding="utf-8") as stream:
-        entry["plan"] = json.load(stream)
+        entry["stack"] = json.load(stream)
 if log_path:
     with open(log_path, "a", encoding="utf-8") as stream:
         stream.write(json.dumps(entry) + "\n")
@@ -86,24 +87,24 @@ elif args[:2] == ["template", "show"]:
     }))
 elif args[:2] == ["target", "add"] or args[:2] == ["target", "setup"]:
     pass
-elif args[:2] == ["plan", "validate"]:
+elif args[:2] == ["stack", "validate"]:
     print(json.dumps({"valid": True}))
-elif args[:2] == ["plan", "submit"]:
-    print(json.dumps(plan_projection("queued")))
-elif args[:2] == ["plan", "status"]:
-    print(json.dumps(plan_projection("queued")))
-elif args[:2] == ["plan", "watch"]:
-    print(json.dumps(plan_projection("running")), flush=True)
-    if os.environ.get("FAKE_PLAN_WATCH_FAIL_BEFORE_TERMINAL") == "1":
-        print("zeroshot: plan watch failed before terminal status", file=sys.stderr)
+elif args[:2] == ["stack", "submit"]:
+    print(json.dumps(stack_projection("queued")))
+elif args[:2] == ["stack", "status"]:
+    print(json.dumps(stack_projection("queued")))
+elif args[:2] == ["stack", "watch"]:
+    print(json.dumps(stack_projection("running")), flush=True)
+    if os.environ.get("FAKE_STACK_WATCH_FAIL_BEFORE_TERMINAL") == "1":
+        print("zeroshot: stack watch failed before terminal status", file=sys.stderr)
         raise SystemExit(1)
-    terminal = os.environ.get("FAKE_PLAN_WATCH_TERMINAL", "succeeded")
-    print(json.dumps(plan_projection(terminal)), flush=True)
-    if terminal != "succeeded" or os.environ.get("FAKE_PLAN_WATCH_EXIT_NONZERO") == "1":
-        print("zeroshot: merge plan finished unsuccessfully", file=sys.stderr)
+    terminal = os.environ.get("FAKE_STACK_WATCH_TERMINAL", "succeeded")
+    print(json.dumps(stack_projection(terminal)), flush=True)
+    if terminal != "succeeded" or os.environ.get("FAKE_STACK_WATCH_EXIT_NONZERO") == "1":
+        print("zeroshot: stack finished unsuccessfully", file=sys.stderr)
         raise SystemExit(1)
-elif args[:2] == ["plan", "force-stop"]:
-    print(json.dumps(plan_projection("cancelled")))
+elif args[:2] == ["stack", "force-stop"]:
+    print(json.dumps(stack_projection("cancelled")))
 elif args and args[0] == "run":
     initial_input = entry.get("--input")
     task = initial_input.get("task") if isinstance(initial_input, dict) else None

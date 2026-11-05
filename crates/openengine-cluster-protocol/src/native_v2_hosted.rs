@@ -5,9 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
-#[path = "native_v2_hosted/merge_plan.rs"]
-mod merge_plan;
-pub use merge_plan::*;
+#[path = "native_v2_hosted/stack.rs"]
+mod stack;
+pub use stack::*;
 
 #[path = "delegation.rs"]
 mod delegation;

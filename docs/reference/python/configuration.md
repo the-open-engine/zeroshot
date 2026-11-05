@@ -1,5 +1,5 @@
 ---
-description: "Python API reference for targets, graph specifications, runtime plans, presets, run requests and merge-plan configuration."
+description: "Python API reference for targets, graph specifications, runtime plans, presets, run requests and hosted stack requests."
 ---
 
 # Configuration
@@ -16,7 +16,8 @@ description: "Python API reference for targets, graph specifications, runtime pl
         - UniformRuntime
         - RuntimePlan
         - RunRequest
-        - MergePlanRequest
-        - MergePlanRun
+        - StackRequest
+        - StackRun
+        - StackDelivery
         - JsonValue
       show_if_no_docstring: false

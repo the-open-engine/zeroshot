@@ -108,98 +108,152 @@ async fn enforces_graph_visible_delivery_policy_counts() {
     );
 }
 
-#[tokio::test]
-async fn merge_profile_validation_rejects_pull_request_delivery() {
-    let pull_request = submission(
-        graph(vec![
-            delivery_verifier("deliver", DeliveryMode::PullRequest),
-            succeed("done"),
-        ]),
+fn stack_profile(mode: DeliveryMode) -> RunSubmission {
+    submission(
+        graph(vec![delivery_verifier("deliver", mode), succeed("done")]),
         BTreeMap::from([(named("deliver"), delivery_binding())]),
-    );
-    assert_eq!(
-        NativeV2Admission
-            .validate_merge_profile(&pull_request.graph, &pull_request.runtime)
-            .await,
-        Err(NativeV2AdmissionError::MergeDeliveryRequired)
-    );
+    )
+}
 
-    let merge = submission(
-        graph(vec![
-            delivery_verifier("deliver", DeliveryMode::Merge),
-            succeed("done"),
-        ]),
-        BTreeMap::from([(named("deliver"), delivery_binding())]),
-    );
+async fn validate_stack(
+    profile: &RunSubmission,
+    delivery: StackDelivery,
+) -> Result<(), NativeV2AdmissionError> {
     NativeV2Admission
-        .validate_merge_profile(&merge.graph, &merge.runtime)
+        .validate_stack_profile(&profile.graph, &profile.runtime, delivery)
         .await
-        .assert_value_with("merge plans accept the sole merge delivery worker");
 }
 
 #[tokio::test]
-async fn merge_profile_keeps_github_credentials_on_delivery_nodes() {
-    let merge_graph = graph(vec![
-        null_step("worker", "worker.change@1"),
-        delivery_verifier("deliver", DeliveryMode::Merge),
-        succeed("done"),
-    ]);
-    let agent_token = submission(
-        merge_graph.clone(),
-        BTreeMap::from([
-            (
-                named("worker"),
-                binding_with_environment([GITHUB_TOKEN_ENV.to_owned()]),
-            ),
-            (named("deliver"), delivery_binding()),
-        ]),
-    );
+async fn stack_profiles_must_match_the_stack_delivery() {
+    for mode in [DeliveryMode::Merge, DeliveryMode::MergeV3] {
+        validate_stack(&stack_profile(mode), StackDelivery::Merge)
+            .await
+            .assert_value_with("merge stacks accept the sole merge delivery worker");
+        assert_eq!(
+            validate_stack(&stack_profile(mode), StackDelivery::StackedPullRequests).await,
+            Err(NativeV2AdmissionError::StackDeliveryRequired {
+                delivery: StackDelivery::StackedPullRequests,
+            })
+        );
+    }
 
-    NativeV2Admission
-        .validate_profile(
-            &agent_token.graph,
-            &agent_token.runtime,
-            DeliveryPolicy::Required,
-        )
+    let pull_request = stack_profile(DeliveryMode::PullRequestV2);
+    validate_stack(&pull_request, StackDelivery::StackedPullRequests)
         .await
-        .assert_value_with("ordinary hosted runs may explicitly bind GitHub to an agent");
+        .assert_value_with("stacked pull requests accept the sole pr@2 delivery worker");
     assert_eq!(
-        NativeV2Admission
-            .validate_merge_profile(&agent_token.graph, &agent_token.runtime)
-            .await,
-        Err(NativeV2AdmissionError::MergePlanAgentGitHubToken {
-            node: named("worker"),
+        validate_stack(&pull_request, StackDelivery::Merge).await,
+        Err(NativeV2AdmissionError::StackDeliveryRequired {
+            delivery: StackDelivery::Merge,
         })
     );
 
-    let delivery_token = submission(
-        merge_graph,
-        BTreeMap::from([
-            (named("worker"), binding("claude-sonnet-5", None)),
-            (
-                named("deliver"),
-                NodeRuntimeBinding::GitDelivery {
-                    connections: DeclaredConnections::single(
-                        "github-alias",
-                        DeclaredEnvironment::new([
-                            EnvironmentVariableName::new(GITHUB_TOKEN_ENV).assert_value()
-                        ])
-                        .assert_value(),
-                    )
-                    .assert_value(),
-                    pull_request_feedback: Default::default(),
-                },
-            ),
-        ]),
+    for (mode, delivery) in [
+        (
+            DeliveryMode::PullRequest,
+            StackDelivery::StackedPullRequests,
+        ),
+        (DeliveryMode::Push, StackDelivery::StackedPullRequests),
+        (DeliveryMode::Push, StackDelivery::Merge),
+    ] {
+        assert_eq!(
+            validate_stack(&stack_profile(mode), delivery).await,
+            Err(NativeV2AdmissionError::StackDeliveryRequired { delivery }),
+            "{mode:?} cannot deliver {delivery:?} stacks"
+        );
+    }
+}
+
+#[test]
+fn stack_delivery_errors_name_the_required_worker() {
+    assert_eq!(
+        NativeV2AdmissionError::StackDeliveryRequired {
+            delivery: StackDelivery::Merge,
+        }
+        .to_string(),
+        "stack delivery \"merge\" requires exactly one graph-visible Git merge delivery node \
+         (merge@2 or merge@3)"
     );
-    NativeV2Admission
-        .validate_merge_profile(&delivery_token.graph, &delivery_token.runtime)
-        .await
-        .assert_value_with("merge plans keep GitHub credentials on Git delivery");
+    assert_eq!(
+        NativeV2AdmissionError::StackDeliveryRequired {
+            delivery: StackDelivery::StackedPullRequests,
+        }
+        .to_string(),
+        "stack delivery \"stacked_pull_requests\" requires exactly one graph-visible Git \
+         pull-request delivery node (pr@2)"
+    );
 }
 
 #[tokio::test]
-async fn legacy_merge_worker_remains_admissible_but_is_not_a_merge_plan_profile() {
+async fn stack_profiles_keep_github_credentials_on_delivery_nodes() {
+    for (mode, delivery) in [
+        (DeliveryMode::MergeV3, StackDelivery::Merge),
+        (
+            DeliveryMode::PullRequestV2,
+            StackDelivery::StackedPullRequests,
+        ),
+    ] {
+        let stack_graph = graph(vec![
+            null_step("worker", "worker.change@1"),
+            delivery_verifier("deliver", mode),
+            succeed("done"),
+        ]);
+        let agent_token = submission(
+            stack_graph.clone(),
+            BTreeMap::from([
+                (
+                    named("worker"),
+                    binding_with_environment([GITHUB_TOKEN_ENV.to_owned()]),
+                ),
+                (named("deliver"), delivery_binding()),
+            ]),
+        );
+
+        NativeV2Admission
+            .validate_profile(
+                &agent_token.graph,
+                &agent_token.runtime,
+                DeliveryPolicy::Required,
+            )
+            .await
+            .assert_value_with("ordinary hosted runs may explicitly bind GitHub to an agent");
+        assert_eq!(
+            validate_stack(&agent_token, delivery).await,
+            Err(NativeV2AdmissionError::StackAgentGitHubToken {
+                node: named("worker"),
+            })
+        );
+
+        let delivery_token = submission(
+            stack_graph,
+            BTreeMap::from([
+                (named("worker"), binding("claude-sonnet-5", None)),
+                (
+                    named("deliver"),
+                    NodeRuntimeBinding::GitDelivery {
+                        connections: DeclaredConnections::single(
+                            "github-alias",
+                            DeclaredEnvironment::new([EnvironmentVariableName::new(
+                                GITHUB_TOKEN_ENV,
+                            )
+                            .assert_value()])
+                            .assert_value(),
+                        )
+                        .assert_value(),
+                        pull_request_feedback: Default::default(),
+                    },
+                ),
+            ]),
+        );
+        validate_stack(&delivery_token, delivery)
+            .await
+            .assert_value_with("stacks keep GitHub credentials on Git delivery");
+    }
+}
+
+#[tokio::test]
+async fn legacy_merge_worker_remains_admissible_but_is_not_a_stack_profile() {
     let legacy_graph = graph(vec![
         delivery_verifier("deliver", DeliveryMode::MergeV1),
         succeed("done"),
@@ -216,7 +270,7 @@ async fn legacy_merge_worker_remains_admissible_but_is_not_a_merge_plan_profile(
 
     assert_eq!(
         NativeV2Admission
-            .validate_merge_profile(
+            .validate_stack_profile(
                 &legacy_graph,
                 &RuntimePlan::new(
                     openengine_cluster_protocol::RuntimeLane::new(
@@ -227,8 +281,11 @@ async fn legacy_merge_worker_remains_admissible_but_is_not_a_merge_plan_profile(
                     RunSize::Medium,
                     legacy_nodes
                 ),
+                StackDelivery::Merge,
             )
             .await,
-        Err(NativeV2AdmissionError::MergeDeliveryRequired)
+        Err(NativeV2AdmissionError::StackDeliveryRequired {
+            delivery: StackDelivery::Merge,
+        })
     );
 }

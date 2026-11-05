@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from typing import Literal, TypeAlias, cast
 
 from .errors import ProtocolError
-from .plans import MergePlanRunStatus, MergePlanStatus
 from .runs import (
     ActiveExecution,
     FailureContext,
@@ -17,6 +16,7 @@ from .runs import (
     RunSummary,
 )
 from .source import ResolvedGitRemote, ResolvedSource, SourceForgeIdentity
+from .stacks import StackRunStatus, StackStatus
 from .values import JsonValue
 
 _Size: TypeAlias = Literal["small", "medium", "large", "xl", "gpu_t4"]
@@ -260,34 +260,35 @@ def _enum_string(
     return selected
 
 
-def _plan_status(value: object) -> MergePlanStatus:
-    root = _mapping(value, "merge plan status")
+def _stack_status(value: object) -> StackStatus:
+    kind = "stack status"
+    root = _mapping(value, kind)
     runs = tuple(
-        _plan_run_status(item) for item in _mapping_list(root.get("runs"), "merge plan status.runs")
+        _stack_run_status(item) for item in _mapping_list(root.get("runs"), f"{kind}.runs")
     )
-    return MergePlanStatus(
-        plan_id=_string(root, "planId", "merge plan status"),
-        title=_string(root, "title", "merge plan status"),
+    return StackStatus(
+        stack_id=_string(root, "stackId", kind),
+        title=_string(root, "title", kind),
         state=cast(
             Literal["queued", "running", "succeeded", "failed", "cancelled", "expired"],
             _enum_string(
                 root,
                 "state",
                 {"queued", "running", "succeeded", "failed", "cancelled", "expired"},
-                "merge plan status",
+                kind,
             ),
         ),
-        repository=_string(root, "repository", "merge plan status"),
-        branch=_string(root, "branch", "merge plan status"),
-        submitted_at=_string(root, "submittedAt", "merge plan status"),
-        expires_at=_string(root, "expiresAt", "merge plan status"),
+        repository=_string(root, "repository", kind),
+        branch=_string(root, "branch", kind),
+        submitted_at=_string(root, "submittedAt", kind),
+        expires_at=_string(root, "expiresAt", kind),
         runs=runs,
     )
 
 
-def _plan_run_status(value: Mapping[str, object]) -> MergePlanRunStatus:
-    kind = "merge plan status.runs"
-    return MergePlanRunStatus(
+def _stack_run_status(value: Mapping[str, object]) -> StackRunStatus:
+    kind = "stack status.runs"
+    return StackRunStatus(
         name=_string(value, "name", kind),
         run_id=_string(value, "runId", kind),
         state=cast(
@@ -322,6 +323,7 @@ def _plan_run_status(value: Mapping[str, object]) -> MergePlanRunStatus:
             ),
         ),
         needs=_string_list(value, "needs", kind),
+        source_branch=_nullable_string(value, "sourceBranch", kind),
         source_revision=_nullable_string(value, "sourceRevision", kind),
         ready_at=_nullable_string(value, "readyAt", kind),
         queue_expires_at=_nullable_string(value, "queueExpiresAt", kind),

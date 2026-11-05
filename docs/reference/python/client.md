@@ -1,5 +1,5 @@
 ---
-description: "Python API reference for Client, MergePlan and Run, covering submission, lookup, observation, stop operations and merge plans."
+description: "Python API reference for Client, Run and Stack, covering run and hosted stack submission, lookup, observation and stop operations."
 ---
 
 # Client and run handle
@@ -8,6 +8,6 @@ description: "Python API reference for Client, MergePlan and Run, covering submi
     options:
       members:
         - Client
-        - MergePlan
         - Run
+        - Stack
       show_if_no_docstring: false

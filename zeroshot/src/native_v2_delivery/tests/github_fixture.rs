@@ -84,6 +84,7 @@ pub(in crate::native_v2_delivery) struct FakeGitHub {
     pub(super) inspections: AtomicUsize,
     pub(super) feedback_reads: AtomicUsize,
     pub(super) delivery_reads: AtomicUsize,
+    pub(super) delivery_read_branches: Mutex<Vec<String>>,
     pub(super) reviews: Mutex<Vec<SourceReviewRequest>>,
     pub(super) review_sync_attempts: AtomicUsize,
     pub(super) conflict_materializations: AtomicUsize,
@@ -110,6 +111,7 @@ impl FakeGitHub {
             inspections: AtomicUsize::new(0),
             feedback_reads: AtomicUsize::new(0),
             delivery_reads: AtomicUsize::new(0),
+            delivery_read_branches: Mutex::new(Vec::new()),
             reviews: Mutex::new(Vec::new()),
             review_sync_attempts: AtomicUsize::new(0),
             conflict_materializations: AtomicUsize::new(0),
@@ -372,6 +374,10 @@ impl SourceDeliveryAuthority for FakeGitHub {
         _credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceDeliverySnapshot, SourceDeliveryError> {
         let read = self.delivery_reads.fetch_add(1, Ordering::SeqCst);
+        self.delivery_read_branches
+            .lock()
+            .assert_value()
+            .push(request.head_branch.to_owned());
         if matches!(self.script, Script::PreflightRefusedAfterTransientRead) && read == 0 {
             return Err(SourceDeliveryError::Unavailable);
         }

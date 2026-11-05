@@ -40,7 +40,7 @@ fn request_diagnostics_keep_stable_recovery_context() {
             json!({}),
         ),
         (
-            NativeV2CliError::InvalidRun(NativeV2AdmissionError::MergePlanAgentGitHubToken {
+            NativeV2CliError::InvalidRun(NativeV2AdmissionError::StackAgentGitHubToken {
                 node: node(),
             }),
             "runtime.invalid_environment",

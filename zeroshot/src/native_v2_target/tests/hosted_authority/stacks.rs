@@ -1,4 +1,4 @@
-use openengine_cluster_protocol::{MergePlanId, MergePlanSubmitRequest, RunListParams};
+use openengine_cluster_protocol::{StackId, StackSubmitRequest, RunListParams};
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{Value, json};
 
@@ -11,13 +11,14 @@ use super::super::super::controller_authority::{TargetCredentialStore, TargetHtt
 use super::super::super::{TargetControlAuthority, TargetRecord};
 
 const DEFAULT_RESPONSE_LIMIT: usize = 64 * 1024;
-const MERGE_PLAN_RESPONSE_LIMIT: usize = 1024 * 1024;
+const STACK_RESPONSE_LIMIT: usize = 1024 * 1024;
 
-fn submission() -> MergePlanSubmitRequest {
+fn submission() -> StackSubmitRequest {
     serde_json::from_value(json!({
-        "submissionKey": "merge-plan-boundary",
-        "title": "Merge the queued changes",
+        "submissionKey": "stack-boundary",
+        "title": "Stack the queued changes",
         "expiresAt": "2026-09-24T00:00:00Z",
+        "delivery": "stacked_pull_requests",
         "source": {"repository": "open-engine/zeroshot", "branch": "main"},
         "profile": {"scope": "user", "name": "software-change"},
         "runs": [{"name": "first", "initialInput": null}],
@@ -28,66 +29,67 @@ fn submission() -> MergePlanSubmitRequest {
 }
 
 #[tokio::test]
-async fn direct_targets_reject_every_merge_plan_operation_before_hosted_effects() {
+async fn direct_targets_reject_every_stack_operation_before_hosted_effects() {
     let root = temp_root();
     let (_, authority) = test_authority(&root);
     let target = direct_target("http://127.0.0.1:1");
-    let plan_id = MergePlanId::new("plan-1");
+    let stack_id = StackId::new("stack-1");
 
     let errors = [
         authority
-            .merge_plan_submit(&target, &submission())
+            .stack_submit(&target, &submission())
             .await
             .assert_error(),
         authority
-            .merge_plan_status(&target, &plan_id)
+            .stack_status(&target, &stack_id)
             .await
             .assert_error(),
         authority
-            .merge_plan_force(&target, &plan_id)
+            .stack_force(&target, &stack_id)
             .await
             .assert_error(),
     ];
     for error in errors {
         assert_eq!(
             error.to_string(),
-            "direct target does not support hosted merge plans"
+            "direct target does not support hosted stacks"
         );
     }
 }
 
 #[tokio::test]
-async fn merge_plan_submission_and_force_stop_use_distinct_authenticated_routes() {
-    let body = merge_plan_body(vec![merge_plan_run("first", Vec::new(), None)]);
-    let harness = merge_plan_harness(vec![body.clone(), body]).await;
+async fn stack_submission_and_force_stop_use_distinct_authenticated_routes() {
+    let body = stack_body(vec![stack_run("first", Vec::new(), None)]);
+    let harness = stack_harness(vec![body.clone(), body]).await;
 
     let submitted = harness
         .authority
-        .merge_plan_submit(&harness.target, &submission())
+        .stack_submit(&harness.target, &submission())
         .await
         .assert_value();
     let forced = harness
         .authority
-        .merge_plan_force(&harness.target, &MergePlanId::new("plan-1"))
+        .stack_force(&harness.target, &StackId::new("stack-1"))
         .await
         .assert_value();
-    assert_eq!(submitted.plan_id.as_str(), "plan-1");
-    assert_eq!(forced.plan_id.as_str(), "plan-1");
+    assert_eq!(submitted.stack_id.as_str(), "stack-1");
+    assert_eq!(forced.stack_id.as_str(), "stack-1");
 
     let requests = harness.server.await.assert_value();
     let create = requests
         .iter()
-        .find(|request| request.path == "/native-v2/merge-plans")
+        .find(|request| request.path == "/native-v2/stacks")
         .assert_value();
     assert_eq!(create.method, "POST");
     assert_eq!(create.authorization.as_deref(), Some("Bearer access-1"));
     let create_body: Value = serde_json::from_str(&create.body).assert_value();
-    assert_eq!(create_body["submissionKey"], "merge-plan-boundary");
+    assert_eq!(create_body["submissionKey"], "stack-boundary");
+    assert_eq!(create_body["delivery"], "stacked_pull_requests");
     assert_eq!(create_body["githubToken"], "private-test-token");
 
     let force = requests
         .iter()
-        .find(|request| request.path == "/native-v2/merge-plans/plan-1/force")
+        .find(|request| request.path == "/native-v2/stacks/stack-1/force")
         .assert_value();
     assert_eq!(force.method, "POST");
     assert_eq!(force.authorization.as_deref(), Some("Bearer access-1"));
@@ -95,19 +97,19 @@ async fn merge_plan_submission_and_force_stop_use_distinct_authenticated_routes(
 }
 
 #[tokio::test]
-async fn merge_plan_polling_reuses_discovery_routes_and_access_token() {
-    let body = merge_plan_body(dense_runs());
-    let harness = merge_plan_harness(vec![body.clone(), body]).await;
+async fn stack_polling_reuses_discovery_routes_and_access_token() {
+    let body = stack_body(dense_runs());
+    let harness = stack_harness(vec![body.clone(), body]).await;
 
-    let plan_id = MergePlanId::new("plan-1");
+    let stack_id = StackId::new("stack-1");
     harness
         .authority
-        .merge_plan_status(&harness.target, &plan_id)
+        .stack_status(&harness.target, &stack_id)
         .await
         .assert_value();
     harness
         .authority
-        .merge_plan_status(&harness.target, &plan_id)
+        .stack_status(&harness.target, &stack_id)
         .await
         .assert_value();
 
@@ -120,13 +122,13 @@ async fn merge_plan_polling_reuses_discovery_routes_and_access_token() {
     assert_eq!(request_count(&requests, "POST", "/oauth/token"), 1);
     assert_eq!(request_count(&requests, "GET", "/session"), 1);
     assert_eq!(
-        request_count(&requests, "GET", "/native-v2/merge-plans/plan-1"),
+        request_count(&requests, "GET", "/native-v2/stacks/stack-1"),
         2
     );
     assert_eq!(
         requests
             .iter()
-            .filter(|request| request.path == "/native-v2/merge-plans/plan-1")
+            .filter(|request| request.path == "/native-v2/stacks/stack-1")
             .map(|request| request.authorization.as_deref())
             .collect::<Vec<_>>(),
         vec![Some("Bearer access-1"), Some("Bearer access-1")]
@@ -134,9 +136,9 @@ async fn merge_plan_polling_reuses_discovery_routes_and_access_token() {
 }
 
 #[tokio::test]
-async fn merge_plans_and_run_operations_share_the_same_access_cache() {
-    let body = merge_plan_body(Vec::new());
-    let (origin, server) = spawn_merge_plan_authority(vec![("200 OK", body)], 1, 4).await;
+async fn stacks_and_run_operations_share_the_same_access_cache() {
+    let body = stack_body(Vec::new());
+    let (origin, server) = spawn_stack_authority(vec![("200 OK", body)], 1, 4).await;
     let root = temp_root();
     let (credentials, authority) = test_authority(&root);
     let target = hosted_target("local", origin);
@@ -150,7 +152,7 @@ async fn merge_plans_and_run_operations_share_the_same_access_cache() {
         .await
         .assert_value();
     authority
-        .merge_plan_status(&target, &MergePlanId::new("plan-1"))
+        .stack_status(&target, &StackId::new("stack-1"))
         .await
         .assert_value();
     authority
@@ -173,11 +175,11 @@ async fn merge_plans_and_run_operations_share_the_same_access_cache() {
 }
 
 #[tokio::test]
-async fn merge_plans_never_reuse_a_cached_delegation_admin_token() {
+async fn stacks_never_reuse_a_cached_delegation_admin_token() {
     use openengine_cluster_protocol::DelegationOwner;
     use zeroshot_engine::native_v2_cli::DelegationAction;
-    let body = merge_plan_body(Vec::new());
-    let (origin, server) = spawn_merge_plan_authority(vec![("200 OK", body)], 2, 1).await;
+    let body = stack_body(Vec::new());
+    let (origin, server) = spawn_stack_authority(vec![("200 OK", body)], 2, 1).await;
     let root = temp_root();
     let (credentials, authority) = test_authority(&root);
     let target = hosted_target("local", origin);
@@ -196,17 +198,14 @@ async fn merge_plans_never_reuse_a_cached_delegation_admin_token() {
         .await
         .assert_value();
     authority
-        .merge_plan_status(&target, &MergePlanId::new("plan-1"))
+        .stack_status(&target, &StackId::new("stack-1"))
         .await
         .assert_value();
     let requests = tokio::time::timeout(std::time::Duration::from_secs(5), server)
         .await
         .assert_value()
         .assert_value();
-    assert_eq!(
-        merge_plan_authorizations(&requests),
-        vec!["Bearer access-2"]
-    );
+    assert_eq!(stack_authorizations(&requests), vec!["Bearer access-2"]);
     let tokens = refresh_token_bodies(&requests);
     assert_eq!(tokens.len(), 2);
     assert!(tokens[0].contains("audience=admin"));
@@ -225,12 +224,12 @@ async fn delayed_auth_rejection_cannot_evict_a_newer_issuance_even_with_the_same
         let mut delayed_response = None;
         let mut captured = Vec::new();
         let mut token_index = 0_u8;
-        let mut plan_requests = 0;
+        let mut stack_requests = 0;
         for _ in 0..14 {
-            let (mut stream, request) = accept_merge_plan_request(&listener).await;
-            let (status, body) = if request.path == "/native-v2/merge-plans/plan-1" {
-                plan_requests += 1;
-                if plan_requests == 2 {
+            let (mut stream, request) = accept_stack_request(&listener).await;
+            let (status, body) = if request.path == "/native-v2/stacks/stack-1" {
+                stack_requests += 1;
+                if stack_requests == 2 {
                     let (held, wait_for_release) = held.take().assert_value();
                     delayed_response = Some(tokio::spawn(async move {
                         held.send(()).assert_value();
@@ -245,10 +244,10 @@ async fn delayed_auth_rejection_cannot_evict_a_newer_issuance_even_with_the_same
                     captured.push(request);
                     continue;
                 }
-                if plan_requests == 3 {
+                if stack_requests == 3 {
                     ("401 Unauthorized", auth_rejection_body())
                 } else {
-                    ("200 OK", merge_plan_body(Vec::new()))
+                    ("200 OK", stack_body(Vec::new()))
                 }
             } else {
                 let body =
@@ -273,27 +272,27 @@ async fn delayed_auth_rejection_cannot_evict_a_newer_issuance_even_with_the_same
         .set(&target.id, "refresh-0")
         .await
         .assert_value();
-    let plan_id = MergePlanId::new("plan-1");
+    let stack_id = StackId::new("stack-1");
     authority
-        .merge_plan_status(&target, &plan_id)
+        .stack_status(&target, &stack_id)
         .await
         .assert_value();
     let clone = authority.clone();
     let delayed_target = target.clone();
     let delayed = tokio::spawn(async move {
         clone
-            .merge_plan_status(&delayed_target, &MergePlanId::new("plan-1"))
+            .stack_status(&delayed_target, &StackId::new("stack-1"))
             .await
     });
     wait_until_held.await.assert_value();
     authority
-        .merge_plan_status(&target, &plan_id)
+        .stack_status(&target, &stack_id)
         .await
         .assert_value();
     release.send(()).assert_value();
     delayed.await.assert_value().assert_value();
     authority
-        .merge_plan_status(&target, &plan_id)
+        .stack_status(&target, &stack_id)
         .await
         .assert_value();
     let requests = server.await.assert_value();
@@ -303,16 +302,16 @@ async fn delayed_auth_rejection_cannot_evict_a_newer_issuance_even_with_the_same
         2
     );
     assert_eq!(
-        request_count(&requests, "GET", "/native-v2/merge-plans/plan-1"),
+        request_count(&requests, "GET", "/native-v2/stacks/stack-1"),
         6
     );
 }
 
 #[tokio::test]
-async fn merge_plan_auth_rejection_refreshes_and_retries_once() {
-    let body = merge_plan_body(vec![merge_plan_run("build", Vec::new(), None)]);
+async fn stack_auth_rejection_refreshes_and_retries_once() {
+    let body = stack_body(vec![stack_run("build", Vec::new(), None)]);
     for rejection in ["401 Unauthorized", "403 Forbidden"] {
-        let harness = merge_plan_harness_with_responses(
+        let harness = stack_harness_with_responses(
             vec![(rejection, auth_rejection_body()), ("200 OK", body.clone())],
             2,
         )
@@ -320,7 +319,7 @@ async fn merge_plan_auth_rejection_refreshes_and_retries_once() {
 
         harness
             .authority
-            .merge_plan_status(&harness.target, &MergePlanId::new("plan-1"))
+            .stack_status(&harness.target, &StackId::new("stack-1"))
             .await
             .assert_value();
 
@@ -331,7 +330,7 @@ async fn merge_plan_auth_rejection_refreshes_and_retries_once() {
         );
         assert_eq!(request_count(&requests, "POST", "/oauth/token"), 2);
         assert_eq!(
-            merge_plan_authorizations(&requests),
+            stack_authorizations(&requests),
             ["Bearer access-1", "Bearer access-2"]
         );
         let refreshes = refresh_token_bodies(&requests);
@@ -341,9 +340,9 @@ async fn merge_plan_auth_rejection_refreshes_and_retries_once() {
 }
 
 #[tokio::test]
-async fn merge_plan_auth_retry_is_bounded_and_leaves_rejected_retry_uncached() {
-    let body = merge_plan_body(vec![merge_plan_run("build", Vec::new(), None)]);
-    let harness = merge_plan_harness_with_responses(
+async fn stack_auth_retry_is_bounded_and_leaves_rejected_retry_uncached() {
+    let body = stack_body(vec![stack_run("build", Vec::new(), None)]);
+    let harness = stack_harness_with_responses(
         vec![
             ("401 Unauthorized", auth_rejection_body()),
             ("403 Forbidden", auth_rejection_body()),
@@ -352,88 +351,88 @@ async fn merge_plan_auth_retry_is_bounded_and_leaves_rejected_retry_uncached() {
         3,
     )
     .await;
-    let plan_id = MergePlanId::new("plan-1");
+    let stack_id = StackId::new("stack-1");
 
     let error = harness
         .authority
-        .merge_plan_status(&harness.target, &plan_id)
+        .stack_status(&harness.target, &stack_id)
         .await
         .assert_error();
     assert_eq!(
         error.to_string(),
-        "merge-plan status request was rejected: access token rejected"
+        "stack status request was rejected: access token rejected"
     );
     harness
         .authority
-        .merge_plan_status(&harness.target, &plan_id)
+        .stack_status(&harness.target, &stack_id)
         .await
         .assert_value();
 
     let requests = harness.server.await.assert_value();
     assert_eq!(request_count(&requests, "POST", "/oauth/token"), 3);
     assert_eq!(
-        merge_plan_authorizations(&requests),
+        stack_authorizations(&requests),
         ["Bearer access-1", "Bearer access-2", "Bearer access-3"]
     );
 }
 
 #[tokio::test]
-async fn merge_plan_status_accepts_a_maximal_dense_dag_above_the_default_limit() {
-    let body = merge_plan_body(dense_runs());
+async fn stack_status_accepts_a_maximal_dense_dag_above_the_default_limit() {
+    let body = stack_body(dense_runs());
     assert!(body.len() > DEFAULT_RESPONSE_LIMIT);
-    assert!(body.len() <= MERGE_PLAN_RESPONSE_LIMIT);
-    let harness = merge_plan_harness(vec![body]).await;
+    assert!(body.len() <= STACK_RESPONSE_LIMIT);
+    let harness = stack_harness(vec![body]).await;
 
-    let plan = harness
+    let stack = harness
         .authority
-        .merge_plan_status(&harness.target, &MergePlanId::new("plan-1"))
+        .stack_status(&harness.target, &StackId::new("stack-1"))
         .await
         .assert_value();
 
-    assert_eq!(plan.runs.len(), 64);
+    assert_eq!(stack.runs.len(), 64);
     harness.server.await.assert_value();
 }
 
 #[tokio::test]
-async fn merge_plan_status_rejects_a_response_above_its_dedicated_limit() {
-    let body = merge_plan_body(vec![merge_plan_run(
+async fn stack_status_rejects_a_response_above_its_dedicated_limit() {
+    let body = stack_body(vec![stack_run(
         "oversized",
         Vec::new(),
-        Some("x".repeat(MERGE_PLAN_RESPONSE_LIMIT)),
+        Some("x".repeat(STACK_RESPONSE_LIMIT)),
     )]);
-    assert!(body.len() > MERGE_PLAN_RESPONSE_LIMIT);
-    let harness = merge_plan_harness(vec![body]).await;
+    assert!(body.len() > STACK_RESPONSE_LIMIT);
+    let harness = stack_harness(vec![body]).await;
 
     let error = harness
         .authority
-        .merge_plan_status(&harness.target, &MergePlanId::new("plan-1"))
+        .stack_status(&harness.target, &StackId::new("stack-1"))
         .await
         .assert_error();
 
-    assert_eq!(error.to_string(), "merge-plan status response is too large");
+    assert_eq!(error.to_string(), "stack status response is too large");
     harness.server.await.assert_value();
 }
 
-struct MergePlanHarness {
+struct StackHarness {
     _root: TempRoot,
     authority: TargetHttpControlAuthority,
     target: TargetRecord,
     server: tokio::task::JoinHandle<Vec<CapturedHttpRequest>>,
 }
 
-async fn merge_plan_harness(responses: Vec<String>) -> MergePlanHarness {
-    merge_plan_harness_with_responses(
+async fn stack_harness(responses: Vec<String>) -> StackHarness {
+    stack_harness_with_responses(
         responses.into_iter().map(|body| ("200 OK", body)).collect(),
         1,
     )
     .await
 }
 
-async fn merge_plan_harness_with_responses(
+async fn stack_harness_with_responses(
     responses: Vec<(&'static str, String)>,
     access_rounds: usize,
-) -> MergePlanHarness {
-    let (origin, server) = spawn_merge_plan_authority(responses, access_rounds, 0).await;
+) -> StackHarness {
+    let (origin, server) = spawn_stack_authority(responses, access_rounds, 0).await;
     let root = temp_root();
     let (credentials, authority) = test_authority(&root);
     let target = hosted_target("prod", origin);
@@ -441,7 +440,7 @@ async fn merge_plan_harness_with_responses(
         .set(&target.id, "refresh-0")
         .await
         .assert_value();
-    MergePlanHarness {
+    StackHarness {
         _root: root,
         authority,
         target,
@@ -449,7 +448,7 @@ async fn merge_plan_harness_with_responses(
     }
 }
 
-async fn spawn_merge_plan_authority(
+async fn spawn_stack_authority(
     responses: Vec<(&'static str, String)>,
     access_rounds: usize,
     additional_requests: usize,
@@ -462,9 +461,9 @@ async fn spawn_merge_plan_authority(
         let request_count = responses.len() + access_rounds * 4 + additional_requests;
         let mut responses = responses.into_iter();
         for _ in 0..request_count {
-            let (mut stream, request) = accept_merge_plan_request(&listener).await;
-            let operation = merge_plan_operation_response(&request, &mut responses)
-                .or_else(|| merge_plan_account_response(&request));
+            let (mut stream, request) = accept_stack_request(&listener).await;
+            let operation = stack_operation_response(&request, &mut responses)
+                .or_else(|| stack_account_response(&request));
             let (status, body) = if let Some(response) = operation {
                 response
             } else {
@@ -499,7 +498,7 @@ async fn spawn_merge_plan_authority(
     (origin, server)
 }
 
-fn merge_plan_account_response(request: &CapturedHttpRequest) -> Option<(&'static str, String)> {
+fn stack_account_response(request: &CapturedHttpRequest) -> Option<(&'static str, String)> {
     match (request.method.as_str(), request.path.as_str()) {
         ("GET", "/auth/v1/me") => Some((
             "200 OK",
@@ -512,16 +511,14 @@ fn merge_plan_account_response(request: &CapturedHttpRequest) -> Option<(&'stati
     }
 }
 
-fn merge_plan_operation_response(
+fn stack_operation_response(
     request: &CapturedHttpRequest,
     responses: &mut impl Iterator<Item = (&'static str, String)>,
 ) -> Option<(&'static str, String)> {
     let is_operation = match (request.method.as_str(), request.path.as_str()) {
-        ("GET", path) if path.starts_with("/native-v2/merge-plans/") => true,
-        ("POST", "/native-v2/merge-plans") => true,
-        ("POST", path)
-            if path.starts_with("/native-v2/merge-plans/") && path.ends_with("/force") =>
-        {
+        ("GET", path) if path.starts_with("/native-v2/stacks/") => true,
+        ("POST", "/native-v2/stacks") => true,
+        ("POST", path) if path.starts_with("/native-v2/stacks/") && path.ends_with("/force") => {
             true
         }
         _ => false,
@@ -529,7 +526,7 @@ fn merge_plan_operation_response(
     is_operation.then(|| responses.next().assert_value())
 }
 
-async fn accept_merge_plan_request(
+async fn accept_stack_request(
     listener: &tokio::net::TcpListener,
 ) -> (tokio::net::TcpStream, CapturedHttpRequest) {
     let (mut stream, _) = listener.accept().await.assert_value();
@@ -544,16 +541,21 @@ fn dense_runs() -> Vec<Value> {
     names
         .iter()
         .enumerate()
-        .map(|(index, name)| merge_plan_run(name, names.get(..index).assert_value().to_vec(), None))
+        .map(|(index, name)| {
+            let mut run = stack_run(name, names.get(..index).assert_value().to_vec(), None);
+            run["sourceBranch"] = json!(format!("zeroshot/{}", "b".repeat(246)));
+            run
+        })
         .collect()
 }
 
-fn merge_plan_run(name: &str, needs: Vec<String>, waiting_reason: Option<String>) -> Value {
+fn stack_run(name: &str, needs: Vec<String>, waiting_reason: Option<String>) -> Value {
     json!({
         "name": name,
         "runId": format!("run-{name}"),
         "state": "blocked",
         "needs": needs,
+        "sourceBranch": null,
         "sourceRevision": null,
         "readyAt": null,
         "queueExpiresAt": null,
@@ -563,10 +565,10 @@ fn merge_plan_run(name: &str, needs: Vec<String>, waiting_reason: Option<String>
     })
 }
 
-fn merge_plan_body(runs: Vec<Value>) -> String {
+fn stack_body(runs: Vec<Value>) -> String {
     json!({
-        "planId": "plan-1",
-        "title": "Dense merge plan",
+        "stackId": "stack-1",
+        "title": "Dense stack",
         "state": "queued",
         "repository": "open-engine/zeroshot",
         "branch": "main",
@@ -585,10 +587,10 @@ fn auth_rejection_body() -> String {
     .to_string()
 }
 
-fn merge_plan_authorizations(requests: &[CapturedHttpRequest]) -> Vec<&str> {
+fn stack_authorizations(requests: &[CapturedHttpRequest]) -> Vec<&str> {
     requests
         .iter()
-        .filter(|request| request.path == "/native-v2/merge-plans/plan-1")
+        .filter(|request| request.path == "/native-v2/stacks/stack-1")
         .filter_map(|request| request.authorization.as_deref())
         .collect()
 }

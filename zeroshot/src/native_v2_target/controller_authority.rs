@@ -25,7 +25,7 @@ use zeroshot_engine::native_v2_target_authority::{DISCOVERY_PATH, TargetDiscover
 
 use self::contract::{
     build_auth_descriptor, build_controller_descriptor, validate_metadata_routes,
-    ControllerDescriptor, DeviceCodeWire, DevicePoll, HostedAuthDescriptor, MergePlansDescriptor,
+    ControllerDescriptor, DeviceCodeWire, DevicePoll, HostedAuthDescriptor, StacksDescriptor,
     OAuthErrorWire, OAuthMetadataWire, TargetSessionWire, TokenWire, authority_error, parse_origin,
     read_json, read_success_json, require_response_route, validate_device_code, validate_secret,
     validate_token,

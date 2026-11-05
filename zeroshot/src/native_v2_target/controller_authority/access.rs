@@ -6,7 +6,7 @@ use reqwest::header::{HeaderMap, HeaderValue, WWW_AUTHENTICATE};
 use reqwest::{Response, StatusCode, Url};
 
 use super::{
-    HostedAuthDescriptor, IssuedAccessToken, MergePlansDescriptor, TargetAuthorityError,
+    HostedAuthDescriptor, IssuedAccessToken, StacksDescriptor, TargetAuthorityError,
     TargetHttpControlAuthority, TargetRecord,
 };
 
@@ -53,19 +53,19 @@ impl AccessIdentity {
 pub(super) struct CachedHostedAccess {
     identity: AccessIdentity,
     access: AccessToken,
-    merge_plans: Option<MergePlansDescriptor>,
+    stacks: Option<StacksDescriptor>,
 }
 
 impl CachedHostedAccess {
-    pub(super) fn merge_plan_access(
+    pub(super) fn stack_access(
         &self,
         target: &TargetRecord,
-    ) -> Option<(MergePlansDescriptor, AccessToken)> {
+    ) -> Option<(StacksDescriptor, AccessToken)> {
         (self.identity.target == *target
             && self.identity.audience == openengine_cluster_protocol::TARGET_CONTROLLER_AUDIENCE
             && Instant::now() < self.access.0.reusable_until)
             .then(|| {
-                self.merge_plans
+                self.stacks
                     .clone()
                     .map(|routes| (routes, self.access.clone()))
             })
@@ -129,7 +129,7 @@ impl TargetHttpControlAuthority {
             && entry.identity == identity
             && Instant::now() < entry.access.0.reusable_until
         {
-            entry.merge_plans = auth.merge_plans.clone();
+            entry.stacks = auth.stacks.clone();
             return Ok(entry.access.clone());
         }
         *cached = None;
@@ -139,7 +139,7 @@ impl TargetHttpControlAuthority {
         *cached = Some(CachedHostedAccess {
             identity,
             access: access.clone(),
-            merge_plans: auth.merge_plans.clone(),
+            stacks: auth.stacks.clone(),
         });
         Ok(access)
     }

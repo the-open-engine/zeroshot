@@ -8,7 +8,7 @@ use reqwest::{RequestBuilder, Response, Url};
 use serde::de::DeserializeOwned;
 
 use super::contract::{
-    HostedRunsDescriptor, MergePlansDescriptor, authority_error, http_error, read_success_json,
+    HostedRunsDescriptor, StacksDescriptor, authority_error, http_error, read_success_json,
     read_success_json_with_limit, require_response_route,
 };
 use super::TargetHttpControlAuthority;
@@ -23,10 +23,10 @@ use crate::native_v2_target::{TargetAccess, TargetAuthorityError, TargetRecord};
 const NDJSON_MEDIA_TYPE: &str = "application/x-ndjson";
 const MAX_STREAM_FRAME_BYTES: usize = 64 * 1024;
 
-#[path = "hosted_runs/merge_plans_http.rs"]
-mod merge_plans_http;
 #[path = "hosted_runs/recovery_http.rs"]
 mod recovery_http;
+#[path = "hosted_runs/stacks_http.rs"]
+mod stacks_http;
 
 struct HostedRunSubscription<E> {
     response: Response,

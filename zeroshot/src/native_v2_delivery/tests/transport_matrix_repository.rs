@@ -133,7 +133,7 @@ fn verify_published_candidate(repo: &TempRepo) {
         &[
             "clone",
             "--branch",
-            &delivery_branch(RUN),
+            &delivery_head_branch(&RunId::new(RUN)),
             repo.remote.to_str().assert_value(),
             checkout.to_str().assert_value(),
         ],

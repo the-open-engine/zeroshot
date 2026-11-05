@@ -37,8 +37,7 @@ test('environment edits preserve connection declarations and omitted scripts sta
   const html = renderToStaticMarkup(createElement(EnvironmentEditor, props()));
   assert.match(html, /Setup script/);
   assert.match(html, /Startup script/);
-  assert.match(html, /preserve existing workspace files on resume/);
-  assert.match(html, /Use connections for secrets/);
+  assert.doesNotMatch(html, /preserve existing workspace files on resume|Use connections for secrets/);
   assert.deepEqual(value, initial);
   interact(
     (node) => node.type === 'textarea' && node.props.placeholder.startsWith('apt-get'),

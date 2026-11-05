@@ -212,3 +212,37 @@ prepares the edit you are about to make; this skill writes a plan file that outl
   `zeroshot` skill with the plan's Goal, Context, Acceptance criteria, Constraints, Decided approach
   and Decisions as the task, and start it only when the user asks. After the run, remind the user of
   the manual checks it could not perform.
+- **Stack:** when the plans you wrote are linked by `depends_on`, offer to also write a stack
+  manifest so Zeroshot Platform can build them in order from one submission. Write it only when the
+  user agrees, as `.zeroshot/plans/<id>.stack.json` beside the plans, where `<id>` is the plan the
+  others build on:
+
+  ```json
+  {
+    "schema": "zeroshot.stack/v1",
+    "title": "<title of that plan>",
+    "delivery": "<merge or stacked_pull_requests>",
+    "source": { "repository": "<owner/name>", "branch": "<base branch>" },
+    "profile": "<org:NAME or user:NAME>",
+    "expiresAt": "<RFC 3339 time, at most seven days ahead>",
+    "runs": {
+      "<plan id>": {
+        "needs": ["<ids from the plan's depends_on>"],
+        "input": { "task": "<the plan's Goal through Decisions>" }
+      }
+    }
+  }
+  ```
+
+  Add one run per plan, named by its id. Its task is one string holding the plan's Goal, Context,
+  Acceptance criteria, Constraints, Decided approach and Decisions sections as written, the task a
+  single run would get; use the profile's own input field if it has no `task`. `needs` lists the
+  `depends_on` ids that are in this stack and is omitted when there are none; a dependency outside
+  the stack must be built and merged before the stack is submitted. Take the repository and base
+  branch from the checkout and ask for the Platform profile and deadline. Leave `delivery` to the
+  user and keep the placeholder until they choose: `merge` merges each plan into the base branch
+  before the plans that need it start; `stacked_pull_requests` builds the plans in one line, in
+  dependency order with ties broken by id, and opens one pull request per plan against the branch of
+  the plan before it, merging nothing. Check the file with `zeroshot stack validate` when the CLI is
+  installed (the placeholder fails until `delivery` is chosen) and leave submission to the
+  `zeroshot` skill.

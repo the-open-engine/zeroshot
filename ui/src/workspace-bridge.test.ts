@@ -146,6 +146,39 @@ test('save denials keep structured codes and malformed acknowledgements are reje
   assert.deepEqual(state.commands, [denied]);
 });
 
+test('environment acknowledgements retain only the generic environment contract', () => {
+  const state = setup();
+  state.emit({
+    ...state.init,
+    view: 'environments',
+    environmentApi: `${state.init.apiBase}environments`,
+  });
+  state.emit({
+    version: 1,
+    type: 'save_ack',
+    workspaceId: state.init.workspaceId,
+    documentId: 'environment-document',
+    generation: 0,
+    requestId: 'save-environment',
+    environment: {
+      id: 'env-1',
+      name: 'node-tools',
+      revision: 'r2',
+      definition: { startup: 'npm ci' },
+      hostMetadata: { private: true },
+    },
+  });
+  const command = state.commands[0];
+  assert.equal(command?.type, 'save_ack');
+  if (!command || command.type !== 'save_ack') assert.fail('missing environment acknowledgement');
+  assert.deepEqual(command.environment, {
+    id: 'env-1',
+    name: 'node-tools',
+    revision: 'r2',
+    definition: { startup: 'npm ci' },
+  });
+});
+
 test('disposed bridges ignore incoming commands and cannot send host state', () => {
   const state = setup();
   state.emit(state.init);

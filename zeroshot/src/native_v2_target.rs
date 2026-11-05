@@ -13,11 +13,11 @@ use thiserror::Error;
 use zeroshot_engine::native_v2_cli::oecp::{BoxedSubscription, TargetConnector};
 use zeroshot_engine::native_v2_cli::{
     CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
-    NativeV2CliError, PreparedMergePlanRequest, PreparedRunRequest, TargetAdd,
+    NativeV2CliError, PreparedStackRequest, PreparedRunRequest, TargetAdd,
 };
 use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
-    ConnectionMutationResult, ConnectionSetRequest, MergePlan, MergePlanId, MergePlanSubmitRequest,
+    ConnectionMutationResult, ConnectionSetRequest, Stack, StackId, StackSubmitRequest,
 };
 use openengine_cluster_protocol::{
     RunConnectionRequirements, RunForceParams, RunListParams, RunLogEventNotification,
@@ -326,24 +326,25 @@ where
             .map_err(|error| self.authority.redact_error(error).into_cli(&target))
     }
 
-    async fn merge_plan_submit(
+    async fn stack_submit(
         &self,
         name: &str,
-        request: PreparedMergePlanRequest,
-    ) -> Result<MergePlan, NativeV2CliError> {
+        request: PreparedStackRequest,
+    ) -> Result<Stack, NativeV2CliError> {
         let target = self.target(name)?;
         if matches!(target.access, TargetAccess::Direct) {
             return Err(NativeV2CliError::Target(
-                "direct target does not support hosted merge plans".to_owned(),
+                "direct target does not support hosted stacks".to_owned(),
             ));
         }
         self.authority
-            .merge_plan_submit(
+            .stack_submit(
                 &target,
-                &MergePlanSubmitRequest {
+                &StackSubmitRequest {
                     submission_key: request.submission_key,
                     title: request.title,
                     expires_at: request.expires_at,
+                    delivery: request.delivery,
                     source: request.source,
                     profile: request.profile,
                     runs: request.runs,
@@ -356,26 +357,18 @@ where
             .map_err(|error| self.authority.redact_error(error).into_cli(&target))
     }
 
-    async fn merge_plan_status(
-        &self,
-        name: &str,
-        plan_id: MergePlanId,
-    ) -> Result<MergePlan, NativeV2CliError> {
+    async fn stack_status(&self, name: &str, stack_id: StackId) -> Result<Stack, NativeV2CliError> {
         let target = self.target(name)?;
         self.authority
-            .merge_plan_status(&target, &plan_id)
+            .stack_status(&target, &stack_id)
             .await
             .map_err(|error| self.authority.redact_error(error).into_cli(&target))
     }
 
-    async fn merge_plan_force(
-        &self,
-        name: &str,
-        plan_id: MergePlanId,
-    ) -> Result<MergePlan, NativeV2CliError> {
+    async fn stack_force(&self, name: &str, stack_id: StackId) -> Result<Stack, NativeV2CliError> {
         let target = self.target(name)?;
         self.authority
-            .merge_plan_force(&target, &plan_id)
+            .stack_force(&target, &stack_id)
             .await
             .map_err(|error| self.authority.redact_error(error).into_cli(&target))
     }

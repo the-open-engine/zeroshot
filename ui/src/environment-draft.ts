@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { Environment, EnvironmentDefinition, EnvironmentDraft } from './environment-store';
+import {
+  isEnvironmentDefinition,
+  type Environment,
+  type EnvironmentDraft,
+} from './environment-store';
 
 type DraftState = { key: string; draft?: EnvironmentDraft; saved?: Environment };
 const MAX_RECOVERY_BYTES = 8 * 1024 * 1024;
@@ -55,11 +59,22 @@ export function useEnvironmentDraft(key: string) {
         ...(previous.key === key ? previous : { key }),
         draft,
       })),
+    acknowledge: (captured: EnvironmentDraft, saved: Environment) =>
+      setState((previous) => {
+        const current = previous.key === key ? previous : { key };
+        const changed = JSON.stringify(current.draft) !== JSON.stringify(content(captured));
+        const draft = changed && current.draft ? { ...current.draft, id: saved.id } : content(saved);
+        return { key, saved, draft };
+      }),
     adopt: (saved?: Environment) => setState({ key, saved, draft: saved && content(saved) }),
   };
 }
-function content(value: Environment): EnvironmentDraft {
-  return { id: value.id, name: value.name, definition: value.definition };
+function content(value: EnvironmentDraft): EnvironmentDraft {
+  return {
+    ...(value.id === undefined ? {} : { id: value.id }),
+    name: value.name,
+    definition: value.definition,
+  };
 }
 function restore(key: string): DraftState {
   try {
@@ -83,26 +98,9 @@ function draft(value: unknown): value is EnvironmentDraft {
     typeof value.name === 'string' &&
     value.name.length <= 64 &&
     (value.id === undefined || typeof value.id === 'string') &&
-    definition(value.definition)
+    isEnvironmentDefinition(value.definition)
   );
 }
-function definition(value: unknown): value is EnvironmentDefinition {
-  if (!record(value)) return false;
-  return Object.entries(value).every(([name, field]) => {
-    if (name === 'setup' || name === 'startup') return typeof field === 'string';
-    if (name === 'variables')
-      return record(field) && Object.values(field).every((entry) => typeof entry === 'string');
-    if (name === 'connections')
-      return (
-        record(field) &&
-        Object.values(field).every(
-          (entry) => Array.isArray(entry) && entry.every((item) => typeof item === 'string')
-        )
-      );
-    return false;
-  });
-}
-
 function savedBase(value: unknown, id?: string): value is Environment {
   if (!record(value)) return false;
   const revision = value.revision;

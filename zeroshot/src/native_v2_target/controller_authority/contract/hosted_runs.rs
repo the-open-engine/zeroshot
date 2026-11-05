@@ -4,9 +4,9 @@ use openengine_cluster_protocol::{
 };
 use reqwest::Url;
 
-#[path = "hosted_runs/merge_plans.rs"]
-mod merge_plans;
-pub(crate) use merge_plans::{MergePlansDescriptor, build_merge_plans_descriptor};
+#[path = "hosted_runs/stacks.rs"]
+mod stacks;
+pub(crate) use stacks::{StacksDescriptor, build_stacks_descriptor};
 
 use super::{
     RunIdRouteSegment, authority_error, capability_base_url, compile_run_id_route_segments,

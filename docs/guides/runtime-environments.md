@@ -1,5 +1,5 @@
 ---
-description: "Configure setup commands, startup commands and environment variables for Docker target runs without putting environment settings in profiles."
+description: 'Configure setup commands, startup commands and environment variables for Docker target runs without putting environment settings in profiles.'
 ---
 
 # Prepare a runtime environment
@@ -21,8 +21,8 @@ definition when submitting a run. With the CLI, put the contents of `environment
 file and pass `--environment FILE` alongside your profile. `--no-environment` sends an explicit empty
 definition (`{}`), which bypasses defaults on hosts that provide them. Omitting both flags leaves
 selection to the host. Direct Docker uses the base environment when none is supplied.
-Merge-plan manifests also accept a top-level `environment`; the definition applies to each run
-in that plan, while omission allows the host to resolve each repository's default.
+[Stack](stacks.md) manifests also accept a top-level `environment`; the definition applies to each
+run in that stack, while omission allows the host to resolve each repository's default.
 
 Hosts may provide saved environments and choose repository defaults before accepting a run.
 Zeroshot executes the resolved definition and preserves it for queued and resumed attempts; it

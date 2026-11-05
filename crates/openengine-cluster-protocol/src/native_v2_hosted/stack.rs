@@ -1,4 +1,4 @@
-//! Hosted merge-plan admission and aggregate lifecycle contracts.
+//! Hosted stack admission and aggregate lifecycle contracts.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -8,43 +8,67 @@ use crate::{
     SourceBranchId, SourceRepositoryId, SourceRevisionId,
 };
 
-pub const MERGE_PLANS_KIND: &str = "zeroshot.merge-plans/v1";
-pub const MERGE_PLAN_SCHEMA: &str = "zeroshot.merge-plan/v1";
-pub const MAX_MERGE_PLAN_RUNS: usize = 64;
+pub const STACKS_KIND: &str = "zeroshot.stacks/v1";
+pub const STACK_SCHEMA: &str = "zeroshot.stack/v1";
+pub const MAX_STACK_RUNS: usize = 64;
 
-/// Merge-plan IDs share the host-assigned opaque identity representation used by runs.
-pub type MergePlanId = RunId;
-/// Symbolic plan run names use the existing compact ASCII identifier contract.
-pub type MergePlanRunName = RunProfileName;
+/// Stack IDs share the host-assigned opaque identity representation used by runs.
+pub type StackId = RunId;
+/// Symbolic stack run names use the existing compact ASCII identifier contract.
+pub type StackRunName = RunProfileName;
+
+/// How every run in a stack delivers its change.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StackDelivery {
+    /// Each run merges into the base branch before its dependents start.
+    Merge,
+    /// The runs form one linear stack; each run opens a pull request against the branch of the
+    /// run it needs, so the stack arrives as a chain of pull requests.
+    StackedPullRequests,
+}
+
+impl StackDelivery {
+    /// Manifest and wire spelling of this delivery mode.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Merge => "merge",
+            Self::StackedPullRequests => "stacked_pull_requests",
+        }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct MergePlanSource {
+pub struct StackSource {
     pub repository: SourceRepositoryId,
     pub branch: SourceBranchId,
 }
 
-/// One unresolved merge-plan run whose source revision is assigned only after dependencies pass.
+/// One unresolved stack run whose source revision is assigned only after dependencies pass.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct MergePlanRunRequest {
-    pub name: MergePlanRunName,
+pub struct StackRunRequest {
+    pub name: StackRunName,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub needs: Vec<MergePlanRunName>,
+    pub needs: Vec<StackRunName>,
     pub initial_input: serde_json::Value,
 }
 
-/// Atomic merge-plan submission. Secret values deliberately do not implement Debug.
+/// Atomic stack submission. Secret values deliberately do not implement Debug.
 #[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct MergePlanSubmitRequest {
+pub struct StackSubmitRequest {
     pub submission_key: IdempotencyKey,
     pub title: RunTitle,
     pub expires_at: String,
-    pub source: MergePlanSource,
+    pub delivery: StackDelivery,
+    pub source: StackSource,
     pub profile: RunProfileSelector,
-    pub runs: Vec<MergePlanRunRequest>,
-    /// Shared preparation for every plan run; omission permits a host default, `{}` selects base.
+    /// Stacked pull-request submissions are already linear: each run needs only its predecessor.
+    pub runs: Vec<StackRunRequest>,
+    /// Shared preparation for every stack run; omission permits a host default, `{}` selects base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<crate::RuntimeEnvironment>,
     #[serde(default, skip_serializing_if = "RunConnectionValues::is_empty")]
@@ -55,7 +79,7 @@ pub struct MergePlanSubmitRequest {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MergePlanState {
+pub enum StackState {
     Queued,
     Running,
     Succeeded,
@@ -64,7 +88,7 @@ pub enum MergePlanState {
     Expired,
 }
 
-impl MergePlanState {
+impl StackState {
     #[must_use]
     pub const fn is_terminal(self) -> bool {
         matches!(
@@ -81,7 +105,7 @@ impl MergePlanState {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MergePlanRunState {
+pub enum StackRunState {
     Blocked,
     Materializing,
     Queued,
@@ -94,7 +118,7 @@ pub enum MergePlanRunState {
     Expired,
 }
 
-impl MergePlanRunState {
+impl StackRunState {
     #[must_use]
     pub const fn is_terminal(self) -> bool {
         matches!(
@@ -106,11 +130,15 @@ impl MergePlanRunState {
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct MergePlanRunStatus {
-    pub name: MergePlanRunName,
+pub struct StackRunStatus {
+    pub name: StackRunName,
     pub run_id: RunId,
-    pub state: MergePlanRunState,
-    pub needs: Vec<MergePlanRunName>,
+    pub state: StackRunState,
+    pub needs: Vec<StackRunName>,
+    /// Branch the run started from once materialized; a stacked pull request targets it.
+    #[serde(with = "explicit_nullable")]
+    #[schemars(with = "Option<SourceBranchId>")]
+    pub source_branch: Option<SourceBranchId>,
     #[serde(with = "explicit_nullable")]
     #[schemars(with = "Option<SourceRevisionId>")]
     pub source_revision: Option<SourceRevisionId>,
@@ -153,20 +181,21 @@ mod explicit_nullable {
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct MergePlan {
-    pub plan_id: MergePlanId,
+pub struct Stack {
+    pub stack_id: StackId,
     pub title: RunTitle,
-    pub state: MergePlanState,
+    pub state: StackState,
     pub repository: SourceRepositoryId,
     pub branch: SourceBranchId,
     pub submitted_at: String,
     pub expires_at: String,
-    pub runs: Vec<MergePlanRunStatus>,
+    pub runs: Vec<StackRunStatus>,
 }
 
+/// Route templates relative to `baseUrl`; `status` and `force` contain one `{stack_id}` segment.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct TargetMergePlanRoutes {
+pub struct TargetStackRoutes {
     pub create: String,
     pub status: String,
     pub force: String,
@@ -174,12 +203,12 @@ pub struct TargetMergePlanRoutes {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct TargetMergePlansDiscovery {
+pub struct TargetStacksDiscovery {
     pub kind: String,
     pub base_url: String,
-    pub route_templates: TargetMergePlanRoutes,
+    pub route_templates: TargetStackRoutes,
 }
 
 #[cfg(test)]
-#[path = "merge_plan/tests.rs"]
+#[path = "stack/tests.rs"]
 mod tests;

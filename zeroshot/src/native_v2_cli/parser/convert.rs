@@ -8,16 +8,16 @@ use openengine_cluster_protocol::{
 };
 
 use super::{
-    AcpArgs, AttachArgs, Cli, CliCommand, ConnectionCommand, ConnectionScopeArg, PlanCommand,
-    PlanSelectorArgs, PlanSubmitArgs, RunArgs, RunCheckpointsArgs, RunResumeArgs, RunLogsArgs,
+    AcpArgs, AttachArgs, Cli, CliCommand, ConnectionCommand, ConnectionScopeArg, StackCommand,
+    StackSelectorArgs, StackSubmitArgs, RunArgs, RunCheckpointsArgs, RunResumeArgs, RunLogsArgs,
     RunSelectorArgs, RunWatchArgs, TargetCommand, TemplateCommand, TemplateName, UtilityCommand,
 };
 use crate::native_v2_cli::{
-    BuiltinGraphTemplate, ConnectionInput, ConnectionRoute, ConnectionSetCommand,
-    MergePlanSelector, MergePlanSubmitCommand, NativeV2CliCommand, NativeV2CliError,
-    ProfileQualifier, ProfileReference, RunCommand, RunGraph, RunLogsCommand, RunRepository,
-    RunSourceForge, RunRuntime, RunSelection, RunSelector, RunResumeCommand, RunCheckpointsCommand,
-    RunWatchCommand, TargetAdd, TargetServe, TemplateDelivery,
+    BuiltinGraphTemplate, ConnectionInput, ConnectionRoute, ConnectionSetCommand, StackSelector,
+    StackSubmitCommand, NativeV2CliCommand, NativeV2CliError, ProfileQualifier, ProfileReference,
+    RunCommand, RunGraph, RunLogsCommand, RunRepository, RunSourceForge, RunRuntime, RunSelection,
+    RunSelector, RunResumeCommand, RunCheckpointsCommand, RunWatchCommand, TargetAdd, TargetServe,
+    TemplateDelivery,
 };
 
 #[path = "convert/profile_commands.rs"]
@@ -74,7 +74,7 @@ impl CliCommand {
             Self::Connection { command } => command.into_command(),
             Self::Profile { command } => command.into_command(),
             Self::Template { command } => command.into_command(),
-            Self::Plan { command } => command.into_command(),
+            Self::Stack { command } => command.into_command(),
             Self::Run(args) => args.into_command(),
             Self::Utility(command) => command.into_command(),
             _ => Err(usage("expected an execution or management command")),
@@ -282,24 +282,24 @@ impl TemplateCommand {
     }
 }
 
-impl PlanCommand {
+impl StackCommand {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         match self {
-            Self::Validate(args) => Ok(NativeV2CliCommand::PlanValidate { file: args.file }),
+            Self::Validate(args) => Ok(NativeV2CliCommand::StackValidate { file: args.file }),
             Self::Submit(args) => args.into_command(),
-            Self::Status(args) => plan_selector(args).map(NativeV2CliCommand::PlanStatus),
-            Self::Watch(args) => plan_selector(args).map(NativeV2CliCommand::PlanWatch),
-            Self::ForceStop(args) => plan_selector(args).map(NativeV2CliCommand::PlanForceStop),
+            Self::Status(args) => stack_selector(args).map(NativeV2CliCommand::StackStatus),
+            Self::Watch(args) => stack_selector(args).map(NativeV2CliCommand::StackWatch),
+            Self::ForceStop(args) => stack_selector(args).map(NativeV2CliCommand::StackForceStop),
         }
     }
 }
 
-impl PlanSubmitArgs {
+impl StackSubmitArgs {
     fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
         let target = required_target(self.target)?;
         let submission_key = IdempotencyKey::new(self.submission_key)
             .map_err(|error| usage(format!("invalid --submission-key: {error}")))?;
-        Ok(NativeV2CliCommand::PlanSubmit(MergePlanSubmitCommand {
+        Ok(NativeV2CliCommand::StackSubmit(StackSubmitCommand {
             target,
             file: self.file,
             detach: self.detach,
@@ -308,11 +308,11 @@ impl PlanSubmitArgs {
     }
 }
 
-fn plan_selector(args: PlanSelectorArgs) -> Result<MergePlanSelector, NativeV2CliError> {
-    validate_public_id(&args.plan_id, "plan ID")?;
-    Ok(MergePlanSelector {
+fn stack_selector(args: StackSelectorArgs) -> Result<StackSelector, NativeV2CliError> {
+    validate_public_id(&args.stack_id, "stack ID")?;
+    Ok(StackSelector {
         target: required_target(args.target)?,
-        plan_id: openengine_cluster_protocol::MergePlanId::new(args.plan_id),
+        stack_id: openengine_cluster_protocol::StackId::new(args.stack_id),
     })
 }
 
