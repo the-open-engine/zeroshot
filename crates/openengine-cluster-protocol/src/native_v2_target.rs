@@ -315,7 +315,7 @@ impl TryFrom<CommitIdentityWire> for CommitIdentity {
 }
 
 fn valid_commit_identity_field(value: &str) -> bool {
-    // Git drops these characters around identity values and rejects a value left empty.
+    // Git trims these characters around identity values, so reject values with nothing left.
     let ignored_by_git = |character: char| {
         character.is_whitespace() || matches!(character, '.' | ',' | ':' | ';' | '"' | '\'' | '\\')
     };

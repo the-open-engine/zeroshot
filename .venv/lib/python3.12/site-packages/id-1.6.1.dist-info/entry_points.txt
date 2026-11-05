@@ -1,3 +1,0 @@
-[pipx.run]
-id=id.__main__:main
-

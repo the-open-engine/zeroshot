@@ -1,7 +1,0 @@
-[console_scripts]
-
-[gui_scripts]
-
-[mkdocs.plugins]
-autorefs = mkdocs_autorefs:AutorefsPlugin
-
