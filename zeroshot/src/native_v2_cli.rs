@@ -628,6 +628,15 @@ pub trait NativeV2CliBackend: Send + Sync {
         ))
     }
 
+    /// CLI presentation may carry local diagnostics without extending target protocol responses.
+    async fn profile_list_with_problems(
+        &self,
+        target: Option<&str>,
+        request: RunProfileListRequest,
+    ) -> Result<CliProfileListResult, NativeV2CliError> {
+        self.profile_list(target, request).await.map(Into::into)
+    }
+
     async fn profile_show(
         &self,
         _target: Option<&str>,
@@ -733,6 +742,13 @@ pub trait NativeV2CliBackend: Send + Sync {
         target: Option<&str>,
         params: RunForceParams,
     ) -> Result<CliRunForceResult, NativeV2CliError>;
+    /// Reject unsupported recovery selections before reading caller credentials.
+    async fn validate_resume_selection(
+        &self,
+        _command: &RunResumeCommand,
+    ) -> Result<(), NativeV2CliError> {
+        Ok(())
+    }
     async fn authorize_resume_connection_requirements(
         &self,
         target: Option<&str>,

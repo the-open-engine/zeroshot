@@ -189,6 +189,37 @@ describe('npm Zeroshot skill installation', () => {
 });
 
 describe('npm Zeroshot skill installation boundaries', () => {
+  it('skips all skill handling only when ZEROSHOT_SKIP_SKILLS is exactly 1', () => {
+    const fixture = makeFixture();
+    fs.rmSync(path.join(fixture.packageRoot, 'skills'), { recursive: true });
+
+    assert.deepEqual(
+      install(fixture, {
+        environment: {
+          ZEROSHOT_SKIP_SKILLS: '1',
+          CLAUDE_CONFIG_DIR: 'relative-claude',
+          SUDO_USER: 'developer',
+        },
+        homeDirectory: 'relative-home',
+        uid: 0,
+      }),
+      []
+    );
+    assert.deepEqual(fs.readdirSync(fixture.homeDirectory), []);
+    const sink = {
+      write: () => assert.fail('skipped skills must not be reported as ready or failed'),
+    };
+    requireCompleteSkillInstall([], sink, sink);
+
+    for (const value of [undefined, '', '0', 'false', 'true', ' 1 ', 'yes']) {
+      const enabled = makeFixture();
+      assert.equal(
+        install(enabled, { environment: { ZEROSHOT_SKIP_SKILLS: value } })[0].status,
+        'installed'
+      );
+    }
+  });
+
   it('honors an absolute CLAUDE_CONFIG_DIR', () => {
     const fixture = makeFixture();
     const claudeRoot = path.join(fixture.root, 'custom-claude');
@@ -201,6 +232,21 @@ describe('npm Zeroshot skill installation boundaries', () => {
     );
     assert.equal(fs.existsSync(destinations(fixture).claude), false);
   });
+
+  it(
+    'leaves a read-only home untouched when opted out',
+    { skip: process.platform === 'win32' },
+    () => {
+      const fixture = makeFixture();
+      fs.chmodSync(fixture.homeDirectory, 0o555);
+      try {
+        assert.deepEqual(install(fixture, { environment: { ZEROSHOT_SKIP_SKILLS: '1' } }), []);
+        assert.deepEqual(fs.readdirSync(fixture.homeDirectory), []);
+      } finally {
+        fs.chmodSync(fixture.homeDirectory, 0o755);
+      }
+    }
+  );
 
   it('keeps one destination usable when another path fails', () => {
     const fixture = makeFixture();

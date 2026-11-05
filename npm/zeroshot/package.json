@@ -1,7 +1,7 @@
 {
   "name": "@the-open-engine-company/zeroshot",
   "version": "0.0.0-development",
-  "description": "Enforces your team's QA process on coding agents. Define the workflow as a graph of implementers, reviewers, tests and repair loops; every task runs through it and no agent can skip a step. Works with Codex, Claude Code, GitHub Copilot and Pi.",
+  "description": "The open-source engine for autonomous software production. Orchestrate coding agents through implementation, code review, testing and repair.",
   "keywords": [
     "claude-code",
     "codex",
@@ -12,7 +12,10 @@
     "agent-orchestration",
     "code-review",
     "verification",
-    "cli"
+    "cli",
+    "autonomous-software-production",
+    "workflow-engine",
+    "qa-automation"
   ],
   "homepage": "https://zeroshot.sh",
   "license": "MIT",

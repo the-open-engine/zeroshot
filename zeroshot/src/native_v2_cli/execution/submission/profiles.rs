@@ -6,8 +6,8 @@ use openengine_cluster_protocol::{
 use super::{materialize_graph, materialize_runtime, validate_graph_profile};
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission};
 use crate::native_v2_cli::{
-    LocalRunProfileStore, NativeV2CliBackend, NativeV2CliError, ProfileQualifier, ProfileReference,
-    RunCommand, RunGraph, RunRuntime, RunSelection,
+    CliProfileListResult, LocalRunProfileStore, NativeV2CliBackend, NativeV2CliError,
+    ProfileQualifier, ProfileReference, RunCommand, RunGraph, RunRuntime, RunSelection,
 };
 
 pub(super) struct ResolvedRunProfile {
@@ -92,7 +92,7 @@ impl<B: NativeV2CliBackend> StoredProfileLookup<'_, B> {
         reference: Option<&ProfileReference>,
     ) -> Result<Option<ResolvedRunProfile>, NativeV2CliError> {
         let list = profile_list(scope, self.target, self.backend, self.local).await?;
-        let Some(selected) = select_profile(list, reference) else {
+        let Some(selected) = select_profile(list, reference)? else {
             return Ok(None);
         };
         let selector = RunProfileSelector {
@@ -149,30 +149,35 @@ async fn profile_list<B: NativeV2CliBackend>(
     target: Option<&str>,
     backend: &B,
     local: &LocalRunProfileStore,
-) -> Result<openengine_cluster_protocol::RunProfileListResult, NativeV2CliError> {
+) -> Result<CliProfileListResult, NativeV2CliError> {
     match scope {
         None => local.list(RunProfileListRequest {
             scope: RunProfileScope::User,
         }),
-        Some(scope) => {
-            backend
-                .profile_list(target, RunProfileListRequest { scope })
-                .await
-        }
+        Some(scope) => backend
+            .profile_list(target, RunProfileListRequest { scope })
+            .await
+            .map(Into::into),
     }
 }
 
 fn select_profile(
-    list: openengine_cluster_protocol::RunProfileListResult,
+    list: CliProfileListResult,
     reference: Option<&ProfileReference>,
-) -> Option<openengine_cluster_protocol::RunProfileSummary> {
-    match reference {
+) -> Result<Option<openengine_cluster_protocol::RunProfileSummary>, NativeV2CliError> {
+    if let Some(problem) = list.problems.into_iter().find(|problem| match reference {
+        Some(reference) => problem.name == reference.name,
+        None => problem.is_default,
+    }) {
+        return Err(NativeV2CliError::Local(problem.message));
+    }
+    Ok(match reference {
         Some(reference) => list
             .profiles
             .into_iter()
             .find(|profile| profile.name == reference.name),
         None => list.profiles.into_iter().find(|profile| profile.is_default),
-    }
+    })
 }
 
 fn profile_not_found(reference: Option<&ProfileReference>) -> NativeV2CliError {

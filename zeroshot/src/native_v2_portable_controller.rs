@@ -190,6 +190,8 @@ pub enum PortableControllerError {
     Readiness,
     #[error("portable controller durable identity does not match bootstrap")]
     DurableIdentity,
+    #[error("workspace checkpoint restore is unavailable because workspaceCheckpoints is false")]
+    CheckpointsDisabled,
     #[error("portable runtime could not be constructed")]
     RuntimeUnavailable,
     #[error("portable controller could not install its console control guard")]

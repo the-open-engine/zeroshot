@@ -604,9 +604,24 @@ fn require_runtime_capabilities(
     controller: &ControllerDescriptor,
     runtime: &RuntimePlan,
 ) -> Result<(), TargetAuthorityError> {
+    if runtime.nodes().values().any(|binding| {
+        matches!(
+            binding,
+            openengine_cluster_protocol::NodeRuntimeBinding::Script { .. }
+        )
+    }) {
+        return Err(authority_error(
+            "script bindings currently require local execution",
+        ));
+    }
     require_run_size(controller, runtime.size())?;
     require_node_runtime_lanes(controller, runtime)?;
     require_runtime_harnesses(controller, runtime)?;
+    if !runtime.workspace_checkpoints {
+        return Err(authority_error(
+            "this target does not support disabling workspace checkpoints",
+        ));
+    }
     if runtime.nodes().values().any(|binding| {
         matches!(
             binding,

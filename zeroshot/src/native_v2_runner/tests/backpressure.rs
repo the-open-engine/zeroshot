@@ -3,34 +3,20 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{TokenCount, WorkerOutcome};
-use tokio::sync::{broadcast, watch};
+use tokio::sync::watch;
 
 use super::super::{
     AttachReceiveError, DriverControl, DurableNodeEvent, DurableOutput, LiveOutput,
     LiveOutputStream, NodeRunner, NodeRunnerError, DURABLE_OUTPUT_CAPACITY,
 };
-use super::super::output::{
-    CANCELLED_TERMINAL_CAPACITY, CANCELLED_TERMINAL_OVERFLOW_DETAIL,
-    durable_event_channel_with_capacity,
-};
+use super::super::output::{CANCELLED_TERMINAL_CAPACITY, CANCELLED_TERMINAL_OVERFLOW_DETAIL};
 use crate::native_v2_contract::TokenUsageDelta;
 use crate::native_v2_runner::test_support::{FakeFactory, admitted, request};
 
 use openengine_cluster_testkit::assertions::AssertValue;
 
 fn control_with_capacity(capacity: usize) -> (watch::Sender<bool>, DriverControl, DurableOutput) {
-    let (cancel, cancellation) = watch::channel(false);
-    let (live_output, _) = broadcast::channel(1);
-    let (durable_output, durable) = durable_event_channel_with_capacity(capacity);
-    (
-        cancel,
-        DriverControl {
-            cancellation,
-            live_output,
-            durable_output,
-        },
-        durable,
-    )
+    crate::native_v2_runner::test_support::control_with_capacity(capacity)
 }
 
 #[tokio::test]

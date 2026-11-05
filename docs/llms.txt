@@ -1,6 +1,6 @@
 # Zeroshot
 
-> Zeroshot enforces your team's QA process on coding agents. You define the process as a graph: which agents implement, which independent agents review or test the result, where rejected work goes for repair, and where a run stops. The engine runs the graph's order, routing and bounds in code, so no agent can skip a step; model output cannot add an edge or raise a bound. It is a native CLI (`zeroshot`) for Linux, macOS, and Windows. Each node can use its own harness and model. MIT licensed.
+> zeroshot is the open-source engine for autonomous software production. Its workflow engine orchestrates coding agents through your team's development and QA process. You define the process as a graph: which agents implement, which independent agents review or test the result, where rejected work goes for repair, and where a run stops. The engine runs the graph's order, routing and bounds in code, so no agent can skip a step; model output cannot add an edge or raise a bound. It is a native CLI (`zeroshot`) for Linux, macOS, and Windows. Each node can use its own harness and model. MIT licensed.
 
 ## Build your own graph
 

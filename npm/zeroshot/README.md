@@ -1,9 +1,10 @@
 # `@the-open-engine-company/zeroshot`
 
-Zeroshot enforces your team's QA process on coding agents. You define the process as a graph:
-which agents implement, which reviewers and tests a change must pass, where failures go for repair,
-and where a run stops. Every task runs through it, and no agent can skip a step. It works with
-Codex, Claude Code, GitHub Copilot and Pi.
+zeroshot is the open-source engine for autonomous software production. Its workflow engine
+orchestrates coding agents through implementation, independent code review, testing, repair
+and delivery. Define your team's development and QA process as a reusable multi-agent graph;
+the engine enforces its transitions and retry limits. It works with Codex, Claude Code,
+GitHub Copilot and Pi.
 
 This package is the installer for the canonical `zeroshot` executable and agent skills. The package selects the release
 archive for the current Node platform and architecture, verifies it against that release's
@@ -21,7 +22,20 @@ Claude Code at `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/<name>/SKILL.md`. Rei
 managed copy. A conflicting or edited skill is preserved; installation fails with the exact path so
 the conflict cannot pass unnoticed.
 
-When set, `CLAUDE_CONFIG_DIR` must be absolute so the managed skills have stable locations.
+Set `ZEROSHOT_SKIP_SKILLS=1` to install or update only the executables:
+
+```sh
+ZEROSHOT_SKIP_SKILLS=1 npm install --global @the-open-engine-company/zeroshot
+ZEROSHOT_SKIP_SKILLS=1 zeroshot update
+```
+
+Only the exact value `1` enables this opt-out. Export it in your shell configuration to keep later
+installs and updates from recreating removed skills. Existing skills are left untouched, and skill
+conflicts or unwritable destinations do not block executable installation. Unset it to restore
+automatic skill installation.
+
+With automatic skill installation enabled, `CLAUDE_CONFIG_DIR` must be absolute when set so the
+managed skills have stable locations.
 
 npm 7 and newer do not run uninstall lifecycle scripts. After uninstalling the package, remove the
 managed skill directories above manually if their `SKILL.md` files are still unmodified managed copies.

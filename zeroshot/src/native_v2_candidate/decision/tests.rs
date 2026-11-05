@@ -189,7 +189,8 @@ async fn server_bytes(
 async fn http_adapter_preserves_auth_path_state_and_usage() {
     let (endpoint, server) = server(200, answer(0.9)).await;
     let invocation = invocation(&endpoint, "private-test-key").await;
-    let (_cancel, control, mut durable) = crate::native_v2_runner::test_support::control();
+    let (_cancel, control, mut durable) =
+        crate::native_v2_runner::test_support::control_with_capacity(16);
     let result = DecisionAdapter::new()
         .unwrap()
         .run(invocation, control)
@@ -219,7 +220,8 @@ async fn run_failure(
     Option<crate::native_v2_contract::TokenUsageDelta>,
     String,
 ) {
-    let (_cancel, control, mut durable) = crate::native_v2_runner::test_support::control();
+    let (_cancel, control, mut durable) =
+        crate::native_v2_runner::test_support::control_with_capacity(16);
     let adapter = DecisionAdapter::new().unwrap();
     let (outcome, (usage, diagnostic)) = tokio::join!(adapter.run(invocation, control), async {
         let usage = durable.recv_usage().await.unwrap();
@@ -284,7 +286,8 @@ async fn an_expired_http_deadline_is_a_timeout_worker_result() {
 #[tokio::test]
 async fn cancellation_interrupts_a_stalled_http_response() {
     let (invocation, listener) = stalled_request().await;
-    let (cancel, control, _durable) = crate::native_v2_runner::test_support::control();
+    let (cancel, control, _durable) =
+        crate::native_v2_runner::test_support::control_with_capacity(16);
     let adapter = DecisionAdapter::new().unwrap();
     let task = tokio::spawn(async move { adapter.run(invocation, control).await });
     let (_stream, _) = listener.accept().await.unwrap();
@@ -312,7 +315,8 @@ async fn live_systemone_smoke() {
         panic!("decision binding")
     };
     *selected = ModelId::new(model).unwrap();
-    let (_cancel, control, mut durable) = crate::native_v2_runner::test_support::control();
+    let (_cancel, control, mut durable) =
+        crate::native_v2_runner::test_support::control_with_capacity(16);
     let outcome = DecisionAdapter::new()
         .unwrap()
         .run(invocation, control)
@@ -366,6 +370,7 @@ async fn native_candidate_runs_a_decision_without_starting_a_harness() {
         .await
         .unwrap();
     assert!(admitted.runtime.lanes().is_empty());
+    assert!(crate::native_v2_admission::writer_nodes(&admitted).is_empty());
     let directory = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let memory_path = state.path().join("memory.sqlite");

@@ -144,7 +144,8 @@ enum UtilityCommand {
     /// their SHA256SUMS entries and the executable version, then replaces this executable and any
     /// unchanged Zeroshot-managed skill copies. User-edited skills are preserved and reported as
     /// conflicts. The executable's directory must be writable; Zeroshot does not elevate
-    /// privileges.
+    /// privileges. Set ZEROSHOT_SKIP_SKILLS=1 to skip skill downloads and installation while
+    /// updating the executable.
     Update,
 
     /// List runs as JSON.

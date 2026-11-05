@@ -28,8 +28,8 @@ use super::oecp::{ChannelSubscription, spawn_attach, spawn_logs, spawn_watch};
 use super::support::{CommitPaths, cleanup_temporary, write_and_commit};
 use super::{
     CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
-    LocalRunProfileStore, NativeV2CliBackend, NativeV2CliError, PreparedRunRequest, TargetAdd,
-    default_local_state_root,
+    CliProfileListResult, LocalRunProfileStore, NativeV2CliBackend, NativeV2CliError,
+    PreparedRunRequest, TargetAdd, default_local_state_root,
 };
 use crate::execution::platform::{ControllerChild as Child, FileAccess, private_file};
 use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission};

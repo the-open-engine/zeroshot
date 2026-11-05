@@ -31,6 +31,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - That package owns the canonical `zeroshot`, `zeroshot-memory-init`, `zeroshot-graph-design`, and
   `zeroshot-plan` skills and installs managed copies for Codex, GitHub Copilot, Pi, and Claude Code
   at their user scopes. Do not fork skills by host.
+  `ZEROSHOT_SKIP_SKILLS=1` opts out of all user-scope skill handling in npm postinstall and
+  `zeroshot update`; only the exact value `1` enables it. Executables still install/update, existing
+  skills stay untouched, and updates skip skill downloads. Keep default managed-copy protections
+  when the opt-out is unset.
 - The target image is `ghcr.io/the-open-engine/zeroshot-target`.
 - The Python distribution is `the-open-engine-zeroshot`; its import package remains `zeroshot`.
 - Python SDK tags are `zeroshot-python-vZEROSHOT_SDK` and package versions are
@@ -237,6 +241,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `maxTokens` on an agent binding; they are declarations rather than catalog knowledge, are written
   only to the Pi gateway model entry when supplied, and stay absent so the provider keeps its own
   defaults otherwise. Never infer either value from the model identifier.
+- A `script` binding executes an argv program on an existing step without instructions. The local
+  adapter in `native_v2_candidate::script` uses the shared process runner, bounded JSON stdin/stdout,
+  authoritative output validation, connection redaction and confirmed process-tree cleanup. It does
+  not invoke a shell or inherit ambient provider keys. Local-only placement is enforced both before
+  remote submission and at candidate construction. Keep service lifecycle outside the runtime.
 - A `decision` runtime binding runs one TypeSafe-compatible System One Choice request on an
   existing verifier, without a harness, tools, host context, or Active Memory. The verifier's
   instructions supply its question and its single signal supplies the options, excluding the
@@ -618,6 +627,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   attempt's delivery identity so every successor reuses the same delivery branch and pull request.
   Successor composition explicitly authorizes a fresh delivery adapter to adopt that lineage-owned
   branch; ordinary fresh adapters still reject unexplained existing run branches.
+- Runtime plans accept `workspaceCheckpoints`, defaulting to true and omitted from the wire at
+  that default. Local opt-out leaves the existing executor and durable ledger intact, skips Restic
+  construction and snapshot cleanup, and refuses selected checkpoint restoration before credential
+  resolution. Named/contained targets currently refuse opt-out explicitly. Decision bindings are
+  not workspace writers. Executable steps remain conservative potential writers.
 - `openengine.workspace-checkpoints/v1` adds `run/checkpoints` and selected checkpoint resume to
   retained workspace recovery. Default resume starts a fresh graph on the latest retained workspace;
   checkpoint resume restores a private input snapshot and settled prerequisite executions. Neither
@@ -1075,6 +1089,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Profiles use `LocalRunProfileStore` and `NativeV2Admission::validate_profile`. Saves check content
   revision and the bootstrap workspace UUID under the CLI's store lock. Identity persists with the
   store; replacement rejects stale tabs, including creation requests without a prior revision.
+  Local storage retains complete profile entries as raw JSON. Listing borrows graph/runtime slices
+  to inspect metadata and returns malformed entries separately in `problems`, without inventing IDs
+  or hiding names. Only selected payloads become typed graphs/runtimes; selecting a malformed named
+  or default profile fails explicitly rather than falling through to another scope. Deletion, default
+  selection and unrelated saves preserve incompatible entries. Listing diagnostics belong to the local
+  CLI/UI result, never the target's `zeroshot.run-profiles/v1` wire result. Legacy backend methods retain
+  explicit failure when they cannot represent partial listings; the CLI diagnostic method defaults to
+  wrapping unchanged target results. New entries are decoded through the selected-profile reader before
+  publication so accepted writes remain readable; unchanged entries stay opaque. Shared store envelope
+  corruption still fails closed. Checked saves decode the selected profile for its revision.
 - Drafts/layout are scoped to workspace identity. Saves acknowledge only their captured document
   generation; imports carry no foreign revision. Pending numeric text belongs to the document,
   survives inspector navigation, and commits only when valid. Navigation must preserve unsaved work.
@@ -1180,7 +1204,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Python test doubles use `openengine_cluster_testkit::fixture::python3_script`, which resolves
   the test PATH's actual interpreter before entering a pinned or cleared child environment.
 - `.opcore.json` owns the full-source Opcore policy. `.github/workflows/opcore.yml` runs the Fast
-  provider and Cargo with warnings denied on every PR and main commit. Cargo uses the complete checkout
+  provider and Cargo with warnings denied except for root-README-only changes, identified by the
+  shared CI classifier. Cargo uses the complete checkout
   because Opcore's Rust snapshot omits embedded Python assets. The two exact PowerShell exclusions
   reflect unsupported parsing; the Windows native CI lane still runs those scripts.
 - Preserve bounded values, explicit overflow, cancellation safety, and exact source provenance at
@@ -1217,7 +1242,12 @@ python -m mkdocs build --strict
 ## Release convention
 
 - CI has native, Python, repository-tooling, npm-package, and strict-documentation lanes plus stable
-  aggregate `required`. On PRs, that aggregate waits for Greptile's latest review check on the exact
+  aggregate `required`. Root-README-only changes use a lightweight README lane for formatting, local
+  links, and documentation contracts, without Rust or distribution checks. Mixed changes keep every
+  applicable lane. `.github/select-ci-lanes.sh` shares history selection between CI and Opcore;
+  empty, unavailable, or manually dispatched history selects full checks. The README lane participates
+  in `required`, and missing or failed results block delivery.
+  On PRs, that aggregate waits for Greptile's latest review check on the exact
   head to complete; findings remain review input for the worker rather than automatic CI failures.
   Merge groups use the completed PR gate because Greptile does not review merge-group commits.
   Native changes also require macOS product and test compilation with the UI

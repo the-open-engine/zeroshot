@@ -1,15 +1,15 @@
 ---
-description: "zeroshot enforces your team's QA process on coding agents through a graph of implementation, review, test, repair and delivery steps."
+description: 'The engine for autonomous software production. Orchestrate coding agents through implementation, code review, testing, repair and delivery.'
 ---
 
 <p class="docs-kicker">Core documentation</p>
 
-# Build and review software through a graph
+# The engine for autonomous software production
 
 <p class="docs-lede">
-Zeroshot enforces your team's QA process on coding agents. You define it as a graph of
-implementation, review, test, repair, and delivery steps; its authored transitions decide which
-node runs next, so no agent skips a step.
+zeroshot is an open-source workflow engine for coding agents. Turn your team's development and
+QA process into a reusable multi-agent graph of implementation, independent code review, testing,
+repair and delivery. The engine enforces the graph's transitions and retry limits.
 </p>
 
 [Run a first task](getting-started/first-run.md){ .md-button .md-button--primary }

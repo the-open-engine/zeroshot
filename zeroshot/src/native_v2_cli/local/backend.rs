@@ -1,5 +1,22 @@
 use super::*;
 
+fn validate_checkpoint_policy(
+    enabled: bool,
+    from: Option<&openengine_cluster_protocol::RunResumeFrom>,
+) -> Result<(), NativeV2CliError> {
+    if !enabled
+        && matches!(
+            from,
+            Some(openengine_cluster_protocol::RunResumeFrom::Checkpoint { .. })
+        )
+    {
+        return Err(local_message(
+            "workspace checkpoint restore is unavailable because workspaceCheckpoints is false",
+        ));
+    }
+    Ok(())
+}
+
 impl LocalCliBackend {
     async fn resume_local(
         &self,
@@ -36,11 +53,16 @@ impl LocalCliBackend {
     fn checkpoint_selection(
         &self,
         params: &openengine_cluster_protocol::RunResumeParams,
+        enabled: bool,
     ) -> Result<Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>, NativeV2CliError>
     {
         use crate::native_v2_supervisor::checkpoints::{
             CheckpointRestore, CheckpointRestoreSelection, latest_available, restore_selection,
         };
+        validate_checkpoint_policy(enabled, params.from.as_ref())?;
+        if !enabled {
+            return Ok(None);
+        }
         let directory = self.paths(&params.run_id)?.storage().join("checkpoints");
         let selection = restore_selection(params.from.as_ref());
         if matches!(&selection, CheckpointRestoreSelection::Latest)
@@ -59,8 +81,9 @@ impl LocalCliBackend {
         params: openengine_cluster_protocol::RunResumeParams,
         mut recovery: LocalRecoveryDocument,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
+        let checkpoint =
+            self.checkpoint_selection(&params, recovery.submission.runtime.workspace_checkpoints)?;
         let prepared = self.prepare_successor(&params, &recovery).await?;
-        let checkpoint = self.checkpoint_selection(&params)?;
         recovery.successor_run_id = Some(params.successor_run_id.clone());
         self.write_recovery_document(&params.run_id, &recovery)?;
         if let Err(error) = self
@@ -203,6 +226,16 @@ impl NativeV2CliBackend for LocalCliBackend {
         target: Option<&str>,
         request: RunProfileListRequest,
     ) -> Result<RunProfileListResult, NativeV2CliError> {
+        self.profile_list_with_problems(target, request)
+            .await?
+            .into_protocol()
+    }
+
+    async fn profile_list_with_problems(
+        &self,
+        target: Option<&str>,
+        request: RunProfileListRequest,
+    ) -> Result<CliProfileListResult, NativeV2CliError> {
         require_local(target)?;
         LocalRunProfileStore::production()?.list(request)
     }
@@ -308,6 +341,18 @@ impl NativeV2CliBackend for LocalCliBackend {
     ) -> Result<CliRunForceResult, NativeV2CliError> {
         require_local(target)?;
         self.force_local(params).await.map(Into::into)
+    }
+
+    async fn validate_resume_selection(
+        &self,
+        command: &crate::native_v2_cli::RunResumeCommand,
+    ) -> Result<(), NativeV2CliError> {
+        require_local(command.run.target.as_deref())?;
+        let recovery = self.read_recovery_document(&command.run.run_id)?;
+        validate_checkpoint_policy(
+            recovery.submission.runtime.workspace_checkpoints,
+            command.from.as_ref(),
+        )
     }
 
     async fn run_checkpoints(

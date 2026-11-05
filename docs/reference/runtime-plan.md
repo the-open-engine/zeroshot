@@ -25,6 +25,18 @@ machine-readable contract.
 | `size`     | `small`, `medium`, or `large`                                                      |
 | `nodes`    | Object mapping each executable graph node name to a [node binding](#node-bindings) |
 
+Optional `workspaceCheckpoints` is a boolean that defaults to `true`. Local CLI runs may set it
+to `false` to skip workspace snapshot storage and the Restic dependency. Run history, structured
+outputs, usage, and logs remain durable. Restart uses the retained workspace and original graph
+input. Selected workspace-checkpoint resume is unavailable when snapshots were disabled.
+This controls file snapshots, not external side effects or node retry semantics.
+The current named targets reject opt-out explicitly.
+The field is accepted in exact and uniform runtime plans and is preserved in saved profiles.
+
+```json
+{"workspaceCheckpoints": false}
+```
+
 Optional `activeMemory` controls repository and graph recall/collection independently, and
 `globalAgents.postmortem` configures the built-in after-run specialists. Both default to enabled
 on local CLI runs and direct targets. The same sections are accepted by uniform runtime files.
@@ -87,8 +99,36 @@ rather than a bypass argument.
 
 ## Node bindings
 
-`kind` selects an agent, decision, Git delivery, or comment delivery binding. Fields belonging to another
+`kind` selects an agent, script, decision, Git delivery, or comment delivery binding. Fields belonging to another
 kind are rejected.
+
+### `script`
+
+A script binding executes a caller-owned program on an existing `step`, using the step's typed
+input and output. The step must omit `instructions`. This initial implementation is local only.
+Named targets and contained placements reject script bindings.
+
+```json
+{"kind":"script", "command":["python3", "retrieve.py"], "connections":{}}
+```
+
+`command` is an executable followed by literal arguments. Zeroshot does not invoke a shell.
+There must be 1 to 128 entries, each at most 8,192 bytes, with no NUL characters and at most
+65,536 bytes in total. The executable must be nonblank. Paths resolve from the run workspace.
+Scripts inherit a small process environment for executable lookup, the user's home directory,
+temporary files and locale. Public run variables and explicitly declared connection fields are
+added through the existing connection resolver. Other ambient credentials are not inherited.
+
+The program receives one JSON value on stdin, followed by EOF, and must exit zero with exactly
+one JSON value on stdout. Zeroshot validates that value against the step's output schema.
+Process input and output are each bounded at 8 MiB. A result must also fit the ledger's
+1 MiB serialized completion event, including execution metadata. Complete stderr is retained
+as bounded diagnostics with resolved connection values redacted. Truncated stderr is omitted because its cut boundary
+may split a credential. A nonzero exit becomes `crash`, and invalid or oversized
+JSON becomes `malformed`. The ordinary graph error and retry rules apply. Cancellation and the
+step's optional `timeoutMs` terminate the process tree through the shared process runner.
+Script steps record zero native model tokens. Services started separately by the application
+may keep indexes or models warm across script invocations. Service lifecycle is application owned.
 
 ### `agent`
 

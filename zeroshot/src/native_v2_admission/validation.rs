@@ -193,6 +193,14 @@ fn validate_binding_kinds(
                 detail: error.to_string(),
             }
         })?;
+        if matches!(binding, NodeRuntimeBinding::Script { .. })
+            && (declaration.kind != LeafKind::Step || declaration.instructions.is_some())
+        {
+            return Err(NativeV2AdmissionError::InvalidRuntimeBinding {
+                node: declaration.name.clone(),
+                detail: "script bindings require a step without agent instructions".to_owned(),
+            });
+        }
         if let NodeRuntimeBinding::Decision { .. } = binding {
             validate_decision_declaration(declaration, binding)?;
         }
@@ -316,6 +324,12 @@ pub(crate) fn sole_delivery_node(admitted: &AdmittedRun) -> Option<(NodeName, De
 pub(crate) fn writer_nodes(admitted: &AdmittedRun) -> BTreeSet<NodeName> {
     executable_declarations(&admitted.graph.root)
         .into_iter()
+        .filter(|declaration| {
+            !matches!(
+                admitted.runtime.nodes().get(&declaration.name),
+                Some(NodeRuntimeBinding::Decision { .. })
+            )
+        })
         .map(|declaration| declaration.name)
         .collect()
 }

@@ -81,6 +81,73 @@ const exampleFiles = () =>
 const allRuns = () => exampleFiles().flatMap(documentedRuns);
 const flagName = (word) => word.split('=')[0];
 
+function localReadmeTargets(markdown) {
+  const inline = [...markdown.matchAll(/\]\(\s*(?:<([^>]+)>|([^\s)]+))/g)].map(
+    (match) => match[1] ?? match[2]
+  );
+  const references = [...markdown.matchAll(/^ {0,3}\[[^\]\n]+\]:\s*(?:<([^>]+)>|(\S+))/gm)].map(
+    (match) => match[1] ?? match[2]
+  );
+  const html = [...markdown.matchAll(/<[a-z][^>]*>/gi)].flatMap(([tag]) =>
+    [...tag.matchAll(/\b(href|src|srcset)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)].flatMap(
+      ([, attribute, doubleQuoted, singleQuoted, unquoted]) => {
+        const value = doubleQuoted ?? singleQuoted ?? unquoted;
+        return attribute.toLowerCase() === 'srcset'
+          ? value.split(',').map((candidate) => candidate.trim().split(/\s+/)[0])
+          : [value];
+      }
+    )
+  );
+  return [...inline, ...references, ...html].filter(
+    (target) => target && !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(target)
+  );
+}
+
+it('finds local inline, reference-style, and HTML link/image targets', () => {
+  const markdown = [
+    '[inline](docs/inline.md#intro)',
+    '![image](docs/image.png)',
+    '[guide][guide]',
+    '[guide]: docs/reference.md "Guide"',
+    '[space]: <docs/with space.md>',
+    '<a href="docs/double.md">double</a>',
+    "<a href='docs/single.md'>single</a>",
+    '<a href=docs/unquoted.md>unquoted</a>',
+    '<img src="docs/photo.png" srcset="docs/small.png 1x, docs/large.png 2x">',
+    '[web](https://example.com)',
+    '[section](#intro)',
+    '<a href="mailto:dev@example.com">email</a>',
+  ].join('\n');
+  assert.deepEqual(localReadmeTargets(markdown), [
+    'docs/inline.md#intro',
+    'docs/image.png',
+    'docs/reference.md',
+    'docs/with space.md',
+    'docs/double.md',
+    'docs/single.md',
+    'docs/unquoted.md',
+    'docs/photo.png',
+    'docs/small.png',
+    'docs/large.png',
+  ]);
+});
+
+it('README links and images point to existing local files', () => {
+  const local = localReadmeTargets(read('README.md'));
+  assert.ok(local.length > 0, 'README must link its local documentation');
+  for (const target of local) {
+    const filename = decodeURIComponent(target.split(/[?#]/)[0]);
+    assert.ok(
+      fs.existsSync(path.resolve(root, filename)),
+      `README references missing file: ${target}`
+    );
+  }
+});
+
+it('README links to the canonical self-hosting guide', () => {
+  assert.ok(localReadmeTargets(read('README.md')).includes('docker/zeroshot-target/README.md'));
+});
+
 // JSON examples in fenced blocks titled `name` or `name for ...`.
 function titledJson(file, name) {
   const pattern = /```json title="([^"]+)"\n([\s\S]*?)\n\s*```/g;
@@ -89,11 +156,9 @@ function titledJson(file, name) {
     .map(([, title, body]) => ({ title, value: JSON.parse(body) }));
 }
 
-// Agents and package registries show these instead of the product page, so each one leads with
-// what makes Zeroshot worth adopting: the team's own QA process, defined as a graph and enforced.
-// The shared standard is "Every surface that describes the product" in the company repo's
-// message skill (.claude/skills/message/references/product-messaging.md).
-const PITCH = "your team's QA process";
+// Package registries, HTTP-only agents and the CLI need an available product description.
+// Preserve the distinction between the customizable engine and one built-in graph without
+// freezing marketing copy to a particular slogan or phrase.
 const DEFAULT_GRAPH_LEAD = /^.{0,80}\bone agent implements\b/i;
 
 // The first prose paragraph after the title, joined onto one line.
@@ -113,7 +178,7 @@ function productDescriptions() {
     ['docs site description', read('mkdocs.yml').match(/^site_description: (.*)$/m)?.[1]],
     ['docs home lede', lede?.[1].replace(/\s+/g, ' ')],
     ['npm README', firstParagraph(read('npm/zeroshot/README.md'))],
-    ['PyPI README', read('sdks/python/README.md').match(/^Zeroshot enforces[\s\S]*?\.\s/m)?.[0]],
+    ['PyPI README', read('sdks/python/README.md').match(/^zeroshot is[\s\S]*?\.\s/m)?.[0]],
     [
       'zeroshot --help',
       read('docs/zeroshot-cli.md').match(/## `zeroshot`\n\n```text\n(.*)\n/)?.[1],
@@ -121,13 +186,9 @@ function productDescriptions() {
   ];
 }
 
-it('every product description sells the team’s own enforced QA process', () => {
+it('product descriptions are available and do not reduce the engine to one fixed graph', () => {
   for (const [surface, text] of productDescriptions()) {
     assert.ok(text, `${surface} was not found`);
-    assert.ok(
-      text.includes(PITCH) && /\bgraph\b/.test(text),
-      `${surface} must lead with ${PITCH}, defined as a graph; it reads: ${text}`
-    );
     assert.doesNotMatch(
       text,
       DEFAULT_GRAPH_LEAD,

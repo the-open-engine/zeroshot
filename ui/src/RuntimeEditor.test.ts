@@ -257,6 +257,30 @@ test('legacy schema choices apply only when the host catalog is absent', () =>
     });
   }));
 
+test('script commands from JSON render safely in the runtime form', () =>
+  withRuntimeEditor((RuntimeEditor) => {
+    const render = (command: unknown) =>
+      renderToStaticMarkup(
+        createElement(RuntimeEditor, {
+          document: {
+            graph: { root: { kind: 'step', name: 'retrieve' } },
+            runtime: {
+              harness: 'codex',
+              provider: 'openai',
+              size: 'small',
+              nodes: { retrieve: { kind: 'script', command } },
+            },
+          },
+          schema: {},
+          edit: () => assert.fail('render must preserve the draft'),
+        })
+      );
+    assert.match(render(['python3', 'retrieve.py']), /Script: python3 retrieve.py/);
+    for (const command of ['python3', null, [], ['python3', 42]]) {
+      assert.match(render(command), /Script: Invalid command/);
+    }
+  }));
+
 async function withRuntimeEditor(check: (RuntimeEditor: any) => void) {
   const server = await createServer({
     root: fileURLToPath(new URL('..', import.meta.url)),

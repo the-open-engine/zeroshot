@@ -211,6 +211,9 @@ async fn download_release_at(
 async fn download_skills(
     release: &VerifiedRelease<'_>,
 ) -> Result<Vec<skill::PreparedSkill>, NativeV2CliError> {
+    if std::env::var_os("ZEROSHOT_SKIP_SKILLS").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        return Ok(Vec::new());
+    }
     let mut skills = Vec::new();
     for (name, filename) in SKILL_ASSETS {
         skills.push(skill::prepare_named(

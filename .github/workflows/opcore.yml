@@ -20,26 +20,41 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
           node-version: 24
 
+      - name: Select CI lanes
+        id: paths
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: bash .github/select-ci-lanes.sh | tee -a "$GITHUB_OUTPUT"
+
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        if: steps.paths.outputs.readme_only != 'true'
         with:
           toolchain: 1.97.0
 
       - name: Install Opcore
+        if: steps.paths.outputs.readme_only != 'true'
         run: OPCORE_NO_HOOKS=1 npm install --global @the-open-engine-company/opcore@0.3.2
 
       - name: Fetch locked Rust dependencies
+        if: steps.paths.outputs.readme_only != 'true'
         run: cargo fetch --locked
 
       - name: Check all supported source
+        if: steps.paths.outputs.readme_only != 'true'
         run: opcore check --repo . --committed --comparison all --providers fast
 
       # Opcore 0.3.2 omits embedded Python assets from its Rust workspace snapshot.
       - name: Check native Rust with complete build inputs
+        if: steps.paths.outputs.readme_only != 'true'
         run: cargo check --locked --offline --workspace --all-targets
         env:
           RUSTFLAGS: -Dwarnings

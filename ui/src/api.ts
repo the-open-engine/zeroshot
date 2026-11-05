@@ -2,6 +2,8 @@ import type { WorkerOption } from './workers';
 import { validMachineCatalog, type MachineOption } from './machines';
 import type { Document, Template } from './domain';
 export type Summary = { id: string; name: string; isDefault: boolean };
+export type ProfileProblem = { name: string; isDefault: boolean; message: string };
+export type ProfileList = { profiles: Summary[]; problems?: ProfileProblem[] };
 export type Saved = { profile: Document & Summary; revision: string };
 export type ApiClient = <T>(
   path: string,
