@@ -207,6 +207,7 @@ fn probe(outage: Outage) -> (Arc<SyncProbe>, Arc<OutageAuthority>, Arc<TimedRefr
             delivery_run_id: openengine_cluster_protocol::RunId::new("outage-test"),
             adopt_existing_delivery: false,
             git_identity: None,
+            commit_identity: None,
             workspace: std::env::temp_dir(),
             git_program: PathBuf::from("unused-git"),
             target: request.target.clone(),

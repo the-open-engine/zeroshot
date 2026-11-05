@@ -1,0 +1,18 @@
+{#- Import translation macros for the given language and fallback language. -#}
+
+{% block logs scoped %}
+  {#- Logging block.
+
+  This block can be used to log debug messages, deprecation messages, warnings, etc.
+  -#}
+{% endblock logs %}
+
+{% set lang_pth = "languages/" ~ locale ~ ".html.jinja" %}
+{% if lang_pth is existing_template %}
+  {% import lang_pth as lang %}
+  {% import "languages/en.html.jinja" as fallback %}
+  {% macro t(key) %}{{ lang.t(key) or fallback.t(key) }}{% endmacro %}
+{% else %}
+  {% import "languages/en.html.jinja" as lang %}
+  {% macro t(key) %}{{ lang.t(key) }}{% endmacro %}
+{% endif %}

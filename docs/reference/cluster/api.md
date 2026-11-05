@@ -430,6 +430,7 @@ Omitting from or selecting restart starts the graph at its root on the latest re
 | <code>connectionResolver</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/TargetConnectionResolver&quot;},{&quot;type&quot;:&quot;null&quot;}],&quot;description&quot;:&quot;Run-scoped callback used to resolve fresh dynamic connection values.&quot;}</code> |
 | <code>githubToken</code> | No | <code>{&quot;description&quot;:&quot;Fresh GitHub credential for private source checkout or Git delivery.&quot;,&quot;type&quot;:[&quot;string&quot;,&quot;null&quot;]}</code> |
 | <code>gitCredentials</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/GitTransportCredentials&quot;},{&quot;type&quot;:&quot;null&quot;}],&quot;description&quot;:&quot;Fresh generic Git authority, excluded from immutable source and submission identity.&quot;}</code> |
+| <code>commitIdentity</code> | No | <code>{&quot;anyOf&quot;:[{&quot;$ref&quot;:&quot;#/$defs/CommitIdentity&quot;},{&quot;type&quot;:&quot;null&quot;}],&quot;description&quot;:&quot;Author and committer of every commit the successor&#39;s delivery creates. Omission keeps the\ntarget&#39;s default delivery identity.&quot;}</code> |
 
 #### Result
 

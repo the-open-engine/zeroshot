@@ -227,18 +227,21 @@ async fn ordinary_runtime_factory_binds_the_contributed_context_transport() {
             connection: None,
         }),
     };
-    let authority = delivery_authority(SourceDeliveryFactoryRequest {
-        source: &source,
-        workspace: root.path(),
-        git_program: &program,
-        gh_program: Path::new("/must-not-start-gh"),
-        home_directory: root.path(),
-        private_directory: root.path(),
-        git_identity: None,
-        local_environment: None,
-        required_capabilities: &[SourceCapability::PullRequest, SourceCapability::Checks],
-        operator_diagnostics: None,
-    })
+    let authority = delivery_authority(
+        SourceDeliveryFactoryRequest {
+            source: &source,
+            workspace: root.path(),
+            git_program: &program,
+            gh_program: Path::new("/must-not-start-gh"),
+            home_directory: root.path(),
+            private_directory: root.path(),
+            git_identity: None,
+            local_environment: None,
+            required_capabilities: &[SourceCapability::PullRequest, SourceCapability::Checks],
+            operator_diagnostics: None,
+        },
+        None,
+    )
     .assert_value();
     let target = DeliveryTarget::new(REPOSITORY, "main", source.revision.as_str()).assert_value();
     let observed = authority

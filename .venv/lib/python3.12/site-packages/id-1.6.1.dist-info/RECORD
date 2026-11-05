@@ -1,0 +1,15 @@
+id-1.6.1.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+id-1.6.1.dist-info/METADATA,sha256=XfhdhxMkh-9ew_bnSEWV3yPGsIi5frfv81RH1Wx8uiQ,5144
+id-1.6.1.dist-info/RECORD,,
+id-1.6.1.dist-info/WHEEL,sha256=G2gURzTEtmeR8nrdXUJfNiB3VYVxigPQ-bEQujpNiNs,82
+id-1.6.1.dist-info/entry_points.txt,sha256=_Li0ADdcFkwCRKDuaKrMdhLXsXqdJyvsU1een1JobbQ,32
+id-1.6.1.dist-info/licenses/LICENSE,sha256=z8d0m5b2O9McPEK1xHG_dWgUBT6EfBDz6wA0F7xSPTA,11358
+id/__init__.py,sha256=J9BRKS6T2qkSCib-bTZ6kFvi63prvKQ-wSP3CjbSJ6k,3490
+id/__main__.py,sha256=RuGt772LYr6JvDGpxKtVgXx7STz_SWuTcBP1BAV1Gcs,2514
+id/__pycache__/__init__.cpython-312.pyc,,
+id/__pycache__/__main__.cpython-312.pyc,,
+id/_internal/oidc/__init__.py,sha256=3XYUfXwiv8Cywc60nCMpNmzBXwzLB7_8_1zEeUlQE7k,585
+id/_internal/oidc/__pycache__/__init__.cpython-312.pyc,,
+id/_internal/oidc/__pycache__/ambient.cpython-312.pyc,,
+id/_internal/oidc/ambient.py,sha256=hPHw1d4M-SaH_rGLz2dLOe7qebhdNEDOEWqnyGiBFlI,12778
+id/py.typed,sha256=JNCbzqw3ESsNW_-F7sgo1bAMdL1Ee_dJLmJhQDCWYi4,275

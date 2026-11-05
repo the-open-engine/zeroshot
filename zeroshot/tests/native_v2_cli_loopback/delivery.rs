@@ -380,6 +380,7 @@ impl CapsuleAllocator for DeliveryAllocator {
                 delivery_run_id: run_id.clone(),
                 adopt_existing_delivery: false,
                 git_identity: None,
+                commit_identity: None,
                 workspace: self.fixture.workspace.clone(),
                 git_program: PathBuf::from("/usr/bin/git"),
                 target: DeliveryTarget::new(

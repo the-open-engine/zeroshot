@@ -1,0 +1,6 @@
+#!/var/lib/zeroshot/native-v2/runs/3aefe2a90496aeec2ba526c50fdc7250e24ab5100d2f53b7eeef31693dcccc0c/workspace/.venv/bin/python
+import sys
+from build.__main__ import entrypoint
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(entrypoint())

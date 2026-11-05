@@ -134,6 +134,7 @@ exec /usr/bin/git "$@"
     ) -> RetainedAllocationRequest<'a> {
         RetainedAllocationRequest {
             git_credentials: None,
+            commit_identity: None,
             selection,
             source_run_id,
             run_id,
@@ -714,6 +715,7 @@ async fn checkpoint_restore_survives_workspace_move_and_discard_removes_lineage_
         .allocator
         .allocate_from_retained(RetainedAllocationRequest {
             git_credentials: None,
+            commit_identity: None,
             selection: CheckpointRestoreSelection::Checkpoint {
                 checkpoint_id: checkpoint_id.clone(),
             },

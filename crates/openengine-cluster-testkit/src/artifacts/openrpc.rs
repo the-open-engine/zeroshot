@@ -451,7 +451,8 @@ fn run_resume_method() -> Value {
             {"name": "connections", "required": false, "schema": property_schema(&schema, "connections")},
             {"name": "connectionResolver", "required": false, "schema": property_schema(&schema, "connectionResolver")},
             {"name": "githubToken", "required": false, "schema": property_schema(&schema, "githubToken")},
-            {"name": "gitCredentials", "required": false, "schema": property_schema(&schema, "gitCredentials")}
+            {"name": "gitCredentials", "required": false, "schema": property_schema(&schema, "gitCredentials")},
+            {"name": "commitIdentity", "required": false, "schema": property_schema(&schema, "commitIdentity")}
         ],
         "result": {
             "name": "runResumeResult",

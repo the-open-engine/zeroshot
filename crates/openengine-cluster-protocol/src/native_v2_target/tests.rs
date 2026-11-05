@@ -201,6 +201,147 @@ fn target_request_debug_redacts_ephemeral_values() {
     assert!(debug.contains("OPENAI_API_KEY"));
 }
 
+const BOT_NAME: &str = "zeroshot-app[bot]";
+const BOT_EMAIL: &str = "326899010+zeroshot-app[bot]@users.noreply.github.com";
+
+fn fixture_request() -> TargetRunRequest {
+    serde_json::from_str(include_str!(
+        "../../tests/fixtures/native-v2-target-request.json"
+    ))
+    .assert_value()
+}
+
+#[test]
+fn absent_commit_identity_keeps_older_requests_and_their_bytes_unchanged() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/native-v2-target-request.json"
+    ))
+    .assert_value();
+    let older = fixture_request();
+    assert_eq!(older.commit_identity, None);
+    let encoded = serde_json::to_string(&older).assert_value();
+    assert!(!encoded.contains("commitIdentity"));
+    assert!(encoded.ends_with(r#""githubToken":"github-secret"}"#));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&encoded).assert_value(),
+        fixture
+    );
+
+    let mut identified = older.clone();
+    identified.commit_identity = Some(CommitIdentity::new(BOT_NAME, BOT_EMAIL).assert_value());
+    let mut decoded: TargetRunRequest =
+        serde_json::from_str(&serde_json::to_string(&identified).assert_value()).assert_value();
+    assert_eq!(decoded, identified);
+    decoded.commit_identity = None;
+    assert_eq!(serde_json::to_string(&decoded).assert_value(), encoded);
+}
+
+#[test]
+fn commit_identity_round_trips_as_an_exact_name_and_email() {
+    let mut request = serde_json::to_value(fixture_request()).assert_value();
+    request["commitIdentity"] = serde_json::json!({"name": BOT_NAME, "email": BOT_EMAIL});
+    let decoded = serde_json::from_value::<TargetRunRequest>(request.clone()).assert_value();
+    let identity = decoded.commit_identity.as_ref().assert_value();
+    assert_eq!((identity.name(), identity.email()), (BOT_NAME, BOT_EMAIL));
+    assert_eq!(serde_json::to_value(&decoded).assert_value(), request);
+    assert!(format!("{decoded:?}").contains(BOT_EMAIL));
+    let boundary = "n".repeat(256);
+    assert_eq!(
+        CommitIdentity::new(boundary.as_str(), BOT_EMAIL)
+            .assert_value()
+            .name(),
+        boundary
+    );
+}
+
+fn commit_identity_schema() -> jsonschema::Validator {
+    let schema = serde_json::to_value(schemars::schema_for!(CommitIdentity)).assert_value();
+    jsonschema::validator_for(&schema).assert_value()
+}
+
+#[test]
+fn commit_identity_rejects_values_that_are_not_one_exact_git_identity() {
+    let schema = commit_identity_schema();
+    let oversized = "e".repeat(257);
+    let invalid = [
+        "",
+        "  ",
+        ",;",
+        " .\"'\\: ",
+        "\u{7}bell",
+        "line\nbreak",
+        "carriage\rreturn",
+        "tab\tseparated",
+        "\u{7f}delete",
+        "\u{85}next",
+        "open<",
+        "close>",
+        &oversized,
+    ];
+    for value in invalid {
+        assert!(
+            CommitIdentity::new(value, BOT_EMAIL).is_err(),
+            "name {value:?}"
+        );
+        assert!(
+            CommitIdentity::new(BOT_NAME, value).is_err(),
+            "email {value:?}"
+        );
+        for identity in [
+            serde_json::json!({"name": value, "email": BOT_EMAIL}),
+            serde_json::json!({"name": BOT_NAME, "email": value}),
+        ] {
+            assert!(!schema.is_valid(&identity), "schema {identity}");
+            let mut request = serde_json::to_value(fixture_request()).assert_value();
+            request["commitIdentity"] = identity;
+            assert!(
+                serde_json::from_value::<TargetRunRequest>(request).is_err(),
+                "{value:?}"
+            );
+        }
+    }
+    for identity in [
+        serde_json::json!({"name": BOT_NAME}),
+        serde_json::json!({"email": BOT_EMAIL}),
+        serde_json::json!({"name": BOT_NAME, "email": BOT_EMAIL, "login": "zeroshot-app"}),
+        serde_json::json!(format!("{BOT_NAME} <{BOT_EMAIL}>")),
+    ] {
+        assert!(!schema.is_valid(&identity), "schema {identity}");
+        let mut request = serde_json::to_value(fixture_request()).assert_value();
+        request["commitIdentity"] = identity.clone();
+        assert!(
+            serde_json::from_value::<TargetRunRequest>(request).is_err(),
+            "{identity}"
+        );
+    }
+    let boundary = "n".repeat(256);
+    for name in [BOT_NAME, "Jr.", "Zoë", "'quoted name'", boundary.as_str()] {
+        let identity = serde_json::json!({"name": name, "email": BOT_EMAIL});
+        assert!(schema.is_valid(&identity), "schema {identity}");
+        assert!(serde_json::from_value::<CommitIdentity>(identity).is_ok());
+    }
+}
+
+#[test]
+fn resume_params_carry_an_optional_commit_identity() {
+    let older = serde_json::json!({"runId": "run-1", "successorRunId": "run-2"});
+    let resume = serde_json::from_value::<crate::RunResumeParams>(older.clone()).assert_value();
+    assert_eq!(resume.commit_identity, None);
+    assert_eq!(serde_json::to_value(&resume).assert_value(), older);
+
+    let mut identified = older;
+    identified["commitIdentity"] = serde_json::json!({"name": BOT_NAME, "email": BOT_EMAIL});
+    let resume =
+        serde_json::from_value::<crate::RunResumeParams>(identified.clone()).assert_value();
+    assert_eq!(
+        resume.commit_identity,
+        Some(CommitIdentity::new(BOT_NAME, BOT_EMAIL).assert_value())
+    );
+    assert_eq!(serde_json::to_value(&resume).assert_value(), identified);
+    identified["commitIdentity"]["name"] = serde_json::json!("line\nbreak");
+    assert!(serde_json::from_value::<crate::RunResumeParams>(identified).is_err());
+}
+
 #[test]
 fn static_connection_debug_redacts_values_and_validates_shape() {
     let values = StaticConnectionValues::new(BTreeMap::from([(

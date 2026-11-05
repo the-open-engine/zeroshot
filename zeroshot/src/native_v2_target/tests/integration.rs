@@ -475,6 +475,7 @@ async fn direct_connector_constrains_resume_values_and_propagates_authorization(
         connection_resolver: None,
         github_token: None,
         git_credentials: None,
+        commit_identity: None,
         from: None,
     };
     assert!(
@@ -500,6 +501,7 @@ async fn direct_connector_constrains_resume_values_and_propagates_authorization(
         }),
         github_token: None,
         git_credentials: None,
+        commit_identity: None,
         from: None,
     };
     assert!(
@@ -582,6 +584,7 @@ async fn named_target_recovery_and_checkpoints_require_advertisement_before_dial
                     connection_resolver: None,
                     github_token: None,
                     git_credentials: None,
+                    commit_identity: None,
                     from: None,
                 },
             )

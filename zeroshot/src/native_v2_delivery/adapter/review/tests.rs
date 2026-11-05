@@ -58,6 +58,7 @@ mod queued_handoff {
                     delivery_run_id: openengine_cluster_protocol::RunId::new("cleanup"),
                     adopt_existing_delivery: false,
                     git_identity: None,
+                    commit_identity: None,
                     workspace: root.path().to_owned(),
                     git_program: "/usr/bin/git".into(),
                     target: DeliveryTarget::new("acme/project", "main", "a".repeat(40)).unwrap(),

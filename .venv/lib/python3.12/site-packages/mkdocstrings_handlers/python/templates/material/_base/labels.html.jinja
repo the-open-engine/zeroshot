@@ -1,0 +1,25 @@
+{#- Template for object labels.
+
+Labels are additional information that can be displayed alongside an object.
+Example labels include "property", "writable" or "cached" for properties,
+"classmethod" or "staticmethod" for methods, etc.
+
+Context:
+    labels (list): The list of labels to render.
+    config (dict): The configuration options.
+-#}
+
+{% if config.show_labels and labels %}
+  {% block logs scoped %}
+    {#- Logging block.
+
+    This block can be used to log debug messages, deprecation messages, warnings, etc.
+    -#}
+    {{ log.debug("Rendering labels") }}
+  {% endblock logs %}
+  <span class="doc doc-labels">
+    {% for label in labels|sort %}
+      <small class="doc doc-label doc-label-{{ label }}"><code>{{ label }}</code></small>
+    {% endfor %}
+  </span>
+{% endif %}

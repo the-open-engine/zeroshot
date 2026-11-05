@@ -228,6 +228,7 @@ where
                 connection_resolver: None,
                 github_token,
                 git_credentials: None,
+                commit_identity: None,
             },
         )
         .await?;

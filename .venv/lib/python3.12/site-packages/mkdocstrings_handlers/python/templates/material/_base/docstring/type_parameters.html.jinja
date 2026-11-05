@@ -1,0 +1,208 @@
+{#- Template for "Parameters" sections in docstrings.
+
+This template renders a list of documented type parameters in the format
+specified with the [`docstring_section_style`][] configuration option.
+
+Context:
+  section (griffe.DocstringSectionTypeParameters): The section to render.
+-#}
+
+{% block logs scoped %}
+  {#- Logging block.
+
+  This block can be used to log debug messages, deprecation messages, warnings, etc.
+  -#}
+  {{ log.debug("Rendering type parameters section") }}
+{% endblock logs %}
+
+{% import "language.html.jinja" as lang with context %}
+{#- Language module providing the `t` translation method. -#}
+
+{% if config.docstring_section_style == "table" %}
+  {% block table_style scoped %}
+    {#- Block for the `table` section style. -#}
+    <p>
+      <span class="doc-section-title">
+        {{ section.title or lang.t(("Class " if obj.is_class else "Init " if obj.is_init_method else "") ~  "Type Parameters:") }}
+      </span>
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>{{ lang.t("Name") }}</th>
+          <th>{{ lang.t("Bound or Constraints") }}</th>
+          <th>{{ lang.t("Description") }}</th>
+          <th>{{ lang.t("Default") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for type_parameter in section.value %}
+          <tr class="doc-section-item">
+            <td>
+              {% if config.type_parameter_headings %}
+                {% filter heading(
+                    heading_level + 1,
+                    role="typeparam",
+                    id=obj.path ~ "[" ~ type_parameter.name ~ "]",
+                    class="doc doc-heading doc-heading-type_parameter",
+                    toc_label=('<code class="doc-symbol doc-symbol-toc doc-symbol-type_parameter"></code>&nbsp;'|safe if config.show_symbol_type_toc else '') + type_parameter.name,
+                  ) %}
+                  <code>{{ type_parameter.name }}</code>
+                {% endfilter %}
+              {% else %}
+                <code>{{ type_parameter.name }}</code>
+              {% endif %}
+            </td>
+            <td>
+              {% if type_parameter.annotation %}
+                {% with expression = type_parameter.annotation %}
+                  <code>{% include "expression.html.jinja" with context %}</code>
+                {% endwith %}
+              {% endif %}
+            </td>
+            <td>
+              <div class="doc-md-description">
+                {{ type_parameter.description|convert_markdown(heading_level, html_id, autoref_hook=autoref_hook) }}
+              </div>
+            </td>
+            <td>
+              {% if type_parameter.default %}
+                {% with expression = type_parameter.default %}
+                  <code>{% include "expression.html.jinja" with context %}</code>
+                {% endwith %}
+              {% else %}
+                <em>{{ lang.t("required") }}</em>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endblock table_style %}
+{% elif config.docstring_section_style == "list" %}
+  {% block list_style scoped %}
+    {#- Block for the `list` section style. -#}
+    <p>
+      <span class="doc-section-title">
+        {{ section.title or lang.t(("Class " if obj.is_class else "Init " if obj.is_init_method else "") ~  "Type Parameters:") }}
+      </span>
+    </p>
+    <ul>
+      {% for type_parameter in section.value %}
+        <li class="doc-section-item field-body">
+          {% if config.type_parameter_headings %}
+            {% filter heading(
+                heading_level + 1,
+                role="typeparam",
+                id=obj.path ~ "[" ~ type_parameter.name ~ "]",
+                class="doc doc-heading doc-heading-type_parameter",
+                toc_label=('<code class="doc-symbol doc-symbol-toc doc-symbol-type_parameter"></code>&nbsp;'|safe if config.show_symbol_type_toc else '') + type_parameter.name,
+              ) %}
+              <b><code>{{ type_parameter.name }}</code></b>
+            {% endfilter %}
+          {% else %}
+            <b><code>{{ type_parameter.name }}</code></b>
+          {% endif %}
+          {%- if type_parameter.bound or type_parameter.constraints or type_parameter.default -%}
+            (
+          {%- endif -%}
+          {%- if type_parameter.bound -%}
+            {%- with expression = type_parameter.bound -%}
+              <code>{% include "expression.html.jinja" with context %}</code>
+            {%- endwith -%}
+            {%- if type_parameter.default %}, {% endif -%}
+          {%- elif type_parameter.constraints -%}
+            {%- for expression in type_parameter.constraints -%}
+              <code>{% include "expression.html.jinja" with context %}</code>
+              {%- if not loop.last %}, {% endif -%}
+            {%- endfor -%}
+            {%- if type_parameter.default %}, {% endif -%}
+          {%- endif -%}
+          {%- if type_parameter.default -%}
+            {{ lang.t("default:") }}
+            {% with expression = type_parameter.default %}
+              <code>{% include "expression.html.jinja" with context %}</code>
+            {%- endwith -%}
+          {%- endif -%}
+          {%- if type_parameter.constraints or type_parameter.default -%}
+            )
+          {% endif -%}
+          –
+          <div class="doc-md-description">
+            {{ type_parameter.description|convert_markdown(heading_level, html_id, autoref_hook=autoref_hook) }}
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endblock list_style %}
+{% elif config.docstring_section_style == "spacy" %}
+  {% block spacy_style scoped %}
+    {#- Block for the `spacy` section style. -#}
+    <table>
+      <thead>
+        <tr>
+          <th>
+            <span class="doc-section-title">
+              {{ (section.title or lang.t(("CLASS " if obj.is_class else "INIT " if obj.is_init_method else "") ~  "TYPE PARAMETER")).rstrip(":").upper() }}
+            </span>
+          </th>
+          <th><span>{{ lang.t("DESCRIPTION") }}</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for type_parameter in section.value %}
+          <tr class="doc-section-item">
+            <td>
+              {% if config.type_parameter_headings %}
+                {% filter heading(
+                    heading_level + 1,
+                    role="typeparam",
+                    id=obj.path ~ "[" ~ type_parameter.name ~ "]",
+                    class="doc doc-heading doc-heading-type_parameter",
+                    toc_label=('<code class="doc-symbol doc-symbol-toc doc-symbol-type_parameter"></code>&nbsp;'|safe if config.show_symbol_type_toc else '') + type_parameter.name,
+                  ) %}
+                  <code>{{ type_parameter.name }}</code>
+                {% endfilter %}
+              {% else %}
+                <code>{{ type_parameter.name }}</code>
+              {% endif %}
+            </td>
+            <td class="doc-type_param-details">
+              <div class="doc-md-description">
+                {{ type_parameter.description|convert_markdown(heading_level, html_id, autoref_hook=autoref_hook) }}
+              </div>
+              <p>
+                {% if type_parameter.constraints %}
+                  <span class="doc-type_param-constraints">
+                    <b>{{ lang.t("CONSTRAINTS:") }}</b>
+                    {% for constraint in type_parameter.constraints -%}
+                      {%- with expression = constraint -%}
+                        <code>{% include "expression.html.jinja" with context %}</code>
+                      {%- endwith -%}
+                      {%- if not loop.last %}, {% endif -%}
+                    {% endfor %}
+                  </span>
+                {% elif type_parameter.bound %}
+                  <span class="doc-type_param-bound">
+                    <b>{{ lang.t("BOUND:") }}</b>
+                    {% with expression = type_parameter.bound %}
+                      <code>{% include "expression.html.jinja" with context %}</code>
+                    {% endwith %}
+                  </span>
+                {% endif %}
+                {% if type_parameter.default %}
+                  <span class="doc-type_param-default">
+                    <b>{{ lang.t("DEFAULT:") }}</b>
+                    {% with expression = type_parameter.default %}
+                      <code>{% include "expression.html.jinja" with context %}</code>
+                    {% endwith %}
+                  </span>
+                {% endif %}
+              </p>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endblock spacy_style %}
+{% endif %}

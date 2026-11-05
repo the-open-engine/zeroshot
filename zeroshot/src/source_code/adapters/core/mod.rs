@@ -308,8 +308,10 @@ pub(crate) fn delivery_uses_github_cli(
         .is_ok_and(|selected| selected.id().as_str() == GITHUB_PROVIDER_ID)
 }
 
+/// Every selected adapter shares one transport whose workspace commits use `commit_identity`.
 pub(crate) fn delivery_authority(
     mut request: SourceDeliveryFactoryRequest<'_>,
+    commit_identity: Option<&openengine_cluster_protocol::CommitIdentity>,
 ) -> Result<Arc<dyn SourceDeliveryAuthority>, SourceDeliveryFactoryError> {
     validate_delivery_source(request.source, request.required_capabilities)?;
     let selected = provider_ref(request.source, request.required_capabilities)?;
@@ -325,7 +327,8 @@ pub(crate) fn delivery_authority(
             deadline: std::time::Duration::from_secs(10 * 60),
         },
         remote,
-    );
+    )
+    .with_commit_identity(commit_identity.cloned());
     if let Some((run_id, store)) = &request.operator_diagnostics {
         transport = transport.with_operator_diagnostics(run_id.clone(), store.clone());
     }

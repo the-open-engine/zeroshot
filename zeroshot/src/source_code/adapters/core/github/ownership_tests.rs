@@ -498,6 +498,7 @@ async fn start_delivery(fixture: &OwnershipFixture) -> crate::native_v2_runner::
             delivery_run_id: RunId::new("ownership-handoff"),
             adopt_existing_delivery: false,
             git_identity: fixture.authority.config.git_identity,
+            commit_identity: None,
             workspace: fixture.workspace.clone(),
             git_program: fixture.authority.config.git_program.clone(),
             target: fixture.delivery_target(),

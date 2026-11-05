@@ -117,3 +117,22 @@ async fn delivery_commit_identity_overrides_repository_author_and_committer() {
         "Zeroshot <delivery@zeroshot.invalid>|Zeroshot <delivery@zeroshot.invalid>"
     );
 }
+
+#[tokio::test]
+async fn host_commit_identity_authors_and_commits_the_prepared_revision() {
+    use crate::native_v2_candidate::test_support::{BOT_AUTHOR, bot_commit_identity, commit_authorship};
+    let repository = TestGitRepository::delivery();
+    crate::native_v2_candidate::test_support::git(
+        &repository.workspace,
+        &["config", "--local", "user.name", "Caller"],
+    );
+    let revision = SystemGit::new("git".into())
+        .with_commit_identity(Some(bot_commit_identity()))
+        .prepare_revision(&repository.workspace, &repository.base, "bot identity")
+        .await
+        .assert_value();
+    assert_eq!(
+        commit_authorship(&repository.workspace, &revision),
+        format!("{BOT_AUTHOR}|{BOT_AUTHOR}")
+    );
+}

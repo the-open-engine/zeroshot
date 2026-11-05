@@ -1,0 +1,11 @@
+{% extends "_base/class.html.jinja" %}
+
+{% block logs scoped %}
+  {{ super() }}
+  {# TODO: Switch to a warning after some time. #}
+  {{ log.info(
+        "DeprecationWarning: Extending '_base/class.html' is deprecated, extend '_base/class.html.jinja' instead. " ~
+        "After some time, this message will be logged as a warning, causing strict builds to fail.",
+        once=True,
+      ) }}
+{% endblock logs %}

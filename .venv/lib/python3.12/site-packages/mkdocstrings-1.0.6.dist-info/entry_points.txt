@@ -1,0 +1,7 @@
+[console_scripts]
+
+[gui_scripts]
+
+[mkdocs.plugins]
+mkdocstrings = mkdocstrings:MkdocstringsPlugin
+

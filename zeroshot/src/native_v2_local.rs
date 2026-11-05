@@ -26,7 +26,7 @@ use crate::native_v2_delivery::{NativeV2DeliveryConfig, TrustedGitHubTokenFile};
 use crate::native_v2_delivery::validation::TrustedDeliveryValidator;
 mod token_file;
 pub(crate) use token_file::{take_github_authority, take_delivery_validator};
-use crate::source_code_provider::adapters::core::{SourceDeliveryFactoryRequest, delivery_authority};
+use crate::source_code_provider::adapters::core::SourceDeliveryFactoryRequest;
 use crate::native_v2_runner::{NativeNodeRunner, NodeRunner};
 use crate::native_v2_supervisor::{RunEnvironment, RunEnvironmentError};
 
@@ -382,32 +382,34 @@ fn build_local_candidate_config(
             native_environment,
             workspace,
         )?;
-        let authority = delivery_authority(SourceDeliveryFactoryRequest {
-            source,
-            workspace,
-            git_program: &programs.git,
-            gh_program: &programs.gh,
-            home_directory: &runtime_home,
-            private_directory: &runtime_home,
+        let config = NativeV2DeliveryConfig {
+            delivery_run_id: delivery_run_id.clone(),
+            adopt_existing_delivery,
             git_identity: None,
-            local_environment: Some(native_environment.clone()),
-            required_capabilities: &required_capabilities,
-            operator_diagnostics: None,
-        })
-        .map_err(|_| LocalCompositionError::ResolvedSource)?;
-        Some(NativeV2CandidateDelivery {
-            config: NativeV2DeliveryConfig {
-                delivery_run_id: delivery_run_id.clone(),
-                adopt_existing_delivery,
+            commit_identity: None,
+            workspace: workspace.to_owned(),
+            git_program: programs.git.clone(),
+            target,
+            poll: Default::default(),
+        };
+        let delivery = NativeV2CandidateDelivery::new(
+            config,
+            SourceDeliveryFactoryRequest {
+                source,
+                workspace,
+                git_program: &programs.git,
+                gh_program: &programs.gh,
+                home_directory: &runtime_home,
+                private_directory: &runtime_home,
                 git_identity: None,
-                workspace: workspace.to_owned(),
-                git_program: programs.git,
-                target,
-                poll: Default::default(),
+                local_environment: Some(native_environment.clone()),
+                required_capabilities: &required_capabilities,
+                operator_diagnostics: None,
             },
-            authority,
             git_credentials,
-        })
+        )
+        .map_err(|_| LocalCompositionError::ResolvedSource)?;
+        Some(delivery)
     };
     let comment_delivery = local_comment_delivery(LocalCommentRequest {
         admitted,

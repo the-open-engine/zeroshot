@@ -1,0 +1,109 @@
+from __future__ import annotations
+
+import os
+import re
+import shlex
+import sys
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Final
+
+from virtualenv.util.path import write_file
+
+from .activator import Activator
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+    from pathlib import Path
+
+    from virtualenv.create.creator import Creator
+
+if sys.version_info >= (3, 10):
+    from importlib.resources import files
+
+    def read_binary(module_name: str, filename: str) -> bytes:
+        return (files(module_name) / filename).read_bytes()
+
+else:
+    from importlib.resources import read_binary
+
+
+class ViaTemplateActivator(Activator, ABC):
+    @abstractmethod
+    def templates(self) -> Iterator[str]:
+        raise NotImplementedError
+
+    @staticmethod
+    def quote(string: str) -> str:
+        """Quote strings in the activation script.
+
+        :param string: the string to quote
+
+        :returns: quoted string that works in the activation script
+
+        """
+        return shlex.quote(string)
+
+    def generate(self, creator: Creator) -> list[Path]:
+        dest_folder = creator.bin_dir
+        replacements = self.replacements(creator, dest_folder)
+        generated = self._generate(replacements, self.templates(), dest_folder, creator)
+        if self.flag_prompt is not None:
+            creator.pyenv_cfg["prompt"] = self.flag_prompt
+        return generated
+
+    def replacements(self, creator: Creator, dest_folder: Path) -> dict[str, str]:  # ruff:ignore[unused-method-argument]
+        return {
+            "__VIRTUAL_PROMPT__": "" if self.flag_prompt is None else self.flag_prompt,
+            "__VIRTUAL_ENV__": str(creator.dest),
+            "__VIRTUAL_NAME__": creator.env_name,
+            "__BIN_NAME__": str(creator.bin_dir.relative_to(creator.dest)),
+            "__PATH_SEP__": os.pathsep,
+            "__TCL_LIBRARY__": getattr(creator.interpreter, "tcl_lib", None) or "",
+            "__TK_LIBRARY__": getattr(creator.interpreter, "tk_lib", None) or "",
+        }
+
+    def _generate(
+        self, replacements: dict[str, str], templates: Iterable[str], to_folder: Path, creator: Creator
+    ) -> list[Path]:
+        generated: Final[list[Path]] = []
+        for template in templates:
+            text: Final = self.instantiate_template(replacements, template, creator)
+            dest: Final = to_folder / self.as_name(template)
+            # PowerShell assumes Windows 1252 when the UTF-8 BOM is absent.
+            encoding: Final = "utf-8-sig" if str(template).endswith(".ps1") else "utf-8"
+            write_file(dest, text.encode(encoding))
+            generated.append(dest)
+        return generated
+
+    def as_name(self, template: str) -> str:
+        return template
+
+    def instantiate_template(self, replacements: dict[str, str], template: str, creator: Creator) -> str:
+        # read content as binary to avoid platform specific line normalization (\n -> \r\n)
+        binary = read_binary(self.__module__, template)
+        text = binary.decode("utf-8", errors="strict")
+        substitutions = self.substitutions(replacements, creator)
+        # one pass over the template, so a placeholder name inside an already quoted value (a path component named
+        # __VIRTUAL_NAME__) stays data instead of being rewritten by a later key from inside the finished literal
+        pattern = re.compile("|".join(re.escape(key) for key in sorted(substitutions, key=len, reverse=True)))
+        return pattern.sub(lambda match: substitutions[match.group()], text)
+
+    def substitutions(self, replacements: dict[str, str], creator: Creator) -> dict[str, str]:
+        """Map each placeholder to the final text that replaces it in the template.
+
+        :param replacements: the raw placeholder values
+        :param creator: the creator of the environment
+
+        :returns: the placeholder to substituted text mapping
+
+        """
+        return {key: self.quote(self._repr_unicode(creator, value)) for key, value in replacements.items()}
+
+    @staticmethod
+    def _repr_unicode(creator: Creator, value: str) -> str:  # ruff:ignore[unused-static-method-argument]
+        return value  # by default, we just let it be unicode
+
+
+__all__ = [
+    "ViaTemplateActivator",
+]

@@ -119,6 +119,50 @@ async fn authenticated_target_fetch_leaves_exact_conflict_for_repair() {
 }
 
 #[tokio::test]
+async fn host_commit_identity_authors_conflict_repair_commits() {
+    use crate::native_v2_candidate::test_support::{BOT_AUTHOR, bot_commit_identity, commit_authorship};
+    let mut fixture = ConflictFixture::new("result.txt");
+    let transport = fixture
+        .authority
+        .git_transport(&fixture.repository.workspace, "acme/project")
+        .with_commit_identity(Some(bot_commit_identity()));
+    fixture.authority = fixture.authority.clone().with_git_transport(transport);
+    git(
+        &fixture.repository.workspace,
+        &["config", "--local", "user.name", "Codex"],
+    );
+
+    let outcome = fixture
+        .authority
+        .materialize_merge_conflict(
+            &fixture.request,
+            SourceDeliveryCredential::token("test-token"),
+        )
+        .await
+        .assert_value();
+    assert!(matches!(outcome, SourceConflictOutcome::Materialized(_)));
+    fs::write(
+        fixture.repository.workspace.join("result.txt"),
+        "resolved\n",
+    )
+    .assert_value();
+    git(&fixture.repository.workspace, &["add", "--all"]);
+    git(
+        &fixture.repository.workspace,
+        &["commit", "--no-verify", "--message", "repair conflict"],
+    );
+
+    assert_eq!(
+        commit_authorship(&fixture.repository.workspace, "HEAD"),
+        format!("{BOT_AUTHOR}|{BOT_AUTHOR}")
+    );
+    assert_eq!(
+        git_output(&fixture.repository.workspace, &["rev-parse", "HEAD^2"]),
+        fixture.target_revision
+    );
+}
+
+#[tokio::test]
 async fn conflict_handoff_pins_repair_commit_to_delivery_identity() {
     let fixture = ConflictFixture::new("result.txt");
     git(

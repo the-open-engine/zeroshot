@@ -482,6 +482,29 @@
       ],
       "type": "object"
     },
+    "CommitIdentity": {
+      "additionalProperties": false,
+      "description": "A host-selected Git author and committer for commits created by delivery. Each value has at\nmost 256 UTF-8 bytes, no control characters, `<` or `>`, and at least one character that Git\nkeeps after trimming whitespace and `.,:;\"'\\`.",
+      "properties": {
+        "email": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F<>]*[^\\s\\u0000-\\u001F\\u007F-\\u009F<>.,:;\"'\\\\][^\\u0000-\\u001F\\u007F-\\u009F<>]*$",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F<>]*[^\\s\\u0000-\\u001F\\u007F-\\u009F<>.,:;\"'\\\\][^\\u0000-\\u001F\\u007F-\\u009F<>]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "email"
+      ],
+      "type": "object"
+    },
     "ControlSelector": {
       "additionalProperties": false,
       "properties": {
@@ -4764,6 +4787,17 @@
     "RunResumeParams": {
       "additionalProperties": false,
       "properties": {
+        "commitIdentity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommitIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Author and committer of every commit the successor's delivery creates. Omission keeps the\ntarget's default delivery identity."
+        },
         "connectionResolver": {
           "anyOf": [
             {

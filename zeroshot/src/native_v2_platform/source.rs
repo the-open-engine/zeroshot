@@ -41,6 +41,7 @@ pub(super) async fn source_credentials(
     Ok(RunSourceCredentials {
         github_token,
         git_credentials,
+        commit_identity: secrets.source_credentials.commit_identity.clone(),
     })
 }
 

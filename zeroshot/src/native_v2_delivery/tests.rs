@@ -161,6 +161,47 @@ async fn push_worker_publishes_only_the_exact_managed_branch() {
 }
 
 #[tokio::test]
+async fn configured_commit_identity_authors_the_delivered_commit() {
+    use crate::native_v2_candidate::test_support::{BOT_AUTHOR, bot_commit_identity, commit_authorship};
+    let repo = TempRepo::delivery();
+    let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::NoCi));
+    let adapter = Arc::new(NativeV2DeliveryAdapter::new(
+        NativeV2DeliveryConfig {
+            delivery_run_id: RunId::new("delivery-bot-identity"),
+            adopt_existing_delivery: false,
+            git_identity: None,
+            commit_identity: Some(bot_commit_identity()),
+            workspace: repo.workspace.clone(),
+            git_program: "/usr/bin/git".into(),
+            target: target(&repo),
+            poll: DeliveryPollPolicy::new(1, Duration::ZERO).assert_value(),
+        },
+        authority,
+    ));
+    let outcome = run_with_adapter(
+        DeliveryRunRequest {
+            repo: &repo,
+            attempts: 1,
+            mode: DeliveryMode::Push,
+            run_id: "delivery-bot-identity",
+            refresh: None,
+        },
+        adapter,
+    )
+    .await
+    .outcome;
+    let output = assert_delivery_signal(&outcome, DELIVERY_PUSHED_LABEL);
+    let head = output
+        .pointer("/headRevision")
+        .and_then(Value::as_str)
+        .assert_value();
+    assert_eq!(
+        commit_authorship(&repo.workspace, head),
+        format!("{BOT_AUTHOR}|{BOT_AUTHOR}")
+    );
+}
+
+#[tokio::test]
 async fn current_pr_worker_waits_for_technical_readiness_without_merging() {
     let authority = successful_delivery(DeliveryMode::PullRequestV2, DELIVERY_READY_LABEL, 1).await;
     assert_eq!(authority.review_requests().len(), 1);
@@ -930,6 +971,7 @@ async fn run_delivery_execution_with_identity_and_adoption(
         delivery_run_id: RunId::new(delivery_run_id),
         adopt_existing_delivery,
         git_identity: None,
+        commit_identity: None,
         workspace: request.repo.workspace.clone(),
         git_program: PathBuf::from("/usr/bin/git"),
         target: target(request.repo),
@@ -972,6 +1014,7 @@ fn retained_adapter(
             delivery_run_id: RunId::new(lineage.run_id),
             adopt_existing_delivery: lineage.adopt_existing,
             git_identity: None,
+            commit_identity: None,
             workspace: repo.workspace.clone(),
             git_program: "/usr/bin/git".into(),
             target: target(repo),

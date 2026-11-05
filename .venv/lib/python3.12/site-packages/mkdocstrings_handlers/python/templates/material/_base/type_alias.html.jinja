@@ -1,0 +1,117 @@
+{#- Template for Python type aliases.
+
+This template renders a Python type alias.
+
+Context:
+  type_alias (griffe.TypeAlias): The type alias to render.
+  root (bool): Whether this is the root object, injected with `:::` in a Markdown page.
+  heading_level (int): The HTML heading level to use.
+  config (dict): The configuration options.
+-#}
+
+{% block logs scoped %}
+  {#- Logging block.
+
+  This block can be used to log debug messages, deprecation messages, warnings, etc.
+  -#}
+  {{ log.debug("Rendering " + type_alias.path) }}
+{% endblock logs %}
+
+<div class="doc doc-object doc-type_alias">
+  {% with obj = type_alias, html_id = type_alias.path %}
+
+    {% if root %}
+      {% set show_full_path = config.show_root_full_path %}
+      {% set root_members = True %}
+    {% elif root_members %}
+      {% set show_full_path = config.show_root_members_full_path or config.show_object_full_path %}
+      {% set root_members = False %}
+    {% else %}
+      {% set show_full_path = config.show_object_full_path %}
+    {% endif %}
+
+    {% set type_alias_name = type_alias.path if show_full_path else type_alias.name %}
+
+    {% if not root or config.show_root_heading %}
+      {% filter heading(
+          heading_level,
+          role="typealias",
+          id=html_id,
+          class="doc doc-heading",
+          toc_label=('<code class="doc-symbol doc-symbol-toc doc-symbol-type_alias"></code>&nbsp;'|safe if config.show_symbol_type_toc else '') + type_alias.name,
+        ) %}
+
+        {% block heading scoped %}
+          {#- Heading block.
+
+          This block renders the heading for the type alias.
+          -#}
+          {% if config.show_symbol_type_heading %}<code class="doc-symbol doc-symbol-heading doc-symbol-type_alias"></code>{% endif %}
+          {% if config.separate_signature %}
+            <span class="doc doc-object-name doc-type_alias-name">{{ type_alias_name }}</span>
+          {% else %}
+            {%+ filter highlight(language="python", inline=True) %}
+              {{ type_alias_name }}{% include "type_parameters.html.jinja" with context %} = {{ type_alias.value }}
+            {% endfilter %}
+          {% endif %}
+        {% endblock heading %}
+
+        {% block labels scoped %}
+          {#- Labels block.
+
+          This block renders the labels for the type alias.
+          -#}
+          {% with labels = type_alias.labels %}
+            {% include "labels.html.jinja" with context %}
+          {% endwith %}
+        {% endblock labels %}
+
+      {% endfilter %}
+
+      {% block signature scoped %}
+        {#- Signature block.
+
+        This block renders the signature for the type alias.
+        -#}
+        {% if config.separate_signature %}
+          {% filter format_type_alias(type_alias, config.line_length, crossrefs=config.signature_crossrefs) %}
+            {{ type_alias.name }}
+          {% endfilter %}
+        {% endif %}
+      {% endblock signature %}
+
+    {% else %}
+      {% if config.show_root_toc_entry %}
+        {% filter heading(heading_level,
+            role="typealias",
+            id=html_id,
+            toc_label=('<code class="doc-symbol doc-symbol-toc doc-symbol-type_alias"></code>&nbsp;'|safe if config.show_symbol_type_toc else '') + type_alias.name,
+            hidden=True,
+          ) %}
+        {% endfilter %}
+      {% endif %}
+      {% set heading_level = heading_level - 1 %}
+    {% endif %}
+
+    <div class="doc doc-contents {% if root %}first{% endif %}">
+      {% block contents scoped %}
+        {#- Contents block.
+
+        This block renders the contents of the type alias.
+        It contains other blocks that users can override.
+        Overriding the contents block allows to rearrange the order of the blocks.
+        -#}
+        {% block docstring scoped %}
+          {#- Docstring block.
+
+          This block renders the docstring for the type alias.
+          -#}
+          {% with docstring_sections = type_alias.docstring.parsed %}
+            {% include "docstring.html.jinja" with context %}
+          {% endwith %}
+        {% endblock docstring %}
+      {% endblock contents %}
+    </div>
+
+  {% endwith %}
+</div>

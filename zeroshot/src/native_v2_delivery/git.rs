@@ -30,6 +30,7 @@ pub(crate) struct SystemGit {
     program: PathBuf,
     identity: Option<crate::execution::process::HostedProcessIdentity>,
     local_environment: Option<std::collections::BTreeMap<String, String>>,
+    commit_identity: Option<openengine_cluster_protocol::CommitIdentity>,
 }
 
 impl SystemGit {
@@ -38,6 +39,7 @@ impl SystemGit {
             program,
             identity: None,
             local_environment: None,
+            commit_identity: None,
         }
     }
 
@@ -57,6 +59,14 @@ impl SystemGit {
         self
     }
 
+    pub(crate) fn with_commit_identity(
+        mut self,
+        identity: Option<openengine_cluster_protocol::CommitIdentity>,
+    ) -> Self {
+        self.commit_identity = identity;
+        self
+    }
+
     pub(crate) async fn prepare_revision(
         &self,
         workspace: &Path,
@@ -72,13 +82,14 @@ impl SystemGit {
         }
         self.require_success(workspace, &["add", "--all"]).await?;
         if self.commit_pending(workspace).await? {
+            let [name, email] = command::identity_configuration(self.commit_identity.as_ref());
             self.require_success(
                 workspace,
                 &[
                     "-c",
-                    "user.name=Zeroshot",
+                    &name,
                     "-c",
-                    "user.email=delivery@zeroshot.invalid",
+                    &email,
                     "commit",
                     "--no-verify",
                     "--message",
@@ -250,8 +261,11 @@ impl SystemGit {
         let mut command = command::git_command(
             &self.program,
             workspace,
-            self.identity,
-            self.local_environment.as_ref(),
+            command::GitCommandContext {
+                identity: self.identity,
+                local_environment: self.local_environment.as_ref(),
+                commit_identity: self.commit_identity.as_ref(),
+            },
         );
         command.args(arguments);
         command

@@ -1,0 +1,30 @@
+{#- Template for auto-summaries. -#}
+
+{% block logs scoped %}
+  {#- Logging block.
+
+  This block can be used to log debug messages, deprecation messages, warnings, etc.
+  -#}
+{% endblock logs %}
+
+{% with members_list = config.members if root_members else None %}
+  {% if config.summary.modules %}
+    {% include "summary/modules.html.jinja" with context %}
+  {% endif %}
+
+  {% if config.summary.type_aliases %}
+    {% include "summary/type_aliases.html.jinja" with context %}
+  {% endif %}
+
+  {% if config.summary.classes %}
+    {% include "summary/classes.html.jinja" with context %}
+  {% endif %}
+
+  {% if config.summary.functions %}
+    {% include "summary/functions.html.jinja" with context %}
+  {% endif %}
+
+  {% if config.summary.attributes %}
+    {% include "summary/attributes.html.jinja" with context %}
+  {% endif %}
+{% endwith %}

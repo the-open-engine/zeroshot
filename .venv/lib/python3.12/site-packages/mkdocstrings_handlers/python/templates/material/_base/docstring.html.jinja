@@ -1,0 +1,59 @@
+{#- Template for docstrings.
+
+This template renders Python docstrings.
+Griffe parses docstrings into a list of sections, each with a `kind` and a `value`.
+This template can then iterate on these sections and render them according to the configuration.
+
+Context:
+  docstring_sections (list[griffe.DocstringSection]): The list of docstring sections.
+  config (dict): The configuration dictionary.
+  heading_level (int): The heading level to use for Markdown conversion.
+  html_id (str): The HTML ID to use for Markdown conversion.
+-#}
+
+{% if docstring_sections %}
+  {% block logs scoped %}
+    {#- Logging block.
+
+    This block can be used to log debug messages, deprecation messages, warnings, etc.
+    -#}
+    {{ log.debug("Rendering docstring") }}
+  {% endblock logs %}
+  {% with autoref_hook = AutorefsHook(obj, config) %}
+    {% for section in docstring_sections %}
+      {% if config.show_docstring_description and section.kind.value == "text" %}
+        {{ section.value|convert_markdown(heading_level, html_id, autoref_hook=autoref_hook) }}
+      {% elif config.show_docstring_attributes and section.kind.value == "attributes" %}
+        {% include "docstring/attributes.html.jinja" with context %}
+      {% elif config.show_docstring_functions and section.kind.value == "functions" %}
+        {% include "docstring/functions.html.jinja" with context %}
+      {% elif config.show_docstring_classes and section.kind.value == "classes" %}
+        {% include "docstring/classes.html.jinja" with context %}
+      {% elif config.show_docstring_type_aliases and section.kind.value == "type aliases" %}
+        {% include "docstring/type_aliases.html.jinja" with context %}
+      {% elif config.show_docstring_modules and section.kind.value == "modules" %}
+        {% include "docstring/modules.html.jinja" with context %}
+      {% elif config.show_docstring_type_parameters and section.kind.value == "type parameters" %}
+        {% include "docstring/type_parameters.html.jinja" with context %}
+      {% elif config.show_docstring_parameters and section.kind.value == "parameters" %}
+        {% include "docstring/parameters.html.jinja" with context %}
+      {% elif config.show_docstring_other_parameters and section.kind.value == "other parameters" %}
+        {% include "docstring/other_parameters.html.jinja" with context %}
+      {% elif config.show_docstring_raises and section.kind.value == "raises" %}
+        {% include "docstring/raises.html.jinja" with context %}
+      {% elif config.show_docstring_warns and section.kind.value == "warns" %}
+        {% include "docstring/warns.html.jinja" with context %}
+      {% elif config.show_docstring_yields and section.kind.value == "yields" %}
+        {% include "docstring/yields.html.jinja" with context %}
+      {% elif config.show_docstring_receives and section.kind.value == "receives" %}
+        {% include "docstring/receives.html.jinja" with context %}
+      {% elif config.show_docstring_returns and section.kind.value == "returns" %}
+        {% include "docstring/returns.html.jinja" with context %}
+      {% elif config.show_docstring_examples and section.kind.value == "examples" %}
+        {% include "docstring/examples.html.jinja" with context %}
+      {% elif config.show_docstring_description and section.kind.value == "admonition" %}
+        {% include "docstring/admonition.html.jinja" with context %}
+      {% endif %}
+    {% endfor %}
+  {% endwith %}
+{% endif %}

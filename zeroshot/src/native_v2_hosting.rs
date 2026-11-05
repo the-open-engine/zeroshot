@@ -237,6 +237,7 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
             connection_resolver,
             github_token,
             git_credentials,
+            commit_identity,
         } = request;
         prepare_contained_submission(&mut submission)?;
         let digest = submission_digest(&submission)
@@ -265,6 +266,7 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
                 crate::native_v2_platform::RunSourceCredentials {
                     github_token,
                     git_credentials,
+                    commit_identity,
                 },
             )
             .await

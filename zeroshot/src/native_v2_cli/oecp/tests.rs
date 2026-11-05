@@ -421,6 +421,7 @@ async fn wave7_cli_contract_oecp_default_optional_authority_is_refused() {
     let successor_run_id = RunId::new("run-successor");
     let resume = openengine_cluster_protocol::RunResumeParams {
         git_credentials: None,
+        commit_identity: None,
 
         run_id: run_id.clone(),
         successor_run_id,
@@ -558,6 +559,7 @@ async fn oecp_optional_authority_defaults_are_explicit_and_fail_closed() {
                     connection_resolver: None,
                     github_token: None,
                     git_credentials: None,
+                    commit_identity: None,
                 },
             )
             .await

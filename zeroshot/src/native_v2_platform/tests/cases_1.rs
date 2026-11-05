@@ -140,6 +140,7 @@ async fn allocator_defaults_are_explicit_fail_closed_and_side_effect_free() {
     let credentials = RunSourceCredentials {
         github_token: Some("private-github-token".to_owned()),
         git_credentials: None,
+        commit_identity: None,
     };
     let diagnostic = format!("{credentials:?}");
     assert!(diagnostic.contains("RunSourceCredentials"));
@@ -170,6 +171,7 @@ async fn allocator_defaults_are_explicit_fail_closed_and_side_effect_free() {
                 admitted: &admitted,
                 github_token: None,
                 git_credentials: None,
+                commit_identity: None,
             })
             .await,
         Err(RetainedAllocationUnavailable::Settled(
@@ -243,6 +245,7 @@ async fn wave8_cli_contract_submission_rejects_missing_secrets_and_invalid_graph
         }),
         github_token: None,
         git_credentials: None,
+        commit_identity: None,
     })
     .err()
     .expect("insecure resolver authority must fail closed");
@@ -312,6 +315,7 @@ async fn wave8_cli_contract_retained_cleanup_and_discard_fail_closed_across_reco
             connection_resolver: None,
             github_token: None,
             git_credentials: None,
+            commit_identity: None,
         })
         .await
         .assert_value_with("accepted resume");
@@ -366,6 +370,7 @@ struct SourceRecoveryAllocator {
     runtime: FakeAllocator,
     resumed_credentials:
         StdMutex<Vec<Option<openengine_cluster_protocol::GitTransportCredentials>>>,
+    resumed_commit_identities: StdMutex<Vec<Option<openengine_cluster_protocol::CommitIdentity>>>,
 }
 
 #[async_trait]
@@ -392,12 +397,17 @@ impl CapsuleAllocator for SourceRecoveryAllocator {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(request.git_credentials.cloned());
+        self.resumed_commit_identities
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(request.commit_identity.cloned());
         self.runtime
             .allocate(CapsuleAllocationRequest {
                 run_id: request.run_id,
                 admitted: request.admitted,
                 github_token: request.github_token,
                 git_credentials: request.git_credentials,
+                commit_identity: request.commit_identity,
                 preparation: request.preparation,
             })
             .await
@@ -513,6 +523,7 @@ async fn assert_recoverable_source_resume(
     let allocator = Arc::new(SourceRecoveryAllocator {
         runtime: FakeAllocator::new(harness.driver.clone(), harness.cleanup.clone()),
         resumed_credentials: StdMutex::new(Vec::new()),
+        resumed_commit_identities: StdMutex::new(Vec::new()),
     });
     let controller = NativeV2PlatformController::new(ledger.clone(), allocator.clone())
         .await
@@ -551,6 +562,7 @@ async fn assert_recoverable_source_resume(
             connection_resolver: None,
             github_token: None,
             git_credentials: None,
+            commit_identity: Some(crate::native_v2_candidate::test_support::bot_commit_identity()),
         })
         .await
         .assert_value();
@@ -565,6 +577,16 @@ async fn assert_recoverable_source_resume(
             .unwrap_or_else(PoisonError::into_inner)
             .as_slice(),
         &[Some(credentials)]
+    );
+    assert_eq!(
+        allocator
+            .resumed_commit_identities
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_slice(),
+        &[Some(
+            crate::native_v2_candidate::test_support::bot_commit_identity()
+        )]
     );
     assert_eq!(
         harness.driver.environments().as_slice(),
@@ -592,5 +614,90 @@ fn assert_public_resume_admission(admitted: &AdmittedRun, source: Option<Resolve
         "fresh-node-token",
     ] {
         assert!(!durable.contains(secret));
+    }
+}
+
+struct CommitIdentityAllocator {
+    runtime: Arc<FakeAllocator>,
+    identities: StdMutex<Vec<Option<openengine_cluster_protocol::CommitIdentity>>>,
+}
+
+#[async_trait]
+impl CapsuleAllocator for CommitIdentityAllocator {
+    async fn claim_controller(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Arc<dyn ExclusiveControllerClaim>, ControllerClaimUnavailable> {
+        self.runtime.claim_controller(run_id).await
+    }
+
+    async fn allocate(
+        &self,
+        request: CapsuleAllocationRequest<'_>,
+    ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
+        self.identities
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(request.commit_identity.cloned());
+        self.runtime.allocate(request).await
+    }
+
+    async fn destroy_or_confirm_absent(
+        &self,
+        run_id: &RunId,
+        exit: RunRuntimeExit,
+    ) -> Result<CapsuleDestroyed, CapsuleCleanupUnavailable> {
+        self.runtime.destroy_or_confirm_absent(run_id, exit).await
+    }
+}
+
+#[tokio::test]
+async fn submitted_commit_identity_reaches_allocation_but_not_node_environments() {
+    let driver = Arc::new(FakeDriver::new(Behavior::Complete));
+    let (ledger, _cleanup, runtime) = runtime_parts(driver.clone());
+    let allocator = Arc::new(CommitIdentityAllocator {
+        runtime: runtime.clone(),
+        identities: StdMutex::new(Vec::new()),
+    });
+    let controller = NativeV2PlatformController::new(ledger, allocator.clone())
+        .await
+        .assert_value();
+    let identity = crate::native_v2_candidate::test_support::bot_commit_identity();
+    let submitted = request(Value::Null);
+    let environment = exact_test_environment(&submitted).assert_value();
+    controller
+        .submit_with_exact_environment_and_source_credentials(
+            submitted,
+            environment,
+            RunSourceCredentials {
+                commit_identity: Some(identity.clone()),
+                ..RunSourceCredentials::default()
+            },
+        )
+        .await
+        .assert_value();
+    wait_for_allocations(&runtime, 1).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while driver.environments().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .assert_value();
+
+    assert_eq!(
+        *allocator
+            .identities
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner),
+        vec![Some(identity.clone())]
+    );
+    for environment in driver.environments().iter() {
+        assert!(
+            environment
+                .values()
+                .all(|value| !value.contains(identity.name()) && !value.contains(identity.email())),
+            "{environment:?}"
+        );
     }
 }

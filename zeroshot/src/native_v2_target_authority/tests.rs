@@ -94,6 +94,7 @@ struct FakeFactory {
     submissions: AtomicUsize,
     active_submissions: AtomicUsize,
     max_active_submissions: AtomicUsize,
+    commit_identities: std::sync::Mutex<Vec<Option<openengine_cluster_protocol::CommitIdentity>>>,
 }
 
 #[async_trait]
@@ -122,6 +123,10 @@ impl TargetControllerFactory for FakeFactory {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         self.active_submissions.fetch_sub(1, Ordering::SeqCst);
         self.submissions.fetch_add(1, Ordering::SeqCst);
+        self.commit_identities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(request.commit_identity);
         Ok(TargetRunReceipt {
             run_id: request.run_id,
         })
@@ -246,6 +251,7 @@ fn request() -> TargetRunRequest {
         connections: BTreeMap::new(),
         connection_resolver: None,
         github_token: None,
+        commit_identity: None,
         git_credentials: None,
     }
 }
@@ -355,6 +361,59 @@ async fn malformed_and_unknown_http_requests_return_structured_problems() {
     .await
     .assert_problem(404, "request.not_found", "target route was not found");
 
+    task.abort();
+}
+
+#[tokio::test]
+async fn run_admission_rejects_unsafe_commit_identities_before_submission() {
+    let factory = Arc::new(FakeFactory::default());
+    let (address, _, task) = direct_test_server(factory.clone()).await;
+    let bot = crate::native_v2_candidate::test_support::bot_commit_identity();
+    let submit = |identity: Value| {
+        let mut body = serde_json::to_value(request()).assert_value();
+        body["commitIdentity"] = identity;
+        let encoded = serde_json::to_vec(&body).assert_value();
+        async move {
+            http(
+                address,
+                TestHttpRequest::body("POST", RUN_PATH, None, &encoded),
+            )
+            .await
+        }
+    };
+    let oversized = "x".repeat(257);
+    for value in [
+        "",
+        " ",
+        ",;",
+        "bell\u{7}",
+        "line\nbreak",
+        "open<",
+        "close>",
+        oversized.as_str(),
+    ] {
+        for identity in [
+            json!({"name": value, "email": bot.email()}),
+            json!({"name": bot.name(), "email": value}),
+        ] {
+            submit(identity).await.assert_problem(
+                400,
+                "request.invalid",
+                "target run request is malformed",
+            );
+        }
+    }
+    assert_eq!(factory.submissions.load(Ordering::SeqCst), 0);
+
+    let accepted = submit(json!({"name": bot.name(), "email": bot.email()})).await;
+    assert_eq!(accepted.status, 200);
+    assert_eq!(
+        *factory
+            .commit_identities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        vec![Some(bot)]
+    );
     task.abort();
 }
 
@@ -478,6 +537,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
                 connection_resolver: None,
                 github_token: None,
                 git_credentials: None,
+                commit_identity: None,
             })
             .await
             .expect_err("unsupported checkpoint resume must be rejected"),
@@ -500,6 +560,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
                 connection_resolver: None,
                 github_token: None,
                 git_credentials: None,
+                commit_identity: None,
             })
             .await
             .expect_err("missing run must be rejected by controller");
@@ -520,6 +581,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
             connection_resolver: None,
             github_token: None,
             git_credentials: None,
+            commit_identity: None,
         },
         RunResumeParams {
             run_id: run_id(),
@@ -529,6 +591,7 @@ async fn target_oecp_routes_workspace_recovery_methods_to_the_controller() {
             connection_resolver: None,
             github_token: None,
             git_credentials: None,
+            commit_identity: None,
         },
     ] {
         let error = client
@@ -867,6 +930,7 @@ async fn assert_workspace_recovery(endpoint: &str, bearer: Option<&str>, adverti
                 connection_resolver: None,
                 github_token: None,
                 git_credentials: None,
+                commit_identity: None,
             })
             .await
             .expect_err("missing run must be rejected"),

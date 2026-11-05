@@ -1,7 +1,7 @@
 use std::time::Duration;
 use tokio::process::Command;
 use crate::source_code_provider::*;
-use crate::native_v2_delivery::command::{capture, capture_sensitive};
+use crate::native_v2_delivery::command::{capture, capture_sensitive, delivery_identity};
 use super::GitTransport;
 
 pub(super) async fn bounded_status(
@@ -190,10 +190,8 @@ fn local_command(context: TargetContext<'_>) -> Command {
 pub(super) async fn configure_delivery_identity(
     transport: &GitTransport,
 ) -> Result<(), SourceDeliveryError> {
-    for (key, value) in [
-        ("user.name", "Zeroshot"),
-        ("user.email", "delivery@zeroshot.invalid"),
-    ] {
+    let (name, email) = delivery_identity(transport.commit_identity());
+    for (key, value) in [("user.name", name), ("user.email", email)] {
         let mut command = transport.command(&transport.config().workspace);
         command.args(["config", "--local", "--replace-all", key, value]);
         bounded_status(command, transport.config().deadline).await?;

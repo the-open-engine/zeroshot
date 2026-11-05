@@ -238,6 +238,92 @@ pub struct TargetRunRequest {
     pub connection_resolver: Option<TargetConnectionResolver>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,
+    /// Author and committer of every commit this run's delivery creates. Omission keeps the
+    /// target's default delivery identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_identity: Option<CommitIdentity>,
+}
+
+const MAX_COMMIT_IDENTITY_FIELD_BYTES: usize = 256;
+
+/// A host-selected Git author and committer for commits created by delivery. Each value has at
+/// most 256 UTF-8 bytes, no control characters, `<` or `>`, and at least one character that Git
+/// keeps after trimming whitespace and `.,:;"'\`.
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(try_from = "CommitIdentityWire")]
+pub struct CommitIdentity {
+    name: String,
+    email: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CommitIdentityWire {
+    #[schemars(
+        length(min = 1, max = 256),
+        regex(
+            pattern = r#"^[^\u0000-\u001F\u007F-\u009F<>]*[^\s\u0000-\u001F\u007F-\u009F<>.,:;"'\\][^\u0000-\u001F\u007F-\u009F<>]*$"#
+        )
+    )]
+    name: String,
+    #[schemars(
+        length(min = 1, max = 256),
+        regex(
+            pattern = r#"^[^\u0000-\u001F\u007F-\u009F<>]*[^\s\u0000-\u001F\u007F-\u009F<>.,:;"'\\][^\u0000-\u001F\u007F-\u009F<>]*$"#
+        )
+    )]
+    email: String,
+}
+
+impl CommitIdentity {
+    /// Validates one exact Git identity; see the type documentation for the bounds.
+    pub fn new(
+        name: impl Into<String>,
+        email: impl Into<String>,
+    ) -> Result<Self, NativeV2RunValueError> {
+        let (name, email) = (name.into(), email.into());
+        if !valid_commit_identity_field(&name) {
+            return Err(NativeV2RunValueError(
+                "commit identity name must be at most 256 bytes, free of control characters, '<' and '>', and not empty after Git trims it",
+            ));
+        }
+        if !valid_commit_identity_field(&email) {
+            return Err(NativeV2RunValueError(
+                "commit identity email must be at most 256 bytes, free of control characters, '<' and '>', and not empty after Git trims it",
+            ));
+        }
+        Ok(Self { name, email })
+    }
+
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[must_use]
+    pub fn email(&self) -> &str {
+        &self.email
+    }
+}
+
+impl TryFrom<CommitIdentityWire> for CommitIdentity {
+    type Error = NativeV2RunValueError;
+
+    fn try_from(wire: CommitIdentityWire) -> Result<Self, Self::Error> {
+        Self::new(wire.name, wire.email)
+    }
+}
+
+fn valid_commit_identity_field(value: &str) -> bool {
+    // Git drops these characters around identity values and rejects a value left empty.
+    let ignored_by_git = |character: char| {
+        character.is_whitespace() || matches!(character, '.' | ',' | ':' | ';' | '"' | '\'' | '\\')
+    };
+    !value.trim_matches(ignored_by_git).is_empty()
+        && value.len() <= MAX_COMMIT_IDENTITY_FIELD_BYTES
+        && !value
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '<' | '>'))
 }
 
 impl TargetRunRequest {
@@ -259,6 +345,7 @@ impl fmt::Debug for TargetRunRequest {
             .field("connection_resolver", &self.connection_resolver)
             .field("github_token", &redacted(&self.github_token))
             .field("git_credentials", &self.git_credentials)
+            .field("commit_identity", &self.commit_identity)
             .finish()
     }
 }

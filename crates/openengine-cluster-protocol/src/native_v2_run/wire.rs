@@ -256,6 +256,10 @@ pub struct RunResumeParams {
     /// Fresh generic Git authority, excluded from immutable source and submission identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_credentials: Option<super::GitTransportCredentials>,
+    /// Author and committer of every commit the successor's delivery creates. Omission keeps the
+    /// target's default delivery identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_identity: Option<crate::CommitIdentity>,
 }
 
 impl std::fmt::Debug for RunResumeParams {
@@ -272,6 +276,7 @@ impl std::fmt::Debug for RunResumeParams {
                 &self.github_token.as_ref().map(|_| "[REDACTED]"),
             )
             .field("git_credentials", &self.git_credentials)
+            .field("commit_identity", &self.commit_identity)
             .finish()
     }
 }

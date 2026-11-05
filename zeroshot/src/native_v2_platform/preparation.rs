@@ -191,6 +191,7 @@ impl NativeV2PlatformController {
                     admitted: &start.stored.admitted,
                     github_token: credentials.github_token.as_deref(),
                     git_credentials: credentials.git_credentials.as_ref(),
+                    commit_identity: credentials.commit_identity.as_ref(),
                     preparation,
                     selection: resume.selection.clone(),
                     source_run_id: &resume.source_run_id,
@@ -211,6 +212,7 @@ impl NativeV2PlatformController {
                     admitted: &start.stored.admitted,
                     github_token: credentials.github_token.as_deref(),
                     git_credentials: credentials.git_credentials.as_ref(),
+                    commit_identity: credentials.commit_identity.as_ref(),
                     preparation,
                 })
                 .await

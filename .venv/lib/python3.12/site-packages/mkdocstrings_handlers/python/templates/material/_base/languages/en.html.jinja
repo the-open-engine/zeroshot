@@ -1,0 +1,61 @@
+{#- Macro for English translations. -#}
+
+{% block logs scoped %}
+  {#- Logging block.
+
+  This block can be used to log debug messages, deprecation messages, warnings, etc.
+  -#}
+{% endblock logs %}
+
+{% macro t(key) %}{{ {
+  "ATTRIBUTE": "ATTRIBUTE",
+  "Attributes": "Attributes",
+  "Attributes:": "Attributes:",
+  "BOUND:": "BOUND:",
+  "Bound or Constraints": "Bound or Constraints",
+  "Classes": "Classes",
+  "Classes:": "Classes:",
+  "Class Type Parameters:": "Class Type Parameters:",
+  "CLASS TYPE PARAMETER": "CLASS TYPE PARAMETER",
+  "CLASS": "CLASS",
+  "CONSTRAINTS:": "CONSTRAINTS:",
+  "DEFAULT:": "DEFAULT:",
+  "Default": "Default",
+  "default:": "default:",
+  "DESCRIPTION": "DESCRIPTION",
+  "Description": "Description",
+  "Examples:": "Examples:",
+  "Functions": "Functions",
+  "Functions:": "Functions:",
+  "FUNCTION": "FUNCTION",
+  "Init Type Parameters:": "Init Type Parameters:",
+  "INIT TYPE PARAMETER": "INIT TYPE PARAMETER",
+  "Methods:": "Methods:",
+  "METHOD": "METHOD",
+  "Modules": "Modules",
+  "Modules:": "Modules:",
+  "MODULE": "MODULE",
+  "Name": "Name",
+  "Other Parameters:": "Other Parameters:",
+  "PARAMETER": "PARAMETER",
+  "Parameters:": "Parameters:",
+  "RAISES": "RAISES",
+  "Raises:" : "Raises:",
+  "RECEIVES": "RECEIVES",
+  "Receives:": "Receives:",
+  "required": "required",
+  "RETURNS": "RETURNS",
+  "Returns:": "Returns:",
+  "Source code in": "Source code in",
+  "TYPE:": "TYPE:",
+  "Type": "Type",
+  "Type Aliases": "Type Aliases",
+  "Type Aliases:": "Type Aliases:",
+  "TYPE ALIAS": "TYPE ALIAS",
+  "Type Parameters:": "Type Parameters:",
+  "TYPE PARAMETER": "TYPE PARAMETER",
+  "WARNS": "WARNS",
+  "Warns:": "Warns:",
+  "YIELDS": "YIELDS",
+  "Yields:": "Yields:",
+}[key] }}{% endmacro %}

@@ -204,6 +204,7 @@ async fn exercise_named_run_rejections(backend: &LocalCliBackend) {
                 Some("prod"),
                 RunResumeParams {
                     git_credentials: None,
+                    commit_identity: None,
 
                     run_id: run_id.clone(),
                     successor_run_id: successor,
@@ -308,6 +309,7 @@ async fn exercise_absent_local_run_failures(backend: &LocalCliBackend) {
                 None,
                 RunResumeParams {
                     git_credentials: None,
+                    commit_identity: None,
 
                     run_id,
                     successor_run_id: RunId::new("0199f33f-3b44-7d21-9000-000000000032",),
@@ -423,6 +425,7 @@ async fn local_resume_rejects_an_unusable_state_root_before_observing_the_run() 
     let error = backend
         .resume_local(RunResumeParams {
             git_credentials: None,
+            commit_identity: None,
 
             run_id: run_id("0199f33f-3b44-7d21-9000-000000000042"),
             successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000043"),
@@ -434,6 +437,37 @@ async fn local_resume_rejects_an_unusable_state_root_before_observing_the_run() 
         .await
         .unwrap_err();
     assert!(matches!(error, NativeV2CliError::Local(_)));
+}
+
+#[tokio::test]
+async fn local_resume_rejects_a_commit_identity_before_touching_local_state() {
+    let root = tempfile::tempdir().assert_value();
+    let state = root.path().join("state");
+    let backend = LocalCliBackend::new(
+        state.clone(),
+        PathBuf::from("zeroshot"),
+        root.path().to_path_buf(),
+        PathBuf::from("git"),
+    );
+
+    let error = backend
+        .resume_local(RunResumeParams {
+            run_id: run_id("0199f33f-3b44-7d21-9000-000000000044"),
+            successor_run_id: run_id("0199f33f-3b44-7d21-9000-000000000045"),
+            from: None,
+            connections: BTreeMap::new(),
+            connection_resolver: None,
+            github_token: None,
+            git_credentials: None,
+            commit_identity: Some(crate::native_v2_candidate::test_support::bot_commit_identity()),
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&error, NativeV2CliError::Local(message) if message.contains("default delivery commit identity")),
+        "{error}"
+    );
+    assert!(!state.exists());
 }
 
 #[tokio::test]
@@ -483,6 +517,7 @@ async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
     let error = backend
         .resume_local(RunResumeParams {
             git_credentials: None,
+            commit_identity: None,
 
             run_id: original.clone(),
             successor_run_id: successor.clone(),

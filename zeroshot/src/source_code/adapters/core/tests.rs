@@ -219,18 +219,21 @@ async fn delivery_factory_keeps_private_push_diagnostics_for_git_and_github() {
         .assert_value();
         let run_id = openengine_cluster_protocol::RunId::new("source-factory-diagnostic");
         let diagnostics = Arc::new(OperatorDiagnosticStore::default());
-        let authority = delivery_authority(SourceDeliveryFactoryRequest {
-            source: &source,
-            workspace: root.path(),
-            git_program: &program,
-            gh_program: &root.path().join("forge-cli-must-not-run"),
-            home_directory: root.path(),
-            private_directory: root.path(),
-            git_identity: None,
-            local_environment: None,
-            required_capabilities: &[capability],
-            operator_diagnostics: Some((run_id.clone(), diagnostics.clone())),
-        })
+        let authority = delivery_authority(
+            SourceDeliveryFactoryRequest {
+                source: &source,
+                workspace: root.path(),
+                git_program: &program,
+                gh_program: &root.path().join("forge-cli-must-not-run"),
+                home_directory: root.path(),
+                private_directory: root.path(),
+                git_identity: None,
+                local_environment: None,
+                required_capabilities: &[capability],
+                operator_diagnostics: Some((run_id.clone(), diagnostics.clone())),
+            },
+            None,
+        )
         .assert_value();
         assert_eq!(
             authority.forge_credential_field(),

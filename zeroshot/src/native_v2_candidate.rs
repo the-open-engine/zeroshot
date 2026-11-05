@@ -20,6 +20,9 @@ use crate::native_v2_comment_delivery::{
     NativeV2CommentDeliveryAdapter, NativeV2CommentDeliveryConfig, CommentPublicationStore,
 };
 use crate::source_code_provider::SourceCommentAuthority;
+use crate::source_code_provider::adapters::core::{
+    SourceDeliveryFactoryError, SourceDeliveryFactoryRequest, delivery_authority,
+};
 use crate::native_v2_contract::{AdmittedRun, NodeInvocation, NodeRuntimeBinding, RuntimeLane};
 use crate::native_v2_delivery::validation::TrustedDeliveryValidator;
 use crate::native_v2_delivery::{
@@ -64,6 +67,23 @@ pub struct NativeV2CandidateDelivery {
     pub config: NativeV2DeliveryConfig,
     pub authority: Arc<dyn SourceDeliveryAuthority>,
     pub git_credentials: Option<GitTransportCredentials>,
+}
+
+impl NativeV2CandidateDelivery {
+    /// Builds the source authority from `config`, so its commit identity authors both workspace
+    /// commits and every merge the shared transport creates.
+    pub(crate) fn new(
+        config: NativeV2DeliveryConfig,
+        source: SourceDeliveryFactoryRequest<'_>,
+        git_credentials: Option<GitTransportCredentials>,
+    ) -> Result<Self, SourceDeliveryFactoryError> {
+        let authority = delivery_authority(source, config.commit_identity.as_ref())?;
+        Ok(Self {
+            config,
+            authority,
+            git_credentials,
+        })
+    }
 }
 
 #[derive(Clone, Copy)]

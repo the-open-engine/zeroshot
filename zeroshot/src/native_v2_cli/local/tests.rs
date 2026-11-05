@@ -553,6 +553,7 @@ async fn local_bootstrap_and_resume_failures_leave_recoverable_state() {
         .start_local_successor(
             RunResumeParams {
                 git_credentials: None,
+                commit_identity: None,
 
                 run_id: original.clone(),
                 successor_run_id: successor.clone(),

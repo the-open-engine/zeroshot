@@ -406,6 +406,7 @@ impl CapsuleAllocator for CandidateAllocator {
                 delivery_run_id: RunId::new("candidate-test"),
                 adopt_existing_delivery: false,
                 git_identity: None,
+                commit_identity: None,
                 workspace: self.workspace.clone(),
                 git_program: PathBuf::from("/usr/bin/git"),
                 target: self.target.clone(),
@@ -1085,6 +1086,7 @@ fn routing_delivery(workspace: &Path) -> Arc<NativeV2DeliveryAdapter> {
             delivery_run_id: RunId::new("candidate-routing"),
             adopt_existing_delivery: false,
             git_identity: None,
+            commit_identity: None,
             workspace: workspace.to_owned(),
             git_program: PathBuf::from("/usr/bin/git"),
             target: DeliveryTarget::new("acme/project", "main", "a".repeat(40))
@@ -1149,3 +1151,123 @@ use fixtures::{
 };
 
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue, JsonAt};
+
+#[tokio::test]
+async fn candidate_delivery_applies_its_commit_identity_to_transport_commits() {
+    use crate::native_v2_candidate::test_support::{
+        BOT_AUTHOR, bot_commit_identity, commit_all, commit_authorship, git, path_text,
+    };
+    const REMOTE: &str = "https://forge.example/team/project.git";
+    let repository = TestGitRepository::candidate();
+    let workspace = &repository.workspace;
+    let commit = |file: &str| {
+        fs::write(workspace.join(file), format!("{file}\n")).assert_value();
+        commit_all(workspace, file);
+        git_output(workspace, &["rev-parse", "HEAD"])
+    };
+    let published_revision = commit("published");
+    let local_revision = commit("local");
+    git(workspace, &["checkout", "--detach", &published_revision]);
+    let observed_revision = commit("upstream");
+    let branch = "zeroshot/host-identity";
+    git(
+        workspace,
+        &[
+            "push",
+            path_text(&repository.remote),
+            &format!("{observed_revision}:refs/heads/{branch}"),
+        ],
+    );
+    git(workspace, &["checkout", "--detach", &local_revision]);
+    fs::write(workspace.join("dirty"), "dirty\n").assert_value();
+    let program = repository.root.write_executable(
+        "git-forge",
+        &format!(
+            r#"#!/bin/bash
+set -eu
+arguments=()
+for argument in "$@"; do
+  if [[ "$argument" == '{REMOTE}' ]]; then arguments+=('{remote}'); else arguments+=("$argument"); fi
+done
+exec /usr/bin/git "${{arguments[@]}}"
+"#,
+            remote = path_text(&repository.remote)
+        ),
+    );
+    let source: ResolvedSource = serde_json::from_value(json!({
+        "repository": "team/project", "branch": "main", "revision": repository.base,
+        "remote": {"url": REMOTE}
+    }))
+    .assert_value();
+
+    let delivery = NativeV2CandidateDelivery::new(
+        NativeV2DeliveryConfig {
+            delivery_run_id: RunId::new("candidate-commit-identity"),
+            adopt_existing_delivery: false,
+            git_identity: None,
+            commit_identity: Some(bot_commit_identity()),
+            workspace: workspace.clone(),
+            git_program: program.clone(),
+            target: DeliveryTarget::new("team/project", "main", &repository.base).assert_value(),
+            poll: DeliveryPollPolicy::default(),
+        },
+        SourceDeliveryFactoryRequest {
+            source: &source,
+            workspace,
+            git_program: &program,
+            gh_program: &repository.root.child("forge-cli-must-not-run"),
+            home_directory: repository.root.path(),
+            private_directory: repository.root.path(),
+            git_identity: None,
+            local_environment: None,
+            required_capabilities: crate::native_v2_delivery::DeliveryMode::Push
+                .required_capabilities(),
+            operator_diagnostics: None,
+        },
+        None,
+    )
+    .assert_value();
+    assert_eq!(delivery.config.commit_identity, Some(bot_commit_identity()));
+
+    let published = SourceReviewReceipt {
+        review_id: String::new(),
+        repository: "team/project".to_owned(),
+        target_branch: "main".to_owned(),
+        head_branch: branch.to_owned(),
+        head_revision: published_revision,
+    };
+    let observed = SourceReviewReceipt {
+        head_revision: observed_revision.clone(),
+        ..published.clone()
+    };
+    let outcome = delivery
+        .authority
+        .reconcile_delivery_head(
+            SourceHeadReconciliation {
+                workspace,
+                published: &published,
+                observed: &observed,
+                commit_message: "Preserve local work",
+                authorized_update: false,
+                adopting_existing: false,
+            },
+            SourceDeliveryCredential::token(""),
+        )
+        .await
+        .assert_value();
+    assert!(
+        matches!(outcome, SourceReconciliationOutcome::NeedsWork(_)),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        git_output(workspace, &["rev-parse", "HEAD^2"]),
+        observed_revision
+    );
+    for (revision, kind) in [("HEAD", "reconcile merge"), ("HEAD^1", "prepared revision")] {
+        assert_eq!(
+            commit_authorship(workspace, revision),
+            format!("{BOT_AUTHOR}|{BOT_AUTHOR}"),
+            "{kind}"
+        );
+    }
+}
