@@ -609,6 +609,8 @@
       
         
       
+        
+      
     
     
     
@@ -747,6 +749,17 @@
     <span class="md-ellipsis">
       
         Run a plan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-dependent-plans-as-a-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run dependent plans as a stack
       
     </span>
   </a>
@@ -917,6 +930,34 @@
     
   
     GitHub and GitLab delivery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../stacks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Submit a stack
   
 
     
@@ -1918,6 +1959,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#run-dependent-plans-as-a-stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run dependent plans as a stack
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2102,6 +2154,15 @@ or pull request, not in the file.</p>
 the task of a run, for example through the <code>zeroshot</code> skill. The acceptance verifier then judges the
 change against criteria you agreed on. Starting the run is the decision to build the plan; nothing
 in the plan starts a run by itself.</p>
+<h2 id="run-dependent-plans-as-a-stack">Run dependent plans as a stack<a class="headerlink" href="#run-dependent-plans-as-a-stack" title="Permanent link">&para;</a></h2>
+<p>When the skill splits work into plans linked by <code>depends_on</code>, it offers to write a
+<a href="../stacks/">stack</a> manifest next to them, <code>.zeroshot/plans/&lt;id&gt;.stack.json</code>, named after the first
+plan. The manifest has one run per plan, named after the plan's id, whose task is that plan's Goal,
+Context, Acceptance criteria, Constraints, Decided approach and Decisions, and whose <code>needs</code> follow
+<code>depends_on</code>. The skill asks for or leaves the rest to you: the hosted profile, the deadline and
+<code>delivery</code>, which is either <code>merge</code>, to merge each plan before the plans that depend on it start, or
+<code>stacked_pull_requests</code>, to get one pull request per plan stacked on the one before it. Check it with
+<code>zeroshot stack validate</code> and submit it with <code>zeroshot stack submit</code>.</p>
 
 
 
@@ -2122,7 +2183,7 @@ in the plan starts a run by itself.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-28">28 October 2026</time>
+    Last updated <time datetime="2026-11-05">5 November 2026</time>
   </span>
 
     

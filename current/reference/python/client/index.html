@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Python API reference for Client, MergePlan and Run, covering submission, lookup, observation, stop operations and merge plans.">
+        <meta name="description" content="Python API reference for Client, Run and Stack, covering run and hosted stack submission, lookup, observation and stop operations.">
       
       
       
@@ -66,14 +66,14 @@
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="zeroshot">
     <meta property="og:title" content="Client and run handle | zeroshot docs">
-    <meta property="og:description" content="Python API reference for Client, MergePlan and Run, covering submission, lookup, observation, stop operations and merge plans.">
+    <meta property="og:description" content="Python API reference for Client, Run and Stack, covering run and hosted stack submission, lookup, observation and stop operations.">
     <meta property="og:url" content="https://zeroshot.sh/docs/current/reference/python/client/">
     <meta property="og:image" content="https://zeroshot.sh/og.jpg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Client and run handle | zeroshot docs">
-    <meta name="twitter:description" content="Python API reference for Client, MergePlan and Run, covering submission, lookup, observation, stop operations and merge plans.">
+    <meta name="twitter:description" content="Python API reference for Client, Run and Stack, covering run and hosted stack submission, lookup, observation and stop operations.">
     <meta name="twitter:image" content="https://zeroshot.sh/og.jpg">
     
       
@@ -607,6 +607,8 @@
       
         
       
+        
+      
     
     
     
@@ -835,6 +837,34 @@
     
   
     GitHub and GitLab delivery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guides/stacks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Submit a stack
   
 
     
@@ -1265,10 +1295,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#zeroshot.Client.submit_plan" class="md-nav__link">
+  <a href="#zeroshot.Client.submit_stack" class="md-nav__link">
     <span class="md-ellipsis">
       
-        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;submit_plan
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;submit_stack
       
     </span>
   </a>
@@ -1276,10 +1306,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#zeroshot.Client.get_plan" class="md-nav__link">
+  <a href="#zeroshot.Client.get_stack" class="md-nav__link">
     <span class="md-ellipsis">
       
-        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_plan
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_stack
       
     </span>
   </a>
@@ -1324,78 +1354,6 @@
     <span class="md-ellipsis">
       
         <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_preset
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#zeroshot.MergePlan" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;MergePlan
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label=" MergePlan">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#zeroshot.MergePlan.id" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;id
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#zeroshot.MergePlan.status" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;status
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#zeroshot.MergePlan.watch" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;watch
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#zeroshot.MergePlan.wait" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;wait
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#zeroshot.MergePlan.force_stop" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;force_stop
       
     </span>
   </a>
@@ -1476,6 +1434,78 @@
         
           <li class="md-nav__item">
   <a href="#zeroshot.Run.force_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;force_stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#zeroshot.Stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;Stack
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" Stack">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Stack.id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;id
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Stack.status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Stack.watch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;watch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Stack.wait" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;wait
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Stack.force_stop" class="md-nav__link">
     <span class="md-ellipsis">
       
         <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;force_stop
@@ -2237,10 +2267,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#zeroshot.Client.submit_plan" class="md-nav__link">
+  <a href="#zeroshot.Client.submit_stack" class="md-nav__link">
     <span class="md-ellipsis">
       
-        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;submit_plan
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;submit_stack
       
     </span>
   </a>
@@ -2248,10 +2278,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#zeroshot.Client.get_plan" class="md-nav__link">
+  <a href="#zeroshot.Client.get_stack" class="md-nav__link">
     <span class="md-ellipsis">
       
-        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_plan
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_stack
       
     </span>
   </a>
@@ -2296,78 +2326,6 @@
     <span class="md-ellipsis">
       
         <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_preset
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#zeroshot.MergePlan" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;MergePlan
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label=" MergePlan">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#zeroshot.MergePlan.id" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;id
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#zeroshot.MergePlan.status" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;status
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#zeroshot.MergePlan.watch" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;watch
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#zeroshot.MergePlan.wait" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;wait
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#zeroshot.MergePlan.force_stop" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;force_stop
       
     </span>
   </a>
@@ -2462,6 +2420,78 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#zeroshot.Stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;Stack
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" Stack">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Stack.id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;id
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Stack.status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Stack.watch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;watch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Stack.wait" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;wait
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zeroshot.Stack.force_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;force_stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2527,7 +2557,7 @@
 
 
 
-        <p>Submit and observe Zeroshot graph runs and hosted merge plans.</p>
+        <p>Submit and observe Zeroshot graph runs and hosted stacks.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -2903,33 +2933,33 @@ completes before local controller startup or direct-target contact.</p>
 <div class="doc doc-object doc-function">
 
 
-<h3 id="zeroshot.Client.submit_plan" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">submit_plan</span><span class="p">(</span><span class="n">request</span><span class="p">:</span> <span class="n">MergePlanRequest</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MergePlan</span></code>
+<h3 id="zeroshot.Client.submit_stack" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">submit_stack</span><span class="p">(</span><span class="n">request</span><span class="p">:</span> <span class="n">StackRequest</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Stack</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-async"><code>async</code></small>
   </span>
 
-<a href="#zeroshot.Client.submit_plan" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#zeroshot.Client.submit_stack" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
 
-        <p>Validate and atomically submit one merge-only DAG to a hosted target.</p>
+        <p>Validate and atomically submit one stack of runs to a hosted target.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
     <ul>
         <li class="doc-section-item field-body">
             <b><code>request</code></b>
-              (<code><a class="autorefs autorefs-internal" title="              MergePlanRequest(*, title: str, repository: str, branch: str, profile: str, expires_at: str, runs: Mapping[str, MergePlanRun], submission_key: str | None = None)
+              (<code><a class="autorefs autorefs-internal" title="              StackRequest(*, title: str, repository: str, branch: str, profile: str, delivery: StackDelivery, expires_at: str, runs: Mapping[str, StackRun], submission_key: str | None = None)
 
   
       dataclass
-   (zeroshot.plans.MergePlanRequest)" href="../configuration/#zeroshot.MergePlanRequest">MergePlanRequest</a></code>)
+   (zeroshot.stacks.StackRequest)" href="../configuration/#zeroshot.StackRequest">StackRequest</a></code>)
           –
           <div class="doc-md-description">
-            <p>Immutable plan metadata, profile selector, and static run DAG.</p>
+            <p>Immutable stack metadata, profile selector, delivery mode, and static run DAG.</p>
           </div>
         </li>
     </ul>
@@ -2938,10 +2968,10 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              MergePlan(client: Client, plan_id: str) (zeroshot.client.MergePlan)" href="#zeroshot.MergePlan">MergePlan</a></code>
+              <code><a class="autorefs autorefs-internal" title="              Stack(client: Client, stack_id: str) (zeroshot.client.Stack)" href="#zeroshot.Stack">Stack</a></code>
           –
           <div class="doc-md-description">
-            <p>A durable merge-plan handle bound to this client's hosted target.</p>
+            <p>A durable stack handle bound to this client's hosted target.</p>
           </div>
         </li>
     </ul>
@@ -2980,25 +3010,25 @@ completes before local controller startup or direct-target contact.</p>
 <div class="doc doc-object doc-function">
 
 
-<h3 id="zeroshot.Client.get_plan" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">get_plan</span><span class="p">(</span><span class="n">plan_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MergePlan</span></code>
+<h3 id="zeroshot.Client.get_stack" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">get_stack</span><span class="p">(</span><span class="n">stack_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Stack</span></code>
 
-<a href="#zeroshot.Client.get_plan" class="headerlink" title="Permanent link">&para;</a></h3>
+<a href="#zeroshot.Client.get_stack" class="headerlink" title="Permanent link">&para;</a></h3>
 
 
     <div class="doc doc-contents ">
 
-        <p>Reconstruct a durable hosted merge-plan handle without target I/O.</p>
+        <p>Reconstruct a durable hosted stack handle without target I/O.</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-            <b><code>plan_id</code></b>
+            <b><code>stack_id</code></b>
               (<code><span title="str">str</span></code>)
           –
           <div class="doc-md-description">
-            <p>Opaque server-assigned plan identity.</p>
+            <p>Opaque server-assigned stack identity.</p>
           </div>
         </li>
     </ul>
@@ -3007,7 +3037,7 @@ completes before local controller startup or direct-target contact.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              MergePlan(client: Client, plan_id: str) (zeroshot.client.MergePlan)" href="#zeroshot.MergePlan">MergePlan</a></code>
+              <code><a class="autorefs autorefs-internal" title="              Stack(client: Client, stack_id: str) (zeroshot.client.Stack)" href="#zeroshot.Stack">Stack</a></code>
           –
           <div class="doc-md-description">
             <p>A handle resolved lazily against this client's named hosted target.</p>
@@ -3212,206 +3242,6 @@ completes before local controller startup or direct-target contact.</p>
           </div>
         </li>
     </ul>
-
-
-    </div>
-
-</div>
-
-
-
-  </div>
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-class">
-
-
-
-<h2 id="zeroshot.MergePlan" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">MergePlan</span><span class="p">(</span><span class="n">client</span><span class="p">:</span> <span class="n">Client</span><span class="p">,</span> <span class="n">plan_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span></code>
-
-<a href="#zeroshot.MergePlan" class="headerlink" title="Permanent link">&para;</a></h2>
-
-
-    <div class="doc doc-contents ">
-
-
-
-        <p>Durable hosted merge-plan handle bound to one Client target.</p>
-
-
-
-
-
-
-
-
-
-
-
-<div class="doc doc-children">
-
-
-
-
-
-
-
-<div class="doc doc-object doc-attribute">
-
-
-
-<h3 id="zeroshot.MergePlan.id" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <code class="highlight language-python"><span class="nb">id</span><span class="p">:</span> <span class="nb">str</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-property"><code>property</code></small>
-  </span>
-
-<a href="#zeroshot.MergePlan.id" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Return the opaque server-assigned merge-plan identity.</p>
-
-    </div>
-
-</div>
-
-
-
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="zeroshot.MergePlan.status" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">status</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">MergePlanStatus</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#zeroshot.MergePlan.status" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Read the plan's current aggregate status.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="zeroshot.MergePlan.watch" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">watch</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">AsyncIterator</span><span class="p">[</span><span class="n">MergePlanStatus</span><span class="p">]</span></code>
-
-<a href="#zeroshot.MergePlan.watch" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Poll and yield changed aggregate snapshots until the plan is terminal.</p>
-<p>Cancelling or closing the iterator detaches observation and leaves runs active.</p>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="zeroshot.MergePlan.wait" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">wait</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">wait_timeout</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MergePlanStatus</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#zeroshot.MergePlan.wait" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Wait for a terminal aggregate status without controlling plan lifetime.</p>
-
-
-<p><span class="doc-section-title">Parameters:</span></p>
-    <ul>
-        <li class="doc-section-item field-body">
-            <b><code>wait_timeout</code></b>
-              (<code><span title="float">float</span> | None</code>, default:
-                  <code>None</code>
-)
-          –
-          <div class="doc-md-description">
-            <p>Non-negative observation deadline in seconds. None waits indefinitely.</p>
-          </div>
-        </li>
-    </ul>
-
-
-<p><span class="doc-section-title">Raises:</span></p>
-    <ul>
-        <li class="doc-section-item field-body">
-              <code><span title="ValueError">ValueError</span></code>
-            –
-          <div class="doc-md-description">
-            <p>If wait_timeout is negative.</p>
-          </div>
-        </li>
-        <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              MergePlanWaitTimeout(plan: _MergePlanHandle, wait_timeout: float) (zeroshot.plan_errors.MergePlanWaitTimeout)" href="../errors/#zeroshot.MergePlanWaitTimeout">MergePlanWaitTimeout</a></code>
-            –
-          <div class="doc-md-description">
-            <p>If observation expires; it carries this durable handle.</p>
-          </div>
-        </li>
-        <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              TargetError(message: str, *, exit_code: int | None = None) (zeroshot.errors.TargetError)" href="../errors/#zeroshot.TargetError">TargetError</a></code>
-            –
-          <div class="doc-md-description">
-            <p>If the selected target is unavailable.</p>
-          </div>
-        </li>
-        <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="            ProtocolError (zeroshot.errors.ProtocolError)" href="../errors/#zeroshot.ProtocolError">ProtocolError</a></code>
-            –
-          <div class="doc-md-description">
-            <p>If native output is malformed.</p>
-          </div>
-        </li>
-    </ul>
-
-
-    </div>
-
-</div>
-
-<div class="doc doc-object doc-function">
-
-
-<h3 id="zeroshot.MergePlan.force_stop" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">force_stop</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">MergePlanStatus</span></code>
-
-  <span class="doc doc-labels">
-      <small class="doc doc-label doc-label-async"><code>async</code></small>
-  </span>
-
-<a href="#zeroshot.MergePlan.force_stop" class="headerlink" title="Permanent link">&para;</a></h3>
-
-
-    <div class="doc doc-contents ">
-
-        <p>Force every nonterminal run to stop and wait for aggregate termination.</p>
 
 
     </div>
@@ -3825,6 +3655,211 @@ completes before local controller startup or direct-target contact.</p>
 
 </div>
 
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="zeroshot.Stack" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">Stack</span><span class="p">(</span><span class="n">client</span><span class="p">:</span> <span class="n">Client</span><span class="p">,</span> <span class="n">stack_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span></code>
+
+<a href="#zeroshot.Stack" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Durable hosted stack handle bound to one Client target.</p>
+<p>A "stacked_pull_requests" stack is complete once every pull request is open; Zeroshot never
+merges, retargets, or restacks them. Merge them from the bottom up: GitHub moves a child pull
+request onto the base branch when its merged parent's branch is deleted. A squash-merged parent
+leaves the child to rebase onto the base branch, and changes pushed to a parent pull request
+during review are not restacked, so rebase the pull requests above it by hand.</p>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h3 id="zeroshot.Stack.id" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <code class="highlight language-python"><span class="nb">id</span><span class="p">:</span> <span class="nb">str</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#zeroshot.Stack.id" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Return the opaque server-assigned stack identity.</p>
+
+    </div>
+
+</div>
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.Stack.status" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">status</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">StackStatus</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#zeroshot.Stack.status" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Read the stack's current aggregate status.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.Stack.watch" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">watch</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">AsyncIterator</span><span class="p">[</span><span class="n">StackStatus</span><span class="p">]</span></code>
+
+<a href="#zeroshot.Stack.watch" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Poll and yield changed aggregate snapshots until the stack is terminal.</p>
+<p>Cancelling or closing the iterator detaches observation and leaves runs active.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.Stack.wait" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">wait</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">wait_timeout</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">StackStatus</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#zeroshot.Stack.wait" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Wait for a terminal aggregate status without controlling stack lifetime.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>wait_timeout</code></b>
+              (<code><span title="float">float</span> | None</code>, default:
+                  <code>None</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Non-negative observation deadline in seconds. None waits indefinitely.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><span title="ValueError">ValueError</span></code>
+            –
+          <div class="doc-md-description">
+            <p>If wait_timeout is negative.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              StackWaitTimeout(stack: _StackHandle, wait_timeout: float) (zeroshot.stack_errors.StackWaitTimeout)" href="../errors/#zeroshot.StackWaitTimeout">StackWaitTimeout</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If observation expires; it carries this durable handle.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              TargetError(message: str, *, exit_code: int | None = None) (zeroshot.errors.TargetError)" href="../errors/#zeroshot.TargetError">TargetError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If the selected target is unavailable.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="            ProtocolError (zeroshot.errors.ProtocolError)" href="../errors/#zeroshot.ProtocolError">ProtocolError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If native output is malformed.</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="zeroshot.Stack.force_stop" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">force_stop</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">StackStatus</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-async"><code>async</code></small>
+  </span>
+
+<a href="#zeroshot.Stack.force_stop" class="headerlink" title="Permanent link">&para;</a></h3>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Force every nonterminal run to stop and wait for aggregate termination.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
 
 
 
@@ -3853,7 +3888,7 @@ completes before local controller startup or direct-target contact.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-04">4 November 2026</time>
+    Last updated <time datetime="2026-11-05">5 November 2026</time>
   </span>
 
     
