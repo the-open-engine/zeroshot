@@ -68,9 +68,13 @@ fn schema_rendering_shows_the_provider_schema_and_never_the_contract() {
     assert!(prompt.contains("never return the schema itself"));
 
     let error = NodeResponseError::new("output is not an integer".to_owned());
-    let correction =
-        render_agent_correction_with_schema(&contract, &error, ProviderSchemaDialect::Standard)
-            .assert_value();
+    let correction = render_agent_correction_with_schema(
+        &contract,
+        &error,
+        None,
+        ProviderSchemaDialect::Standard,
+    )
+    .assert_value();
     assert!(correction.contains("output is not an integer"));
     assert!(correction.contains("Response schema:"));
     assert!(correction.contains(&schema_json));
@@ -521,4 +525,219 @@ fn contract_signals(contract: &NodeResponseContract) -> BTreeMap<FieldName, NonE
         unreachable!("test contract is a verifier")
     };
     signals.clone()
+}
+
+const VERIFIER_SKELETON: &str = concat!(
+    r#"{"response":{"output":{"note"?:<integer>,"summary":<string>},"#,
+    r#""signals":{"verdict":<one of "approved", "rejected">},"diagnostic":<string>}}"#
+);
+
+fn verifier_contract() -> NodeResponseContract {
+    NodeResponseContract::Verifier {
+        output: serde_json::from_value(json!({
+            "kind": "record",
+            "fields": {
+                "summary": { "type": { "kind": "string" }, "required": true },
+                "note": { "type": { "kind": "integer" }, "required": false }
+            }
+        }))
+        .assert_value(),
+        signals: BTreeMap::from([(
+            FieldName::new("verdict").assert_value(),
+            NonEmptyEnumSet::new(vec![
+                EnumLabel::new("approved").assert_value(),
+                EnumLabel::new("rejected").assert_value(),
+            ])
+            .assert_value(),
+        )]),
+        diagnostic: serde_json::from_value(json!({ "kind": "string" })).assert_value(),
+    }
+}
+
+fn valid_verifier_envelope() -> String {
+    json!({
+        "response": {
+            "output": { "summary": "looks good" },
+            "signals": { "verdict": "approved" },
+            "diagnostic": "checked"
+        }
+    })
+    .to_string()
+}
+
+fn correction_prompt(contract: &NodeResponseContract, response: &str) -> String {
+    match resolve_agent_response_with_schema(contract, response, ProviderSchemaDialect::Standard)
+        .assert_value()
+    {
+        AgentResponse::Correction { prompt, .. } => prompt,
+        AgentResponse::Complete(_) => panic!("rejected response must request a correction"),
+    }
+}
+
+#[test]
+fn response_skeleton_renders_the_verifier_envelope() {
+    assert_eq!(
+        response_skeleton(&verifier_contract()).assert_value(),
+        VERIFIER_SKELETON
+    );
+}
+
+#[test]
+fn response_skeleton_renders_every_payload_kind() {
+    let contract = NodeResponseContract::Worker {
+        output: serde_json::from_value(json!({
+            "kind": "record",
+            "fields": {
+                "nothing": { "type": { "kind": "null" }, "required": true },
+                "flag": { "type": { "kind": "boolean" }, "required": true },
+                "count": { "type": { "kind": "integer" }, "required": true },
+                "ratio": { "type": { "kind": "number" }, "required": true },
+                "text": { "type": { "kind": "string" }, "required": true },
+                "names": {
+                    "type": {
+                        "kind": "array",
+                        "items": { "kind": "string" }
+                    },
+                    "required": true
+                },
+                "state": {
+                    "type": { "kind": "enum", "values": ["fresh", "ripe"] },
+                    "required": true
+                },
+                "nested": {
+                    "type": {
+                        "kind": "record",
+                        "fields": {
+                            "note": { "type": { "kind": "string" }, "required": false }
+                        }
+                    },
+                    "required": true
+                }
+            }
+        }))
+        .assert_value(),
+    };
+    assert_eq!(
+        response_skeleton(&contract).assert_value(),
+        concat!(
+            r#"{"response":{"count":<integer>,"flag":<boolean>,"names":[<string>,...],"#,
+            r#""nested":{"note"?:<string>},"nothing":null,"ratio":<number>,"#,
+            r#""state":<one of "fresh", "ripe">,"text":<string>}}"#
+        )
+    );
+    assert_eq!(
+        response_skeleton(&worker_contract()).assert_value(),
+        r#"{"response":{"answer":<integer>}}"#
+    );
+}
+
+#[test]
+fn skeleton_with_placeholders_is_not_accepted() {
+    let skeleton = response_skeleton(&verifier_contract()).assert_value();
+    assert!(serde_json::from_str::<Value>(&skeleton).is_err());
+    assert!(matches!(
+        resolve_agent_response_with_schema(
+            &verifier_contract(),
+            &skeleton,
+            ProviderSchemaDialect::Standard
+        )
+        .assert_value(),
+        AgentResponse::Correction { .. }
+    ));
+}
+
+#[test]
+fn correction_names_text_before_the_object() {
+    let response = format!("Here is my review:\n{}", valid_verifier_envelope());
+    let prompt = correction_prompt(&verifier_contract(), &response);
+    assert!(prompt.contains("Problem:"));
+    assert!(prompt.contains(EnvelopeFault::LeadingText.problem()));
+    assert!(prompt.contains(VERIFIER_SKELETON));
+}
+
+#[test]
+fn correction_names_an_unterminated_object() {
+    let envelope = valid_verifier_envelope();
+    let truncated = envelope.strip_suffix('}').assert_value();
+    let prompt = correction_prompt(&verifier_contract(), truncated);
+    assert!(prompt.contains("Problem:"));
+    assert!(prompt.contains(EnvelopeFault::Unterminated.problem()));
+}
+
+#[test]
+fn correction_names_content_after_the_object() {
+    let envelope = valid_verifier_envelope();
+    let prompt = correction_prompt(&verifier_contract(), &format!("{envelope}{envelope}"));
+    assert!(prompt.contains("Problem:"));
+    assert!(prompt.contains(EnvelopeFault::TrailingContent.problem()));
+}
+
+#[test]
+fn correction_names_an_empty_reply() {
+    let prompt = correction_prompt(&verifier_contract(), "  \n");
+    assert!(prompt.contains("Problem:"));
+    assert!(prompt.contains(EnvelopeFault::Empty.problem()));
+}
+
+#[test]
+fn payload_errors_carry_the_shape_but_no_envelope_problem() {
+    let response = json!({
+        "response": {
+            "output": { "summary": "looks good" },
+            "signals": { "verdict": "maybe" },
+            "diagnostic": "checked"
+        }
+    })
+    .to_string();
+    let prompt = correction_prompt(&verifier_contract(), &response);
+    assert!(prompt.contains(VERIFIER_SKELETON));
+    assert!(!prompt.contains("Problem:"));
+}
+
+#[test]
+fn correction_guidance_stays_out_of_the_diagnostic() {
+    let response = format!("Here is my review:\n{}", valid_verifier_envelope());
+    let AgentResponse::Correction { diagnostic, .. } = resolve_agent_response_with_schema(
+        &verifier_contract(),
+        &response,
+        ProviderSchemaDialect::Standard,
+    )
+    .assert_value() else {
+        panic!("rejected response must request a correction");
+    };
+    assert!(
+        diagnostic
+            .to_string()
+            .starts_with("provider response must be exactly an object containing response:")
+    );
+    assert!(!diagnostic.to_string().contains("Problem:"));
+    assert!(!diagnostic.to_string().contains("Expected shape"));
+}
+
+#[test]
+fn contract_correction_carries_the_same_guidance() {
+    let response = format!("Here is my review:\n{}", valid_verifier_envelope());
+    let AgentResponse::Correction { prompt, .. } =
+        resolve_agent_response(&verifier_contract(), &response).assert_value()
+    else {
+        panic!("rejected response must request a correction");
+    };
+    assert!(prompt.contains("Response contract:"));
+    assert!(prompt.contains("Problem:"));
+    assert!(prompt.contains(VERIFIER_SKELETON));
+}
+
+#[test]
+fn envelope_fault_classifies_known_faults() {
+    assert_eq!(envelope_fault(""), Some(EnvelopeFault::Empty));
+    assert_eq!(envelope_fault("ok {}"), Some(EnvelopeFault::LeadingText));
+    assert_eq!(
+        envelope_fault("{\"response\":{"),
+        Some(EnvelopeFault::Unterminated)
+    );
+    assert_eq!(
+        envelope_fault("{} {}"),
+        Some(EnvelopeFault::TrailingContent)
+    );
+    assert_eq!(envelope_fault("{\"other\":1}"), None);
 }
