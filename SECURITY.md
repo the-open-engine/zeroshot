@@ -11,24 +11,18 @@
 If you discover a security vulnerability in zeroshot, please report it responsibly:
 
 1. **Do NOT** open a public GitHub issue for security vulnerabilities
-2. Email the maintainers directly at: security@covibes.io
+2. Submit the finding on our [support page](https://support.theopenengine.com/) or submit a GitHub security advisory.
 3. Include:
    - Description of the vulnerability
    - Steps to reproduce
    - Potential impact
    - Any suggested fixes (optional)
 
-## Response Timeline
-
-- **Initial response**: Within 48 hours
-- **Status update**: Within 7 days
-- **Fix timeline**: Depends on severity, typically within 30 days for critical issues
-
 ## Scope
 
 This policy applies to:
 
-- The zeroshot CLI tool
+- The zeroshot CLI tool and target images
 - Agent execution and isolation mechanisms
 - Message bus and ledger components
 - Docker container configurations
