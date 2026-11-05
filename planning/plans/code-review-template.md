@@ -106,6 +106,9 @@ with the new node names:
 
 - The top level is `claude`/`anthropic`, and Codex nodes use
   `lane: {harness: codex, provider: openai}`.
+- `workspaceCheckpoints: false` skips file snapshots and Restic for local reviews; durable history,
+  outputs and comment receipts remain. Hosted users enable or omit the field, since named targets
+  currently reject checkpoint opt-out. Uniform runtimes accept the same field.
 - `report` uses `gpt-6.1-sol` at `medium`.
 - `deliver` is `comment_delivery` with `github: [GH_TOKEN]`.
 - It has no API-key or `IS_SANDBOX` connections, no Codex catalog pin, and no `activeMemory` or

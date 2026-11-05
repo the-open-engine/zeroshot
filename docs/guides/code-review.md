@@ -53,6 +53,11 @@ as `runtime.json` and pass it through `--runtime-config`. It needs a Claude Code
 Model choices remain in the caller's runtime plan rather than the graph, so a plan with other
 models, or a uniform runtime through `--uniform-runtime-config`, works as well.
 
+The supplied plan sets `workspaceCheckpoints: false` for local reviews, skipping file snapshots
+and the Restic dependency. History, structured outputs, logs and comment receipts remain durable.
+A failed run can restart against its retained checkout, but cannot resume from a workspace snapshot.
+Set the same field in a uniform runtime file to use this policy with `--uniform-runtime-config`.
+
 Comment delivery uses the `github` connection's `GH_TOKEN`, as for `pr-review`. Publication
 credentials belong to the native node and are not declared on the review agents.
 
@@ -70,8 +75,10 @@ zeroshot run --title "Code review PR 123" \
   --submission-key code-review-pr-123
 ```
 
-`--validate-only` prepares and validates without executing agents. For hosted execution, add
-`--target platform`; source comes from URL resolution, so a client checkout is unnecessary.
+`--validate-only` prepares and validates without executing agents. For hosted execution, set
+`workspaceCheckpoints` to `true` (or remove the field) before adding `--target platform`; named
+targets currently reject checkpoint opt-out. Source comes from URL resolution, so a client checkout
+is unnecessary.
 
 ## Input and result
 

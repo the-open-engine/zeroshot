@@ -467,7 +467,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   agent error or map overflow fails before publication. Instructions concatenate fixed `include_str!` fragments at compile time; there is no runtime
   prompt parser. Inspectors do not install dependencies or start applications, services or browsers.
   The report stays under 12,000 characters and 48,000 UTF-8 bytes to leave room for the publisher header. The supplied runtime splits agents across Claude Code and Codex;
-  model choices remain caller-authored.
+  model choices remain caller-authored. Its supplied local runtime sets `workspaceCheckpoints: false`
+  to skip file snapshots and Restic while preserving durable history and comment receipts. Uniform
+  runtimes can select the same policy; named targets require the field enabled or omitted.
 - Built-in template selection defaults to PR delivery for `software-change`, comment delivery for
   `pr-review`, `code-review` and `issue-review`, and no delivery for the other templates. Explicit supported delivery choices override
   these defaults. Run, profile creation, template export, and editor ordering agree; Python leaves

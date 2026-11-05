@@ -31,6 +31,10 @@ async fn graph(delivery: TemplateDelivery) -> VerifiedGraph {
         "../../../../docs/assets/code-review/runtime.json"
     ))
     .assert_value();
+    assert!(
+        !runtime.workspace_checkpoints,
+        "the supplied local code-review runtime must skip workspace snapshots"
+    );
     if delivery == TemplateDelivery::None {
         runtime
             .nodes_mut()

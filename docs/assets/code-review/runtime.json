@@ -2,6 +2,7 @@
   "harness": "claude",
   "provider": "anthropic",
   "size": "medium",
+  "workspaceCheckpoints": false,
   "nodes": {
     "triage": {
       "kind": "agent",
