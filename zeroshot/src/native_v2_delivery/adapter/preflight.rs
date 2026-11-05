@@ -89,7 +89,7 @@ impl NativeV2DeliveryAdapter {
         preparation: &mut DeliveryPreparation<'_, '_>,
         commit_message: &str,
     ) -> Result<(), DeliveryStop> {
-        let branch = delivery_branch(self.config.delivery_run_id.as_str());
+        let branch = delivery_head_branch(&self.config.delivery_run_id);
         let known = self.delivery_state();
         let mode = preparation_mode(preparation)?;
         let request = SourceDeliveryRead {

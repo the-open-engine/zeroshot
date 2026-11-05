@@ -256,16 +256,24 @@ fn help_explains_delivery_authentication_and_local_run_safety() {
 }
 
 #[test]
-fn help_explains_the_seven_day_plan_queue_deadline() {
-    let plan = successful_stdout(&["plan", "--help"]);
+fn help_explains_stack_delivery_and_the_seven_day_queue_deadline() {
+    let stack = successful_stdout(&["stack", "--help"]);
     assert_prose(
-        &plan,
+        &stack,
         &[
+            "\"schema\": \"zeroshot.stack/v1\"",
+            "`delivery` is required",
+            "merge each run merges into the base branch",
+            "stacked_pull_requests each run opens a pull request against the branch of the run before it",
+            "in dependency order with ties broken by run name",
+            "`zeroshot stack validate` prints that order",
             "queue deadline is the earlier of `expiresat` and seven days after `readyat`",
             "`expiresat` must be in the future and no more than seven days away",
         ],
     );
-    assert!(!normalized(&plan).contains("24 hours"));
+    assert!(!normalized(&stack).contains("24 hours"));
+    assert!(!normalized(&stack).contains("merge-plan"));
+    assert!(!invoke(&["plan", "--help"]).status.success());
 }
 
 #[test]

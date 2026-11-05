@@ -25,10 +25,10 @@ mod context;
 mod failure;
 #[path = "graph_tree.rs"]
 mod graph_tree;
-#[path = "execution/merge_plans.rs"]
-mod merge_plans;
 #[path = "execution/profiles.rs"]
 mod profiles;
+#[path = "execution/stacks.rs"]
+mod stacks;
 #[path = "execution/status.rs"]
 mod status;
 #[path = "execution/submission.rs"]
@@ -76,8 +76,8 @@ where
     if let Some(outcome) = try_execute_native_v2_static(&command, output)? {
         return Ok(outcome);
     }
-    if command.is_plan_operation() {
-        return merge_plans::execute(command, context, signal, output).await;
+    if command.is_stack_operation() {
+        return stacks::execute(command, context, signal, output).await;
     }
     if command.is_management_operation() {
         return execute_management(command, context.backend, output).await;

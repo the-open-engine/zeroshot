@@ -30,7 +30,8 @@ a plan file exists (`.zeroshot/plans/<id>.md`), use its Goal, Context, Acceptanc
 Constraints, Decided approach and Decisions as the task. Criteria marked `Check (manual):` need a
 person or another environment: tell the run to list them rather than verify them. If the plan lists
 `depends_on`, confirm with the user that those plans are built and merged before starting it, and
-include any constraints they share that the plan does not repeat.
+include any constraints they share that the plan does not repeat, or submit the dependent plans
+together as a stack on Platform (see Submit a stack).
 
 Never start a Zeroshot run merely because the skill is available. The user must ask to use Zeroshot.
 A worker already executing inside a Zeroshot run should perform its assigned work directly, not start
@@ -250,6 +251,37 @@ credentials. Generic forms require the target's `openengine.git-transport/v1` ca
 Named targets receive the remote revision, not uncommitted files. Check dirty or unpushed work and
 never push or omit it without authorization. Confirm the exact repository, branch, revision, target,
 profile, and delivery intent reported for the run.
+
+## Submit a stack
+
+A stack submits several dependent tasks to Platform at once, for example the stack manifest the
+`zeroshot-plan` skill writes as `.zeroshot/plans/<id>.stack.json`. It is atomic and immutable: every
+run uses one repository, base branch and profile, and `needs` decides which runs must succeed before
+another starts without passing output between them. Submit one only when the user asks. The
+manifest's `delivery` is required; when it is still a placeholder, ask the user to choose:
+
+- `merge`: each run merges into the base branch before the runs that need it start. The profile
+  needs exactly one Git merge delivery node, `merge@2` or `merge@3` (`--ship` templates use
+  `merge@3`).
+- `stacked_pull_requests`: Zeroshot puts the runs in one line, in dependency order with ties broken
+  by run name, and each run opens a pull request against the branch of the run before it. Nothing
+  merges; the stack is done when every pull request is open. The profile needs exactly one `pr@2`
+  delivery node, the `software-change` default.
+
+Agent bindings in the profile must not declare `GH_TOKEN`. Validate, show the user the printed order
+for stacked pull requests, then submit with a stable key and follow it:
+
+```console
+zeroshot stack validate STACK.json
+zeroshot stack submit STACK.json --target platform --submission-key KEY
+zeroshot stack status STACK_ID --target platform
+```
+
+`zeroshot stack --help` documents the manifest. Stacked pull requests are reviewed and merged from
+the bottom up. GitHub moves a child pull request onto the base branch when its merged parent's
+branch is deleted; a squash-merged parent, or a parent changed during review, leaves the pull
+requests above it to rebase by hand. `zeroshot stack force-stop` stops every unfinished run; use it
+only when the user intends to stop the stack.
 
 ## Observe and troubleshoot
 

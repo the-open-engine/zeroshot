@@ -84,28 +84,38 @@ Docker/direct and hosted targets require a committed Git source. Per-run `reposi
 credential-free HTTPS/SSH Git URL or GitHub `owner/name`; `branch=` and `revision=` override source
 selection. `source_connection=` selects a named connection used only for checkout and delivery.
 
-`HostedTarget` reuses a named target and login from the CLI. Merge plans are immutable DAGs over one
-repository, branch, and hosted profile. That profile must contain exactly one
-`builtin.git-delivery.merge@2` node; pull-request delivery isn't accepted for plans. Agent bindings
-must not declare `GH_TOKEN`; only the Git delivery binding may declare it.
+`HostedTarget` reuses a named target and login from the CLI. A stack is an atomic, immutable DAG
+of runs over one repository, base branch, and hosted profile, submitted at once. `delivery` chooses
+how it lands:
+
+- `"merge"`: the profile contains exactly one Git merge delivery node
+  (`builtin.git-delivery.merge@2` or `@3`). Each run merges into the base branch before its
+  dependents start, and a run may need several others.
+- `"stacked_pull_requests"`: the profile contains exactly one `builtin.git-delivery.pr@2` node.
+  Zeroshot turns the runs into one linear stack: each run needs exactly the run before it, in
+  dependency order with ties broken by run name. Each run opens a pull request against the previous
+  run's branch, the first against the base branch, and nothing is merged.
+
+In both modes, agent bindings must not declare `GH_TOKEN`; only the Git delivery binding may.
 
 ```python
 from datetime import UTC, datetime, timedelta
 
-from zeroshot import Client, HostedTarget, MergePlanRequest, MergePlanRun
+from zeroshot import Client, HostedTarget, StackRequest, StackRun
 
 
-async def run_plan() -> None:
-    request = MergePlanRequest(
+async def run_stack() -> None:
+    request = StackRequest(
         title="Release checkout update",
         repository="the-open-engine/zeroshot",
         branch="main",
         profile="org:software-change",
+        delivery="merge",
         expires_at=(datetime.now(UTC) + timedelta(days=1)).isoformat(),
         runs={
-            "backend": MergePlanRun(input={"task": "Update the API."}),
-            "frontend": MergePlanRun(input={"task": "Update the client."}),
-            "integrate": MergePlanRun(
+            "backend": StackRun(input={"task": "Update the API."}),
+            "frontend": StackRun(input={"task": "Update the client."}),
+            "integrate": StackRun(
                 input={"task": "Verify the combined changes and run the release tests."},
                 needs=("backend", "frontend"),
             ),
@@ -114,21 +124,26 @@ async def run_plan() -> None:
     )
 
     async with Client(target=HostedTarget("platform")) as client:
-        plan = await client.submit_plan(request)
-        status = await plan.wait(wait_timeout=21_600)
+        stack = await client.submit_stack(request)
+        status = await stack.wait(wait_timeout=21_600)
 
     if not status.succeeded:
-        raise RuntimeError(f"merge plan ended as {status.state}")
+        raise RuntimeError(f"stack ended as {status.state}")
 ```
 
-Plan input is static JSON. A dependency controls when a node may start; it doesn't copy output into
-another node. Run IDs are assigned once during atomic submission. After dependencies merge, Platform
-materializes a node against an exact source revision. When materialization completes, `readyAt` is
-set and the node's queue deadline is the earlier of plan expiry and seven days after `readyAt`. A
-merge conflict is repaired by the conflicting run itself in the same checkout and delivery loop. A
-descendant cannot repair a failed predecessor; it ends as `dependency_failed`. `MergePlan.watch()`
-polls the aggregate Platform status and emits changed snapshots because the v1 plan API has no
-streaming endpoint.
+With a pull-request delivery profile and `delivery="stacked_pull_requests"`, the same runs become
+the chain `backend`, `frontend`, `integrate`: three pull requests, each targeting the branch of the
+one before it.
+
+Stack input is static JSON. A dependency controls when a run may start; it doesn't copy output into
+another run. Run IDs are assigned once during atomic submission. Once its dependencies are
+delivered, Platform materializes a run against an exact source branch and revision. When
+materialization completes, `readyAt` is set and the run's queue deadline is the earlier of stack
+expiry and seven days after `readyAt`. With merge delivery, a merge conflict is repaired by the
+conflicting run itself in the same checkout and delivery loop. A descendant cannot repair a failed
+predecessor; it ends as `dependency_failed`. `Stack.watch()` polls the aggregate Platform status and
+emits changed snapshots because the v1 stack API has no streaming endpoint. The stacks guide in the
+Zeroshot documentation covers delivery modes and reviewing a stacked pull-request chain.
 
 ## Exact graph and runtime control
 

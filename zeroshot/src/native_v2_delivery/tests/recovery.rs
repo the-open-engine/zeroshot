@@ -151,7 +151,10 @@ async fn later_execution_resumes_the_authorized_remote_head_after_infrastructure
         &repo.remote,
         &[
             "rev-parse",
-            &format!("refs/heads/{}", delivery_branch("delivery-run")),
+            &format!(
+                "refs/heads/{}",
+                delivery_head_branch(&RunId::new("delivery-run"))
+            ),
         ],
     );
     assert_ne!(
@@ -210,7 +213,10 @@ async fn already_merged_pr_preserves_dirty_or_newer_local_work_without_republish
                 &repo.remote,
                 &[
                     "rev-parse",
-                    &format!("refs/heads/{}", delivery_branch("delivery-run"))
+                    &format!(
+                        "refs/heads/{}",
+                        delivery_head_branch(&RunId::new("delivery-run"))
+                    )
                 ]
             ),
             published
@@ -236,7 +242,7 @@ async fn completed_reconciliation_followed_by_retry_still_requires_current_work_
     };
     let initial = run_with_adapter(request(), adapter.clone()).await.outcome;
     assert_delivery_signal(&initial, DELIVERY_CI_FAILED_LABEL);
-    let branch = delivery_branch("delivery-run");
+    let branch = delivery_head_branch(&RunId::new("delivery-run"));
     let external_head = advance_delivery_branch(&repo, &branch);
     let outcome = run_with_adapter(request(), adapter).await.outcome;
     assert_delivery_signal(&outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
@@ -272,7 +278,7 @@ async fn preflight_retries_reads_but_refuses_unowned_remote_lineage() {
     assert_delivery_signal(&opened, DELIVERY_OPENED_LABEL);
     assert_eq!(authority.delivery_reads.load(Ordering::SeqCst), 2);
 
-    let branch = delivery_branch("preflight-refusal");
+    let branch = delivery_head_branch(&RunId::new("preflight-refusal"));
     let external_head = advance_delivery_branch(&repo, &branch);
     let local_head = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
     let refused = run_with_adapter(request(), adapter).await;
@@ -312,7 +318,7 @@ async fn published_branch_deletion_and_unexplained_existing_branch_fail_closed()
         };
         let opened = run_with_adapter(request(), adapter.clone()).await.outcome;
         assert_delivery_signal(&opened, DELIVERY_OPENED_LABEL);
-        let branch = delivery_branch(scenario);
+        let branch = delivery_head_branch(&RunId::new(scenario));
 
         let retry_adapter = if scenario == "deleted" {
             git(

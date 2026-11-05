@@ -816,7 +816,7 @@ async fn resumed_current_delivery_modes_keep_the_predecessor_branch_with_a_fresh
         if mode == DeliveryMode::Push {
             assert_eq!(
                 resumed["headBranch"],
-                delivery_branch("stable-delivery-run")
+                delivery_head_branch(&RunId::new("stable-delivery-run"))
             );
         } else {
             let reviews = authority.review_requests();
@@ -824,10 +824,71 @@ async fn resumed_current_delivery_modes_keep_the_predecessor_branch_with_a_fresh
             assert_eq!(reviews[0].head_branch, reviews[1].head_branch);
             assert_eq!(
                 reviews[1].head_branch,
-                delivery_branch("stable-delivery-run")
+                delivery_head_branch(&RunId::new("stable-delivery-run"))
             );
         }
     }
+}
+
+#[tokio::test]
+async fn public_head_branch_is_the_pull_request_branch_on_every_delivery_path() {
+    let delivery_run = RunId::new("stack-parent-delivery");
+    let head = delivery_head_branch(&delivery_run);
+    assert_eq!(
+        head, "zeroshot/v2-59b39eb2d2d1a0e1e360",
+        "the branch is a stable public contract"
+    );
+    let repo = TempRepo::delivery();
+    let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::NoCi));
+    let request = |run_id| DeliveryRunRequest {
+        repo: &repo,
+        attempts: 3,
+        mode: DeliveryMode::PullRequestV2,
+        run_id,
+        refresh: None,
+    };
+
+    let first = run_delivery_execution_with_identity(
+        request("stack-parent"),
+        authority.clone(),
+        delivery_run.as_str(),
+    )
+    .await;
+    let recovered = run_delivery_execution_with_identity_and_adoption(
+        request("stack-parent-successor"),
+        authority.clone(),
+        delivery_run.as_str(),
+        true,
+    )
+    .await;
+
+    assert_delivery_signal(&first.outcome, DELIVERY_READY_LABEL);
+    assert_delivery_signal(&recovered.outcome, DELIVERY_READY_LABEL);
+    let reviews = authority.review_requests();
+    assert_eq!(
+        reviews.len(),
+        2,
+        "first delivery and recovery open the same PR"
+    );
+    assert!(reviews.iter().all(|review| review.head_branch == head));
+    let preflight_reads = authority
+        .delivery_read_branches
+        .lock()
+        .assert_value()
+        .clone();
+    assert!(!preflight_reads.is_empty());
+    assert!(preflight_reads.iter().all(|branch| *branch == head));
+    let pushed = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&repo.remote)
+        .args(["rev-parse", "--verify", &format!("refs/heads/{head}")])
+        .output()
+        .assert_value();
+    assert!(pushed.status.success(), "delivery pushed {head}");
+    assert_eq!(
+        String::from_utf8(pushed.stdout).assert_value().trim(),
+        reviews[0].head_revision
+    );
 }
 
 #[tokio::test]

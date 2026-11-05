@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionDeleteResult, ConnectionListRequest, ConnectionListResult,
-    ConnectionMutationResult, ConnectionSetRequest, ConnectionSummary, MergePlan, MergePlanState,
-    NodeName, PositiveInteger, RunAttachEventNotification, RunAttachParams, RunCheckpoint,
+    ConnectionMutationResult, ConnectionSetRequest, ConnectionSummary, Stack, StackState, NodeName,
+    PositiveInteger, RunAttachEventNotification, RunAttachParams, RunCheckpoint,
     RunCheckpointsParams, RunCheckpointsResult, RunConnectionRequirements, RunConnectionValues,
     RunDiscardWorkspaceParams, RunDiscardWorkspaceResult, RunForceParams, RunId, RunListParams,
     RunLogEventNotification, RunLogsParams, RunProfile, RunProfileDefaultRequest,
@@ -228,7 +228,9 @@ pub(in crate::native_v2_cli) struct FakeBackend {
     error_logs: usize,
     pending_logs: bool,
     queued_lifecycle: bool,
-    terminal_plan_state: Option<MergePlanState>,
+    terminal_stack_state: Option<StackState>,
+    stack_template_delivery: Option<TemplateDelivery>,
+    submitted_stacks: Arc<Mutex<Vec<PreparedStackRequest>>>,
     resume_requirements: Option<RunConnectionRequirements>,
     resume_source: Option<Value>,
     trusted_resume_requirements: Option<RunConnectionRequirements>,
@@ -336,11 +338,22 @@ impl FakeBackend {
         }
     }
 
-    pub(super) fn with_terminal_plan_state(state: MergePlanState) -> Self {
+    pub(super) fn with_terminal_stack_state(state: StackState) -> Self {
         Self {
-            terminal_plan_state: Some(state),
+            terminal_stack_state: Some(state),
             ..Self::default()
         }
+    }
+
+    pub(super) fn with_stack_profile(state: StackState, delivery: TemplateDelivery) -> Self {
+        Self {
+            stack_template_delivery: Some(delivery),
+            ..Self::with_terminal_stack_state(state)
+        }
+    }
+
+    pub(super) fn submitted_stacks(&self) -> Vec<PreparedStackRequest> {
+        self.submitted_stacks.lock().assert_value().clone()
     }
 
     pub(super) fn with_resume_requirements(requirements: RunConnectionRequirements) -> Self {
@@ -406,16 +419,14 @@ impl FakeBackend {
         self.calls.lock().assert_value().clone()
     }
 
-    fn terminal_plan(&self) -> Result<MergePlan, NativeV2CliError> {
-        self.terminal_plan_state
-            .map(terminal_merge_plan)
-            .ok_or_else(|| {
-                NativeV2CliError::Target("target does not advertise merge plans".to_owned())
-            })
+    fn terminal_stack_result(&self) -> Result<Stack, NativeV2CliError> {
+        self.terminal_stack_state
+            .map(terminal_stack)
+            .ok_or_else(|| NativeV2CliError::Target("target does not advertise stacks".to_owned()))
     }
 }
 
-fn merge_plan_profile() -> RunProfile {
+fn stack_profile(delivery: TemplateDelivery) -> RunProfile {
     let runtime = serde_json::from_str(
         r#"{
             "harness":"codex","provider":"openai","size":"medium","nodes":{
@@ -428,11 +439,11 @@ fn merge_plan_profile() -> RunProfile {
     )
     .assert_value();
     RunProfile {
-        id: "profile-plan".to_owned(),
+        id: "profile-stack".to_owned(),
         name: RunProfileName::new("software-change").assert_value(),
         scope: RunProfileScope::Org,
         graph: BuiltinGraphTemplate::SoftwareChange
-            .materialize(TemplateDelivery::Merge)
+            .materialize(delivery)
             .assert_value(),
         runtime,
         is_default: false,
@@ -463,9 +474,9 @@ fn connection_summary(
     }
 }
 
-fn terminal_merge_plan(state: MergePlanState) -> MergePlan {
+fn terminal_stack(state: StackState) -> Stack {
     serde_json::from_value(json!({
-        "planId":"plan-public",
+        "stackId":"stack-public",
         "title":"Release",
         "state":state,
         "repository":"open-engine/zeroshot",
@@ -620,8 +631,11 @@ impl NativeV2CliBackend for FakeBackend {
         target: Option<&str>,
         selector: RunProfileSelector,
     ) -> Result<RunProfile, NativeV2CliError> {
-        if self.terminal_plan_state.is_some() {
-            return Ok(merge_plan_profile());
+        if self.terminal_stack_state.is_some() {
+            return Ok(stack_profile(
+                self.stack_template_delivery
+                    .unwrap_or(TemplateDelivery::Merge),
+            ));
         }
         self.calls.lock().assert_value().push(Call::ProfileShow {
             target: target.map(str::to_owned),
@@ -678,28 +692,29 @@ impl NativeV2CliBackend for FakeBackend {
         })
     }
 
-    async fn merge_plan_submit(
+    async fn stack_submit(
         &self,
         _target: &str,
-        _request: PreparedMergePlanRequest,
-    ) -> Result<MergePlan, NativeV2CliError> {
-        self.terminal_plan()
+        request: PreparedStackRequest,
+    ) -> Result<Stack, NativeV2CliError> {
+        self.submitted_stacks.lock().assert_value().push(request);
+        self.terminal_stack_result()
     }
 
-    async fn merge_plan_status(
+    async fn stack_status(
         &self,
         _target: &str,
-        _plan_id: MergePlanId,
-    ) -> Result<MergePlan, NativeV2CliError> {
-        self.terminal_plan()
+        _stack_id: StackId,
+    ) -> Result<Stack, NativeV2CliError> {
+        self.terminal_stack_result()
     }
 
-    async fn merge_plan_force(
+    async fn stack_force(
         &self,
         _target: &str,
-        _plan_id: MergePlanId,
-    ) -> Result<MergePlan, NativeV2CliError> {
-        self.terminal_plan()
+        _stack_id: StackId,
+    ) -> Result<Stack, NativeV2CliError> {
+        self.terminal_stack_result()
     }
 
     async fn run_submit(

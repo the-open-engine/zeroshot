@@ -1,11 +1,12 @@
+use super::tests::test_manifest_json;
 use super::*;
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::json;
 
 #[test]
-fn merge_plan_environment_is_optional_concrete_and_selects_declared_hook_credentials() {
+fn stack_environment_is_optional_concrete_and_selects_declared_hook_credentials() {
     let root = tempfile::tempdir().assert_value();
-    let file = root.path().join("plan.json");
+    let file = root.path().join("stack.json");
     let mut document = test_manifest_json();
     let tomorrow = OffsetDateTime::now_utc() + TimeDuration::days(1);
     document["expiresAt"] = json!(format!(
@@ -43,7 +44,7 @@ fn merge_plan_environment_is_optional_concrete_and_selects_declared_hook_credent
             selection.clone().unwrap_or_default()
         );
         let request = prepared_request(
-            IdempotencyKey::new("plan").assert_value(),
+            IdempotencyKey::new("stack").assert_value(),
             manifest,
             &profile,
             &|name| (name == "NPM_TOKEN").then(|| OsString::from("registry-secret")),

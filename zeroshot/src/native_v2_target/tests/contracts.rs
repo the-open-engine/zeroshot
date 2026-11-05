@@ -1,7 +1,7 @@
 use openengine_cluster_protocol::{
     ConnectionDeleteRequest, ConnectionKey, ConnectionListRequest, ConnectionScope,
-    ConnectionSetRequest, EnvironmentVariableName, MergePlanId, RunForceParams, RunId,
-    RunListParams, RunLogsParams, RunProfileDefaultRequest, RunProfileListRequest, RunProfileName,
+    ConnectionSetRequest, EnvironmentVariableName, StackId, RunForceParams, RunId, RunListParams,
+    RunLogsParams, RunProfileDefaultRequest, RunProfileListRequest, RunProfileName,
     RunProfileRunRequest, RunProfileScope, RunProfileSelector, RunProfileSetRequest,
     RunStatusParams, RunWatchParams, StaticConnectionValues,
 };
@@ -249,7 +249,7 @@ async fn authorities_without_profile_support_fail_closed_for_every_profile_opera
 }
 
 #[tokio::test]
-async fn connector_preserves_fail_closed_profile_and_merge_plan_errors() {
+async fn connector_preserves_fail_closed_profile_and_stack_errors() {
     let authority = FakeAuthority::new("ws://127.0.0.1:1/native-v2/oecp");
     let (target, selector, set, _) = profile_operations();
     let registry = MemoryRegistry::default();
@@ -301,19 +301,15 @@ async fn connector_preserves_fail_closed_profile_and_merge_plan_errors() {
     );
     for error in [
         connector
-            .merge_plan_status("vm", MergePlanId::new("plan-1"))
+            .stack_status("vm", StackId::new("stack-1"))
             .await
             .assert_error(),
         connector
-            .merge_plan_force("vm", MergePlanId::new("plan-1"))
+            .stack_force("vm", StackId::new("stack-1"))
             .await
             .assert_error(),
     ] {
-        assert!(
-            error
-                .to_string()
-                .contains("hosted merge plans are unavailable")
-        );
+        assert!(error.to_string().contains("hosted stacks are unavailable"));
     }
     assert!(authority.calls().is_empty());
 }

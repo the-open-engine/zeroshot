@@ -269,28 +269,28 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         TargetHttpControlAuthority::profile_run(self, target, request).await
     }
 
-    async fn merge_plan_submit(
+    async fn stack_submit(
         &self,
         target: &TargetRecord,
-        request: &openengine_cluster_protocol::MergePlanSubmitRequest,
-    ) -> Result<openengine_cluster_protocol::MergePlan, TargetAuthorityError> {
-        TargetHttpControlAuthority::merge_plan_submit(self, target, request).await
+        request: &openengine_cluster_protocol::StackSubmitRequest,
+    ) -> Result<openengine_cluster_protocol::Stack, TargetAuthorityError> {
+        TargetHttpControlAuthority::stack_submit(self, target, request).await
     }
 
-    async fn merge_plan_status(
+    async fn stack_status(
         &self,
         target: &TargetRecord,
-        plan_id: &openengine_cluster_protocol::MergePlanId,
-    ) -> Result<openengine_cluster_protocol::MergePlan, TargetAuthorityError> {
-        TargetHttpControlAuthority::merge_plan_status(self, target, plan_id).await
+        stack_id: &openengine_cluster_protocol::StackId,
+    ) -> Result<openengine_cluster_protocol::Stack, TargetAuthorityError> {
+        TargetHttpControlAuthority::stack_status(self, target, stack_id).await
     }
 
-    async fn merge_plan_force(
+    async fn stack_force(
         &self,
         target: &TargetRecord,
-        plan_id: &openengine_cluster_protocol::MergePlanId,
-    ) -> Result<openengine_cluster_protocol::MergePlan, TargetAuthorityError> {
-        TargetHttpControlAuthority::merge_plan_force(self, target, plan_id).await
+        stack_id: &openengine_cluster_protocol::StackId,
+    ) -> Result<openengine_cluster_protocol::Stack, TargetAuthorityError> {
+        TargetHttpControlAuthority::stack_force(self, target, stack_id).await
     }
 
     async fn hosted_run_resume(

@@ -485,12 +485,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   commands use the Admin audience; target login verifies that account before persisting refresh
   custody, including accounts without an organization.
 - Hosted HTTP authority clones share one bounded in-memory OAuth access-token slot across all
-  hosted operations, including merge-plan discovery routes. Reuse requires the same target, login,
+  hosted operations, including stack discovery routes. Reuse requires the same target, login,
   OAuth endpoints/client, and audience with more than thirty seconds of token lifetime remaining.
   Cache misses and login serialize under the shared cache lock before the cross-process refresh-family
   lock; tokens enter the cache only after session verification and rotated refresh-token persistence.
   Login clears the slot before attempting authentication. HTTP authentication rejection invalidates
-  only the exact cached issuance, never a newer concurrent token; only merge plans retain their
+  only the exact cached issuance, never a newer concurrent token; only stacks retain their
   existing one-retry policy. Access tokens remain memory-only, and transport grant expiry continues
   to use durable observation reconnect/cursors without extending any lifetime.
 - Direct-target submissions keep a separate secret-free local authorization for each run's connection field requirements. Resume must match target-reported requirements to that original authorization before reading the caller environment, constrain outgoing values to those fields, carry the authorization to the successor, and revoke it after workspace discard.
@@ -1028,49 +1028,56 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   flushing each line and reporting overflow. `target serve --operator-diagnostics-json` enables
   stdout output. Writer shutdown is bounded; it cannot guarantee delivery after abrupt termination.
   Output has no deployment metadata or cloud-specific envelope.
-- Hosted merge plans are atomic, immutable, merge-only DAGs over one explicit repository, branch,
-  and profile. The target resolves each node's exact revision only after its dependencies succeed;
-  plans have static inputs, no cross-node dataflow, and no retry-in-place. Agent runtime bindings
-  cannot declare `GH_TOKEN`; the sole merge-delivery binding owns the GitHub write credential. A
-  node's queue deadline is the earlier of plan expiry and seven days after readiness.
+- Hosted stacks (`zeroshot stack`, manifest `zeroshot.stack/v1`, discovery `zeroshot.stacks/v1`)
+  are atomic, immutable DAGs over one explicit repository, base branch, and profile, delivered by
+  merge or as stacked pull requests per the required manifest `delivery`. Merge stacks need one
+  `merge@2`/`merge@3` profile delivery node and keep fan-in. Stacked pull-request stacks need one
+  `pr@2` node and run as one linear stack: the CLI orders runs by dependencies, ties broken by name,
+  and each run needs only its predecessor, starts from that run's branch and opens its PR against
+  it. A run's PR head is `native_v2_delivery::delivery_head_branch` of its delivery run ID; receipts
+  stay unchanged. Zeroshot never retargets or restacks PRs. The target resolves each node's exact
+  source branch and revision only after its dependencies succeed; stacks have static inputs, no
+  cross-node dataflow, no local execution, and no retry-in-place. Agent runtime bindings cannot
+  declare `GH_TOKEN`; the sole delivery binding owns the GitHub write credential. A node's queue
+  deadline is the earlier of stack expiry and seven days after readiness.
 - Read-only safe commands include `zeroshot list`, `zeroshot status`, and `zeroshot logs`.
 - Destructive commands such as `zeroshot force-stop` require explicit user intent.
 
 ## Where to look
 
-| Concept                       | Path                                                                                                                                                                                              |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Canonical crate and CLI       | `zeroshot/`                                                                                                                                                                                       |
-| CLI grammar/help              | `zeroshot/src/native_v2_cli/parser.rs`                                                                                                                                                            |
-| CLI composition               | `zeroshot/src/native_v2_cli.rs`, `zeroshot/src/main.rs`                                                                                                                                           |
-| CLI self-update               | `zeroshot/src/native_v2_cli/update.rs`                                                                                                                                                            |
-| Built-in templates            | `zeroshot/src/native_v2_templates.rs`, `zeroshot/src/native_v2_templates/`                                                                                                                        |
-| Local run composition         | `zeroshot/src/native_v2_local.rs`                                                                                                                                                                 |
-| Hosted/platform composition   | `zeroshot/src/native_v2_platform.rs`, `zeroshot/src/native_v2_hosting.rs`                                                                                                                         |
-| Hosted merge plans            | `crates/openengine-cluster-protocol/src/native_v2_hosted/merge_plan.rs`, `zeroshot/src/native_v2_cli/execution/merge_plans.rs`, `zeroshot/src/native_v2_target/controller_authority/hosted_runs/` |
-| Portable controller           | `zeroshot/src/native_v2_portable_controller.rs`, `zeroshot/src/native_v2_portable_controller/`                                                                                                    |
-| Provider/delivery composition | `zeroshot/src/native_v2_candidate.rs`, `zeroshot/src/native_v2_candidate/`                                                                                                                        |
-| Target server                 | `zeroshot/src/native_v2_target.rs`, `zeroshot/src/native_v2_target/`                                                                                                                              |
-| Target authority/auth         | `zeroshot/src/native_v2_target_authority.rs`, `zeroshot/src/native_v2_target_authority/`                                                                                                          |
-| Contained execution           | `zeroshot/src/execution.rs`, `zeroshot/src/execution/`                                                                                                                                            |
-| Faults and redaction          | `zeroshot/src/fault.rs`, `zeroshot/src/fault/`                                                                                                                                                    |
-| Run ledger                    | `zeroshot/src/v2_run_ledger.rs`, `zeroshot/src/v2_run_ledger/`                                                                                                                                    |
-| Cluster protocol types        | `crates/openengine-cluster-protocol/`                                                                                                                                                             |
-| Cluster server                | `crates/openengine-cluster-server/`                                                                                                                                                               |
-| Cluster client                | `crates/openengine-cluster-client/`                                                                                                                                                               |
-| Conformance fixtures          | `crates/openengine-cluster-testkit/`                                                                                                                                                              |
-| Worker descriptors/registry   | `crates/openengine-cluster-protocol/src/worker.rs`, `crates/openengine-cluster-server/src/worker_registry.rs`                                                                                     |
-| Generated protocol artifacts  | `protocol/openengine-cluster/v1/`                                                                                                                                                                 |
-| Documentation site            | `mkdocs.yml`, `docs/`, `scripts/docs_hook.py`, `scripts/docs_versions.py`, `.github/workflows/docs.yml`                                                                                           |
-| npm package                   | `npm/zeroshot/`                                                                                                                                                                                   |
-| Target image                  | `docker/zeroshot-target/`                                                                                                                                                                         |
-| Target declarations           | `distribution/zeroshot-targets.json`                                                                                                                                                              |
-| Distribution tooling          | `scripts/distribution.js`, `scripts/distribution/`, `npm/zeroshot/lib/release-artifacts.js`                                                                                                       |
-| Python SDK                    | `sdks/python/`                                                                                                                                                                                    |
-| Release workflow              | `.github/workflows/release.yml`                                                                                                                                                                   |
-| Python release workflow       | `.github/workflows/release-python.yml`                                                                                                                                                            |
-| CI classifier                 | `.github/ci-path-classifier.js`                                                                                                                                                                   |
-| Repository tooling tests      | `tests/tooling/`                                                                                                                                                                                  |
+| Concept                       | Path                                                                                                                                                                                    |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Canonical crate and CLI       | `zeroshot/`                                                                                                                                                                             |
+| CLI grammar/help              | `zeroshot/src/native_v2_cli/parser.rs`                                                                                                                                                  |
+| CLI composition               | `zeroshot/src/native_v2_cli.rs`, `zeroshot/src/main.rs`                                                                                                                                 |
+| CLI self-update               | `zeroshot/src/native_v2_cli/update.rs`                                                                                                                                                  |
+| Built-in templates            | `zeroshot/src/native_v2_templates.rs`, `zeroshot/src/native_v2_templates/`                                                                                                              |
+| Local run composition         | `zeroshot/src/native_v2_local.rs`                                                                                                                                                       |
+| Hosted/platform composition   | `zeroshot/src/native_v2_platform.rs`, `zeroshot/src/native_v2_hosting.rs`                                                                                                               |
+| Hosted stacks                 | `crates/openengine-cluster-protocol/src/native_v2_hosted/stack.rs`, `zeroshot/src/native_v2_cli/execution/stacks.rs`, `zeroshot/src/native_v2_target/controller_authority/hosted_runs/` |
+| Portable controller           | `zeroshot/src/native_v2_portable_controller.rs`, `zeroshot/src/native_v2_portable_controller/`                                                                                          |
+| Provider/delivery composition | `zeroshot/src/native_v2_candidate.rs`, `zeroshot/src/native_v2_candidate/`                                                                                                              |
+| Target server                 | `zeroshot/src/native_v2_target.rs`, `zeroshot/src/native_v2_target/`                                                                                                                    |
+| Target authority/auth         | `zeroshot/src/native_v2_target_authority.rs`, `zeroshot/src/native_v2_target_authority/`                                                                                                |
+| Contained execution           | `zeroshot/src/execution.rs`, `zeroshot/src/execution/`                                                                                                                                  |
+| Faults and redaction          | `zeroshot/src/fault.rs`, `zeroshot/src/fault/`                                                                                                                                          |
+| Run ledger                    | `zeroshot/src/v2_run_ledger.rs`, `zeroshot/src/v2_run_ledger/`                                                                                                                          |
+| Cluster protocol types        | `crates/openengine-cluster-protocol/`                                                                                                                                                   |
+| Cluster server                | `crates/openengine-cluster-server/`                                                                                                                                                     |
+| Cluster client                | `crates/openengine-cluster-client/`                                                                                                                                                     |
+| Conformance fixtures          | `crates/openengine-cluster-testkit/`                                                                                                                                                    |
+| Worker descriptors/registry   | `crates/openengine-cluster-protocol/src/worker.rs`, `crates/openengine-cluster-server/src/worker_registry.rs`                                                                           |
+| Generated protocol artifacts  | `protocol/openengine-cluster/v1/`                                                                                                                                                       |
+| Documentation site            | `mkdocs.yml`, `docs/`, `scripts/docs_hook.py`, `scripts/docs_versions.py`, `.github/workflows/docs.yml`                                                                                 |
+| npm package                   | `npm/zeroshot/`                                                                                                                                                                         |
+| Target image                  | `docker/zeroshot-target/`                                                                                                                                                               |
+| Target declarations           | `distribution/zeroshot-targets.json`                                                                                                                                                    |
+| Distribution tooling          | `scripts/distribution.js`, `scripts/distribution/`, `npm/zeroshot/lib/release-artifacts.js`                                                                                             |
+| Python SDK                    | `sdks/python/`                                                                                                                                                                          |
+| Release workflow              | `.github/workflows/release.yml`                                                                                                                                                         |
+| Python release workflow       | `.github/workflows/release-python.yml`                                                                                                                                                  |
+| CI classifier                 | `.github/ci-path-classifier.js`                                                                                                                                                         |
+| Repository tooling tests      | `tests/tooling/`                                                                                                                                                                        |
 
 ## Shared workspace UI
 

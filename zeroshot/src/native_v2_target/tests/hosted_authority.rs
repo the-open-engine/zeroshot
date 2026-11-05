@@ -21,12 +21,12 @@ mod direct;
 pub(super) use direct::{spawn_direct_target_authority, spawn_rejecting_direct_target_authority};
 #[path = "hosted_authority/machine.rs"]
 mod machine;
-#[path = "hosted_authority/merge_plans.rs"]
-mod merge_plans;
 #[path = "hosted_authority/problem_errors.rs"]
 mod problem_errors;
 #[path = "hosted_authority/runtime_lanes.rs"]
 mod runtime_lanes;
+#[path = "hosted_authority/stacks.rs"]
+mod stacks;
 
 type HostedTestBackend = zeroshot_engine::native_v2_cli::oecp::NamedTargetCliBackend<
     NativeV2TargetConnector<
@@ -360,13 +360,13 @@ fn hosted_discovery(origin: &str) -> String {
                     "page": "/native-v2/workspaces/user/runs/{run_id}/history{?after}"
                 }
             },
-            "merge_plans": {
-                "kind": "zeroshot.merge-plans/v1",
+            "stacks": {
+                "kind": "zeroshot.stacks/v1",
                 "baseUrl": origin,
                 "routeTemplates": {
-                    "create": "/native-v2/merge-plans",
-                    "status": "/native-v2/merge-plans/{plan_id}",
-                    "force": "/native-v2/merge-plans/{plan_id}/force"
+                    "create": "/native-v2/stacks",
+                    "status": "/native-v2/stacks/{stack_id}",
+                    "force": "/native-v2/stacks/{stack_id}/force"
                 }
             },
             "connections": {

@@ -74,7 +74,7 @@ fn push_request(repo: &TempRepo, revision: String) -> SourcePushRequest {
     SourcePushRequest {
         workspace: repo.workspace.clone(),
         target: target(repo),
-        head_branch: delivery_branch(RUN),
+        head_branch: delivery_head_branch(&RunId::new(RUN)),
         head_revision: revision,
     }
 }
@@ -92,7 +92,7 @@ async fn push_successfully(repo: &TempRepo, server: &HttpGit, request: &SourcePu
 
 fn publish_reviewed_candidate(repo: &TempRepo) -> SourceReviewReceipt {
     let candidate = commit_file(&repo.workspace, "result.txt", "reviewed\n");
-    let branch = delivery_branch(RUN);
+    let branch = delivery_head_branch(&RunId::new(RUN));
     git(
         &repo.workspace,
         &[
@@ -474,7 +474,10 @@ async fn http_expired_push_credential_refreshes_or_stops_without_graph_repair() 
             assert_eq!(server.faults.receive_packs.load(Ordering::SeqCst), 1);
         } else {
             assert_eq!(execution.outcome, WorkerOutcome::authentication_refusal());
-            assert_eq!(reference(&repo.remote, &delivery_branch(RUN)), None);
+            assert_eq!(
+                reference(&repo.remote, &delivery_head_branch(&RunId::new(RUN))),
+                None
+            );
         }
     }
 }
@@ -517,7 +520,7 @@ async fn http_known_remote_update_retries_a_real_fetch_503_without_graph_repair(
         assert_eq!(server.faults.denied.load(Ordering::SeqCst) > 0, refresh);
         assert_eq!(
             git_output(&repo.workspace, &["rev-parse", "HEAD"]),
-            reference(&repo.remote, &delivery_branch(RUN)).assert_value()
+            reference(&repo.remote, &delivery_head_branch(&RunId::new(RUN))).assert_value()
         );
     }
 }
@@ -531,7 +534,7 @@ async fn http_lost_update_receipt_fetches_remote_head_and_requires_existing_work
     assert_eq!(authority.updates.load(Ordering::SeqCst), 1);
     assert_eq!(
         git_output(&repo.workspace, &["rev-parse", "HEAD"]),
-        reference(&repo.remote, &delivery_branch(RUN)).assert_value()
+        reference(&repo.remote, &delivery_head_branch(&RunId::new(RUN))).assert_value()
     );
     assert!(!authority.merged.load(Ordering::SeqCst));
     assert!(

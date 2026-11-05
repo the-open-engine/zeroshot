@@ -654,7 +654,7 @@ pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_history: Option<TargetRunHistoryDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub merge_plans: Option<crate::TargetMergePlansDiscovery>,
+    pub stacks: Option<crate::TargetStacksDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connections: Option<TargetConnectionsDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -707,7 +707,7 @@ impl TargetDiscoveryExtensions {
         self.api_key.is_none()
             && self.hosted_runs.is_none()
             && self.run_history.is_none()
-            && self.merge_plans.is_none()
+            && self.stacks.is_none()
             && self.connections.is_none()
             && self.run_profiles.is_none()
             && self.controller_extensions_empty()
