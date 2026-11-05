@@ -27,19 +27,42 @@ enforces the process.
 
 ## Build your own graph
 
-Require security approval for changes to authentication, payments, or migrations:
+An example graph: independent reviews, end-to-end testing, and CI must pass before merge.
 
 ```text
-worker ◄─────────── any "no" ────┐
-  ▼                              │
-risk check                       │
-  ├─ auth, payments, migration?  │
-  │    ▼                         │
-  │  security review ─────── no ─┤
-  ▼    ▼                         │
-acceptance + code review ─── no ─┘
-  ▼ both yes
-deliver
+                           ┌─────────────────┐
+                           │       Goal      │
+                           └────────┬────────┘
+                                    ▼
+┌───────────────┐          ┌─────────────────┐
+│     Repair    ├─────────▶┤      Worker     │
+└───────┬───────┘          └────────┬────────┘
+        ▲                           │
+        │             ┌─────────────┴─────────────┐
+        │             ▼                           ▼
+        │  ┌─────────────────────┐     ┌─────────────────────┐
+        │  │  Acceptance review  │     │     Code review     │
+        │  └──────────┬──────────┘     └──────────┬──────────┘
+        │             │                           │
+        │             └─────────────┬─────────────┘
+        ├◀─── either rejects ───────┤
+        │                           │  both approve
+        │                           ▼
+        │                  ┌─────────────────┐
+        ├◀───── fail ──────┤ End-to-end test │
+        │                  └────────┬────────┘
+        │                           ▼  pass
+        │                  ┌─────────────────┐
+        │                  │        PR       │
+        │                  └────────┬────────┘
+        │                           ▼
+        │                  ┌─────────────────┐
+        └◀───── fail ──────┤        CI       │
+                           └────────┬────────┘
+                                    ▼  pass
+                           ┌─────────────────┐
+                           │      Merge      │
+                           └─────────────────┘
 ```
 
 Save your graph as a [reusable profile](docs/zeroshot-cli.md#zeroshot-profile-set)
