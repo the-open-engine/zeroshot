@@ -15,9 +15,19 @@ pub(super) struct Response {
     status: StatusCode,
     body: Vec<u8>,
     headers: Vec<(String, String)>,
+    disconnect: bool,
 }
 
 impl Response {
+    pub(super) fn disconnected() -> Self {
+        Self {
+            status: StatusCode::OK,
+            body: Vec::new(),
+            headers: Vec::new(),
+            disconnect: true,
+        }
+    }
+
     pub(super) fn header(mut self, name: &str, value: &str) -> Self {
         assert!(!name.contains(['\r', '\n']) && !value.contains(['\r', '\n']));
         self.headers.push((name.to_owned(), value.to_owned()));
@@ -35,6 +45,7 @@ impl<T: Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> Response {
         Response {
             status: StatusCode::OK,
+            disconnect: false,
             headers: Vec::new(),
             body: serde_json::to_vec(&self.0).unwrap(),
         }
@@ -45,6 +56,7 @@ impl IntoResponse for StatusCode {
     fn into_response(self) -> Response {
         Response {
             status: self,
+            disconnect: false,
             headers: Vec::new(),
             body: Vec::new(),
         }
@@ -55,6 +67,7 @@ impl<T: Serialize> IntoResponse for (StatusCode, Json<T>) {
     fn into_response(self) -> Response {
         Response {
             status: self.0,
+            disconnect: false,
             headers: Vec::new(),
             body: serde_json::to_vec(&self.1.0).unwrap(),
         }
@@ -76,6 +89,9 @@ pub(super) async fn serve(
                 Some(request) => handler(request),
                 None => StatusCode::BAD_REQUEST.into_response(),
             };
+            if response.disconnect {
+                return;
+            }
             let extras = response
                 .headers
                 .iter()

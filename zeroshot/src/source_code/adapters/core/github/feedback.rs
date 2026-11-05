@@ -7,7 +7,24 @@ const MAX_FEEDBACK_ITEMS: usize = 100_000;
 
 #[derive(Clone, Debug, Deserialize)]
 struct UserWire {
+    id: u64,
     login: String,
+}
+
+#[derive(Deserialize)]
+struct PermissionWire {
+    permission: BasePermission,
+    user: UserWire,
+}
+
+// GitHub returns the effective base permission, mapping maintain to write.
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum BasePermission {
+    None,
+    Read,
+    Write,
+    Admin,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -85,20 +102,78 @@ pub(super) async fn inspect(
     )
     .await?;
 
+    let mut permissions = BTreeMap::new();
+    let mut items = Vec::new();
+    for (author, item) in collect_items(issue_comments, reviews, review_comments)? {
+        let allowed = match permissions.get(&author.id) {
+            Some(allowed) => *allowed,
+            None => {
+                let allowed = can_repair(authority, review, &author, credential).await?;
+                permissions.insert(author.id, allowed);
+                allowed
+            }
+        };
+        if allowed {
+            items.push(item);
+        }
+    }
+
     let after = authority.pull_request(review, credential).await?;
     require_review_identity(&after, review).map_err(|_| {
         SourceDeliveryError::Unavailable
             .with_context("GitHub PR identity changed while feedback was paginated")
     })?;
 
-    collect_items(issue_comments, reviews, review_comments)
+    Ok(SourceReviewFeedback { items })
+}
+
+async fn can_repair(
+    authority: &GhCliDeliveryAuthority,
+    review: &SourceReviewReceipt,
+    author: &UserWire,
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<bool, SourceDeliveryError> {
+    if author.id == 0 || author.login.is_empty() || matches!(author.login.as_str(), "." | "..") {
+        return Err(SourceDeliveryError::identity(
+            "GitHub feedback author is invalid",
+        ));
+    }
+    let username: String = url::form_urlencoded::byte_serialize(author.login.as_bytes()).collect();
+    let value = match authority
+        .api(
+            &[
+                format!(
+                    "repos/{}/collaborators/{username}/permission",
+                    review.repository
+                ),
+                "--method".to_owned(),
+                "GET".to_owned(),
+            ],
+            credential,
+        )
+        .await
+    {
+        Ok(value) => value,
+        Err(error) if error.api_status() == Some(404) => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    let permission: PermissionWire = super::api::decode_response(value, credential)?;
+    if permission.user.id != author.id {
+        return Err(SourceDeliveryError::identity(
+            "GitHub feedback permission changed author identity",
+        ));
+    }
+    Ok(matches!(
+        permission.permission,
+        BasePermission::Write | BasePermission::Admin
+    ))
 }
 
 fn collect_items(
     issue_comments: Vec<IssueCommentWire>,
     reviews: Vec<ReviewWire>,
     review_comments: Vec<ReviewCommentWire>,
-) -> Result<SourceReviewFeedback, SourceDeliveryError> {
+) -> Result<Vec<(UserWire, SourceReviewFeedbackItem)>, SourceDeliveryError> {
     let count = issue_comments
         .len()
         .saturating_add(reviews.len())
@@ -113,11 +188,20 @@ fn collect_items(
     }
 
     let mut items = Vec::with_capacity(count);
-    items.extend(issue_comments.into_iter().filter_map(issue_item));
-    items.extend(reviews.into_iter().filter_map(review_item));
-    items.extend(review_comments.into_iter().filter_map(review_comment_item));
-    items.sort_by(|left, right| left.key.cmp(&right.key));
-    Ok(SourceReviewFeedback { items })
+    items.extend(issue_comments.into_iter().filter_map(|comment| {
+        let author = comment.user.clone();
+        issue_item(comment).map(|item| (author, item))
+    }));
+    items.extend(reviews.into_iter().filter_map(|review| {
+        let author = review.user.clone();
+        review_item(review).map(|item| (author, item))
+    }));
+    items.extend(review_comments.into_iter().filter_map(|comment| {
+        let author = comment.user.clone();
+        review_comment_item(comment).map(|item| (author, item))
+    }));
+    items.sort_by(|left, right| left.1.key.cmp(&right.1.key));
+    Ok(items)
 }
 
 fn issue_item(comment: IssueCommentWire) -> Option<SourceReviewFeedbackItem> {

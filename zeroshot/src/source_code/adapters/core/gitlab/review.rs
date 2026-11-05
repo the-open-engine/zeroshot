@@ -590,17 +590,85 @@ pub(super) async fn feedback(
         .await?;
     let project = authority.project(&receipt.repository, credential).await?;
     let mut items = Vec::new();
+    let mut permissions = BTreeMap::new();
     for discussion in discussions {
         for note in discussion.notes {
             super::comment::require_review_note_scope(&note, &review, project.id)?;
             if !note.system && !note.body.trim().is_empty() {
-                items.push(feedback_item(&discussion.id, note));
+                let allowed = match permissions.get(&note.author.id) {
+                    Some(allowed) => *allowed,
+                    None => {
+                        let allowed =
+                            can_repair(authority, receipt, note.author.id, credential).await?;
+                        permissions.insert(note.author.id, allowed);
+                        allowed
+                    }
+                };
+                if allowed {
+                    items.push(feedback_item(&discussion.id, note));
+                }
             }
         }
     }
     authority.merge_request(receipt, credential).await?;
     items.sort_by(|a, b| a.key.cmp(&b.key));
     Ok(SourceReviewFeedback { items })
+}
+
+async fn can_repair(
+    authority: &GitLabDeliveryAuthority,
+    receipt: &SourceReviewReceipt,
+    author: u64,
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<bool, SourceDeliveryError> {
+    if author == 0 {
+        return Err(SourceDeliveryError::identity(
+            "GitLab feedback author is invalid",
+        ));
+    }
+    // Include inherited and invited project membership, rather than direct members only.
+    let member: wire::Member = match authority
+        .api
+        .json(
+            ApiRequest::get(&[
+                "projects",
+                &receipt.repository,
+                "members",
+                "all",
+                &author.to_string(),
+            ]),
+            credential,
+        )
+        .await
+    {
+        Ok(member) => member,
+        Err(error) if error.api_status() == Some(404) => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if member.id != author {
+        return Err(SourceDeliveryError::identity(
+            "GitLab feedback membership changed author identity",
+        ));
+    }
+    let active_membership = match member.membership_state {
+        wire::MembershipState::Active => true,
+        wire::MembershipState::Awaiting => false,
+        wire::MembershipState::Unreported => {
+            // CE has no awaiting-membership feature or serialized membership state.
+            // Its members/all endpoint excludes invitations and access requests. Do not
+            // apply that response shape to EE or an instance with unknown edition.
+            if authority.api.server_metadata(credential).await?.enterprise != Some(false) {
+                return Err(SourceDeliveryError::api(
+                    None,
+                    "GitLab omitted membership state without confirming Community Edition",
+                ));
+            }
+            true
+        }
+    };
+    Ok(matches!(member.state, wire::AccountState::Active)
+        && active_membership
+        && member.access_level >= 30)
 }
 
 fn feedback_item(discussion: &str, note: wire::Note) -> SourceReviewFeedbackItem {

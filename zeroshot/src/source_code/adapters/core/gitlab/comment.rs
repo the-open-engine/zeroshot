@@ -179,7 +179,7 @@ impl SourceCommentAuthority for GitLabDeliveryAuthority {
         &self,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<String, SourceDeliveryError> {
-        self.api.ensure_version(credential).await?;
+        self.api.server_metadata(credential).await?;
         let actor: Actor = self
             .api
             .json(ApiRequest::get(&["user"]), credential)

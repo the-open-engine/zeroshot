@@ -281,7 +281,10 @@ pub trait SourceDeliveryAuthority: Send + Sync {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<SourceReviewObservation, SourceDeliveryError>;
 
-    /// Reads every visible PR discussion surface behind one stable review/head identity fence.
+    /// Reads every actionable review surface behind one stable review/head identity fence.
+    /// Return only feedback whose author has current write access to the bound repository.
+    /// Authorization is provider-owned and rechecked per inspection, with stable author identity.
+    /// Confirmed insufficient access is ignored; incomplete or failed lookups fail the read.
     async fn inspect_review_feedback(
         &self,
         _review: &SourceReviewReceipt,

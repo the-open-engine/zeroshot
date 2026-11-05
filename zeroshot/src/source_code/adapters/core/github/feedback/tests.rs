@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 
 fn user(login: &str) -> UserWire {
     UserWire {
+        id: 1,
         login: login.to_owned(),
     }
 }
@@ -58,6 +59,12 @@ fn write_fixture(root: &Path, second_review_head: &str, pages: FeedbackPages) ->
          'repos/acme/project/issues/17/comments?per_page=100') printf '%s\\n' {} ;;\n\
          'repos/acme/project/pulls/17/reviews?per_page=100') printf '%s\\n' {} ;;\n\
          'repos/acme/project/pulls/17/comments?per_page=100') printf '%s\\n' {} ;;\n\
+         repos/acme/project/collaborators/*/permission)\n\
+           username=${{endpoint#repos/acme/project/collaborators/}}\n\
+           username=${{username%/permission}}\n\
+           printf '%s\\n' \"$username\" >> \"$0.permission-calls\"\n\
+           if [ -f \"$0.$username.error\" ]; then cat \"$0.$username.error\" >&2; exit 1; fi\n\
+           cat \"$0.$username.permission\" ;;\n\
          *) exit 19 ;;\n\
          esac\n",
         shell_literal(&review_wire(HEAD).to_string()),
@@ -67,12 +74,204 @@ fn write_fixture(root: &Path, second_review_head: &str, pages: FeedbackPages) ->
         shell_literal(&pages.review_comments.to_string()),
     );
     write_executable(&program, source);
+    for surface in [
+        &pages.issue_comments,
+        &pages.reviews,
+        &pages.review_comments,
+    ] {
+        if let Some(pages) = surface.as_array() {
+            for entry in pages.iter().filter_map(Value::as_array).flatten() {
+                let login = entry["user"]["login"].as_str().unwrap();
+                set_permission(
+                    &program,
+                    login,
+                    json!({"permission":"write", "user":entry["user"]}),
+                );
+            }
+        }
+    }
     program
+}
+
+fn set_permission(program: &Path, login: &str, value: Value) {
+    std::fs::write(
+        format!("{}.{}.permission", program.display(), login),
+        value.to_string(),
+    )
+    .unwrap();
+}
+
+fn all_surfaces(authors: &[(u64, &str)]) -> FeedbackPages {
+    let mut issues = Vec::new();
+    let mut reviews = Vec::new();
+    let mut inline = Vec::new();
+    for (id, login) in authors {
+        let user = json!({"id":id,"login":login,"type":"Bot"});
+        issues.push(json!({
+            "id":id*10,"updated_at":"one","user":user,"body":"Check the edge case.",
+            "author_association":"MEMBER"
+        }));
+        for (offset, body) in [(1, Some("Review summary")), (2, None)] {
+            reviews.push(json!({
+                "id":id*10+offset,"state":"CHANGES_REQUESTED","submitted_at":"one",
+                "commit_id":HEAD,"user":user,"body":body,"author_association":"OWNER"
+            }));
+        }
+        for (offset, reply) in [(3, None), (4, Some(1))] {
+            inline.push(json!({
+                "id":id*10+offset,"updated_at":"one","user":user,"body":"Check this line.",
+                "path":"src/lib.rs","line":17,"commit_id":HEAD,"in_reply_to_id":reply,
+                "author_association":"COLLABORATOR"
+            }));
+        }
+    }
+    FeedbackPages {
+        issue_comments: json!([[], issues]),
+        reviews: json!([reviews, []]),
+        review_comments: json!([inline]),
+    }
+}
+
+fn permission_calls(program: &Path) -> Vec<String> {
+    std::fs::read_to_string(format!("{}.permission-calls", program.display()))
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+#[tokio::test]
+async fn only_current_writers_can_supply_any_feedback_surface() {
+    let root = tempfile::tempdir().unwrap();
+    let program = write_fixture(
+        root.path(),
+        HEAD,
+        all_surfaces(&[
+            (1, "writer"),
+            (2, "org-reader"),
+            (3, "outsider"),
+            (4, "admin"),
+            (5, "bot"),
+        ]),
+    );
+    set_permission(
+        &program,
+        "writer",
+        json!({"permission":"write","role_name":"maintain","user":{"id":1,"login":"writer"}}),
+    );
+    set_permission(
+        &program,
+        "org-reader",
+        json!({"permission":"read","role_name":"read","user":{"id":2,"login":"org-reader"}}),
+    );
+    set_permission(
+        &program,
+        "admin",
+        json!({"permission":"admin","user":{"id":4,"login":"admin"}}),
+    );
+    set_permission(
+        &program,
+        "bot",
+        json!({"permission":"none","user":{"id":5,"login":"bot"}}),
+    );
+    std::fs::write(
+        format!("{}.outsider.error", program.display()),
+        "gh: Not Found (HTTP 404)\n",
+    )
+    .unwrap();
+    let authority = authority(program.clone(), root.path());
+    let credential = SourceDeliveryCredential::token("test-token");
+    let first = inspect(&authority, &receipt(), credential).await.unwrap();
+    assert_eq!(first.items.len(), 10);
+    assert!(
+        first
+            .items
+            .iter()
+            .all(|item| matches!(item.author.as_str(), "writer" | "admin"))
+    );
+    assert_eq!(permission_calls(&program).len(), 5);
+
+    // An edit by an outsider stays invisible; a revoked writer cannot supply even old feedback.
+    set_permission(
+        &program,
+        "writer",
+        json!({"permission":"read","user":{"id":1,"login":"writer"}}),
+    );
+    let second = inspect(&authority, &receipt(), credential).await.unwrap();
+    assert_eq!(second.items.len(), 5);
+    assert!(second.items.iter().all(|item| item.author == "admin"));
+    let calls = permission_calls(&program);
+    for login in ["writer", "org-reader", "outsider", "admin", "bot"] {
+        assert_eq!(calls.iter().filter(|called| *called == login).count(), 2);
+    }
+}
+
+#[tokio::test]
+async fn incomplete_or_mismatched_permissions_fail_the_entire_inspection() {
+    let root = tempfile::tempdir().unwrap();
+    let program = write_fixture(
+        root.path(),
+        HEAD,
+        all_surfaces(&[(1, "writer"), (2, "unknown")]),
+    );
+    let authority = authority(program.clone(), root.path());
+    for value in [
+        json!({"user":{"id":2,"login":"unknown"}}),
+        json!({"permission":"owner","user":{"id":2,"login":"unknown"}}),
+        json!({"permission":null,"user":{"id":2,"login":"unknown"}}),
+        json!({"permission":"write"}),
+        json!({"permission":"write","user":{"login":"unknown"}}),
+        json!({"permission":"write","user":{"id":99,"login":"unknown"}}),
+    ] {
+        set_permission(&program, "unknown", value.clone());
+        assert!(
+            inspect(
+                &authority,
+                &receipt(),
+                SourceDeliveryCredential::token("test-token")
+            )
+            .await
+            .is_err(),
+            "accepted {value}"
+        );
+    }
+    std::fs::write(
+        format!("{}.unknown.permission", program.display()),
+        "not json",
+    )
+    .unwrap();
+    assert!(
+        inspect(
+            &authority,
+            &receipt(),
+            SourceDeliveryCredential::token("test-token")
+        )
+        .await
+        .is_err()
+    );
+    for (diagnostic, status, retryable) in [
+        ("gh: Bad credentials (HTTP 401)\n", Some(401), false),
+        ("gh: Resource not accessible (HTTP 403)\n", Some(403), false),
+        ("gh: API rate limit exceeded (HTTP 403)\n", Some(403), true),
+        ("gh: Too Many Requests (HTTP 429)\n", Some(429), true),
+        ("error connecting to api.github.com\n", None, true),
+    ] {
+        std::fs::write(format!("{}.unknown.error", program.display()), diagnostic).unwrap();
+        let error = inspect(
+            &authority,
+            &receipt(),
+            SourceDeliveryCredential::token("test-token"),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.api_status(), status);
+        assert_eq!(error.retryable_operation(), retryable, "{error}");
+    }
 }
 
 #[test]
 fn visible_feedback_surfaces_are_normalized_sorted_and_sanitized() {
-    let feedback = collect_items(
+    let items = collect_items(
         vec![IssueCommentWire {
             id: 9,
             updated_at: "2026-09-19T00:00:00Z".to_owned(),
@@ -100,6 +299,9 @@ fn visible_feedback_surfaces_are_normalized_sorted_and_sanitized() {
         }],
     )
     .assert_value();
+    let feedback = SourceReviewFeedback {
+        items: items.into_iter().map(|(_, item)| item).collect(),
+    };
 
     assert_eq!(feedback.items.len(), 3);
     assert_eq!(feedback.items[0].key, "issue_comment:9");
@@ -148,7 +350,7 @@ async fn paginated_feedback_is_fenced_by_the_exact_review_identity() {
             issue_comments: json!([[{
                 "id": 9,
                 "updated_at": "2026-09-19T00:00:00Z",
-                "user": {"login": "issue-author"},
+                "user": {"id":1,"login": "issue-author"},
                 "body": "issue body"
             }], []]),
             reviews: json!([[], [{
@@ -156,13 +358,13 @@ async fn paginated_feedback_is_fenced_by_the_exact_review_identity() {
                 "state": "CHANGES_REQUESTED",
                 "submitted_at": null,
                 "commit_id": null,
-                "user": {"login": "reviewer"},
+                "user": {"id":2,"login": "reviewer"},
                 "body": null
             }]]),
             review_comments: json!([[{
                 "id": 2,
                 "updated_at": "2026-09-19T00:00:01Z",
-                "user": {"login": "inline"},
+                "user": {"id":3,"login": "inline"},
                 "body": "fix this",
                 "path": "src/lib.rs",
                 "line": null,

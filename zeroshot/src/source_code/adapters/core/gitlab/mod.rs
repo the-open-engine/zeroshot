@@ -71,7 +71,7 @@ impl GitLabDeliveryAuthority {
         repository: &str,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<Project, SourceDeliveryError> {
-        self.api.ensure_version(credential).await?;
+        self.api.server_metadata(credential).await?;
         let project: Project = self
             .api
             .json(ApiRequest::get(&["projects", repository]), credential)

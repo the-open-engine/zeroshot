@@ -34,7 +34,7 @@ The current named targets reject opt-out explicitly.
 The field is accepted in exact and uniform runtime plans and is preserved in saved profiles.
 
 ```json
-{"workspaceCheckpoints": false}
+{ "workspaceCheckpoints": false }
 ```
 
 Optional `activeMemory` controls repository and graph recall/collection independently, and
@@ -109,7 +109,7 @@ input and output. The step must omit `instructions`. This initial implementation
 Named targets and contained placements reject script bindings.
 
 ```json
-{"kind":"script", "command":["python3", "retrieve.py"], "connections":{}}
+{ "kind": "script", "command": ["python3", "retrieve.py"], "connections": {} }
 ```
 
 `command` is an executable followed by literal arguments. Zeroshot does not invoke a shell.
@@ -466,6 +466,9 @@ The CLI inserts a `git_delivery` binding with no forge connection for push, or
 `{"github": ["GH_TOKEN"]}` for PR and merge. Git transport uses the selected
 [source credentials](../concepts/targets.md#source-and-delivery-credentials).
 `--no-pr-feedback` (requires pull-request or merge delivery) sets `pullRequestFeedback` to `ignore`.
+When feedback is enabled, the forge adapter admits repair requests only from current repository
+writers, with permissions rechecked on each inspection. See [Execution](../concepts/execution.md)
+for the GitHub and GitLab authorization rules and lookup failure behavior.
 
 A uniform configuration binds the added agent nodes too. An exact `--runtime-config` must bind
 all agent nodes itself. Software-change uses `worker`, `acceptance`, and `code` with every delivery

@@ -3,6 +3,8 @@ use reqwest::{Method, StatusCode};
 use serde_json::{Value, json};
 use super::*;
 
+#[path = "feedback_tests.rs"]
+mod feedback_tests;
 #[path = "http_fixture.rs"]
 mod http_fixture;
 use http_fixture::{IntoResponse, Json, Response};
@@ -26,6 +28,7 @@ struct StateData {
     lose_merge: bool,
     move_head_during_feedback: bool,
     oversized_notes: bool,
+    disconnect_membership: bool,
     responses: BTreeMap<(String, String), (StatusCode, Value)>,
 }
 
@@ -56,6 +59,7 @@ impl Fixture {
             lose_merge: false,
             move_head_during_feedback: false,
             oversized_notes: false,
+            disconnect_membership: false,
             responses: BTreeMap::new(),
         }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -186,6 +190,9 @@ fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Res
         .calls
         .push((method.to_string(), path.to_owned(), body.clone()));
     let query = uri.query().unwrap_or("");
+    if state.disconnect_membership && path.contains("/members/all/") {
+        return Response::disconnected();
+    }
     if let Some(response) =
         overridden_response(&state, &method, path).or_else(|| simple_response(&state, path))
     {
@@ -218,13 +225,15 @@ fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Res
 
 fn simple_response(state: &StateData, path: &str) -> Option<Response> {
     let value = if path == "/api/v4/version" {
-        json!({"version":state.version})
+        json!({"version":state.version,"enterprise":true})
     } else if path.ends_with("/repository/branches/main") {
         json!({"name":"main","commit":{"id":BASE}})
     } else if path.contains("/repository/branches/") {
         json!({"name":"zeroshot/test","commit":{"id":HEAD}})
     } else if path == "/api/v4/user" {
         json!({"id":31})
+    } else if path == "/api/v4/projects/group%2Fsub%2Fproject/members/all/31" {
+        json!({"id":31,"state":"active","membership_state":"active","access_level":30})
     } else {
         return None;
     };

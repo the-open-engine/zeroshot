@@ -780,6 +780,17 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   resolution retries with backoff; confirmed refusal and malformed responses stop. Initial
   resolution belongs to each supervised execution, so it observes the authored deadline and does
   not block parallel dispatch. Pending authorized head adoption survives repair.
+- Forge adapters authorize actionable review feedback before delivery checkpoints or repair handoff.
+  Each inspection confirms current write access on the bound repository and stable author identity:
+  GitHub uses collaborators' effective base write/admin permission; GitLab uses active inherited or
+  invited Developer-or-higher project membership and active account `state`. Enterprise Edition
+  also requires explicit active `membership_state`; omission is valid only when instance metadata
+  authoritatively confirms Community Edition, whose members/all endpoint excludes pending invites
+  and access requests. Unknown or malformed membership status always fails the read. Cache author
+  decisions only within that inspection; instance metadata never substitutes for fresh membership.
+  Confirmed insufficient access or membership/permission HTTP 404 ignores feedback; failed,
+  malformed or identity-mismatched lookups fail the complete read through delivery error handling.
+  Association, authorship, requested-reviewer and bot status never substitute for authorization.
 - Git diagnostics retain bounded, credential-redacted command/status/stdout/stderr details.
   Capture and native transport share credential-name selection for tokens, passwords and API keys,
   respecting operating-system case rules. Trusted Git commands pin author and committer identity
