@@ -899,6 +899,21 @@
             ],
             "description": "Fresh generic Git authority, excluded from immutable source and submission identity."
           }
+        },
+        {
+          "name": "commitIdentity",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CommitIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Author and committer of every commit the successor's delivery creates. Omission keeps the\ntarget's default delivery identity."
+          }
         }
       ],
       "result": {
