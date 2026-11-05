@@ -697,6 +697,8 @@
       
         
       
+        
+      
     
     
     
@@ -869,6 +871,34 @@
     
   
     Review an issue or PR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="guides/code-review/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Review a PR in depth
   
 
     
@@ -1962,9 +1992,10 @@ Authored edges then route review, retries, and the final result.</p>
 <p><a class="docs-graph-wide" href="assets/zeroshot-workflow.svg"><img alt="Zeroshot built-in workflow: implementation, parallel independent acceptance and code review, bounded repair, optional Git delivery, and delivery repair returning to both reviews." loading="lazy" src="assets/zeroshot-workflow.svg" /></a></p>
 <p><a class="docs-graph-tall" href="assets/zeroshot-workflow-mobile.svg"><img alt="Zeroshot built-in workflow: implementation, parallel independent acceptance and code review, bounded repair, optional Git delivery, and delivery repair returning to both reviews." loading="lazy" src="assets/zeroshot-workflow-mobile.svg" /></a></p>
 <p>The built-in <code>software-change</code> template uses the route shown above. For work that does not need its
-review loop, use <code>single-worker</code>. For research, use <code>auto-research</code>. It runs ten rounds of experiments
-by default, and a new result replaces the current one only when the progress judge accepts it. Custom
-graphs follow the same protocol contracts.</p>
+review loop, use <code>single-worker</code>. To review a pull request, use <code>pr-review</code>, or <code>code-review</code> for a
+deeper review. For research, use <code>auto-research</code>. It runs ten rounds of experiments by default, and a
+new result replaces the current one only when the progress judge accepts it. Custom graphs follow
+the same protocol contracts.</p>
 <h2 id="choose-where-it-runs">Choose where it runs<a class="headerlink" href="#choose-where-it-runs" title="Permanent link">&para;</a></h2>
 <!-- prettier-ignore-start -->
 
@@ -2038,7 +2069,7 @@ minor version from the header; each minor documents its newest published patch.
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-04">4 November 2026</time>
+    Last updated <time datetime="2026-11-05">5 November 2026</time>
   </span>
 
     
