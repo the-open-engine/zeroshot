@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const SERVICE_BOT = 'zeroshot-app[bot]';
 const ACTIONS_BOT = 'github-actions[bot]';
@@ -44,22 +45,20 @@ async function labelHistory(repository, number, request) {
   }
 }
 
-function requireVisibleEvent(payload, events) {
-  if (!['labeled', 'unlabeled'].includes(payload.action)) return;
+function hasVisibleEvent(payload, events) {
+  if (!['labeled', 'unlabeled'].includes(payload.action)) return true;
   const name = labelName(payload.label);
   const since = Date.parse(payload.issue.updated_at);
-  if (
-    !Number.isFinite(since) ||
-    !events.some(
+  return (
+    Number.isFinite(since) &&
+    events.some(
       (event) =>
         event.event === payload.action &&
         event.label?.name === name &&
         event.actor?.id === payload.sender?.id &&
         Date.parse(event.created_at) >= since
     )
-  ) {
-    throw new Error('Triggering label event is not yet visible; retry this workflow');
-  }
+  );
 }
 
 async function approvedLabels(events, repository, serviceBot, request) {
@@ -91,11 +90,24 @@ function requireIssueEvent(payload, repository) {
   return number;
 }
 
-async function reconcileIssueLabels({ request, payload, repository, serviceBot = SERVICE_BOT }) {
+async function reconcileIssueLabels({
+  request,
+  payload,
+  repository,
+  serviceBot = SERVICE_BOT,
+  pause = delay,
+}) {
   if (payload.issue?.pull_request) return { skipped: 'pull_request' };
   const number = requireIssueEvent(payload, repository);
-  const events = await labelHistory(repository, number, request);
-  requireVisibleEvent(payload, events);
+  let events = await labelHistory(repository, number, request);
+  for (const wait of [1000, 2000, 4000, 8000, 16000]) {
+    if (hasVisibleEvent(payload, events)) break;
+    await pause(wait);
+    events = await labelHistory(repository, number, request);
+  }
+  if (!hasVisibleEvent(payload, events)) {
+    throw new Error('Triggering label event is not yet visible; retry this workflow');
+  }
   const desired = await approvedLabels(events, repository, serviceBot, request);
   const prefix = '/repos/' + repository + '/issues/' + number;
   const current = labelsOf(await request('GET', prefix));

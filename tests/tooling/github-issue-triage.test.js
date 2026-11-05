@@ -20,6 +20,7 @@ function event(kind, name, actor, index) {
 
 function readFixture({ events, labels, options }, route) {
   if (route.includes('/events?')) {
+    if (options.historyError) throw options.historyError;
     const page = Number(new URL('https://api.github.com' + route).searchParams.get('page'));
     return events.slice((page - 1) * 100, page * 100);
   }
@@ -46,6 +47,7 @@ function fixture(options = {}) {
   };
   const labels = new Set(options.labels ?? []);
   const calls = [];
+  const pauses = [];
   const request = async (method, route, body) => {
     calls.push({ method, route, body });
     if (method === 'GET') return readFixture({ events, labels, options }, route);
@@ -63,11 +65,16 @@ function fixture(options = {}) {
     payload,
     labels,
     calls,
+    pauses,
     run: () =>
       reconcileIssueLabels({
         repository: 'the-open-engine/zeroshot',
         payload,
         request,
+        pause: async (wait) => {
+          pauses.push(wait);
+          await options.pause?.(wait);
+        },
       }),
   };
 }
@@ -246,6 +253,63 @@ it('unavailable role evidence fails before changing any labels', async () => {
   assert.equal(f.calls.filter((call) => call.method !== 'GET').length, 0);
 });
 
+it('delayed event visibility rereads complete history before applying the latest maintainer intent', async () => {
+  const trigger = event('labeled', 'auto-fix-0', writer, 102);
+  const events = Array.from({ length: 100 }, (_, index) => ({ event: 'commented', id: index }));
+  events.push(event('labeled', 'plan-0', maintainer, 101));
+  const f = fixture({
+    action: 'labeled',
+    trigger,
+    roles: managedRoles,
+    events,
+    labels: ['auto-fix-0', 'plan-1'],
+    pause: async (wait) => {
+      assert.equal(f.calls.filter((call) => call.method !== 'GET').length, 0);
+      assert.equal(f.calls.filter((call) => call.route.includes('/collaborators/')).length, 0);
+      assert.deepEqual(names(f), ['auto-fix-0', 'plan-1']);
+      if (wait === 2000) {
+        events.push(
+          trigger,
+          event('unlabeled', 'plan-0', maintainer, 103),
+          event('labeled', 'plan-1', maintainer, 104),
+          event('unlabeled', 'triage', maintainer, 105)
+        );
+      }
+    },
+  });
+  await f.run();
+  assert.deepEqual(names(f), ['plan-1']);
+  assert.deepEqual(f.pauses, [1000, 2000]);
+  assert.deepEqual(
+    f.calls.filter((call) => call.route.includes('/events?')).map((call) => call.route),
+    [1, 2, 1, 2, 1, 2].map((page) => origin + '/issues/7/events?per_page=100&page=' + page)
+  );
+});
+
+it('event history API failures propagate without retrying on initial reads or visibility rereads', async () => {
+  for (const failAfterPause of [false, true]) {
+    const failure = new Error('event history unavailable');
+    const options = {
+      action: 'labeled',
+      trigger: event('labeled', 'auto-fix-0', writer, 10),
+      labels: ['auto-fix-0'],
+    };
+    if (failAfterPause) {
+      options.pause = async () => {
+        options.historyError = failure;
+      };
+    } else {
+      options.historyError = failure;
+    }
+    const f = fixture(options);
+    await assert.rejects(f.run(), (error) => error === failure);
+    assert.deepEqual(f.pauses, failAfterPause ? [1000] : []);
+    assert.equal(f.calls.length, failAfterPause ? 2 : 1);
+    assert.equal(f.calls.filter((call) => call.method !== 'GET').length, 0);
+    assert.deepEqual(names(f), ['auto-fix-0']);
+  }
+});
+
 it('an event missing from the API history cannot trigger destructive reconciliation', async () => {
   const f = fixture({
     action: 'labeled',
@@ -255,7 +319,10 @@ it('an event missing from the API history cannot trigger destructive reconciliat
     labels: ['plan-0'],
   });
   await assert.rejects(f.run(), /not yet visible/);
+  assert.deepEqual(f.pauses, [1000, 2000, 4000, 8000, 16000]);
+  assert.equal(f.calls.filter((call) => call.route.includes('/events?')).length, 6);
   assert.equal(f.calls.filter((call) => call.method !== 'GET').length, 0);
+  assert.deepEqual(names(f), ['plan-0']);
 });
 
 it('PR payloads and mismatched repository events cannot write issue labels', async () => {
