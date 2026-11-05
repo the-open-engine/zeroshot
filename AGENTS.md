@@ -1210,6 +1210,22 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   bounded frame buffering and owned reader cancellation. A host source change must preserve the
   viewer's history prefix and playback position; it never changes native graph projection.
 
+## Issue triage
+
+- The issue triage workflow adds `triage` to new and reopened issues. Only Maintain/Admin users
+  and the verified support service App may assign or remove other issue labels; ordinary Write
+  and Triage access does not authorize routing decisions.
+- `scripts/github-issue-triage.js` derives current label intent from complete issue event history
+  and fresh repository role checks. Per-issue workflow serialization may coalesce pending events,
+  so reconciliation covers all labels instead of reversing only one webhook.
+- The policy comes from the trusted default branch. The workflow never executes issue text and
+  uses only repository content read and issue write permissions.
+- The guard's own `github-actions[bot]` corrections are not new label authority. Preserve later
+  maintainer/service decisions across stale events and never replace the whole label list.
+- Support-service backlog decisions remain authoritative for scheduling; GitHub labels alone
+  never authorize a code change or merge. Bootstrap `triage`, `auto-fix-0` through `auto-fix-3`,
+  and `plan-0` through `plan-3` before activating this workflow.
+
 ## Development conventions
 
 - Fix root causes and keep changes scoped.
