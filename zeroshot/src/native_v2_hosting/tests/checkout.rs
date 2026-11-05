@@ -1013,7 +1013,7 @@ async fn retained_claim_reconciliation_preserves_a_failed_successor() {
 }
 
 #[tokio::test]
-async fn retained_workspace_transfers_to_a_different_concurrent_writer_identity() {
+async fn root_retained_workspace_transfers_to_a_different_concurrent_writer_identity() {
     if unsafe { libc::geteuid() } != 0 {
         return;
     }
