@@ -12,6 +12,50 @@ async function renderWorkspace(t: TestContext, store: EnvironmentStore, readOnly
     url: 'https://example.test/ui/',
     pretendToBeVisual: true,
   });
+  const restoreGlobals = installDomGlobals(dom);
+  dom.window.confirm = () => true;
+  const server = await createViteTestServer(t);
+  const { EnvironmentWorkspace } = await server.ssrLoadModule('/src/EnvironmentWorkspace.tsx');
+  const { createRoot } = await import('react-dom/client');
+  const container = dom.window.document.getElementById('root')!;
+  const { WorkspaceBridge } = await server.ssrLoadModule('/src/workspace-bridge.ts');
+  const messages: any[] = [];
+  const session = {
+    root: createRoot(container),
+    bridge: initializeBridge(WorkspaceBridge, messages),
+  };
+  async function mount(workspaceId = 'test', context = '') {
+    await act(async () =>
+      session.root.render(
+        createElement(EnvironmentWorkspace, {
+          store,
+          collection: new URL(`https://example.test/ui/${context}`),
+          bootstrap: { workspace: { kind: 'local', id: workspaceId } },
+          host: session.bridge.host,
+          readOnly,
+        })
+      )
+    );
+  }
+  await mount();
+  t.after(async () => {
+    await act(async () => session.root.unmount());
+    session.bridge.host.dispose();
+    dom.window.close();
+    restoreGlobals();
+  });
+  return workspaceControls({
+    dom,
+    messages,
+    session,
+    WorkspaceBridge,
+    createRoot,
+    container,
+    mount,
+  });
+}
+
+function installDomGlobals(dom: JSDOM) {
   const globals = {
     window: dom.window,
     document: dom.window.document,
@@ -25,60 +69,65 @@ async function renderWorkspace(t: TestContext, store: EnvironmentStore, readOnly
   );
   for (const [key, value] of Object.entries(globals))
     Object.defineProperty(globalThis, key, { configurable: true, value });
-  dom.window.confirm = () => true;
-  const server = await createViteTestServer(t);
-  const { EnvironmentWorkspace } = await server.ssrLoadModule('/src/EnvironmentWorkspace.tsx');
-  const { createRoot } = await import('react-dom/client');
-  const container = dom.window.document.getElementById('root')!;
-  let root = createRoot(container);
-  const { WorkspaceBridge } = await server.ssrLoadModule('/src/workspace-bridge.ts');
-  const messages: any[] = [];
-  let bridge = initializeBridge(WorkspaceBridge, messages);
-  async function mount(workspaceId = 'test', context = '') {
-    await act(async () =>
-      root.render(
-        createElement(EnvironmentWorkspace, {
-          store,
-          collection: new URL(`https://example.test/ui/${context}`),
-          bootstrap: { workspace: { kind: 'local', id: workspaceId } },
-          host: bridge.host,
-          readOnly,
-        })
-      )
-    );
-  }
-  await mount();
-  t.after(async () => {
-    await act(async () => root.unmount());
-    bridge.host.dispose();
-    dom.window.close();
+  return () => {
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else Reflect.deleteProperty(globalThis, key);
     }
-  });
+  };
+}
+
+function workspaceControls(context: {
+  dom: JSDOM;
+  messages: any[];
+  session: { root: any; bridge: any };
+  WorkspaceBridge: any;
+  createRoot: (container: Element | DocumentFragment) => any;
+  container: HTMLElement;
+  mount: (workspaceId?: string, context?: string) => Promise<void>;
+}) {
+  const { dom, messages, session, WorkspaceBridge, createRoot, container, mount } = context;
   const label = (name: string) => fieldLabel(dom, name);
   const button = (name: string) => namedButton(dom, name);
+  const last = (type: string) => messages.filter((message) => message.type === type).at(-1);
+  const acknowledge = async (
+    snapshot: any,
+    result: { environment?: Environment; problem?: { code: string; message: string } }
+  ) =>
+    act(async () => {
+      session.bridge.receive({ ...saveEnvelope(snapshot), type: 'save_ack', ...result });
+      await pause(20);
+    });
   return {
     dom,
     messages,
     remount: async (workspaceId = 'test', context = '') => {
-      await act(async () => root.unmount());
-      bridge.host.dispose();
-      bridge = initializeBridge(WorkspaceBridge, messages, workspaceId);
-      root = createRoot(container);
+      await act(async () => session.root.unmount());
+      session.bridge.host.dispose();
+      session.bridge = initializeBridge(WorkspaceBridge, messages, workspaceId);
+      session.root = createRoot(container);
       await mount(workspaceId, context);
     },
+    send: async (command: Partial<HostCommand>) =>
+      act(async () => {
+        session.bridge.receive({
+          ...last('state'),
+          requestId: crypto.randomUUID(),
+          ...command,
+        });
+        await pause(40);
+      }),
     command: async (command: Partial<HostCommand>) =>
-      act(async () =>
-        bridge.receive({
-          ...messages.at(-1),
+      act(async () => {
+        session.bridge.receive({
+          ...last('state'),
           ...command,
           requestId: 'nav',
           type: 'navigate',
           action: 'leave',
-        })
-      ),
+        });
+        await pause(20);
+      }),
     label,
     button,
     click: async (name: string) => act(async () => button(name).click()),
@@ -94,14 +143,40 @@ async function renderWorkspace(t: TestContext, store: EnvironmentStore, readOnly
         Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(field, value);
         field.dispatchEvent(new dom.window.Event(type, { bubbles: true }));
       }),
-    submit: async () =>
-      act(async () => {
-        dom.window.document
-          .querySelector('form')!
-          .dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
-        await new Promise((resolve) => setTimeout(resolve, 40));
-      }),
+    requestSave: async (withAcknowledgement = true) => {
+      const requestId = crypto.randomUUID();
+      await act(async () => {
+        session.bridge.receive({
+          ...last('state'),
+          requestId,
+          type: 'request_save',
+        });
+        await pause(40);
+      });
+      const snapshot = messages
+        .filter((message) => message.type === 'save_snapshot' && message.requestId === requestId)
+        .at(-1);
+      assert.ok(snapshot, 'The environment workspace must capture a save snapshot');
+      if (withAcknowledgement) {
+        const environment = snapshot.environment;
+        await acknowledge(snapshot, {
+          environment: {
+            id: environment.id ?? 'env-2',
+            name: environment.name,
+            definition: environment.definition,
+            revision: 'r2',
+          },
+        });
+      }
+      return snapshot;
+    },
+    acknowledge,
   };
+}
+const pause = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+function saveEnvelope(value: any) {
+  const { version, workspaceId, documentId, generation, requestId } = value;
+  return { version, workspaceId, documentId, generation, requestId };
 }
 function fixture() {
   let saved: Environment = {
@@ -110,88 +185,74 @@ function fixture() {
     definition: { startup: 'npm ci' },
     revision: 'r1',
   };
-  const writes: any[] = [];
   const store: EnvironmentStore = {
     list: async () => ({ environments: [saved] }),
     load: async () => structuredClone(saved),
-    save: async (value) => {
-      writes.push(structuredClone(value));
-      saved = {
-        id: value.id ?? 'env-2',
-        name: value.name,
-        definition: value.definition,
-        revision: 'r2',
-      };
-      return structuredClone(saved);
-    },
     remove: async () => {},
   };
-  return { store, writes };
+  return { store };
 }
 
-test('environment edits save their own CAS resource and protect unsaved navigation', async (t) => {
-  const { ui, writes } = await editingFixture(t);
+test('environment edits capture one CAS snapshot and protect unsaved navigation', async (t) => {
+  const { ui } = await editingFixture(t);
   await ui.input('Startup script', 'npm ci --ignore-scripts');
   await ui.command({});
   assert.equal(ui.messages.at(-1).problem.code, 'unsaved_changes');
-  await ui.submit();
-  assert.deepEqual(writes, [
-    {
-      id: 'env-1',
-      name: 'node-tools',
-      definition: { startup: 'npm ci --ignore-scripts' },
-      expectedRevision: 'r1',
-    },
-  ]);
-  assert.match(ui.dom.window.document.body.textContent!, /Environment saved/);
+  const snapshot = await ui.requestSave();
+  assert.deepEqual(snapshot.environment, {
+    id: 'env-1',
+    name: 'node-tools',
+    definition: { startup: 'npm ci --ignore-scripts' },
+    expectedRevision: 'r1',
+  });
+  assert.deepEqual(snapshot.authority, { userId: 'user', organizationId: 'org', scope: 'user' });
   assert.equal(ui.messages.at(-1).dirty, false);
   assert.equal(ui.button('Add variable').type, 'button');
 });
 
 test('focused pending variable names are committed before capturing the environment save', async (t) => {
-  const { ui, writes } = await editingFixture(t);
+  const { ui } = await editingFixture(t);
   await ui.click('Add variable');
   await act(async () => ui.label('Variable VARIABLE name').focus());
   await ui.input('Variable VARIABLE name', 'PROJECT_MODE');
-  await ui.submit();
-  assert.equal(writes.length, 1);
-  assert.deepEqual(writes[0].definition.variables, { PROJECT_MODE: '' });
+  const snapshot = await ui.requestSave();
+  assert.deepEqual(snapshot.environment.definition.variables, { PROJECT_MODE: '' });
 });
 
 test('failed save and deletion retain the environment draft and saved revision', async (t) => {
   const { store } = fixture();
-  store.save = async () => {
-    throw new Error('Environment changed. Reload before saving.');
-  };
   store.remove = async () => {
     throw new Error('This environment was changed in another tab.');
   };
   const ui = await renderWorkspace(t, store);
   await ui.input('Select environment', 'env-1', 'change');
   await ui.input('Startup script', 'local unsaved work');
-  await ui.submit();
+  const snapshot = await ui.requestSave(false);
+  await ui.acknowledge(snapshot, {
+    problem: { code: 'environment_conflict', message: 'Reload the page and try again.' },
+  });
   assert.equal(ui.label('Startup script').value, 'local unsaved work');
-  assert.match(ui.dom.window.document.body.textContent!, /Environment changed/);
-  ui.dom.window.confirm = () => false;
-  await ui.click('Reload environment');
-  assert.equal(ui.label('Startup script').value, 'local unsaved work');
-  ui.dom.window.confirm = () => true;
+  assert.equal(
+    ui.messages.filter((message) => message.problem?.code === 'environment_conflict').at(-1)?.problem
+      .code,
+    'environment_conflict'
+  );
+  assert.throws(() => ui.button('Reload environment'));
   await ui.click('Delete environment');
   assert.match(ui.dom.window.document.body.textContent!, /changed in another tab/);
   assert.equal(ui.label('Startup script').value, 'local unsaved work');
-  await ui.click('Reload environment');
+  await ui.command({ discard: true });
   assert.equal(ui.label('Startup script').value, 'npm ci');
 });
 
 test('read-only environment view can select resources but cannot modify or delete them', async (t) => {
-  const { store, writes } = fixture();
+  const { store } = fixture();
   const ui = await renderWorkspace(t, store, true);
   await ui.input('Select environment', 'env-1', 'change');
   assert.equal(ui.dom.window.document.querySelector('fieldset')!.disabled, true);
   const text = ui.dom.window.document.body.textContent!;
-  assert.doesNotMatch(text, /New environment|Save environment|Delete environment/);
+  assert.doesNotMatch(text, /New environment|Save environment|Reload environment|Delete environment/);
   assert.equal(ui.label('Startup script').value, 'npm ci');
-  assert.deepEqual(writes, []);
 });
 
 function fieldLabel(dom: JSDOM, name: string) {
@@ -241,13 +302,13 @@ function initializeBridge(Bridge: any, messages: any[], workspaceId = 'test') {
 }
 
 test('remount restores committed edits and their original CAS revision', async (t) => {
-  const { ui, writes } = await editingFixture(t);
+  const { ui } = await editingFixture(t);
   await ui.input('Startup script', 'preserve this edited startup');
   await ui.remount();
   assert.equal(ui.label('Startup script').value, 'preserve this edited startup');
-  await ui.submit();
-  assert.equal(writes[0].expectedRevision, 'r1');
-  assert.equal(writes[0].definition.startup, 'preserve this edited startup');
+  const snapshot = await ui.requestSave();
+  assert.equal(snapshot.environment.expectedRevision, 'r1');
+  assert.equal(snapshot.environment.definition.startup, 'preserve this edited startup');
   await ui.remount();
   assert.equal(ui.dom.window.document.querySelector('textarea'), null, 'A saved draft is cleared');
 });
@@ -290,14 +351,14 @@ test('deletion clears recovery and malformed storage cannot prevent opening envi
 });
 
 async function editingFixture(t: TestContext) {
-  const { store, writes } = fixture();
+  const { store } = fixture();
   const ui = await renderWorkspace(t, store);
   await ui.input('Select environment', 'env-1', 'change');
-  return { ui, writes };
+  return { ui };
 }
 
 test('large escaped environment definitions recover with their CAS base within the shared bound', async (t) => {
-  const { store, writes } = fixture();
+  const { store } = fixture();
   const definition = {
     setup: '\u0001'.repeat(64 * 1024),
     startup: '\u0001'.repeat(64 * 1024),
@@ -329,8 +390,8 @@ test('large escaped environment definitions recover with their CAS base within t
   );
   await ui.remount();
   assert.equal(ui.label('Startup script').value, edited);
-  await ui.submit();
-  assert.equal(writes[0].expectedRevision, 'large-r1');
+  const saved = await ui.requestSave();
+  assert.equal(saved.environment.expectedRevision, 'large-r1');
   assert.equal(ui.dom.window.sessionStorage.getItem(key), null);
 });
 
@@ -359,26 +420,42 @@ test('hosted collection contexts recover only their own drafts', async (t) => {
   assert.equal(ui.label('Startup script').value, 'first repository draft');
 });
 
-for (const action of ['reload', 'switch'] as const) {
-  test(`${action} discards pending field edits after loading the environment`, async (t) => {
-    const { ui } = await pendingNameFixture(t);
-    if (action === 'reload') await ui.click('Reload environment');
-    else await ui.input('Select environment', 'env-2', 'change');
-    assert.equal(ui.label('Variable MODE name').value, 'MODE');
-    assert.equal(ui.messages.at(-1).pending, false);
-    assert.equal(ui.messages.at(-1).dirty, false);
-  });
-}
+test('switching environments discards pending field edits only after confirmation', async (t) => {
+  const { ui } = await pendingNameFixture(t);
+  await ui.input('Select environment', 'env-2', 'change');
+  assert.equal(ui.label('Variable MODE name').value, 'MODE');
+  assert.equal(ui.messages.at(-1).pending, false);
+  assert.equal(ui.messages.at(-1).dirty, false);
+});
 
-test('failed reload preserves pending field edits', async (t) => {
-  const { store, ui } = await pendingNameFixture(t);
-  store.load = async () => {
-    throw new Error('Environment unavailable');
-  };
-  await ui.click('Reload environment');
-  assert.equal(ui.label('Variable MODE name').value, 'bad name');
-  assert.equal(ui.messages.at(-1).pending, true);
-  assert.match(ui.dom.window.document.body.textContent!, /Environment unavailable/);
+test('a save acknowledgement settles only its captured environment snapshot', async (t) => {
+  const { ui } = await editingFixture(t);
+  await ui.input('Startup script', 'captured');
+  const snapshot = await ui.requestSave(false);
+  await ui.input('Startup script', 'newer edit');
+  await ui.acknowledge(snapshot, {
+    environment: {
+      id: 'env-1',
+      name: 'node-tools',
+      definition: { startup: 'captured' },
+      revision: 'r2',
+    },
+  });
+  assert.equal(ui.label('Startup script').value, 'newer edit');
+  assert.equal(ui.messages.filter((message) => message.type === 'state').at(-1)?.dirty, true);
+  const next = await ui.requestSave(false);
+  assert.equal(next.environment.expectedRevision, 'r2');
+});
+
+test('host-owned settings participate in navigation protection without entering the snapshot', async (t) => {
+  const { ui } = await editingFixture(t);
+  await ui.send({ type: 'environment_settings', dirty: true });
+  assert.equal(ui.messages.filter((message) => message.type === 'state').at(-1)?.dirty, true);
+  ui.dom.window.confirm = () => false;
+  await ui.input('Select environment', 'env-1', 'change');
+  assert.equal(ui.label('Startup script').value, 'npm ci');
+  const snapshot = await ui.requestSave(false);
+  assert.equal(Object.hasOwn(snapshot.environment, 'hostMetadata'), false);
 });
 
 async function pendingNameFixture(t: TestContext) {

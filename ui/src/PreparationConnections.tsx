@@ -32,11 +32,6 @@ export function PreparationConnections({
   return (
     <section aria-label="Preparation connections">
       <h3>Preparation connections</h3>
-      <p className="helper">
-        Declare saved connection names and the exact secret fields setup and startup need. Manage
-        their values in the target’s connection store. Agent connections stay in their node
-        bindings.
-      </p>
       {Object.entries(value).map(([name, names]) => (
         <div className="runtime-variable" key={name}>
           <ControlText

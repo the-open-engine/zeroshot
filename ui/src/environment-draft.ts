@@ -55,6 +55,12 @@ export function useEnvironmentDraft(key: string) {
         ...(previous.key === key ? previous : { key }),
         draft,
       })),
+    acknowledge: (captured: EnvironmentDraft, saved: Environment) =>
+      setState((previous) => {
+        const current = previous.key === key ? previous : { key };
+        const changed = JSON.stringify(current.draft) !== JSON.stringify(captured);
+        return { key, saved, draft: changed ? current.draft : content(saved) };
+      }),
     adopt: (saved?: Environment) => setState({ key, saved, draft: saved && content(saved) }),
   };
 }

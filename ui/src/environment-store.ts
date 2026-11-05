@@ -9,13 +9,10 @@ export type EnvironmentDefinition = {
 export type EnvironmentSummary = { id: string; name: string; revision: string };
 export type Environment = EnvironmentSummary & { definition: EnvironmentDefinition };
 export type EnvironmentDraft = { id?: string; name: string; definition: EnvironmentDefinition };
+export type EnvironmentSaveSnapshot = EnvironmentDraft & { expectedRevision: string | null };
 export interface EnvironmentStore {
   list(signal?: AbortSignal): Promise<{ environments: EnvironmentSummary[] }>;
   load(id: string, signal?: AbortSignal): Promise<Environment>;
-  save(
-    value: EnvironmentDraft & { expectedRevision: string | null },
-    signal?: AbortSignal
-  ): Promise<Environment>;
   remove(id: string, expectedRevision: string, signal?: AbortSignal): Promise<void>;
 }
 
@@ -35,7 +32,6 @@ export function createEnvironmentStore(
   return {
     list: (signal) => api(endpoint(), undefined, signal),
     load: (id, signal) => api(endpoint(id), undefined, signal),
-    save: (value, signal) => api(endpoint(), value, signal, headers()),
     remove: async (id, expectedRevision, signal) => {
       const result = await api<{ deleted: boolean }>(
         endpoint(id),

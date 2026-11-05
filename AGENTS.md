@@ -1092,6 +1092,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   survives inspector navigation, and commits only when valid. Navigation must preserve unsaved work.
   Hosted workspaces use the `platform` kind with their existing opaque workspace IDs. The tag
   rename starts a new browser storage namespace; earlier drafts and preferences are not imported.
+  Hosted environment saves use the same correlated snapshot/acknowledgement lifecycle: the iframe
+  exposes only `{id?, name, definition, expectedRevision}`, while the host owns persistence and may
+  atomically add private metadata. Host metadata participates in navigation protection through one
+  opaque dirty boolean; its fields and domain semantics must not enter this repository.
 - The structured graph is canonical; React Flow/ELK provide presentation only. Flattening sequences
   or folding standard error routes must preserve scopes, identities, priority, conditions, and
   runtime bindings. Custom/unfamiliar routes stay visible. Layout and themes stay out of profiles.

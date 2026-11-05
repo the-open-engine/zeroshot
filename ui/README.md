@@ -137,8 +137,9 @@ The workspace rejects stale document generations. A document switch may change b
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `open_profile` | `nextDocumentId`, optional `discard`, and either `profile: {name, graph, runtime}` with optional `revision`, or `templateId`. |
 | `open_run`     | `nextDocumentId`, `runId`, optional `discard`. History is fetched through the API.                                            |
-| `request_save` | Optional `name` for save-as. The current identity must be a profile.                                                          |
-| `save_ack`     | The snapshot's request ID and generation, with either `saved: {profile, revision}` or `problem: {code, message, details?}`.   |
+| `request_save` | Optional `name` for profile save-as. Captures the current profile or environment draft.                                      |
+| `save_ack`     | The snapshot's request ID and generation, with a saved profile/environment or `problem: {code, message, details?}`.          |
+| `environment_settings` | Environment view only; reports whether opaque host-owned settings are dirty.                                          |
 | `theme`        | `theme: "light"` or `"dark"`.                                                                                                 |
 | `navigate`     | `action: "profiles"`, `"runs"` or `"leave"`, optional `discard`.                                                              |
 
@@ -150,11 +151,12 @@ Dirty or unresolved drafts refuse switches with `unsaved_changes`; an explicit h
 may resend with `discard: true`. Pending saves refuse switches even with discard. The host waits
 for the correlated `state` acknowledgement before changing outer navigation or removing the frame.
 
-`save_snapshot` replies contain `profile: {name, graph, runtime, expectedRevision}`, the captured
-`authority`, and the original request/document/generation envelope. Valid focused field edits commit
-before capture; unresolved edits return a structured problem. The host performs the conditional
-write with the captured authority/workspace/revision and returns `save_ack`. An acknowledgement
-only settles its captured snapshot, preserving later edits. A save-as name drops the old revision.
+`save_snapshot` replies contain the captured `authority`, the original request/document/generation
+envelope, and either `profile: {name, graph, runtime, expectedRevision}` or
+`environment: {id?, name, definition, expectedRevision}`. Valid focused field edits commit before
+capture; unresolved edits return a structured problem. The host performs the conditional write and
+returns `save_ack`. An acknowledgement only settles its captured snapshot, preserving later edits.
+A profile save-as name drops the old revision.
 
 Unsolicited `state` messages report `dirty`, `pending`, `validation`, `saving`, `loading` and profile
 `name`. Command replies report `accepted` or a structured `problem`. `navigate` messages from the
@@ -163,8 +165,11 @@ workspace request the host's `save` or `defaults` action. The host keeps selecti
 Set `view: "environments"` and an explicit `environmentApi` collection URL in `init` to mount the hosted environment manager;
 `readOnly: true` disables mutation controls. The server remains responsible for write authorization.
 The manager reuses the same theme, state, and guarded navigation messages, with one document identity
-for its mounted surface. It handles resource selection and conditional CRUD through the service below;
-profile-specific bridge commands are unavailable. Failed writes preserve the draft and saved revision.
+for its mounted surface. It handles resource reads and deletion through the service below. Saves emit
+only the generic environment snapshot; the host may combine it atomically with private metadata before
+acknowledging it. A single opaque dirty bit brings that metadata into the manager's existing navigation
+guard without exposing its shape. Profile-specific bridge commands are unavailable. Failed writes
+preserve the draft and saved revision.
 
 ### Authenticated service paths and history lifecycle
 
@@ -175,7 +180,7 @@ paths beneath it; its profile load/save work passes through the host bridge inst
 | ------------------------------------ | --------------------------------------------------------------------------------------------- |
 | `GET environmentApi`                 | `{environments: [{id, name, revision}]}`.                                                     |
 | `GET environmentApi/{id}`            | `{id, name, definition, revision}`.                                                           |
-| `POST environmentApi`                | Save `{id?, name, definition, expectedRevision: string or null}`; returns the saved resource. |
+| `POST environmentApi`                | Host save of `{id?, name, definition, expectedRevision: string or null}` plus host-owned fields; returns the saved resource. |
 | `DELETE environmentApi/{id}`         | Delete with `{expectedRevision}`; returns `{deleted: true}`.                                  |
 | `GET bootstrap`                      | Existing workspace bootstrap with templates, workers and runtime schema.                      |
 | `POST validate`                      | Native validation of `{graph, runtime}`.                                                      |
@@ -185,8 +190,8 @@ paths beneath it; its profile load/save work passes through the host bridge inst
 | `GET runs/{id}/events?after=CURSOR`  | SSE `history` pages and structured `history_error` problems.                                  |
 
 Environment writes carry the pinned `X-Zeroshot-Workspace` bootstrap identity. The generic hosted
-manager preserves the explicit collection URL's query parameters for CRUD and draft recovery;
-the host owns repository matching, defaults, authorization, and any additional resource fields.
+manager preserves the explicit collection URL's query parameters for reads, deletion, and draft
+recovery; the host owns authorization, persistence, and any additional resource fields.
 It reports opaque `resourceId`/`resourceRevision` state changes so host controls can refresh their
 catalog. Plain local services never create this adapter. Profiles reject `runtime.environment`.
 Committed drafts and their original CAS baseline recover in the same authority and collection
