@@ -2187,6 +2187,17 @@ admitted runs keep their stored graph and runtime.</p>
 <p>PR and merge delivery consider feedback by default. Use <code>--no-pr-feedback</code> to ignore PR discussion;
 the <a href="../../reference/runtime-plan/#git_delivery"><code>git_delivery</code> binding</a> describes the runtime
 setting.</p>
+<p>Automatic repairs accept feedback only from current writers on the target repository. GitHub
+confirms effective write or admin permission for issue comments, submitted reviews (including
+unwritten change requests), inline comments and replies. GitLab confirms active Developer-or-higher
+project membership, including inherited and invited membership, for discussion notes. The account
+must be active. Enterprise Edition also requires active <code>membership_state</code>; awaiting membership is
+ignored. Community Edition omits that field, so its response is accepted only after instance metadata
+confirms the edition. Unknown or malformed membership status fails the feedback read. Permissions
+are checked again on each inspection and bound to the author's stable numeric identity. Organization
+association, PR authorship, requested-reviewer status and bot status grant no exception. Confirmed
+read-only access or nonmembership is ignored and does not start another worker/reviewer round.
+Failed or incomplete permission lookups stop delivery or use its existing retry handling.</p>
 
 
 
