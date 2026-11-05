@@ -1,6 +1,6 @@
 import { assertDocument, type Document } from './domain';
 import type { Saved } from './api';
-import type { Environment } from './environment-store';
+import { readEnvironment, type Environment } from './environment-store';
 
 export type WorkspaceAuthority = { userId: string; organizationId: string; scope: 'user' | 'org' };
 type Envelope = {
@@ -238,8 +238,9 @@ function problemAcknowledgement(value: Record<string, unknown>) {
 }
 
 function environmentAcknowledgement(value: Record<string, unknown>) {
-  return !value.saved && !value.problem && savedEnvironment(value.environment)
-    ? (value as HostCommand)
+  const environment = readEnvironment(value.environment);
+  return !value.saved && !value.problem && environment
+    ? ({ ...value, environment } as HostCommand)
     : undefined;
 }
 
@@ -251,17 +252,6 @@ function profileAcknowledgement(value: Record<string, unknown>) {
     return;
   }
   return value as HostCommand;
-}
-
-function savedEnvironment(value: unknown): value is Environment {
-  return (
-    record(value) &&
-    token(value.id) &&
-    typeof value.name === 'string' &&
-    value.name.length <= 64 &&
-    token(value.revision) &&
-    record(value.definition)
-  );
 }
 
 function validCsrf(value: unknown): boolean {

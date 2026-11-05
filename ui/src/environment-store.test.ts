@@ -3,19 +3,32 @@ import assert from 'node:assert/strict';
 import { createEnvironmentStore } from './environment-store';
 import { createWorkspaceServices } from './workspace-services';
 
-test('hosted environment reads and deletion preserve explicit context and conditional-write identity', async () => {
+test('hosted environment reads project host responses and preserve conditional-write identity', async () => {
   const seen: { path: string; init?: RequestInit }[] = [];
+  const environment = {
+    id: 'env-1',
+    name: 'node-tools',
+    revision: 'r1',
+    definition: { startup: 'npm ci' },
+  };
   const store = createEnvironmentStore(
     new URL('https://example.test/workspace/environments?context=repo-1'),
     'store-1',
     async (url, init) => {
       seen.push({ path: String(url), init });
-      return Response.json({ deleted: true, environments: [] });
+      if (init?.method === 'DELETE') return Response.json({ deleted: true });
+      if (String(url).includes('id%2Fwith%2Fslash'))
+        return Response.json({ ...environment, hostMetadata: { private: true } });
+      return Response.json({
+        environments: [{ ...environment, hostMetadata: { private: true } }],
+      });
     }
   );
   const controller = new AbortController();
-  await store.list(controller.signal);
-  await store.load('id/with/slash', controller.signal);
+  assert.deepEqual(await store.list(controller.signal), {
+    environments: [{ id: environment.id, name: environment.name, revision: environment.revision }],
+  });
+  assert.deepEqual(await store.load('id/with/slash', controller.signal), environment);
   await store.remove('env-1', 'revision-2', controller.signal);
   assert.equal(
     seen[1].path,
