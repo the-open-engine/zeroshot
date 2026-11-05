@@ -540,7 +540,9 @@ fn named_validation_command(
 fn template_validation_input(template: BuiltinGraphTemplate) -> serde_json::Value {
     if !matches!(
         template,
-        BuiltinGraphTemplate::IssueReview | BuiltinGraphTemplate::PrReview
+        BuiltinGraphTemplate::IssueReview
+            | BuiltinGraphTemplate::PrReview
+            | BuiltinGraphTemplate::CodeReview
     ) {
         return serde_json::json!({"task":"Validate without a source or credential"});
     }
@@ -548,7 +550,10 @@ fn template_validation_input(template: BuiltinGraphTemplate) -> serde_json::Valu
         "url":"https://ghe.example.test/team/project/issues/17",
         "context":{"title":"Proposal","body":"Review prepared context","reviewScope":{}}
     });
-    if template == BuiltinGraphTemplate::PrReview {
+    if matches!(
+        template,
+        BuiltinGraphTemplate::PrReview | BuiltinGraphTemplate::CodeReview
+    ) {
         input["url"] = serde_json::json!("https://ghe.example.test/team/project/pull/17");
         input["context"]["reviewScope"] = serde_json::json!({
             "baseRepository":"team/project","baseBranch":"main","baseRevision":"a".repeat(40),

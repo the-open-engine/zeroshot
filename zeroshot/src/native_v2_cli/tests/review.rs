@@ -61,7 +61,9 @@ fn review_defaults_to_comment_for_run_profile_creation_and_template_export() {
     ] {
         assert_template_delivery("issue-review", &overrides, expected);
         if expected != TemplateDelivery::None {
-            assert_template_delivery("pr-review", &overrides, expected);
+            for template in ["pr-review", "code-review"] {
+                assert_template_delivery(template, &overrides, expected);
+            }
         }
     }
     for template in ["single-worker", "auto-research"] {
@@ -310,15 +312,11 @@ async fn task_from_accepts_a_custom_profile_requiring_complete_pr_scope() {
 }
 
 #[test]
-fn pr_review_requires_comment_delivery_for_exact_comparison_preparation() {
-    assert!(
-        parse_native_v2_args(args(&[
-            "template",
-            "show",
-            "pr-review",
-            "--delivery",
-            "none"
-        ]))
-        .is_err()
-    );
+fn pr_templates_require_comment_delivery_for_exact_comparison_preparation() {
+    for template in ["pr-review", "code-review"] {
+        assert!(
+            parse_native_v2_args(args(&["template", "show", template, "--delivery", "none"]))
+                .is_err()
+        );
+    }
 }

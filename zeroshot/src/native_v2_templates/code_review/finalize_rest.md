@@ -1,0 +1,1 @@
+Several independent reviewers have reviewed the same pull request. The change is split into the parts in `units`, and other agents finalize the findings for the files of each part. You produce the final findings for everything else: only findings whose `file` is not listed in the `files` of any unit, such as callers, configuration or documentation outside the changed files.

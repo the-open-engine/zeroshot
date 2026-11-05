@@ -29,7 +29,9 @@ pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
             BuiltinGraphTemplate::IssueReview => {
                 &[TemplateDelivery::Comment, TemplateDelivery::None][..]
             }
-            BuiltinGraphTemplate::PrReview => &[TemplateDelivery::Comment][..],
+            BuiltinGraphTemplate::PrReview | BuiltinGraphTemplate::CodeReview => {
+                &[TemplateDelivery::Comment][..]
+            }
         };
         for delivery in deliveries {
             let graph = materialize(*template, *delivery)?;
@@ -204,6 +206,13 @@ fn template_label(template: BuiltinGraphTemplate, delivery: TemplateDelivery) ->
                 "PR review · comment"
             } else {
                 "PR review"
+            }
+        }
+        BuiltinGraphTemplate::CodeReview => {
+            if delivery == TemplateDelivery::Comment {
+                "Code review · comment"
+            } else {
+                "Code review"
             }
         }
     }

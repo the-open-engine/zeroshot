@@ -779,7 +779,10 @@ async fn all_supported_builtin_graphs_keep_success_independent_of_receipt_projec
             }
             let runtime =
                 crate::native_v2_candidate::test_support::codex_runtime(RunSize::Medium, nodes);
-            let is_pr = template == BuiltinGraphTemplate::PrReview;
+            let is_pr = matches!(
+                template,
+                BuiltinGraphTemplate::PrReview | BuiltinGraphTemplate::CodeReview
+            );
             let url = if is_pr {
                 "https://github.com/acme/project/pull/42"
             } else {
@@ -787,7 +790,9 @@ async fn all_supported_builtin_graphs_keep_success_independent_of_receipt_projec
             };
             let initial_input = if matches!(
                 template,
-                BuiltinGraphTemplate::IssueReview | BuiltinGraphTemplate::PrReview
+                BuiltinGraphTemplate::IssueReview
+                    | BuiltinGraphTemplate::PrReview
+                    | BuiltinGraphTemplate::CodeReview
             ) {
                 let scope = if is_pr {
                     json!({"baseRepository":"acme/project","baseBranch":"main","baseRevision":"b".repeat(40),"headRepository":"acme/project","headBranch":"fix","headRevision":"a".repeat(40)})
@@ -886,7 +891,7 @@ async fn all_supported_builtin_graphs_keep_success_independent_of_receipt_projec
             checked_pairs += 1;
         }
     }
-    assert_eq!(checked_pairs, 10);
+    assert_eq!(checked_pairs, 11);
 }
 
 #[tokio::test]

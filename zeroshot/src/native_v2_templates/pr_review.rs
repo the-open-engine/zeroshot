@@ -12,13 +12,8 @@ fn task_type() -> Result<PayloadType, BuiltinTemplateError> {
     record_type(vec![("plan", PayloadType::String, true)])
 }
 
-fn array(items: PayloadType) -> PayloadType {
-    PayloadType::Array {
-        items: Box::new(items),
-    }
-}
-
-fn input_type() -> Result<PayloadType, BuiltinTemplateError> {
+/// The prepared PR review input, shared with the `code-review` template.
+pub(super) fn input_type() -> Result<PayloadType, BuiltinTemplateError> {
     let mut scope = static_value(crate::native_v2_comment_delivery::review_scope_schema())?;
     let PayloadType::Record { fields } = &mut scope else {
         return Err(BuiltinTemplateError::InvalidStaticContract);
@@ -44,14 +39,16 @@ fn input_type() -> Result<PayloadType, BuiltinTemplateError> {
     ])
 }
 
-fn agent_input(extra: Vec<(&str, PayloadType, bool)>) -> Result<PayloadType, BuiltinTemplateError> {
+pub(super) fn agent_input(
+    extra: Vec<(&str, PayloadType, bool)>,
+) -> Result<PayloadType, BuiltinTemplateError> {
     let mut fields = record_fields(input_type()?)?;
     fields.insert(field_name("instructions")?, required(PayloadType::String));
     fields.extend(record_fields(record_type(extra)?)?);
     Ok(PayloadType::Record { fields })
 }
 
-fn bindings(
+pub(super) fn bindings(
     extra: &[&str],
 ) -> Result<Vec<openengine_cluster_protocol::InputBinding>, BuiltinTemplateError> {
     ["url", "context", "instructions"]

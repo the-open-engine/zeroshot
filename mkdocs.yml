@@ -59,6 +59,7 @@ nav:
       - Active Memory: guides/active-memory.md
       - Build a review loop: guides/review-loop.md
       - Review an issue or PR: guides/review.md
+      - Review a PR in depth: guides/code-review.md
       - GitHub and GitLab delivery: guides/forge-delivery.md
       - Observe and control runs: guides/observe-and-control.md
       - Use a local graph as an ACP agent: guides/acp.md

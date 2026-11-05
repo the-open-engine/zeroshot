@@ -574,7 +574,8 @@ fn template_list_and_show_are_static_and_emit_ordinary_json() {
             "software-change",
             "auto-research",
             "issue-review",
-            "pr-review"
+            "pr-review",
+            "code-review"
         ])
     );
 

@@ -324,6 +324,7 @@ impl TemplateName {
             Self::AutoResearch => "auto-research",
             Self::IssueReview => "issue-review",
             Self::PrReview => "pr-review",
+            Self::CodeReview => "code-review",
         };
         BuiltinGraphTemplate::parse(name)
             .ok_or_else(|| usage("Clap template value is outside the built-in catalog"))
@@ -706,7 +707,9 @@ fn validate_template_delivery(
         BuiltinGraphTemplate::IssueReview => {
             matches!(delivery, TemplateDelivery::None | TemplateDelivery::Comment)
         }
-        BuiltinGraphTemplate::PrReview => delivery == TemplateDelivery::Comment,
+        BuiltinGraphTemplate::PrReview | BuiltinGraphTemplate::CodeReview => {
+            delivery == TemplateDelivery::Comment
+        }
     };
     if !supported {
         return Err(usage(format!(

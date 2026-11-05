@@ -410,11 +410,14 @@ enum TemplateName {
 
     /// Review a PR diff, conditionally reproduce behavior, and post a concise report.
     PrReview,
+
+    /// Review a PR with parallel specialist reviewers, verify their findings, and post one report.
+    CodeReview,
 }
 
 #[derive(Debug, Args)]
 struct DeliveryArgs {
-    /// Template delivery mode. Defaults to pull_request for software-change, comment for issue-review and pr-review, otherwise none.
+    /// Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none.
     #[arg(long, value_name = "MODE", conflicts_with_all = ["push", "pr", "ship"])]
     delivery: Option<String>,
 

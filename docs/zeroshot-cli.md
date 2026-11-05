@@ -683,6 +683,7 @@ Options:
           - auto-research:   Research with ten iterations by default and independent evidence gates
           - issue-review:    Inspect an issue proposal and post a review report
           - pr-review:       Review a PR diff, conditionally reproduce behavior, and post a concise report
+          - code-review:     Review a PR with parallel specialist reviewers, verify their findings, and post one report
 
       --runtime-config <FILE>
 
@@ -694,7 +695,7 @@ Options:
 
 
       --delivery <MODE>
-          Template delivery mode. Defaults to pull_request for software-change, comment for issue-review and pr-review, otherwise none
+          Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none
 
       --push
           Commit and push the managed run branch without opening a pull request
@@ -854,13 +855,14 @@ Arguments:
           - auto-research:   Research with ten iterations by default and independent evidence gates
           - issue-review:    Inspect an issue proposal and post a review report
           - pr-review:       Review a PR diff, conditionally reproduce behavior, and post a concise report
+          - code-review:     Review a PR with parallel specialist reviewers, verify their findings, and post one report
 
 Options:
       --json
           Write the complete graph as JSON even when stdout is a terminal
 
       --delivery <MODE>
-          Template delivery mode. Defaults to pull_request for software-change, comment for issue-review and pr-review, otherwise none
+          Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none
 
       --push
           Commit and push the managed run branch without opening a pull request
@@ -1076,6 +1078,7 @@ Options:
           - auto-research:   Research with ten iterations by default and independent evidence gates
           - issue-review:    Inspect an issue proposal and post a review report
           - pr-review:       Review a PR diff, conditionally reproduce behavior, and post a concise report
+          - code-review:     Review a PR with parallel specialist reviewers, verify their findings, and post one report
 
       --input <FILE>
           Load the graph's initial input from this JSON file
@@ -1138,7 +1141,7 @@ Options:
           Remote profiles still require target access. This does not check dependency installation or connection availability.
 
       --delivery <MODE>
-          Template delivery mode. Defaults to pull_request for software-change, comment for issue-review and pr-review, otherwise none
+          Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none
 
       --push
           Commit and push the managed run branch without opening a pull request

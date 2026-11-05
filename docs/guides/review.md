@@ -9,7 +9,8 @@ PR review uses comment delivery so comparison preparation always has an admitted
 The `--task-from` resolver supports GitHub.com; [GHE and GitLab comments](forge-delivery.md) need
 caller-supplied graph input.
 The separate `issue-review` template retains a basic issue-proposal review; its review workflow
-will be designed separately.
+will be designed separately. For a deeper static review that reports every verified finding, see
+[Review a PR in depth](code-review.md).
 
 ## What the graph checks
 
