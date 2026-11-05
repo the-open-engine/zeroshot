@@ -436,6 +436,7 @@ where
                         connections: request.connections,
                         connection_resolver: None,
                         github_token: request.github_token,
+                        commit_identity: None,
                         git_credentials: request.git_credentials,
                     },
                 )

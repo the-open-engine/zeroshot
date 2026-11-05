@@ -26,7 +26,7 @@ use crate::native_v2_candidate::{
     NativeV2CandidateConfig, NativeV2CandidateCommentDelivery, NativeV2CandidateDelivery,
     build_native_v2_candidate_with_github_token,
 };
-use crate::source_code_provider::adapters::core::{SourceDeliveryFactoryRequest, delivery_authority};
+use crate::source_code_provider::adapters::core::SourceDeliveryFactoryRequest;
 use crate::native_v2_capsule::{
     CapsuleFilesystem, CapsuleFilesystemSpec, NativeCapsuleNodeEndpoint, RemoteCapsuleNodeRunner,
     prepare_capsule_filesystem,
@@ -82,6 +82,7 @@ struct CapsuleBuildRequest<'a> {
     admitted: &'a AdmittedRun,
     github_token: Option<&'a str>,
     git_credentials: Option<&'a GitTransportCredentials>,
+    commit_identity: Option<&'a openengine_cluster_protocol::CommitIdentity>,
     install_source: bool,
     transfer_retained_workspace: bool,
     preparation: CapsulePreparation,
@@ -199,6 +200,7 @@ impl ProductionCapsuleAllocator {
             admitted,
             github_token,
             git_credentials,
+            commit_identity,
             preparation,
         } = request;
         let allocation = self
@@ -209,6 +211,7 @@ impl ProductionCapsuleAllocator {
                 admitted,
                 github_token,
                 git_credentials,
+                commit_identity,
                 install_source: true,
                 transfer_retained_workspace: false,
                 preparation,
@@ -466,24 +469,9 @@ impl ProductionCapsuleAllocator {
                 .ok_or(CapsuleAllocationUnavailable::Runtime)?;
             let target = crate::native_v2_delivery::source_target(source, mode)
                 .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-            let authority = delivery_authority(SourceDeliveryFactoryRequest {
-                source,
-                workspace: &prepared.filesystem.workspace,
-                git_program: &self.config.git_program,
-                gh_program: &self.config.gh_program,
-                home_directory: &prepared.paths.runtime_home,
-                private_directory: &prepared.paths.runtime_home,
-                git_identity: Some(pending.git_identity),
-                local_environment: None,
-                required_capabilities: &capabilities,
-                operator_diagnostics: Some((
-                    request.run_id.clone(),
-                    self.operator_diagnostics.clone(),
-                )),
-            })
-            .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
-            Ok(Some(NativeV2CandidateDelivery {
-                config: NativeV2DeliveryConfig::for_hosted_workspace(
+            let config = NativeV2DeliveryConfig {
+                commit_identity: request.commit_identity.cloned(),
+                ..NativeV2DeliveryConfig::for_hosted_workspace(
                     DeliveryLineage::new(
                         delivery_run_id.clone(),
                         request.adopt_existing_delivery || delivery_run_id != pending.run_id,
@@ -491,10 +479,29 @@ impl ProductionCapsuleAllocator {
                     prepared.filesystem.workspace.clone(),
                     target,
                     pending.git_identity,
-                ),
-                authority,
-                git_credentials: request.git_credentials.cloned(),
-            }))
+                )
+            };
+            NativeV2CandidateDelivery::new(
+                config,
+                SourceDeliveryFactoryRequest {
+                    source,
+                    workspace: &prepared.filesystem.workspace,
+                    git_program: &self.config.git_program,
+                    gh_program: &self.config.gh_program,
+                    home_directory: &prepared.paths.runtime_home,
+                    private_directory: &prepared.paths.runtime_home,
+                    git_identity: Some(pending.git_identity),
+                    local_environment: None,
+                    required_capabilities: &capabilities,
+                    operator_diagnostics: Some((
+                        request.run_id.clone(),
+                        self.operator_diagnostics.clone(),
+                    )),
+                },
+                request.git_credentials.cloned(),
+            )
+            .map(Some)
+            .map_err(|_| CapsuleAllocationUnavailable::Runtime)
         }
     }
 
@@ -838,6 +845,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
             admitted,
             github_token,
             git_credentials,
+            commit_identity,
             preparation,
         } = request;
         self.validate_retained_selection(source_run_id, &selection)?;
@@ -853,6 +861,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                 admitted,
                 github_token,
                 git_credentials,
+                commit_identity,
                 install_source: false,
                 transfer_retained_workspace: true,
                 preparation,

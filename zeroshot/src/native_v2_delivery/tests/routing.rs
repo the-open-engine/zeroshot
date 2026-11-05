@@ -131,6 +131,7 @@ async fn drive_repair_loop(
             delivery_run_id: RunId::new("delivery-routing"),
             adopt_existing_delivery: false,
             git_identity: None,
+            commit_identity: None,
             workspace: repo.workspace.clone(),
             git_program: PathBuf::from("/usr/bin/git"),
             target: DeliveryTarget::new("acme/project", "main", repo.base.clone()).assert_value(),

@@ -267,6 +267,7 @@ async fn allocate_comment(fixture: &CheckoutFixture) -> AllocatedCapsule {
             admitted: &fixture.admitted,
             github_token: Some(CHECKOUT_TOKEN),
             git_credentials: None,
+            commit_identity: None,
             preparation: crate::native_v2_platform::CapsulePreparation {
                 environment,
                 progress: Arc::new(QuietCommentPreparation),

@@ -22,6 +22,7 @@ async fn allocated_start(harness: &Harness) -> AllocatedRunStart {
             admitted: &stored.admitted,
             github_token: None,
             git_credentials: None,
+            commit_identity: None,
             preparation: test_preparation(),
         })
         .await

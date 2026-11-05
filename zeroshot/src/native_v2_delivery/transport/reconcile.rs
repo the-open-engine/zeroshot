@@ -2,7 +2,8 @@ use super::{GitTransport, SourceDeliveryCredential, SourceDeliveryError};
 use crate::source_code_provider::{
     SourceHeadReconciliation, SourceReviewReceipt, SourceReconciliationOutcome,
 };
-use crate::native_v2_delivery::{command::GitCommandOutput, git::GitError};
+use crate::native_v2_delivery::command::{GitCommandOutput, identity_configuration};
+use crate::native_v2_delivery::git::GitError;
 use std::ffi::OsString;
 
 #[derive(Clone, Copy)]
@@ -151,14 +152,8 @@ async fn integrate(
     request: SourceHeadReconciliation<'_>,
     authorized: bool,
 ) -> Result<SourceReconciliationOutcome, SourceDeliveryError> {
-    let mut arguments = vec![
-        "-c",
-        "user.name=Zeroshot",
-        "-c",
-        "user.email=delivery@zeroshot.invalid",
-        "merge",
-        "--no-edit",
-    ];
+    let [name, email] = identity_configuration(context.transport.commit_identity());
+    let mut arguments = vec!["-c", &name, "-c", &email, "merge", "--no-edit"];
     if authorized {
         arguments.push("--ff-only");
     }

@@ -6,6 +6,7 @@ use crate::execution::process::platform::{
 };
 use std::time::Duration;
 
+use openengine_cluster_protocol::CommitIdentity;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
@@ -375,16 +376,30 @@ pub(crate) fn local_git_command(program: &Path, workspace: &Path) -> Command {
     let mut environment = std::collections::BTreeMap::new();
     crate::execution::platform::process_environment(&mut environment);
     command.envs(environment);
-    pin_delivery_identity(&mut command);
+    pin_delivery_identity(&mut command, None);
     command
 }
 
-pub(super) fn pin_delivery_identity(command: &mut Command) {
+/// Delivery commits use the host-selected identity, or the fixed product identity without one.
+pub(crate) fn delivery_identity(identity: Option<&CommitIdentity>) -> (&str, &str) {
+    identity.map_or(("Zeroshot", "delivery@zeroshot.invalid"), |identity| {
+        (identity.name(), identity.email())
+    })
+}
+
+/// `-c` values that also make the delivery identity the configured Git user for one command.
+pub(crate) fn identity_configuration(identity: Option<&CommitIdentity>) -> [String; 2] {
+    let (name, email) = delivery_identity(identity);
+    [format!("user.name={name}"), format!("user.email={email}")]
+}
+
+fn pin_delivery_identity(command: &mut Command, identity: Option<&CommitIdentity>) {
+    let (name, email) = delivery_identity(identity);
     command
-        .env("GIT_AUTHOR_NAME", "Zeroshot")
-        .env("GIT_AUTHOR_EMAIL", "delivery@zeroshot.invalid")
-        .env("GIT_COMMITTER_NAME", "Zeroshot")
-        .env("GIT_COMMITTER_EMAIL", "delivery@zeroshot.invalid");
+        .env("GIT_AUTHOR_NAME", name)
+        .env("GIT_AUTHOR_EMAIL", email)
+        .env("GIT_COMMITTER_NAME", name)
+        .env("GIT_COMMITTER_EMAIL", email);
 }
 
 /// Repository-selection controls never override an engine-selected workspace. Native Git
@@ -407,14 +422,26 @@ pub(crate) fn remove_repository_environment(command: &mut std::process::Command)
     }
 }
 
+/// Trusted subprocess context shared by local workspace and transport Git commands.
+#[derive(Clone, Copy)]
+pub(crate) struct GitCommandContext<'a> {
+    pub(crate) identity: Option<crate::execution::process::HostedProcessIdentity>,
+    pub(crate) local_environment: Option<&'a std::collections::BTreeMap<String, String>>,
+    pub(crate) commit_identity: Option<&'a CommitIdentity>,
+}
+
 /// Selects the same private native Git context for local workspace and transport operations.
 /// An absent snapshot retains hosted isolation; the controller's ambient environment is never used.
 pub(crate) fn git_command(
     program: &Path,
     workspace: &Path,
-    identity: Option<crate::execution::process::HostedProcessIdentity>,
-    local_environment: Option<&std::collections::BTreeMap<String, String>>,
+    context: GitCommandContext<'_>,
 ) -> Command {
+    let GitCommandContext {
+        identity,
+        local_environment,
+        commit_identity,
+    } = context;
     let mut command = local_git_command_with_identity(program, workspace, identity);
     if let Some(environment) = local_environment {
         command.envs(environment);
@@ -435,7 +462,7 @@ pub(crate) fn git_command(
         }
     }
     remove_repository_environment(command.as_std_mut());
-    pin_delivery_identity(&mut command);
+    pin_delivery_identity(&mut command, commit_identity);
     command
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "never")

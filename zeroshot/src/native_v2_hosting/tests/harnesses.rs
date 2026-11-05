@@ -40,6 +40,7 @@ async fn forced_contributed_harness_requests_fail_before_connections_or_allocati
             connection_resolver: None,
             git_credentials: None,
             github_token: None,
+            commit_identity: None,
         };
         let error = factory.submit(&controller, request).await.assert_error();
         assert_eq!(error.kind(), TargetAuthorityErrorKind::Invalid);

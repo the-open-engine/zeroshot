@@ -206,6 +206,26 @@ pub(crate) fn path_text(path: &Path) -> &str {
     path.to_str().assert_value_with("test path is UTF-8")
 }
 
+/// A GitHub App bot author, as a host would select it for delivered commits.
+pub(crate) const BOT_AUTHOR: &str =
+    "zeroshot-app[bot] <326899010+zeroshot-app[bot]@users.noreply.github.com>";
+
+pub(crate) fn bot_commit_identity() -> openengine_cluster_protocol::CommitIdentity {
+    openengine_cluster_protocol::CommitIdentity::new(
+        "zeroshot-app[bot]",
+        "326899010+zeroshot-app[bot]@users.noreply.github.com",
+    )
+    .assert_value()
+}
+
+/// Author and committer of one commit, as `name <email>|name <email>`.
+pub(crate) fn commit_authorship(directory: &Path, revision: &str) -> String {
+    git_output(
+        directory,
+        &["show", "-s", "--format=%an <%ae>|%cn <%ce>", revision],
+    )
+}
+
 pub(crate) struct TestGitRepository {
     pub(crate) root: TestDirectory,
     pub(crate) remote: PathBuf,
@@ -328,6 +348,7 @@ pub(crate) fn allocation_request<'a>(
 ) -> crate::native_v2_platform::CapsuleAllocationRequest<'a> {
     crate::native_v2_platform::CapsuleAllocationRequest {
         git_credentials: None,
+        commit_identity: None,
 
         run_id,
         admitted,

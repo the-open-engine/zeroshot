@@ -9,7 +9,9 @@ use tokio::process::Command;
 use crate::execution::process::HostedProcessIdentity;
 use crate::native_v2_target_authority::{NewOperatorDiagnostic, OperatorDiagnosticStore};
 use crate::source_code_provider::{SourceDeliveryCredential, SourceDeliveryError, valid_git_revision};
-use super::command::{GitCommandFailure, GitCommandOutput, capture_sensitive, git_command};
+use super::command::{
+    GitCommandContext, GitCommandFailure, GitCommandOutput, capture_sensitive, git_command,
+};
 
 mod authentication;
 mod conflict;
@@ -56,6 +58,7 @@ impl std::fmt::Debug for GitTransportConfig {
 pub struct GitTransport {
     config: Arc<GitTransportConfig>,
     remote: OsString,
+    commit_identity: Option<openengine_cluster_protocol::CommitIdentity>,
     checkout_references: Vec<String>,
     diagnostics: Option<(
         openengine_cluster_protocol::RunId,
@@ -74,9 +77,24 @@ impl GitTransport {
         Self {
             config: Arc::new(config),
             remote: remote.as_ref().to_owned(),
+            commit_identity: None,
             checkout_references: Vec::new(),
             diagnostics: None,
         }
+    }
+
+    /// Selects the author and committer of every commit this transport's workspace Git creates.
+    #[must_use]
+    pub(crate) fn with_commit_identity(
+        mut self,
+        identity: Option<openengine_cluster_protocol::CommitIdentity>,
+    ) -> Self {
+        self.commit_identity = identity;
+        self
+    }
+
+    pub(crate) fn commit_identity(&self) -> Option<&openengine_cluster_protocol::CommitIdentity> {
+        self.commit_identity.as_ref()
     }
 
     #[must_use]
@@ -400,14 +418,18 @@ impl GitTransport {
         super::git::SystemGit::new(self.config.git_program.clone())
             .with_identity(self.config.identity)
             .with_local_environment(self.config.local_environment.clone())
+            .with_commit_identity(self.commit_identity.clone())
     }
 
     pub(crate) fn command(&self, workspace: &Path) -> Command {
         let mut command = git_command(
             &self.config.git_program,
             workspace,
-            self.config.identity,
-            self.config.local_environment.as_ref(),
+            GitCommandContext {
+                identity: self.config.identity,
+                local_environment: self.config.local_environment.as_ref(),
+                commit_identity: self.commit_identity.as_ref(),
+            },
         );
         if self.config.local_environment.is_none() {
             command

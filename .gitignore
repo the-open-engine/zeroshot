@@ -1,6 +1,7 @@
 node_modules/
 /target/
 **/target/
+/.venv/
 sdks/python/.venv/
 sdks/python/dist/
 __pycache__/

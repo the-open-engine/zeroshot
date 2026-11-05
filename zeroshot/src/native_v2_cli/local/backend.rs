@@ -22,6 +22,11 @@ impl LocalCliBackend {
         &self,
         params: openengine_cluster_protocol::RunResumeParams,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
+        if params.commit_identity.is_some() {
+            return Err(local_message(
+                "local runs keep the default delivery commit identity",
+            ));
+        }
         let _submission_lock = self.acquire_submission_lock().await?;
         self.reconcile_local_resume_claim(&params.run_id).await?;
         let status = self

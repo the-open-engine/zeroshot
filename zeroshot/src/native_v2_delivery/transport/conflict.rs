@@ -2,7 +2,7 @@ use std::path::{Component, Path};
 use super::target::{bounded_status, bounded_git_output};
 use super::GitTransport;
 use crate::source_code_provider::*;
-use crate::native_v2_delivery::command::capture;
+use crate::native_v2_delivery::command::{capture, identity_configuration};
 use tokio::process::Command;
 use std::time::Duration;
 
@@ -79,14 +79,15 @@ async fn merge_target(
     target_revision: &str,
 ) -> Result<i32, SourceDeliveryError> {
     super::target::configure_delivery_identity(context.transport).await?;
+    let [name, email] = identity_configuration(context.transport.commit_identity());
     let mut command = context.transport.command(&context.request.workspace);
     command.args([
         "-c",
         "rerere.enabled=false",
         "-c",
-        "user.name=Zeroshot",
+        &name,
         "-c",
-        "user.email=delivery@zeroshot.invalid",
+        &email,
         "merge",
         "--no-commit",
         "--no-ff",

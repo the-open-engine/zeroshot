@@ -743,7 +743,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   it before deleting the workspace or releasing its identity lease; failed cleanup retains both.
   Allocation retains cleanup authority before checkout starts, including through startup errors and
   cancellation. Controllers confirm destruction before recording an allocation failure as terminal.
-  Local Git retains the caller's OS identity, separately from fixed delivery commit authorship.
+  Local Git retains the caller's OS identity, separately from delivery commit authorship.
+- Delivery commits default to `Zeroshot <delivery@zeroshot.invalid>`. A hosted
+  `TargetRunRequest.commitIdentity`, or `RunResumeParams.commitIdentity` for a successor, replaces
+  that author and committer for every commit the attempt's delivery creates: prepared revisions,
+  reconcile and target merges, and the repository-local identity pinned before conflict repair.
+  Like resume credentials, hosts resupply it for each successor. `CommitIdentity` rejects values
+  over 256 bytes, control characters, `<`, `>`, and values Git trims to nothing.
+  `NativeV2CandidateDelivery::new` derives the shared transport's identity from the delivery
+  config. Local runs keep the default and reject a resume identity. It travels with ephemeral
+  source credentials, never run state or agent configuration; hosts decide which forges get one.
 - Delivery clears the environment of its Git and GitHub CLI processes, so local composition pins
   delivery Git and, when the GitHub adapter is selected, `gh` to the files `find_executable` finds
   on the captured search path. Local `run`/`resume` reject a missing one as a usage error with the
@@ -816,8 +825,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   queues, branch freshness advances only through an authorized compare-and-swap response. A
   reported conflict is routable only after the trusted lane fetches the exact current target and
   leaves a verified nonempty Git merge conflict in the workspace; repair agents receive no GitHub
-  credential, and the trusted lane pins their repository-local commit identity to
-  `Zeroshot <delivery@zeroshot.invalid>` before handoff. Merge receipts preserve GitHub's
+  credential, and the trusted lane pins their repository-local commit identity to the delivery
+  identity before handoff. Merge receipts preserve GitHub's
   authoritative merged revision. When a required check fails, bounded repair diagnostics include
   supporting failed checks and labelled raw job excerpts ending at the last GitHub error annotation.
   Supporting checks never acquire merge authority, and unavailable or omitted logs are explicit.

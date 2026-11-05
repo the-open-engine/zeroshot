@@ -371,6 +371,47 @@ async fn divergent_target_changes_leave_real_conflicts_and_delivery_identity() {
 }
 
 #[tokio::test]
+async fn host_commit_identity_authors_target_integration_and_configures_repairs() {
+    use crate::native_v2_candidate::test_support::{BOT_AUTHOR, bot_commit_identity, commit_authorship};
+    let mut fixture = TargetFixture::new();
+    let transport = fixture
+        .authority
+        .git_transport(&fixture.repository.workspace, "acme/project")
+        .with_commit_identity(Some(bot_commit_identity()));
+    fixture.authority = fixture.authority.clone().with_git_transport(transport);
+    git(
+        &fixture.repository.workspace,
+        &["config", "user.name", "Worker"],
+    );
+
+    let outcome = fixture.reconcile().await;
+    assert!(matches!(
+        outcome.outcome,
+        SourceReconciliationOutcome::NeedsWork(_)
+    ));
+    assert_eq!(
+        git_output(&fixture.repository.workspace, &["rev-parse", "HEAD^2"]),
+        fixture.target_revision
+    );
+    let bot = format!("{BOT_AUTHOR}|{BOT_AUTHOR}");
+    for (revision, kind) in [("HEAD", "target merge"), ("HEAD^1", "prepared revision")] {
+        assert_eq!(
+            commit_authorship(&fixture.repository.workspace, revision),
+            bot,
+            "{kind}"
+        );
+    }
+    assert_eq!(
+        git_output(&fixture.repository.workspace, &["config", "user.name"]),
+        "zeroshot-app[bot]"
+    );
+    assert_eq!(
+        git_output(&fixture.repository.workspace, &["config", "user.email"]),
+        "326899010+zeroshot-app[bot]@users.noreply.github.com"
+    );
+}
+
+#[tokio::test]
 async fn explicit_source_pins_can_be_ahead_of_or_diverge_from_the_target() {
     for target_is_ancestor in [true, false] {
         let mut fixture = TargetFixture::new();

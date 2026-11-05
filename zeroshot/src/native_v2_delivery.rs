@@ -231,6 +231,9 @@ pub struct NativeV2DeliveryConfig {
     pub adopt_existing_delivery: bool,
     /// Pinned workspace owner for hosted Git; local execution inherits the caller.
     pub git_identity: Option<crate::execution::process::HostedProcessIdentity>,
+    /// Host-selected author and committer of delivered commits; absent keeps
+    /// `Zeroshot <delivery@zeroshot.invalid>`.
+    pub commit_identity: Option<openengine_cluster_protocol::CommitIdentity>,
     pub workspace: PathBuf,
     pub git_program: PathBuf,
     pub target: DeliveryTarget,
@@ -266,6 +269,7 @@ impl NativeV2DeliveryConfig {
             adopt_existing_delivery: lineage.adopt_existing_delivery,
             workspace,
             git_identity: Some(identity),
+            commit_identity: None,
             git_program: PathBuf::from("/usr/bin/git"),
             target,
             poll: DeliveryPollPolicy::default(),

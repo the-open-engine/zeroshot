@@ -263,8 +263,13 @@ pub(crate) async fn submit_test_run(
         connection_resolver: _,
         github_token,
         git_credentials,
+        commit_identity,
     } = request;
     assert!(git_credentials.is_none(), "legacy GitHub loopback fixture");
+    assert!(
+        commit_identity.is_none(),
+        "CLI runs keep the default commit identity"
+    );
     let exact_environment = RunEnvironment::exact(
         &submission.runtime,
         submission.environment.as_ref(),

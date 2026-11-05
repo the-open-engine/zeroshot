@@ -41,7 +41,9 @@ impl NativeV2DeliveryAdapter {
         config: NativeV2DeliveryConfig,
         authority: Arc<dyn SourceDeliveryAuthority>,
     ) -> Self {
-        let git = SystemGit::new(config.git_program.clone()).with_identity(config.git_identity);
+        let git = SystemGit::new(config.git_program.clone())
+            .with_identity(config.git_identity)
+            .with_commit_identity(config.commit_identity.clone());
         Self {
             config: Arc::new(config),
             authority,
