@@ -1217,7 +1217,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and Triage access does not authorize routing decisions.
 - `scripts/github-issue-triage.js` derives current label intent from complete issue event history
   and fresh repository role checks. Per-issue workflow serialization may coalesce pending events,
-  so reconciliation covers all labels instead of reversing only one webhook.
+  so reconciliation covers all labels instead of reversing only one webhook. Trigger visibility
+  permits GitHub's observed one-second event/issue timestamp skew, with exact action/label/actor
+  matching and bounded history rereads. The latest mutation for the triggering label must agree
+  with fresh issue labels before role replay and again before writes; replay checks each actor.
 - The policy comes from the trusted default branch. The workflow never executes issue text and
   uses only repository content read and issue write permissions.
 - The guard's own `github-actions[bot]` corrections are not new label authority. Preserve later
