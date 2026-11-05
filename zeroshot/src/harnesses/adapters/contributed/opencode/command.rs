@@ -39,6 +39,7 @@ pub(super) const LOCAL_ENVIRONMENT: &[&str] = &[
     "ANTHROPIC_BASE_URL",
     "OPENROUTER_API_KEY",
     "OPENROUTER_BASE_URL",
+    "OPENCODE_API_KEY",
 ];
 
 /// Native AWS credential-chain inputs; inherited only by the Bedrock lane.
@@ -77,6 +78,7 @@ const CREDENTIALS: &[&str] = &[
     "GATEWAY_API_KEY",
     "AWS_BEARER_TOKEN_BEDROCK",
     "COPILOT_GITHUB_TOKEN",
+    "OPENCODE_API_KEY",
 ];
 const AUTHENTICATION: &[&str] = &[
     "COPILOT_GITHUB_TOKEN",
@@ -84,6 +86,7 @@ const AUTHENTICATION: &[&str] = &[
     "ANTHROPIC_API_KEY",
     "OPENROUTER_API_KEY",
     "GATEWAY_API_KEY",
+    "OPENCODE_API_KEY",
     "AWS_BEARER_TOKEN_BEDROCK",
     "OPENCODE_AUTH_CONTENT",
     "AWS_PROFILE",
@@ -117,6 +120,8 @@ pub(super) fn credential_field(provider: &str) -> Option<&'static str> {
         "github" => Some("COPILOT_GITHUB_TOKEN"),
         "openai" => Some("OPENAI_API_KEY"),
         "openrouter" => Some("OPENROUTER_API_KEY"),
+        // Zen and Go share the OpenCode account key that native OpenCode reads.
+        "opencode" | "opencode-go" => Some("OPENCODE_API_KEY"),
         _ => None,
     }
 }
@@ -277,7 +282,8 @@ pub(super) fn validate_connection_name(name: &str, windows: bool) -> Result<(), 
         "XDG_CACHE_HOME",
         "XDG_STATE_HOME",
     ];
-    let native_control = upper.starts_with("OPENCODE_") && name != "OPENCODE_PERMISSION";
+    let native_control = upper.starts_with("OPENCODE_")
+        && !["OPENCODE_PERMISSION", "OPENCODE_API_KEY"].contains(&name);
     let reserved = reserved.contains(&name) || (windows && reserved.contains(&upper.as_str()));
     let native_names = LOCAL_ENVIRONMENT
         .iter()

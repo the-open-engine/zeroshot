@@ -120,6 +120,8 @@ fn core_and_local_catalogs_apply_only_the_compiled_contribution_policy() {
     for (harness, provider) in [
         ("opencode", "openai"),
         ("opencode", "github"),
+        ("opencode", "opencode"),
+        ("opencode", "opencode-go"),
         ("hermes", "openai"),
         ("hermes", "github"),
         ("hermes", "bedrock"),

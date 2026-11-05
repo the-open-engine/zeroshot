@@ -74,15 +74,16 @@ effective lane and the selected execution placement. Local adapters can reuse na
 [Harness adapters](../project/harness-adapters.md). Lanes requiring a connection and contained targets
 receive these canonical requirements:
 
-| Provider     | Connection key | Fields                                            |
-| ------------ | -------------- | ------------------------------------------------- |
-| `openai`     | `openai`       | `OPENAI_API_KEY`                                  |
-| `openrouter` | `openrouter`   | `OPENROUTER_API_KEY`                              |
-| `anthropic`  | `anthropic`    | `ANTHROPIC_API_KEY`                               |
-| `gateway`    | `gateway`      | `GATEWAY_BASE_URL`, `GATEWAY_API_KEY`             |
-| `bedrock`    | `bedrock`      | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_REGION`          |
-| `foundry`    | `foundry`      | `AZURE_FOUNDRY_API_KEY`, `AZURE_FOUNDRY_RESOURCE` |
-| `github`     | `github`       | `COPILOT_GITHUB_TOKEN`                            |
+| Provider                  | Connection key | Fields                                            |
+| ------------------------- | -------------- | ------------------------------------------------- |
+| `openai`                  | `openai`       | `OPENAI_API_KEY`                                  |
+| `openrouter`              | `openrouter`   | `OPENROUTER_API_KEY`                              |
+| `anthropic`               | `anthropic`    | `ANTHROPIC_API_KEY`                               |
+| `gateway`                 | `gateway`      | `GATEWAY_BASE_URL`, `GATEWAY_API_KEY`             |
+| `bedrock`                 | `bedrock`      | `AWS_BEARER_TOKEN_BEDROCK`, `AWS_REGION`          |
+| `foundry`                 | `foundry`      | `AZURE_FOUNDRY_API_KEY`, `AZURE_FOUNDRY_RESOURCE` |
+| `github`                  | `github`       | `COPILOT_GITHUB_TOKEN`                            |
+| `opencode`, `opencode-go` | `opencode`     | `OPENCODE_API_KEY`                                |
 
 Pi, Copilot, OpenCode and Hermes gateway runs additionally require `GATEWAY_API`, which names the wire protocol
 (`openai-responses`, `openai-completions`, or `anthropic-messages`). The Codex and Claude gateway
