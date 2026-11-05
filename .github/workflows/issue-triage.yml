@@ -1,0 +1,33 @@
+name: Issue triage
+
+on:
+  issues:
+    types: [opened, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-triage-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  labels:
+    name: Reconcile issue labels
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted policy
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+
+      - name: Apply maintainer and service label decisions
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/github-issue-triage.js
