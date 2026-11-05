@@ -50,7 +50,10 @@ function fixture(options = {}) {
   const pauses = [];
   const request = async (method, route, body) => {
     calls.push({ method, route, body });
-    if (method === 'GET') return readFixture({ events, labels, options }, route);
+    if (method === 'GET') {
+      options.onRead?.(route);
+      return readFixture({ events, labels, options }, route);
+    }
     if (method === 'POST' && route.endsWith('/labels')) {
       for (const label of body.labels) labels.add(label);
       return [];
@@ -81,6 +84,15 @@ function fixture(options = {}) {
 
 const managedRoles = { maintainer: { permission: 'write', role_name: 'maintain' } };
 const names = (f) => [...f.labels].sort();
+
+async function assertVisibilityFailure(f) {
+  const before = names(f);
+  await assert.rejects(f.run(), /not yet visible/);
+  assert.deepEqual(f.pauses, [1000, 2000, 4000, 8000, 16000]);
+  assert.ok(f.calls.every((call) => call.method === 'GET'));
+  assert.equal(f.calls.filter((call) => call.route.includes('/collaborators/')).length, 0);
+  assert.deepEqual(names(f), before);
+}
 
 it('new issues get triage and cannot retain labels assigned by an ordinary writer', async () => {
   const f = fixture({
@@ -253,6 +265,138 @@ it('unavailable role evidence fails before changing any labels', async () => {
   assert.equal(f.calls.filter((call) => call.method !== 'GET').length, 0);
 });
 
+it('the four observed one-second timestamp gaps permit both label actions', async () => {
+  for (const [created_at, updated_at] of [
+    ['2026-11-05T16:42:54Z', '2026-11-05T16:42:55Z'],
+    ['2026-11-05T16:42:36Z', '2026-11-05T16:42:37Z'],
+    ['2026-11-05T16:42:04Z', '2026-11-05T16:42:05Z'],
+    ['2026-11-05T16:41:43Z', '2026-11-05T16:41:44Z'],
+  ]) {
+    for (const action of ['labeled', 'unlabeled']) {
+      const trigger = { ...event(action, 'plan-0', maintainer, 9), created_at };
+      const f = fixture({
+        action,
+        trigger,
+        roles: managedRoles,
+        events:
+          action === 'labeled' ? [trigger] : [event('labeled', 'plan-0', maintainer, 1), trigger],
+        labels: action === 'labeled' ? ['plan-0', 'triage'] : ['triage'],
+      });
+      f.payload.issue.updated_at = updated_at;
+      await f.run();
+      assert.deepEqual(names(f), action === 'labeled' ? ['plan-0', 'triage'] : ['triage']);
+      assert.deepEqual(f.pauses, []);
+    }
+  }
+});
+
+it('matching label events older than the one-second allowance still fail closed', async () => {
+  for (const action of ['labeled', 'unlabeled']) {
+    const f = fixture({
+      action,
+      trigger: event(action, 'plan-0', maintainer, 10),
+      roles: managedRoles,
+      events: [event(action, 'plan-0', maintainer, 8)],
+      labels: ['plan-0'],
+    });
+    await assertVisibilityFailure(f);
+  }
+});
+
+it('the timestamp allowance still requires the exact actor, action, and label', async () => {
+  for (const mismatch of [
+    event('labeled', 'plan-0', writer, 9),
+    event('unlabeled', 'plan-0', maintainer, 9),
+    event('labeled', 'plan-1', maintainer, 9),
+  ]) {
+    const f = fixture({
+      action: 'labeled',
+      trigger: event('labeled', 'plan-0', maintainer, 10),
+      roles: managedRoles,
+      events: [mismatch],
+      labels: ['plan-0'],
+    });
+    await assertVisibilityFailure(f);
+  }
+});
+
+it('an older matching event cannot hide a pending repeat after the opposite label action', async () => {
+  for (const action of ['labeled', 'unlabeled']) {
+    const opposite = action === 'labeled' ? 'unlabeled' : 'labeled';
+    const f = fixture({
+      action,
+      trigger: event(action, 'plan-0', maintainer, 10),
+      roles: managedRoles,
+      events: [event(action, 'plan-0', maintainer, 9), event(opposite, 'plan-0', maintainer, 9)],
+      labels: action === 'labeled' ? ['plan-0', 'triage'] : ['triage'],
+    });
+    await assertVisibilityFailure(f);
+  }
+});
+
+it('stale skewed webhooks preserve later approved decisions and ignore guard authority', async () => {
+  for (const actor of [maintainer, guard]) {
+    for (const action of ['labeled', 'unlabeled']) {
+      const trigger = event(action, 'plan-0', maintainer, 9);
+      const opposite = action === 'labeled' ? 'unlabeled' : 'labeled';
+      const f = fixture({
+        action,
+        trigger,
+        roles: managedRoles,
+        events: [trigger, event(opposite, 'plan-0', actor, 10)],
+        labels: opposite === 'labeled' ? ['plan-0', 'triage'] : ['triage'],
+      });
+      f.payload.issue.updated_at = timestamp(10);
+      await f.run();
+      const approved = actor === guard ? action : opposite;
+      assert.deepEqual(names(f), approved === 'labeled' ? ['plan-0', 'triage'] : ['triage']);
+      assert.deepEqual(f.pauses, []);
+    }
+  }
+});
+
+it('same-second events replay in history order with each actor checked independently', async () => {
+  const trigger = event('labeled', 'auto-fix-0', writer, 9);
+  const f = fixture({
+    action: 'labeled',
+    trigger,
+    roles: managedRoles,
+    events: [
+      event('labeled', 'plan-0', maintainer, 9),
+      event('unlabeled', 'plan-0', writer, 9),
+      event('labeled', 'plan-1', maintainer, 9),
+      trigger,
+      event('unlabeled', 'plan-1', maintainer, 9),
+      event('labeled', 'plan-2', service, 9),
+      event('unlabeled', 'triage', service, 9),
+    ],
+    labels: ['auto-fix-0', 'plan-2'],
+  });
+  f.payload.issue.updated_at = timestamp(10);
+  await f.run();
+  assert.deepEqual(names(f), ['plan-0', 'plan-2']);
+  assert.deepEqual(f.pauses, []);
+});
+
+it('a changed trigger label during role resolution fails before any reconciliation writes', async () => {
+  const trigger = event('labeled', 'plan-0', maintainer, 9);
+  const f = fixture({
+    action: 'labeled',
+    trigger,
+    roles: managedRoles,
+    events: [trigger],
+    labels: ['plan-0'],
+    onRead: (route) => {
+      if (route.includes('/collaborators/')) f.labels.delete('plan-0');
+    },
+  });
+  f.payload.issue.updated_at = timestamp(10);
+  await assert.rejects(f.run(), /changed during reconciliation/);
+  assert.equal(f.calls.filter((call) => call.route === origin + '/issues/7').length, 2);
+  assert.equal(f.calls.filter((call) => call.method !== 'GET').length, 0);
+  assert.deepEqual(names(f), []);
+});
+
 it('delayed event visibility rereads complete history before applying the latest maintainer intent', async () => {
   const trigger = event('labeled', 'auto-fix-0', writer, 102);
   const events = Array.from({ length: 100 }, (_, index) => ({ event: 'commented', id: index }));
@@ -318,11 +462,8 @@ it('an event missing from the API history cannot trigger destructive reconciliat
     events: [event('unlabeled', 'plan-0', maintainer, 9)],
     labels: ['plan-0'],
   });
-  await assert.rejects(f.run(), /not yet visible/);
-  assert.deepEqual(f.pauses, [1000, 2000, 4000, 8000, 16000]);
+  await assertVisibilityFailure(f);
   assert.equal(f.calls.filter((call) => call.route.includes('/events?')).length, 6);
-  assert.equal(f.calls.filter((call) => call.method !== 'GET').length, 0);
-  assert.deepEqual(names(f), ['plan-0']);
 });
 
 it('PR payloads and mismatched repository events cannot write issue labels', async () => {

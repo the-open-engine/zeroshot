@@ -56,8 +56,34 @@ function hasVisibleEvent(payload, events) {
         event.event === payload.action &&
         event.label?.name === name &&
         event.actor?.id === payload.sender?.id &&
-        Date.parse(event.created_at) >= since
+        // GitHub can update the issue one second after recording its label event.
+        Date.parse(event.created_at) >= since - 1000
     )
+  );
+}
+
+function matchesLatestLabelEvent(payload, events, current) {
+  if (!['labeled', 'unlabeled'].includes(payload.action)) return true;
+  const name = labelName(payload.label);
+  const latest = events.findLast(
+    (event) => ['labeled', 'unlabeled'].includes(event.event) && event.label?.name === name
+  );
+  return latest !== undefined && current.has(name) === (latest.event === 'labeled');
+}
+
+async function visibleLabelHistory(payload, repository, number, request, pause) {
+  for (const wait of [0, 1000, 2000, 4000, 8000, 16000]) {
+    if (wait) await pause(wait);
+    const events = await labelHistory(repository, number, request);
+    if (!hasVisibleEvent(payload, events)) continue;
+    if (['labeled', 'unlabeled'].includes(payload.action)) {
+      const current = labelsOf(await request('GET', '/repos/' + repository + '/issues/' + number));
+      if (!matchesLatestLabelEvent(payload, events, current)) continue;
+    }
+    return events;
+  }
+  throw new Error(
+    'Triggering label event is not yet visible in consistent issue history; retry this workflow'
   );
 }
 
@@ -99,18 +125,13 @@ async function reconcileIssueLabels({
 }) {
   if (payload.issue?.pull_request) return { skipped: 'pull_request' };
   const number = requireIssueEvent(payload, repository);
-  let events = await labelHistory(repository, number, request);
-  for (const wait of [1000, 2000, 4000, 8000, 16000]) {
-    if (hasVisibleEvent(payload, events)) break;
-    await pause(wait);
-    events = await labelHistory(repository, number, request);
-  }
-  if (!hasVisibleEvent(payload, events)) {
-    throw new Error('Triggering label event is not yet visible; retry this workflow');
-  }
+  const events = await visibleLabelHistory(payload, repository, number, request, pause);
   const desired = await approvedLabels(events, repository, serviceBot, request);
   const prefix = '/repos/' + repository + '/issues/' + number;
   const current = labelsOf(await request('GET', prefix));
+  if (!matchesLatestLabelEvent(payload, events, current)) {
+    throw new Error('Issue labels changed during reconciliation; retry this workflow');
+  }
   const added = [...desired].filter((name) => !current.has(name));
   const removed = [...current].filter((name) => !desired.has(name));
   if (added.length) await request('POST', prefix + '/labels', { labels: added });
