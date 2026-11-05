@@ -19,7 +19,11 @@ type Actions = {
   capture: () => Promise<EnvironmentSaveSnapshot>;
   acknowledge: (captured: EnvironmentSaveSnapshot, saved: Environment) => void;
 };
-type PendingSave = { requestId: string; snapshot?: EnvironmentSaveSnapshot };
+type PendingSave = {
+  requestId: string;
+  settingsVersion: number;
+  snapshot?: EnvironmentSaveSnapshot;
+};
 type Latest = { state: State; actions: Actions; readOnly: boolean };
 type Active = { current: boolean };
 type HostContext = {
@@ -28,6 +32,7 @@ type HostContext = {
   pending: MutableRefObject<PendingSave | undefined>;
   latest: MutableRefObject<Latest>;
   settingsDirty: MutableRefObject<boolean>;
+  settingsVersion: MutableRefObject<number>;
   active: Active;
   setSaving: (value: boolean) => void;
   setHostDirty: (value: boolean) => void;
@@ -46,6 +51,7 @@ export function useEnvironmentHost(
   const [saving, setSaving] = useState(false);
   const [hostDirty, setHostDirty] = useState(false);
   const pending = useRef<PendingSave | undefined>(undefined);
+  const settingsVersion = useRef(0);
   const latest = useRef({ state, actions, readOnly });
   latest.current = { state, actions, readOnly };
   useEffect(() => {
@@ -56,6 +62,7 @@ export function useEnvironmentHost(
       pending,
       latest,
       settingsDirty,
+      settingsVersion,
       active: { current: true },
       setSaving,
       setHostDirty,
@@ -138,6 +145,7 @@ function acceptHostCommand(command: HostCommand, context: HostContext) {
     return;
   }
   if (command.type === 'environment_settings') {
+    context.settingsVersion.current += 1;
     context.settingsDirty.current = command.dirty;
     if (context.active.current) context.setHostDirty(command.dirty);
     return;
@@ -169,12 +177,13 @@ async function captureSnapshot(
     throw new ApiError(403, 'environment_read_only', 'This environment is read-only.');
   if (context.pending.current || current.state.busy || current.state.loading)
     throw new ApiError(409, 'save_pending', 'Wait for the current environment operation.');
-  context.pending.current = { requestId: command.requestId };
+  const settingsVersion = context.settingsVersion.current;
+  context.pending.current = { requestId: command.requestId, settingsVersion };
   if (context.active.current) context.setSaving(true);
   try {
     const snapshot = await current.actions.capture();
     if (!context.active.current) return;
-    context.pending.current = { requestId: command.requestId, snapshot };
+    context.pending.current = { requestId: command.requestId, settingsVersion, snapshot };
     context.host.send(
       'save_snapshot',
       { environment: snapshot, authority: context.host.configuration?.authority },
@@ -203,8 +212,10 @@ function acknowledgeSnapshot(command: HostCommand & { type: 'save_ack' }, contex
   }
   if (!command.environment)
     throw new ApiError(502, 'invalid_environment_response', 'The save could not be confirmed.');
-  context.settingsDirty.current = false;
-  if (context.active.current) context.setHostDirty(false);
+  if (context.settingsVersion.current === captured.settingsVersion) {
+    context.settingsDirty.current = false;
+    if (context.active.current) context.setHostDirty(false);
+  }
   context.latest.current.actions.acknowledge(captured.snapshot, command.environment);
   reply(command, context);
 }

@@ -477,6 +477,22 @@ test('host-owned settings participate in navigation protection without entering 
   assert.equal(Object.hasOwn(snapshot.environment, 'hostMetadata'), false);
 });
 
+test('a save acknowledgement preserves host settings changed after capture', async (t) => {
+  const { ui } = await editingFixture(t);
+  await ui.send({ type: 'environment_settings', dirty: true });
+  const snapshot = await ui.requestSave(false);
+  await ui.send({ type: 'environment_settings', dirty: true });
+  await ui.acknowledge(snapshot, {
+    environment: {
+      id: 'env-1',
+      name: 'node-tools',
+      definition: { startup: 'npm ci' },
+      revision: 'r2',
+    },
+  });
+  assert.equal(ui.messages.filter((message) => message.type === 'state').at(-1)?.dirty, true);
+});
+
 async function pendingNameFixture(t: TestContext) {
   const { store } = fixture();
   const environments = ['env-1', 'env-2'].map((id) => ({
