@@ -210,6 +210,25 @@ test('environment edits capture one CAS snapshot and protect unsaved navigation'
   assert.equal(ui.button('Add variable').type, 'button');
 });
 
+test('a new environment adopts its server identity and saved revision', async (t) => {
+  const { store } = fixture();
+  const ui = await renderWorkspace(t, store);
+  await ui.click('New environment');
+  await ui.input('Environment name', 'fresh-tools');
+  await ui.input('Startup script', 'npm ci');
+  const snapshot = await ui.requestSave();
+  assert.deepEqual(snapshot.environment, {
+    name: 'fresh-tools',
+    definition: { startup: 'npm ci' },
+    expectedRevision: null,
+  });
+  assert.equal(ui.messages.at(-1).dirty, false);
+  assert.equal(ui.label('Select environment').value, 'env-2');
+  const next = await ui.requestSave(false);
+  assert.equal(next.environment.id, 'env-2');
+  assert.equal(next.environment.expectedRevision, 'r2');
+});
+
 test('focused pending variable names are committed before capturing the environment save', async (t) => {
   const { ui } = await editingFixture(t);
   await ui.click('Add variable');

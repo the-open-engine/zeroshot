@@ -62,14 +62,19 @@ export function useEnvironmentDraft(key: string) {
     acknowledge: (captured: EnvironmentDraft, saved: Environment) =>
       setState((previous) => {
         const current = previous.key === key ? previous : { key };
-        const changed = JSON.stringify(current.draft) !== JSON.stringify(captured);
-        return { key, saved, draft: changed ? current.draft : content(saved) };
+        const changed = JSON.stringify(current.draft) !== JSON.stringify(content(captured));
+        const draft = changed && current.draft ? { ...current.draft, id: saved.id } : content(saved);
+        return { key, saved, draft };
       }),
     adopt: (saved?: Environment) => setState({ key, saved, draft: saved && content(saved) }),
   };
 }
-function content(value: Environment): EnvironmentDraft {
-  return { id: value.id, name: value.name, definition: value.definition };
+function content(value: EnvironmentDraft): EnvironmentDraft {
+  return {
+    ...(value.id === undefined ? {} : { id: value.id }),
+    name: value.name,
+    definition: value.definition,
+  };
 }
 function restore(key: string): DraftState {
   try {
