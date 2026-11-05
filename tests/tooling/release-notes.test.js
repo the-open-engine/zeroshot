@@ -183,6 +183,59 @@ describe('release-note validation', () => {
   });
 });
 
+const recoveredReadmeSummaries = [
+  {
+    hash: 'ed424368780b4c052fa8ad2fe8b1462036c3aa9b',
+    subject: 'docs(readme): lead with using zeroshot through your agent (#1334)',
+    summary:
+      'Rewrite the README around installing Zeroshot and using its graph-design, planning and run skills through a coding agent.',
+  },
+  {
+    hash: '968ec77faa73b70dc69cd1f4837224a17bb9131c',
+    subject:
+      'docs(readme): add the blog link, the starred-by strip, the problem and where work goes (#1335)',
+    summary:
+      'Add the README blog link and starred-by banner, and explain local, branch, PR and merge delivery.',
+  },
+  {
+    hash: 'd99ac445cd8fc14441e2d90adc59edb3bb02efbc',
+    subject: 'docs(readme): read as a dev tool, not a team pitch (#1336)',
+    summary:
+      'Address individual developers in the README introduction and keep shared Platform workflows in a separate team section.',
+  },
+  {
+    hash: '6a8cf31f0e404131683a0ead9ac5a992bdb5de5a',
+    subject: 'docs(readme): open with why reviews must be independent and enforced (#1337)',
+    summary:
+      'Explain independent reviews in the README, including fresh reviewer sessions and enforced repair cycles.',
+  },
+  {
+    hash: '40a6d49b6521bbb6f1ef36eb9bcc18f9928106b3',
+    subject: 'docs(readme): say the graph is customizable down to the model per step (#1338)',
+    summary:
+      "Clarify in the README that graphs customize workflow steps and select each step's tool and model.",
+  },
+  {
+    hash: '305ab185ab0a5193e494f0601103b24816ab21a1',
+    subject: 'docs(readme): open with why single-agent sessions fail (#1339)',
+    summary:
+      "Explain why independent reviewers check single-agent work and return failed checks through the graph's repair loop.",
+  },
+  {
+    hash: '516447fc32004bce940439dbc355030aca22d22a',
+    subject:
+      'docs(readme): add the skills, an architecture diagram and a command reference (#1340)',
+    summary:
+      'Document the four installed skills, add an architecture diagram, and list common CLI commands in the README.',
+  },
+  {
+    hash: '8523568a8b4cca268e4302500ab8cacb088f62ae',
+    subject: 'docs(readme): use a compact architecture diagram (#1341)',
+    summary:
+      "Replace the README's boxed architecture diagram with a compact flow through admission, execution, adapters, durable state and delivery.",
+  },
+];
+
 describe('historical release metadata recovery', () => {
   it('recovers only the recorded README summaries', () => {
     for (const historical of [
@@ -204,6 +257,7 @@ describe('historical release metadata recovery', () => {
         summary:
           "Clarify that the README's custom bugfinder/E2E topology is an example and only the review loop is built in.",
       },
+      ...recoveredReadmeSummaries,
     ]) {
       const input = { ...historical, body: 'README change without a Summary heading.' };
       assert.equal(parseReleaseCommit(input).summary, historical.summary);
