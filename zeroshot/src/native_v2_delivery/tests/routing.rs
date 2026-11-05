@@ -119,13 +119,14 @@ pub(super) async fn create_delivery_run(
 async fn drive_repair_loop(
     repo: &TempRepo,
     authority: Arc<FakeGitHub>,
+    mode: DeliveryMode,
 ) -> (
     TerminalResult,
     Arc<DeliveryLoopLane>,
     RunId,
     Arc<FakeRunLedger>,
 ) {
-    let admitted = admitted_routing_graph(&repo.base).await;
+    let admitted = admitted_routing_graph(&repo.base, mode).await;
     let delivery = Arc::new(NativeV2DeliveryAdapter::new(
         NativeV2DeliveryConfig {
             delivery_run_id: RunId::new("delivery-routing"),
@@ -181,7 +182,8 @@ async fn ci_failure_repairs_then_authoritatively_merges_in_one_supervised_run() 
         repo.remote.clone(),
         Script::CiFailsThenMerges,
     ));
-    let (terminal, lane, run_id, ledger) = drive_repair_loop(&repo, authority.clone()).await;
+    let (terminal, lane, run_id, ledger) =
+        drive_repair_loop(&repo, authority.clone(), DeliveryMode::Merge).await;
 
     assert_successful_repair_loop(terminal, &repo, &lane, &authority);
     assert_eq!(authority.inspections.load(Ordering::SeqCst), 3);
@@ -215,7 +217,8 @@ async fn materialized_conflict_repairs_and_retries_the_same_run_branch() {
         repo.remote.clone(),
         Script::ConflictThenMerges,
     ));
-    let (terminal, lane, _, _) = drive_repair_loop(&repo, authority.clone()).await;
+    let (terminal, lane, _, _) =
+        drive_repair_loop(&repo, authority.clone(), DeliveryMode::Merge).await;
 
     assert_successful_repair_loop(terminal, &repo, &lane, &authority);
     assert_eq!(
@@ -247,7 +250,8 @@ async fn github_policy_authority_failures_never_dispatch_code_repair() {
     for script in [Script::PolicyForbidden, Script::PolicySchemaInvalid] {
         let repo = TempRepo::delivery();
         let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), script));
-        let (terminal, lane, run_id, ledger) = drive_repair_loop(&repo, authority).await;
+        let (terminal, lane, run_id, ledger) =
+            drive_repair_loop(&repo, authority, DeliveryMode::Merge).await;
 
         assert!(matches!(terminal, TerminalResult::Failed { .. }));
         assert_eq!(lane.repairs.load(Ordering::SeqCst), 0);
@@ -279,7 +283,7 @@ pub(super) async fn assert_ci_failure_routes_an_authored_worker_loop(
     base_revision: &str,
     outcome: WorkerOutcome,
 ) {
-    let admitted = admitted_routing_graph(base_revision).await;
+    let admitted = admitted_routing_graph(base_revision, DeliveryMode::Merge).await;
     let verified = VerifiedGraph {
         compiled_ir: admitted.graph,
         diagnostics: Vec::new(),
@@ -287,7 +291,7 @@ pub(super) async fn assert_ci_failure_routes_an_authored_worker_loop(
     let delivery = settled_execution((1, 1), "deliver", (0, 1), outcome);
     let after_failure = FullV1Reducer::native_v2(&verified)
         .reduce(ReductionInput {
-            initial_input: &routing_initial_input(base_revision),
+            initial_input: &routing_initial_input(base_revision, DeliveryMode::Merge),
             executions: std::slice::from_ref(&delivery),
             next_node_instance: 2,
             next_execution: 2,
@@ -309,7 +313,7 @@ pub(super) async fn assert_ci_failure_routes_an_authored_worker_loop(
     );
     let next_iteration = FullV1Reducer::native_v2(&verified)
         .reduce(ReductionInput {
-            initial_input: &routing_initial_input(base_revision),
+            initial_input: &routing_initial_input(base_revision, DeliveryMode::Merge),
             executions: &[delivery, repair],
             next_node_instance: 3,
             next_execution: 3,
@@ -324,8 +328,11 @@ pub(super) async fn assert_ci_failure_routes_an_authored_worker_loop(
     )));
 }
 
-async fn admitted_routing_graph(base_revision: &str) -> crate::native_v2_contract::AdmittedRun {
-    let graph = routing_graph();
+async fn admitted_routing_graph(
+    base_revision: &str,
+    mode: DeliveryMode,
+) -> crate::native_v2_contract::AdmittedRun {
+    let graph = routing_graph(mode);
     let delivery = NodeRuntimeBinding::GitDelivery {
         connections: DeclaredConnections::single(
             "github",
@@ -352,7 +359,7 @@ async fn admitted_routing_graph(base_revision: &str) -> crate::native_v2_contrac
             environment: None,
             title: RunTitle::new("Delivery routing test").assert_value(),
             graph,
-            initial_input: routing_initial_input(base_revision),
+            initial_input: routing_initial_input(base_revision, mode),
             runtime: RuntimePlan::new(
                 openengine_cluster_protocol::RuntimeLane::new(
                     "codex",
@@ -372,9 +379,8 @@ async fn admitted_routing_graph(base_revision: &str) -> crate::native_v2_contrac
         .assert_value()
 }
 
-fn routing_graph() -> GraphSpec {
-    let state = serde_json::to_value(delivery_result_schema(DeliveryMode::Merge).assert_value())
-        .assert_value();
+fn routing_graph(mode: DeliveryMode) -> GraphSpec {
+    let state = serde_json::to_value(delivery_result_schema(mode).assert_value()).assert_value();
     let fields = state
         .pointer("/fields")
         .and_then(Value::as_object)
@@ -393,7 +399,7 @@ fn routing_graph() -> GraphSpec {
             })
         })
         .collect::<Vec<_>>();
-    let mut delivery = delivery_node(DeliveryMode::Merge);
+    let mut delivery = delivery_node(mode);
     *delivery.assert_key_mut("writeBindings") = Value::Array(
         fields
             .iter()
@@ -418,7 +424,7 @@ fn routing_graph() -> GraphSpec {
             "when":{
                 "kind":"in",
                 "value":{"name":"deliver","source":"signal","field":"delivery"},
-                "labels":["ci_failed","conflict"]
+                "labels":["ci_failed","conflict","repair_required"]
             },
             "node":repair
         }],
@@ -459,9 +465,9 @@ fn routing_graph() -> GraphSpec {
     .assert_value()
 }
 
-fn routing_initial_input(base_revision: &str) -> Value {
+fn routing_initial_input(base_revision: &str, mode: DeliveryMode) -> Value {
     Value::Object(serde_json::Map::from_iter([
-        ("version".to_owned(), json!("v2")),
+        ("version".to_owned(), json!(mode.result_version())),
         ("mode".to_owned(), json!("merge")),
         ("outcome".to_owned(), json!("conflict")),
         ("repository".to_owned(), json!("acme/project")),
@@ -499,3 +505,6 @@ fn settled_execution(
 }
 
 use openengine_cluster_testkit::assertions::{AssertValue};
+
+#[path = "feedback_authorization_tests.rs"]
+mod feedback_authorization;

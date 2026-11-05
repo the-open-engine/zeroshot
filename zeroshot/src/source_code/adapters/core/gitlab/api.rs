@@ -6,6 +6,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tokio::sync::OnceCell;
 use crate::source_code_provider::{SourceDeliveryCredential, SourceDeliveryError};
+use super::wire::ServerMetadata;
 
 const RESPONSE_LIMIT: usize = 1024 * 1024;
 pub(super) const PAGE_LIMIT: u32 = 64;
@@ -15,7 +16,7 @@ const PAGE_SIZE: usize = 100;
 pub(super) struct Api {
     endpoint: Url,
     client: Client,
-    version: Arc<OnceCell<()>>,
+    metadata: Arc<OnceCell<ServerMetadata>>,
 }
 
 pub(super) struct ApiRequest<'a> {
@@ -69,7 +70,7 @@ impl Api {
         Ok(Self {
             endpoint,
             client,
-            version: Arc::new(OnceCell::new()),
+            metadata: Arc::new(OnceCell::new()),
         })
     }
 
@@ -86,23 +87,18 @@ impl Api {
         Self::build(endpoint)
     }
 
-    pub(super) async fn ensure_version(
+    pub(super) async fn server_metadata(
         &self,
         credential: SourceDeliveryCredential<'_>,
-    ) -> Result<(), SourceDeliveryError> {
-        self.version
+    ) -> Result<&ServerMetadata, SourceDeliveryError> {
+        self.metadata
             .get_or_try_init(|| async {
-                let value: Value = self.json(ApiRequest::get(&["version"]), credential).await?;
-                let version = value
-                    .get("version")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
-                        SourceDeliveryError::identity("GitLab did not report a server version")
-                    })?;
-                require_version(version)
+                let value: ServerMetadata =
+                    self.json(ApiRequest::get(&["version"]), credential).await?;
+                require_version(&value.version)?;
+                Ok(value)
             })
             .await
-            .map(|_| ())
     }
 
     pub(super) async fn json<T: DeserializeOwned>(

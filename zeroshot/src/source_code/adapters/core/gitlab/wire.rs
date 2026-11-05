@@ -4,6 +4,12 @@ use crate::source_code_provider::{
     SourceDeliveryError, SourceReviewReceipt, SourceReviewRequest, valid_git_revision,
 };
 
+#[derive(Deserialize)]
+pub(super) struct ServerMetadata {
+    pub version: String,
+    pub enterprise: Option<bool>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct Project {
     pub id: u64,
@@ -154,6 +160,38 @@ impl MergeRequest {
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct Actor {
     pub id: u64,
+}
+
+#[derive(Deserialize)]
+pub(super) struct Member {
+    pub id: u64,
+    pub state: AccountState,
+    #[serde(default)]
+    pub membership_state: MembershipState,
+    pub access_level: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum AccountState {
+    Active,
+    Blocked,
+    LdapBlocked,
+    BlockedPendingApproval,
+    Deactivated,
+    Banned,
+}
+
+// EE serializes membership separately from account state; CE omits this field.
+// Only omission is edition-dependent: explicit null and unknown values remain errors.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum MembershipState {
+    Active,
+    Awaiting,
+    #[default]
+    #[serde(skip)]
+    Unreported,
 }
 
 #[derive(Clone, Debug, Deserialize)]
