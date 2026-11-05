@@ -83,6 +83,8 @@ export class WorkspaceSession {
       case 'save_ack':
         this.acknowledge(command);
         return;
+      case 'environment_settings':
+        throw new ApiError(400, 'unsupported_command', 'This action is unavailable here.');
       case 'navigate':
         this.switchSection(command);
         return;

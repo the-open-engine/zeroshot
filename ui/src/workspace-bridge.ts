@@ -1,5 +1,6 @@
 import { assertDocument, type Document } from './domain';
 import type { Saved } from './api';
+import { readEnvironment, type Environment } from './environment-store';
 
 export type WorkspaceAuthority = { userId: string; organizationId: string; scope: 'user' | 'org' };
 type Envelope = {
@@ -37,8 +38,10 @@ export type HostCommand = Envelope &
     | {
         type: 'save_ack';
         saved?: Saved;
+        environment?: Environment;
         problem?: { code: string; message: string; details?: unknown };
       }
+    | { type: 'environment_settings'; dirty: boolean }
     | { type: 'theme'; theme: 'light' | 'dark' }
     | { type: 'navigate'; action: 'profiles' | 'runs' | 'leave'; discard?: boolean }
   );
@@ -111,7 +114,11 @@ export class WorkspaceBridge {
       }
       return;
     }
-    const command = readCommand(value, this.configuration.workspaceId);
+    const command = readCommand(
+      value,
+      this.configuration.workspaceId,
+      this.configuration.view === 'environments'
+    );
     if (command) this.handler?.(command);
   }
 }
@@ -170,7 +177,11 @@ function invalidCommandEnvelope(value: Record<string, unknown>, workspaceId: str
     (value.discard !== undefined && typeof value.discard !== 'boolean')
   );
 }
-function readCommand(value: Record<string, unknown>, workspaceId: string): HostCommand | undefined {
+function readCommand(
+  value: Record<string, unknown>,
+  workspaceId: string,
+  environments: boolean
+): HostCommand | undefined {
   if (invalidCommandEnvelope(value, workspaceId)) return;
   switch (value.type) {
     case 'open_profile':
@@ -181,6 +192,8 @@ function readCommand(value: Record<string, unknown>, workspaceId: string): HostC
       return value.name === undefined || token(value.name) ? (value as HostCommand) : undefined;
     case 'save_ack':
       return readAcknowledgement(value);
+    case 'environment_settings':
+      return environments && typeof value.dirty === 'boolean' ? (value as HostCommand) : undefined;
     case 'theme':
       return ['light', 'dark'].includes(String(value.theme)) ? (value as HostCommand) : undefined;
     case 'navigate':
@@ -207,13 +220,31 @@ function readProfileCommand(value: Record<string, unknown>): HostCommand | undef
   return value as HostCommand;
 }
 function readAcknowledgement(value: Record<string, unknown>): HostCommand | undefined {
+  if (problemAcknowledgement(value)) return value as HostCommand;
+  if (value.environment !== undefined) return environmentAcknowledgement(value);
+  return profileAcknowledgement(value);
+}
+
+function problemAcknowledgement(value: Record<string, unknown>) {
   if (
     record(value.problem) &&
     token(value.problem.code) &&
     typeof value.problem.message === 'string' &&
-    !value.saved
+    !value.saved &&
+    !value.environment
   )
-    return value as HostCommand;
+    return true;
+  return false;
+}
+
+function environmentAcknowledgement(value: Record<string, unknown>) {
+  const environment = readEnvironment(value.environment);
+  return !value.saved && !value.problem && environment
+    ? ({ ...value, environment } as HostCommand)
+    : undefined;
+}
+
+function profileAcknowledgement(value: Record<string, unknown>) {
   if (!record(value.saved) || value.problem || !token(value.saved.revision)) return;
   try {
     assertDocument(value.saved.profile);
@@ -235,7 +266,7 @@ function validCsrf(value: unknown): boolean {
 function bounded(value: unknown): value is Record<string, unknown> {
   if (!record(value)) return false;
   try {
-    return JSON.stringify(value).length <= 2 * 1024 * 1024;
+    return JSON.stringify(value).length <= 8 * 1024 * 1024;
   } catch {
     return false;
   }
