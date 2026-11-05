@@ -37,8 +37,7 @@ An example graph: independent reviews, end-to-end testing, and CI must pass befo
 ┌───────────────┐          ┌─────────────────┐
 │     Repair    ├─────────▶┤      Worker     │
 └───────┬───────┘          └────────┬────────┘
-        ▲                           │
-        │             ┌─────────────┴─────────────┐
+        ▲             ┌─────────────┴─────────────┐
         │             ▼                           ▼
         │  ┌─────────────────────┐     ┌─────────────────────┐
         │  │  Acceptance review  │     │     Code review     │
@@ -52,17 +51,10 @@ An example graph: independent reviews, end-to-end testing, and CI must pass befo
         ├◀───── fail ──────┤ End-to-end test │
         │                  └────────┬────────┘
         │                           ▼  pass
-        │                  ┌─────────────────┐
-        │                  │        PR       │
-        │                  └────────┬────────┘
-        │                           ▼
-        │                  ┌─────────────────┐
-        └◀───── fail ──────┤        CI       │
-                           └────────┬────────┘
-                                    ▼  pass
-                           ┌─────────────────┐
-                           │      Merge      │
-                           └─────────────────┘
+        │                        ┌─────┐     ┌─────┐        ┌───────┐
+        │                        │  PR ├────▶┤  CI ├─pass──▶┤ Merge │
+        │                        └─────┘     └──┬──┘        └───────┘
+        └◀───────────── fail ───────────────────┘
 ```
 
 Save your graph as a [reusable profile](docs/zeroshot-cli.md#zeroshot-profile-set)
