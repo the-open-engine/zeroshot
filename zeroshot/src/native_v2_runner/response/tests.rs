@@ -532,6 +532,11 @@ const VERIFIER_SKELETON: &str = concat!(
     r#""signals":{"verdict":<one of "approved", "rejected">},"diagnostic":<string>}}"#
 );
 
+const STRICT_VERIFIER_SKELETON: &str = concat!(
+    r#"{"response":{"output":{"note":<integer> or null,"summary":<string>},"#,
+    r#""signals":{"verdict":<one of "approved", "rejected">},"diagnostic":<string>}}"#
+);
+
 fn verifier_contract() -> NodeResponseContract {
     NodeResponseContract::Verifier {
         output: serde_json::from_value(json!({
@@ -577,7 +582,7 @@ fn correction_prompt(contract: &NodeResponseContract, response: &str) -> String 
 #[test]
 fn response_skeleton_renders_the_verifier_envelope() {
     assert_eq!(
-        response_skeleton(&verifier_contract()).assert_value(),
+        response_skeleton(&verifier_contract(), ProviderSchemaDialect::Standard).assert_value(),
         VERIFIER_SKELETON
     );
 }
@@ -618,7 +623,7 @@ fn response_skeleton_renders_every_payload_kind() {
         .assert_value(),
     };
     assert_eq!(
-        response_skeleton(&contract).assert_value(),
+        response_skeleton(&contract, ProviderSchemaDialect::Standard).assert_value(),
         concat!(
             r#"{"response":{"count":<integer>,"flag":<boolean>,"names":[<string>,...],"#,
             r#""nested":{"note"?:<string>},"nothing":null,"ratio":<number>,"#,
@@ -626,14 +631,76 @@ fn response_skeleton_renders_every_payload_kind() {
         )
     );
     assert_eq!(
-        response_skeleton(&worker_contract()).assert_value(),
+        response_skeleton(&worker_contract(), ProviderSchemaDialect::Standard).assert_value(),
         r#"{"response":{"answer":<integer>}}"#
     );
 }
 
 #[test]
+fn strict_skeleton_writes_every_optional_field_with_its_omission_value() {
+    assert_eq!(
+        response_skeleton(&verifier_contract(), ProviderSchemaDialect::OpenAiStrict).assert_value(),
+        STRICT_VERIFIER_SKELETON
+    );
+}
+
+#[test]
+fn strict_skeleton_uses_the_sentinel_for_optional_null_fields() {
+    let contract = NodeResponseContract::Worker {
+        output: serde_json::from_value(json!({
+            "kind": "record",
+            "fields": {
+                "gap": { "type": { "kind": "null" }, "required": false },
+                "n": { "type": { "kind": "integer" }, "required": true }
+            }
+        }))
+        .assert_value(),
+    };
+    assert_eq!(
+        response_skeleton(&contract, ProviderSchemaDialect::OpenAiStrict).assert_value(),
+        r#"{"response":{"gap":null or "__zeroshot_omitted_optional_null__","n":<integer>}}"#
+    );
+    assert_eq!(
+        response_skeleton(&contract, ProviderSchemaDialect::Standard).assert_value(),
+        r#"{"response":{"gap"?:null,"n":<integer>}}"#
+    );
+}
+
+#[test]
+fn strict_schema_correction_shows_the_strict_shape() {
+    let response = format!("Here is my review:\n{}", valid_verifier_envelope());
+    let AgentResponse::Correction { prompt, .. } = resolve_agent_response_with_schema(
+        &verifier_contract(),
+        &response,
+        ProviderSchemaDialect::OpenAiStrict,
+    )
+    .assert_value() else {
+        panic!("rejected response must request a correction");
+    };
+    assert!(prompt.contains(STRICT_VERIFIER_SKELETON));
+    assert!(prompt.contains(STRICT_EXPECTED_SHAPE_HEADER));
+    assert!(!prompt.contains("\"note\"?"));
+}
+
+#[test]
+fn contract_correction_keeps_the_standard_shape_for_strict_lanes() {
+    let response = format!("Here is my review:\n{}", valid_verifier_envelope());
+    let AgentResponse::Correction { prompt, .. } = resolve_agent_response_with_dialect(
+        &verifier_contract(),
+        &response,
+        ProviderSchemaDialect::OpenAiStrict,
+    )
+    .assert_value() else {
+        panic!("rejected response must request a correction");
+    };
+    assert!(prompt.contains("\"note\"?:<integer>"));
+    assert!(prompt.contains(EXPECTED_SHAPE_HEADER));
+}
+
+#[test]
 fn skeleton_with_placeholders_is_not_accepted() {
-    let skeleton = response_skeleton(&verifier_contract()).assert_value();
+    let skeleton =
+        response_skeleton(&verifier_contract(), ProviderSchemaDialect::Standard).assert_value();
     assert!(serde_json::from_str::<Value>(&skeleton).is_err());
     assert!(matches!(
         resolve_agent_response_with_schema(

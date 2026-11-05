@@ -17,6 +17,9 @@ const OPENAI_OPTIONAL_NULL_OMISSION: &str = "__zeroshot_omitted_optional_null__"
 const EXPECTED_SHAPE_HEADER: &str = "Expected shape (angle-bracket placeholders are not JSON; \
      replace each with a real value; \"name\"? marks an optional field; the schema or contract above \
      stays authoritative):";
+const STRICT_EXPECTED_SHAPE_HEADER: &str = "Expected shape (angle-bracket placeholders are not JSON; \
+     replace each with a real value; every field must be present, and \"X or Y\" means write Y \
+     when the optional field has no value; the schema above stays authoritative):";
 const START_REPLY_SENTENCE: &str = "Start the reply with the opening brace and end it with the final \
      closing brace of that one object.";
 
@@ -404,18 +407,22 @@ fn envelope_fault(response: &str) -> Option<EnvelopeFault> {
 }
 
 /// One-line skeleton of the expected provider response. Angle-bracket placeholders are not JSON,
-/// so copying the skeleton verbatim can never pass validation.
-fn response_skeleton(contract: &NodeResponseContract) -> Result<String, NodeRunnerError> {
+/// so copying the skeleton verbatim can never pass validation. The strict dialect writes every
+/// optional field with its omission value instead of a `?` marker, matching the strict schema.
+fn response_skeleton(
+    contract: &NodeResponseContract,
+    dialect: ProviderSchemaDialect,
+) -> Result<String, NodeRunnerError> {
     let mut out = String::from("{\"response\":");
     match contract {
-        NodeResponseContract::Worker { output } => payload_skeleton(output, &mut out)?,
+        NodeResponseContract::Worker { output } => payload_skeleton(output, dialect, &mut out)?,
         NodeResponseContract::Verifier {
             output,
             signals,
             diagnostic,
         } => {
             out.push_str("{\"output\":");
-            payload_skeleton(output, &mut out)?;
+            payload_skeleton(output, dialect, &mut out)?;
             out.push_str(",\"signals\":{");
             for (index, (name, labels)) in signals.iter().enumerate() {
                 if index > 0 {
@@ -432,7 +439,7 @@ fn response_skeleton(contract: &NodeResponseContract) -> Result<String, NodeRunn
                 out.push('>');
             }
             out.push_str("},\"diagnostic\":");
-            payload_skeleton(diagnostic, &mut out)?;
+            payload_skeleton(diagnostic, dialect, &mut out)?;
             out.push('}');
         }
     }
@@ -440,7 +447,21 @@ fn response_skeleton(contract: &NodeResponseContract) -> Result<String, NodeRunn
     Ok(out)
 }
 
-fn payload_skeleton(payload: &PayloadType, out: &mut String) -> Result<(), NodeRunnerError> {
+/// The correction-turn header matching the skeleton's dialect: the standard dialect marks
+/// optional fields with `?`, while the strict dialect requires every field and names its
+/// omission value.
+fn expected_shape_header(dialect: ProviderSchemaDialect) -> &'static str {
+    match dialect {
+        ProviderSchemaDialect::Standard => EXPECTED_SHAPE_HEADER,
+        ProviderSchemaDialect::OpenAiStrict => STRICT_EXPECTED_SHAPE_HEADER,
+    }
+}
+
+fn payload_skeleton(
+    payload: &PayloadType,
+    dialect: ProviderSchemaDialect,
+    out: &mut String,
+) -> Result<(), NodeRunnerError> {
     match payload {
         PayloadType::Null => out.push_str("null"),
         PayloadType::Boolean => out.push_str("<boolean>"),
@@ -454,17 +475,28 @@ fn payload_skeleton(payload: &PayloadType, out: &mut String) -> Result<(), NodeR
                     out.push(',');
                 }
                 out.push_str(&json_string(name.as_str())?);
-                if !field.required {
-                    out.push('?');
+                if !field.required && dialect == ProviderSchemaDialect::OpenAiStrict {
+                    out.push(':');
+                    if matches!(field.value_type, PayloadType::Null) {
+                        out.push_str("null or ");
+                        out.push_str(&json_string(OPENAI_OPTIONAL_NULL_OMISSION)?);
+                    } else {
+                        payload_skeleton(&field.value_type, dialect, out)?;
+                        out.push_str(" or null");
+                    }
+                } else {
+                    if !field.required {
+                        out.push('?');
+                    }
+                    out.push(':');
+                    payload_skeleton(&field.value_type, dialect, out)?;
                 }
-                out.push(':');
-                payload_skeleton(&field.value_type, out)?;
             }
             out.push('}');
         }
         PayloadType::Array { items } => {
             out.push('[');
-            payload_skeleton(items, out)?;
+            payload_skeleton(items, dialect, out)?;
             out.push_str(",...]");
         }
         PayloadType::Enum { values } => {
@@ -715,7 +747,7 @@ pub(crate) fn render_agent_correction(
     fault: Option<EnvelopeFault>,
 ) -> Result<String, NodeRunnerError> {
     let problem = correction_problem(fault);
-    let skeleton = response_skeleton(response)?;
+    let skeleton = response_skeleton(response, ProviderSchemaDialect::Standard)?;
     let response = serde_json::to_string(response).map_err(|_| NodeRunnerError::Driver)?;
     Ok(format!(
         "Your previous final response was rejected mechanically and was not passed to the graph.\n\
@@ -740,13 +772,14 @@ pub(crate) fn render_agent_correction_with_schema(
     let response_schema = serde_json::to_string(&response.provider_schema(dialect))
         .map_err(|_| NodeRunnerError::Driver)?;
     let problem = correction_problem(fault);
-    let skeleton = response_skeleton(response)?;
+    let header = expected_shape_header(dialect);
+    let skeleton = response_skeleton(response, dialect)?;
     Ok(format!(
         "Your previous final response was rejected mechanically and was not passed to the graph.\n\
          Validation error:\n{error}\n\
          {problem}\
          Response schema:\n{response_schema}\n\
-         {EXPECTED_SHAPE_HEADER}\n{skeleton}\n\
+         {header}\n{skeleton}\n\
          Return a corrected provider response only: exactly an object with one field named \
          response whose value matches the schema above. It must be valid JSON with no Markdown \
          or commentary.\n\
