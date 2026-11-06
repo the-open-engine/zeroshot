@@ -331,6 +331,10 @@ fn prepare_storage_root(path: &PathBuf) -> Result<PathBuf, ProductionHostingErro
     std::fs::create_dir_all(path).map_err(|_| ProductionHostingError::Storage)?;
     let root = canonical_directory(path)?;
     let runs = prepare_runs_directory(&root)?;
+    // The direct target's UI profile store shares this root.
+    #[cfg(unix)]
+    crate::native_v2_cli::secure_existing_profile_store(&root)
+        .map_err(|_| ProductionHostingError::Storage)?;
     set_traversable_directory(&root).map_err(|_| ProductionHostingError::Storage)?;
     set_traversable_directory(&runs).map_err(|_| ProductionHostingError::Storage)?;
     Ok(root)

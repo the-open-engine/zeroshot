@@ -925,7 +925,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Workers and verifiers use one canonical workspace, including ignored dependencies, build outputs
   and services. Provider session homes and scratch directories remain separate; individual process
   cleanup uses session group markers so it cannot terminate a peer or a startup service. Workspace
-  roots are run-owner `0700`, runtime roots supervisor-owned `0711`, and production ledgers `0600`.
+  roots are run-owner `0700`, runtime roots supervisor-owned `0711`, and production ledgers and UI
+  profile stores `0600`.
   Session homes disappear only after confirmed cleanup; node-instance homes survive loop revisits.
   On Linux, provider `TMPDIR` is a supervisor-owned `/tmp/zs-<16 random hex>` symlink to the
   execution scratch, so project Unix sockets fit `sun_path`. Files stay in the execution root and

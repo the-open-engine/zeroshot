@@ -380,8 +380,27 @@ fn production_ledger_rejects_symlinks_and_foreign_owners() {
 }
 
 #[test]
+fn production_storage_rejects_a_symlinked_profile_store() {
+    use std::os::unix::fs::symlink;
+
+    let root = TestDirectory::new("hosting-profile-store-validation");
+    let target = root.path().join("target");
+    fs::write(&target, "{}").assert_value();
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o644)).assert_value();
+    symlink(&target, root.path().join("profiles.json")).assert_value();
+    assert_eq!(
+        prepare_storage_root(&root.path().to_owned()),
+        Err(ProductionHostingError::Storage)
+    );
+    assert_eq!(
+        fs::metadata(&target).assert_value().permissions().mode() & 0o777,
+        0o644
+    );
+}
+
+#[test]
 #[cfg(target_os = "linux")]
-fn hosted_worker_cannot_read_the_ledger_or_another_candidate() {
+fn root_hosted_worker_cannot_read_the_ledger_or_another_candidate() {
     use crate::execution::process::{HostedProcessPool, HostedProcessScope};
     use crate::native_v2_capsule::{CapsuleFilesystemSpec, prepare_capsule_filesystem};
 
@@ -390,6 +409,13 @@ fn hosted_worker_cannot_read_the_ledger_or_another_candidate() {
         return;
     }
     let root = TestDirectory::new("hosting-cross-run-boundary");
+    // A profile store written by an earlier target is repaired before runs can traverse the root.
+    let profiles_path = root.path().join("profiles.json");
+    let profiles_lock_path = root.path().join("profiles.lock");
+    for path in [&profiles_path, &profiles_lock_path] {
+        fs::write(path, "{}").assert_value();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o644)).assert_value();
+    }
     let storage = prepare_storage_root(&root.path().to_owned()).assert_value();
     let ledger_path = storage.join("runs.sqlite3");
     fs::write(&ledger_path, "private ledger").assert_value();
@@ -420,15 +446,19 @@ fn hosted_worker_cannot_read_the_ledger_or_another_candidate() {
         .identity(HostedProcessScope::Writer)
         .assert_value();
 
+    // `set -e` ignores negated commands, so each denied read must fail the script explicitly.
     let status = Command::new("/bin/sh")
         .arg("-c")
         .arg(
             "set -eu; cd \"$OWN\"; printf own > worker.txt; test \"$(cat worker.txt)\" = own; \
-             ! cat \"$LEDGER\" >/dev/null 2>&1; ! cat \"$OTHER/secret\" >/dev/null 2>&1",
+             for denied in \"$LEDGER\" \"$PROFILES\" \"$PROFILES_LOCK\" \"$OTHER/secret\"; do \
+             if cat \"$denied\" >/dev/null 2>&1; then exit 1; fi; done",
         )
         .env_clear()
         .env("OWN", &first.workspace)
         .env("LEDGER", &ledger_path)
+        .env("PROFILES", &profiles_path)
+        .env("PROFILES_LOCK", &profiles_lock_path)
         .env("OTHER", &second.workspace)
         .uid(writer.uid())
         .gid(writer.gid())
