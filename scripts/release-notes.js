@@ -267,12 +267,17 @@ function renderReleaseNotes({ version, previousTag, commits }) {
       );
     }
   }
+  // The 10.4.0-10.8.0 updaters predate the Restic sidecar and reject every later archive.
   lines.push(
     '## Upgrade',
     '',
     '```bash',
     `npm install -g @the-open-engine-company/zeroshot@${version}`,
     '```',
+    '',
+    'Versions 10.4.0 through 10.8.0 cannot update themselves: `zeroshot update` fails with ' +
+      '`release archive contains unexpected entry restic` (`restic.exe` on Windows). ' +
+      'Upgrade those installations once with the npm command above.',
     ''
   );
   return lines.join('\n');

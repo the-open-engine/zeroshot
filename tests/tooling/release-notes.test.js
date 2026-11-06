@@ -95,6 +95,10 @@ describe('deterministic release notes', () => {
         'npm install -g @the-open-engine-company/zeroshot@10.5.0',
         '```',
         '',
+        'Versions 10.4.0 through 10.8.0 cannot update themselves: `zeroshot update` fails with ' +
+          '`release archive contains unexpected entry restic` (`restic.exe` on Windows). ' +
+          'Upgrade those installations once with the npm command above.',
+        '',
       ].join('\n')
     );
   });

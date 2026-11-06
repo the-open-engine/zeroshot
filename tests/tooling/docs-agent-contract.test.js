@@ -9,6 +9,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { it } = require('node:test');
+const { renderReleaseNotes } = require('../../scripts/release-notes');
 
 const root = path.resolve(__dirname, '../..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
@@ -358,6 +359,57 @@ it('the first-run guide covers core harnesses from the canonical catalog', () =>
     read(FIRST_RUN).includes('../project/harness-adapters.md'),
     `${FIRST_RUN} must link to the complete harness catalog`
   );
+});
+
+// The updater in 10.4.0 through 10.8.0 accepts only `zeroshot` in a release archive, and every
+// archive since v10.9.0 also contains `restic`. No release can change an installed updater, so the
+// places that explain updating must tell those users to reinstall once through npm.
+const FIRST_STRANDED = /\b10\.4\b/;
+const LAST_STRANDED = /\b10\.8\b/;
+const STRANDED_FAILURE = /unexpected entry `?restic\b/;
+const NPM_INSTALL = 'npm (?:install|i) (?:-g|--global) @the-open-engine-company/zeroshot@';
+
+// Markdown sections split at every heading outside fenced blocks.
+function sections(markdown) {
+  const result = [[]];
+  let fenced = false;
+  for (const line of markdown.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    if (!fenced && /^#{1,6}\s/.test(line)) result.push([]);
+    result.at(-1).push(line);
+  }
+  return result.map((lines) => lines.join('\n'));
+}
+
+it('the install guide tells 10.4.0-10.8.0 users to reinstall through npm once', () => {
+  const guide = 'docs/getting-started/install.md';
+  const section = sections(read(guide)).find(
+    (text) => FIRST_STRANDED.test(text) && LAST_STRANDED.test(text)
+  );
+  assert.ok(section, `${guide} does not say that 10.4.0-10.8.0 cannot update themselves`);
+  assert.match(section, STRANDED_FAILURE);
+  assert.match(section, new RegExp(`${NPM_INSTALL}latest\\b`));
+});
+
+it('release notes tell 10.4.0-10.8.0 users how to upgrade', () => {
+  const notes = renderReleaseNotes({
+    version: '11.2.0',
+    previousTag: 'v11.1.0',
+    commits: [
+      {
+        hash: 'a'.repeat(40),
+        subject: 'fix(cli): keep release archives verified (#50)',
+        body: '## Summary\n\nKeep release archives verified.\n\n## Testing\n\nPassed.',
+      },
+    ],
+  });
+  const start = notes.indexOf('## Upgrade\n');
+  assert.notEqual(start, -1, 'release notes have no Upgrade section');
+  const upgrade = notes.slice(start);
+  assert.match(upgrade, FIRST_STRANDED);
+  assert.match(upgrade, LAST_STRANDED);
+  assert.match(upgrade, STRANDED_FAILURE);
+  assert.match(upgrade, new RegExp(`${NPM_INSTALL}(?:latest|11\\.2\\.0)\\b`));
 });
 
 it('extracts commands the way a shell reads them', () => {

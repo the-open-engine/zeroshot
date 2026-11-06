@@ -50,7 +50,9 @@ The target manifest declares Linux x64/arm64 musl, macOS x64/arm64, and Windows 
 target table must match it exactly. The installer stops on any other host.
 
 Every archive contains exactly the Zeroshot executable and its pinned Restic sidecar. npm, Python
-wheels, self-update, and the target image install the pair together. `SHA256SUMS` covers each archive
+wheels, self-update, and the target image install the pair together. The 10.4.0 through 10.8.0
+updaters predate the sidecar and reject these archives, so those installations upgrade once through
+npm as described in [Install Zeroshot](getting-started/install.md). `SHA256SUMS` covers each archive
 and the exact `zeroshot-skill.md`, `zeroshot-memory-init-skill.md`, `zeroshot-graph-design-skill.md`,
 and `zeroshot-plan-skill.md` copied from their canonical npm sources. The workflow also rejects a Linux Zeroshot release binary that has a dynamic interpreter.
 

@@ -25,6 +25,16 @@ Unchanged managed skill copies are installed or refreshed for Codex, GitHub Copi
 Code. A user-edited or conflicting skill is preserved, and the command fails with its exact path
 after completing any safe updates.
 
+Versions 10.4.0 through 10.8.0 cannot update themselves to a current release. Their updater accepts
+only the `zeroshot` executable, but every archive since 10.9.0 also contains the `restic` sidecar,
+so `zeroshot update` always fails with `release archive contains unexpected entry restic`
+(`restic.exe` on Windows) and leaves the installation unchanged. Install the latest release through
+npm once; later updates can use `zeroshot update` again:
+
+```console
+npm install --global @the-open-engine-company/zeroshot@latest
+```
+
 Older updaters install only the skills they know. If `zeroshot-graph-design` or `zeroshot-plan` is
 missing after an executable upgrade, run `zeroshot update` again. The current updater refreshes all
 managed skills even when the executable version is already current.
