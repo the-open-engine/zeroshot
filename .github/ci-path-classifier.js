@@ -6,6 +6,7 @@ const SHARED_PATHS = new Set([
   '.github/ci-path-classifier.js',
   '.github/select-ci-lanes.sh',
   '.github/workflows/ci.yml',
+  '.github/workflows/coverage.yml',
   '.github/workflows/opcore.yml',
   '.github/workflows/release.yml',
 ]);

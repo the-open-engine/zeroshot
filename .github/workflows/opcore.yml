@@ -1,12 +1,7 @@
 name: Opcore
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  merge_group:
-    types: [checks_requested]
+  workflow_call:
   workflow_dispatch:
 
 permissions:

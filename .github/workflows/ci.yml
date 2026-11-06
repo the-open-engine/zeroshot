@@ -1,8 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
@@ -43,6 +41,46 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: bash .github/select-ci-lanes.sh | tee -a "$GITHUB_OUTPUT"
 
+  quick-check:
+    name: PR checks
+    needs: classify
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        if: needs.classify.outputs.native == 'true'
+        with:
+          toolchain: 1.97.0
+          components: rustfmt
+
+      - name: Install repository tooling
+        run: npm ci --ignore-scripts
+
+      - name: Check Rust formatting
+        if: needs.classify.outputs.native == 'true'
+        run: cargo fmt --all -- --check
+
+      - name: Check repository tooling and workflow formatting
+        run: |
+          npm run lint
+          npx --no-install prettier --check .github/workflows/*.yml
+
+      - name: Test CI routing and delivery contracts
+        run: >-
+          node --test
+          tests/tooling/ci-*.test.js
+          tests/tooling/greptile-gate.test.js
+          tests/tooling/release-contract.test.js
+
   readme-check:
     name: README
     needs: classify
@@ -69,7 +107,7 @@ jobs:
   tooling-check:
     name: Repository tooling
     needs: classify
-    if: needs.classify.outputs.tooling == 'true'
+    if: github.event_name != 'pull_request' && needs.classify.outputs.tooling == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -103,7 +141,7 @@ jobs:
   npm-check:
     name: npm package (${{ matrix.os }})
     needs: classify
-    if: needs.classify.outputs.npm == 'true'
+    if: github.event_name != 'pull_request' && needs.classify.outputs.npm == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -143,7 +181,7 @@ jobs:
   native-check:
     name: Native product (${{ matrix.os }})
     needs: classify
-    if: needs.classify.outputs.native == 'true'
+    if: github.event_name != 'pull_request' && needs.classify.outputs.native == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -312,7 +350,7 @@ jobs:
   macos-check:
     name: macOS compilation
     needs: classify
-    if: needs.classify.outputs.native == 'true'
+    if: github.event_name != 'pull_request' && needs.classify.outputs.native == 'true'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -343,7 +381,7 @@ jobs:
   python-check:
     name: Python SDK
     needs: classify
-    if: needs.classify.outputs.python == 'true'
+    if: github.event_name != 'pull_request' && needs.classify.outputs.python == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -421,7 +459,7 @@ jobs:
   docs-check:
     name: Strict documentation
     needs: classify
-    if: needs.classify.outputs.docs == 'true'
+    if: github.event_name != 'pull_request' && needs.classify.outputs.docs == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -481,7 +519,7 @@ jobs:
   target-image:
     name: Target image
     needs: classify
-    if: needs.classify.outputs.native == 'true'
+    if: github.event_name != 'pull_request' && needs.classify.outputs.native == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -551,12 +589,24 @@ jobs:
             zeroshot-target:ci -i HOME=/work/home PATH=/usr/local/bin:/usr/bin:/bin \
             /bin/sh /smoke.sh
 
+  coverage-check:
+    needs: classify
+    if: github.event_name != 'pull_request' && needs.classify.outputs.native == 'true'
+    uses: ./.github/workflows/coverage.yml
+
+  opcore-check:
+    if: github.event_name != 'pull_request'
+    uses: ./.github/workflows/opcore.yml
+
   required:
     name: required
     if: always()
     needs:
       [
         classify,
+        quick-check,
+        coverage-check,
+        opcore-check,
         readme-check,
         tooling-check,
         npm-check,
@@ -573,6 +623,10 @@ jobs:
       - name: Require every selected lane
         shell: bash
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          QUICK_RESULT: ${{ needs.quick-check.result }}
+          COVERAGE_RESULT: ${{ needs.coverage-check.result }}
+          OPCORE_RESULT: ${{ needs.opcore-check.result }}
           CLASSIFY_RESULT: ${{ needs.classify.result }}
           NATIVE_SELECTED: ${{ needs.classify.outputs.native }}
           PYTHON_SELECTED: ${{ needs.classify.outputs.python }}
@@ -594,14 +648,23 @@ jobs:
             echo "::error::classify concluded with $CLASSIFY_RESULT"
             exit 1
           }
+          case "$EVENT_NAME" in
+            pull_request) QUICK_SELECTED=true; FULL_SELECTED=false ;;
+            merge_group|workflow_dispatch) QUICK_SELECTED=false; FULL_SELECTED=true ;;
+            *) echo "::error::Unsupported CI event: $EVENT_NAME" >&2; exit 1 ;;
+          esac
           require_result() {
             local selected="$1"
             local result="$2"
             local name="$3"
+            local full_only="${4:-false}"
             [[ "$selected" == "true" || "$selected" == "false" ]] || {
               echo "::error::$name has invalid selection value: $selected"
               exit 1
             }
+            if [[ "$full_only" == "true" && "$FULL_SELECTED" == "false" ]]; then
+              selected=false
+            fi
             if [[ "$selected" == "true" && "$result" != "success" ]]; then
               echo "::error::$name concluded with $result"
               exit 1
@@ -611,14 +674,17 @@ jobs:
               exit 1
             fi
           }
+          require_result "$QUICK_SELECTED" "$QUICK_RESULT" quick-check
+          require_result "$FULL_SELECTED" "$OPCORE_RESULT" opcore-check
+          require_result "$NATIVE_SELECTED" "$COVERAGE_RESULT" coverage-check true
           require_result "$README_SELECTED" "$README_RESULT" readme-check
-          require_result "$TOOLING_SELECTED" "$TOOLING_RESULT" tooling-check
-          require_result "$NPM_SELECTED" "$NPM_RESULT" npm-check
-          require_result "$DOCS_SELECTED" "$DOCS_RESULT" docs-check
-          require_result "$NATIVE_SELECTED" "$NATIVE_RESULT" native-check
-          require_result "$NATIVE_SELECTED" "$MACOS_RESULT" macos-check
-          require_result "$NATIVE_SELECTED" "$IMAGE_RESULT" target-image
-          require_result "$PYTHON_SELECTED" "$PYTHON_RESULT" python-check
+          require_result "$TOOLING_SELECTED" "$TOOLING_RESULT" tooling-check true
+          require_result "$NPM_SELECTED" "$NPM_RESULT" npm-check true
+          require_result "$DOCS_SELECTED" "$DOCS_RESULT" docs-check true
+          require_result "$NATIVE_SELECTED" "$NATIVE_RESULT" native-check true
+          require_result "$NATIVE_SELECTED" "$MACOS_RESULT" macos-check true
+          require_result "$NATIVE_SELECTED" "$IMAGE_RESULT" target-image true
+          require_result "$PYTHON_SELECTED" "$PYTHON_RESULT" python-check true
 
       - name: Wait for Greptile review
         if: github.event_name == 'pull_request' && !github.event.pull_request.draft
