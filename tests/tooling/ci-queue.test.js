@@ -6,6 +6,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { it } = require('node:test');
 const yaml = require('js-yaml');
+const { classifyPaths } = require('../../.github/ci-path-classifier');
 
 const root = path.resolve(__dirname, '..', '..');
 const readWorkflow = (name) =>
@@ -22,6 +23,16 @@ const fullJobs = [
   'coverage-check',
   'opcore-check',
 ];
+
+it('preserves the native job names and owned prefixes consumed by support queue admission', () => {
+  assert.equal(ci.jobs['native-check'].name, 'Native product (${{ matrix.os }})');
+  assert.deepEqual(ci.jobs['native-check'].strategy.matrix.os, ['ubuntu-latest', 'windows-latest']);
+  assert.equal(ci.jobs['macos-check'].name, 'macOS compilation');
+  assert.equal(ci.jobs['target-image'].name, 'Target image');
+  for (const prefix of ['crates/', 'docker/zeroshot-target/', 'protocol/', 'ui/', 'zeroshot/']) {
+    assert.equal(classifyPaths([prefix + 'regression']).native, true, prefix);
+  }
+});
 
 it('runs full CI once in the merge queue and preserves manual full validation', () => {
   assert.equal(Object.hasOwn(ci.on, 'push'), false);
