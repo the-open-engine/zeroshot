@@ -72,14 +72,11 @@ impl LocalRunProfileStore {
         let id = uuid::Uuid::now_v7().to_string();
         let temporary = temporary_path(&self.root);
         let result = (|| {
-            let mut options = OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt as _;
-                options.mode(0o600);
-            }
-            let file = options.open(&temporary).map_err(local_io)?;
+            let file = owner_only_options()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)
+                .map_err(local_io)?;
             write_and_commit(
                 file,
                 format!("{id}\n").as_bytes(),
@@ -247,7 +244,7 @@ impl LocalRunProfileStore {
 
     fn lock(&self) -> Result<File, NativeV2CliError> {
         std::fs::create_dir_all(&self.root).map_err(local_io)?;
-        OpenOptions::new()
+        owner_only_options()
             .read(true)
             .write(true)
             .create(true)
@@ -278,7 +275,7 @@ impl LocalRunProfileStore {
             local_message("local profile store could not be read back before saving")
         })?;
         let result = (|| {
-            let file = OpenOptions::new()
+            let file = owner_only_options()
                 .write(true)
                 .create_new(true)
                 .truncate(false)
@@ -429,6 +426,44 @@ fn default_unix_config_root() -> Result<PathBuf, NativeV2CliError> {
 
 fn temporary_path(root: &Path) -> PathBuf {
     root.join(format!("profiles.{}.tmp", uuid::Uuid::now_v7()))
+}
+
+/// Store files have fixed names, and a direct target's storage root is traversable by its run
+/// identities, so new files are created owner-only.
+#[cfg(unix)]
+fn owner_only_options() -> OpenOptions {
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    let mut options = OpenOptions::new();
+    options.mode(0o600);
+    options
+}
+
+#[cfg(not(unix))]
+fn owner_only_options() -> OpenOptions {
+    OpenOptions::new()
+}
+
+/// Makes store files left by earlier versions owner-only before a target exposes their root.
+#[cfg(unix)]
+pub(crate) fn secure_existing_profile_store(root: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+
+    for name in [PROFILES_FILE, PROFILES_LOCK_FILE] {
+        let file = match crate::execution::platform::open_identity(&root.join(name)) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.uid() != unsafe { libc::geteuid() } {
+            return Err(std::io::Error::other(
+                "profile store file is not a regular file owned by this account",
+            ));
+        }
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
 }
 
 fn local_io(error: std::io::Error) -> NativeV2CliError {

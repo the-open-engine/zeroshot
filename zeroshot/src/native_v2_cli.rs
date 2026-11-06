@@ -63,6 +63,8 @@ mod delegations;
 mod profiles;
 pub use delegations::{DelegationAction, DelegationCommand, DelegationResult};
 pub(crate) use profiles::LocalRunProfileStore;
+#[cfg(unix)]
+pub(crate) use profiles::secure_existing_profile_store;
 #[cfg(feature = "ui")]
 pub(crate) use profiles::{profile_revision, ProfileSaveConflict};
 

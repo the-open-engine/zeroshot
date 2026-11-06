@@ -344,3 +344,98 @@ async fn prepared_target_reaches_a_live_listener_and_remains_active_until_cancel
     task.abort();
     assert!(task.await.assert_error().is_cancelled());
 }
+
+#[cfg(all(unix, feature = "ui"))]
+#[tokio::test]
+async fn direct_target_keeps_ui_profiles_private_to_the_target_account() {
+    let root =
+        openengine_cluster_testkit::TemporaryDirectory::for_test("target-serve-private-profiles");
+    let storage = root.path("storage");
+    let mode = |name: &str| {
+        std::fs::metadata(storage.join(name))
+            .assert_value()
+            .permissions()
+            .mode()
+            & 0o777
+    };
+    let config = TargetServe {
+        listen: "127.0.0.1:0".parse().assert_value(),
+        public_origin: "http://127.0.0.1:8080".to_owned(),
+        storage: storage.clone(),
+        operator_diagnostics_json: false,
+        bootstrap_key_file: None,
+    };
+    let (server, listener) = prepare_server(&config, &config.public_origin)
+        .await
+        .assert_value();
+    let address = listener.local_addr().assert_value();
+    let task = tokio::spawn(serve_prepared(server, listener, std::future::pending()));
+
+    // Save one profile the way the browser does: from a catalog template, under the workspace id.
+    // Requests reach the bound port while presenting the public origin's authority.
+    let client = reqwest::Client::new();
+    let host = "127.0.0.1:8080";
+    let bootstrap: serde_json::Value = client
+        .get(format!("http://{address}/ui/api/bootstrap"))
+        .header(reqwest::header::HOST, host)
+        .send()
+        .await
+        .assert_value()
+        .json()
+        .await
+        .assert_value();
+    let template = bootstrap["templates"]
+        .as_array()
+        .assert_value()
+        .iter()
+        .find(|template| template["id"] == "single-worker:none")
+        .assert_value();
+    let saved = client
+        .post(format!("http://{address}/ui/api/profiles"))
+        .header(reqwest::header::HOST, host)
+        .header(
+            "x-zeroshot-workspace",
+            bootstrap["workspace"]["id"].as_str().assert_value(),
+        )
+        .json(&serde_json::json!({
+            "name": "private-profile",
+            "graph": template["graph"],
+            "runtime": {
+                "harness": "codex", "provider": "openai", "size": "small",
+                "nodes": {"worker": {"kind": "agent", "model": "opaque-model"}}
+            },
+            "expectedRevision": null
+        }))
+        .send()
+        .await
+        .assert_value();
+    assert_eq!(saved.status(), reqwest::StatusCode::OK);
+    task.abort();
+    let _ = task.await;
+
+    // Run identities can traverse the storage root, so its fixed names must stay owner-only.
+    for name in ["profiles.json", "profiles.lock"] {
+        assert_eq!(
+            mode(name) & 0o077,
+            0,
+            "{name} is accessible to other accounts"
+        );
+    }
+
+    // A store written by an earlier target is repaired when the target starts again.
+    std::fs::set_permissions(
+        storage.join("profiles.json"),
+        std::fs::Permissions::from_mode(0o644),
+    )
+    .assert_value();
+    let (server, listener) = prepare_server(&config, &config.public_origin)
+        .await
+        .assert_value();
+    assert_eq!(
+        mode("profiles.json"),
+        0o600,
+        "existing profiles.json was not repaired at target start"
+    );
+    drop(listener);
+    drop(server);
+}
