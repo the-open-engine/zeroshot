@@ -4,6 +4,7 @@
 //! submission key admits a run. A later request with the same key and submission gets that run
 //! back, and a new key admits another run. Like a proxy or VPN that drops the response, the stub
 //! discards a configured number of replies after it has admitted the submission.
+//! The CLI's replay budget is bounded, so the tests also count every submission it sends.
 
 use std::sync::{Arc, Mutex};
 
@@ -33,6 +34,8 @@ use super::{
 const SUBMISSION_KEY: &str = "target-test";
 const FORGE_SECRET: &str = "ghs_lost_reply_forge_secret";
 const SERVER_DOWN_HINT: &str = "that the server is running";
+/// The first submission and its two identical replays.
+const SUBMISSION_ATTEMPTS: usize = 3;
 
 type Backend = NamedTargetCliBackend<
     NativeV2TargetConnector<MemoryRegistry, TargetHttpControlAuthority, FakeDialer>,
@@ -70,6 +73,15 @@ impl Submission {
             Self::HostedProfile => "/native-v2/profiles/run",
         }
     }
+}
+
+/// What the stub answers once it stops discarding replies.
+#[derive(Clone, Copy)]
+enum Answer {
+    /// The receipt the idempotency contract selects.
+    Receipt,
+    /// A temporary refusal, as Cloud answers a replay while the first submission is in progress.
+    Unavailable,
 }
 
 struct Admission {
@@ -142,6 +154,7 @@ struct StubTarget {
     origin: String,
     submission: Submission,
     lost_replies: usize,
+    answer: Answer,
     state: Mutex<TargetState>,
 }
 
@@ -158,7 +171,13 @@ impl StubTarget {
         let mut state = self.state.lock().assert_value();
         let response = match (request.method.as_str(), request.path.as_str()) {
             ("POST", path) if path == self.submission.route() => {
-                let response = state.submit(&request.body);
+                let receipt = state.submit(&request.body);
+                let response = match self.answer {
+                    Answer::Receipt => receipt,
+                    Answer::Unavailable => {
+                        problem("503 Service Unavailable", "temporarily_unavailable")
+                    }
+                };
                 state.submissions += 1;
                 return (state.submissions > self.lost_replies).then_some(response);
             }
@@ -191,12 +210,13 @@ struct LossyTarget {
 }
 
 impl LossyTarget {
-    async fn spawn(submission: Submission, lost_replies: usize) -> Self {
+    async fn spawn(submission: Submission, lost_replies: usize, answer: Answer) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
         let stub = Arc::new(StubTarget {
             origin: format!("http://{}", listener.local_addr().assert_value()),
             submission,
             lost_replies,
+            answer,
             state: Mutex::default(),
         });
         let served = stub.clone();
@@ -236,9 +256,9 @@ async fn backend(root: &TempRoot, target: TargetRecord) -> Backend {
     ))
 }
 
-async fn assert_lost_reply_returns_the_admitted_run(submission: Submission) {
+async fn assert_lost_reply_returns_the_admitted_run(submission: Submission, lost_replies: usize) {
     let root = temp_root();
-    let stub = LossyTarget::spawn(submission, 1).await;
+    let stub = LossyTarget::spawn(submission, lost_replies, Answer::Receipt).await;
     let target = submission.target(stub.origin());
     let name = target.name.clone();
     let backend = backend(&root, target).await;
@@ -255,6 +275,7 @@ async fn assert_lost_reply_returns_the_admitted_run(submission: Submission) {
     let receipt = receipt.assert_value_with(&context);
     assert_eq!(receipt.run_id, run_id, "{submission:?}");
     assert_eq!(state.admissions.len(), 1, "{submission:?}: duplicate run");
+    assert_eq!(state.submissions, lost_replies + 1, "{submission:?}");
     assert!(
         state.unexpected.is_empty(),
         "{submission:?}: {:?}",
@@ -264,7 +285,7 @@ async fn assert_lost_reply_returns_the_admitted_run(submission: Submission) {
 
 async fn assert_unknown_outcome_names_the_retry_key(submission: Submission) {
     let root = temp_root();
-    let stub = LossyTarget::spawn(submission, usize::MAX).await;
+    let stub = LossyTarget::spawn(submission, usize::MAX, Answer::Receipt).await;
     let target = submission.target(stub.origin());
     let name = target.name.clone();
     let backend = backend(&root, target).await;
@@ -296,6 +317,7 @@ async fn assert_unknown_outcome_names_the_retry_key(submission: Submission) {
     assert!(!message.contains(FORGE_SECRET), "{context}");
     assert!(!diagnostic.to_string().contains(FORGE_SECRET), "{context}");
     assert_eq!(state.admissions.len(), 1, "{context}");
+    assert_eq!(state.submissions, SUBMISSION_ATTEMPTS, "{context}");
     assert!(
         state.unexpected.is_empty(),
         "{context}: {:?}",
@@ -305,17 +327,49 @@ async fn assert_unknown_outcome_names_the_retry_key(submission: Submission) {
 
 #[tokio::test]
 async fn direct_lost_reply_returns_the_admitted_run() {
-    assert_lost_reply_returns_the_admitted_run(Submission::Direct).await;
+    assert_lost_reply_returns_the_admitted_run(Submission::Direct, 1).await;
 }
 
 #[tokio::test]
 async fn hosted_lost_reply_returns_the_admitted_run() {
-    assert_lost_reply_returns_the_admitted_run(Submission::Hosted).await;
+    assert_lost_reply_returns_the_admitted_run(Submission::Hosted, 1).await;
 }
 
 #[tokio::test]
 async fn hosted_profile_lost_reply_returns_the_admitted_run() {
-    assert_lost_reply_returns_the_admitted_run(Submission::HostedProfile).await;
+    assert_lost_reply_returns_the_admitted_run(Submission::HostedProfile, 1).await;
+}
+
+#[tokio::test]
+async fn direct_final_replay_returns_the_admitted_run() {
+    assert_lost_reply_returns_the_admitted_run(Submission::Direct, SUBMISSION_ATTEMPTS - 1).await;
+}
+
+#[tokio::test]
+async fn a_target_answer_to_a_replay_ends_the_replays_with_an_unknown_outcome() {
+    let root = temp_root();
+    let stub = LossyTarget::spawn(Submission::Direct, 1, Answer::Unavailable).await;
+    let target = Submission::Direct.target(stub.origin());
+    let name = target.name.clone();
+    let backend = backend(&root, target).await;
+
+    let error = backend
+        .run_submit(Some(&name), Submission::Direct.request())
+        .await;
+    let state = stub.stop();
+
+    let message = error
+        .assert_error_with("the replay was answered with a refusal")
+        .to_string();
+    // The refusal does not settle whether the lost first submission was admitted.
+    assert!(message.contains("submission outcome unknown"), "{message}");
+    assert!(
+        message.contains("target run request failed: connection interrupted"),
+        "{message}"
+    );
+    assert!(message.contains(SUBMISSION_KEY), "{message}");
+    assert_eq!(state.submissions, 2, "{message}");
+    assert_eq!(state.admissions.len(), 1, "{message}");
 }
 
 #[tokio::test]
