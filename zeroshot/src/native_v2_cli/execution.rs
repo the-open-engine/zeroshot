@@ -186,7 +186,7 @@ where
         )
         .await?;
     if !status.workspace_recovery.recoverable {
-        return Err(NativeV2CliError::Target(
+        return Err(NativeV2CliError::Usage(
             "run does not have a recoverable workspace".to_owned(),
         ));
     }

@@ -1,4 +1,42 @@
+use openengine_cluster_protocol::ConnectionKey;
+use openengine_cluster_server::BackendErrorKind;
+use openengine_cluster_testkit::assertions::AssertValue;
+
 use super::*;
+
+#[test]
+fn environment_refusals_keep_their_cause_and_name_only_missing_connections() {
+    let key = ConnectionKey::new("anthropic").assert_value();
+    let field = EnvironmentVariableName::new("CLAUDE_CODE_OAUTH_TOKEN").assert_value();
+    for source in [
+        RunEnvironmentError::MissingConnection(key.clone()),
+        RunEnvironmentError::MissingField(key.clone(), field.clone()),
+    ] {
+        let message = source.to_string();
+        let error = platform_backend_error(NativeV2PlatformError::Environment(source));
+        assert_eq!(error.kind, BackendErrorKind::Application);
+        assert_eq!(error.code, "connection_unavailable");
+        assert_eq!(error.message, message);
+        assert_eq!(
+            error.details,
+            Some(serde_json::json!({ "connection": "anthropic" }))
+        );
+    }
+
+    for source in [
+        RunEnvironmentError::UndeclaredConnection(key.clone()),
+        RunEnvironmentError::UndeclaredField(key, field),
+        RunEnvironmentError::TooLarge,
+        RunEnvironmentError::InvalidPlan,
+    ] {
+        let message = source.to_string();
+        let error = platform_backend_error(NativeV2PlatformError::Environment(source));
+        assert_eq!(error.kind, BackendErrorKind::Application);
+        assert_eq!(error.code, SCHEMA_VIOLATION);
+        assert_eq!(error.message, message);
+        assert!(error.details.is_none());
+    }
+}
 
 #[test]
 fn source_checkout_failure_is_a_public_application_error() {

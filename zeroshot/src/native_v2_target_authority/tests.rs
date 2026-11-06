@@ -44,6 +44,9 @@ mod history;
 #[path = "tests/tasks.rs"]
 mod tasks;
 
+#[path = "tests/resume_refusals.rs"]
+mod resume_refusals;
+
 struct Claim;
 impl ExclusiveControllerClaim for Claim {}
 

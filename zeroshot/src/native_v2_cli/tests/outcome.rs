@@ -227,6 +227,28 @@ async fn resume_rejects_an_invalid_github_token_before_submission() {
     assert_no_resume_call(&backend);
 }
 
+#[tokio::test]
+async fn resume_refusal_for_an_unrecoverable_workspace_is_not_a_target_outage() {
+    // The run failed on the target at once, so the target retained no workspace for it.
+    let backend = FakeBackend::with_runtime_failure_before_terminal();
+    let command =
+        parse_native_v2_args(args(&["resume", "run-failed", "--target", "d1"])).assert_value();
+    let error = execute_native_v2_cli(command, &backend, &mut NeverDetach, &mut Vec::new())
+        .await
+        .assert_error();
+    let diagnostic = serde_json::to_value(error.diagnostic()).assert_value();
+
+    assert!(
+        diagnostic["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("does not have a recoverable workspace")),
+        "{diagnostic}"
+    );
+    assert_ne!(diagnostic["code"], "target.unavailable", "{diagnostic}");
+    assert_ne!(diagnostic["kind"], "target", "{diagnostic}");
+    assert_no_resume_call(&backend);
+}
+
 fn assert_no_resume_call(backend: &FakeBackend) {
     assert!(
         backend
