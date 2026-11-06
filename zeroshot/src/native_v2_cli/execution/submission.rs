@@ -226,19 +226,11 @@ where
     if run.validate_only {
         return Ok((RunConnectionValues::new(), None));
     }
-    let connections = select_connections(&intent.runtime, intent.environment.as_ref(), available)?;
-    let github_token = run
-        .target
-        .as_ref()
-        .and_then(|_| available("GH_TOKEN"))
-        .map(|value| {
-            value
-                .into_string()
-                .map_err(|_| NativeV2CliError::GitHubToken)
-        })
-        .transpose()?
-        .map(validate_github_token)
-        .transpose()?;
+    let forward = run.target.is_some() && run.forward_github_token;
+    let environment = connection_environment(run.target.is_some() && !forward, available);
+    let connections =
+        select_connections(&intent.runtime, intent.environment.as_ref(), &environment)?;
+    let github_token = forwarded_github_token(forward, available)?;
     Ok((connections, github_token))
 }
 
@@ -294,9 +286,10 @@ where
         .filter(|(key, _)| !request.connections.contains_key(key))
         .map(|(key, fields)| (key, fields.into_iter().collect()))
         .collect();
+    let environment = connection_environment(!run.forward_github_token, available);
     request
         .connections
-        .extend(select_connection_requirements(missing, available)?);
+        .extend(select_connection_requirements(missing, &environment)?);
     Ok(())
 }
 
@@ -478,6 +471,44 @@ fn named_source_record(run: &RunCommand, params: &PreparedRunRequest) -> Option<
         ),
         "dirty": source.dirty,
     }))
+}
+
+/// Reads connection values from the shell, hiding `GH_TOKEN` when `hide_github_token` is set.
+///
+/// Named targets resolve an unsent GitHub field from their own stored connection, so an ambient
+/// shell token must not fill it without `--forward-gh-token`.
+pub(super) fn connection_environment<'a>(
+    hide_github_token: bool,
+    available: &'a dyn Fn(&str) -> Option<OsString>,
+) -> impl Fn(&str) -> Option<OsString> + 'a {
+    move |name| {
+        if hide_github_token && name == "GH_TOKEN" {
+            None
+        } else {
+            available(name)
+        }
+    }
+}
+
+/// Reads the caller's `GH_TOKEN` only after an explicit `--forward-gh-token` opt-in.
+///
+/// Targets otherwise use their own stored GitHub connection, so an ambient shell token never
+/// replaces it.
+pub(super) fn forwarded_github_token(
+    forward: bool,
+    available: &dyn Fn(&str) -> Option<OsString>,
+) -> Result<Option<String>, NativeV2CliError> {
+    if !forward {
+        return Ok(None);
+    }
+    let value = available("GH_TOKEN").ok_or_else(|| {
+        NativeV2CliError::Usage("--forward-gh-token requires GH_TOKEN to be set".to_owned())
+    })?;
+    value
+        .into_string()
+        .map_err(|_| NativeV2CliError::GitHubToken)
+        .and_then(validate_github_token)
+        .map(Some)
 }
 
 pub(super) fn validate_github_token(value: String) -> Result<String, NativeV2CliError> {

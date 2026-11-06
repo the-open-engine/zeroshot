@@ -72,31 +72,7 @@ async fn template_run_preserves_authored_input_and_owned_delivery_binding() {
         json!({"task":"ship it","issueNumber":"208"}),
         software_change_runtime(),
     );
-    let command = parse_native_v2_args(args(&[
-        "run",
-        "--target",
-        "prod",
-        "--repository",
-        "open-engine/zeroshot",
-        "--branch",
-        "main",
-        "--revision",
-        "0123456789abcdef0123456789abcdef01234567",
-        "--title",
-        "Ship change",
-        "--template",
-        "software-change",
-        "--ship",
-        "--no-pr-feedback",
-        "--input",
-        files.input.to_str().assert_value(),
-        "--runtime-config",
-        files.runtime.to_str().assert_value(),
-        "--submission-key",
-        "template-key",
-        "-d",
-    ]))
-    .assert_value();
+    let command = ship_run_command(&files, true);
     let backend = FakeBackend::default();
     let available = |name: &str| (name == "GH_TOKEN").then(|| OsString::from("template-secret"));
     execute_with_environment(command, &backend, &available)
@@ -150,8 +126,64 @@ async fn template_run_preserves_authored_input_and_owned_delivery_binding() {
 }
 
 #[tokio::test]
+async fn shipped_named_run_leaves_the_delivery_gh_token_to_the_target_without_opt_in() {
+    let files = FixtureFiles::with_runtime(
+        graph(),
+        json!({"task":"ship it","issueNumber":"208"}),
+        software_change_runtime(),
+    );
+    let backend = FakeBackend::default();
+    let available = |name: &str| (name == "GH_TOKEN").then(|| OsString::from("ambient-secret"));
+    execute_with_environment(ship_run_command(&files, false), &backend, &available)
+        .await
+        .assert_value();
+    let calls = backend.calls();
+    assert!(matches!(
+        calls.as_slice(),
+        [Call::Submit { connections, github_token: None, .. }]
+            if !connections.contains_key(&ConnectionKey::new("github").assert_value())
+    ));
+}
+
+fn ship_run_command(files: &FixtureFiles, forward_gh_token: bool) -> NativeV2CliCommand {
+    let mut arguments = vec![
+        "run",
+        "--target",
+        "prod",
+        "--repository",
+        "open-engine/zeroshot",
+        "--branch",
+        "main",
+        "--revision",
+        "0123456789abcdef0123456789abcdef01234567",
+        "--title",
+        "Ship change",
+        "--template",
+        "software-change",
+        "--ship",
+        "--no-pr-feedback",
+        "--input",
+        files.input.to_str().assert_value(),
+        "--runtime-config",
+        files.runtime.to_str().assert_value(),
+        "--submission-key",
+        "template-key",
+        "-d",
+    ];
+    if forward_gh_token {
+        arguments.push("--forward-gh-token");
+    }
+    parse_native_v2_args(args(&arguments)).assert_value()
+}
+
+#[tokio::test]
 async fn run_collects_only_the_distinct_declared_environment_before_submission() {
-    let (_files, command) = environment_command(&["--submission-key", "environment-key", "-d"]);
+    let (_files, command) = environment_command(&[
+        "--submission-key",
+        "environment-key",
+        "-d",
+        "--forward-gh-token",
+    ]);
     let requested = std::cell::RefCell::new(Vec::new());
     let backend = FakeBackend::default();
     let available = |name: &str| {
@@ -192,6 +224,51 @@ async fn run_collects_only_the_distinct_declared_environment_before_submission()
             ("SHARED", "value-for-SHARED")
         ]
     );
+}
+
+#[tokio::test]
+async fn named_run_leaves_an_ambient_gh_token_unsent_without_opt_in() {
+    let (_files, command) = environment_command(&["--submission-key", "ambient-token", "-d"]);
+    let requested = std::cell::RefCell::new(Vec::new());
+    let backend = FakeBackend::default();
+    let available = |name: &str| {
+        requested.borrow_mut().push(name.to_owned());
+        Some(OsString::from(format!("value-for-{name}")))
+    };
+    execute_with_environment(command, &backend, &available)
+        .await
+        .assert_value();
+
+    assert!(!requested.into_inner().iter().any(|name| name == "GH_TOKEN"));
+    let calls = backend.calls();
+    assert!(matches!(
+        calls.as_slice(),
+        [Call::Submit {
+            github_token: None,
+            ..
+        }]
+    ));
+}
+
+#[tokio::test]
+async fn forwarding_an_unset_gh_token_fails_before_submission() {
+    let (_files, command) = environment_command(&[
+        "--submission-key",
+        "unset-token",
+        "-d",
+        "--forward-gh-token",
+    ]);
+    let backend = FakeBackend::default();
+    let available = |name: &str| (name != "GH_TOKEN").then(|| OsString::from("value"));
+    let error = execute_with_environment(command, &backend, &available)
+        .await
+        .assert_error();
+
+    assert!(
+        matches!(&error, NativeV2CliError::Usage(message) if message.contains("GH_TOKEN")),
+        "{error}"
+    );
+    assert!(backend.calls().is_empty());
 }
 
 #[tokio::test]

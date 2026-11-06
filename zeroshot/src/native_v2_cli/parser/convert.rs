@@ -221,6 +221,7 @@ impl RunResumeArgs {
         Ok(NativeV2CliCommand::Resume(RunResumeCommand {
             run: self.run.into_selector()?,
             from,
+            forward_github_token: self.forward_gh_token,
         }))
     }
 }
@@ -304,6 +305,7 @@ impl StackSubmitArgs {
             file: self.file,
             detach: self.detach,
             submission_key,
+            forward_github_token: self.forward_gh_token,
         }))
     }
 }
@@ -373,6 +375,7 @@ impl RunArgs {
             detach: self.detach,
             validate_only: self.validate_only,
             submission_key: submission_key(self.submission_key)?,
+            forward_github_token: self.forward_gh_token,
         })))
     }
 }

@@ -153,6 +153,7 @@ async fn wave6_cli_contract_remote_profile_resolution_preserves_selector_and_pay
         detach: true,
         validate_only: false,
         submission_key: None,
+        forward_github_token: false,
     };
 
     let resolved = resolve_run_profile(&run, &backend).await.assert_value();

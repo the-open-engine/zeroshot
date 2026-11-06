@@ -456,6 +456,7 @@ async fn wave8_cli_contract_validate_only_preflight_materializes_without_backend
         detach: false,
         validate_only: true,
         submission_key: None,
+        forward_github_token: false,
     };
     let mut output = Vec::new();
     assert_eq!(
@@ -742,6 +743,7 @@ fn intent_command(selection: RunSelection) -> RunCommand {
         detach: false,
         validate_only: false,
         submission_key: None,
+        forward_github_token: false,
     }
 }
 
@@ -944,7 +946,8 @@ const NAMED_COMMENT_CASES: [(&str, &str, &str); 2] = [
 #[test]
 fn named_source_less_comments_materialize_the_canonical_connection_used_by_resume() {
     for (url, key, field) in NAMED_COMMENT_CASES {
-        let (run, mut request) = named_comment_request(url);
+        let (mut run, mut request) = named_comment_request(url);
+        run.forward_github_token = true;
         let queried = std::cell::RefCell::new(Vec::new());
         let available = |name: &str| {
             queried.borrow_mut().push(name.to_owned());
@@ -981,9 +984,31 @@ fn named_source_less_comments_materialize_the_canonical_connection_used_by_resum
 }
 
 #[test]
+fn named_delivery_leaves_github_to_the_target_without_opt_in() {
+    for (url, key, field) in NAMED_COMMENT_CASES {
+        let (run, mut request) = named_comment_request(url);
+        let queried = std::cell::RefCell::new(Vec::new());
+        materialize_named_delivery_access(&run, &mut request, &|name: &str| {
+            queried.borrow_mut().push(name.to_owned());
+            Some(OsString::from("shell-token"))
+        })
+        .assert_value();
+        let hidden = field == "GH_TOKEN";
+        assert_eq!(queried.borrow().is_empty(), hidden);
+        assert_eq!(
+            request
+                .connections
+                .contains_key(&ConnectionKey::new(key).assert_value()),
+            !hidden
+        );
+    }
+}
+
+#[test]
 fn named_delivery_does_not_upload_local_cli_token_aliases() {
     for (url, _, field) in NAMED_COMMENT_CASES {
-        let (run, mut request) = named_comment_request(url);
+        let (mut run, mut request) = named_comment_request(url);
+        run.forward_github_token = true;
         let queried = std::cell::RefCell::new(Vec::new());
         materialize_named_delivery_access(&run, &mut request, &|name: &str| {
             queried.borrow_mut().push(name.to_owned());

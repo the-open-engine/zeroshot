@@ -40,7 +40,10 @@ pub use submission::{
     try_execute_native_v2_preflight, try_execute_native_v2_static,
     try_execute_native_v2_static_with_terminal,
 };
-use submission::{RunSubmission, select_connection_requirements, submit_run, validate_github_token};
+use submission::{
+    RunSubmission, connection_environment, forwarded_github_token, select_connection_requirements,
+    submit_run, validate_github_token,
+};
 use status::outcome_for_status;
 
 pub async fn execute_native_v2_cli<B, S, W>(
@@ -200,22 +203,32 @@ where
             status.workspace_recovery.connection_requirements,
         )
         .await?;
-    let connections = select_connection_requirements(requirements, context.environment)?;
-    let allow_legacy_github_token = run.target.is_none()
-        || status
+    let connections = select_connection_requirements(
+        requirements,
+        connection_environment(
+            run.target.is_some() && !command.forward_github_token,
+            context.environment,
+        ),
+    )?;
+    let github_token = if run.target.is_none() {
+        (context.environment)("GH_TOKEN")
+            .map(|value| {
+                value
+                    .into_string()
+                    .map_err(|_| NativeV2CliError::GitHubToken)
+                    .and_then(validate_github_token)
+            })
+            .transpose()?
+    } else {
+        let github_com = status
             .source
             .as_ref()
             .is_some_and(crate::native_v2_candidate::is_github_com_source);
-    let github_token = allow_legacy_github_token
-        .then(|| (context.environment)("GH_TOKEN"))
-        .flatten()
-        .map(|value| {
-            value
-                .into_string()
-                .map_err(|_| NativeV2CliError::GitHubToken)
-                .and_then(validate_github_token)
-        })
-        .transpose()?;
+        forwarded_github_token(
+            command.forward_github_token && github_com,
+            context.environment,
+        )?
+    };
     let result = context
         .backend
         .run_resume(

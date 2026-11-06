@@ -305,11 +305,14 @@ HTTPS connections declare `GIT_USERNAME` and `GIT_PASSWORD`; SSH connections dec
 `GIT_SSH_PRIVATE_KEY` and `GIT_SSH_KNOWN_HOSTS`. Explicit SSH authentication uses those pinned hosts
 and its private key. Contained runs inherit no host Git login state.
 
-Named GitHub.com runs retain `GH_TOKEN` checkout and delivery support. That token is not automatically
-applied to another Git host. A model provider receives a connection field only when its own runtime
-binding declares it. Transport values stay out of source records, ledgers, observations, and
-checkpoint snapshots. Direct-target resume reuses the original source connection authorization and
-resolves fresh values.
+Named runs never send the invoking shell's `GH_TOKEN` unless you pass `--forward-gh-token` to `run`,
+`resume`, or `stack submit`. Without the flag, the target resolves GitHub access from its own stored
+`github` connection, even when `GH_TOKEN` is set locally. With the flag, the CLI sends `GH_TOKEN`
+for GitHub.com checkout and delivery and to fill a declared `GH_TOKEN` connection field, and fails
+when it is unset. That token is not automatically applied to another Git host. A model provider
+receives a connection field only when its own runtime binding declares it. Transport values stay out
+of source records, ledgers, observations, and checkpoint snapshots. Direct-target resume reuses the
+original source connection authorization and resolves fresh values.
 
 After admission, the CLI reports the target, repository, branch, exact revision, and whether the
 client checkout is dirty before emitting the receipt. Uncommitted files stay on the client.

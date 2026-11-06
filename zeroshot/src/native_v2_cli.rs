@@ -143,6 +143,8 @@ pub struct RunCommand {
     pub detach: bool,
     pub validate_only: bool,
     pub submission_key: Option<IdempotencyKey>,
+    /// Send the caller's `GH_TOKEN` with a named-target submission.
+    pub forward_github_token: bool,
 }
 
 /// Explicit instance selection for a credential-free Git remote.
@@ -263,6 +265,8 @@ pub struct StackSubmitCommand {
     pub file: PathBuf,
     pub detach: bool,
     pub submission_key: IdempotencyKey,
+    /// Send the caller's `GH_TOKEN` with the stack submission.
+    pub forward_github_token: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -297,6 +301,8 @@ pub struct RunSelector {
 pub struct RunResumeCommand {
     pub run: RunSelector,
     pub from: Option<RunResumeFrom>,
+    /// Send the caller's `GH_TOKEN` with a named-target resume.
+    pub forward_github_token: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

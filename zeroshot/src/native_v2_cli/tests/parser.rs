@@ -358,7 +358,7 @@ fn parser_exposes_workspace_recovery_commands() {
         parse_native_v2_args(args(&["resume", "run-7", "--target", "docker"])).assert_value();
     assert!(matches!(
         resume,
-        NativeV2CliCommand::Resume(RunResumeCommand { run: RunSelector { target, run_id }, from: None })
+        NativeV2CliCommand::Resume(RunResumeCommand { run: RunSelector { target, run_id }, from: None, forward_github_token: false })
             if target.as_deref() == Some("docker") && run_id.as_str() == "run-7"
     ));
 
@@ -387,6 +387,7 @@ fn checkpoint_selection_and_bounded_listing_preserve_opaque_ids() {
         NativeV2CliCommand::Resume(RunResumeCommand {
             run: RunSelector { target, run_id },
             from: Some(RunResumeFrom::Checkpoint { checkpoint_id }),
+            forward_github_token: false,
         }) if target.as_deref() == Some("docker")
             && run_id.as_str() == "run-7" && checkpoint_id.as_str() == "entry:opaque-2"
     ));

@@ -664,6 +664,13 @@ struct RunArgs {
     #[arg(long)]
     validate_only: bool,
 
+    /// Send the GH_TOKEN from this shell with the submission.
+    ///
+    /// Without this flag the target uses its own stored GitHub connection, and a GH_TOKEN in
+    /// this shell is not sent. Fails when GH_TOKEN is unset.
+    #[arg(long, requires = "target")]
+    forward_gh_token: bool,
+
     #[command(flatten)]
     delivery: DeliveryArgs,
 }
@@ -692,6 +699,12 @@ struct StackSubmitArgs {
     /// Return after atomic submission instead of polling stack status.
     #[arg(short = 'd', long)]
     detach: bool,
+    /// Send the GH_TOKEN from this shell with the stack submission.
+    ///
+    /// Without this flag the target uses its own stored GitHub connection, and a GH_TOKEN in
+    /// this shell is not sent. Fails when GH_TOKEN is unset.
+    #[arg(long)]
+    forward_gh_token: bool,
 }
 
 #[derive(Debug, Args)]
@@ -731,6 +744,12 @@ struct RunResumeArgs {
     /// Restore this checkpoint and continue from its saved graph boundary.
     #[arg(long, value_name = "ID")]
     from_checkpoint: Option<String>,
+    /// Send the GH_TOKEN from this shell with the resume.
+    ///
+    /// Without this flag the target uses its own stored GitHub connection, and a GH_TOKEN in
+    /// this shell is not sent. Fails when GH_TOKEN is unset.
+    #[arg(long, requires = "target")]
+    forward_gh_token: bool,
 }
 
 #[derive(Debug, Args)]

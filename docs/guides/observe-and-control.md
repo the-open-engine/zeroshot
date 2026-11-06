@@ -110,7 +110,8 @@ failed recovery lineage and delete it after a successful run. Platform exposes r
 authenticated hosted run routes, so failed-run checkpoints remain available for 30 days after the
 original capsule is removed. Platform resolves declared connections from their original references.
 Direct-target resume reuses the original source connection authorization and resolves fresh values;
-export `GH_TOKEN` again when the run uses it for checkout or GitHub delivery.
+export `GH_TOKEN` again and pass `--forward-gh-token` when the run relied on the shell's token
+instead of the target's stored `github` connection.
 
 ## Stop only with explicit intent
 

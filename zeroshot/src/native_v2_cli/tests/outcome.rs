@@ -120,7 +120,9 @@ async fn ctrl_c_detaches_while_settling_a_watch_closed_before_the_terminal_snaps
 #[tokio::test]
 async fn named_target_resume_resolves_current_values_for_original_requirements() {
     for checkpoint in [None, Some("entry-2")] {
-        assert_resume_resolves_current_values(Some("docker"), checkpoint).await;
+        for forward in [false, true] {
+            assert_resume_resolves_current_values(Some("docker"), checkpoint, forward).await;
+        }
     }
 }
 
@@ -158,13 +160,14 @@ async fn named_target_resume_rejects_target_selected_environment_fields_before_l
 #[tokio::test]
 async fn local_resume_resolves_current_values_for_original_requirements() {
     for checkpoint in [None, Some("entry-2")] {
-        assert_resume_resolves_current_values(None, checkpoint).await;
+        assert_resume_resolves_current_values(None, checkpoint, false).await;
     }
 }
 
 async fn assert_resume_resolves_current_values(
     expected_target: Option<&str>,
     checkpoint: Option<&str>,
+    forward: bool,
 ) {
     let key = openengine_cluster_protocol::ConnectionKey::new("openai").assert_value();
     let field =
@@ -179,6 +182,9 @@ async fn assert_resume_resolves_current_values(
     };
     if let Some(id) = checkpoint {
         command_args.extend(["--from-checkpoint", id]);
+    }
+    if forward {
+        command_args.push("--forward-gh-token");
     }
     let command = parse_native_v2_args(args(&command_args)).assert_value();
     let environment = |name: &str| match name {
@@ -210,7 +216,11 @@ async fn assert_resume_resolves_current_values(
             .map(String::as_str),
         Some("fresh-openai-token")
     );
-    assert_eq!(params.github_token.as_deref(), Some("fresh-github-token"));
+    // Local controllers read GH_TOKEN directly; named targets receive it only on opt-in.
+    assert_eq!(
+        params.github_token.as_deref(),
+        (expected_target.is_none() || forward).then_some("fresh-github-token")
+    );
 }
 
 #[tokio::test]
@@ -484,6 +494,67 @@ async fn stack_submission_rejects_a_profile_for_the_other_delivery() {
     }
 }
 
+#[tokio::test]
+async fn named_target_resume_leaves_gh_token_to_the_target_without_opt_in() {
+    let accessed = std::sync::Mutex::new(Vec::new());
+    let environment = |field: &str| {
+        accessed.lock().assert_value().push(field.to_owned());
+        (field == "GH_TOKEN").then(|| OsString::from("ambient-token"))
+    };
+
+    let backend =
+        FakeBackend::with_resume_requirements(Default::default()).with_resume_source(source());
+    let command =
+        parse_native_v2_args(args(&["resume", "run-failed", "--target", "docker"])).assert_value();
+    execute_with_environment(command, &backend, &environment)
+        .await
+        .assert_value();
+    let calls = backend.calls();
+    let [_, Call::Resume { params, .. }] = calls.as_slice() else {
+        panic!("resume call was not recorded");
+    };
+    assert_eq!(params.github_token, None);
+    assert!(accessed.lock().assert_value().is_empty());
+
+    let key = openengine_cluster_protocol::ConnectionKey::new("github").assert_value();
+    let field =
+        openengine_cluster_protocol::EnvironmentVariableName::new("GH_TOKEN").assert_value();
+    let backend = FakeBackend::with_resume_requirements(std::collections::BTreeMap::from([(
+        key.clone(),
+        vec![field],
+    )]))
+    .with_resume_source(source());
+    let command =
+        parse_native_v2_args(args(&["resume", "run-failed", "--target", "docker"])).assert_value();
+    execute_with_environment(command, &backend, &environment)
+        .await
+        .assert_value();
+    let calls = backend.calls();
+    let [_, Call::Resume { params, .. }] = calls.as_slice() else {
+        panic!("resume call was not recorded");
+    };
+    assert!(params.connections.is_empty());
+    assert_eq!(params.github_token, None);
+    assert!(accessed.lock().assert_value().is_empty());
+}
+
+#[test]
+fn forward_gh_token_requires_a_named_target() {
+    for arguments in [
+        &["resume", "run-failed", "--forward-gh-token"][..],
+        &[
+            "run",
+            "--title",
+            "Local",
+            "--input",
+            "input.json",
+            "--forward-gh-token",
+        ][..],
+    ] {
+        assert!(parse_native_v2_args(args(arguments)).is_err());
+    }
+}
+
 fn forge_resume_source(provider: &str, base: &str) -> Value {
     let mut retained = source();
     retained["remote"] = json!({
@@ -540,7 +611,7 @@ async fn resume_keeps_local_trusted_authority_and_scopes_named_github_fallback()
             FakeBackend::with_resume_requirements(requirements).with_resume_source(retained);
         let mut arguments = vec!["resume", "run-failed"];
         if let Some(target) = target {
-            arguments.extend(["--target", target]);
+            arguments.extend(["--target", target, "--forward-gh-token"]);
         }
         let command = parse_native_v2_args(args(&arguments)).assert_value();
         let accessed = std::sync::Mutex::new(Vec::new());

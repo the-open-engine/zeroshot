@@ -13,7 +13,7 @@ use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;
 use time::{Duration as TimeDuration, OffsetDateTime};
 
-use super::submission::{read_json, select_connections, validate_github_token};
+use super::submission::{connection_environment, forwarded_github_token, read_json, select_connections};
 use super::{CliExecutionContext, write_json};
 use crate::native_v2_admission::NativeV2Admission;
 use crate::native_v2_cli::{
@@ -121,7 +121,10 @@ where
         command.submission_key,
         manifest,
         &profile,
-        context.environment,
+        StackCredentials {
+            environment: context.environment,
+            forward_github_token: command.forward_github_token,
+        },
     )?;
     let stack = context
         .backend
@@ -144,28 +147,33 @@ where
     foreground_outcome(outcome)
 }
 
+/// Shell values a stack submission may read, and whether `GH_TOKEN` is among them.
+struct StackCredentials<'a> {
+    environment: &'a dyn Fn(&str) -> Option<OsString>,
+    forward_github_token: bool,
+}
+
 fn prepared_request(
     submission_key: IdempotencyKey,
     manifest: ValidatedStack,
     profile: &RunProfile,
-    environment: &dyn Fn(&str) -> Option<OsString>,
+    credentials: StackCredentials<'_>,
 ) -> Result<PreparedStackRequest, NativeV2CliError> {
+    let StackCredentials {
+        environment,
+        forward_github_token,
+    } = credentials;
     crate::native_v2_admission::validate_run_environment(
         &profile.runtime,
         manifest.environment.as_ref(),
     )
     .map_err(NativeV2CliError::InvalidRun)?;
-    let connections =
-        select_connections(&profile.runtime, manifest.environment.as_ref(), environment)?;
-    let github_token = environment("GH_TOKEN")
-        .map(|value| {
-            value
-                .into_string()
-                .map_err(|_| NativeV2CliError::GitHubToken)
-        })
-        .transpose()?
-        .map(validate_github_token)
-        .transpose()?;
+    let connections = select_connections(
+        &profile.runtime,
+        manifest.environment.as_ref(),
+        connection_environment(!forward_github_token, environment),
+    )?;
+    let github_token = forwarded_github_token(forward_github_token, environment)?;
     Ok(PreparedStackRequest {
         submission_key,
         title: manifest.title,
