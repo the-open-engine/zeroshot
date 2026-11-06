@@ -1256,9 +1256,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   descriptors inherited by concurrent process spawns.
 - Python test doubles use `openengine_cluster_testkit::fixture::python3_script`, which resolves
   the test PATH's actual interpreter before entering a pinned or cleared child environment.
-- `.opcore.json` owns the full-source Opcore policy. `.github/workflows/opcore.yml` runs the Fast
-  provider and Cargo with warnings denied except for root-README-only changes, identified by the
-  shared CI classifier. Cargo uses the complete checkout
+- `.opcore.json` owns the full-source Opcore policy. The reusable `.github/workflows/opcore.yml`
+  runs the Fast provider and Cargo with warnings denied in merge-group/manual full CI, except
+  for root-README-only changes identified by the shared CI classifier. Cargo uses the complete checkout
   because Opcore's Rust snapshot omits embedded Python assets. The two exact PowerShell exclusions
   reflect unsupported parsing; the Windows native CI lane still runs those scripts.
 - Preserve bounded values, explicit overflow, cancellation safety, and exact source provenance at
@@ -1295,7 +1295,12 @@ python -m mkdocs build --strict
 ## Release convention
 
 - CI has native, Python, repository-tooling, npm-package, and strict-documentation lanes plus stable
-  aggregate `required`. Root-README-only changes use a lightweight README lane for formatting, local
+  aggregate `required`. Pull requests run formatting, lightweight tooling and CI contract checks,
+  then wait for authenticated exact-head Greptile completion. Full applicable lanes run only for
+  merge groups or manual dispatch; ordinary main pushes do not repeat pre-merge validation.
+  Reusable Opcore and native coverage participate in the full-CI aggregate. The aggregate rejects
+  missing, failed and unexpectedly skipped checks for the selected event and paths.
+  Root-README-only changes use a lightweight README lane for formatting, local
   links, and documentation contracts, without Rust or distribution checks. Mixed changes keep every
   applicable lane. `.github/select-ci-lanes.sh` shares history selection between CI and Opcore;
   empty, unavailable, or manually dispatched history selects full checks. The README lane participates
@@ -1314,7 +1319,8 @@ python -m mkdocs build --strict
   hosted process and filesystem boundary tests as root against its built test binary.
 - `.github/workflows/coverage.yml` measures the default workspace, UI-feature Rust tests, and hosted
   root boundary tests on native changes, enforces coverage floors, and publishes LCOV to Coveralls.
-  It stays outside the required CI aggregate. Keep Rust test implementations in `tests/`, `tests.rs`,
+  It is reusable from the required merge-group CI aggregate and may also run manually.
+  Keep Rust test implementations in `tests/`, `tests.rs`,
   `*_tests.rs`, or `*-tests.rs`; do not embed test bodies in production-named source files, because
   production coverage totals explicitly exclude those test-source paths.
 - `.github/workflows/release.yml` is the only canonical product release workflow.

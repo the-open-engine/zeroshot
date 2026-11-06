@@ -329,9 +329,10 @@ describe('Native coverage contract', () => {
     const publish = coverage.steps.find((step) => step.name === 'Publish coverage');
     const enforce = coverage.steps.find((step) => step.name === 'Enforce coverage quality');
 
-    assert.deepEqual(workflow.on.push.branches, ['main']);
-    assert.deepEqual(workflow.on.pull_request.branches, ['main']);
+    assert.equal(Object.hasOwn(workflow.on, 'workflow_call'), true);
     assert.equal(Object.hasOwn(workflow.on, 'workflow_dispatch'), true);
+    assert.equal(Object.hasOwn(workflow.on, 'push'), false);
+    assert.equal(Object.hasOwn(workflow.on, 'pull_request'), false);
     assert.deepEqual(workflow.permissions, { contents: 'read' });
     assert.match(commands, /npm --prefix ui run build/);
     assert.match(commands, /cargo llvm-cov clean --workspace/);

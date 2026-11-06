@@ -300,7 +300,12 @@ it(
     const environment = Object.fromEntries(
       Object.keys(gate.env).map((key) => [key, key.endsWith('_SELECTED') ? 'false' : 'skipped'])
     );
-    Object.assign(environment, { CLASSIFY_RESULT: 'success', README_SELECTED: 'true' });
+    Object.assign(environment, {
+      CLASSIFY_RESULT: 'success',
+      README_SELECTED: 'true',
+      EVENT_NAME: 'merge_group',
+      OPCORE_RESULT: 'success',
+    });
     for (const status of ['success', 'failure', 'cancelled', 'skipped', '']) {
       const result = spawnSync('bash', ['-c', gate.run], {
         encoding: 'utf8',
