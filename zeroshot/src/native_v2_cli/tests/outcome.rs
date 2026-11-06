@@ -538,6 +538,35 @@ async fn named_target_resume_leaves_gh_token_to_the_target_without_opt_in() {
     assert!(accessed.lock().assert_value().is_empty());
 }
 
+#[tokio::test]
+async fn named_target_resume_opt_in_fails_without_gh_token_for_every_source() {
+    for retained in [
+        source(),
+        forge_resume_source("source.github", "https://ghe.example.test"),
+        forge_resume_source("source.gitlab", "https://gitlab.example.test"),
+    ] {
+        let backend =
+            FakeBackend::with_resume_requirements(Default::default()).with_resume_source(retained);
+        let command = parse_native_v2_args(args(&[
+            "resume",
+            "run-failed",
+            "--target",
+            "docker",
+            "--forward-gh-token",
+        ]))
+        .assert_value();
+        let error = execute_with_environment(command, &backend, &|_: &str| None)
+            .await
+            .assert_error();
+
+        assert!(
+            matches!(&error, NativeV2CliError::Usage(message) if message.contains("GH_TOKEN")),
+            "{error}"
+        );
+        assert_no_resume_call(&backend);
+    }
+}
+
 #[test]
 fn forward_gh_token_requires_a_named_target() {
     for arguments in [
@@ -655,7 +684,8 @@ async fn resume_keeps_local_trusted_authority_and_scopes_named_github_fallback()
         let mut expected_reads = field
             .map(|field| vec![field.to_owned()])
             .unwrap_or_default();
-        if fallback {
+        // Named targets pass --forward-gh-token, which always checks GH_TOKEN.
+        if fallback || target.is_some() {
             expected_reads.push("GH_TOKEN".to_owned());
         }
         assert_eq!(*accessed.lock().assert_value(), expected_reads);

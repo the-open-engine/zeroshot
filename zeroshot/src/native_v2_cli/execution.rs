@@ -224,10 +224,10 @@ where
             .source
             .as_ref()
             .is_some_and(crate::native_v2_candidate::is_github_com_source);
-        forwarded_github_token(
-            command.forward_github_token && github_com,
-            context.environment,
-        )?
+        // The opt-in always requires a valid GH_TOKEN; only GitHub.com sources carry it in the
+        // legacy request field.
+        forwarded_github_token(command.forward_github_token, context.environment)?
+            .filter(|_| github_com)
     };
     let result = context
         .backend
