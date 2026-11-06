@@ -196,7 +196,8 @@ async fn run_collects_only_the_distinct_declared_environment_before_submission()
 
     assert_eq!(
         requested.into_inner(),
-        ["OPENAI_API_KEY", "DECLARED", "SHARED", "GH_TOKEN"]
+        // The --forward-gh-token precondition is checked before connection values are read.
+        ["GH_TOKEN", "OPENAI_API_KEY", "DECLARED", "SHARED"]
     );
     let calls = backend.calls();
     let (connections, github_token) = match calls.as_slice() {
@@ -248,6 +249,28 @@ async fn named_run_leaves_an_ambient_gh_token_unsent_without_opt_in() {
             ..
         }]
     ));
+}
+
+#[tokio::test]
+async fn validate_only_checks_the_gh_token_opt_in_like_submission() {
+    let (_files, command) = environment_command(&[
+        "--submission-key",
+        "validate-token",
+        "--validate-only",
+        "--forward-gh-token",
+    ]);
+    let backend = FakeBackend::default();
+    let error = execute_with_environment(command, &backend, &|name: &str| {
+        (name != "GH_TOKEN").then(|| OsString::from("value"))
+    })
+    .await
+    .assert_error();
+
+    assert!(
+        matches!(&error, NativeV2CliError::Usage(message) if message.contains("GH_TOKEN")),
+        "{error}"
+    );
+    assert!(backend.calls().is_empty());
 }
 
 #[tokio::test]

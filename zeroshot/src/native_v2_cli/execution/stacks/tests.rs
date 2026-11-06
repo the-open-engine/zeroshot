@@ -95,10 +95,7 @@ fn compile(delivery: &str, runs: Value) -> Compiled {
         IdempotencyKey::new("stack").assert_value(),
         load_manifest(&path).assert_value(),
         &plain_profile(),
-        StackCredentials {
-            environment: &|_| None,
-            forward_github_token: false,
-        },
+        &|_| None,
     )
     .assert_value();
     Compiled {
@@ -423,31 +420,6 @@ fn cli_contract_manifest_validation_and_terminal_outcomes_are_closed() {
         assert_eq!(
             foreground_outcome(outcome).is_err(),
             expected == CliOutcome::Failed
-        );
-    }
-}
-
-#[test]
-fn stack_submission_sends_the_shell_gh_token_only_on_opt_in() {
-    let directory = tempfile::tempdir().assert_value();
-    let path = write_manifest(
-        directory.path(),
-        &current_manifest("merge", json!({"build": {"input": {}}})),
-    );
-    for forward in [false, true] {
-        let request = prepared_request(
-            IdempotencyKey::new("stack").assert_value(),
-            load_manifest(&path).assert_value(),
-            &plain_profile(),
-            StackCredentials {
-                environment: &|name| (name == "GH_TOKEN").then(|| OsString::from("shell-token")),
-                forward_github_token: forward,
-            },
-        )
-        .assert_value();
-        assert_eq!(
-            request.github_token.as_deref(),
-            forward.then_some("shell-token")
         );
     }
 }

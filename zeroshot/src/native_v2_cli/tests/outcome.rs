@@ -501,29 +501,9 @@ async fn named_target_resume_leaves_gh_token_to_the_target_without_opt_in() {
         accessed.lock().assert_value().push(field.to_owned());
         (field == "GH_TOKEN").then(|| OsString::from("ambient-token"))
     };
-
+    // Hosted targets resolve retained connections themselves and return no requirements.
     let backend =
         FakeBackend::with_resume_requirements(Default::default()).with_resume_source(source());
-    let command =
-        parse_native_v2_args(args(&["resume", "run-failed", "--target", "docker"])).assert_value();
-    execute_with_environment(command, &backend, &environment)
-        .await
-        .assert_value();
-    let calls = backend.calls();
-    let [_, Call::Resume { params, .. }] = calls.as_slice() else {
-        panic!("resume call was not recorded");
-    };
-    assert_eq!(params.github_token, None);
-    assert!(accessed.lock().assert_value().is_empty());
-
-    let key = openengine_cluster_protocol::ConnectionKey::new("github").assert_value();
-    let field =
-        openengine_cluster_protocol::EnvironmentVariableName::new("GH_TOKEN").assert_value();
-    let backend = FakeBackend::with_resume_requirements(std::collections::BTreeMap::from([(
-        key.clone(),
-        vec![field],
-    )]))
-    .with_resume_source(source());
     let command =
         parse_native_v2_args(args(&["resume", "run-failed", "--target", "docker"])).assert_value();
     execute_with_environment(command, &backend, &environment)
@@ -536,6 +516,58 @@ async fn named_target_resume_leaves_gh_token_to_the_target_without_opt_in() {
     assert!(params.connections.is_empty());
     assert_eq!(params.github_token, None);
     assert!(accessed.lock().assert_value().is_empty());
+}
+
+#[tokio::test]
+async fn direct_resume_needing_gh_token_points_to_the_opt_in() {
+    let backend = FakeBackend::with_resume_requirements(std::collections::BTreeMap::from([(
+        openengine_cluster_protocol::ConnectionKey::new("github").assert_value(),
+        vec![openengine_cluster_protocol::EnvironmentVariableName::new("GH_TOKEN").assert_value()],
+    )]))
+    .with_resume_source(source());
+    let command =
+        parse_native_v2_args(args(&["resume", "run-failed", "--target", "docker"])).assert_value();
+    let error = execute_with_environment(command, &backend, &|_: &str| {
+        Some(OsString::from("ambient-token"))
+    })
+    .await
+    .assert_error();
+
+    assert!(
+        matches!(&error, NativeV2CliError::Usage(message) if message.contains("--forward-gh-token")),
+        "{error}"
+    );
+    assert_no_resume_call(&backend);
+}
+
+#[tokio::test]
+async fn stack_submission_sends_the_shell_gh_token_only_on_opt_in() {
+    for forward in [false, true] {
+        let files = stack_fixture("merge", diamond_runs());
+        let backend =
+            FakeBackend::with_stack_profile(StackState::Succeeded, TemplateDelivery::Merge);
+        let mut command = stack_submit_command(&files.input, true);
+        if let NativeV2CliCommand::StackSubmit(submit) = &mut command {
+            submit.forward_github_token = forward;
+        }
+
+        let (result, _) = execute_stack(command, &backend).await;
+
+        assert_eq!(result.assert_value(), CliOutcome::Detached);
+        let submitted = &backend.submitted_stacks()[0];
+        assert_eq!(
+            submitted.github_token.as_deref(),
+            forward.then_some("test-token")
+        );
+        let sent_in_connections = submitted
+            .connections
+            .values()
+            .any(|values| values.as_map().values().any(|value| value == "test-token"));
+        assert_eq!(
+            sent_in_connections,
+            forward && !submitted.connections.is_empty()
+        );
+    }
 }
 
 #[tokio::test]

@@ -47,12 +47,7 @@ fn stack_environment_is_optional_concrete_and_selects_declared_hook_credentials(
             IdempotencyKey::new("stack").assert_value(),
             manifest,
             &profile,
-            StackCredentials {
-                environment: &|name| {
-                    (name == "NPM_TOKEN").then(|| OsString::from("registry-secret"))
-                },
-                forward_github_token: false,
-            },
+            &|name| (name == "NPM_TOKEN").then(|| OsString::from("registry-secret")),
         )
         .assert_value();
         assert_eq!(
