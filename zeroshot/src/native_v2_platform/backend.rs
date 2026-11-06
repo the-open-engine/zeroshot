@@ -188,6 +188,15 @@ fn platform_backend_error(error: NativeV2PlatformError) -> BackendError {
                 None,
             )
         }
+        NativeV2PlatformError::Environment(error) => match &error {
+            RunEnvironmentError::MissingConnection(key)
+            | RunEnvironmentError::MissingField(key, _) => BackendError::application(
+                "connection_unavailable",
+                error.to_string(),
+                Some(serde_json::json!({ "connection": key.as_str() })),
+            ),
+            _ => BackendError::application(SCHEMA_VIOLATION, error.to_string(), None),
+        },
         NativeV2PlatformError::Ledger(RunLedgerError::SubmissionConflict { existing_run_id }) => {
             BackendError::application(
                 IDEMPOTENCY_REUSE,
