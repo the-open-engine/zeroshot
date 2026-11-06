@@ -156,12 +156,16 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
             .json(request)
             .send()
             .await
-            .map_err(|error| TargetAuthorityError::request_failed("target run request", &error))?;
+            .map_err(|error| {
+                TargetAuthorityError::request_failed("target run request", &error).submission()
+            })?;
         require_response_route(&response, &controller.run_url)?;
         self.invalidate_rejected_access(&response, access.as_ref())
             .await;
         let receipt: TargetRunReceipt =
-            read_success_json(response, &controller.run_url, "target run").await?;
+            read_success_json(response, &controller.run_url, "target run")
+                .await
+                .map_err(TargetAuthorityError::submission)?;
         Ok(RunSubmitResult {
             run_id: receipt.run_id,
         })

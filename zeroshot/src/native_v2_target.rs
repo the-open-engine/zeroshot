@@ -5,7 +5,9 @@
 //! values cross only in the ephemeral per-run request and are never stored locally.
 
 use std::fmt;
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -20,9 +22,9 @@ use openengine_cluster_protocol::{
     ConnectionMutationResult, ConnectionSetRequest, Stack, StackId, StackSubmitRequest,
 };
 use openengine_cluster_protocol::{
-    RunConnectionRequirements, RunForceParams, RunListParams, RunLogEventNotification,
-    RunLogsParams, RunResumeParams, RunStatusParams, RunSubmission, RunSubmitResult,
-    RunWatchParams,
+    IdempotencyKey, RunConnectionRequirements, RunForceParams, RunListParams,
+    RunLogEventNotification, RunLogsParams, RunResumeParams, RunStatusParams, RunSubmission,
+    RunSubmitResult, RunWatchParams,
 };
 use openengine_cluster_protocol::{
     RunProfile, RunProfileDefaultRequest, RunProfileDefaultResult, RunProfileDeleteResult,
@@ -131,6 +133,10 @@ pub enum TargetConnectorError {
     #[error("target OECP connection failed: {0}")]
     OecpConnection(String),
 }
+
+/// Waits before each identical replay of a run submission whose receipt was lost.
+const SUBMISSION_REPLAY_DELAYS: [Duration; 2] =
+    [Duration::from_millis(500), Duration::from_secs(2)];
 
 pub struct NativeV2TargetConnector<R, A, D> {
     registry: R,
@@ -393,48 +399,44 @@ where
         let recovery_requirements =
             self.record_initial_recovery_authorization(&target, &request)?;
         let receipt = if let Some(profile) = request.profile {
-            self.authority
-                .profile_run(
-                    &target,
-                    &RunProfileRunRequest {
-                        run_id: request.run_id,
-                        profile,
-                        environment: request.intent.environment,
-                        title: request.intent.title,
-                        initial_input: request.intent.initial_input,
-                        source,
-                        submission_key: request.intent.submission_key,
-                        connections: request.connections,
-                        github_token: request.github_token,
-                        git_credentials: request.git_credentials,
-                    },
-                )
-                .await
-                .map_err(|error| self.authority.redact_error(error).into_cli(&target))?
+            let request = RunProfileRunRequest {
+                run_id: request.run_id,
+                profile,
+                environment: request.intent.environment,
+                title: request.intent.title,
+                initial_input: request.intent.initial_input,
+                source,
+                submission_key: request.intent.submission_key,
+                connections: request.connections,
+                github_token: request.github_token,
+                git_credentials: request.git_credentials,
+            };
+            self.submit_with_replays(&target, &request.submission_key, || {
+                self.authority.profile_run(&target, &request)
+            })
+            .await?
         } else {
-            self.authority
-                .submit(
-                    &target,
-                    &TargetRunRequest {
-                        run_id: request.run_id,
-                        submission: RunSubmission {
-                            title: request.intent.title,
-                            graph: request.intent.graph,
-                            initial_input: request.intent.initial_input,
-                            runtime: request.intent.runtime,
-                            environment: request.intent.environment,
-                            source: Some(source),
-                            submission_key: request.intent.submission_key,
-                        },
-                        connections: request.connections,
-                        connection_resolver: None,
-                        github_token: request.github_token,
-                        commit_identity: None,
-                        git_credentials: request.git_credentials,
-                    },
-                )
-                .await
-                .map_err(|error| self.authority.redact_error(error).into_cli(&target))?
+            let request = TargetRunRequest {
+                run_id: request.run_id,
+                submission: RunSubmission {
+                    title: request.intent.title,
+                    graph: request.intent.graph,
+                    initial_input: request.intent.initial_input,
+                    runtime: request.intent.runtime,
+                    environment: request.intent.environment,
+                    source: Some(source),
+                    submission_key: request.intent.submission_key,
+                },
+                connections: request.connections,
+                connection_resolver: None,
+                github_token: request.github_token,
+                commit_identity: None,
+                git_credentials: request.git_credentials,
+            };
+            self.submit_with_replays(&target, &request.submission.submission_key, || {
+                self.authority.submit(&target, &request)
+            })
+            .await?
         };
         self.record_receipt_recovery_authorization(
             &target,
@@ -706,6 +708,39 @@ where
             .dial(&target, session)
             .await
             .map_err(|error| cli_connector_error(&target, error))
+    }
+
+    /// Submits a run. When the target may have admitted it but no receipt arrived, the identical
+    /// request is replayed with the same submission key, for which targets return the admitted
+    /// run. A submission that stays unconfirmed reports an unknown outcome with that key.
+    async fn submit_with_replays<F, S>(
+        &self,
+        target: &TargetRecord,
+        submission_key: &IdempotencyKey,
+        submit: F,
+    ) -> Result<RunSubmitResult, NativeV2CliError>
+    where
+        F: Fn() -> S + Send,
+        S: Future<Output = Result<RunSubmitResult, TargetAuthorityError>> + Send,
+    {
+        let unconfirmed = match submit().await {
+            Ok(receipt) => return Ok(receipt),
+            Err(error) if error.is_unconfirmed_submission() => error,
+            Err(error) => return Err(self.authority.redact_error(error).into_cli(target)),
+        };
+        for delay in SUBMISSION_REPLAY_DELAYS {
+            tokio::time::sleep(delay).await;
+            match submit().await {
+                Ok(receipt) => return Ok(receipt),
+                // Only transport failures are replayed; a target answer or local error ends them.
+                Err(error) if error.is_transport_failure() => {}
+                Err(_) => break,
+            }
+        }
+        Err(self
+            .authority
+            .redact_error(unconfirmed)
+            .into_unconfirmed_submission(target, submission_key))
     }
 }
 

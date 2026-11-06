@@ -1025,6 +1025,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Secret-bearing target inputs never enter run ledgers, target configuration, or observation records.
 - Target transport failures retain the target name, origin and safe connection category. Never expose
   raw request URLs or credentials; transport failures remain eligible for observation reconnection.
+- A named-target run submission whose request may have reached the target but returned no receipt
+  (timeout, interrupted connection or lost response body; not a refused or unestablished
+  connection) is replayed identically with the same submission key, a bounded number of times inside
+  the preserved submission future. Targets return the admitted run for an exact replay. A
+  submission that stays unconfirmed reports `submission.outcome_unknown` with the key and
+  `zeroshot list --target NAME`, never the unreachable-server hint.
 - Target HTTP failures use the shared bounded `{code,message,details?}` protocol problem; message-only
   bodies are invalid, and details contain only user-safe structured metadata.
 - Operator diagnostics are private-capability-only, run-scoped, bounded, sanitized, and excluded
