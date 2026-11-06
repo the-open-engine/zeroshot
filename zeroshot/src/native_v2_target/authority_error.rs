@@ -1,6 +1,7 @@
 use std::error::Error as _;
 
 use thiserror::Error;
+use openengine_cluster_protocol::IdempotencyKey;
 use zeroshot_engine::native_v2_cli::NativeV2CliError;
 
 use super::TargetRecord;
@@ -9,8 +10,19 @@ use super::TargetRecord;
 #[error("{message}")]
 pub struct TargetAuthorityError {
     message: String,
-    disconnected: bool,
+    transport: Option<TransportFailure>,
     remote: Option<TargetRemoteError>,
+}
+
+/// A request that failed without a target response.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TransportFailure {
+    /// The request never reached the target.
+    Unsent,
+    /// The request may have reached the target before the connection failed.
+    Unconfirmed,
+    /// The target may have admitted a run submission whose receipt was lost.
+    UnconfirmedSubmission,
 }
 
 #[derive(Debug)]
@@ -24,15 +36,19 @@ impl TargetAuthorityError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
-            disconnected: false,
+            transport: None,
             remote: None,
         }
     }
 
     pub(super) fn disconnected(message: impl Into<String>) -> Self {
+        Self::transport(message, TransportFailure::Unsent)
+    }
+
+    fn transport(message: impl Into<String>, failure: TransportFailure) -> Self {
         Self {
             message: message.into(),
-            disconnected: true,
+            transport: Some(failure),
             remote: None,
         }
     }
@@ -51,7 +67,32 @@ impl TargetAuthorityError {
         } else {
             "connection interrupted"
         };
-        Self::disconnected(format!("{operation} failed: {reason}"))
+        // A connection that was never established, or a request that was never built, cannot
+        // have reached the target. Any later failure leaves its effect unconfirmed.
+        let failure = if refused || error.is_connect() || error.is_builder() {
+            TransportFailure::Unsent
+        } else {
+            TransportFailure::Unconfirmed
+        };
+        Self::transport(format!("{operation} failed: {reason}"), failure)
+    }
+
+    /// Marks a failure of the request that submits a run. If that request may have reached the
+    /// target, the target may have admitted the run without its receipt reaching the caller.
+    #[must_use]
+    pub(super) fn submission(mut self) -> Self {
+        if self.transport == Some(TransportFailure::Unconfirmed) {
+            self.transport = Some(TransportFailure::UnconfirmedSubmission);
+        }
+        self
+    }
+
+    pub(super) fn is_unconfirmed_submission(&self) -> bool {
+        self.transport == Some(TransportFailure::UnconfirmedSubmission)
+    }
+
+    pub(super) fn is_transport_failure(&self) -> bool {
+        self.transport.is_some()
     }
 
     pub(super) fn remote(
@@ -61,7 +102,7 @@ impl TargetAuthorityError {
     ) -> Self {
         Self {
             message: message.into(),
-            disconnected: false,
+            transport: None,
             remote: Some(TargetRemoteError {
                 code: code.into(),
                 details,
@@ -93,7 +134,7 @@ impl TargetAuthorityError {
     }
 
     pub(super) fn into_cli(self, target: &TargetRecord) -> NativeV2CliError {
-        if self.disconnected {
+        if self.transport.is_some() {
             NativeV2CliError::TargetTransport {
                 name: target.name.clone(),
                 origin: target.origin.clone(),
@@ -107,6 +148,19 @@ impl TargetAuthorityError {
             }
         } else {
             NativeV2CliError::Target(self.message)
+        }
+    }
+
+    pub(super) fn into_unconfirmed_submission(
+        self,
+        target: &TargetRecord,
+        submission_key: &IdempotencyKey,
+    ) -> NativeV2CliError {
+        NativeV2CliError::SubmissionOutcomeUnknown {
+            name: target.name.clone(),
+            origin: target.origin.clone(),
+            submission_key: submission_key.as_str().to_owned(),
+            message: self.message,
         }
     }
 }

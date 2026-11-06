@@ -110,8 +110,13 @@ impl TargetHttpControlAuthority {
             .header(ACCEPT, "application/json")
             .header(CACHE_CONTROL, "no-store")
             .json(input);
-        self.hosted_json((builder, &access), operation.label(), None)
-            .await
+        let result = self
+            .hosted_json((builder, &access), operation.label(), None)
+            .await;
+        match operation {
+            ProfileOperation::Run => result.map_err(TargetAuthorityError::submission),
+            _ => result,
+        }
     }
 
     pub(super) async fn profile_list(
