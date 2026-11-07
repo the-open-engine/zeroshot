@@ -567,14 +567,19 @@ impl NativeV2PlatformController {
     /// off to its engine before it finishes, so the engine that replaced it is awaited too.
     pub(crate) async fn wait_runtime_settled(&self, run_id: &RunId) {
         loop {
-            let runtime = self.runtimes.lock().await.get(run_id).cloned();
+            // Read the slot and its preparation state under one lock: a finished preparation
+            // still in its slot can no longer install an engine.
+            let runtime = match self.runtimes.lock().await.get(run_id) {
+                Some(RuntimeSlot::Preparing(task)) if task.is_finished() => None,
+                runtime => runtime.cloned(),
+            };
             match runtime {
-                Some(RuntimeSlot::Preparing(task)) if !task.is_finished() => task.wait().await,
+                Some(RuntimeSlot::Preparing(task)) => task.wait().await,
                 Some(RuntimeSlot::Running(engine)) => {
                     engine.wait_removable().await;
                     return;
                 }
-                Some(RuntimeSlot::Preparing(_)) | None => return,
+                None => return,
             }
         }
     }
