@@ -1,4 +1,6 @@
-import type { HistoryEvent, HistoryPage, NodeState } from './run-history';
+import { pathTo, type GraphNode } from './domain';
+import type { HistoryEvent, HistoryPage } from './run-history';
+import type { WorkflowNodeObservation } from './workflow-observation';
 
 /** Derived by the canonical reducer at a durable cursor; these are not worker executions. */
 export type ControlRecord = {
@@ -17,14 +19,50 @@ export type ControlVisit = ControlRecord & {
   visit: number;
 };
 
-export function controlState(state: ControlRecord['state']): NodeState {
+/** A reducer `completed` visit is neutral: it also marks groups that a fail node ended. */
+export function controlState(state: ControlRecord['state']): WorkflowNodeObservation['state'] {
   return state === 'entered'
     ? 'running'
-    : state === 'failed'
-      ? 'failed'
+    : state === 'succeeded' || state === 'failed'
+      ? state
       : state === 'stopped'
         ? 'skipped'
-        : 'succeeded';
+        : 'recorded';
+}
+
+/**
+ * A seq, choice, loop or map ends in the same reduction as a succeed or fail node it contains; a
+ * par never passes a branch terminal up. Give those enclosing visits the terminal's outcome; every
+ * other completed visit stays neutral.
+ */
+export function settleControlVisits(
+  root: GraphNode,
+  visits: readonly ControlVisit[]
+): ControlVisit[] {
+  const outcomes = new Map<ControlVisit, 'succeeded' | 'failed'>();
+  for (const [position, terminal] of visits.entries()) {
+    if (terminal.state !== 'succeeded' && terminal.state !== 'failed') continue;
+    for (const group of pathTo(root, terminal.node).slice(0, -1).reverse()) {
+      if (group.kind === 'par') break;
+      // Visits are in entry order, so the group's nearest earlier visit in the terminal's map scope
+      // holds it, even when later loop rounds below a par end in the same reduction.
+      let enclosing: ControlVisit | undefined;
+      for (let index = position - 1; index >= 0 && !enclosing; index--) {
+        const visit = visits[index];
+        if (
+          visit.node === group.name &&
+          visit.mapIndices.every((item, level) => item === terminal.mapIndices[level])
+        )
+          enclosing = visit;
+      }
+      if (enclosing?.state === 'completed' && outcomes.get(enclosing) !== 'failed')
+        outcomes.set(enclosing, terminal.state);
+    }
+  }
+  return visits.map((visit) => {
+    const state = outcomes.get(visit);
+    return state ? { ...visit, state } : visit;
+  });
 }
 
 export function controlVisitLabel(visit: ControlVisit): string {

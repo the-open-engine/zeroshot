@@ -1212,6 +1212,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   structural visits/decisions with source cursors and stable identities; JavaScript never evaluates
   guards or invents worker executions. Keep loop visits, retries, and Map items distinct. Projection
   failure leaves recorded worker history readable; verifier rejection is a decision, not a crash.
+  A reducer `completed` group visit alone is neutral. The seq, choice, loop and map visits that a
+  succeed/fail node ended at its cursor take its outcome; a par stops that propagation.
 - Profile and run inspectors share `InspectorPanel`, pointer/keyboard resizing, and one client-only
   width preference. Viewport clamping preserves the preferred width when the available space shrinks.
 - Run navigation retains tab-scoped view preferences (node/inspector, execution, cursor, graph

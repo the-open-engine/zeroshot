@@ -1,13 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { Check, Circle, Minus, Pause, Play, RotateCcw, X } from 'lucide-react';
 import type { Document } from './domain';
-import {
-  humanize,
-  invocationLabel,
-  stateLabel,
-  type Invocation,
-  type NodeState,
-} from './run-history';
+import { humanize, invocationLabel, stateLabel, type Invocation } from './run-history';
+import type { WorkflowNodeObservation } from './workflow-observation';
 
 /** An ordered strip of executions from the selected history prefix. */
 export function ExecutionTimeline({
@@ -67,7 +62,13 @@ export function ActivityTimeline({
   restart,
 }: {
   title: string;
-  entries: { id: string; label: string; name?: string; state: NodeState; description: string }[];
+  entries: {
+    id: string;
+    label: string;
+    name?: string;
+    state: WorkflowNodeObservation['state'];
+    description: string;
+  }[];
   selected?: string;
   select: (id: string) => void;
   playing: boolean;
