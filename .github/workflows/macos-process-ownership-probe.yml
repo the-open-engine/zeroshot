@@ -1,0 +1,145 @@
+name: macOS process ownership feasibility
+
+on:
+  push:
+    branches: [codex/macos-process-ownership-probe-20261107]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ownership:
+    name: Native ownership (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15-intel, macos-26]
+    env:
+      PROBE_BASE_REVISION: 4377817cba2c109ab1805cf6651aa04ad56f47f8
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Unpack disposable experiment artifacts
+        env:
+          PROBE_BASE64: >-
+            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
+        run: |
+          python3 - <<'PY_PROBE'
+          import base64, io, os, pathlib, zipfile
+          directory = pathlib.Path(os.environ['RUNNER_TEMP']) / 'ownership-probe'
+          directory.mkdir()
+          with zipfile.ZipFile(io.BytesIO(base64.b64decode(os.environ['PROBE_BASE64']))) as archive:
+              assert set(archive.namelist()) == {'native.c', 'runner.py', 'process_ownership_tests.rs'}
+              archive.extractall(directory)
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('PROBE_LOCATION=' + str(directory) + '\n')
+          PY_PROBE
+      - name: Prepare native fixture and record platform security
+        run: python3 "$PROBE_LOCATION/runner.py" prepare
+      - name: Exercise native process groups, discovery, launchd and Endpoint Security
+        run: python3 "$PROBE_LOCATION/runner.py" native
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: 1.97.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: process-ownership-feasibility
+      - name: Compile probe against the actual Zeroshot process runner
+        run: >-
+          cargo test --locked -p zeroshot --no-default-features
+          --test macos_process_ownership_probe --no-run --message-format=json
+          > "$PROBE_LOCATION/build.jsonl"
+      - name: Exercise actual runner cancellation, deadline, completion and owner death
+        run: python3 "$PROBE_LOCATION/runner.py" production
+      - name: Retain evidence and exact experiment sources
+        if: always() && env.PROBE_LOCATION != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: macos-process-ownership-${{ matrix.runner }}
+          path: ${{ env.PROBE_LOCATION }}
+          if-no-files-found: error
+          retention-days: 14
