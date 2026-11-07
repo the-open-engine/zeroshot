@@ -566,7 +566,13 @@ ENVIRONMENT PREPARATION
     reject hooks and hook connections.
 
     Installation, services, limits, and recovery:
-    https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/"#)]
+    https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/
+
+EXIT STATUS
+    0  The run succeeded, --detach or Ctrl-C returned before it finished, or --validate-only
+       accepted it.
+    1  The run finished failed, or the command failed. A failed run's summary is printed on
+       stderr. `zeroshot watch RUN_ID` waits for a detached run and exits the same way."#)]
 struct RunArgs {
     /// Human-readable title recorded with the run.
     #[arg(long, value_name = "TITLE")]
@@ -767,6 +773,10 @@ struct RunCheckpointsArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(after_long_help = r#"EXIT STATUS
+  0  The run succeeded, or Ctrl-C detached before it finished.
+  1  The run finished failed, or observation failed. A failed run prints the same failure summary
+     on stderr as a foreground `zeroshot run`, also when --after starts past its terminal event."#)]
 struct RunWatchArgs {
     #[command(flatten)]
     run: RunSelectorArgs,
@@ -777,6 +787,11 @@ struct RunWatchArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(after_long_help = r#"EXIT STATUS
+  0  The log stream ended or Ctrl-C detached, whatever the run's result. Read the result with
+     `zeroshot watch` or `zeroshot status`.
+  1  The command failed, for example because the run was not found or its logs could not be
+     read."#)]
 struct RunLogsArgs {
     #[command(flatten)]
     run: RunSelectorArgs,

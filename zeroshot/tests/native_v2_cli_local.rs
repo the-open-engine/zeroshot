@@ -230,7 +230,7 @@ async fn detached_local_run_reconnects_without_observer_ownership_and_force_stop
     );
 
     fixture
-        .assert_replay("watch", &run_id, "force_stopped")
+        .assert_failed_watch_replay(&run_id, "force_stopped")
         .await;
     fixture
         .assert_replay("logs", &run_id, "Codex turn started")
@@ -272,7 +272,7 @@ async fn dead_controller_reconciles_runtime_loss_and_keeps_durable_observation()
         "runtime_lost"
     );
     fixture
-        .assert_replay("watch", &run_id, "runtime_lost")
+        .assert_failed_watch_replay(&run_id, "runtime_lost")
         .await;
     fixture
         .assert_replay("logs", &run_id, "Codex turn started")

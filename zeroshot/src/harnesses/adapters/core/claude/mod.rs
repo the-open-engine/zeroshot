@@ -15,6 +15,7 @@ mod permissions;
 mod session;
 #[path = "transcript.rs"]
 mod transcript;
+mod version;
 use crate::native_v2_capsule::provider_process::turn as turn_process;
 
 use std::collections::BTreeMap;
@@ -56,6 +57,7 @@ pub struct ClaudeAdapter {
     runners: ProviderProcessRunners,
     local_environment: BTreeMap<String, String>,
     active_memory: Option<std::sync::Arc<crate::active_memory::hooks::ActiveMemoryHooks>>,
+    version_supported: std::sync::atomic::AtomicBool,
     #[cfg(test)]
     test_permission_policy: Option<crate::native_v2_capsule::provider_process::PermissionPolicy>,
 }
@@ -126,6 +128,7 @@ impl ClaudeAdapter {
             runners,
             local_environment: BTreeMap::new(),
             active_memory: None,
+            version_supported: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             test_permission_policy: None,
         })
@@ -333,6 +336,12 @@ impl ClaudeAdapter {
                 files: &files,
             },
         )?;
+        if let Some(start) = self
+            .require_supported_version(files.clone(), &command, turn.control)
+            .await?
+        {
+            return Ok(start);
+        }
         self.apply_permission_default(
             crate::harnesses::native_config::PermissionInput {
                 files: files.clone(),

@@ -3,8 +3,8 @@ use super::*;
 #[tokio::test]
 async fn cancellation_wins_after_durable_output_closes_and_reaps_the_process() {
     let workspace = TestDirectory::new("claude-closed-durable-cancellation");
-    workspace.write(
-        "fake-claude.sh",
+    write_claude_script(
+        &workspace,
         r#"
 set -eu
 cat >/dev/null

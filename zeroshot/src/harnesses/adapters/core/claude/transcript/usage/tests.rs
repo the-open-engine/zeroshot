@@ -71,52 +71,48 @@ fn coverage_contract_usage_snapshots_merge_partial_fields_and_reject_incomplete_
     assert!(overflow.total().is_none());
 }
 
-#[test]
-fn coverage_contract_terminal_usage_aliases_and_optional_counts_fail_closed() {
-    assert!(matches!(
-        parse_terminal_usage(
-            Some(&json!({"model": {"inputTokens": 1, "outputTokens": 2}})),
-            Some(&json!({"different": {"input_tokens": 1, "output_tokens": 2}})),
-            None
-        ),
-        TerminalUsage::Malformed
-    ));
-    assert!(matches!(
-        parse_terminal_usage(None, None, Some(&json!(null))),
-        TerminalUsage::Empty
-    ));
-    assert!(matches!(
-        parse_terminal_usage(None, None, Some(&json!({}))),
-        TerminalUsage::Empty
-    ));
-    assert!(matches!(
-        parse_terminal_usage(
-            None,
-            Some(&json!({"model": {"input_tokens": 4, "output_tokens": 6}})),
-            None,
-        ),
-        TerminalUsage::Valid(usage)
-            if usage.input_tokens.get() == 4 && usage.output_tokens.get() == 6
-    ));
+fn stated(input: u64, output: u64) -> Value {
+    json!({"model": {
+        "inputTokens": input,
+        "outputTokens": output,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0
+    }})
+}
 
-    let keys = UsageKeys {
-        input: UsageKey::aliased("input", "input_alt"),
-        output: UsageKey::single("output"),
-        cache_read: UsageKey::single("read"),
-        cache_creation: UsageKey::single("write"),
-    };
-    assert!(
-        parse_usage_snapshot(
-            Some(&json!({"input": 1, "input_alt": 2, "output": 3})),
-            keys,
-        )
-        .is_none()
-    );
-    let parsed = parse_usage_snapshot(Some(&json!({"input_alt": 1, "output": 3, "read": 4})), keys)
-        .assert_value()
-        .complete()
-        .assert_value();
-    assert_eq!(parsed.input_tokens.get(), 1);
-    assert_eq!(parsed.cache_read_input_tokens.assert_value().get(), 4);
-    assert!(parsed.cache_creation_input_tokens.is_none());
+fn counts(usage: Option<TokenUsageDelta>) -> Option<(u64, u64)> {
+    usage.map(|usage| (usage.input_tokens.get(), usage.output_tokens.get()))
+}
+
+#[test]
+fn coverage_contract_result_usage_sums_stated_values_and_fails_closed() {
+    let none = ProvisionalUsage::default();
+    let mut usage = ResultUsage::default();
+    assert_eq!(counts(usage.total(&none)), None);
+    usage.record(Some(&json!({})));
+    assert_eq!(counts(usage.total(&none)), Some((0, 0)));
+    usage.record(Some(&stated(3, 5)));
+    usage.record(Some(&json!({})));
+    usage.record(Some(&stated(7, 11)));
+    assert_eq!(counts(usage.total(&none)), Some((10, 16)));
+
+    let mut later = ProvisionalUsage::default();
+    later.add_anonymous(snapshot(2, 1));
+    assert_eq!(counts(usage.total(&later)), Some((12, 17)));
+    later.invalidate();
+    assert_eq!(counts(usage.total(&later)), None);
+
+    for invalid in [
+        None,
+        Some(json!(null)),
+        Some(json!({"model": {"inputTokens": 1}})),
+        Some(json!({"model": {"input_tokens": 1, "output_tokens": 2}})),
+        Some(stated(MAX_SAFE_GENERATION, 1)),
+    ] {
+        let mut usage = ResultUsage::default();
+        usage.record(Some(&stated(1, 1)));
+        usage.record(invalid.as_ref());
+        usage.record(Some(&stated(1, 1)));
+        assert_eq!(counts(usage.total(&none)), None, "{invalid:?}");
+    }
 }

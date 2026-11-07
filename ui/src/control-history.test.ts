@@ -168,3 +168,175 @@ test('a completed map item does not conceal another active occurrence of the sam
   const stopped: ControlRecord[] = [...visits, { ...visits[0], cursor: 'v2:2', state: 'stopped' }];
   assert.equal(projectHistory(doc, events, 1, stopped).nodes.review_result.state, 'skipped');
 });
+
+const visit = (
+  cursor: string,
+  node: string,
+  state: ControlRecord['state'],
+  extra: Partial<ControlRecord> = {}
+): ControlRecord => ({ cursor, node, visitId: node, mapIndices: [], state, ...extra });
+const graph = (root: Document['graph']['root']): Document => ({
+  ...doc,
+  graph: { ...doc.graph, root },
+});
+const fail = (name: string) => ({ name, kind: 'fail', reason: name });
+
+test('a terminal settles only the visits it ended, in its own loop iteration', () => {
+  const loop = graph({
+    name: 'run',
+    kind: 'seq',
+    children: [
+      {
+        name: 'rounds',
+        kind: 'loop',
+        maxIterations: 2,
+        body: {
+          name: 'round',
+          kind: 'choice',
+          branches: [{ node: fail('stop'), when: {} }],
+          otherwise: { name: 'review', kind: 'verifier' },
+        },
+      },
+    ],
+  });
+  const failed: HistoryEvent[] = [
+    ...events.slice(0, 3),
+    { cursor: 'v2:4', event: { kind: 'terminal', result: { status: 'failed', reason: 'stop' } } },
+  ];
+  // The review ends round 1, and round 2 selects stop within the same reduction.
+  const control = [
+    visit('v2:1', 'run', 'entered'),
+    visit('v2:1', 'rounds', 'entered'),
+    visit('v2:1', 'round', 'entered', { visitId: 'round-1', branch: 'review' }),
+    visit('v2:3', 'run', 'completed'),
+    visit('v2:3', 'rounds', 'completed'),
+    visit('v2:3', 'round', 'completed', { visitId: 'round-1', branch: 'review' }),
+    visit('v2:3', 'round', 'completed', { visitId: 'round-2', branch: 'stop' }),
+    visit('v2:3', 'stop', 'failed', { detail: 'stop' }),
+  ];
+  const final = projectHistory(loop, failed, 3, control);
+  assert.equal(final.nodes.rounds.state, 'failed');
+  assert.equal(final.nodes.round.state, 'failed');
+  assert.deepEqual(
+    final.controls.filter((visit) => visit.node === 'round').map((visit) => visit.state),
+    ['completed', 'failed']
+  );
+  assert.equal(projectHistory(loop, failed, 2, control).nodes.run.state, 'failed');
+});
+
+test('par branch terminals settle only their own branch visits, in every round', () => {
+  const rounds = graph({
+    name: 'run',
+    kind: 'seq',
+    children: [
+      { name: 'review', kind: 'verifier' },
+      {
+        name: 'rounds',
+        kind: 'loop',
+        maxIterations: 2,
+        body: {
+          name: 'lanes',
+          kind: 'par',
+          join: { kind: 'all' },
+          branches: [
+            {
+              name: 'left',
+              kind: 'choice',
+              branches: [{ node: { name: 'left_end', kind: 'succeed' }, when: {} }],
+              otherwise: { name: 'left_work', kind: 'step' },
+            },
+            {
+              name: 'right',
+              kind: 'choice',
+              branches: [{ node: fail('right_end'), when: {} }],
+              otherwise: { name: 'right_work', kind: 'step' },
+            },
+          ],
+        },
+      },
+      { name: 'done', kind: 'succeed' },
+    ],
+  });
+  // Both branches end at terminals, so each join is unreachable: both rounds and the run finish in
+  // the reduction after the review.
+  const round = (number: number, node: string, state: ControlRecord['state'], extra = {}) =>
+    visit('v2:3', node, state, { visitId: `${node}-${number}`, ...extra });
+  const control = [
+    visit('v2:1', 'run', 'entered'),
+    visit('v2:3', 'run', 'completed'),
+    visit('v2:3', 'rounds', 'completed'),
+    ...[1, 2].flatMap((number) => [
+      round(number, 'lanes', 'completed', { detail: 'quorum_unreachable' }),
+      round(number, 'left', 'completed', { branch: 'left_end' }),
+      round(number, 'left_end', 'succeeded', { output: null }),
+      round(number, 'right', 'completed', { branch: 'right_end' }),
+      round(number, 'right_end', 'failed', { detail: 'right_end' }),
+    ]),
+    visit('v2:3', 'done', 'succeeded', { output: null }),
+  ];
+  const { nodes, controls } = projectHistory(rounds, events, 2, control);
+  const states = (node: string) =>
+    controls.filter((visit) => visit.node === node).map((visit) => visit.state);
+  assert.equal(nodes.run.state, 'succeeded');
+  assert.equal(nodes.rounds.state, 'recorded');
+  assert.equal(nodes.lanes.state, 'recorded');
+  assert.deepEqual(states('left'), ['succeeded', 'succeeded']);
+  assert.deepEqual(states('right'), ['failed', 'failed']);
+});
+
+test('a terminal settles only the visits of its own map item', () => {
+  const items = graph({
+    name: 'run',
+    kind: 'seq',
+    children: [
+      {
+        name: 'items',
+        kind: 'map',
+        body: {
+          name: 'item',
+          kind: 'seq',
+          children: [
+            { name: 'work', kind: 'step' },
+            { name: 'item_done', kind: 'succeed' },
+          ],
+        },
+      },
+      { name: 'empty_done', kind: 'succeed' },
+    ],
+  });
+  const reference = (execution: string) => ({ node: 'work', execution, nodeInstance: execution });
+  const started = (execution: string, item: number) => ({
+    kind: 'node_started',
+    reference: reference(execution),
+    occurrence: { node: 'work', mapIndices: [item] },
+  });
+  const ledger: HistoryEvent['event'][] = [
+    { kind: 'run_started' },
+    started('1', 0),
+    started('2', 1),
+    {
+      kind: 'node_completed',
+      completion: { reference: reference('1'), outcome: { status: 'verified', output: null } },
+    },
+    { kind: 'terminal', result: { status: 'succeeded', output: null } },
+  ];
+  const history = ledger.map((event, index) => ({ cursor: `v2:${index + 1}`, event }));
+  // Item 0 reaches item_done while item 1 still works, so the reducer stops item 1's visit.
+  const control = [
+    visit('v2:1', 'run', 'entered'),
+    visit('v2:1', 'items', 'entered'),
+    visit('v2:1', 'item', 'entered', { visitId: 'item-0', mapIndices: [0] }),
+    visit('v2:1', 'item', 'entered', { visitId: 'item-1', mapIndices: [1] }),
+    visit('v2:4', 'run', 'completed'),
+    visit('v2:4', 'items', 'completed'),
+    visit('v2:4', 'item', 'completed', { visitId: 'item-0', mapIndices: [0] }),
+    visit('v2:4', 'item_done', 'succeeded', { mapIndices: [0], output: null }),
+    visit('v2:4', 'item', 'stopped', { visitId: 'item-1', mapIndices: [1] }),
+  ];
+  const final = projectHistory(items, history, 4, control);
+  assert.equal(final.nodes.items.state, 'succeeded');
+  assert.deepEqual(
+    final.controls.filter((visit) => visit.node === 'item').map((visit) => visit.state),
+    ['succeeded', 'stopped']
+  );
+});

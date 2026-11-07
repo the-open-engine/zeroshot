@@ -1270,6 +1270,12 @@ ENVIRONMENT PREPARATION
 
     Installation, services, limits, and recovery:
     https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/
+
+EXIT STATUS
+    0  The run succeeded, --detach or Ctrl-C returned before it finished, or --validate-only
+       accepted it.
+    1  The run finished failed, or the command failed. A failed run's summary is printed on
+       stderr. `zeroshot watch RUN_ID` waits for a detached run and exits the same way.
 ```
 
 ### `zeroshot update`
@@ -1339,7 +1345,12 @@ Options:
           Resume strictly after this durable cursor
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
+
+EXIT STATUS
+  0  The run succeeded, or Ctrl-C detached before it finished.
+  1  The run finished failed, or observation failed. A failed run prints the same failure summary
+     on stderr as a foreground `zeroshot run`, also when --after starts past its terminal event.
 ```
 
 ### `zeroshot logs`
@@ -1364,7 +1375,13 @@ Options:
           Return records only for this opaque execution selector
 
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
+
+EXIT STATUS
+  0  The log stream ended or Ctrl-C detached, whatever the run's result. Read the result with
+     `zeroshot watch` or `zeroshot status`.
+  1  The command failed, for example because the run was not found or its logs could not be
+     read.
 ```
 
 ### `zeroshot attach`

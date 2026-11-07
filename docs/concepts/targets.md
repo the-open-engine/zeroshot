@@ -216,6 +216,12 @@ resolving the remote branch tip. Detached worktrees require repository and branc
 Generic transport and credentials require a target advertising `openengine.git-transport/v1`;
 the CLI rejects an older target before submitting the request or acquiring an access token.
 
+If a proxy, VPN or tunnel loses the reply to a direct or hosted target submission, the CLI resends
+the identical submission with the same submission key, and the target returns the run it already
+admitted. If the outcome still cannot be confirmed, the error says so and names the key. Check
+`zeroshot list --target NAME`, or rerun the same command with `--submission-key KEY` to get that
+run instead of starting a second one.
+
 ### Image tags and remote hosts
 
 The image is published for `linux/amd64` only. Each release publishes a version tag such as

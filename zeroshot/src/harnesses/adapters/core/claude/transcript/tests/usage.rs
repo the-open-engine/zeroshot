@@ -56,18 +56,6 @@ fn usage_values(usage: Option<TokenUsageDelta>) -> [u64; 4] {
     ]
 }
 
-fn success_without_terminal_usage() -> Value {
-    json!({
-        "type":"result",
-        "subtype":"success",
-        "is_error":false,
-        "session_id":"session-1",
-        "structured_output":{"response":"done"},
-        "usage":{},
-        "modelUsage":null
-    })
-}
-
 #[test]
 fn assistant_usage_sums_unique_messages_and_replaces_repeated_snapshots() {
     let mut bytes = Vec::new();
@@ -130,7 +118,7 @@ fn malformed_raw_usage_is_not_reported_as_complete() {
 }
 
 #[test]
-fn unidentifiable_message_start_usage_is_incomplete_but_turn_can_succeed() {
+fn unidentifiable_message_start_usage_after_the_last_result_is_incomplete_but_turn_can_succeed() {
     for message in [
         json!({"usage":usage(23, 9, 17, 5)}),
         json!({"id":null,"usage":usage(23, 9, 17, 5)}),
@@ -138,6 +126,7 @@ fn unidentifiable_message_start_usage_is_incomplete_but_turn_can_succeed() {
         json!({"id":17,"usage":usage(23, 9, 17, 5)}),
     ] {
         let mut bytes = Vec::new();
+        append_event(&mut bytes, success(json!("done"), "session-1"));
         append_event(
             &mut bytes,
             json!({
@@ -149,7 +138,6 @@ fn unidentifiable_message_start_usage_is_incomplete_but_turn_can_succeed() {
                 }
             }),
         );
-        append_event(&mut bytes, success_without_terminal_usage());
 
         let decoded = decode(&bytes, 13, None);
         assert_eq!(completed_response(decoded.attempt), json!("done"));
@@ -158,8 +146,9 @@ fn unidentifiable_message_start_usage_is_incomplete_but_turn_can_succeed() {
 }
 
 #[test]
-fn unassociated_message_delta_usage_is_incomplete_but_turn_can_succeed() {
+fn unassociated_message_delta_usage_after_the_last_result_is_incomplete_but_turn_can_succeed() {
     let mut bytes = Vec::new();
+    append_event(&mut bytes, success(json!("done"), "session-1"));
     append_event(
         &mut bytes,
         json!({
@@ -168,7 +157,6 @@ fn unassociated_message_delta_usage_is_incomplete_but_turn_can_succeed() {
             "event":{"type":"message_delta","usage":{"output_tokens":9}}
         }),
     );
-    append_event(&mut bytes, success_without_terminal_usage());
 
     let decoded = decode(&bytes, 17, None);
     assert_eq!(completed_response(decoded.attempt), json!("done"));
@@ -189,7 +177,7 @@ fn assistant_wrapper_replaces_the_same_raw_message_usage() {
 }
 
 #[test]
-fn valid_result_usage_replaces_provisional_assistant_usage() {
+fn stated_result_usage_replaces_streamed_usage_before_the_result() {
     let mut bytes = Vec::new();
     append_event(
         &mut bytes,
@@ -215,137 +203,82 @@ fn valid_result_usage_replaces_provisional_assistant_usage() {
 }
 
 #[test]
-fn model_usage_sums_all_models_and_overrides_other_usage() {
-    for (model_key, fields) in [
-        (
-            "modelUsage",
-            [
-                ("inputTokens", 13),
-                ("outputTokens", 7),
-                ("cacheReadInputTokens", 11),
-                ("cacheCreationInputTokens", 5),
-            ],
-        ),
-        (
-            "model_usage",
-            [
-                ("input_tokens", 13),
-                ("output_tokens", 7),
-                ("cache_read_input_tokens", 11),
-                ("cache_creation_input_tokens", 5),
-            ],
-        ),
-    ] {
-        let first = fields
-            .into_iter()
-            .map(|(key, value)| (key.to_owned(), json!(value)))
-            .collect::<serde_json::Map<_, _>>();
-        let second = fields
-            .into_iter()
-            .map(|(key, value)| (key.to_owned(), json!(value + 1)))
-            .collect::<serde_json::Map<_, _>>();
-        let mut event = json!({
-            "type":"result",
-            "subtype":"success",
-            "is_error":false,
-            "session_id":"session-1",
-            "result":"done",
-            "usage":{
-                "input_tokens":999,
-                "output_tokens":999,
-                "cache_read_input_tokens":999,
-                "cache_creation_input_tokens":999
-            }
-        });
-        event.as_object_mut().assert_value().insert(
-            model_key.to_owned(),
-            json!({"model-a":first,"model-b":second}),
-        );
-        let mut bytes = Vec::new();
-        append_event(&mut bytes, event);
+fn streamed_usage_after_the_last_result_is_added_to_the_stated_usage() {
+    // Claude Code states calls after its last result nowhere, as when a process stops mid-turn.
+    let mut bytes = Vec::new();
+    append_event(&mut bytes, success(json!("early"), "session-1"));
+    append_event(
+        &mut bytes,
+        assistant_usage("message-2", usage(23, 9, 17, 5)),
+    );
 
-        let decoded = decode(&bytes, 31, None);
-        assert_eq!(usage_values(decoded.usage), [27, 15, 23, 11]);
-    }
+    let decoded = decode(&bytes, 29, Some("provider process exited with status 17"));
+    assert_eq!(usage_values(decoded.usage), [34, 13, 23, 7]);
 }
 
 #[test]
-fn malformed_model_usage_fails_closed_even_with_valid_result_usage() {
-    let mut event = success(json!("done"), "session-1");
-    event.as_object_mut().assert_value().insert(
-        "modelUsage".to_owned(),
+fn per_result_usage_sums_all_models_and_ignores_session_and_main_thread_totals() {
+    let model = |offset: u64| {
         json!({
-            "model-a":{
-                "inputTokens":"many",
-                "outputTokens":7,
-                "cacheReadInputTokens":11,
-                "cacheCreationInputTokens":5
-            }
-        }),
-    );
+            "inputTokens":13 + offset,
+            "outputTokens":7 + offset,
+            "cacheReadInputTokens":11 + offset,
+            "cacheCreationInputTokens":5 + offset,
+            "costUSD":0.01
+        })
+    };
+    let mut event = success(json!("done"), "session-1");
+    event["usage"] = usage(999, 999, 999, 999);
+    event["modelUsage"] = json!({"model-a":model(900),"model-b":model(900)});
+    event["model_usage_since_last_result"] = json!({"model-a":model(0),"model-b":model(1)});
     let mut bytes = Vec::new();
     append_event(&mut bytes, event);
 
-    assert!(decode(&bytes, 19, None).usage.is_none());
+    let decoded = decode(&bytes, 31, None);
+    assert_eq!(usage_values(decoded.usage), [27, 15, 23, 11]);
 }
 
 #[test]
-fn empty_terminal_usage_preserves_provisional_usage_on_success_and_failure() {
-    for (subtype, is_error, result) in [
-        ("success", false, "done"),
-        ("error_during_execution", true, "provider failed"),
+fn results_without_valid_per_result_usage_leave_usage_unknown() {
+    for since in [
+        None,
+        Some(json!(null)),
+        Some(json!({"model-a":{"inputTokens":"many","outputTokens":7}})),
+        Some(json!({"model-a":{"input_tokens":13,"output_tokens":7}})),
     ] {
-        let mut bytes = Vec::new();
-        append_event(
-            &mut bytes,
-            assistant_usage("message-1", usage(23, 9, 17, 5)),
-        );
-        let mut terminal = json!({
-            "type":"result",
-            "subtype":subtype,
-            "is_error":is_error,
-            "session_id":"session-1",
-            "result":result,
-            "usage":{},
-            "modelUsage":null
-        });
-        if !is_error {
-            terminal
-                .as_object_mut()
-                .assert_value()
-                .insert("structured_output".to_owned(), json!({"response":result}));
-        }
-        append_event(&mut bytes, terminal);
+        for (subtype, is_error, result) in [
+            ("success", false, "done"),
+            ("error_during_execution", true, "provider failed"),
+        ] {
+            let mut bytes = Vec::new();
+            append_event(
+                &mut bytes,
+                assistant_usage("message-1", usage(23, 9, 17, 5)),
+            );
+            let mut terminal = json!({
+                "type":"result",
+                "subtype":subtype,
+                "is_error":is_error,
+                "session_id":"session-1",
+                "result":result,
+                "usage":usage(23, 9, 17, 5),
+                "modelUsage":{"model-a":{"inputTokens":23,"outputTokens":9}}
+            });
+            if let Some(since) = &since {
+                terminal["model_usage_since_last_result"] = since.clone();
+            }
+            if !is_error {
+                terminal["structured_output"] = json!({"response":result});
+            }
+            append_event(&mut bytes, terminal);
 
-        let decoded = decode(&bytes, 29, None);
-        assert_eq!(usage_values(decoded.usage), [23, 9, 17, 5]);
-        if is_error {
-            assert_eq!(failed_attempt(decoded.attempt).diagnostic, result);
-        } else {
-            assert_eq!(completed_response(decoded.attempt), json!(result));
+            let decoded = decode(&bytes, 29, None);
+            assert!(decoded.usage.is_none(), "{since:?} {subtype}");
+            if is_error {
+                assert_eq!(failed_attempt(decoded.attempt).diagnostic, result);
+            } else {
+                assert_eq!(completed_response(decoded.attempt), json!(result));
+            }
         }
     }
-}
-
-#[test]
-fn malformed_terminal_usage_does_not_reuse_provisional_usage() {
-    let mut bytes = Vec::new();
-    append_event(
-        &mut bytes,
-        assistant_usage("message-1", usage(23, 9, 17, 5)),
-    );
-    append_event(
-        &mut bytes,
-        json!({
-            "type":"result",
-            "subtype":"success",
-            "is_error":false,
-            "session_id":"session-1",
-            "result":"done",
-            "modelUsage":{"model-a":{"inputTokens":"many"}},
-            "usage":{"input_tokens":"many","output_tokens":7}
-        }),
-    );
-
-    assert!(decode(&bytes, 23, None).usage.is_none());
 }

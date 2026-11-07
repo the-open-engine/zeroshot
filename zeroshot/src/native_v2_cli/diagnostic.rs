@@ -277,6 +277,23 @@ fn protocol_diagnostic(error: &NativeV2CliError) -> Option<NativeV2CliDiagnostic
             NativeV2CliDiagnostic::target(error.to_string())
                 .with_details(json!({"target": name, "origin": origin})),
         ),
+        NativeV2CliError::SubmissionOutcomeUnknown {
+            name,
+            origin,
+            submission_key,
+            ..
+        } => Some(
+            NativeV2CliDiagnostic::new(
+                DiagnosticKind::Target,
+                "submission.outcome_unknown",
+                error.to_string(),
+            )
+            .with_details(json!({
+                "target": name,
+                "origin": origin,
+                "submissionKey": submission_key,
+            })),
+        ),
         NativeV2CliError::Protocol(_) | NativeV2CliError::OutputJson(_) => {
             Some(NativeV2CliDiagnostic::new(
                 DiagnosticKind::Protocol,

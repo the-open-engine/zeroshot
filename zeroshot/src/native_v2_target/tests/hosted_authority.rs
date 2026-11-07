@@ -19,6 +19,8 @@ pub(super) use connections::test_authority;
 #[path = "hosted_authority/direct.rs"]
 mod direct;
 pub(super) use direct::{spawn_direct_target_authority, spawn_rejecting_direct_target_authority};
+#[path = "hosted_authority/lost_submission_reply.rs"]
+mod lost_submission_reply;
 #[path = "hosted_authority/machine.rs"]
 mod machine;
 #[path = "hosted_authority/problem_errors.rs"]

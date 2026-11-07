@@ -355,7 +355,9 @@ where
 {
     match command {
         NativeV2CliCommand::Watch(RunWatchCommand { run, after }) => {
-            follow_durable(
+            let detach = signal.wait();
+            tokio::pin!(detach);
+            follow_run_result(
                 DurableFollow {
                     backend,
                     target: run.target.as_deref(),
@@ -364,7 +366,7 @@ where
                     initial_cursor: after,
                     execution: None,
                 },
-                signal,
+                detach,
                 output,
             )
             .await
@@ -437,33 +439,50 @@ where
     if run.detach || interrupted {
         return Ok(CliOutcome::Detached);
     }
-    let target = run.target.as_deref();
-    let mut observed = failure::FailureOutput::new(output);
-    let outcome = match follow_durable_with_detach(
+    follow_run_result(
         DurableFollow {
             backend: context.backend,
-            target,
-            run_id: receipt.run_id.clone(),
+            target: run.target.as_deref(),
+            run_id: receipt.run_id,
             kind: DurableFollowKind::Watch,
             initial_cursor: None,
             execution: None,
         },
-        detach.as_mut(),
-        &mut observed,
+        detach,
+        output,
     )
-    .await?
-    {
+    .await
+}
+
+/// Follows a run's watch and settles the run's result.
+///
+/// Foreground `run` and `watch` share this, so a failed run ends both as `RunFailed` after its
+/// status events are written.
+async fn follow_run_result<B, D, W>(
+    follow: DurableFollow<'_, B>,
+    mut detach: Pin<&mut D>,
+    output: &mut W,
+) -> Result<CliOutcome, NativeV2CliError>
+where
+    B: NativeV2CliBackend,
+    D: Future<Output = ()> + ?Sized,
+    W: Write,
+{
+    let (backend, target, run_id) = (follow.backend, follow.target, follow.run_id.clone());
+    let mut observed = failure::FailureOutput::new(output);
+    let outcome = match follow_durable_with_detach(follow, detach.as_mut(), &mut observed).await? {
         // A runtime failure can close the watch before its terminal snapshot is durable, or
-        // without one when persistence is unavailable. Run status reports either result, and
-        // Ctrl-C still detaches while it is read.
+        // without one when persistence is unavailable, and a watch resumed after the terminal
+        // cursor has no new event. Run status reports the result, and Ctrl-C still detaches
+        // while it is read.
         CliOutcome::Completed => {
             let params = RunStatusParams {
-                run_id: receipt.run_id.clone(),
+                run_id: run_id.clone(),
             };
             tokio::select! {
                 biased;
                 () = detach.as_mut() => CliOutcome::Detached,
-                result = context.backend.run_status(target, params) => {
+                result = backend.run_status(target, params) => {
                     let result = result?;
                     observed.observe(&result.status);
                     outcome_for_status(&result.status)
@@ -474,9 +493,9 @@ where
     };
     if outcome == CliOutcome::Failed {
         let failure = if let Some(failure) = observed.context {
-            RunFailure::from_context(receipt.run_id, target, failure)
+            RunFailure::from_context(run_id, target, failure)
         } else {
-            RunFailure::read(context.backend, target, receipt.run_id, detach.as_mut()).await
+            RunFailure::read(backend, target, run_id, detach).await
         };
         return Err(NativeV2CliError::RunFailed(Box::new(failure)));
     }

@@ -286,6 +286,21 @@ fn protocol_and_fallback_diagnostics_remain_distinct() {
             json!({"target": "platform", "origin": "https://api.example.test"}),
         ),
         (
+            NativeV2CliError::SubmissionOutcomeUnknown {
+                name: "platform".to_owned(),
+                origin: "https://api.example.test".to_owned(),
+                submission_key: "cli-0123".to_owned(),
+                message: "request timed out".to_owned(),
+            },
+            "target",
+            "submission.outcome_unknown",
+            json!({
+                "target": "platform",
+                "origin": "https://api.example.test",
+                "submissionKey": "cli-0123",
+            }),
+        ),
+        (
             NativeV2CliError::Protocol("invalid frame".to_owned()),
             "protocol",
             "protocol.invalid",

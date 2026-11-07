@@ -16,10 +16,7 @@ mod usage;
 
 use diagnostic::{combine_failure_detail, error_list, record_count};
 use session_id::record_session_id;
-use usage::{
-    ProvisionalUsage, TerminalUsage, UsageKeys, message_identity, parse_terminal_usage,
-    parse_usage_snapshot,
-};
+use usage::{ProvisionalUsage, ResultUsage, UsageKeys, message_identity, parse_usage_snapshot};
 
 #[cfg(test)]
 use crate::native_v2_capsule::provider_process::text::{LIVE_CHUNK_BYTES, LIVE_LINE_BYTES, utf8_chunks};
@@ -34,6 +31,9 @@ enum ClaudeTerminal {
     Failed(String),
 }
 
+/// One `--print` process writes a result per main-loop turn: background subagent and shell
+/// notifications start later turns after an earlier result. Claude Code marks no result as final,
+/// so every record is read through stdout EOF and the last result written is authoritative.
 pub(super) struct ClaudeTranscript {
     lines: ProviderJsonLines,
     session_id: Option<String>,
@@ -41,7 +41,8 @@ pub(super) struct ClaudeTranscript {
     terminal: Option<ClaudeTerminal>,
     retryable_failure_seen: bool,
     visible_text_emitted: bool,
-    terminal_usage: Option<Option<TokenUsageDelta>>,
+    result_usage: ResultUsage,
+    /// Streamed message usage since the last result, or since the start without one.
     provisional_usage: ProvisionalUsage,
     active_stream_message: Option<String>,
     malformed_records: usize,
@@ -58,7 +59,7 @@ impl ClaudeTranscript {
             terminal: None,
             retryable_failure_seen: false,
             visible_text_emitted: false,
-            terminal_usage: None,
+            result_usage: ResultUsage::default(),
             provisional_usage: ProvisionalUsage::default(),
             active_stream_message: None,
             malformed_records: 0,
@@ -70,19 +71,11 @@ impl ClaudeTranscript {
 
 impl ProviderTranscript for ClaudeTranscript {
     fn push(&mut self, chunk: &[u8]) -> Vec<ClaudeEmission> {
-        if self.terminal.is_some() {
-            self.lines.discard();
-            return Vec::new();
-        }
         let records = self.lines.push(chunk);
         self.accept_records(records)
     }
 
     fn finish_stream(&mut self) -> Vec<ClaudeEmission> {
-        if self.terminal.is_some() {
-            self.lines.discard();
-            return Vec::new();
-        }
         let mut emissions = self
             .lines
             .finish()
@@ -92,8 +85,7 @@ impl ProviderTranscript for ClaudeTranscript {
     }
 
     fn token_usage(&self) -> Option<TokenUsageDelta> {
-        self.terminal_usage
-            .unwrap_or_else(|| self.provisional_usage.total())
+        self.result_usage.total(&self.provisional_usage)
     }
 
     fn is_success(&self) -> bool {
@@ -187,10 +179,6 @@ impl ClaudeTranscript {
     ) -> Vec<ClaudeEmission> {
         let mut emissions = Vec::new();
         for record in records {
-            if self.terminal.is_some() {
-                self.lines.discard();
-                break;
-            }
             self.accept_record(record, &mut emissions);
         }
         emissions
@@ -450,15 +438,9 @@ impl ClaudeTranscript {
     }
 
     fn parse_result(&mut self, event: &serde_json::Map<String, Value>) {
-        match parse_terminal_usage(
-            event.get("modelUsage"),
-            event.get("model_usage"),
-            event.get("usage"),
-        ) {
-            TerminalUsage::Empty => {}
-            TerminalUsage::Valid(usage) => self.terminal_usage = Some(Some(usage)),
-            TerminalUsage::Malformed => self.terminal_usage = Some(None),
-        }
+        self.result_usage
+            .record(event.get("model_usage_since_last_result"));
+        self.provisional_usage = ProvisionalUsage::default();
         let unsuccessful = event.get("subtype").and_then(Value::as_str) != Some("success")
             || event.get("is_error").and_then(Value::as_bool) == Some(true);
         if unsuccessful {
@@ -478,6 +460,19 @@ impl ClaudeTranscript {
                     )
                 });
             self.terminal = Some(ClaudeTerminal::Failed(diagnostic));
+            return;
+        }
+        // `subagent_stats` holds this process's running totals. `killed.system` counts subagents
+        // Claude Code stopped itself, as at its background wait ceiling; their work is missing.
+        if let Some(stopped) = event
+            .get("subagent_stats")
+            .and_then(|stats| stats.pointer("/killed/system"))
+            .and_then(Value::as_u64)
+            .filter(|stopped| *stopped > 0)
+        {
+            self.terminal = Some(ClaudeTerminal::Failed(format!(
+                "Claude Code stopped unfinished subagents itself (subagent_stats.killed.system = {stopped}); the final result does not include their work"
+            )));
             return;
         }
         self.terminal = Some(ClaudeTerminal::Complete(

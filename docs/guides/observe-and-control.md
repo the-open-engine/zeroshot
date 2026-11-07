@@ -60,6 +60,12 @@ zeroshot logs RUN_ID --after LOG_CURSOR
 Cursors are opaque, so store the last fully consumed value and pass it back unchanged.
 `logs --execution EXECUTION_REF` restricts output to one execution selector from status.
 
+`watch` exits 0 when the run succeeded. When the run finished failed, it prints the same failure
+summary on stderr as a failed foreground `run` and exits 1, so a script can start a run with
+`--detach` and wait for its result with `zeroshot watch RUN_ID`. `logs` exits 0 when its stream
+ends, whatever the run's result. The [CLI reference](../zeroshot-cli.md) lists the exit status of
+`run`, `watch` and `logs`.
+
 The producer records each log timestamp as a positive JavaScript-safe Unix epoch millisecond, and
 durable replay preserves it.
 

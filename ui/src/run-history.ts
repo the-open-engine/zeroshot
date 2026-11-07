@@ -2,7 +2,12 @@ import type { EnvironmentDefinition } from './environment-store';
 import type { FailureContext } from './failure-context';
 import type { HistoryObservation } from './history-contract';
 import { allNodes, children, isGroup, pathTo, type Document, type GraphNode } from './domain';
-import { projectControlHistory, type ControlRecord } from './control-history';
+import {
+  controlState,
+  projectControlHistory,
+  settleControlVisits,
+  type ControlRecord,
+} from './control-history';
 import type { WorkflowNodeObservation } from './workflow-observation';
 
 export type ExecutionId = string;
@@ -337,7 +342,10 @@ export function projectHistory(
           .join(' · '),
     };
   }
-  const controls = projectControlHistory(control, events, through);
+  const controls = settleControlVisits(
+    document.graph.root,
+    projectControlHistory(control, events, through)
+  );
   const byControlNode = new Map<string, typeof controls>();
   for (const visit of controls) {
     const visits = byControlNode.get(visit.node) ?? [];
@@ -348,13 +356,10 @@ export function projectHistory(
     const latest = new Map<string, (typeof controls)[number]>();
     for (const visit of visits) latest.set(JSON.stringify(visit.mapIndices), visit);
     const current = [...latest.values()];
-    const state = current.some((visit) => visit.state === 'entered')
-      ? 'running'
-      : current.some((visit) => visit.state === 'failed')
-        ? 'failed'
-        : current.some((visit) => visit.state === 'stopped')
-          ? 'skipped'
-          : 'succeeded';
+    const states = new Set(current.map((visit) => controlState(visit.state)));
+    const state =
+      (['running', 'failed', 'skipped', 'recorded'] as const).find((next) => states.has(next)) ??
+      'succeeded';
     const visit = current.reduce((a, b) => (a.updated > b.updated ? a : b));
     nodes[name] = {
       state,

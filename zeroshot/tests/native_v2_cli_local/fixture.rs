@@ -221,6 +221,21 @@ impl LocalFixture {
         );
     }
 
+    /// Replays a failed run's watch, which exits unsuccessfully like the failed foreground run.
+    pub(super) async fn assert_failed_watch_replay(&self, run_id: &str, reason: &str) {
+        let output = self.output(&["watch", run_id], "block").await;
+        let (stdout, stderr) = (
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        assert!(
+            !output.status.success()
+                && stdout.contains(reason)
+                && stderr.contains("run finished unsuccessfully"),
+            "watch replay must report the failed run\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+    }
+
     pub(super) async fn listed_run(&self, run_id: &str) -> Value {
         self.json(&["list"], "block")
             .await
@@ -644,7 +659,8 @@ fn claude_configuration_probe(response: &ProbeResponse) -> String {
     }});
     let initialize = shell_literal(&initialize.to_string());
     format!(
-        r#"for argument in "$@"; do
+        r#"if test "$*" = --version; then printf '%s\n' '2.1.318 (Claude Code)'; exit 0; fi
+for argument in "$@"; do
   if test "$argument" = --safe-mode; then
     while IFS= read -r request; do
       case "$request" in

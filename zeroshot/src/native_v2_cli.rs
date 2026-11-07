@@ -517,6 +517,18 @@ pub enum NativeV2CliError {
         origin: String,
         message: String,
     },
+    #[error(
+        "submission outcome unknown on target {name:?} at {origin}: {message}. \
+         The target may have admitted the run; check `zeroshot list --target {name}`, \
+         or rerun the same command with `--submission-key {submission_key}` \
+         to get that run instead of starting another"
+    )]
+    SubmissionOutcomeUnknown {
+        name: String,
+        origin: String,
+        submission_key: String,
+        message: String,
+    },
     #[error("{0}")]
     RunFailed(Box<RunFailure>),
     #[error("stack finished unsuccessfully")]

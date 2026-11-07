@@ -1,7 +1,7 @@
-//! The cause of a failed foreground run.
+//! The cause of a failed run that foreground `run` or `watch` followed.
 //!
-//! A foreground run keeps the structured context from its terminal status. Older runs without
-//! context fall back to durable error logs within a deadline and the caller's Ctrl-C signal.
+//! The follow keeps the structured context from the terminal status. Older runs without context
+//! fall back to durable error logs within a deadline and the caller's Ctrl-C signal.
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -19,9 +19,9 @@ use super::super::{
 };
 use super::{DurableFollow, DurableFollowKind, DurableOutput, follow_durable_with_detach};
 
-/// Most recent error log records a failed foreground run reports; `zeroshot logs` keeps them all.
+/// Most recent error log records a followed failed run reports; `zeroshot logs` keeps them all.
 const MAX_REPORTED_ERRORS: usize = 5;
-/// Bounds how long a failed foreground run reads its error logs before it exits.
+/// Bounds how long a followed failed run's error logs are read before the command exits.
 const ERROR_LOG_DEADLINE: Duration = Duration::from_secs(5);
 
 /// The latest error log records of a failed run and the command that shows its complete log.

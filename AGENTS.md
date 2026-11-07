@@ -603,6 +603,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Provider JSONL readers do not cap cumulative output. They share only the 64 MiB unfinished-record
   guard, accept a complete final record without a newline, ignore unknown future event types before
   validating provider-owned fields, and continue draining after the first valid terminal event.
+- Claude requires Claude Code 2.1.310 or newer, with no upper bound. Before an adapter's first model
+  turn it runs the selected executable with `--version` through that turn's launch path and
+  environment. One `--print` process can write several results while background subagents or
+  shells finish, so Claude parses every record through stdout EOF and the last result decides the
+  attempt: a later error fails it, missing final structured output uses the bounded correction, and
+  `subagent_stats.killed.system` above zero (subagents Claude Code stopped itself) fails it. Usage
+  is the sum of each result's `model_usage_since_last_result` plus streamed message usage after the
+  last result; an absent or malformed value leaves it unknown. Session-total `modelUsage` and
+  main-thread `usage` never stand in.
 - Provider stdin and stdout are concurrent and bounded so large prompts and early output cannot
   deadlock. Incomplete stdin is fatal, while parsed identity, usage, retry, and diagnostics survive
   either I/O completion order.
@@ -999,10 +1008,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   entering the backend. Once polled, that future is preserved through its receipt or error because
   it may cross an irreversible admission boundary before yielding. A successful receipt is emitted
   before detaching without opening observation. Ctrl-C never force-stops a run.
-- A foreground run whose watch closes without a terminal snapshot settles from run status, which
-  Ctrl-C detaches like observation. A failed foreground run's process error carries its latest
-  bounded, control-safe error-log records and the `zeroshot logs` command. That read is best
-  effort, deadline- and Ctrl-C-bounded, and never replaces the failure.
+- Foreground `run` and `watch` settle a followed run the same way. A watch that closes without a
+  terminal snapshot settles from run status, which Ctrl-C detaches like observation. A failed run
+  ends either command with a process error (exit 1) that carries its latest bounded, control-safe
+  error-log records and the `zeroshot logs` command. That read is best effort, deadline- and
+  Ctrl-C-bounded, and never replaces the failure. `logs` exits 0 whatever the run's result.
 - Graph verification errors display their first safe diagnostic through the shared verifier error,
   so local validation and hosted rejection report the same cause.
 - Do not hand-edit `docs/zeroshot-cli.md` or `docs/zeroshot-cli.html`; regenerate with
@@ -1033,6 +1043,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Secret-bearing target inputs never enter run ledgers, target configuration, or observation records.
 - Target transport failures retain the target name, origin and safe connection category. Never expose
   raw request URLs or credentials; transport failures remain eligible for observation reconnection.
+- A named-target run submission whose request may have reached the target but returned no receipt
+  (timeout, interrupted connection or lost response body; not a refused or unestablished
+  connection) is replayed identically with the same submission key, a bounded number of times inside
+  the preserved submission future. Targets return the admitted run for an exact replay. A
+  submission that stays unconfirmed reports `submission.outcome_unknown` with the key and
+  `zeroshot list --target NAME`, never the unreachable-server hint.
 - Target HTTP failures use the shared bounded `{code,message,details?}` protocol problem; message-only
   bodies are invalid, and details contain only user-safe structured metadata.
 - Operator diagnostics are private-capability-only, run-scoped, bounded, sanitized, and excluded
@@ -1205,6 +1221,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   structural visits/decisions with source cursors and stable identities; JavaScript never evaluates
   guards or invents worker executions. Keep loop visits, retries, and Map items distinct. Projection
   failure leaves recorded worker history readable; verifier rejection is a decision, not a crash.
+  A reducer `completed` group visit alone is neutral. The seq, choice, loop and map visits that a
+  succeed/fail node ended at its cursor take its outcome; a par stops that propagation.
 - Profile and run inspectors share `InspectorPanel`, pointer/keyboard resizing, and one client-only
   width preference. Viewport clamping preserves the preferred width when the available space shrinks.
 - Run navigation retains tab-scoped view preferences (node/inspector, execution, cursor, graph
