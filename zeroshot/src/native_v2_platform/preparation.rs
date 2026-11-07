@@ -58,7 +58,7 @@ impl PreparationTask {
         *self.finished.borrow()
     }
 
-    async fn wait(&self) {
+    pub(super) async fn wait(&self) {
         let mut finished = self.finished.subscribe();
         let _ = finished.wait_for(|value| *value).await;
     }

@@ -623,7 +623,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Live force-stop signals owned work before waiting for persistence. Local stop intent prevents
   interrupted work from becoming a retryable crash. Cleanup and durable output still precede
   final settlement. Confirmed runtime failure is observable before its persistence attempt;
-  a later durable terminal snapshot remains authoritative over the in-memory fallback.
+  a later durable terminal snapshot remains authoritative over the in-memory fallback. A local
+  controller keeps serving until that attempt settles, bounded beyond SQLite's busy timeout, so
+  process exit cannot discard the terminal; success exits are never delayed.
 - Failed local and direct-target runs retain an exclusively claimable workspace for a successor
   attempt. Local recovery metadata lives beside each run ledger while the checkout remains
   user-owned; direct targets retain only the candidate and Git metadata, dispose private runtime

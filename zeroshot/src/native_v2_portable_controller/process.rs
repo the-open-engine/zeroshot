@@ -354,6 +354,9 @@ impl PortableControllerServer {
     /// readiness cannot race normal startup. Later observation reopens the durable ledger.
     async fn serve_until_terminal(self) -> Result<(), PortableControllerError> {
         let mut lifecycle = ServerLifecycle::default();
+        // One wait spans every accepted connection, so observers cannot restart its bound.
+        let terminal = self.controller.wait_terminal();
+        tokio::pin!(terminal);
         loop {
             if lifecycle.is_complete() {
                 return Ok(());
@@ -363,7 +366,7 @@ impl PortableControllerServer {
                     result.map_err(PortableControllerError::Io)?;
                     lifecycle.accepted();
                 }
-                result = self.controller.wait_terminal(), if !lifecycle.terminal => {
+                result = &mut terminal, if !lifecycle.terminal => {
                     result?;
                     lifecycle.terminal();
                 }
