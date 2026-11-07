@@ -1000,10 +1000,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   entering the backend. Once polled, that future is preserved through its receipt or error because
   it may cross an irreversible admission boundary before yielding. A successful receipt is emitted
   before detaching without opening observation. Ctrl-C never force-stops a run.
-- A foreground run whose watch closes without a terminal snapshot settles from run status, which
-  Ctrl-C detaches like observation. A failed foreground run's process error carries its latest
-  bounded, control-safe error-log records and the `zeroshot logs` command. That read is best
-  effort, deadline- and Ctrl-C-bounded, and never replaces the failure.
+- Foreground `run` and `watch` settle a followed run the same way. A watch that closes without a
+  terminal snapshot settles from run status, which Ctrl-C detaches like observation. A failed run
+  ends either command with a process error (exit 1) that carries its latest bounded, control-safe
+  error-log records and the `zeroshot logs` command. That read is best effort, deadline- and
+  Ctrl-C-bounded, and never replaces the failure. `logs` exits 0 whatever the run's result.
 - Graph verification errors display their first safe diagnostic through the shared verifier error,
   so local validation and hosted rejection report the same cause.
 - Do not hand-edit `docs/zeroshot-cli.md` or `docs/zeroshot-cli.html`; regenerate with

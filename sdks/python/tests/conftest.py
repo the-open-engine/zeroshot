@@ -62,6 +62,11 @@ def stack_projection(state):
         }],
     }
 
+failed_status = {
+    "phase": "finished",
+    "terminalResult": {"status": "failed", "reason": "worker_failed"},
+}
+
 entry = {"args": args, "cwd": os.getcwd()}
 for name in ("--input", "--graph", "--runtime-config", "--uniform-runtime-config"):
     path = option(name)
@@ -139,9 +144,13 @@ elif args and args[0] == "list":
         )
     print(json.dumps({"runs": runs}))
 elif args and args[0] == "status":
-    print(json.dumps(projection(args[1], {"phase": "admitted"}, "v2:0")))
+    if os.environ.get("FAKE_WATCH_FAILURE") in ("terminal", "early"):
+        print(json.dumps(projection(args[1], failed_status, "v2:2")))
+    else:
+        print(json.dumps(projection(args[1], {"phase": "admitted"}, "v2:0")))
 elif args and args[0] == "watch":
     time.sleep(float(os.environ.get("FAKE_WATCH_DELAY", "0")))
+    failure = os.environ.get("FAKE_WATCH_FAILURE")
     running = projection(
         args[1],
         {
@@ -152,9 +161,13 @@ elif args and args[0] == "watch":
     )
     running["cursor"] = running.pop("atCursor")
     print(json.dumps(running), flush=True)
+    if failure in ("early", "outage"):
+        message = "cannot reach target" if failure == "outage" else "run finished unsuccessfully"
+        print(f"zeroshot: {message}", file=sys.stderr)
+        raise SystemExit(1)
     finished = projection(
         args[1],
-        {
+        failed_status if failure == "terminal" else {
             "phase": "finished",
             "terminalResult": {"status": "succeeded", "output": {"ok": True}},
         },
@@ -162,6 +175,9 @@ elif args and args[0] == "watch":
     )
     finished["cursor"] = finished.pop("atCursor")
     print(json.dumps(finished), flush=True)
+    if failure == "terminal":
+        print("zeroshot: run finished unsuccessfully: worker_failed", file=sys.stderr)
+        raise SystemExit(1)
 elif args and args[0] == "logs":
     event = {
         "runId": args[1],

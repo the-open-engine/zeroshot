@@ -544,9 +544,17 @@ class Client:
         if after is not None:
             arguments.extend(["--after", after])
         stream = self._native().json_lines([*arguments, *self._route_arguments()])
-        async with aclosing(stream) as values:
-            async for value in values:
-                yield _status(value)
+        try:
+            async with aclosing(stream) as values:
+                async for value in values:
+                    yield _status(value)
+        except TargetError:
+            # Native watch exits unsuccessfully when the run failed, also after a stream that ended
+            # before its terminal snapshot. RunStatus.result reports that outcome, so only
+            # observation failures propagate.
+            result = (await self._status(run_id)).result
+            if result is None or result.succeeded:
+                raise
 
     async def _logs(
         self,
