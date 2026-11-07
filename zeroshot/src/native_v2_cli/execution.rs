@@ -40,7 +40,9 @@ pub use submission::{
     try_execute_native_v2_preflight, try_execute_native_v2_static,
     try_execute_native_v2_static_with_terminal,
 };
-use submission::{RunSubmission, select_connection_requirements, submit_run, validate_github_token};
+use submission::{
+    GitHubTokenScope, RunSubmission, read_github_token, select_connection_requirements, submit_run,
+};
 use status::outcome_for_status;
 
 pub async fn execute_native_v2_cli<B, S, W>(
@@ -200,22 +202,35 @@ where
             status.workspace_recovery.connection_requirements,
         )
         .await?;
-    let connections = select_connection_requirements(requirements, context.environment)?;
-    let allow_legacy_github_token = run.target.is_none()
-        || status
+    let scope = GitHubTokenScope::new(run.target.is_some(), command.forward_github_token);
+    // Only direct targets return retained requirements, and they need exactly the original values,
+    // so a withheld GH_TOKEN would fail later without naming the flag.
+    if scope == GitHubTokenScope::Withheld
+        && requirements
+            .values()
+            .flatten()
+            .any(|field| field.as_str() == "GH_TOKEN")
+    {
+        return Err(NativeV2CliError::Usage(
+            "this run's retained connections need GH_TOKEN; pass --forward-gh-token to send it"
+                .to_owned(),
+        ));
+    }
+    let connections =
+        select_connection_requirements(requirements, scope.outbound(context.environment))?;
+    let github_token = if scope == GitHubTokenScope::Local {
+        read_github_token(context.environment)?
+    } else {
+        let github_com = status
             .source
             .as_ref()
             .is_some_and(crate::native_v2_candidate::is_github_com_source);
-    let github_token = allow_legacy_github_token
-        .then(|| (context.environment)("GH_TOKEN"))
-        .flatten()
-        .map(|value| {
-            value
-                .into_string()
-                .map_err(|_| NativeV2CliError::GitHubToken)
-                .and_then(validate_github_token)
-        })
-        .transpose()?;
+        // The opt-in always requires a valid GH_TOKEN; only GitHub.com sources carry it in the
+        // legacy request field.
+        scope
+            .forwarded_token(context.environment)?
+            .filter(|_| github_com)
+    };
     let result = context
         .backend
         .run_resume(

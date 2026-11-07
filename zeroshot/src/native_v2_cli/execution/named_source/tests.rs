@@ -359,6 +359,7 @@ fn test_run_command() -> RunCommand {
         detach: true,
         validate_only: false,
         submission_key: None,
+        forward_github_token: false,
     }
 }
 

@@ -93,6 +93,11 @@ async def run_direct(runtime: UniformRuntime) -> None:
     result.raise_for_failure()
 ```
 
+Direct and hosted targets resolve GitHub access from their own stored `github` connection, and the
+client does not send `GH_TOKEN` to them. Pass `forward_github_token=True` to `Client` to send the
+submission environment's `GH_TOKEN` with runs and stacks instead, for example to a direct target
+with no stored connection. The submission then fails when `GH_TOKEN` is unset.
+
 ## Submit a hosted stack
 
 Log in with the CLI first, then pass that target's local name to `HostedTarget`. A stack is an

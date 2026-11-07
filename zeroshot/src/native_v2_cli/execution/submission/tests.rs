@@ -456,6 +456,7 @@ async fn wave8_cli_contract_validate_only_preflight_materializes_without_backend
         detach: false,
         validate_only: true,
         submission_key: None,
+        forward_github_token: false,
     };
     let mut output = Vec::new();
     assert_eq!(
@@ -742,6 +743,7 @@ fn intent_command(selection: RunSelection) -> RunCommand {
         detach: false,
         validate_only: false,
         submission_key: None,
+        forward_github_token: false,
     }
 }
 
@@ -944,7 +946,8 @@ const NAMED_COMMENT_CASES: [(&str, &str, &str); 2] = [
 #[test]
 fn named_source_less_comments_materialize_the_canonical_connection_used_by_resume() {
     for (url, key, field) in NAMED_COMMENT_CASES {
-        let (run, mut request) = named_comment_request(url);
+        let (mut run, mut request) = named_comment_request(url);
+        run.forward_github_token = true;
         let queried = std::cell::RefCell::new(Vec::new());
         let available = |name: &str| {
             queried.borrow_mut().push(name.to_owned());
@@ -981,9 +984,34 @@ fn named_source_less_comments_materialize_the_canonical_connection_used_by_resum
 }
 
 #[test]
+fn named_delivery_leaves_github_to_the_target_without_opt_in() {
+    for (url, key, field) in NAMED_COMMENT_CASES {
+        let (run, mut request) = named_comment_request(url);
+        let queried = std::cell::RefCell::new(Vec::new());
+        let shell = |name: &str| {
+            queried.borrow_mut().push(name.to_owned());
+            Some(OsString::from("shell-token"))
+        };
+        // Submission reads every outbound value through the same scoped environment.
+        let outbound =
+            GitHubTokenScope::new(run.target.is_some(), run.forward_github_token).outbound(&shell);
+        materialize_named_delivery_access(&run, &mut request, &outbound).assert_value();
+        let hidden = field == "GH_TOKEN";
+        assert_eq!(queried.borrow().is_empty(), hidden);
+        assert_eq!(
+            request
+                .connections
+                .contains_key(&ConnectionKey::new(key).assert_value()),
+            !hidden
+        );
+    }
+}
+
+#[test]
 fn named_delivery_does_not_upload_local_cli_token_aliases() {
     for (url, _, field) in NAMED_COMMENT_CASES {
-        let (run, mut request) = named_comment_request(url);
+        let (mut run, mut request) = named_comment_request(url);
+        run.forward_github_token = true;
         let queried = std::cell::RefCell::new(Vec::new());
         materialize_named_delivery_access(&run, &mut request, &|name: &str| {
             queried.borrow_mut().push(name.to_owned());
@@ -1035,5 +1063,34 @@ fn named_delivery_preserves_explicit_values_and_does_not_repair_partial_connecti
             request.connections,
         )
         .is_err()
+    );
+}
+
+#[test]
+fn branch_tip_lookup_reads_the_shell_token_without_sending_it() {
+    let shell = |name: &str| (name == "GH_TOKEN").then(|| OsString::from("shell-token"));
+    let (mut run, mut request) = named_comment_request("https://github.com/team/project/issues/17");
+    assert_eq!(
+        branch_tip_lookup_token(&run, &request, &shell)
+            .assert_value()
+            .as_deref(),
+        Some("shell-token")
+    );
+    assert_eq!(request.github_token, None);
+
+    request.github_token = Some("forwarded-token".to_owned());
+    assert_eq!(
+        branch_tip_lookup_token(&run, &request, &shell)
+            .assert_value()
+            .as_deref(),
+        Some("forwarded-token")
+    );
+
+    request.github_token = None;
+    run.revision =
+        Some(openengine_cluster_protocol::SourceRevisionId::new("a".repeat(40)).assert_value());
+    assert_eq!(
+        branch_tip_lookup_token(&run, &request, &shell).assert_value(),
+        None
     );
 }

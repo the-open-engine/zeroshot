@@ -223,22 +223,13 @@ fn submission_credentials<F>(
 where
     F: Fn(&str) -> Option<OsString>,
 {
+    // Validation checks the opt-in precondition too, so it fails exactly when submission would.
+    let github_token = GitHubTokenScope::new(run.target.is_some(), run.forward_github_token)
+        .forwarded_token(available)?;
     if run.validate_only {
         return Ok((RunConnectionValues::new(), None));
     }
     let connections = select_connections(&intent.runtime, intent.environment.as_ref(), available)?;
-    let github_token = run
-        .target
-        .as_ref()
-        .and_then(|_| available("GH_TOKEN"))
-        .map(|value| {
-            value
-                .into_string()
-                .map_err(|_| NativeV2CliError::GitHubToken)
-        })
-        .transpose()?
-        .map(validate_github_token)
-        .transpose()?;
     Ok((connections, github_token))
 }
 
@@ -251,7 +242,10 @@ async fn prepare_validated_submission_with_environment<F>(
 where
     F: Fn(&str) -> Option<OsString>,
 {
-    let mut params = prepare_submission_with_environment(run, resolved, &available, input)?;
+    // Every value sent to the controller is read through this one environment.
+    let outbound =
+        GitHubTokenScope::new(run.target.is_some(), run.forward_github_token).outbound(&available);
+    let mut params = prepare_submission_with_environment(run, resolved, &outbound, input)?;
     if run.target.is_none() && matches!(run.input, super::super::RunInput::TaskFrom(_)) {
         review_input::validate_local(&mut params).await?;
     }
@@ -261,8 +255,8 @@ where
         .map_err(NativeV2CliError::InvalidRun)?;
     crate::native_v2_cli::local::native_forge::select_local_source(run, &mut params)?;
     validate_local_only_workspace(run, &params)?;
-    resolve_named_source(run, &mut params, &available).await?;
-    materialize_named_delivery_access(run, &mut params, &available)?;
+    resolve_named_source(run, &mut params, &outbound, &available).await?;
+    materialize_named_delivery_access(run, &mut params, &outbound)?;
     Ok(params)
 }
 
@@ -313,25 +307,49 @@ fn resolved_initial_input(
     }
 }
 
+/// Token for the local `ls-remote` that resolves an omitted `--revision`.
+///
+/// A token already in the request is reused. Otherwise the shell's `GH_TOKEN` is read, since this
+/// lookup runs in this process and never sends the value to the target.
+fn branch_tip_lookup_token(
+    run: &RunCommand,
+    params: &PreparedRunRequest,
+    shell: &dyn Fn(&str) -> Option<OsString>,
+) -> Result<Option<String>, NativeV2CliError> {
+    if params.github_token.is_some()
+        || params.source.is_some()
+        || run.target.is_none()
+        || run.validate_only
+        || run.revision.is_some()
+    {
+        return Ok(params.github_token.clone());
+    }
+    read_github_token(shell)
+}
+
+/// Resolves the named run's source. `outbound` supplies values sent to the target; `shell` is
+/// read only for the local branch-tip lookup, whose token never leaves this process.
 async fn resolve_named_source<F>(
     run: &RunCommand,
     params: &mut PreparedRunRequest,
-    available: &F,
+    outbound: &F,
+    shell: &dyn Fn(&str) -> Option<OsString>,
 ) -> Result<(), NativeV2CliError>
 where
     F: Fn(&str) -> Option<OsString>,
 {
     let required_capabilities =
         crate::native_v2_admission::delivery_capabilities(&params.intent.graph.root);
+    let lookup_token = branch_tip_lookup_token(run, params, shell)?;
     if params.source.is_none()
         && let Some(selected) = named_source::resolve(
             named_source::NamedSourceRequest {
                 run,
-                token: params.github_token.as_deref(),
+                token: lookup_token.as_deref(),
                 provided: &params.connections,
                 required_capabilities: &required_capabilities,
             },
-            available,
+            outbound,
         )
         .await?
     {
@@ -478,6 +496,74 @@ fn named_source_record(run: &RunCommand, params: &PreparedRunRequest) -> Option<
         ),
         "dirty": source.dirty,
     }))
+}
+
+const GITHUB_TOKEN: &str = "GH_TOKEN";
+
+/// Parses and bounds the `GH_TOKEN` in `available`, if one is set.
+pub(super) fn read_github_token(
+    available: &dyn Fn(&str) -> Option<OsString>,
+) -> Result<Option<String>, NativeV2CliError> {
+    available(GITHUB_TOKEN)
+        .map(|value| {
+            value
+                .into_string()
+                .map_err(|_| NativeV2CliError::GitHubToken)
+                .and_then(validate_github_token)
+        })
+        .transpose()
+}
+
+/// Whether a command may send the invoking shell's `GH_TOKEN` to its controller.
+///
+/// Named targets resolve GitHub access from their own stored connection, so the shell token
+/// reaches them only after an explicit `--forward-gh-token`. Clap guarantees the flag implies a
+/// named target.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum GitHubTokenScope {
+    /// The local controller, which reads `GH_TOKEN` itself.
+    Local,
+    /// A named target without the opt-in: `GH_TOKEN` is never sent.
+    Withheld,
+    /// A named target with `--forward-gh-token`: `GH_TOKEN` is sent and must be set.
+    Forwarded,
+}
+
+impl GitHubTokenScope {
+    pub(super) fn new(named_target: bool, forward: bool) -> Self {
+        match (named_target, forward) {
+            (false, _) => Self::Local,
+            (true, false) => Self::Withheld,
+            (true, true) => Self::Forwarded,
+        }
+    }
+
+    /// The one environment every value sent to the controller is read from.
+    pub(super) fn outbound<'a>(
+        self,
+        available: &'a dyn Fn(&str) -> Option<OsString>,
+    ) -> impl Fn(&str) -> Option<OsString> + 'a {
+        move |name| {
+            if self == Self::Withheld && name == GITHUB_TOKEN {
+                None
+            } else {
+                available(name)
+            }
+        }
+    }
+
+    /// The token sent in the request's GitHub.com token field; required once forwarded.
+    pub(super) fn forwarded_token(
+        self,
+        available: &dyn Fn(&str) -> Option<OsString>,
+    ) -> Result<Option<String>, NativeV2CliError> {
+        if self != Self::Forwarded {
+            return Ok(None);
+        }
+        read_github_token(available)?.map(Some).ok_or_else(|| {
+            NativeV2CliError::Usage("--forward-gh-token requires GH_TOKEN to be set".to_owned())
+        })
+    }
 }
 
 pub(super) fn validate_github_token(value: String) -> Result<String, NativeV2CliError> {
