@@ -224,15 +224,16 @@ test('a terminal settles only the visits it ended, in its own loop iteration', (
   assert.equal(projectHistory(loop, failed, 2, control).nodes.run.state, 'failed');
 });
 
-test('a par branch terminal never settles the par or the groups above it', () => {
-  const items = graph({
+test('par branch terminals settle only their own branch visits, in every round', () => {
+  const rounds = graph({
     name: 'run',
     kind: 'seq',
     children: [
       { name: 'review', kind: 'verifier' },
       {
-        name: 'items',
-        kind: 'map',
+        name: 'rounds',
+        kind: 'loop',
+        maxIterations: 2,
         body: {
           name: 'lanes',
           kind: 'par',
@@ -256,86 +257,86 @@ test('a par branch terminal never settles the par or the groups above it', () =>
       { name: 'done', kind: 'succeed' },
     ],
   });
-  // In both map items, both branches end at terminals: each join is unreachable, so the run
-  // continues to done within the same reduction.
-  const item = (index: number, node: string, state: ControlRecord['state'], extra = {}) =>
-    visit('v2:3', node, state, { visitId: `${node}-${index}`, mapIndices: [index], ...extra });
+  // Both branches end at terminals, so each join is unreachable: both rounds and the run finish in
+  // the reduction after the review.
+  const round = (number: number, node: string, state: ControlRecord['state'], extra = {}) =>
+    visit('v2:3', node, state, { visitId: `${node}-${number}`, ...extra });
   const control = [
     visit('v2:1', 'run', 'entered'),
     visit('v2:3', 'run', 'completed'),
-    visit('v2:3', 'items', 'completed'),
-    ...[0, 1].flatMap((index) => [
-      item(index, 'lanes', 'completed', { detail: 'quorum_unreachable' }),
-      item(index, 'left', 'completed', { branch: 'left_end' }),
-      item(index, 'left_end', 'succeeded', { output: null }),
-      item(index, 'right', 'completed', { branch: 'right_end' }),
-      item(index, 'right_end', 'failed', { detail: 'right_end' }),
+    visit('v2:3', 'rounds', 'completed'),
+    ...[1, 2].flatMap((number) => [
+      round(number, 'lanes', 'completed', { detail: 'quorum_unreachable' }),
+      round(number, 'left', 'completed', { branch: 'left_end' }),
+      round(number, 'left_end', 'succeeded', { output: null }),
+      round(number, 'right', 'completed', { branch: 'right_end' }),
+      round(number, 'right_end', 'failed', { detail: 'right_end' }),
     ]),
     visit('v2:3', 'done', 'succeeded', { output: null }),
   ];
-  const { nodes } = projectHistory(items, events, 2, control);
+  const { nodes, controls } = projectHistory(rounds, events, 2, control);
+  const states = (node: string) =>
+    controls.filter((visit) => visit.node === node).map((visit) => visit.state);
   assert.equal(nodes.run.state, 'succeeded');
-  assert.equal(nodes.items.state, 'recorded');
+  assert.equal(nodes.rounds.state, 'recorded');
   assert.equal(nodes.lanes.state, 'recorded');
-  assert.equal(nodes.left.state, 'succeeded');
-  assert.equal(nodes.right.state, 'failed');
+  assert.deepEqual(states('left'), ['succeeded', 'succeeded']);
+  assert.deepEqual(states('right'), ['failed', 'failed']);
 });
 
-test('a branch terminal never settles a later visit of its branch', () => {
-  const rounds = graph({
+test('a terminal settles only the visits of its own map item', () => {
+  const items = graph({
     name: 'run',
     kind: 'seq',
     children: [
       {
-        name: 'rounds',
-        kind: 'loop',
-        maxIterations: 2,
+        name: 'items',
+        kind: 'map',
         body: {
-          name: 'lanes',
-          kind: 'par',
-          join: { kind: 'all' },
-          branches: [
-            {
-              name: 'left',
-              kind: 'choice',
-              branches: [{ node: fail('left_end'), when: {} }],
-              otherwise: { name: 'left_work', kind: 'step' },
-            },
-            { name: 'right_work', kind: 'step' },
+          name: 'item',
+          kind: 'seq',
+          children: [
+            { name: 'work', kind: 'step' },
+            { name: 'item_done', kind: 'succeed' },
           ],
         },
       },
+      { name: 'empty_done', kind: 'succeed' },
     ],
   });
-  const reference = (node: string, execution: string) => ({
-    node,
-    execution,
-    nodeInstance: execution,
+  const reference = (execution: string) => ({ node: 'work', execution, nodeInstance: execution });
+  const started = (execution: string, item: number) => ({
+    kind: 'node_started',
+    reference: reference(execution),
+    occurrence: { node: 'work', mapIndices: [item] },
   });
-  const outcome = { status: 'verified', output: null };
-  const history: HistoryEvent[] = [
+  const ledger: HistoryEvent['event'][] = [
     { kind: 'run_started' },
-    { kind: 'node_started', reference: reference('right_work', '1') },
-    { kind: 'node_completed', completion: { reference: reference('right_work', '1'), outcome } },
-    { kind: 'node_started', reference: reference('left_work', '2') },
-    { kind: 'node_completed', completion: { reference: reference('left_work', '2'), outcome } },
-  ].map((event, index) => ({ cursor: `v2:${index + 1}`, event }));
-  // Round 1's left branch ends at left_end; round 2's left visit completes later through left_work.
+    started('1', 0),
+    started('2', 1),
+    {
+      kind: 'node_completed',
+      completion: { reference: reference('1'), outcome: { status: 'verified', output: null } },
+    },
+    { kind: 'terminal', result: { status: 'succeeded', output: null } },
+  ];
+  const history = ledger.map((event, index) => ({ cursor: `v2:${index + 1}`, event }));
+  // Item 0 reaches item_done while item 1 still works, so the reducer stops item 1's visit.
   const control = [
     visit('v2:1', 'run', 'entered'),
-    visit('v2:1', 'rounds', 'entered'),
-    visit('v2:1', 'lanes', 'entered', { visitId: 'lanes-1' }),
-    visit('v2:1', 'left', 'completed', { visitId: 'left-1', branch: 'left_end' }),
-    visit('v2:1', 'left_end', 'failed', { detail: 'left_end' }),
-    visit('v2:3', 'lanes', 'completed', { visitId: 'lanes-1', detail: 'quorum_unreachable' }),
-    visit('v2:3', 'lanes', 'entered', { visitId: 'lanes-2' }),
-    visit('v2:3', 'left', 'entered', { visitId: 'left-2', branch: 'left_work' }),
-    visit('v2:5', 'left', 'completed', { visitId: 'left-2', branch: 'left_work' }),
+    visit('v2:1', 'items', 'entered'),
+    visit('v2:1', 'item', 'entered', { visitId: 'item-0', mapIndices: [0] }),
+    visit('v2:1', 'item', 'entered', { visitId: 'item-1', mapIndices: [1] }),
+    visit('v2:4', 'run', 'completed'),
+    visit('v2:4', 'items', 'completed'),
+    visit('v2:4', 'item', 'completed', { visitId: 'item-0', mapIndices: [0] }),
+    visit('v2:4', 'item_done', 'succeeded', { mapIndices: [0], output: null }),
+    visit('v2:4', 'item', 'stopped', { visitId: 'item-1', mapIndices: [1] }),
   ];
-  const final = projectHistory(rounds, history, 4, control);
-  assert.equal(final.nodes.left.state, 'recorded');
+  const final = projectHistory(items, history, 4, control);
+  assert.equal(final.nodes.items.state, 'succeeded');
   assert.deepEqual(
-    final.controls.filter((visit) => visit.node === 'left').map((visit) => visit.state),
-    ['failed', 'completed']
+    final.controls.filter((visit) => visit.node === 'item').map((visit) => visit.state),
+    ['succeeded', 'stopped']
   );
 });

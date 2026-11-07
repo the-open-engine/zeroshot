@@ -31,30 +31,31 @@ export function controlState(state: ControlRecord['state']): WorkflowNodeObserva
 }
 
 /**
- * A seq, choice, loop or map ends in the same reduction as a succeed or fail node it contains, so
- * its visit completes at that terminal's cursor. A par never passes a branch terminal up. Give
- * those enclosing visits the terminal's outcome; every other completed visit stays neutral.
+ * A seq, choice, loop or map ends in the same reduction as a succeed or fail node it contains; a
+ * par never passes a branch terminal up. Give those enclosing visits the terminal's outcome; every
+ * other completed visit stays neutral.
  */
 export function settleControlVisits(
   root: GraphNode,
   visits: readonly ControlVisit[]
 ): ControlVisit[] {
   const outcomes = new Map<ControlVisit, 'succeeded' | 'failed'>();
-  for (const terminal of visits) {
+  for (const [position, terminal] of visits.entries()) {
     if (terminal.state !== 'succeeded' && terminal.state !== 'failed') continue;
     for (const group of pathTo(root, terminal.node).slice(0, -1).reverse()) {
       if (group.kind === 'par') break;
-      // The latest matching visit is the one that holds the terminal, such as its loop iteration.
-      const enclosing = visits
-        .filter(
-          (visit) =>
-            visit.node === group.name &&
-            visit.state === 'completed' &&
-            visit.cursor === terminal.cursor &&
-            visit.mapIndices.every((index, level) => index === terminal.mapIndices[level])
+      // Visits are in entry order, so the group's nearest earlier visit in the terminal's map scope
+      // holds it, even when later loop rounds below a par end in the same reduction.
+      let enclosing: ControlVisit | undefined;
+      for (let index = position - 1; index >= 0 && !enclosing; index--) {
+        const visit = visits[index];
+        if (
+          visit.node === group.name &&
+          visit.mapIndices.every((item, level) => item === terminal.mapIndices[level])
         )
-        .at(-1);
-      if (enclosing && outcomes.get(enclosing) !== 'failed')
+          enclosing = visit;
+      }
+      if (enclosing?.state === 'completed' && outcomes.get(enclosing) !== 'failed')
         outcomes.set(enclosing, terminal.state);
     }
   }
