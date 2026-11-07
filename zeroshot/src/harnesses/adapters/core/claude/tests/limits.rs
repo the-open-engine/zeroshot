@@ -17,8 +17,8 @@ for argument in "$@"; do /usr/bin/printf '%s\n' "$argument" >> initial.args; don
 async fn long_transcript_crossing_all_legacy_parser_caps_completes() {
     const OLD_TRANSCRIPT_BYTES: usize = 8 * 1024 * 1024;
     let workspace = TestDirectory::new("claude-long-transcript");
-    workspace.write(
-        "fake-claude.sh",
+    write_claude_script(
+        &workspace,
         "set -eu\ncat >/dev/null\nexec /bin/cat provider-output.ndjson\n",
     );
     let mut provider_output = String::new();
@@ -78,7 +78,7 @@ async fn long_transcript_crossing_all_legacy_parser_caps_completes() {
 #[tokio::test]
 async fn stdout_is_drained_while_a_multiframe_prompt_is_delivered_in_full() {
     let workspace = TestDirectory::new("claude-large-prompt");
-    workspace.write("fake-claude.sh", LARGE_DUPLEX_SCRIPT);
+    write_claude_script(&workspace, LARGE_DUPLEX_SCRIPT);
     let (runner, binding) = anthropic_runner(
         &workspace,
         "claude-sonnet-5",

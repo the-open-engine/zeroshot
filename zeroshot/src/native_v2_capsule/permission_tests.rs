@@ -272,6 +272,9 @@ assert os.environ['ZEROSHOT_EXECUTION_REF'].startswith('nv2-')
 assert os.environ['ZEROSHOT_NODE_ATTEMPT'] == '2'
 assert os.environ['ZEROSHOT_NODE_ITERATION'] == '3'
 
+if harness == 'claude' and sys.argv[1:] == ['--version']:
+    print('2.1.318 (Claude Code)')
+    sys.exit(0)
 probe = sys.argv[1:2] == ['app-server'] or '--safe-mode' in sys.argv
 if probe:
     pathlib.Path('inspection-proof').write_text('inspected')

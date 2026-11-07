@@ -5,7 +5,7 @@ async fn correction_runner(
     script: &str,
     environment: &[&str],
 ) -> (NativeNodeRunner, NodeRuntimeBinding) {
-    workspace.write("fake-claude.sh", script);
+    write_claude_script(workspace, script);
     let binding = agent_binding(
         "claude-sonnet-5",
         Some(ReasoningEffort::Max),
@@ -99,7 +99,7 @@ printf '%s%s\n' \
 #[tokio::test]
 async fn gateway_correction_keeps_endpoint_and_key_on_resume() {
     let workspace = TestDirectory::new("claude-gateway-correction");
-    workspace.write("fake-claude.sh", SUCCESS_SCRIPT);
+    write_claude_script(&workspace, SUCCESS_SCRIPT);
     let binding = agent_binding(
         "opaque/model",
         None,

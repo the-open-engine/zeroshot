@@ -8,6 +8,8 @@ mod command;
 mod correction;
 #[path = "tests/environment.rs"]
 mod environment;
+#[path = "tests/final_result.rs"]
+mod final_result;
 #[path = "tests/limits.rs"]
 mod limits;
 #[path = "tests/local_identity.rs"]
@@ -502,7 +504,7 @@ async fn two_turn_workspace(
     scope: SessionScope,
 ) -> TestDirectory {
     let workspace = TestDirectory::new(label);
-    workspace.write("fake-claude.sh", SUCCESS_SCRIPT);
+    write_claude_script(&workspace, SUCCESS_SCRIPT);
     let binding = agent_binding(model, Some(effort), scope, &[ANTHROPIC_KEY]);
     let runner = runner(
         &workspace,
@@ -528,6 +530,16 @@ async fn two_turn_workspace(
         .await;
     assert!(homes.lines().all(|home| !Path::new(home).exists()));
     workspace
+}
+
+/// Writes the scripted Claude Code, which answers the adapter's version check as 2.1.318 does.
+fn write_claude_script(workspace: &TestDirectory, script: &str) {
+    workspace.write(
+        "fake-claude.sh",
+        &format!(
+            "if [ \"$*\" = --version ]; then printf '%s\\n' '2.1.318 (Claude Code)'; exit 0; fi\n{script}"
+        ),
+    );
 }
 
 fn assert_resumed_session(arguments: &str) {
@@ -569,11 +581,12 @@ if [ "${CORRECT_OUTPUT-false}" = true ] && [ "$target" = initial ]; then
 else
   result='{\"response\":\"done\"}'
 fi
-printf '%s%s%s%s\n' \
+printf '%s%s%s%s%s\n' \
   '{"type":"result","subtype":"success","is_error":false,"result":"' \
   "$result" \
   '","session_id":"session-1","usage":{"input_tokens":11,"output_tokens":4,' \
-  '"cache_read_input_tokens":6,"cache_creation_input_tokens":2}}'
+  '"cache_read_input_tokens":6,"cache_creation_input_tokens":2},"model_usage_since_last_result":' \
+  '{"model":{"inputTokens":11,"outputTokens":4,"cacheReadInputTokens":6,"cacheCreationInputTokens":2}}}'
 "#;
 
 #[tokio::test]
@@ -634,8 +647,8 @@ async fn execution_scope_never_resumes_a_prior_turn() {
 #[tokio::test]
 async fn verifier_result_is_normalized_to_the_closed_worker_outcome() {
     let workspace = TestDirectory::new("claude-verifier");
-    workspace.write(
-        "fake-claude.sh",
+    write_claude_script(
+        &workspace,
         r#"
 set -eu
 printf '%s\n' "$ZEROSHOT_NODE_KIND" "$ZEROSHOT_NODE_ITERATION" > verifier.context
@@ -696,8 +709,8 @@ printf '%s%s%s%s\n' \
 #[tokio::test]
 async fn cancellation_reaps_the_script_and_its_child_before_completion() {
     let workspace = TestDirectory::new("claude-cancel");
-    workspace.write(
-        "fake-claude.sh",
+    write_claude_script(
+        &workspace,
         r#"
 set -eu
 cat >/dev/null
@@ -720,8 +733,8 @@ wait
 #[tokio::test]
 async fn cancellation_records_text_held_back_before_its_block_ended() {
     let workspace = TestDirectory::new("claude-cancel-pending");
-    workspace.write(
-        "fake-claude.sh",
+    write_claude_script(
+        &workspace,
         r#"
 set -eu
 cat >/dev/null
@@ -758,8 +771,8 @@ async fn dispatch_metadata_reaches_claude_corrections() {
     };
     use crate::native_v2_runner::NodeDispatchMetadata;
     let workspace = TestDirectory::new("claude-dispatch-metadata");
-    workspace.write(
-        "fake-claude.sh",
+    write_claude_script(
+        &workspace,
         &format!("{CAPTURE_EXECUTION_ENVIRONMENT}\n{SUCCESS_SCRIPT}"),
     );
     let binding = agent_binding(

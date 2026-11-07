@@ -706,6 +706,7 @@ async fn hosted_workspace_replacement_signals_runtime_loss() {
 }
 
 const CLAUDE_HOME_SCRIPT: &str = r#"set -eu
+if [ "$0" = --version ]; then printf '%s\n' '2.1.318 (Claude Code)'; exit 0; fi
 cat >/dev/null
 printf '%s' "$HOME" > observed-home
 : > "$HOME/created-by-provider"

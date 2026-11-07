@@ -16,7 +16,7 @@ async fn scripted_failure(
     script: &str,
 ) -> (TestDirectory, ClaudeHandle, DurableOutput) {
     let workspace = TestDirectory::new(label);
-    workspace.write("fake-claude.sh", script);
+    write_claude_script(&workspace, script);
     let binding = agent_binding(
         "claude-sonnet-5",
         Some(ReasoningEffort::Max),
@@ -278,17 +278,18 @@ exit 0
 #[tokio::test]
 async fn preterminal_session_conflict_records_authoritative_result_usage() {
     let workspace = TestDirectory::new("claude-preterminal-session-conflict-usage");
-    workspace.write(
-        "fake-claude.sh",
+    write_claude_script(
+        &workspace,
         r#"
 set -eu
 cat >/dev/null
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"session-one"}'
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"session-two"}'
-printf '%s%s%s\n' \
+printf '%s%s%s%s\n' \
   '{"type":"result","subtype":"success","is_error":false,"session_id":"session-one",' \
   '"structured_output":{"response":"done"},"usage":{"input_tokens":41,"output_tokens":17,' \
-  '"cache_read_input_tokens":11,"cache_creation_input_tokens":7}}'
+  '"cache_read_input_tokens":11,"cache_creation_input_tokens":7},' \
+  '"model_usage_since_last_result":{"model":{"inputTokens":41,"outputTokens":17,"cacheReadInputTokens":11,"cacheCreationInputTokens":7}}}'
 "#,
     );
 
@@ -328,9 +329,9 @@ async fn environment_above_the_old_process_bound_reaches_the_provider() {
         },
     )
     .await;
+    // The version check launches the executable with the turn's environment first.
     assert!(
-        rendered.contains("process I/O failed after launch")
-            || rendered.contains("Claude output ended without a terminal result"),
+        rendered.contains("the executable's --version reported"),
         "unexpected diagnostic: {rendered}"
     );
     assert!(!rendered.contains("invalid process command"));
@@ -341,8 +342,8 @@ async fn environment_above_the_old_process_bound_reaches_the_provider() {
 #[tokio::test]
 async fn early_exit_while_sending_stdin_emits_detail_without_retrying() {
     let workspace = TestDirectory::new("claude-early-stdin-exit");
-    workspace.write(
-        "fake-claude.sh",
+    write_claude_script(
+        &workspace,
         "set -eu\nprintf x >> invocations.txt\nexit 23\n",
     );
     let (rendered, usages) = anthropic_failure_capture(
@@ -361,8 +362,8 @@ async fn early_exit_while_sending_stdin_emits_detail_without_retrying() {
 #[tokio::test]
 async fn cancelled_input_failure_records_one_incomplete_usage_event() {
     let workspace = TestDirectory::new("claude-cancel-input-failure");
-    workspace.write(
-        "fake-claude.sh",
+    write_claude_script(
+        &workspace,
         "set -eu\nexec 0<&-\nprintf '%s\\n' \"$$\" > input-failure.pid\nsleep 30\n",
     );
     let mut handle =
@@ -386,8 +387,8 @@ async fn cancelled_input_failure_records_one_incomplete_usage_event() {
 #[tokio::test]
 async fn changed_session_across_retry_attempts_emits_a_specific_failure() {
     let workspace = TestDirectory::new("claude-changed-retry-session");
-    workspace.write(
-        "fake-claude.sh",
+    write_claude_script(
+        &workspace,
         r#"
 set -eu
 cat >/dev/null
@@ -417,8 +418,8 @@ exit 1
 #[tokio::test]
 async fn correction_requires_a_provider_session_identifier() {
     let workspace = TestDirectory::new("claude-missing-correction-session");
-    workspace.write(
-        "fake-claude.sh",
+    write_claude_script(
+        &workspace,
         concat!(
             "set -eu\ncat >/dev/null\n",
             "printf '%s%s\\n' \\\n",
@@ -437,8 +438,8 @@ async fn correction_requires_a_provider_session_identifier() {
 #[tokio::test]
 async fn reusable_session_requires_a_provider_session_identifier() {
     let workspace = TestDirectory::new("claude-missing-reusable-session");
-    workspace.write(
-        "fake-claude.sh",
+    write_claude_script(
+        &workspace,
         concat!(
             "set -eu\ncat >/dev/null\n",
             "printf '%s%s\\n' \\\n",

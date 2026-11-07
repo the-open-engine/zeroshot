@@ -97,6 +97,10 @@ impl ProvisionalUsage {
         };
     }
 
+    fn is_empty(&self) -> bool {
+        !self.invalid && self.anonymous.is_none() && self.messages.is_empty()
+    }
+
     pub(super) fn total(&self) -> Option<TokenUsageDelta> {
         if self.invalid {
             return None;
@@ -115,94 +119,78 @@ impl ProvisionalUsage {
 
 #[derive(Clone, Copy)]
 pub(super) struct UsageKeys {
-    input: UsageKey,
-    output: UsageKey,
-    cache_read: UsageKey,
-    cache_creation: UsageKey,
-}
-
-#[derive(Clone, Copy)]
-struct UsageKey {
-    primary: &'static str,
-    alternate: Option<&'static str>,
+    input: &'static str,
+    output: &'static str,
+    cache_read: &'static str,
+    cache_creation: &'static str,
 }
 
 impl UsageKeys {
     pub(super) const CLAUDE_STREAM: Self = Self {
-        input: UsageKey::single("input_tokens"),
-        output: UsageKey::single("output_tokens"),
-        cache_read: UsageKey::single("cache_read_input_tokens"),
-        cache_creation: UsageKey::single("cache_creation_input_tokens"),
+        input: "input_tokens",
+        output: "output_tokens",
+        cache_read: "cache_read_input_tokens",
+        cache_creation: "cache_creation_input_tokens",
     };
     const CLAUDE_MODEL: Self = Self {
-        input: UsageKey::aliased("inputTokens", "input_tokens"),
-        output: UsageKey::aliased("outputTokens", "output_tokens"),
-        cache_read: UsageKey::aliased("cacheReadInputTokens", "cache_read_input_tokens"),
-        cache_creation: UsageKey::aliased(
-            "cacheCreationInputTokens",
-            "cache_creation_input_tokens",
-        ),
+        input: "inputTokens",
+        output: "outputTokens",
+        cache_read: "cacheReadInputTokens",
+        cache_creation: "cacheCreationInputTokens",
     };
 }
 
-pub(super) enum TerminalUsage {
-    Empty,
-    Valid(TokenUsageDelta),
-    Malformed,
+/// Usage that Claude Code states on its results in `model_usage_since_last_result`.
+///
+/// The field is keyed like `modelUsage` and states each model call of the process, including
+/// subagent calls, on at most one result, so the stated values sum to the invocation's usage.
+/// `modelUsage` is a session running total that carries earlier processes on `--resume`, and
+/// `usage` covers only the main thread, so neither replaces a missing value. `{}` states
+/// nothing; an absent or malformed value leaves the invocation's usage unknown.
+#[derive(Clone, Copy, Default)]
+pub(super) enum ResultUsage {
+    #[default]
+    Unwritten,
+    Stated(TokenUsageDelta),
+    Unknown,
 }
 
-pub(super) fn parse_terminal_usage(
-    camel_model_usage: Option<&Value>,
-    snake_model_usage: Option<&Value>,
-    usage: Option<&Value>,
-) -> TerminalUsage {
-    let model_usage = match aliased_value(camel_model_usage, snake_model_usage) {
-        Ok(value) => classify_usage(value, parse_model_usage),
-        Err(()) => TerminalUsage::Malformed,
-    };
-    match model_usage {
-        TerminalUsage::Empty => classify_usage(usage, |value| {
-            parse_usage_snapshot(value, UsageKeys::CLAUDE_MODEL)?.complete()
-        }),
-        terminal => terminal,
+impl ResultUsage {
+    pub(super) fn record(&mut self, since_last_result: Option<&Value>) {
+        let total = match *self {
+            Self::Unwritten => Some(nothing_counted()),
+            Self::Stated(total) => Some(total),
+            Self::Unknown => None,
+        };
+        *self = total
+            .and_then(|total| match since_last_result {
+                Some(Value::Object(models)) if models.is_empty() => Some(total),
+                stated => TokenUsageDelta::checked_add(total, parse_model_usage(stated)?),
+            })
+            .map_or(Self::Unknown, Self::Stated);
     }
-}
 
-fn aliased_value<'a>(
-    primary: Option<&'a Value>,
-    alternate: Option<&'a Value>,
-) -> Result<Option<&'a Value>, ()> {
-    match (primary, alternate) {
-        (Some(primary), Some(alternate)) if primary != alternate => Err(()),
-        (Some(value), _) | (None, Some(value)) => Ok(Some(value)),
-        (None, None) => Ok(None),
-    }
-}
-
-fn classify_usage(
-    value: Option<&Value>,
-    parse: impl FnOnce(Option<&Value>) -> Option<TokenUsageDelta>,
-) -> TerminalUsage {
-    match value {
-        None | Some(Value::Null) => TerminalUsage::Empty,
-        Some(Value::Object(object)) if object.is_empty() => TerminalUsage::Empty,
-        value => parse(value).map_or(TerminalUsage::Malformed, TerminalUsage::Valid),
-    }
-}
-
-impl UsageKey {
-    const fn single(primary: &'static str) -> Self {
-        Self {
-            primary,
-            alternate: None,
+    /// Calls after the last result are stated nowhere. Their streamed message usage counts as it
+    /// does for a process that wrote no result.
+    pub(super) fn total(self, since_last_result: &ProvisionalUsage) -> Option<TokenUsageDelta> {
+        let stated = match self {
+            Self::Unwritten => return since_last_result.total(),
+            Self::Stated(total) => total,
+            Self::Unknown => return None,
+        };
+        if since_last_result.is_empty() {
+            return Some(stated);
         }
+        TokenUsageDelta::checked_add(stated, since_last_result.total()?)
     }
+}
 
-    const fn aliased(primary: &'static str, alternate: &'static str) -> Self {
-        Self {
-            primary,
-            alternate: Some(alternate),
-        }
+fn nothing_counted() -> TokenUsageDelta {
+    TokenUsageDelta {
+        input_tokens: TokenCount::default(),
+        output_tokens: TokenCount::default(),
+        cache_read_input_tokens: Some(TokenCount::default()),
+        cache_creation_input_tokens: Some(TokenCount::default()),
     }
 }
 
@@ -220,18 +208,10 @@ pub(super) fn parse_usage_snapshot(
     snapshot.has_value().then_some(snapshot)
 }
 
-fn optional_count(
-    usage: &serde_json::Map<String, Value>,
-    key: UsageKey,
-) -> Option<Option<TokenCount>> {
-    let primary = usage.get(key.primary);
-    let alternate = key.alternate.and_then(|name| usage.get(name));
-    match (primary, alternate) {
-        (Some(primary), Some(alternate)) if primary != alternate => None,
-        (Some(value), _) | (None, Some(value)) => {
-            Some(Some(TokenCount::new(value.as_u64()?).ok()?))
-        }
-        (None, None) => Some(None),
+fn optional_count(usage: &serde_json::Map<String, Value>, key: &str) -> Option<Option<TokenCount>> {
+    match usage.get(key) {
+        Some(value) => Some(Some(TokenCount::new(value.as_u64()?).ok()?)),
+        None => Some(None),
     }
 }
 

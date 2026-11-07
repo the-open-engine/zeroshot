@@ -151,7 +151,7 @@ async fn scripted_provider_commands_are_exact_and_ambient_free() {
         ClaudeProvider::Foundry,
     ] {
         let workspace = TestDirectory::new("claude-command");
-        workspace.write("fake-claude.sh", SUCCESS_SCRIPT);
+        write_claude_script(&workspace, SUCCESS_SCRIPT);
         let ProviderFixture {
             model,
             provider_value,
@@ -247,7 +247,7 @@ fn arguments_leave_permission_policy_to_the_adapter() {
 #[tokio::test]
 async fn native_tool_selection_survives_correction_and_reused_session() {
     let workspace = TestDirectory::new("claude-native-config");
-    workspace.write("fake-claude.sh", SUCCESS_SCRIPT);
+    write_claude_script(&workspace, SUCCESS_SCRIPT);
     let mut binding = agent_binding(
         "opaque",
         None,
@@ -325,7 +325,7 @@ async fn native_tool_selection_survives_correction_and_reused_session() {
 #[tokio::test]
 async fn native_tools_compose_with_foundry_on_correction_and_revisit() {
     let workspace = TestDirectory::new("claude-foundry-native-config");
-    workspace.write("fake-claude.sh", SUCCESS_SCRIPT);
+    write_claude_script(&workspace, SUCCESS_SCRIPT);
     let fixture = provider_fixture(ClaudeProvider::Foundry);
     let mut environment = fixture.environment;
     environment.push("CORRECT_OUTPUT");
@@ -361,7 +361,10 @@ async fn native_tools_compose_with_foundry_on_correction_and_revisit() {
 #[tokio::test]
 async fn native_configuration_rejection_fails_once_with_node_and_cause() {
     let workspace = TestDirectory::new("claude-native-rejection");
-    workspace.write("fake-claude.sh", "printf 'launch\\n' >> launches\nprintf '%s\\n' 'error: invalid --tools native-selection' >&2\nexit 2\n");
+    write_claude_script(
+        &workspace,
+        "printf 'launch\\n' >> launches\nprintf '%s\\n' 'error: invalid --tools native-selection' >&2\nexit 2\n",
+    );
     let mut binding = agent_binding("opaque", None, SessionScope::Execution, &[ANTHROPIC_KEY]);
     crate::harnesses::native_config::tests::set(
         &mut binding,
