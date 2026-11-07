@@ -610,6 +610,53 @@ def test_hosted_stack_watch_propagates_unexpected_failure_after_success(
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize(
+    ("failure", "phases", "status_reads"),
+    [("terminal", ["running", "finished"], 0), ("early", ["running"], 1)],
+)
+def test_run_watch_ends_normally_when_the_cli_reports_a_failed_run(
+    fake_native: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+    phases: list[str],
+    status_reads: int,
+) -> None:
+    monkeypatch.setenv("FAKE_WATCH_FAILURE", failure)
+
+    async def exercise() -> None:
+        async with Client() as client:
+            run = client.get_run("01900000-0000-7000-8000-000000000001")
+            statuses = [status async for status in run.watch()]
+            assert [status.phase for status in statuses] == phases
+            if failure == "terminal":
+                assert statuses[-1].result is not None
+                assert statuses[-1].result.failure == "worker_failed"
+
+    asyncio.run(exercise())
+    # A delivered failed result needs no status read, which could otherwise fail the watch.
+    arguments = [item["args"] for item in read_invocations(fake_native)]
+    assert sum(args[0] == "status" for args in arguments) == status_reads
+
+
+def test_run_watch_propagates_cli_failure_while_the_run_is_unfinished(
+    fake_native: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FAKE_WATCH_FAILURE", "outage")
+
+    async def exercise() -> None:
+        observed = []
+        async with Client() as client:
+            run = client.get_run("01900000-0000-7000-8000-000000000001")
+            with pytest.raises(TargetError, match="cannot reach target") as caught:
+                async for status in run.watch():
+                    observed.append(status.phase)
+        assert caught.value.exit_code == 1
+        assert observed == ["running"]
+
+    asyncio.run(exercise())
+
+
 def test_stack_requires_a_hosted_target(fake_native: Path) -> None:
     request = StackRequest(
         title="Release",
