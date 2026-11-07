@@ -566,6 +566,28 @@ impl NativeV2PlatformController {
         })
     }
 
+    /// Waits until the run's live runtime, if any, has settled its observed outcome, including
+    /// the terminal append attempt that follows a published runtime failure. A preparation hands
+    /// off to its engine before it finishes, so the engine that replaced it is awaited too.
+    pub(crate) async fn wait_runtime_settled(&self, run_id: &RunId) {
+        loop {
+            // Read the slot and its preparation state under one lock: a finished preparation
+            // still in its slot can no longer install an engine.
+            let runtime = match self.runtimes.lock().await.get(run_id) {
+                Some(RuntimeSlot::Preparing(task)) if task.is_finished() => None,
+                runtime => runtime.cloned(),
+            };
+            match runtime {
+                Some(RuntimeSlot::Preparing(task)) => task.wait().await,
+                Some(RuntimeSlot::Running(engine)) => {
+                    engine.wait_removable().await;
+                    return;
+                }
+                None => return,
+            }
+        }
+    }
+
     fn remove_finished_runtime(&self, run_id: RunId, engine: Arc<PortableRunEngine>) {
         let runtimes = self.runtimes.clone();
         tokio::spawn(async move {
