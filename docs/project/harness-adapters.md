@@ -15,6 +15,10 @@ Official local builds include every adapter below. Install each native CLI separ
 | `opencode` | `openai`, `anthropic`, `openrouter`, `bedrock`, `gateway`, `github` | Contributed  |
 | `hermes`   | `openai`, `anthropic`, `openrouter`, `gateway`, `github`, `bedrock` | Contributed  |
 
+The `claude` adapter requires Claude Code 2.1.310 or newer. Before its first model turn it runs the
+selected executable with `--version` and fails the node, naming the reported version, when that
+release is older or the output can't be read.
+
 Local builds enable `contributed-harnesses` by default. Platform and the default target image disable
 default features and independently admit only the core registry. Targets advertise enabled pairs
 through `openengine.runtime-harnesses/v1`; installing a CLI doesn't enable its adapter. Contributed

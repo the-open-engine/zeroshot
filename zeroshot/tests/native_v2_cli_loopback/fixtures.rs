@@ -382,7 +382,7 @@ pub(crate) fn live_hosting_config(root: &TempRoot, lane: LiveLane) -> Production
                 .unwrap_or_else(|_| "/usr/bin/npx".to_owned()),
             vec![
                 "-y".to_owned(),
-                "@anthropic-ai/claude-code@2.1.276".to_owned(),
+                "@anthropic-ai/claude-code@2.1.310".to_owned(),
             ],
         )
     };

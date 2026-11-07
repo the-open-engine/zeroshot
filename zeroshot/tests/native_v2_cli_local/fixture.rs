@@ -644,7 +644,8 @@ fn claude_configuration_probe(response: &ProbeResponse) -> String {
     }});
     let initialize = shell_literal(&initialize.to_string());
     format!(
-        r#"for argument in "$@"; do
+        r#"if test "$*" = --version; then printf '%s\n' '2.1.318 (Claude Code)'; exit 0; fi
+for argument in "$@"; do
   if test "$argument" = --safe-mode; then
     while IFS= read -r request; do
       case "$request" in

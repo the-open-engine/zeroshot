@@ -45,7 +45,7 @@ printf '%s%s\n' \
 "#;
 
 async fn retry_runner(workspace: &TestDirectory) -> (NativeNodeRunner, NodeRuntimeBinding) {
-    workspace.write("fake-claude.sh", RETRY_SCRIPT);
+    write_claude_script(workspace, RETRY_SCRIPT);
     let binding = agent_binding(
         "claude-sonnet-5",
         Some(ReasoningEffort::Max),

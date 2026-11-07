@@ -5,11 +5,12 @@ const LARGE_INPUT_BYTES: usize = 9 * 1024 * 1024;
 const INPUT_FAILURE_FIRST: &str = r#"
 set -eu
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"duplex-session"}'
-printf '%s%s%s%s\n' \
+printf '%s%s%s%s%s\n' \
   '{"type":"result","subtype":"success","is_error":false,' \
   '"session_id":"duplex-session","structured_output":{"response":"ignored"},' \
   '"usage":{"input_tokens":23,"output_tokens":9,' \
-  '"cache_read_input_tokens":17,"cache_creation_input_tokens":5}}'
+  '"cache_read_input_tokens":17,"cache_creation_input_tokens":5},' \
+  '"model_usage_since_last_result":{"model":{"inputTokens":23,"outputTokens":9,"cacheReadInputTokens":17,"cacheCreationInputTokens":5}}}'
 exec 0<&-
 /usr/bin/sleep 30
 "#;
@@ -20,11 +21,12 @@ if [ ! -e duplex.state ]; then
   : > duplex.state
   printf '%s\n' '{"type":"system","subtype":"init","session_id":"duplex-session"}'
   printf '%s\n' '{"type":"system","subtype":"api_retry","attempt":1,"max_retries":3,"error":"overloaded"}'
-  printf '%s%s%s%s\n' \
+  printf '%s%s%s%s%s\n' \
     '{"type":"result","subtype":"success","is_error":false,' \
     '"session_id":"duplex-session","structured_output":{"response":"ignored"},' \
     '"usage":{"input_tokens":23,"output_tokens":9,' \
-    '"cache_read_input_tokens":17,"cache_creation_input_tokens":5}}'
+    '"cache_read_input_tokens":17,"cache_creation_input_tokens":5},' \
+    '"model_usage_since_last_result":{"model":{"inputTokens":23,"outputTokens":9,"cacheReadInputTokens":17,"cacheCreationInputTokens":5}}}'
   exec 1>&-
   /usr/bin/sleep 1
   exec 0<&-
@@ -41,7 +43,7 @@ printf '%s%s\n' \
 #[tokio::test]
 async fn input_failure_wins_while_the_unfinished_transcript_is_drained() {
     let workspace = TestDirectory::new("claude-duplex-input-first");
-    workspace.write("fake-claude.sh", INPUT_FAILURE_FIRST);
+    write_claude_script(&workspace, INPUT_FAILURE_FIRST);
     let (logs, usages) = anthropic_failure_capture(
         &workspace,
         SessionScope::Execution,
@@ -57,7 +59,7 @@ async fn input_failure_wins_while_the_unfinished_transcript_is_drained() {
 #[tokio::test]
 async fn completed_output_cannot_mask_input_failure_and_retry_metadata() {
     let workspace = TestDirectory::new("claude-duplex-output-first");
-    workspace.write("fake-claude.sh", OUTPUT_FAILURE_FIRST);
+    write_claude_script(&workspace, OUTPUT_FAILURE_FIRST);
     let handle = start_anthropic_input(&workspace, json!("x".repeat(LARGE_INPUT_BYTES))).await;
     let (captured, completion) = complete_with_durable(handle).await;
 

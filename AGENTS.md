@@ -603,6 +603,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Provider JSONL readers do not cap cumulative output. They share only the 64 MiB unfinished-record
   guard, accept a complete final record without a newline, ignore unknown future event types before
   validating provider-owned fields, and continue draining after the first valid terminal event.
+- Claude requires Claude Code 2.1.310 or newer, with no upper bound. Before an adapter's first model
+  turn it runs the selected executable with `--version` through that turn's launch path and
+  environment. One `--print` process can write several results while background subagents or
+  shells finish, so Claude parses every record through stdout EOF and the last result decides the
+  attempt: a later error fails it, missing final structured output uses the bounded correction, and
+  `subagent_stats.killed.system` above zero (subagents Claude Code stopped itself) fails it. Usage
+  is the sum of each result's `model_usage_since_last_result` plus streamed message usage after the
+  last result; an absent or malformed value leaves it unknown. Session-total `modelUsage` and
+  main-thread `usage` never stand in.
 - Provider stdin and stdout are concurrent and bounded so large prompts and early output cannot
   deadlock. Incomplete stdin is fatal, while parsed identity, usage, retry, and diagnostics survive
   either I/O completion order.

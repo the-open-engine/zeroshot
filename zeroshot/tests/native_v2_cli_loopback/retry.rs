@@ -304,7 +304,8 @@ fi
 
 const CLAUDE_RETRY_SCRIPT: &str = r#"#!/bin/sh
 set -eu
-# Keep configuration requests outside the model continuation counter.
+# Keep the version check and configuration requests outside the model continuation counter.
+if [ "$*" = --version ]; then /usr/bin/printf '%s\n' '2.1.318 (Claude Code)'; exit 0; fi
 for arg in "$@"; do if [ "$arg" = --safe-mode ]; then exit 1; fi; done
 attempt=1
 if [ -e attempt.state ]; then attempt=$(( $(/usr/bin/cat attempt.state) + 1 )); fi

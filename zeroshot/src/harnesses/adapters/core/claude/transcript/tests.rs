@@ -22,6 +22,16 @@ fn append_event(bytes: &mut Vec<u8>, event: Value) {
     bytes.push(b'\n');
 }
 
+/// Usage that one result states for the calls since the previous result.
+fn since_last_result(input: u64, output: u64) -> Value {
+    json!({"model":{
+        "inputTokens":input,
+        "outputTokens":output,
+        "cacheReadInputTokens":6,
+        "cacheCreationInputTokens":2
+    }})
+}
+
 fn success(response: Value, session: &str) -> Value {
     json!({
         "type":"result",
@@ -34,7 +44,8 @@ fn success(response: Value, session: &str) -> Value {
             "output_tokens":4,
             "cache_read_input_tokens":6,
             "cache_creation_input_tokens":2
-        }
+        },
+        "model_usage_since_last_result":since_last_result(11, 4)
     })
 }
 
@@ -473,7 +484,7 @@ fn truncated_preterminal_record_has_an_actionable_failure() {
 }
 
 #[test]
-fn first_terminal_result_seals_and_ignores_all_trailing_output() {
+fn every_record_is_read_and_the_last_result_is_authoritative() {
     let mut bytes = Vec::new();
     append_event(&mut bytes, success(json!("first"), "session-1"));
     append_event(
@@ -486,26 +497,71 @@ fn first_terminal_result_seals_and_ignores_all_trailing_output() {
             "error":"late"
         }),
     );
-    append_event(&mut bytes, failure("late failure", "different-session"));
+    let mut late = success(json!("last"), "session-1");
+    late["model_usage_since_last_result"] = since_last_result(7, 3);
+    append_event(&mut bytes, late);
     bytes.extend_from_slice(b"not-json\nunterminated");
 
-    let decoded = decode(&bytes, bytes.len(), None);
-    assert_eq!(completed_response(decoded.attempt), json!("first"));
-    assert!(decoded.emissions.is_empty());
+    let decoded = decode(&bytes, 7, None);
+    assert_eq!(completed_response(decoded.attempt), json!("last"));
+    assert_eq!(
+        emitted(&decoded.emissions),
+        [(LiveOutputStream::System, "Claude API retry 1/3: late")]
+    );
     let usage = decoded.usage.assert_value();
     assert_eq!(
         [usage.input_tokens.get(), usage.output_tokens.get()],
-        [11, 4]
+        [18, 7]
     );
 
-    let mut failure_first = Vec::new();
+    let mut later_failure = Vec::new();
+    append_event(&mut later_failure, success(json!("early"), "session-1"));
     append_event(
-        &mut failure_first,
+        &mut later_failure,
         failure("authoritative failure", "session-1"),
     );
-    append_event(&mut failure_first, success(json!("ignored"), "session-1"));
-    let failure = failed_attempt(decode(&failure_first, failure_first.len(), None).attempt);
-    assert_eq!(failure.diagnostic, "authoritative failure");
+    let decoded = decode(&later_failure, later_failure.len(), None);
+    assert_eq!(
+        failed_attempt(decoded.attempt).diagnostic,
+        "authoritative failure"
+    );
+    // An error result without per-result usage leaves the invocation's usage unknown.
+    assert!(decoded.usage.is_none());
+
+    let mut later_success = Vec::new();
+    append_event(&mut later_success, failure("early failure", "session-1"));
+    append_event(&mut later_success, success(json!("final"), "session-1"));
+    let decoded = decode(&later_success, later_success.len(), None);
+    assert_eq!(completed_response(decoded.attempt), json!("final"));
+}
+
+#[test]
+fn subagents_claude_code_stopped_fail_the_result_they_were_missing_from() {
+    let mut bytes = Vec::new();
+    let mut held = success(json!("early"), "session-1");
+    held["subagent_stats"] =
+        json!({"spawned":2,"completed":1,"killed":{"parent":0,"user":0,"system":1}});
+    append_event(&mut bytes, held);
+
+    let failure = failed_attempt(decode(&bytes, 13, None).attempt);
+    assert!(!failure.retryable);
+    assert_eq!(
+        failure.diagnostic,
+        concat!(
+            "Claude Code stopped unfinished subagents itself (subagent_stats.killed.system = 1); ",
+            "the final result does not include their work"
+        )
+    );
+
+    let mut finished = Vec::new();
+    let mut stopped_by_agent = success(json!("done"), "session-1");
+    stopped_by_agent["subagent_stats"] =
+        json!({"spawned":2,"completed":1,"killed":{"parent":1,"user":0,"system":0}});
+    append_event(&mut finished, stopped_by_agent);
+    assert_eq!(
+        completed_response(decode(&finished, 13, None).attempt),
+        json!("done")
+    );
 }
 
 #[test]
@@ -520,7 +576,8 @@ fn preterminal_session_change_waits_for_result_and_preserves_terminal_usage() {
             "is_error":false,
             "session_id":"session-1",
             "result":"trailing",
-            "usage":{"input_tokens":999,"output_tokens":999}
+            "usage":{"input_tokens":999,"output_tokens":999},
+            "model_usage_since_last_result":since_last_result(7, 3)
         }),
     );
 
@@ -528,7 +585,7 @@ fn preterminal_session_change_waits_for_result_and_preserves_terminal_usage() {
     let failure = assert_failed_with_usage(
         decoded,
         "Claude output changed session identifier during one turn",
-        [11, 4],
+        [18, 7],
     );
     assert!(!failure.retryable);
     assert_eq!(failure.session_id.as_deref(), Some("session-1"));
@@ -556,10 +613,7 @@ fn session_change_on_the_result_still_records_its_usage() {
 fn session_change_preserves_later_terminal_failure_detail_and_usage() {
     let mut bytes = session_change_prefix();
     let mut terminal = failure("provider terminal detail", "session-1");
-    terminal.as_object_mut().assert_value().insert(
-        "usage".to_owned(),
-        json!({"input_tokens":29,"output_tokens":13}),
-    );
+    terminal["model_usage_since_last_result"] = since_last_result(29, 13);
     append_event(&mut bytes, terminal);
 
     let decoded = decode(&bytes, 9, None);
