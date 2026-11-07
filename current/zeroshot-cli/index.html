@@ -4409,6 +4409,12 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-45-190" name="__codelineno-45-190" href="#__codelineno-45-190"></a>
 <a id="__codelineno-45-191" name="__codelineno-45-191" href="#__codelineno-45-191"></a>    Installation, services, limits, and recovery:
 <a id="__codelineno-45-192" name="__codelineno-45-192" href="#__codelineno-45-192"></a>    https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/
+<a id="__codelineno-45-193" name="__codelineno-45-193" href="#__codelineno-45-193"></a>
+<a id="__codelineno-45-194" name="__codelineno-45-194" href="#__codelineno-45-194"></a>EXIT STATUS
+<a id="__codelineno-45-195" name="__codelineno-45-195" href="#__codelineno-45-195"></a>    0  The run succeeded, --detach or Ctrl-C returned before it finished, or --validate-only
+<a id="__codelineno-45-196" name="__codelineno-45-196" href="#__codelineno-45-196"></a>       accepted it.
+<a id="__codelineno-45-197" name="__codelineno-45-197" href="#__codelineno-45-197"></a>    1  The run finished failed, or the command failed. A failed run's summary is printed on
+<a id="__codelineno-45-198" name="__codelineno-45-198" href="#__codelineno-45-198"></a>       stderr. `zeroshot watch RUN_ID` waits for a detached run and exits the same way.
 </code></pre></div>
 <h3 id="zeroshot-update"><code>zeroshot update</code><a class="headerlink" href="#zeroshot-update" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-46-1" name="__codelineno-46-1" href="#__codelineno-46-1"></a>Update this executable and managed agent skills to the newest canonical release.
@@ -4466,7 +4472,12 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-49-14" name="__codelineno-49-14" href="#__codelineno-49-14"></a>          Resume strictly after this durable cursor
 <a id="__codelineno-49-15" name="__codelineno-49-15" href="#__codelineno-49-15"></a>
 <a id="__codelineno-49-16" name="__codelineno-49-16" href="#__codelineno-49-16"></a>  -h, --help
-<a id="__codelineno-49-17" name="__codelineno-49-17" href="#__codelineno-49-17"></a>          Print help
+<a id="__codelineno-49-17" name="__codelineno-49-17" href="#__codelineno-49-17"></a>          Print help (see a summary with '-h')
+<a id="__codelineno-49-18" name="__codelineno-49-18" href="#__codelineno-49-18"></a>
+<a id="__codelineno-49-19" name="__codelineno-49-19" href="#__codelineno-49-19"></a>EXIT STATUS
+<a id="__codelineno-49-20" name="__codelineno-49-20" href="#__codelineno-49-20"></a>  0  The run succeeded, or Ctrl-C detached before it finished.
+<a id="__codelineno-49-21" name="__codelineno-49-21" href="#__codelineno-49-21"></a>  1  The run finished failed, or observation failed. A failed run prints the same failure summary
+<a id="__codelineno-49-22" name="__codelineno-49-22" href="#__codelineno-49-22"></a>     on stderr as a foreground `zeroshot run`, also when --after starts past its terminal event.
 </code></pre></div>
 <h3 id="zeroshot-logs"><code>zeroshot logs</code><a class="headerlink" href="#zeroshot-logs" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-50-1" name="__codelineno-50-1" href="#__codelineno-50-1"></a>Follow a run's log stream as NDJSON
@@ -4488,7 +4499,13 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
 <a id="__codelineno-50-17" name="__codelineno-50-17" href="#__codelineno-50-17"></a>          Return records only for this opaque execution selector
 <a id="__codelineno-50-18" name="__codelineno-50-18" href="#__codelineno-50-18"></a>
 <a id="__codelineno-50-19" name="__codelineno-50-19" href="#__codelineno-50-19"></a>  -h, --help
-<a id="__codelineno-50-20" name="__codelineno-50-20" href="#__codelineno-50-20"></a>          Print help
+<a id="__codelineno-50-20" name="__codelineno-50-20" href="#__codelineno-50-20"></a>          Print help (see a summary with '-h')
+<a id="__codelineno-50-21" name="__codelineno-50-21" href="#__codelineno-50-21"></a>
+<a id="__codelineno-50-22" name="__codelineno-50-22" href="#__codelineno-50-22"></a>EXIT STATUS
+<a id="__codelineno-50-23" name="__codelineno-50-23" href="#__codelineno-50-23"></a>  0  The log stream ended or Ctrl-C detached, whatever the run's result. Read the result with
+<a id="__codelineno-50-24" name="__codelineno-50-24" href="#__codelineno-50-24"></a>     `zeroshot watch` or `zeroshot status`.
+<a id="__codelineno-50-25" name="__codelineno-50-25" href="#__codelineno-50-25"></a>  1  The command failed, for example because the run was not found or its logs could not be
+<a id="__codelineno-50-26" name="__codelineno-50-26" href="#__codelineno-50-26"></a>     read.
 </code></pre></div>
 <h3 id="zeroshot-attach"><code>zeroshot attach</code><a class="headerlink" href="#zeroshot-attach" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-51-1" name="__codelineno-51-1" href="#__codelineno-51-1"></a>Attach to an execution's interactive event stream as NDJSON
@@ -4646,7 +4663,7 @@ Regenerate it with <code>cargo run -p zeroshot --example generate_cli_docs -- --
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-05">5 November 2026</time>
+    Last updated <time datetime="2026-11-07">7 November 2026</time>
   </span>
 
     

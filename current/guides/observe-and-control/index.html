@@ -2094,6 +2094,11 @@ an opaque cursor and resume strictly after it:</p>
 </code></pre></div>
 <p>Cursors are opaque, so store the last fully consumed value and pass it back unchanged.
 <code>logs --execution EXECUTION_REF</code> restricts output to one execution selector from status.</p>
+<p><code>watch</code> exits 0 when the run succeeded. When the run finished failed, it prints the same failure
+summary on stderr as a failed foreground <code>run</code> and exits 1, so a script can start a run with
+<code>--detach</code> and wait for its result with <code>zeroshot watch RUN_ID</code>. <code>logs</code> exits 0 when its stream
+ends, whatever the run's result. The <a href="../../zeroshot-cli/">CLI reference</a> lists the exit status of
+<code>run</code>, <code>watch</code> and <code>logs</code>.</p>
 <p>The producer records each log timestamp as a positive JavaScript-safe Unix epoch millisecond, and
 durable replay preserves it.</p>
 <h2 id="attach-to-an-active-execution">Attach to an active execution<a class="headerlink" href="#attach-to-an-active-execution" title="Permanent link">&para;</a></h2>
@@ -2157,7 +2162,7 @@ status first if another operator may already have stopped the run, or if it may 
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-02">2 November 2026</time>
+    Last updated <time datetime="2026-11-07">7 November 2026</time>
   </span>
 
     

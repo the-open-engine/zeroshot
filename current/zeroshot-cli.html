@@ -1153,7 +1153,13 @@ ENVIRONMENT PREPARATION
     reject hooks and hook connections.
 
     Installation, services, limits, and recovery:
-    https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/</code></pre></section>
+    https://the-open-engine.github.io/zeroshot/current/guides/runtime-environments/
+
+EXIT STATUS
+    0  The run succeeded, --detach or Ctrl-C returned before it finished, or --validate-only
+       accepted it.
+    1  The run finished failed, or the command failed. A failed run&#39;s summary is printed on
+       stderr. `zeroshot watch RUN_ID` waits for a detached run and exits the same way.</code></pre></section>
 <section id="zeroshot-update"><h3><code>zeroshot update</code></h3>
 <pre><code>Update this executable and managed agent skills to the newest canonical release.
 
@@ -1207,7 +1213,12 @@ Options:
           Resume strictly after this durable cursor
 
   -h, --help
-          Print help</code></pre></section>
+          Print help (see a summary with &#39;-h&#39;)
+
+EXIT STATUS
+  0  The run succeeded, or Ctrl-C detached before it finished.
+  1  The run finished failed, or observation failed. A failed run prints the same failure summary
+     on stderr as a foreground `zeroshot run`, also when --after starts past its terminal event.</code></pre></section>
 <section id="zeroshot-logs"><h3><code>zeroshot logs</code></h3>
 <pre><code>Follow a run&#39;s log stream as NDJSON
 
@@ -1228,7 +1239,13 @@ Options:
           Return records only for this opaque execution selector
 
   -h, --help
-          Print help</code></pre></section>
+          Print help (see a summary with &#39;-h&#39;)
+
+EXIT STATUS
+  0  The log stream ended or Ctrl-C detached, whatever the run&#39;s result. Read the result with
+     `zeroshot watch` or `zeroshot status`.
+  1  The command failed, for example because the run was not found or its logs could not be
+     read.</code></pre></section>
 <section id="zeroshot-attach"><h3><code>zeroshot attach</code></h3>
 <pre><code>Attach to an execution&#39;s interactive event stream as NDJSON
 
