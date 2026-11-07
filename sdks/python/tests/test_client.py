@@ -611,14 +611,15 @@ def test_hosted_stack_watch_propagates_unexpected_failure_after_success(
 
 
 @pytest.mark.parametrize(
-    ("failure", "phases"),
-    [("terminal", ["running", "finished"]), ("early", ["running"])],
+    ("failure", "phases", "status_reads"),
+    [("terminal", ["running", "finished"], 0), ("early", ["running"], 1)],
 )
 def test_run_watch_ends_normally_when_the_cli_reports_a_failed_run(
     fake_native: Path,
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
     phases: list[str],
+    status_reads: int,
 ) -> None:
     monkeypatch.setenv("FAKE_WATCH_FAILURE", failure)
 
@@ -632,6 +633,9 @@ def test_run_watch_ends_normally_when_the_cli_reports_a_failed_run(
                 assert statuses[-1].result.failure == "worker_failed"
 
     asyncio.run(exercise())
+    # A delivered failed result needs no status read, which could otherwise fail the watch.
+    arguments = [item["args"] for item in read_invocations(fake_native)]
+    assert sum(args[0] == "status" for args in arguments) == status_reads
 
 
 def test_run_watch_propagates_cli_failure_while_the_run_is_unfinished(

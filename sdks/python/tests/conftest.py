@@ -144,7 +144,7 @@ elif args and args[0] == "list":
         )
     print(json.dumps({"runs": runs}))
 elif args and args[0] == "status":
-    if os.environ.get("FAKE_WATCH_FAILURE") in ("terminal", "early"):
+    if os.environ.get("FAKE_WATCH_FAILURE") == "early":
         print(json.dumps(projection(args[1], failed_status, "v2:2")))
     else:
         print(json.dumps(projection(args[1], {"phase": "admitted"}, "v2:0")))
