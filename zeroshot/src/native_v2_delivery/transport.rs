@@ -59,6 +59,7 @@ pub struct GitTransport {
     config: Arc<GitTransportConfig>,
     remote: OsString,
     commit_identity: Option<openengine_cluster_protocol::CommitIdentity>,
+    commit_co_author: Option<openengine_cluster_protocol::CommitIdentity>,
     checkout_references: Vec<String>,
     diagnostics: Option<(
         openengine_cluster_protocol::RunId,
@@ -78,6 +79,7 @@ impl GitTransport {
             config: Arc::new(config),
             remote: remote.as_ref().to_owned(),
             commit_identity: None,
+            commit_co_author: None,
             checkout_references: Vec::new(),
             diagnostics: None,
         }
@@ -95,6 +97,16 @@ impl GitTransport {
 
     pub(crate) fn commit_identity(&self) -> Option<&openengine_cluster_protocol::CommitIdentity> {
         self.commit_identity.as_ref()
+    }
+
+    /// Credits `co_author` on every revision this transport's workspace Git prepares.
+    #[must_use]
+    pub(crate) fn with_commit_co_author(
+        mut self,
+        co_author: Option<openengine_cluster_protocol::CommitIdentity>,
+    ) -> Self {
+        self.commit_co_author = co_author;
+        self
     }
 
     #[must_use]
@@ -419,6 +431,7 @@ impl GitTransport {
             .with_identity(self.config.identity)
             .with_local_environment(self.config.local_environment.clone())
             .with_commit_identity(self.commit_identity.clone())
+            .with_commit_co_author(self.commit_co_author.clone())
     }
 
     pub(crate) fn command(&self, workspace: &Path) -> Command {

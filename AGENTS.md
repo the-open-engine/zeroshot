@@ -762,6 +762,21 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `NativeV2CandidateDelivery::new` derives the shared transport's identity from the delivery
   config. Local runs keep the default and reject a resume identity. It travels with ephemeral
   source credentials, never run state or agent configuration; hosts decide which forges get one.
+- An optional `commitCoAuthor` on the same requests is one more `CommitIdentity`, credited and
+  never authoring, and resupplied for each successor. `SystemGit::prepare_revision`, where delivery
+  commits the run's changes, credits it in that same single `git commit`, using
+  `--cleanup=whitespace` and `--trailer "zeroshot-co-author: Name <email>"`, so a failed or
+  interrupted commit never leaves those changes committed without the credit. The alias's key
+  (`Co-authored-by`), placement, `ifexists=addIfDifferent`, `ifmissing` and separator are pinned
+  with `-c`, as is the `Co-authored-by` key itself, so Git ends the trailer block with the credit
+  once whatever the workspace's trailer settings. A message the pinned cleanup empties (only blank
+  or `Signed-off-by: ` lines) gets no trailer, so Git refuses it instead of committing the credit
+  as the whole message; without a co-author the commit command is unchanged. A conflicted merge
+  that `prepare_revision` concludes after repair carries the run's resolution and is credited;
+  merges Git completes itself (reconcile `merge --no-edit`, target integration) and the identity
+  pinned for conflict repair never name it. It flows beside `commitIdentity` from source
+  credentials to `NativeV2DeliveryConfig`, the shared transport, and workspace Git. Local resume
+  rejects it, and requests without it are byte-identical.
 - Delivery clears the environment of its Git and GitHub CLI processes, so local composition pins
   delivery Git and, when the GitHub adapter is selected, `gh` to the files `find_executable` finds
   on the captured search path. Local `run`/`resume` reject a missing one as a usage error with the

@@ -137,6 +137,7 @@ fn run_environment_is_exact_and_request_debug_is_redacted() {
         git_credentials: None,
         github_token: Some("github-secret".to_owned()),
         commit_identity: None,
+        commit_co_author: None,
     };
     let debug = format!("{request:?}");
     assert!(debug.contains("OPENAI_API_KEY"));
@@ -506,6 +507,7 @@ async fn invalid_submission_fails_before_run_allocation() {
                 git_credentials: None,
                 github_token: None,
                 commit_identity: None,
+                commit_co_author: None,
             },
         )
         .await
@@ -548,6 +550,7 @@ async fn invalid_run_environment_fails_before_allocation() {
                 git_credentials: None,
                 github_token: None,
                 commit_identity: None,
+                commit_co_author: None,
             },
         )
         .await

@@ -208,6 +208,7 @@ fn probe(outage: Outage) -> (Arc<SyncProbe>, Arc<OutageAuthority>, Arc<TimedRefr
             adopt_existing_delivery: false,
             git_identity: None,
             commit_identity: None,
+            commit_co_author: None,
             workspace: std::env::temp_dir(),
             git_program: PathBuf::from("unused-git"),
             target: request.target.clone(),

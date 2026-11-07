@@ -43,7 +43,8 @@ impl NativeV2DeliveryAdapter {
     ) -> Self {
         let git = SystemGit::new(config.git_program.clone())
             .with_identity(config.git_identity)
-            .with_commit_identity(config.commit_identity.clone());
+            .with_commit_identity(config.commit_identity.clone())
+            .with_commit_co_author(config.commit_co_author.clone());
         Self {
             config: Arc::new(config),
             authority,

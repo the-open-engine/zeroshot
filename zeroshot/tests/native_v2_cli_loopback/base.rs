@@ -264,11 +264,12 @@ pub(crate) async fn submit_test_run(
         github_token,
         git_credentials,
         commit_identity,
+        commit_co_author,
     } = request;
     assert!(git_credentials.is_none(), "legacy GitHub loopback fixture");
     assert!(
-        commit_identity.is_none(),
-        "CLI runs keep the default commit identity"
+        commit_identity.is_none() && commit_co_author.is_none(),
+        "CLI runs keep the default commit identity without a co-author"
     );
     let exact_environment = RunEnvironment::exact(
         &submission.runtime,

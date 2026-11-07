@@ -431,6 +431,7 @@ where
                 connection_resolver: None,
                 github_token: request.github_token,
                 commit_identity: None,
+                commit_co_author: None,
                 git_credentials: request.git_credentials,
             };
             self.submit_with_replays(&target, &request.submission.submission_key, || {

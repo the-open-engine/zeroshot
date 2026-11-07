@@ -141,6 +141,7 @@ async fn allocator_defaults_are_explicit_fail_closed_and_side_effect_free() {
         github_token: Some("private-github-token".to_owned()),
         git_credentials: None,
         commit_identity: None,
+        commit_co_author: None,
     };
     let diagnostic = format!("{credentials:?}");
     assert!(diagnostic.contains("RunSourceCredentials"));
@@ -172,6 +173,7 @@ async fn allocator_defaults_are_explicit_fail_closed_and_side_effect_free() {
                 github_token: None,
                 git_credentials: None,
                 commit_identity: None,
+                commit_co_author: None,
             })
             .await,
         Err(RetainedAllocationUnavailable::Settled(
@@ -246,6 +248,7 @@ async fn wave8_cli_contract_submission_rejects_missing_secrets_and_invalid_graph
         github_token: None,
         git_credentials: None,
         commit_identity: None,
+        commit_co_author: None,
     })
     .err()
     .expect("insecure resolver authority must fail closed");
@@ -316,6 +319,7 @@ async fn wave8_cli_contract_retained_cleanup_and_discard_fail_closed_across_reco
             github_token: None,
             git_credentials: None,
             commit_identity: None,
+            commit_co_author: None,
         })
         .await
         .assert_value_with("accepted resume");
@@ -370,8 +374,13 @@ struct SourceRecoveryAllocator {
     runtime: FakeAllocator,
     resumed_credentials:
         StdMutex<Vec<Option<openengine_cluster_protocol::GitTransportCredentials>>>,
-    resumed_commit_identities: StdMutex<Vec<Option<openengine_cluster_protocol::CommitIdentity>>>,
+    resumed_commit_attributions: StdMutex<Vec<CommitAttribution>>,
 }
+
+type CommitAttribution = (
+    Option<openengine_cluster_protocol::CommitIdentity>,
+    Option<openengine_cluster_protocol::CommitIdentity>,
+);
 
 #[async_trait]
 impl CapsuleAllocator for SourceRecoveryAllocator {
@@ -397,10 +406,13 @@ impl CapsuleAllocator for SourceRecoveryAllocator {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(request.git_credentials.cloned());
-        self.resumed_commit_identities
+        self.resumed_commit_attributions
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .push(request.commit_identity.cloned());
+            .push((
+                request.commit_identity.cloned(),
+                request.commit_co_author.cloned(),
+            ));
         self.runtime
             .allocate(CapsuleAllocationRequest {
                 run_id: request.run_id,
@@ -408,6 +420,7 @@ impl CapsuleAllocator for SourceRecoveryAllocator {
                 github_token: request.github_token,
                 git_credentials: request.git_credentials,
                 commit_identity: request.commit_identity,
+                commit_co_author: request.commit_co_author,
                 preparation: request.preparation,
             })
             .await
@@ -523,7 +536,7 @@ async fn assert_recoverable_source_resume(
     let allocator = Arc::new(SourceRecoveryAllocator {
         runtime: FakeAllocator::new(harness.driver.clone(), harness.cleanup.clone()),
         resumed_credentials: StdMutex::new(Vec::new()),
-        resumed_commit_identities: StdMutex::new(Vec::new()),
+        resumed_commit_attributions: StdMutex::new(Vec::new()),
     });
     let controller = NativeV2PlatformController::new(ledger.clone(), allocator.clone())
         .await
@@ -563,6 +576,7 @@ async fn assert_recoverable_source_resume(
             github_token: None,
             git_credentials: None,
             commit_identity: Some(crate::native_v2_candidate::test_support::bot_commit_identity()),
+            commit_co_author: Some(crate::native_v2_candidate::test_support::co_author_identity()),
         })
         .await
         .assert_value();
@@ -580,12 +594,13 @@ async fn assert_recoverable_source_resume(
     );
     assert_eq!(
         allocator
-            .resumed_commit_identities
+            .resumed_commit_attributions
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .as_slice(),
-        &[Some(
-            crate::native_v2_candidate::test_support::bot_commit_identity()
+        &[(
+            Some(crate::native_v2_candidate::test_support::bot_commit_identity()),
+            Some(crate::native_v2_candidate::test_support::co_author_identity()),
         )]
     );
     assert_eq!(
@@ -619,7 +634,7 @@ fn assert_public_resume_admission(admitted: &AdmittedRun, source: Option<Resolve
 
 struct CommitIdentityAllocator {
     runtime: Arc<FakeAllocator>,
-    identities: StdMutex<Vec<Option<openengine_cluster_protocol::CommitIdentity>>>,
+    attributions: StdMutex<Vec<CommitAttribution>>,
 }
 
 #[async_trait]
@@ -635,10 +650,13 @@ impl CapsuleAllocator for CommitIdentityAllocator {
         &self,
         request: CapsuleAllocationRequest<'_>,
     ) -> Result<AllocatedCapsule, CapsuleAllocationUnavailable> {
-        self.identities
+        self.attributions
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .push(request.commit_identity.cloned());
+            .push((
+                request.commit_identity.cloned(),
+                request.commit_co_author.cloned(),
+            ));
         self.runtime.allocate(request).await
     }
 
@@ -652,17 +670,18 @@ impl CapsuleAllocator for CommitIdentityAllocator {
 }
 
 #[tokio::test]
-async fn submitted_commit_identity_reaches_allocation_but_not_node_environments() {
+async fn submitted_commit_attribution_reaches_allocation_but_not_node_environments() {
     let driver = Arc::new(FakeDriver::new(Behavior::Complete));
     let (ledger, _cleanup, runtime) = runtime_parts(driver.clone());
     let allocator = Arc::new(CommitIdentityAllocator {
         runtime: runtime.clone(),
-        identities: StdMutex::new(Vec::new()),
+        attributions: StdMutex::new(Vec::new()),
     });
     let controller = NativeV2PlatformController::new(ledger, allocator.clone())
         .await
         .assert_value();
     let identity = crate::native_v2_candidate::test_support::bot_commit_identity();
+    let co_author = crate::native_v2_candidate::test_support::co_author_identity();
     let submitted = request(Value::Null);
     let environment = exact_test_environment(&submitted).assert_value();
     controller
@@ -671,6 +690,7 @@ async fn submitted_commit_identity_reaches_allocation_but_not_node_environments(
             environment,
             RunSourceCredentials {
                 commit_identity: Some(identity.clone()),
+                commit_co_author: Some(co_author.clone()),
                 ..RunSourceCredentials::default()
             },
         )
@@ -687,17 +707,19 @@ async fn submitted_commit_identity_reaches_allocation_but_not_node_environments(
 
     assert_eq!(
         *allocator
-            .identities
+            .attributions
             .lock()
             .unwrap_or_else(PoisonError::into_inner),
-        vec![Some(identity.clone())]
+        vec![(Some(identity.clone()), Some(co_author.clone()))]
     );
     for environment in driver.environments().iter() {
-        assert!(
-            environment
-                .values()
-                .all(|value| !value.contains(identity.name()) && !value.contains(identity.email())),
-            "{environment:?}"
-        );
+        for credited in [&identity, &co_author] {
+            assert!(
+                environment.values().all(|value| {
+                    !value.contains(credited.name()) && !value.contains(credited.email())
+                }),
+                "{environment:?}"
+            );
+        }
     }
 }

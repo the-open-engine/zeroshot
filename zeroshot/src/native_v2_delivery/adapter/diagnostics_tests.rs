@@ -9,6 +9,7 @@ fn adapter() -> NativeV2DeliveryAdapter {
             adopt_existing_delivery: false,
             git_identity: None,
             commit_identity: None,
+            commit_co_author: None,
             workspace: PathBuf::new(),
             git_program: "/usr/bin/git".into(),
             target: DeliveryTarget::new("acme/project", "main", "a".repeat(40)).assert_value(),

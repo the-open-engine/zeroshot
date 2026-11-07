@@ -42,6 +42,7 @@ pub(super) async fn source_credentials(
         github_token,
         git_credentials,
         commit_identity: secrets.source_credentials.commit_identity.clone(),
+        commit_co_author: secrets.source_credentials.commit_co_author.clone(),
     })
 }
 

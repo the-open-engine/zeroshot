@@ -261,6 +261,10 @@ pub struct RunResumeParams {
     /// target's default delivery identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit_identity: Option<crate::CommitIdentity>,
+    /// Person credited by a `Co-authored-by` trailer on every commit carrying the successor's
+    /// changes. Author and committer stay as `commitIdentity` selects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_co_author: Option<crate::CommitIdentity>,
 }
 
 impl std::fmt::Debug for RunResumeParams {
@@ -278,6 +282,7 @@ impl std::fmt::Debug for RunResumeParams {
             )
             .field("git_credentials", &self.git_credentials)
             .field("commit_identity", &self.commit_identity)
+            .field("commit_co_author", &self.commit_co_author)
             .finish()
     }
 }

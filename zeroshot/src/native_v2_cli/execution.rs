@@ -229,6 +229,7 @@ where
                 github_token,
                 git_credentials: None,
                 commit_identity: None,
+                commit_co_author: None,
             },
         )
         .await?;

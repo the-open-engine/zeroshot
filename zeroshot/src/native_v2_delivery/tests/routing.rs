@@ -133,6 +133,7 @@ async fn drive_repair_loop(
             adopt_existing_delivery: false,
             git_identity: None,
             commit_identity: None,
+            commit_co_author: None,
             workspace: repo.workspace.clone(),
             git_program: PathBuf::from("/usr/bin/git"),
             target: DeliveryTarget::new("acme/project", "main", repo.base.clone()).assert_value(),

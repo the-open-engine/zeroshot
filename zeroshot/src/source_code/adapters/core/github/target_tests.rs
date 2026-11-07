@@ -372,12 +372,16 @@ async fn divergent_target_changes_leave_real_conflicts_and_delivery_identity() {
 
 #[tokio::test]
 async fn host_commit_identity_authors_target_integration_and_configures_repairs() {
-    use crate::native_v2_candidate::test_support::{BOT_AUTHOR, bot_commit_identity, commit_authorship};
+    use crate::native_v2_candidate::test_support::{
+        BOT_AUTHOR, CO_AUTHOR, bot_commit_identity, co_author_identity, commit_attribution,
+        commit_authorship,
+    };
     let mut fixture = TargetFixture::new();
     let transport = fixture
         .authority
         .git_transport(&fixture.repository.workspace, "acme/project")
-        .with_commit_identity(Some(bot_commit_identity()));
+        .with_commit_identity(Some(bot_commit_identity()))
+        .with_commit_co_author(Some(co_author_identity()));
     fixture.authority = fixture.authority.clone().with_git_transport(transport);
     git(
         &fixture.repository.workspace,
@@ -398,6 +402,26 @@ async fn host_commit_identity_authors_target_integration_and_configures_repairs(
         assert_eq!(
             commit_authorship(&fixture.repository.workspace, revision),
             bot,
+            "{kind}"
+        );
+    }
+    assert_eq!(
+        commit_attribution(&fixture.repository.workspace, "HEAD^1"),
+        format!("{bot}\nfeat: preserve candidate\n\nCo-authored-by: {CO_AUTHOR}")
+    );
+    for (arguments, kind) in [
+        (
+            &["show", "-s", "--format=%B", "HEAD"][..],
+            "target merge message",
+        ),
+        (
+            &["config", "--local", "--list"][..],
+            "repository configuration left for repairs",
+        ),
+    ] {
+        let text = git_output(&fixture.repository.workspace, arguments);
+        assert!(
+            !text.contains("Ada Lovelace") && !text.contains("trailer."),
             "{kind}"
         );
     }

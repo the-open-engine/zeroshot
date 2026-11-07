@@ -31,6 +31,7 @@ pub(crate) struct SystemGit {
     identity: Option<crate::execution::process::HostedProcessIdentity>,
     local_environment: Option<std::collections::BTreeMap<String, String>>,
     commit_identity: Option<openengine_cluster_protocol::CommitIdentity>,
+    commit_co_author: Option<openengine_cluster_protocol::CommitIdentity>,
 }
 
 impl SystemGit {
@@ -40,6 +41,7 @@ impl SystemGit {
             identity: None,
             local_environment: None,
             commit_identity: None,
+            commit_co_author: None,
         }
     }
 
@@ -67,6 +69,14 @@ impl SystemGit {
         self
     }
 
+    pub(crate) fn with_commit_co_author(
+        mut self,
+        co_author: Option<openengine_cluster_protocol::CommitIdentity>,
+    ) -> Self {
+        self.commit_co_author = co_author;
+        self
+    }
+
     pub(crate) async fn prepare_revision(
         &self,
         workspace: &Path,
@@ -82,23 +92,77 @@ impl SystemGit {
         }
         self.require_success(workspace, &["add", "--all"]).await?;
         if self.commit_pending(workspace).await? {
-            let [name, email] = command::identity_configuration(self.commit_identity.as_ref());
-            self.require_success(
-                workspace,
-                &[
-                    "-c",
-                    &name,
-                    "-c",
-                    &email,
-                    "commit",
-                    "--no-verify",
-                    "--message",
-                    commit_message,
-                ],
-            )
-            .await?;
+            if let Some(co_author) = &self.commit_co_author {
+                self.commit_crediting(workspace, commit_message, co_author)
+                    .await?;
+            } else {
+                let [name, email] = command::identity_configuration(self.commit_identity.as_ref());
+                self.require_success(
+                    workspace,
+                    &[
+                        "-c",
+                        &name,
+                        "-c",
+                        &email,
+                        "commit",
+                        "--no-verify",
+                        "--message",
+                        commit_message,
+                    ],
+                )
+                .await?;
+            }
         }
         self.deliverable_revision(workspace, base_revision).await
+    }
+
+    /// Commits with the co-author credit in one Git command, so a failed or interrupted commit
+    /// never leaves the run's changes committed without it. The message gets Git's default
+    /// whitespace cleanup whatever the workspace configures. One that cleanup empties stays
+    /// uncredited, so Git refuses it rather than committing the credit as the whole message.
+    /// Git's trailer handling places the credit under an alias no workspace configures, so
+    /// workspace `trailer.*` settings cannot rename, move, repeat or drop it.
+    async fn commit_crediting(
+        &self,
+        workspace: &Path,
+        commit_message: &str,
+        co_author: &openengine_cluster_protocol::CommitIdentity,
+    ) -> Result<(), GitError> {
+        let [name, email] = command::identity_configuration(self.commit_identity.as_ref());
+        let trailer = format!(
+            "zeroshot-co-author: {} <{}>",
+            co_author.name(),
+            co_author.email()
+        );
+        let mut arguments = vec![
+            "-c",
+            name.as_str(),
+            "-c",
+            email.as_str(),
+            "-c",
+            "trailer.separators=:",
+            // Existing credits keep their key, so the alias below can recognise them.
+            "-c",
+            "trailer.Co-authored-by.key=Co-authored-by",
+            "-c",
+            "trailer.zeroshot-co-author.key=Co-authored-by",
+            "-c",
+            "trailer.zeroshot-co-author.where=end",
+            "-c",
+            "trailer.zeroshot-co-author.ifexists=addIfDifferent",
+            "-c",
+            "trailer.zeroshot-co-author.ifmissing=add",
+            "commit",
+            "--no-verify",
+            "--cleanup=whitespace",
+            "--message",
+            commit_message,
+        ];
+        if !empty_after_whitespace_cleanup(commit_message) {
+            arguments.extend(["--trailer", trailer.as_str()]);
+        }
+        self.require_success(workspace, &arguments).await?;
+        Ok(())
     }
 
     async fn require_supported_operation(&self, workspace: &Path) -> Result<(), GitError> {
@@ -270,6 +334,15 @@ impl SystemGit {
         command.args(arguments);
         command
     }
+}
+
+/// Whether Git's whitespace cleanup leaves only blank and `Signed-off-by: ` lines, which Git
+/// refuses as an empty commit message.
+fn empty_after_whitespace_cleanup(message: &str) -> bool {
+    message.split('\n').all(|line| {
+        let line = line.trim_end_matches([' ', '\t', '\r']);
+        line.is_empty() || line.starts_with("Signed-off-by: ")
+    })
 }
 
 #[cfg(test)]

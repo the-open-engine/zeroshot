@@ -203,6 +203,10 @@ fn target_request_debug_redacts_ephemeral_values() {
 
 const BOT_NAME: &str = "zeroshot-app[bot]";
 const BOT_EMAIL: &str = "326899010+zeroshot-app[bot]@users.noreply.github.com";
+const CO_AUTHOR_NAME: &str = "Ada Lovelace";
+const CO_AUTHOR_EMAIL: &str = "ada@example.com";
+/// Run and resume requests validate both host-selected identities alike.
+const IDENTITY_FIELDS: [&str; 2] = ["commitIdentity", "commitCoAuthor"];
 
 fn fixture_request() -> TargetRunRequest {
     serde_json::from_str(include_str!(
@@ -212,15 +216,18 @@ fn fixture_request() -> TargetRunRequest {
 }
 
 #[test]
-fn absent_commit_identity_keeps_older_requests_and_their_bytes_unchanged() {
+fn absent_commit_identity_and_co_author_keep_older_requests_and_their_bytes_unchanged() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/native-v2-target-request.json"
     ))
     .assert_value();
     let older = fixture_request();
-    assert_eq!(older.commit_identity, None);
+    assert_eq!(
+        (&older.commit_identity, &older.commit_co_author),
+        (&None, &None)
+    );
     let encoded = serde_json::to_string(&older).assert_value();
-    assert!(!encoded.contains("commitIdentity"));
+    assert!(!encoded.contains("commitIdentity") && !encoded.contains("commitCoAuthor"));
     assert!(encoded.ends_with(r#""githubToken":"github-secret"}"#));
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&encoded).assert_value(),
@@ -229,22 +236,33 @@ fn absent_commit_identity_keeps_older_requests_and_their_bytes_unchanged() {
 
     let mut identified = older.clone();
     identified.commit_identity = Some(CommitIdentity::new(BOT_NAME, BOT_EMAIL).assert_value());
+    identified.commit_co_author =
+        Some(CommitIdentity::new(CO_AUTHOR_NAME, CO_AUTHOR_EMAIL).assert_value());
     let mut decoded: TargetRunRequest =
         serde_json::from_str(&serde_json::to_string(&identified).assert_value()).assert_value();
     assert_eq!(decoded, identified);
     decoded.commit_identity = None;
+    decoded.commit_co_author = None;
     assert_eq!(serde_json::to_string(&decoded).assert_value(), encoded);
 }
 
 #[test]
-fn commit_identity_round_trips_as_an_exact_name_and_email() {
+fn commit_identity_and_co_author_round_trip_as_exact_names_and_emails() {
     let mut request = serde_json::to_value(fixture_request()).assert_value();
     request["commitIdentity"] = serde_json::json!({"name": BOT_NAME, "email": BOT_EMAIL});
+    request["commitCoAuthor"] =
+        serde_json::json!({"name": CO_AUTHOR_NAME, "email": CO_AUTHOR_EMAIL});
     let decoded = serde_json::from_value::<TargetRunRequest>(request.clone()).assert_value();
     let identity = decoded.commit_identity.as_ref().assert_value();
     assert_eq!((identity.name(), identity.email()), (BOT_NAME, BOT_EMAIL));
+    let co_author = decoded.commit_co_author.as_ref().assert_value();
+    assert_eq!(
+        (co_author.name(), co_author.email()),
+        (CO_AUTHOR_NAME, CO_AUTHOR_EMAIL)
+    );
     assert_eq!(serde_json::to_value(&decoded).assert_value(), request);
-    assert!(format!("{decoded:?}").contains(BOT_EMAIL));
+    let debug = format!("{decoded:?}");
+    assert!(debug.contains(BOT_EMAIL) && debug.contains(CO_AUTHOR_EMAIL));
     let boundary = "n".repeat(256);
     assert_eq!(
         CommitIdentity::new(boundary.as_str(), BOT_EMAIL)
@@ -262,6 +280,22 @@ fn commit_identity_schema() -> jsonschema::Validator {
 #[test]
 fn commit_identity_rejects_values_that_are_not_one_exact_git_identity() {
     let schema = commit_identity_schema();
+    let assert_requests_rejected = |identity: &serde_json::Value| {
+        for field in IDENTITY_FIELDS {
+            let mut request = serde_json::to_value(fixture_request()).assert_value();
+            request[field] = identity.clone();
+            assert!(
+                serde_json::from_value::<TargetRunRequest>(request).is_err(),
+                "run {field} {identity}"
+            );
+            let mut resume = serde_json::json!({"runId": "run-1", "successorRunId": "run-2"});
+            resume[field] = identity.clone();
+            assert!(
+                serde_json::from_value::<crate::RunResumeParams>(resume).is_err(),
+                "resume {field} {identity}"
+            );
+        }
+    };
     let oversized = "e".repeat(257);
     let invalid = [
         "",
@@ -292,12 +326,7 @@ fn commit_identity_rejects_values_that_are_not_one_exact_git_identity() {
             serde_json::json!({"name": BOT_NAME, "email": value}),
         ] {
             assert!(!schema.is_valid(&identity), "schema {identity}");
-            let mut request = serde_json::to_value(fixture_request()).assert_value();
-            request["commitIdentity"] = identity;
-            assert!(
-                serde_json::from_value::<TargetRunRequest>(request).is_err(),
-                "{value:?}"
-            );
+            assert_requests_rejected(&identity);
         }
     }
     for identity in [
@@ -307,12 +336,7 @@ fn commit_identity_rejects_values_that_are_not_one_exact_git_identity() {
         serde_json::json!(format!("{BOT_NAME} <{BOT_EMAIL}>")),
     ] {
         assert!(!schema.is_valid(&identity), "schema {identity}");
-        let mut request = serde_json::to_value(fixture_request()).assert_value();
-        request["commitIdentity"] = identity.clone();
-        assert!(
-            serde_json::from_value::<TargetRunRequest>(request).is_err(),
-            "{identity}"
-        );
+        assert_requests_rejected(&identity);
     }
     let boundary = "n".repeat(256);
     for name in [BOT_NAME, "Jr.", "Zoë", "'quoted name'", boundary.as_str()] {
@@ -323,23 +347,39 @@ fn commit_identity_rejects_values_that_are_not_one_exact_git_identity() {
 }
 
 #[test]
-fn resume_params_carry_an_optional_commit_identity() {
+fn resume_params_carry_an_optional_commit_identity_and_co_author() {
     let older = serde_json::json!({"runId": "run-1", "successorRunId": "run-2"});
     let resume = serde_json::from_value::<crate::RunResumeParams>(older.clone()).assert_value();
-    assert_eq!(resume.commit_identity, None);
+    assert_eq!(
+        (&resume.commit_identity, &resume.commit_co_author),
+        (&None, &None)
+    );
     assert_eq!(serde_json::to_value(&resume).assert_value(), older);
 
     let mut identified = older;
     identified["commitIdentity"] = serde_json::json!({"name": BOT_NAME, "email": BOT_EMAIL});
+    identified["commitCoAuthor"] =
+        serde_json::json!({"name": CO_AUTHOR_NAME, "email": CO_AUTHOR_EMAIL});
     let resume =
         serde_json::from_value::<crate::RunResumeParams>(identified.clone()).assert_value();
     assert_eq!(
         resume.commit_identity,
         Some(CommitIdentity::new(BOT_NAME, BOT_EMAIL).assert_value())
     );
+    assert_eq!(
+        resume.commit_co_author,
+        Some(CommitIdentity::new(CO_AUTHOR_NAME, CO_AUTHOR_EMAIL).assert_value())
+    );
     assert_eq!(serde_json::to_value(&resume).assert_value(), identified);
-    identified["commitIdentity"]["name"] = serde_json::json!("line\nbreak");
-    assert!(serde_json::from_value::<crate::RunResumeParams>(identified).is_err());
+    assert!(format!("{resume:?}").contains(CO_AUTHOR_EMAIL));
+    for field in IDENTITY_FIELDS {
+        let mut invalid = identified.clone();
+        invalid[field]["name"] = serde_json::json!("line\nbreak");
+        assert!(
+            serde_json::from_value::<crate::RunResumeParams>(invalid).is_err(),
+            "{field}"
+        );
+    }
 }
 
 #[test]

@@ -127,6 +127,7 @@ struct ResumeSecretRequest<'a> {
     github_token: Option<String>,
     git_credentials: Option<openengine_cluster_protocol::GitTransportCredentials>,
     commit_identity: Option<openengine_cluster_protocol::CommitIdentity>,
+    commit_co_author: Option<openengine_cluster_protocol::CommitIdentity>,
 }
 
 struct AllocatedRunStart {
@@ -267,6 +268,7 @@ impl NativeV2PlatformController {
                 github_token,
                 git_credentials: None,
                 commit_identity: None,
+                commit_co_author: None,
             },
         )
         .await
@@ -462,6 +464,7 @@ impl NativeV2PlatformController {
             github_token,
             git_credentials,
             commit_identity,
+            commit_co_author,
         } = params;
         let source = self.recoverable_resume_source(&run_id).await?;
         let (submission_key, submission_digest) =
@@ -476,6 +479,7 @@ impl NativeV2PlatformController {
             github_token,
             git_credentials,
             commit_identity,
+            commit_co_author,
         })?;
         let controller_claim = self.allocator.claim_controller(&successor_run_id).await?;
         let stored = self
@@ -822,6 +826,7 @@ fn resume_secret_envelope(
         github_token,
         git_credentials,
         commit_identity,
+        commit_co_author,
     } = request;
     let environment = match connection_resolver {
         Some(wire) => RunEnvironment::with_resolver_for_admitted(
@@ -838,6 +843,7 @@ fn resume_secret_envelope(
             github_token,
             git_credentials,
             commit_identity,
+            commit_co_author,
         },
     })
 }

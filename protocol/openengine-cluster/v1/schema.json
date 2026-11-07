@@ -484,7 +484,7 @@
     },
     "CommitIdentity": {
       "additionalProperties": false,
-      "description": "A host-selected Git author and committer for commits created by delivery. Each value has at\nmost 256 UTF-8 bytes, no control characters, `<` or `>`, and at least one character that Git\nkeeps after trimming whitespace and `.,:;\"'\\`.",
+      "description": "A host-selected Git identity for commits created by delivery: their author and committer, or\nthe co-author credited in their messages. Each value has at most 256 UTF-8 bytes, no control\ncharacters, `<` or `>`, and at least one character that Git keeps after trimming whitespace\nand `.,:;\"'\\`.",
       "properties": {
         "email": {
           "maxLength": 256,
@@ -4807,6 +4807,17 @@
     "RunResumeParams": {
       "additionalProperties": false,
       "properties": {
+        "commitCoAuthor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommitIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Person credited by a `Co-authored-by` trailer on every commit carrying the successor's\nchanges. Author and committer stay as `commitIdentity` selects."
+        },
         "commitIdentity": {
           "anyOf": [
             {

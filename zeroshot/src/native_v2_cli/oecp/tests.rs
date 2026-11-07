@@ -423,6 +423,7 @@ async fn wave7_cli_contract_oecp_default_optional_authority_is_refused() {
     let resume = openengine_cluster_protocol::RunResumeParams {
         git_credentials: None,
         commit_identity: None,
+        commit_co_author: None,
 
         run_id: run_id.clone(),
         successor_run_id,
@@ -561,6 +562,7 @@ async fn oecp_optional_authority_defaults_are_explicit_and_fail_closed() {
                     github_token: None,
                     git_credentials: None,
                     commit_identity: None,
+                    commit_co_author: None,
                 },
             )
             .await

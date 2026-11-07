@@ -234,6 +234,10 @@ pub struct NativeV2DeliveryConfig {
     /// Host-selected author and committer of delivered commits; absent keeps
     /// `Zeroshot <delivery@zeroshot.invalid>`.
     pub commit_identity: Option<openengine_cluster_protocol::CommitIdentity>,
+    /// Host-selected co-author credited by a `Co-authored-by` trailer on every commit
+    /// `prepare_revision` makes, including a merge it concludes after conflict repair; merges
+    /// Git completes itself never name it.
+    pub commit_co_author: Option<openengine_cluster_protocol::CommitIdentity>,
     pub workspace: PathBuf,
     pub git_program: PathBuf,
     pub target: DeliveryTarget,
@@ -270,6 +274,7 @@ impl NativeV2DeliveryConfig {
             workspace,
             git_identity: Some(identity),
             commit_identity: None,
+            commit_co_author: None,
             git_program: PathBuf::from("/usr/bin/git"),
             target,
             poll: DeliveryPollPolicy::default(),

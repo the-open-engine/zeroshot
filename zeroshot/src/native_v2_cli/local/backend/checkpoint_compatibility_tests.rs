@@ -8,6 +8,7 @@ fn params(from: Option<RunResumeFrom>) -> openengine_cluster_protocol::RunResume
     openengine_cluster_protocol::RunResumeParams {
         git_credentials: None,
         commit_identity: None,
+        commit_co_author: None,
 
         run_id: RunId::new("0199f33f-3b44-7d21-9000-000000000001"),
         successor_run_id: RunId::new("0199f33f-3b44-7d21-9000-000000000002"),
