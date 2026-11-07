@@ -295,3 +295,167 @@ fn coverage_contract_controller_server_waits_for_both_terminal_truth_and_one_obs
     reversed.terminal();
     assert!(reversed.is_complete());
 }
+
+/// Confirms runtime-failure cleanup, then holds the run ledger briefly, as a slow disk or a
+/// concurrent ledger reader can, so the durable `runtime_failed` append is still pending when the
+/// failure is already observable in memory.
+#[cfg(target_os = "linux")]
+struct SlowFailurePersistence {
+    ledger: PathBuf,
+    holder: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+#[cfg(target_os = "linux")]
+impl SlowFailurePersistence {
+    const HOLD: Duration = Duration::from_secs(1);
+
+    fn release(&self) {
+        let holder = self
+            .holder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+            .assert_value_with("runtime failure cleanup ran");
+        holder.join().assert_value();
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[async_trait::async_trait]
+impl crate::native_v2_platform::CapsuleCleanup for SlowFailurePersistence {
+    async fn destroy_or_confirm_absent(
+        &self,
+        exit: crate::native_v2_supervisor::RunRuntimeExit,
+    ) -> Result<
+        crate::native_v2_platform::CapsuleDestroyed,
+        crate::native_v2_platform::CapsuleCleanupUnavailable,
+    > {
+        let mut holder = self
+            .holder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if matches!(
+            exit,
+            crate::native_v2_supervisor::RunRuntimeExit::RuntimeLost
+        ) && holder.is_none()
+        {
+            let connection = rusqlite::Connection::open(&self.ledger).assert_value();
+            connection.execute_batch("BEGIN EXCLUSIVE").assert_value();
+            *holder = Some(std::thread::spawn(move || {
+                std::thread::sleep(Self::HOLD);
+                connection.execute_batch("ROLLBACK").assert_value();
+            }));
+        }
+        Ok(crate::native_v2_platform::CapsuleDestroyed::confirmed())
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn final_contract_controller_serves_a_runtime_failure_until_its_terminal_is_durable() {
+    use std::os::unix::ffi::OsStrExt;
+
+    use openengine_cluster_protocol::{NodeName, TerminalResult};
+
+    use crate::native_v2_candidate::test_support::{full_graph, success_node};
+    use crate::native_v2_portable_controller::tests::{NeverDispatched, bootstrap, submission};
+    use crate::v2_run_ledger::RunLedger;
+    use crate::v2_run_ledger::sqlite::SqliteRunLedger;
+
+    let root = tempfile::tempdir().assert_value();
+    let workspace = root.path().join("workspace");
+    fs::create_dir(&workspace).assert_value();
+    // The first workspace checkpoint refuses this entry, so the runtime fails before dispatch.
+    let pipe = std::ffi::CString::new(workspace.join("pipe").as_os_str().as_bytes()).assert_value();
+    // SAFETY: pipe is a live NUL-terminated filename in this test's private directory.
+    assert_eq!(unsafe { libc::mkfifo(pipe.as_ptr(), 0o600) }, 0);
+    let storage = root.path().join("state");
+    let run_id = RunId::new("run-runtime-failure-exit");
+    let mut submitted = submission("runtime-failure-exit");
+    submitted.graph = full_graph(vec![
+        serde_json::json!({"kind":"step","name":"work","worker":"worker.work@1",
+            "instructions":"Change the workspace.","input":{"kind":"null"},
+            "output":{"kind":"null"},"inputBindings":[],"writeBindings":[],"attempts":1}),
+        success_node(),
+    ]);
+    submitted.runtime.nodes_mut().insert(
+        NodeName::new("work").assert_value(),
+        serde_json::from_value(serde_json::json!({"kind":"agent","model":"fixture"}))
+            .assert_value(),
+    );
+    let persistence = Arc::new(SlowFailurePersistence {
+        ledger: PortableControllerPaths::new(&storage).ledger(),
+        holder: std::sync::Mutex::default(),
+    });
+
+    // Like the controller child, this runtime ends as soon as serving returns.
+    let controller_process = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .assert_value();
+    controller_process.block_on(async {
+        let cleanup = persistence.clone();
+        let controller = Arc::new(
+            PortableRunController::start(
+                bootstrap(run_id.clone(), submitted, workspace, storage.clone()),
+                move |_| {
+                    Ok::<_, std::convert::Infallible>(PortableRuntime::with_cleanup(
+                        Arc::new(NeverDispatched),
+                        cleanup,
+                    ))
+                },
+            )
+            .await
+            .assert_value_with("start portable controller"),
+        );
+        let server = controller.clone().bind().await.assert_value();
+        // The submitting CLI is the observer a short run waits for.
+        let _observer = connect_transport(controller.paths()).await.assert_value();
+        tokio::time::timeout(Duration::from_secs(30), server.serve_until_terminal())
+            .await
+            .assert_value_with("controller stopped serving")
+            .assert_value();
+    });
+    drop(controller_process);
+    persistence.release();
+
+    let stored = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .assert_value()
+        .block_on(async {
+            SqliteRunLedger::open_read_only(PortableControllerPaths::new(&storage).ledger())
+                .assert_value()
+                .get(&run_id)
+                .await
+        })
+        .assert_value()
+        .assert_value_with("durable run");
+    let is_cause = |context: &openengine_cluster_protocol::FailureContext| {
+        context.primary.as_ref().is_some_and(|primary| {
+            primary.message.as_str()
+                == "Runtime failed: workspace checkpoint is unavailable: \
+                    candidate contains an unsupported filesystem entry \"pipe\""
+        })
+    };
+    // The cause is logged before cleanup, so it is durable even when the terminal is not.
+    assert!(
+        stored
+            .snapshot
+            .failure_context
+            .as_deref()
+            .is_some_and(is_cause),
+        "the checkpoint failure cause was not recorded: {:?}",
+        stored.snapshot.failure_context
+    );
+    let terminal = stored.snapshot.terminal;
+    assert!(
+        matches!(
+            &terminal,
+            Some(TerminalResult::Failed { reason, context: Some(context) })
+                if reason.as_str() == "runtime_failed" && is_cause(context)
+        ),
+        "the controller stopped serving before its runtime_failed terminal was durable: \
+         {terminal:?}"
+    );
+}

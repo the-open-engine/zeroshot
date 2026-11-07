@@ -7,7 +7,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use openengine_cluster_protocol::{NOT_FOUND, RunId, RunStatus, RunStatusParams, RunSubmitParams};
+use openengine_cluster_protocol::{
+    NOT_FOUND, RunId, RunStatus, RunStatusParams, RunSubmitParams, TerminalResult,
+};
 use openengine_cluster_server::BackendError;
 use tokio::sync::{Mutex, watch};
 
@@ -33,6 +35,9 @@ use super::{
 };
 
 const WORKSPACE_MONITOR_INTERVAL: Duration = Duration::from_millis(100);
+/// Covers SQLite's 5 s busy timeout for both the failure append's snapshot read and its write.
+/// A hung ledger cannot keep the controller alive; observer recovery then owns the run.
+const RUNTIME_FAILURE_SETTLEMENT_LIMIT: Duration = Duration::from_secs(15);
 
 #[derive(Clone)]
 pub struct PortableRunController {
@@ -192,6 +197,8 @@ impl PortableRunController {
         &self.paths
     }
 
+    /// Returns once the run is finished and a published runtime failure has had a bounded chance
+    /// to make its terminal durable, so ending the controller process cannot discard that append.
     pub(super) async fn wait_terminal(&self) -> Result<(), PortableControllerError> {
         loop {
             let status = self
@@ -200,7 +207,18 @@ impl PortableRunController {
                     run_id: self.run_id.clone(),
                 })
                 .await?;
-            if matches!(status.status, RunStatus::Finished { .. }) {
+            if let RunStatus::Finished {
+                terminal_result, ..
+            } = status.status
+            {
+                // Only a runtime failure is observable before it is durable; success never is.
+                if matches!(terminal_result, TerminalResult::Failed { .. }) {
+                    let _ = tokio::time::timeout(
+                        RUNTIME_FAILURE_SETTLEMENT_LIMIT,
+                        self.inner.wait_runtime_settled(&self.run_id),
+                    )
+                    .await;
+                }
                 return Ok(());
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
