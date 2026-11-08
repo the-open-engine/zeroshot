@@ -229,14 +229,24 @@ jobs:
           persist-credentials: false
           ref: ${{ needs.plan.outputs.commit }}
 
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+
       - name: Build pinned Restic sidecars for every target
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p restic-output
+          source_root="$RUNNER_TEMP/zeroshot-restic-source"
+          scripts/distribution/build-restic.sh "$source_root" --source-only
           docker run --rm \
             --volume "${PWD}:/source:ro" \
             --volume "${PWD}/restic-output:/out" \
+            --volume "$source_root:/restic-source:ro" \
+            --env ZEROSHOT_RESTIC_SOURCE_ARCHIVE=/restic-source/restic.tar.gz \
             golang:1.27.1-trixie@sha256:9baa6b4187bbb98d240372a8a235ac0bb6b5ddd52bba1431dc2f7c0705862728 \
             /source/scripts/distribution/build-restic.sh /out
 
@@ -489,8 +499,11 @@ jobs:
         run: node scripts/distribution.js stage-version --tag "$RELEASE_TAG"
 
       - name: Build linux/amd64 target image
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           docker build --pull --platform linux/amd64 \
+            --secret id=github_token,env=GH_TOKEN \
             --build-arg "VCS_REF=$RELEASE_COMMIT" \
             --build-arg "ZEROSHOT_VERSION=$RELEASE_VERSION" \
             --file docker/zeroshot-target/Dockerfile \

@@ -43,6 +43,8 @@ jobs:
 
       - name: Build pinned Restic sidecar for coverage
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           output_root="$RUNNER_TEMP/zeroshot-restic"
           target=x86_64-unknown-linux-musl
