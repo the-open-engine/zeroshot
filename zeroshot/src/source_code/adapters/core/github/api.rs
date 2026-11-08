@@ -157,29 +157,85 @@ pub(super) async fn command_status(
         .map_err(|failure| command_failure(failure, credential))
 }
 
+#[derive(Debug)]
+pub(super) struct JsonCommandFailure {
+    pub error: SourceDeliveryError,
+    pub rejected: bool,
+}
+
+impl JsonCommandFailure {
+    fn unknown(error: SourceDeliveryError) -> Self {
+        Self {
+            error,
+            rejected: false,
+        }
+    }
+}
+
 pub(super) async fn command_json(
     mut command: Command,
     deadline: Duration,
     credential: SourceDeliveryCredential<'_>,
-) -> Result<Value, SourceDeliveryError> {
+    mutation: Option<&str>,
+) -> Result<Value, JsonCommandFailure> {
     let output = crate::native_v2_delivery::command::capture_sensitive(&mut command, deadline, &[])
         .await
-        .and_then(|output| output.require_success())
-        .map_err(|failure| command_failure(failure, credential))?;
+        .map_err(|failure| JsonCommandFailure::unknown(command_failure(failure, credential)))?;
+    // Inspect protocol bytes before converting the failed output to redacted diagnostics.
+    let rejected = mutation.is_some_and(|mutation| rejected_mutation(&output, mutation));
+    let output = output
+        .require_success()
+        .map_err(|failure| JsonCommandFailure {
+            error: command_failure(failure, credential),
+            rejected,
+        })?;
     if output.stdout_truncated() {
-        return Err(redacted_api_error(
+        return Err(JsonCommandFailure::unknown(redacted_api_error(
             None,
             "GitHub command response exceeded its byte bound",
             credential,
-        ));
+        )));
     }
     serde_json::from_str(output.stdout()).map_err(|error| {
-        redacted_api_error(
+        JsonCommandFailure::unknown(redacted_api_error(
             None,
             format!("GitHub returned invalid JSON: {error}\n{output}"),
             credential,
-        )
+        ))
     })
+}
+
+fn rejected_mutation(
+    output: &crate::native_v2_delivery::command::GitCommandOutput,
+    mutation: &str,
+) -> bool {
+    let diagnostic = output.diagnostic();
+    if output.stdout_truncated()
+        || diagnostic.stderr_truncated
+        || diagnostic.cleanup_unconfirmed
+        || diagnostic.timed_out
+        || !diagnostic.exit_status.is_some_and(|status| status > 0)
+    {
+        return false;
+    }
+    let Ok(value) = serde_json::from_str::<Value>(output.stdout()) else {
+        return false;
+    };
+    let path = serde_json::json!([mutation]);
+    value
+        .get("data")
+        .and_then(Value::as_object)
+        .is_some_and(|data| data.len() == 1 && data.get(mutation).is_some_and(Value::is_null))
+        && value
+            .get("errors")
+            .and_then(Value::as_array)
+            .is_some_and(|errors| {
+                !errors.is_empty()
+                    && errors.iter().all(|error| {
+                        error.get("type").and_then(Value::as_str) == Some("UNPROCESSABLE")
+                            && error.get("path") == Some(&path)
+                    })
+            })
 }
 
 pub(super) fn command_failure(

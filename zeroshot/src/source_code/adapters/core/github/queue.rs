@@ -10,17 +10,26 @@ pub(super) struct QueueEffects(Arc<tokio::sync::Mutex<BTreeMap<QueueIdentity, Qu
 
 #[derive(Debug)]
 struct QueueEffect {
-    task: Option<tokio::task::JoinHandle<Submission>>,
+    task: Option<tokio::task::JoinHandle<QueueSubmission>>,
     settled: Option<Submission>,
+    uncertain: bool,
+}
+
+#[derive(Debug)]
+struct QueueSubmission {
+    result: Submission,
     uncertain: bool,
 }
 
 impl QueueEffect {
     async fn settle(&mut self) -> Submission {
         if let Some(task) = self.task.as_mut() {
-            let result = task.await.unwrap_or_else(|_| Err(submission_panicked()));
-            self.uncertain |= matches!(&result, Err(error) if uncertain_submission(error));
-            self.settled = Some(result);
+            let submitted = task.await.unwrap_or_else(|_| QueueSubmission {
+                result: Err(submission_panicked()),
+                uncertain: true,
+            });
+            self.uncertain |= submitted.uncertain;
+            self.settled = Some(submitted.result);
             self.task = None;
         }
         self.settled
@@ -77,10 +86,25 @@ pub(super) async fn enqueue(
         let review = review.clone();
         let node_id = node_id.to_owned();
         let task = tokio::spawn(async move {
-            let value =
-                api::command_json(command, deadline, SourceDeliveryCredential::token(&token))
-                    .await?;
-            confirm_receipt(value, &review, &node_id)
+            let response = api::command_json(
+                command,
+                deadline,
+                SourceDeliveryCredential::token(&token),
+                Some("enqueuePullRequest"),
+            )
+            .await;
+            let rejected = response
+                .as_ref()
+                .err()
+                .is_some_and(|failure| failure.rejected);
+            let result = response
+                .map_err(|failure| failure.error)
+                .and_then(|value| confirm_receipt(value, &review, &node_id));
+            QueueSubmission {
+                uncertain: !rejected
+                    && matches!(&result, Err(error) if uncertain_submission(error)),
+                result,
+            }
         });
         effects.insert(
             key.clone(),
@@ -214,8 +238,10 @@ async fn withdraw_step(
         mutation(authority, query, node_id, credential)?,
         authority.config.api_deadline,
         credential,
+        None,
     )
-    .await;
+    .await
+    .map_err(|failure| failure.error);
     if let Err(error) = &submitted {
         if error.cleanup_unconfirmed() {
             return Err(error.clone());
