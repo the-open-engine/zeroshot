@@ -21,6 +21,9 @@ zeroshot update
 ```
 
 The update does not elevate privileges; the current executable must be writable by the caller.
+A download fails with a timeout once the server has sent nothing for 30 seconds; a slow download
+that keeps receiving data is never cut off. Failures name their cause, such as an unreachable or
+refusing proxy, an untrusted certificate, or GitHub's explanation of a rate limit.
 Unchanged managed skill copies are installed or refreshed for Codex, GitHub Copilot, Pi, and Claude
 Code. A user-edited or conflicting skill is preserved, and the command fails with its exact path
 after completing any safe updates.

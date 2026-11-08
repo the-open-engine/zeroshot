@@ -1,8 +1,9 @@
 use std::cell::Cell;
 use std::fs;
 use std::io::{Read as _, Write as _};
-use std::net::TcpListener;
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
+use std::sync::mpsc;
 use std::thread::JoinHandle;
 
 use flate2::{Compression, write::GzEncoder};
@@ -182,6 +183,135 @@ async fn bounded_download_accepts_success_and_rejects_status_and_both_oversize_f
             .to_string()
             .contains("could not read truncated")
     );
+}
+
+const PROXY_FIXTURE: &str = "ZEROSHOT_UPDATE_PROXY_FIXTURE";
+const PROXIED_LATEST_RELEASE_URL: &str =
+    "https://zeroshot-update.invalid/repos/the-open-engine/zeroshot/releases/latest";
+const SIGNED_QUERY: &str = "X-Amz-Signature=zeroshot-update-test-signature";
+// Bounds this test only. The updater's idle timeout must report a silent connection well
+// before this generous limit, so a slow but live link keeps a tolerant idle allowance.
+const STALL_DETECTION_LIMIT: Duration = Duration::from_secs(120);
+
+#[tokio::test]
+async fn update_failures_name_their_cause() {
+    if let Some(report) = std::env::var_os(PROXY_FIXTURE) {
+        // Child process: like `zeroshot update`, the client takes its proxy from HTTPS_PROXY.
+        let client = http_client().assert_value();
+        let error = latest_version_at(&client, PROXIED_LATEST_RELEASE_URL)
+            .await
+            .assert_error()
+            .to_string();
+        fs::write(report, error).unwrap();
+        return;
+    }
+
+    let closed_proxy = closed_local_address();
+    let proxy_down = latest_release_error_through_proxy(&format!("http://{closed_proxy}"));
+
+    let (refusing_proxy, connect_request) = refusing_connect_proxy();
+    let proxy_refused = latest_release_error_through_proxy(&refusing_proxy);
+    let connect_request = connect_request
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the update request did not reach HTTPS_PROXY");
+    assert!(
+        connect_request.starts_with(b"CONNECT zeroshot-update.invalid:443 "),
+        "{}",
+        String::from_utf8_lossy(&connect_request)
+    );
+
+    let github = TestServer::start(vec![github_rate_limit_response()]);
+    let client = http_client().assert_value();
+    let rate_limited = latest_version_at(
+        &client,
+        &github.url(&format!(
+            "repos/the-open-engine/zeroshot/releases/latest?{SIGNED_QUERY}"
+        )),
+    )
+    .await
+    .assert_error()
+    .to_string();
+    github.finish();
+
+    let messages = [&proxy_down, &proxy_refused, &rate_limited];
+    assert!(
+        names_refused_connection(&proxy_down, closed_proxy),
+        "an unreachable proxy is not named as a refused connection: {messages:#?}"
+    );
+    let refused = proxy_refused.to_lowercase();
+    assert!(
+        refused.contains("tunnel") || refused.contains("proxy"),
+        "a proxy that refuses CONNECT is not named: {messages:#?}"
+    );
+    assert!(
+        rate_limited.contains("403") && rate_limited.contains("API rate limit exceeded"),
+        "GitHub's rate-limit explanation is missing: {messages:#?}"
+    );
+    assert!(
+        !rate_limited.contains("zeroshot-update-test-signature"),
+        "{rate_limited}"
+    );
+    assert!(
+        proxy_down != proxy_refused && proxy_refused != rate_limited && proxy_down != rate_limited,
+        "different failures print the same message: {messages:#?}"
+    );
+}
+
+#[tokio::test]
+async fn update_failures_report_stalls_as_timeouts_without_cutting_off_progressing_downloads() {
+    let silent = SilentServer::start(b"");
+    let stalled = SilentServer::start(
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100000\r\n\r\n{\"tag_",
+    );
+    let chunk = b"0123456789abcdef".repeat(512);
+    let progressing = ProgressingServer::start(chunk.clone(), Duration::from_millis(500));
+    let client = http_client().assert_value();
+    let silent_url = silent.url(&format!("releases/latest?{SIGNED_QUERY}"));
+    let stalled_url = stalled.url(&format!("releases/latest?{SIGNED_QUERY}"));
+    let archive_url = progressing.url("zeroshot-release.tar.gz");
+
+    let outcome = tokio::time::timeout(STALL_DETECTION_LIMIT, async {
+        tokio::join!(
+            download(&client, &archive_url, MAX_ARCHIVE_BYTES, "release archive"),
+            async {
+                // Start after the progressing download, so it is always the older request.
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                let stalls = tokio::join!(
+                    latest_version_at(&client, &silent_url),
+                    latest_version_at(&client, &stalled_url),
+                );
+                progressing.finish();
+                stalls
+            }
+        )
+    })
+    .await;
+    let Ok((archive, (silent_result, stalled_result))) = outcome else {
+        panic!(
+            "a server that stopped sending kept the update waiting for {STALL_DETECTION_LIMIT:?}"
+        );
+    };
+
+    for (case, result) in [
+        ("sending no response", silent_result),
+        ("stopping mid-body", stalled_result),
+    ] {
+        let error = result.assert_error_with(case).to_string();
+        let wording = error.to_lowercase();
+        assert!(
+            wording.contains("timed out") || wording.contains("timeout"),
+            "a server {case} is not reported as a timeout: {error}"
+        );
+        assert!(!error.contains("zeroshot-update-test-signature"), "{error}");
+    }
+    let archive = archive
+        .unwrap_or_else(|error| panic!("a download that kept receiving data was cut off: {error}"));
+    let chunks = progressing.join();
+    assert!(
+        chunks > 1,
+        "the progressing download received {chunks} chunk(s)"
+    );
+    assert_eq!(archive, chunk.repeat(chunks));
 }
 
 #[tokio::test]
@@ -748,17 +878,7 @@ impl TestServer {
         let thread = std::thread::spawn(move || {
             for response in responses {
                 let (mut stream, _) = listener.accept().unwrap();
-                let mut request = Vec::new();
-                while !request.windows(4).any(|window| window == b"\r\n\r\n") {
-                    let mut chunk = [0; 512];
-                    let read = stream.read(&mut chunk).unwrap();
-                    assert!(read > 0, "client closed before sending request headers");
-                    request.extend_from_slice(&chunk[..read]);
-                    assert!(
-                        request.len() <= 8 * 1024,
-                        "request headers are unexpectedly large"
-                    );
-                }
+                read_request_head(&mut stream);
                 stream.write_all(&response).unwrap();
                 stream.flush().unwrap();
             }
@@ -807,6 +927,207 @@ fn truncated_response(declared_length: usize, body: &[u8]) -> Vec<u8> {
     .into_bytes();
     response.extend_from_slice(body);
     response
+}
+
+fn read_request_head(stream: &mut TcpStream) -> Vec<u8> {
+    let mut request = Vec::new();
+    while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+        let mut chunk = [0; 512];
+        let read = stream.read(&mut chunk).unwrap();
+        assert!(read > 0, "client closed before sending request headers");
+        request.extend_from_slice(&chunk[..read]);
+        assert!(
+            request.len() <= 8 * 1024,
+            "request headers are unexpectedly large"
+        );
+    }
+    request
+}
+
+fn local_listener() -> (TcpListener, String) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    (listener, base_url)
+}
+
+fn closed_local_address() -> SocketAddr {
+    TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+}
+
+/// Whether `message` names the refused connection to `address` in this OS's words.
+fn names_refused_connection(message: &str, address: SocketAddr) -> bool {
+    let refused = TcpStream::connect(address).assert_error();
+    assert_eq!(
+        refused.kind(),
+        std::io::ErrorKind::ConnectionRefused,
+        "{refused}"
+    );
+    let os_words = refused.to_string();
+    let os_words = os_words
+        .split(" (os error")
+        .next()
+        .unwrap_or_default()
+        .to_lowercase();
+    let message = message.to_lowercase();
+    message.contains(&os_words) || message.contains("connection refused")
+}
+
+/// Fetches the latest release in a child whose only proxy setting is `HTTPS_PROXY`.
+fn latest_release_error_through_proxy(proxy: &str) -> String {
+    let report = tempfile::tempdir().unwrap();
+    let path = report.path().join("error.txt");
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command.args([
+        "--exact",
+        "native_v2_cli::update::tests::update_failures_name_their_cause",
+        "--nocapture",
+    ]);
+    for name in [
+        "ALL_PROXY",
+        "all_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    ] {
+        command.env_remove(name);
+    }
+    let output = command
+        .env("HTTPS_PROXY", proxy)
+        .env(PROXY_FIXTURE, &path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::read_to_string(path).unwrap()
+}
+
+/// A proxy that answers one CONNECT with 403 Forbidden and reports the request it got.
+fn refusing_connect_proxy() -> (String, mpsc::Receiver<Vec<u8>>) {
+    let (listener, url) = local_listener();
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let request = read_request_head(&mut stream);
+        stream
+            .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        stream.flush().unwrap();
+        let _ = sender.send(request);
+    });
+    (url, receiver)
+}
+
+/// GitHub's REST API answer once an unauthenticated client exhausts its rate limit.
+fn github_rate_limit_response() -> Vec<u8> {
+    let body = br##"{"message":"API rate limit exceeded for 203.0.113.7. (But here's the good news: Authenticated requests get a higher rate limit. Check out the documentation for more details.)","documentation_url":"https://docs.github.com/rest/overview/resources-in-the-rest-api#rate-limiting"}"##;
+    let mut response = format!(
+        "HTTP/1.1 403 rate limit exceeded\r\nContent-Type: application/json; charset=utf-8\r\nX-RateLimit-Limit: 60\r\nX-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: 1762354301\r\nX-RateLimit-Resource: core\r\nX-RateLimit-Used: 60\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .into_bytes();
+    response.extend_from_slice(body);
+    response
+}
+
+/// Answers one request with `head` (possibly nothing), then keeps the connection open
+/// without sending anything more until dropped: a server that stopped responding.
+struct SilentServer {
+    base_url: String,
+    _release: mpsc::Sender<()>,
+}
+
+impl SilentServer {
+    fn start(head: &'static [u8]) -> Self {
+        let (listener, base_url) = local_listener();
+        let (release, released) = mpsc::channel::<()>();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            read_request_head(&mut stream);
+            stream.write_all(head).unwrap();
+            stream.flush().unwrap();
+            let _ = released.recv();
+        });
+        Self {
+            base_url,
+            _release: release,
+        }
+    }
+
+    fn url(&self, path: &str) -> String {
+        format!("{}/{path}", self.base_url)
+    }
+}
+
+/// Streams a chunked body, one `chunk` per `interval`, until `finish` is called.
+struct ProgressingServer {
+    base_url: String,
+    finish: mpsc::Sender<()>,
+    thread: JoinHandle<usize>,
+}
+
+impl ProgressingServer {
+    fn start(chunk: Vec<u8>, interval: Duration) -> Self {
+        let (listener, base_url) = local_listener();
+        let (finish, finished) = mpsc::channel::<()>();
+        let thread = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            read_request_head(&mut stream);
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+            let mut frame = format!("{:x}\r\n", chunk.len()).into_bytes();
+            frame.extend_from_slice(&chunk);
+            frame.extend_from_slice(b"\r\n");
+            let mut sent = 0;
+            loop {
+                if stream
+                    .write_all(&frame)
+                    .and_then(|()| stream.flush())
+                    .is_err()
+                {
+                    return sent;
+                }
+                sent += 1;
+                if !matches!(
+                    finished.recv_timeout(interval),
+                    Err(mpsc::RecvTimeoutError::Timeout)
+                ) {
+                    break;
+                }
+            }
+            let _ = stream.write_all(b"0\r\n\r\n");
+            sent
+        });
+        Self {
+            base_url,
+            finish,
+            thread,
+        }
+    }
+
+    fn url(&self, path: &str) -> String {
+        format!("{}/{path}", self.base_url)
+    }
+
+    fn finish(&self) {
+        let _ = self.finish.send(());
+    }
+
+    fn join(self) -> usize {
+        self.thread.join().unwrap()
+    }
 }
 
 #[tokio::test]

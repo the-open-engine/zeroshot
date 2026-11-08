@@ -49,7 +49,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and canonical skill assets through that release's `SHA256SUMS`, smoke-checks the
   staged executable, and replaces the running executable in place without privilege escalation. It
   installs or refreshes only unchanged managed skill copies and preserves conflicts.
-  Development-placeholder builds refuse self-update.
+  Development-placeholder builds refuse self-update. Update downloads use an idle timeout, never a
+  whole-request limit, and keep their size caps. Failures carry the complete cause chain and GitHub's
+  bounded, control-safe `message`, never request URLs.
 - Release recovery may complete missing outputs only when existing immutable artifacts match the
   exact version and source commit.
 
