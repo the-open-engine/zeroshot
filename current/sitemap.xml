@@ -2,19 +2,19 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://zeroshot.sh/docs/current/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-05</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/zeroshot-cli/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-07</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/zeroshot-distribution/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-06</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/concepts/delivery-validation/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/concepts/execution/</loc>
@@ -22,15 +22,15 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/concepts/runtimes-and-connections/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-02</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/concepts/targets/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-06</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/getting-started/first-run/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-03</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/getting-started/install/</loc>
@@ -38,15 +38,15 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/acp/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/active-memory/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-04</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/code-review/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-05</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/forge-delivery/</loc>
@@ -58,43 +58,43 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/planning/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-05</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/python-sdk/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-05</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/review-loop/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-10-24</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/review/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-05</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/runtime-environments/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-05</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/stacks/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-05</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/project/harness-adapters/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-07</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/project/source-code-adapters/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-10-30</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/project/versioning/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-10-24</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/python/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-05</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/runtime-plan/</loc>
@@ -102,46 +102,46 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/admission/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-10-24</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/api/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-05</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/data-plane/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-10-24</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/graph/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-10-24</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/lifecycle/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-10-24</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/portable-bindings/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-10-24</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/cluster/watch/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-10-24</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/python/client/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-07</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/python/configuration/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-07</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/python/errors/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-07</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/reference/python/results/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-07</lastmod>
     </url>
 </urlset>
