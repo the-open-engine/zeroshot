@@ -69,12 +69,12 @@ See more graph examples on [zeroshot.sh](https://zeroshot.sh/#one-graph).
 One graph per process your team runs.
 
 - **[Graphs are JSON](docs/reference/cluster/graph.md):** steps, reviewers, branches, parallel
-  work, bounded loops, and steps that repeat over a list.
+  work, bounded loops and maps over lists.
 - **[Profiles](docs/zeroshot-cli.md#zeroshot-profile-set):** save each graph by name and pick one
   per run with `--profile`.
 - **[Agent and model per node](docs/reference/runtime-plan.md#per-node-lanes):** Claude Code,
-  Codex, Copilot CLI, Pi and [more](docs/project/harness-adapters.md), with models from OpenAI,
-  Anthropic, OpenRouter, Bedrock, Foundry or your own endpoint (providers vary by agent).
+  Codex, Copilot CLI, Pi and [more](docs/project/harness-adapters.md), through the providers each
+  agent supports: OpenAI, Anthropic, OpenRouter, Bedrock, Foundry or your own endpoint.
 - **[Delivery](docs/guides/forge-delivery.md):** a run can end by pushing a branch, opening a PR,
   or opening and merging one on GitHub, GitHub Enterprise or GitLab, or by leaving the change in
   your working copy. The built-in template `software-change` defaults to PR delivery.
@@ -83,11 +83,11 @@ One graph per process your team runs.
 
 Agents do the work. The graph decides what happens next.
 
-- **[Checked before it runs](docs/concepts/execution.md#the-run-boundary):** a graph where one
-  node's output doesn't fit the next node's input, a loop has no limit, or a branch can never run
-  is rejected before any agent starts. `--validate-only` runs just the checks.
+- **[Checked before it runs](docs/concepts/execution.md#the-run-boundary):** type mismatches,
+  unbounded loops and unreachable branches are rejected before any agent starts.
+  `--validate-only` runs just the checks.
 - **[Reviewers route the run](docs/concepts/execution.md#state-reduction-chooses-the-next-step):**
-  each reviewer returns a verdict from a fixed set, and the graph says where each verdict goes.
+  each reviewer returns an enum verdict, and the graph routes on it.
 - **[Script steps](docs/reference/runtime-plan.md#script):** run a deterministic command as a
   step in local runs.
 - **[Secrets stay out of the record](docs/concepts/runtimes-and-connections.md#runtime-configuration-contains-names-not-secret-values):**
@@ -99,10 +99,8 @@ Agents do the work. The graph decides what happens next.
 - **[`zeroshot ui`](docs/guides/observe-and-control.md#browser):** each node's input, output and
   logs in the browser, on a timeline you can replay.
 - **[CLI](docs/guides/observe-and-control.md#resume-event-and-log-streams):** `status` and `list`
-  return JSON, `watch` and `logs` stream events and resume after the last one you read, `attach`
-  follows a running agent.
-- **[SQLite](docs/concepts/execution.md#durable-run-state):** local runs are stored in SQLite
-  files you can query.
+  return JSON, `watch` and `logs` stream resumable events, `attach` follows a running agent.
+- **[SQLite](docs/concepts/execution.md#durable-run-state):** one SQLite file per run.
 - **[Resume](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run):** restart a failed
   run from a checkpoint without redoing finished steps.
 
@@ -110,13 +108,13 @@ Agents do the work. The graph decides what happens next.
 
 Drive zeroshot from your own code, CI or UI.
 
-- **[Python SDK](sdks/python/README.md):** submit, watch and wait on runs from Python. Each wheel
-  bundles the matching zeroshot binary.
+- **[Python SDK](sdks/python/README.md):** async Python client for submitting, watching and
+  waiting on runs. Each wheel bundles the matching zeroshot binary.
 - **[JSON-RPC API](https://zeroshot.sh/docs/current/reference/cluster/api/):** run
   `zeroshot target serve` and connect over WebSocket to submit runs, watch their status and which
   nodes are running, and stream logs. An OpenRPC spec describes the methods.
-- **[API keys](docs/zeroshot-cli.md#zeroshot-delegation):** expiring, revocable keys for CI on
-  hosted targets like zeroshot Platform.
+- **[API keys](docs/zeroshot-cli.md#zeroshot-delegation):** expiring, revocable CI keys for hosted
+  targets.
 - **[Agent adapters](docs/project/harness-adapters.md):** add support for another coding agent
   through a documented contract.
 
