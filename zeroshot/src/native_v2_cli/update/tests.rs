@@ -315,6 +315,61 @@ async fn update_failures_report_stalls_as_timeouts_without_cutting_off_progressi
 }
 
 #[tokio::test]
+async fn github_failure_explanations_are_bounded_single_line_text() {
+    // The updater's limits for a failure body and for the message shown from it.
+    const BODY_LIMIT: usize = 64 * 1024;
+    const MESSAGE_LIMIT: usize = 512;
+    let message = format!(
+        "\u{1b}[2Jrate\r\nlimited\t{}{}",
+        "é".repeat(MESSAGE_LIMIT),
+        "z".repeat(MESSAGE_LIMIT)
+    );
+    let explained = serde_json::json!({ "message": message }).to_string();
+    let oversized =
+        serde_json::json!({ "message": "hidden", "padding": "x".repeat(BODY_LIMIT) }).to_string();
+    let declared = format!(
+        "HTTP/1.1 403 Forbidden\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{{\"message\":\"hidden\"}}",
+        BODY_LIMIT + 1
+    );
+    let chunked = format!(
+        "HTTP/1.1 403 Forbidden\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n{oversized}\r\n0\r\n\r\n",
+        oversized.len()
+    );
+    let server = TestServer::start(vec![
+        fixed_response("403 Forbidden", explained.as_bytes()),
+        declared.into_bytes(),
+        chunked.into_bytes(),
+    ]);
+    let client = http_client().assert_value();
+    let mut errors = Vec::new();
+    for label in ["explained", "declared", "chunked"] {
+        let error = download(&client, &server.url(label), 64, label).await;
+        errors.push(error.assert_error().to_string());
+    }
+    server.finish();
+
+    let explanation = errors[0]
+        .strip_prefix("update failed: could not fetch explained: HTTP 403 Forbidden: ")
+        .unwrap_or_else(|| panic!("GitHub's explanation is missing: {}", errors[0]));
+    assert!(explanation.len() <= MESSAGE_LIMIT, "{explanation}");
+    assert!(
+        !explanation.chars().any(char::is_control),
+        "{explanation:?}"
+    );
+    assert!(
+        explanation.starts_with("[2Jrate") && explanation.contains("limited é"),
+        "{explanation}"
+    );
+    assert!(explanation.ends_with('z'), "{explanation}");
+    for (label, error) in [("declared", &errors[1]), ("chunked", &errors[2])] {
+        assert_eq!(
+            error,
+            &format!("update failed: could not fetch {label}: HTTP 403 Forbidden")
+        );
+    }
+}
+
+#[tokio::test]
 async fn wave5_cli_contract_release_metadata_and_verified_assets_are_self_consistent() {
     if rerun_without_skill_opt_out(
         "native_v2_cli::update::tests::wave5_cli_contract_release_metadata_and_verified_assets_are_self_consistent",
