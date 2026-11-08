@@ -2,7 +2,7 @@
 
 # zeroshot
 
-**A multi-agent orchestration framework for autonomous software development, because agents should never grade their own work.**
+**A multi-agent orchestration engine that keeps coding agents from grading their own work.**
 
 [zeroshot.sh](https://zeroshot.sh/?utm_source=github&utm_medium=readme&utm_campaign=zeroshot) · [Discord](https://theopenengine.com/discord) · [Docs](https://zeroshot.sh/docs/) · [Blog](https://theopenengine.com/blog/)
 
