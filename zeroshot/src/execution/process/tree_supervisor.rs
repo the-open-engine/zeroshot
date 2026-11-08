@@ -143,14 +143,15 @@ fn enter(owner: i32, channel: i32, keep: &[i32]) -> io::Result<()> {
             return Ok(());
         }
     }
-    // The supervisor cannot retain std's exec-error pipe: the actual child's exec owns that
-    // handshake. Workspace locks are the only inherited parent files deliberately retained.
+    // Only the provider owns its stdio and exec-error pipe. A supervisor copy would mask
+    // closed stdin (EPIPE) or stdout/stderr EOF while the provider remains alive. The fork above
+    // already gave the provider its own copies; retain only the control socket and workspace locks.
     close_other_descriptors(keep);
     supervise(root, channel)
 }
 
 fn close_other_descriptors(keep: &[i32]) {
-    let mut start = 3_u32;
+    let mut start = 0_u32;
     for end in keep
         .iter()
         .copied()
@@ -166,7 +167,7 @@ fn close_other_descriptors(keep: &[i32]) {
 }
 
 fn close_descriptor_range(start: u32, end: u32) {
-    // SAFETY: this range excludes stdio, the control socket and selected workspace leases.
+    // SAFETY: this range excludes the control socket and selected workspace leases.
     // Old kernels use the same operation one descriptor at a time.
     unsafe {
         if libc::syscall(libc::SYS_close_range, start, end - 1, 0) == 0 {
