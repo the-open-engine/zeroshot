@@ -10,6 +10,49 @@ fn shell(source: &str) -> Command {
 }
 
 #[tokio::test]
+async fn exact_graphql_rejection_is_recognized_before_credential_redaction() {
+    let body = serde_json::json!({"data":{"enqueuePullRequest":null},"errors":[{
+        "type":"UNPROCESSABLE","path":["enqueuePullRequest"],"message":"Policy refused"}]})
+    .to_string();
+    for token in ["test-token", "enqueuePullRequest", "UNPROCESSABLE"] {
+        let mut command = shell("printf '%s' \"$1\"; exit 1");
+        command.args(["fixture", &body]);
+        let failure = command_json(
+            command,
+            Duration::from_secs(2),
+            SourceDeliveryCredential::token(token),
+            Some("enqueuePullRequest"),
+        )
+        .await
+        .expect_err("request rejected");
+        assert!(failure.rejected);
+        assert_eq!(failure.error.api_status(), None);
+        assert!(!failure.error.to_string().contains(token));
+        assert!(!failure.error.retryable_operation());
+    }
+}
+
+#[tokio::test]
+async fn timed_out_graphql_response_never_claims_known_rejection() {
+    let body = serde_json::json!({"data":{"enqueuePullRequest":null},"errors":[{
+        "type":"UNPROCESSABLE","path":["enqueuePullRequest"],"message":"Policy refused"}]})
+    .to_string();
+    let mut command = shell("printf '%s' \"$1\"; exec /bin/sleep 30");
+    command.args(["fixture", &body]);
+    let failure = command_json(
+        command,
+        Duration::from_millis(100),
+        SourceDeliveryCredential::token("test-token"),
+        Some("enqueuePullRequest"),
+    )
+    .await
+    .expect_err("request incomplete");
+    assert!(!failure.rejected);
+    assert_eq!(failure.error.api_status(), None);
+    assert!(failure.error.retryable_operation());
+}
+
+#[tokio::test]
 async fn silent_status_success_requires_no_json_response() {
     command_status(
         shell("exit 0"),
