@@ -1348,6 +1348,9 @@ python -m mkdocs build --strict
 - `.github/workflows/coverage.yml` measures the default workspace, UI-feature Rust tests, and hosted
   root boundary tests on native changes, enforces coverage floors, and publishes LCOV to Coveralls.
   It is reusable from the required merge-group CI aggregate and may also run manually.
+  Linux coverage maps LLVM counters continuously with runtime counter relocation so post-fork
+  helpers ending in `_exit` retain coverage without a profile-runtime call in the child. Profile
+  filenames keep both process (`%p`) and binary (`%m`) identities to avoid unrelated writers.
   Keep Rust test implementations in `tests/`, `tests.rs`,
   `*_tests.rs`, or `*-tests.rs`; do not embed test bodies in production-named source files, because
   production coverage totals explicitly exclude those test-source paths.
