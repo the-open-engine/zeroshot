@@ -2418,6 +2418,9 @@ as bounded diagnostics with resolved connection values redacted. Truncated stder
 may split a credential. A nonzero exit becomes <code>crash</code>, and invalid or oversized
 JSON becomes <code>malformed</code>. The ordinary graph error and retry rules apply. Cancellation and the
 step's optional <code>timeoutMs</code> terminate the process tree through the shared process runner.
+Linux cleanup also covers detached descendants and controller death; Windows uses Job Objects.
+macOS process-group cleanup cannot cover descendants that detach themselves. See
+<a href="../../concepts/execution/#durable-run-state">process ownership</a>.
 Script steps record zero native model tokens. Services started separately by the application
 may keep indexes or models warm across script invocations. Service lifecycle is application owned.</p>
 <h3 id="agent"><code>agent</code><a class="headerlink" href="#agent" title="Permanent link">&para;</a></h3>
@@ -3034,7 +3037,7 @@ or ignored by the native harness have no effective-configuration acknowledgement
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-05">5 November 2026</time>
+    Last updated <time datetime="2026-11-08">8 November 2026</time>
   </span>
 
     
