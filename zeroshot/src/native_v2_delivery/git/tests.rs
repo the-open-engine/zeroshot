@@ -165,6 +165,10 @@ async fn co_author_trailer_credits_each_prepared_revision_once_and_keeps_its_aut
     let credit = format!("Co-authored-by: {CO_AUTHOR}");
     let trailers = "Signed-off-by: Starter <starter@example.com>\n\
                     Reviewed-by: Reviewer <reviewer@example.com>";
+    let others = "Co-Authored-By: Claude <noreply@anthropic.com>\n\
+                  Co-author: Bob <bob@example.com>\n\
+                  Co: Carol <carol@example.com>\n\
+                  Zeroshot: run-123";
     let messages = [
         (
             "fix: one line".to_owned(),
@@ -178,19 +182,25 @@ async fn co_author_trailer_credits_each_prepared_revision_once_and_keeps_its_aut
             format!("fix: credited\n\n{credit}\n{trailers}"),
             format!("fix: credited\n\n{credit}\n{trailers}"),
         ),
+        (
+            format!("fix: cased\n\nco-authored-by: {CO_AUTHOR}\n{trailers}"),
+            format!("fix: cased\n\nco-authored-by: {CO_AUTHOR}\n{trailers}"),
+        ),
+        // Other trailers keep their names even where those prefix the credit's key.
+        (
+            format!("feat: others\n\n{others}"),
+            format!("feat: others\n\n{others}\n{credit}"),
+        ),
     ];
     for (identity, author) in [
         (None, "Zeroshot <delivery@zeroshot.invalid>"),
         (Some(bot_commit_identity()), BOT_AUTHOR),
     ] {
         let repository = TestGitRepository::delivery();
-        // Workspace trailer configuration must not rename, move, repeat or drop the credit.
+        // Workspace trailer defaults and separators must not move, repeat or drop the credit.
         for (key, value) in [
             ("trailer.ifexists", "add"),
             ("trailer.co-authored-by.ifexists", "add"),
-            ("trailer.co-authored-by.key", "Helped-by"),
-            ("trailer.cab.key", "Co-authored-by"),
-            ("trailer.cab.ifexists", "add"),
             ("trailer.where", "start"),
             ("trailer.ifmissing", "doNothing"),
             ("trailer.separators", "#"),

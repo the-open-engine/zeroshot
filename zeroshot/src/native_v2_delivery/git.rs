@@ -120,8 +120,9 @@ impl SystemGit {
     /// never leaves the run's changes committed without it. The message gets Git's default
     /// whitespace cleanup whatever the workspace configures. One that cleanup empties stays
     /// uncredited, so Git refuses it rather than committing the credit as the whole message.
-    /// Git's trailer handling places the credit under an alias no workspace configures, so
-    /// workspace `trailer.*` settings cannot rename, move, repeat or drop it.
+    /// Git's trailer handling appends the credit with pinned placement, duplicate handling and
+    /// separator, so workspace trailer defaults cannot move, repeat or drop it. No pin sets a
+    /// `key`, which would make Git rename existing trailers whose names prefix it.
     async fn commit_crediting(
         &self,
         workspace: &Path,
@@ -130,7 +131,7 @@ impl SystemGit {
     ) -> Result<(), GitError> {
         let [name, email] = command::identity_configuration(self.commit_identity.as_ref());
         let trailer = format!(
-            "zeroshot-co-author: {} <{}>",
+            "Co-authored-by: {} <{}>",
             co_author.name(),
             co_author.email()
         );
@@ -141,17 +142,12 @@ impl SystemGit {
             email.as_str(),
             "-c",
             "trailer.separators=:",
-            // Existing credits keep their key, so the alias below can recognise them.
             "-c",
-            "trailer.Co-authored-by.key=Co-authored-by",
+            "trailer.Co-authored-by.where=end",
             "-c",
-            "trailer.zeroshot-co-author.key=Co-authored-by",
+            "trailer.Co-authored-by.ifexists=addIfDifferent",
             "-c",
-            "trailer.zeroshot-co-author.where=end",
-            "-c",
-            "trailer.zeroshot-co-author.ifexists=addIfDifferent",
-            "-c",
-            "trailer.zeroshot-co-author.ifmissing=add",
+            "trailer.Co-authored-by.ifmissing=add",
             "commit",
             "--no-verify",
             "--cleanup=whitespace",
