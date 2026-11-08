@@ -715,6 +715,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   preserves supplied delivery lineage. Public clients never supply storage paths or execution seeds.
 - Durable observation replay reads bounded ledger pages and retains its scan cursor across pages.
   A finished snapshot closes a subscription only after replay reaches its durable cursor.
+  A retiring local controller closes connection writers and joins their request cleanup before
+  ending its runtime. EOF remains a reconnect signal; durable observation resumes from the last
+  emitted cursor instead of reporting a storage failure caused by runtime shutdown.
 - Bulk replay uses the WebSocket client's opt-in subscription backpressure on a dedicated
   connection; control requests and ordinary observers keep their independent connections.
 - Safe-log timestamps are captured at the producer boundary as positive JavaScript-safe Unix epoch
