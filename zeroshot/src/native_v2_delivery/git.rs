@@ -73,14 +73,7 @@ impl SystemGit {
         base_revision: &str,
         commit_message: &str,
     ) -> Result<String, GitError> {
-        self.require_supported_operation(workspace).await?;
-        let unresolved = self
-            .require_success(workspace, &["diff", "--name-only", "--diff-filter=U"])
-            .await?;
-        if !unresolved.stdout().is_empty() || unresolved.stdout_truncated() {
-            return Err(GitError::Unmerged(Box::new(unresolved.into_diagnostic())));
-        }
-        self.require_success(workspace, &["add", "--all"]).await?;
+        self.stage_workspace(workspace).await?;
         if self.commit_pending(workspace).await? {
             let [name, email] = command::identity_configuration(self.commit_identity.as_ref());
             self.require_success(
@@ -99,6 +92,51 @@ impl SystemGit {
             .await?;
         }
         self.deliverable_revision(workspace, base_revision).await
+    }
+
+    pub(crate) async fn stage_workspace(&self, workspace: &Path) -> Result<String, GitError> {
+        self.require_supported_operation(workspace).await?;
+        let unresolved = self
+            .require_success(workspace, &["diff", "--name-only", "--diff-filter=U"])
+            .await?;
+        if !unresolved.stdout().is_empty() || unresolved.stdout_truncated() {
+            return Err(GitError::Unmerged(Box::new(unresolved.into_diagnostic())));
+        }
+        Ok(self
+            .require_success(workspace, &["add", "--all"])
+            .await?
+            .diagnostic()
+            .stderr
+            .clone())
+    }
+
+    pub(crate) async fn uncommitted_changes(
+        &self,
+        workspace: &Path,
+    ) -> Result<Option<GitCommandFailure>, GitError> {
+        self.require_supported_operation(workspace).await?;
+        let status = self
+            .require_success(
+                workspace,
+                &[
+                    "--no-optional-locks",
+                    "status",
+                    "--porcelain=v1",
+                    "--untracked-files=all",
+                    "--ignore-submodules=dirty",
+                ],
+            )
+            .await?;
+        let pending_merge = self.merge_pending(workspace).await?;
+        if status.stdout().is_empty() && !status.stdout_truncated() && !pending_merge {
+            return Ok(None);
+        }
+        let diagnostic = status.into_diagnostic();
+        Ok(Some(if pending_merge {
+            diagnostic.with_context("workspace has a pending MERGE_HEAD; finish or abort the merge before starting a delivery run")
+        } else {
+            diagnostic
+        }))
     }
 
     async fn require_supported_operation(&self, workspace: &Path) -> Result<(), GitError> {
@@ -161,7 +199,12 @@ impl SystemGit {
         let status = self
             .require_success(
                 workspace,
-                &["status", "--porcelain=v1", "--untracked-files=all"],
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "--untracked-files=all",
+                    "--ignore-submodules=dirty",
+                ],
             )
             .await?;
         Ok((

@@ -241,6 +241,9 @@ impl LocalCliBackend {
         if let Some(run_id) = existing().await? {
             return Ok(run_id);
         }
+        crate::native_v2_local::validate_clean_checkout(&prepared, &self.git_program)
+            .await
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
         self.start_prepared_controller(prepared).await
     }
 

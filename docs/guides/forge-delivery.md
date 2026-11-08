@@ -19,6 +19,13 @@ prefix (such as `https://gitlab.example/install`). GitHub uses a root web URL.
 
 ## Local setup
 
+Local `--push`, `--pr` and `--ship` runs require a clean checkout before agents start. Commit, stash
+or remove staged, unstaged and unignored untracked changes named in the refusal. Finish or abort a
+pending merge first. Changed submodule commit pointers count; files inside submodules do not.
+Runs without Git
+delivery keep their normal behavior. Delivery shows Git's warning when a run adds an unregistered
+embedded repository, but permits the gitlink; register it as a submodule when others need to clone it.
+
 GitHub delivery requires `gh`. GitLab needs `glab` only to reuse its native login. Sign in to the host you use:
 
 ```console

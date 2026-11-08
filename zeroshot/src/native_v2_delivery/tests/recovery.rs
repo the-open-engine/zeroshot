@@ -385,6 +385,8 @@ async fn retained_delivery_honors_terminal_review_state_before_any_new_mutation(
             .outcome;
         assert_delivery_signal(&opened, DELIVERY_OPENED_LABEL);
         let pushes = authority.head_updates.load(Ordering::SeqCst);
+        let index_lock = repo.workspace.join(".git/index.lock");
+        fs::write(&index_lock, "another process owns the index\n").assert_value();
 
         let outcome = run_with_adapter(request(DeliveryMode::Merge), adapter)
             .await
@@ -395,6 +397,10 @@ async fn retained_delivery_honors_terminal_review_state_before_any_new_mutation(
             assert_eq!(outcome, expected.assert_value());
         }
         assert_eq!(authority.head_updates.load(Ordering::SeqCst), pushes);
+        assert_eq!(
+            fs::read_to_string(index_lock).assert_value(),
+            "another process owns the index\n"
+        );
     }
 }
 

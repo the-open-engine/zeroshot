@@ -98,6 +98,48 @@ async fn local_delivery_without_gh_on_the_users_path_is_rejected_before_agents_s
     }
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn local_delivery_rejects_preexisting_changes_before_agents_start() {
+    for flag in ["--push", "--pr", "--ship"] {
+        let fixture = DeliveryFixture::new();
+        fixture.write_fake_gh(&fixture.bin.join("gh"));
+        git(
+            &fixture.repository,
+            &["config", "core.excludesFile", "../excludes"],
+        );
+        fs::write(fixture.root.path("excludes"), "ignored.log\n").assert_value();
+        fs::write(fixture.repository.join("seed.txt"), "edited\n").assert_value();
+        fs::write(fixture.repository.join("staged.txt"), "staged\n").assert_value();
+        git(&fixture.repository, &["add", "staged.txt"]);
+        fs::write(fixture.repository.join("my-notes.txt"), "private\n").assert_value();
+        fs::write(fixture.repository.join("ignored.log"), "ignored\n").assert_value();
+        let search_path = search_path(&[
+            fixture.bin.clone(),
+            PathBuf::from("/usr/bin"),
+            PathBuf::from("/bin"),
+        ]);
+
+        let run = fixture
+            .run_arguments(&[flag, "--detach"], &search_path)
+            .await;
+        let error = String::from_utf8_lossy(&run.stderr);
+        assert!(!run.status.success(), "dirty {flag} was admitted: {run:?}");
+        assert!(!fixture.codex_log.exists(), "agents ran before refusal");
+        for path in ["seed.txt", "staged.txt", "my-notes.txt"] {
+            assert!(error.contains(path), "dirty path {path} missing: {error}");
+        }
+        assert!(
+            !error.contains("ignored.log"),
+            "ignored path was reported: {error}"
+        );
+
+        let no_delivery = fixture
+            .run_arguments(&["--delivery", "none", "--detach"], &search_path)
+            .await;
+        assert!(no_delivery.status.success(), "{no_delivery:?}");
+    }
+}
+
 struct DeliveryFixture {
     root: TemporaryDirectory,
     bin: PathBuf,
@@ -147,11 +189,17 @@ impl DeliveryFixture {
     }
 
     async fn run(&self, flag: &str, search_path: &OsString) -> Output {
+        self.run_arguments(&[flag], search_path).await
+    }
+
+    async fn run_arguments(&self, flags: &[&str], search_path: &OsString) -> Output {
         let path = |name: &str| self.root.path(name);
         let mut command = Command::new(env!("CARGO_BIN_EXE_zeroshot"));
         command
             .args(["run", "--title", "Local delivery gh lookup", "--template"])
-            .args(["software-change", flag, "--input"])
+            .arg("software-change")
+            .args(flags)
+            .arg("--input")
             .arg(path("input.json"))
             .arg("--uniform-runtime-config")
             .arg(path("runtime.json"))

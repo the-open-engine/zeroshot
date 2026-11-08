@@ -100,6 +100,7 @@ impl NativeV2DeliveryAdapter {
         };
         let snapshot = self.observe_before_delivery(request, preparation).await?;
         self.check_terminal_review(&snapshot, preparation).await?;
+        self.stage_workspace(preparation).await?;
         let Some(observed) = observed_receipt(snapshot, &self.config.target, &branch) else {
             return self
                 .unpublished_preflight(&known, preparation, commit_message)
