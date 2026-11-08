@@ -2127,6 +2127,17 @@ token usage. Selecting a checkpoint replaces later workspace edits, including un
 files. Restart restores the latest completed snapshot and starts the graph at its root. A sudden
 target loss can precede the next snapshot boundary, so the last writer may run again. Local workspaces
 must be idle while they are restored.</p>
+<p>A local resume restores the snapshot before any agent starts. That preparation may take up to 10
+minutes. For larger workspaces or slower disks, set <code>ZEROSHOT_PREPARATION_TIMEOUT</code> to a whole number
+of seconds from 1 to 86400 before <code>zeroshot resume</code>. When a restore fails, or its extraction reaches
+that deadline, the error names the step that stopped and its elapsed time. Replacing the workspace
+files, once started, is allowed to finish. If it is still running 30 seconds after the deadline,
+the resume is stopped with an error that names the deadline. Either way the run stays recoverable.</p>
+<p>A restore never changes the checkout before the complete snapshot is extracted. If a crash
+interrupts it while it replaces files, the checkout can stay partially restored. The next
+<code>zeroshot resume</code> then removes the interrupted staging copy beside the workspace. It finishes the
+restore with the same or another checkpoint before any agent runs. A resume that would start
+without restoring a snapshot is refused until a restore completes.</p>
 <p>Local and Docker targets deduplicate checkpoints in a private Restic repository beside their run
 storage and advertise <code>openengine.workspace-checkpoints/v1</code>. They retain that repository only for a
 failed recovery lineage and delete it after a successful run. Platform exposes recovery through
@@ -2162,7 +2173,7 @@ status first if another operator may already have stopped the run, or if it may 
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-07">7 November 2026</time>
+    Last updated <time datetime="2026-11-08">8 November 2026</time>
   </span>
 
     
