@@ -654,6 +654,7 @@ impl NativeV2DeliveryAdapter {
         mut preparation: DeliveryPreparation<'_, '_>,
     ) -> Result<SourceReviewReceipt, DeliveryStop> {
         let input = delivery_input(&preparation.invocation.node.input)?;
+        self.stage_workspace(&preparation).await?;
         self.preflight(&mut preparation, &input.title).await?;
         let head_revision = self
             .prepare_head(preparation.session, preparation.control, &input.title)
@@ -746,6 +747,25 @@ impl NativeV2DeliveryAdapter {
             )
             .await
             .map_err(recovery::git_failure)
+    }
+
+    async fn stage_workspace(
+        &self,
+        preparation: &DeliveryPreparation<'_, '_>,
+    ) -> Result<(), DeliveryStop> {
+        let warning = self
+            .git
+            .stage_workspace(&preparation.session.workspace)
+            .await
+            .map_err(recovery::git_failure)?;
+        if !warning.is_empty() {
+            emit(
+                preparation.control,
+                &self.redact_feedback(preparation.credentials, warning),
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     async fn push_review_head(

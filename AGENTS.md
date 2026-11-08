@@ -370,6 +370,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   detached folders are allowed when the graph has no Git delivery. Workspace and active Zeroshot
   state roots must be disjoint, including symlink aliases and missing state suffixes. Recovery
   reuses the stored workspace; local idempotency cannot return a run from a different folder.
+  New local Git-delivery submissions require a clean index and worktree, including unignored
+  untracked files, after idempotent-replay lookup and before controller launch. Use the captured
+  native Git environment so admission and staging share ignore rules. Git's successful staging
+  warnings reach run output before delivery preflight; unregistered embedded repositories warn
+  without being blocked. Runs without Git delivery and retained-workspace resumes are unchanged.
   Workspace leases hold shared ancestor locks and an exclusive selected-root lock, so overlapping
   folders exclude each other while sibling folders remain concurrent. Lease guards explicitly
   unlock on drop so fork-before-exec children cannot retain released ownership. Git metadata and

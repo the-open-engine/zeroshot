@@ -6,6 +6,50 @@ use super::*;
 use super::test_support::{ConfigLocation, GitFixture};
 
 #[tokio::test]
+async fn checkout_admission_uses_native_ignore_rules_without_changing_the_index() {
+    let fixture = GitFixture::new("[core]\n autocrlf = false\n", ConfigLocation::Home);
+    fixture.seed();
+    let excludes = fixture.root.path().join("global-ignore");
+    std::fs::write(&excludes, "ignored.log\n").assert_value();
+    fixture.git(&[
+        "config",
+        "core.excludesFile",
+        excludes.to_str().assert_value(),
+    ]);
+    fixture.edit();
+    for name in ["staged.txt", "untracked.txt", "ignored.log"] {
+        std::fs::write(fixture.workspace.join(name), "local work\n").assert_value();
+    }
+    fixture.git(&["add", "staged.txt"]);
+    let index = std::fs::read(fixture.workspace.join(".git/index")).assert_value();
+    let changed = fixture
+        .system_git()
+        .uncommitted_changes(&fixture.workspace)
+        .await
+        .assert_value()
+        .assert_value()
+        .to_string();
+    for path in ["sample.txt", "staged.txt", "untracked.txt"] {
+        assert!(changed.contains(path), "{changed}");
+    }
+    assert!(!changed.contains("ignored.log"), "{changed}");
+    assert_eq!(
+        std::fs::read(fixture.workspace.join(".git/index")).assert_value(),
+        index
+    );
+    fixture.git(&["add", "--all"]);
+    fixture.git(&["commit", "-m", "save work"]);
+    assert!(
+        fixture
+            .system_git()
+            .uncommitted_changes(&fixture.workspace)
+            .await
+            .assert_value()
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn native_credentials_cannot_corrupt_revisions_or_tree_ids() {
     let mut fixture = GitFixture::new("[core]\n autocrlf = true\n", ConfigLocation::Home);
     for name in ["GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE"] {
