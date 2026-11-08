@@ -1314,6 +1314,12 @@ python -m mkdocs build --strict
 
 ## Release convention
 
+- Build-time GitHub Release assets use `scripts/distribution/github-release-asset.js` and the
+  authenticated API when `GH_TOKEN` is supplied. Credentials stay on `api.github.com`, never signed
+  storage redirects. Callers retain their upstream checksum and immutable digest checks. CI supplies
+  read-only tokens only to download steps; Docker uses the `github_token` BuildKit secret, never an
+  image argument or environment layer. `build-restic.sh OUTPUT_ROOT --source-only` stages verified
+  source for Go-only builders, which consume `ZEROSHOT_RESTIC_SOURCE_ARCHIVE` and recheck its pin.
 - CI has native, Python, repository-tooling, npm-package, and strict-documentation lanes plus stable
   aggregate `required`. Pull requests run formatting, lightweight tooling and CI contract checks,
   then wait for authenticated exact-head Greptile completion. Full applicable lanes run only for

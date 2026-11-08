@@ -8,10 +8,19 @@ shift
 
 build_root="$(mktemp -d)"
 trap 'rm -rf -- "$build_root"' EXIT
-curl --fail --location --silent --show-error \
-  "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic-${RESTIC_VERSION}.tar.gz" \
-  --output "$build_root/restic.tar.gz"
+if [[ -n "${ZEROSHOT_RESTIC_SOURCE_ARCHIVE:-}" ]]; then
+  cp "$ZEROSHOT_RESTIC_SOURCE_ARCHIVE" "$build_root/restic.tar.gz"
+else
+  node "$(dirname "${BASH_SOURCE[0]}")/github-release-asset.js" \
+    restic/restic "v${RESTIC_VERSION}" "restic-${RESTIC_VERSION}.tar.gz" "$build_root/restic.tar.gz"
+fi
 printf '%s  %s\n' "$RESTIC_SOURCE_SHA256" "$build_root/restic.tar.gz" | sha256sum --check -
+if [[ "${1:-}" == --source-only ]]; then
+  mkdir -p "$OUTPUT_ROOT"
+  cp "$build_root/restic.tar.gz" "$OUTPUT_ROOT/restic.tar.gz"
+  exit 0
+fi
+unset GH_TOKEN
 mkdir "$build_root/source"
 tar -xzf "$build_root/restic.tar.gz" --strip-components=1 -C "$build_root/source"
 cd "$build_root/source"
