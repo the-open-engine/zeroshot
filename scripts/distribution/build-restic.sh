@@ -20,6 +20,7 @@ if [[ "${1:-}" == --source-only ]]; then
   cp "$build_root/restic.tar.gz" "$OUTPUT_ROOT/restic.tar.gz"
   exit 0
 fi
+unset GH_TOKEN
 mkdir "$build_root/source"
 tar -xzf "$build_root/restic.tar.gz" --strip-components=1 -C "$build_root/source"
 cd "$build_root/source"
