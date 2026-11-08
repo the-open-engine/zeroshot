@@ -2,20 +2,21 @@ use std::collections::BTreeMap;
 use std::fs;
 #[cfg(windows)]
 use std::path::PathBuf;
+#[cfg(windows)]
+use std::process::Stdio;
 
-#[cfg(unix)]
 use tokio::sync::watch;
 use tokio::time::{Duration, Instant, timeout};
 use zeroshot_engine::execution::WorkspaceAccessMode;
 use zeroshot_engine::execution::driver::WorkspaceCapability;
 use zeroshot_engine::execution::process::{
-    LocalProcessRunner, ProcessCleanupEvidence, ProcessSessionCommand,
+    LocalProcessRunner, ProcessCleanupEvidence, ProcessSession, ProcessSessionCommand,
 };
 #[cfg(unix)]
 use zeroshot_engine::execution::process::{
     MAX_PROCESS_DIAGNOSTIC_BYTES, MAX_PROCESS_FRAME_BYTES, MAX_PROCESS_FRAMING_OVERHEAD_BYTES,
     MAX_PROCESS_MESSAGE_BYTES, PROCESS_STDIN_CAPACITY, PROCESS_STDOUT_CAPACITY, ProcessFrame,
-    ProcessLaunchEvidence, ProcessRunnerError, ProcessSession,
+    ProcessLaunchEvidence, ProcessRunnerError,
 };
 #[path = "support/process_runner.rs"]
 mod process_runner_support;
@@ -374,23 +375,26 @@ async fn windows_process_fixture(pid_file: std::ffi::OsString) {
         .kill_on_drop(true)
         .spawn()
         .assert_value();
+    let pid_file = PathBuf::from(pid_file);
     fs::write(
-        PathBuf::from(pid_file),
-        child.id().assert_value().to_string(),
+        pid_file.with_extension("root.pid"),
+        std::process::id().to_string(),
     )
     .assert_value();
+    fs::write(&pid_file, child.id().assert_value().to_string()).assert_value();
+    if std::env::var_os("ZEROSHOT_STREAMING_ROOT_EXIT").is_some() {
+        // Skip Rust destructors so kill_on_drop cannot accidentally supply the cleanup proof.
+        std::process::exit(37);
+    }
     child.wait().await.assert_value();
 }
 
 #[cfg(windows)]
-#[tokio::test]
-async fn windows_job_release_reaps_a_descendant() {
-    if let Some(pid_file) = std::env::var_os(WINDOWS_PROCESS_FIXTURE) {
-        windows_process_fixture(pid_file).await;
-        return;
-    }
+async fn windows_owned_session(
+    pid_file: &std::path::Path,
+    root_exits: bool,
+) -> (watch::Sender<bool>, ProcessSession) {
     let executable = std::env::current_exe().assert_value();
-    let pid_file = unique_temp_path("zeroshot-stream-windows-descendant-pid");
     let mut launch = command(
         executable.to_str().assert_value(),
         vec!["--exact", "windows_job_release_reaps_a_descendant"],
@@ -403,12 +407,30 @@ async fn windows_job_release_reaps_a_descendant() {
         WINDOWS_PROCESS_FIXTURE.to_owned(),
         pid_file.to_str().assert_value().to_owned(),
     );
+    launch.deadline = None;
+    if root_exits {
+        launch
+            .environment
+            .insert("ZEROSHOT_STREAMING_ROOT_EXIT".to_owned(), "1".to_owned());
+    }
     let (cancel, cancellation) = cancellation_pair();
     let mut session = LocalProcessRunner::new()
         .open(launch, cancellation)
         .await
         .assert_value();
     session.close_stdin().await.assert_value();
+    (cancel, session)
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_job_release_reaps_a_descendant() {
+    if let Some(pid_file) = std::env::var_os(WINDOWS_PROCESS_FIXTURE) {
+        windows_process_fixture(pid_file).await;
+        return;
+    }
+    let pid_file = unique_temp_path("zeroshot-stream-windows-descendant-pid");
+    let (cancel, mut session) = windows_owned_session(&pid_file, false).await;
     let child_pid = tokio::select! {
         pid = wait_for_child_pid(&pid_file) => pid,
         output = session.wait() => {
@@ -430,6 +452,78 @@ async fn windows_job_release_reaps_a_descendant() {
     assert_eq!(completion.cleanup, ProcessCleanupEvidence::Reaped);
     wait_for_process_exit(child_pid).await;
     let _ = fs::remove_file(pid_file);
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_job_root_exit_reaps_a_descendant() {
+    let root = tempfile::tempdir().assert_value();
+    let pid_file = root.path().join("child.pid");
+    let (_cancel, mut session) = windows_owned_session(&pid_file, true).await;
+    let child = wait_for_child_pid(&pid_file).await;
+    let output = timeout(Duration::from_secs(5), session.wait())
+        .await
+        .assert_value()
+        .assert_value();
+    assert_eq!(output.exit_code, Some(37));
+    assert_eq!(output.cleanup, ProcessCleanupEvidence::Reaped);
+    wait_for_process_exit(child).await;
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_job_owner_death_reaps_only_its_descendants() {
+    const OWNER: &str = "ZEROSHOT_STREAMING_OWNER_FIXTURE";
+    if let Some(root) = std::env::var_os(OWNER) {
+        let root = PathBuf::from(root);
+        let _owned = windows_owned_session(&root.join("owner-child.pid"), false).await;
+        std::future::pending::<()>().await;
+        return;
+    }
+    let root = tempfile::tempdir().assert_value();
+    let peer_pid_file = root.path().join("peer-child.pid");
+    let (peer_cancel, mut peer) = windows_owned_session(&peer_pid_file, false).await;
+    let peer_child = wait_for_child_pid(&peer_pid_file).await;
+    // The owner is an ordinary process, outside the peer's Job. Its abrupt death must close
+    // its own Job handle; an outer managed Job here would mask a leaked inner handle.
+    let mut owner_command = tokio::process::Command::new(std::env::current_exe().assert_value());
+    owner_command
+        .args([
+            "--exact",
+            "windows_job_owner_death_reaps_only_its_descendants",
+        ])
+        .env(OWNER, root.path())
+        .env_remove(WINDOWS_PROCESS_FIXTURE)
+        .env_remove("ZEROSHOT_STREAMING_ROOT_EXIT");
+    owner_command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut owner = owner_command.kill_on_drop(true).spawn().assert_value();
+    let owned_pid_file = root.path().join("owner-child.pid");
+    let owned_child = wait_for_child_pid(&owned_pid_file).await;
+    let owned_root = wait_for_child_pid(&owned_pid_file.with_extension("root.pid")).await;
+    assert!(
+        process_exists(owned_root) && process_exists(owned_child) && process_exists(peer_child)
+    );
+    owner.start_kill().assert_value();
+    timeout(Duration::from_secs(5), owner.wait())
+        .await
+        .assert_value()
+        .assert_value();
+    wait_for_process_exit(owned_root).await;
+    wait_for_process_exit(owned_child).await;
+    assert!(
+        process_exists(peer_child),
+        "owner death killed an unrelated Job's descendant"
+    );
+    peer_cancel.send(true).assert_value();
+    let output = timeout(Duration::from_secs(5), peer.wait())
+        .await
+        .assert_value()
+        .assert_value();
+    assert_eq!(output.cleanup, ProcessCleanupEvidence::Reaped);
+    wait_for_process_exit(peer_child).await;
 }
 
 #[cfg(unix)]
