@@ -199,7 +199,12 @@ impl SystemGit {
         let status = self
             .require_success(
                 workspace,
-                &["status", "--porcelain=v1", "--untracked-files=all"],
+                &[
+                    "status",
+                    "--porcelain=v1",
+                    "--untracked-files=all",
+                    "--ignore-submodules=dirty",
+                ],
             )
             .await?;
         Ok((

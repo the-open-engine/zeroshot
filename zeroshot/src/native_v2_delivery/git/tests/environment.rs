@@ -138,23 +138,27 @@ async fn checkout_admission_rejects_changed_and_staged_gitlinks_even_when_submod
     ]);
     assert!(fixture.git(&["status", "--porcelain=v1"]).is_empty());
     let system = fixture.system_git();
-    assert!(
-        system
-            .uncommitted_changes(&fixture.workspace)
-            .await
-            .assert_value()
-            .is_some()
-    );
     let head_tree = fixture.git(&["rev-parse", "HEAD^{tree}"]);
-    fixture.git(&["add", "--all"]);
-    assert_ne!(fixture.git(&["write-tree"]), head_tree);
-    assert!(
-        system
-            .uncommitted_changes(&fixture.workspace)
-            .await
-            .assert_value()
-            .is_some()
-    );
+    for staged in [false, true] {
+        if staged {
+            fixture.git(&["add", "--all"]);
+            assert_ne!(fixture.git(&["write-tree"]), head_tree);
+        }
+        assert!(
+            system
+                .uncommitted_changes(&fixture.workspace)
+                .await
+                .assert_value()
+                .is_some()
+        );
+        assert!(
+            system
+                .workspace_state(&fixture.workspace)
+                .await
+                .assert_value()
+                .1
+        );
+    }
 }
 
 #[tokio::test]

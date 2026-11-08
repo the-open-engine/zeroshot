@@ -374,6 +374,7 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   untracked files, after idempotent-replay lookup and before controller launch. Use the captured
   native Git environment so admission and staging share ignore rules. Pending merges and moved
   or staged gitlinks block admission; non-stageable contents inside registered submodules do not.
+  Delivery workspace-state and trusted-validation checks use the same root-stageable dirt rules.
   Git's successful staging warnings reach run output after terminal review observation and before
   reconciliation; unregistered embedded repositories warn
   without being blocked. Runs without Git delivery and retained-workspace resumes are unchanged.

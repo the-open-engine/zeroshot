@@ -164,6 +164,50 @@ async fn trusted_publication_refusal_prevents_push_and_review_creation() {
 }
 
 #[tokio::test]
+async fn trusted_validation_accepts_unchanged_nonstageable_submodule_contents() {
+    for ignore in ["none", "all"] {
+        let harness = ValidationHarness::new(Script::NoCi, "printf '{\"verdict\":\"accepted\"}'");
+        let workspace = &harness.repo.workspace;
+        git(
+            workspace,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                harness.repo.remote.to_str().unwrap(),
+                "dependency",
+            ],
+        );
+        git(
+            workspace,
+            &["config", "submodule.dependency.ignore", ignore],
+        );
+        let child = workspace.join("dependency");
+        fs::write(child.join("scratch.txt"), "private child scratch\n").unwrap();
+        fs::write(child.join("README.md"), "unstaged child edit\n").unwrap();
+
+        let outcome = harness.run().await.unwrap();
+        assert_delivery_signal(&outcome, DELIVERY_MERGED_LABEL);
+        assert!(
+            harness
+                .requests()
+                .iter()
+                .any(|request| request["stage"] == "publish")
+        );
+        assert_eq!(
+            fs::read_to_string(child.join("scratch.txt")).unwrap(),
+            "private child scratch\n"
+        );
+        assert_eq!(
+            fs::read_to_string(child.join("README.md")).unwrap(),
+            "unstaged child edit\n"
+        );
+        harness.assert_private_exchange();
+    }
+}
+
+#[tokio::test]
 async fn trusted_publication_repair_returns_the_authored_repair_without_remote_effects() {
     let harness = ValidationHarness::new(
         Script::NoCi,
