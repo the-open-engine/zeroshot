@@ -6,7 +6,7 @@ use super::*;
 const STARTUP_EXITED: &str = "controller exited before becoming ready";
 const SELECTOR_UNUSABLE: &str = "ZEROSHOT_RESTIC does not name a restic executable";
 
-fn test_restic() -> PathBuf {
+pub(super) fn test_restic() -> PathBuf {
     [
         Path::new(env!("CARGO_BIN_EXE_zeroshot")).with_file_name("restic"),
         PathBuf::from("/usr/bin/restic"),

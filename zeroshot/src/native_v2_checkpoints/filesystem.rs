@@ -197,11 +197,17 @@ impl Drop for PrivateStage {
 }
 
 pub(super) fn private_stage(parent: &Path, prefix: &str) -> io::Result<PrivateStage> {
-    let path = parent.join(format!("{prefix}{}", uuid::Uuid::now_v7()));
+    owned_stage(&parent.join(format!("{prefix}{}", uuid::Uuid::now_v7())))
+}
+
+/// Creates the private stage at a path whose name identifies its owner. Only an interrupted
+/// earlier incarnation of that owner can have left a directory there, so it is replaced.
+pub(super) fn owned_stage(path: &Path) -> io::Result<PrivateStage> {
+    remove_disposable_tree(path)?;
     // Windows may give ordinary temporary directories the Administrators owner. Set the
     // current-user owner and private ACL atomically rather than trying to repair that owner.
-    platform::create_private_directory(&path)?;
-    Ok(PrivateStage(path))
+    platform::create_private_directory(path)?;
+    Ok(PrivateStage(path.to_owned()))
 }
 
 /// Deletes only a caller-owned disposable checkpoint directory. Copied workspace directories

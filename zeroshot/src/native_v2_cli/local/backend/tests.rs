@@ -510,6 +510,7 @@ async fn local_resume_reconciles_a_failed_successor_start_for_retry() {
                 resumed_from: None,
                 delivery_run_id: Some(original.clone()),
                 successor_run_id: None,
+                pending_restore: None,
             },
         )
         .assert_value();
@@ -560,6 +561,7 @@ fn local_resume_claimability_fails_closed_before_controller_effects() {
         resumed_from: None,
         delivery_run_id: Some(original_run_id.clone()),
         successor_run_id: Some(run_id("0199f33f-3b44-7d21-9000-000000000053")),
+        pending_restore: None,
     };
     backend
         .write_recovery_document(&original_run_id, &recovery)

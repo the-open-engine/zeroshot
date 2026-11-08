@@ -87,9 +87,13 @@ async fn review_git_preparation_requires_the_workspace_lease_before_any_mutation
                 .assert_value()
         });
         let prepared = prepare_controller_start(&bootstrap).await.assert_value();
-        let result = prepare_runtime(&prepared, &bootstrap, |_| {
-            Err::<PortableRuntime, _>(std::io::Error::other("stop before graph dispatch"))
-        })
+        let deadline = tokio::time::Instant::now() + bootstrap.preparation_timeout;
+        let result = prepare_runtime(
+            &prepared,
+            &bootstrap,
+            |_| Err::<PortableRuntime, _>(std::io::Error::other("stop before graph dispatch")),
+            deadline,
+        )
         .await;
         if occupied {
             assert!(matches!(
@@ -592,14 +596,20 @@ async fn workspace_checkpoint_store_follows_runtime_policy() {
             storage,
         );
         let prepared = prepare_controller_start(&bootstrap).await.assert_value();
-        let runtime = prepare_runtime(&prepared, &bootstrap, |_| {
-            Ok::<_, std::io::Error>(PortableRuntime {
-                checkpoints: None,
-                execution_seed: Vec::new(),
-                runner: Arc::new(NeverDispatched),
-                cleanup: Arc::new(super::super::engine::ConfirmedCleanup),
-            })
-        })
+        let deadline = tokio::time::Instant::now() + bootstrap.preparation_timeout;
+        let runtime = prepare_runtime(
+            &prepared,
+            &bootstrap,
+            |_| {
+                Ok::<_, std::io::Error>(PortableRuntime {
+                    checkpoints: None,
+                    execution_seed: Vec::new(),
+                    runner: Arc::new(NeverDispatched),
+                    cleanup: Arc::new(super::super::engine::ConfirmedCleanup),
+                })
+            },
+            deadline,
+        )
         .await
         .assert_value()
         .runtime

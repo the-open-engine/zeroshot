@@ -332,6 +332,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   readiness leaves one bounded, control-safe startup failure report in its run storage, redacted
   before it is written of the bootstrap's credentials and of every captured shell value except
   short or known-public ones; the waiting CLI consumes it and appends it to its startup error.
+  Preparation before readiness, including a checkpoint restore, has one finite deadline: 600 s, or
+  `ZEROSHOT_PREPARATION_TIMEOUT` whole seconds from 1 to 86400. The controller stops a restore
+  that is still extracting there; workspace replacement, once begun, runs to completion so it is
+  never stopped halfway on purpose. The CLI waits a short stop grace longer, then stops the
+  controller's process group (Unix) or process (Windows) and names the deadline. Handoff waits keep
+  their separate short bound.
   A later local CLI startup scavenges orphaned bootstrap files after the bounded controller handoff
   window without removing other run state.
   The in-memory snapshot supplies bounded native-context forwarding and Codex config-referenced
@@ -649,8 +655,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   recursively transfer them to the successor's newly leased writer identity before admission. They
   advertise `openengine.workspace-recovery/v1`. Local resume persists predecessor/successor
   lineage before controller launch, uses a process-held file lock during admission, and reconciles
-  an interrupted launch before permitting another successor. Direct-target retained-workspace
-  handoff records both sides before moving the tree and reconciles incomplete handoffs at startup.
+  an interrupted launch before permitting another successor. A launch whose controller is confirmed
+  stopped is reconciled without a handoff wait. Status reports a claim whose launcher released it
+  and whose controller neither runs nor admitted the run as recoverable, so a crash cannot strand
+  the workspace. Direct-target retained-workspace handoff records both sides before moving the tree
+  and reconciles incomplete handoffs at startup.
   Direct-target status exposes the immutable admitted connection requirements so the CLI resolves
   fresh resume values without consulting changed profiles. Recovery lineage also retains the root
   attempt's delivery identity so every successor reuses the same delivery branch and pull request.
@@ -675,9 +684,19 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   or exit status without private child output; failed backups never replace a published checkpoint.
   Versioned execution seeds live in separate files and are read only for selected continuation.
   Restart restores the latest published snapshot without importing a seed. Restore staging is a
-  private sibling of the workspace so final replacement stays on one filesystem. Successful
-  lineages delete their catalogs and repository only after durable terminal success; failed lineages
-  retain both for resume. Disposable checkpoint staging cleanup is best effort after confirmed
+  private sibling of the workspace so final replacement stays on one filesystem. A restore reads
+  the selected seed and extracts and validates its complete stage before changing the workspace.
+  Restic runs in a contained process tree that is confirmed stopped on failure or at the deadline.
+  Git objects and private Git files such as HEAD and the index are published by rename, so
+  repeating the restore after an interruption at any step installs the complete snapshot; a hard
+  crash during replacement can still leave a partial checkout until then. Local resume pins the
+  selected snapshot and records it with the successor as the attempt in the predecessor's recovery
+  metadata before launch, and clears it once that successor is ready. The local stage is named
+  after its attempt, so the next resume removes only that stage. The same selection must still
+  resolve to the pinned snapshot; another selection that restores a snapshot replaces the record,
+  and a resume that would start without restoring is refused while it remains. Successful lineages
+  delete their catalogs and repository only after durable terminal success; failed lineages retain
+  both for resume. Disposable checkpoint staging cleanup is best effort after confirmed
   runtime cleanup and before observer ledger access. Copied read-only directories are made writable
   only inside private scratch; staging cleanup failure cannot block terminal truth or status.
   Hosted failed runs likewise collect checkpoint staging as best effort after process cleanup;

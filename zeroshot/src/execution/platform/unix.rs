@@ -112,3 +112,17 @@ pub(crate) fn spawn_controller(
     }
     command.spawn()
 }
+
+/// Stops a controller that never became ready, with every process left in its process group such
+/// as Git, and waits for the controller itself to exit. Restic runs in its own contained group,
+/// which the controller stops at its preparation deadline.
+pub(crate) async fn stop_controller(child: &mut ControllerChild) -> io::Result<()> {
+    // `spawn_controller` made the controller its session's process group leader. Its identifier
+    // stays reserved until the controller is reaped below.
+    if let Some(group) = child.id().and_then(|id| libc::pid_t::try_from(id).ok()) {
+        unsafe {
+            libc::killpg(group, libc::SIGKILL);
+        }
+    }
+    child.kill().await
+}
