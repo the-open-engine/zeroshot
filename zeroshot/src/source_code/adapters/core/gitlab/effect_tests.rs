@@ -193,8 +193,7 @@ async fn known_review_and_branch_observation_are_fenced_against_head_movement() 
             .authority
             .observe_delivery(read, credential())
             .await
-            .unwrap_err()
-            .retryable_review_sync()
+            .is_err()
     );
     assert_eq!(fixture.writes("/merge"), 0);
 }

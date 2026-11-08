@@ -671,8 +671,6 @@ fn review_list_arguments(
         "state=all".to_owned(),
         "-f".to_owned(),
         format!("head={owner}:{head_branch}"),
-        "-f".to_owned(),
-        format!("base={}", target.target_branch),
     ])
 }
 

@@ -102,3 +102,12 @@ Delivery preserves review identity across retries and confirms the integrated re
 reporting a merge. Comment retries reuse the original publication; captured MR scopes refuse stale
 base/head revisions. Required GitLab merge trains and synthetic merged-results pipelines remain
 pending. Escape standalone GitLab slash commands in comments and MR descriptions.
+
+
+Resuming accepts intentional commits pushed to the run branch. If the complete restored candidate
+already matches its published tree and no merge is pending, delivery reuses that commit without another
+work round. Pending merges retain their normal reconciliation path. Different
+local content is preserved and returns to the review loop. Discovery checks every review from the run
+branch before validating its target; retargeted or ambiguous reviews are refused rather than duplicated.
+GitLab briefly rechecks a lagging merge-request head against the branch ref. Persistent disagreement
+stops with both revisions in the diagnostic instead of polling indefinitely.

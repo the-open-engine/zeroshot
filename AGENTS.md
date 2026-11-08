@@ -395,6 +395,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   exact committed Git source. Explicit source connections
   authorize only transport fields; these values never enter agent environments or durable source
   records. Source-less local candidates construct no delivery adapter.
+- Resumed Git delivery accepts intentional run-branch commits and reuses an identical complete
+  staged candidate tree without recommitting when no merge is pending. Pending merges retain the
+  existing reconciliation path; different local work still requires review. Review
+  discovery uses the source repository/run branch before target validation, refusing retargeted or
+  ambiguous reviews. GitLab rechecks MR/ref lag twice locally, then reports persistent disagreement
+  as a terminal identity error.
 - `source_code_provider` owns effect-free source and delivery contracts and one provider registry.
   Maintained implementations live in `source_code/adapters/core`; contributed implementations
   live in `source_code/adapters/contributed`. Git is shared transport; forge adapters supply review,

@@ -73,6 +73,15 @@ async fn reconcile_adopted_delivery(
             request.observed.head_revision, local_head,
         )));
     }
+    let merge_pending = context
+        .transport
+        .workspace_git()
+        .merge_pending(context.transport.config().workspace.as_path())
+        .await
+        .map_err(git_error)?;
+    if !merge_pending && reuse_complete_candidate(context, &request.observed.head_revision).await? {
+        return Ok(SourceReconciliationOutcome::Adopted);
+    }
     let mut anchor = request.observed.clone();
     anchor.head_revision = local_head;
     Box::pin(reconcile_workspace(
@@ -84,6 +93,29 @@ async fn reconcile_adopted_delivery(
         },
     ))
     .await
+}
+
+async fn reuse_complete_candidate(
+    context: ReconciliationContext<'_>,
+    revision: &str,
+) -> Result<bool, SourceDeliveryError> {
+    let workspace = context.transport.config().workspace.as_path();
+    let git = context.transport.workspace_git();
+    git.stage_workspace(workspace).await.map_err(git_error)?;
+    let candidate = context.capture(&["write-tree"]).await?.require_success()?;
+    let published_tree = git
+        .revision_tree(workspace, revision)
+        .await
+        .map_err(git_error)?;
+    if !candidate.stdout_truncated() && candidate.stdout().trim() == published_tree {
+        // The complete restored candidate is already published. Move only HEAD, preserving files.
+        context
+            .capture(&["reset", "--soft", revision])
+            .await?
+            .require_success()?;
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 fn require_identity(
