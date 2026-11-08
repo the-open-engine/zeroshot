@@ -717,7 +717,8 @@ async fn submit_through_cli(
             submission_key: Some(
                 IdempotencyKey::new("candidate-e2e").assert_value_with("submission key"),
             ),
-            forward_github_token: false,
+            // The in-process target has no stored GitHub connection, so the shell token is sent.
+            forward_github_token: true,
         })),
         &context,
         &mut NeverDetach,
