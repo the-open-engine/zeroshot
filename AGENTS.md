@@ -1059,6 +1059,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `cargo run -p zeroshot --example generate_cli_docs -- --write` and verify with `--check`.
 - Page descriptions live in Markdown front matter; generated reference descriptions live in
   `scripts/docs_hook.py`. `docs/overrides/main.html` renders social metadata and breadcrumbs.
+  Search titles and social titles share the same template. Sitemap `lastmod` uses the verified
+  content-change date from Git and is omitted when history cannot establish it.
   Fonts are self-hosted in `docs/assets/fonts/` with their licenses.
 - The public documentation site is the root `mkdocs.yml`. Python API pages are generated from the
   curated SDK exports and docstrings. Do not restore a second SDK-only MkDocs site.

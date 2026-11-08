@@ -53,6 +53,7 @@ nav:
       - How execution works: concepts/execution.md
       - Runtimes and connections: concepts/runtimes-and-connections.md
       - Targets: concepts/targets.md
+      - Delivery validation: concepts/delivery-validation.md
   - Guides:
       - Plan work before running it: guides/planning.md
       - Prepare a runtime environment: guides/runtime-environments.md
