@@ -768,7 +768,7 @@ async fn target_size_rejection_reaches_the_caller_after_the_request_is_sent() {
 }
 
 #[tokio::test]
-async fn size_listing_reads_authenticated_catalogs_with_maximum_descriptions() {
+async fn size_listing_reads_authenticated_catalogs_with_maximum_unicode_descriptors() {
     let root = temp_root();
     for count in [1, 128] {
         let target = RecordingTarget::spawn(move |request, origin, tokens| {
@@ -783,34 +783,46 @@ async fn size_listing_reads_authenticated_catalogs_with_maximum_descriptions() {
             let description = if count == 1 {
                 "16 vCPU, 64 GiB RAM".to_owned()
             } else {
-                "\\\"".repeat(512)
+                "é".repeat(512)
+            };
+            let identifier = |index| {
+                let mut id = format!("{prefix}-{index}");
+                if count == 128 {
+                    id.push_str(&"🚀".repeat(128 - id.chars().count()));
+                }
+                id
             };
             let mut document = hosted_document(origin);
             document["extensions"]["run_size_catalog"] = json!({
                 "kind":openengine_cluster_protocol::RUN_SIZES_KIND,
-                "default":format!("{prefix}-0"),
+                "default":identifier(0),
                 "sizes":(0..count).map(|index| json!({
-                    "id":format!("{prefix}-{index}"), "description":description,
+                    "id":identifier(index), "description":description,
                 })).collect::<Vec<_>>()
             });
-            let encoded = document.to_string();
+            // ASCII-escaping JSON encoders emit surrogate pairs for supplementary characters.
+            let encoded = document
+                .to_string()
+                .replace('é', "\\u00e9")
+                .replace('🚀', "\\ud83d\\ude80");
             if count == 128 {
-                assert!(encoded.len() > 64 * 1024);
-                assert!(encoded.len() < 512 * 1024);
+                assert!(encoded.len() > 512 * 1024);
+                assert!(encoded.len() < 1024 * 1024);
             }
             ("200 OK", encoded)
         })
         .await;
         let (record, authority) = authenticated_authority(&root, &target.origin).await;
         let catalog = authority.run_sizes(&record).await.assert_value();
-        assert_eq!(
-            catalog.default.as_ref().map(|id| id.as_str()),
-            Some("org-enabled-0")
-        );
+        let default = catalog.default.as_ref().assert_value().as_str();
+        assert!(default.starts_with("org-enabled-0"));
         assert_eq!(catalog.sizes.len(), count);
         if count == 1 {
+            assert_eq!(default, "org-enabled-0");
             assert_eq!(catalog.sizes[0].description, "16 vCPU, 64 GiB RAM");
         } else {
+            assert_eq!(default.chars().count(), 128);
+            assert_eq!(catalog.sizes[127].id.as_str().chars().count(), 128);
             assert_eq!(catalog.sizes[127].description.len(), 1024);
         }
         let requests = target.stop();
@@ -820,5 +832,43 @@ async fn size_listing_reads_authenticated_catalogs_with_maximum_descriptions() {
         );
         assert!(requests.first().assert_value().authorization.is_none());
         assert!(requests.last().assert_value().authorization.is_some());
+    }
+}
+
+#[tokio::test]
+async fn size_listing_rejects_public_and_authenticated_discovery_above_one_mebibyte() {
+    for authenticated in [false, true] {
+        let root = temp_root();
+        let target = RecordingTarget::spawn(move |request, origin, tokens| {
+            if (request.method.as_str(), request.path.as_str()) == DISCOVERY
+                && request.authorization.is_some() == authenticated
+            {
+                let body = hosted_discovery(origin) + &" ".repeat(1024 * 1024);
+                assert!(body.len() > 1024 * 1024);
+                return ("200 OK", body);
+            }
+            hosted_response(request, origin, tokens, false)
+        })
+        .await;
+        let (record, authority) = authenticated_authority(&root, &target.origin).await;
+        let error = authority.run_sizes(&record).await.assert_error();
+        let operation = if authenticated {
+            "target run sizes"
+        } else {
+            "native-v2 target discovery"
+        };
+        assert_eq!(
+            error.to_string(),
+            format!("{operation} response is too large")
+        );
+        let requests = target.stop();
+        assert_eq!(
+            routes(&requests),
+            if authenticated {
+                vec![DISCOVERY, OAUTH_METADATA, TOKEN, SESSION, DISCOVERY]
+            } else {
+                vec![DISCOVERY]
+            }
+        );
     }
 }

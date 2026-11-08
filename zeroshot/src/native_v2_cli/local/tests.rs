@@ -95,8 +95,17 @@ pub(super) async fn create_contract_run(
     run_id: &RunId,
     submission: &RunSubmission,
 ) -> SqliteRunLedger {
+    let harnesses = crate::harnesses::HarnessRegistry::local();
+    let sizes = crate::native_v2_hosting::host_run_sizes();
     let admitted = NativeV2Admission
-        .admit(submission.clone())
+        .admit_with_context(
+            submission.clone(),
+            crate::native_v2_admission::NativeV2AdmissionContext::new(
+                &harnesses,
+                DeliveryPolicy::Optional,
+            )
+            .with_run_sizes(&sizes),
+        )
         .await
         .assert_value();
     let storage = backend.create_run_storage(run_id).assert_value();
@@ -930,12 +939,10 @@ async fn assert_local_start_deduplicates_before_controller_launch() {
     .with_ready_timeout(Duration::ZERO);
     let existing = RunId::new("0199f33f-3b44-7d21-9000-0000000000a1");
     let duplicate = RunId::new("0199f33f-3b44-7d21-9000-0000000000a2");
-    let prepared = prepare_local_run(
-        prepared_request(existing.clone(), "wave11-deduplicate"),
-        &repository,
-        Path::new("git"),
-    )
-    .assert_value();
+    let mut original = prepared_request(existing.clone(), "wave11-deduplicate");
+    original.intent.runtime.size = None;
+    let prepared =
+        prepare_local_run(original.clone(), &repository, Path::new("git")).assert_value();
     create_contract_run(&backend, &existing, &prepared.submission).await;
     backend
         .write_recovery_document(
@@ -948,13 +955,21 @@ async fn assert_local_start_deduplicates_before_controller_launch() {
         )
         .assert_value();
 
+    let mut replay = original.clone();
+    replay.run_id = duplicate;
     assert_eq!(
         backend
-            .start_controller(prepared_request(duplicate, "wave11-deduplicate"))
+            .start_controller(replay.clone())
             .await
             .assert_value(),
         existing
     );
+    replay.intent.runtime.size = Some(run_size("host"));
+    assert!(matches!(
+        backend.start_controller(replay).await,
+        Err(NativeV2CliError::SubmissionConflict { existing_run_id })
+            if existing_run_id == existing.as_str()
+    ));
 
     let absent = contract_submission("wave11-absent-key");
     let absent_digest = submission_digest(&absent).assert_value();

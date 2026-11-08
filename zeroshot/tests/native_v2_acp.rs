@@ -43,18 +43,20 @@ impl acp::Client for RecordingClient {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn acp_turns_reuse_provider_session_and_remain_observable() {
-    let fixture = AcpFixture::new();
-    fixture.install_profile();
-    let (run_ids, messages) = fixture.run_session().await;
+async fn acp_initial_and_later_turns_accept_explicit_or_omitted_host_size() {
+    for size in [Some("host"), None] {
+        let fixture = AcpFixture::new();
+        fixture.install_profile_with_size(None, size);
+        let (run_ids, messages) = fixture.run_session().await;
 
-    assert_eq!(messages, ["first", "second"]);
-    assert_eq!(run_ids.len(), 2);
-    assert_ne!(run_ids[0], run_ids[1]);
-    let capture = std::fs::read_to_string(&fixture.capture).unwrap();
-    assert_eq!(capture.matches("arg=resume\n").count(), 1);
-    assert_eq!(capture.matches("arg=acp-test-thread\n").count(), 1);
-    fixture.assert_durable_runs(&run_ids);
+        assert_eq!(messages, ["first", "second"]);
+        assert_eq!(run_ids.len(), 2);
+        assert_ne!(run_ids[0], run_ids[1]);
+        let capture = std::fs::read_to_string(&fixture.capture).unwrap();
+        assert_eq!(capture.matches("arg=resume\n").count(), 1);
+        assert_eq!(capture.matches("arg=acp-test-thread\n").count(), 1);
+        fixture.assert_durable_runs(&run_ids);
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -404,7 +406,11 @@ impl AcpFixture {
     }
 
     fn install_profile_with_worker_lane(&self, lane: Option<Value>) {
-        let (graph, runtime) = write_profile_files(self._root.path(), lane);
+        self.install_profile_with_size(lane, Some("host"));
+    }
+
+    fn install_profile_with_size(&self, lane: Option<Value>, size: Option<&str>) {
+        let (graph, runtime) = write_profile_files(self._root.path(), lane, size);
         let profile = Command::new(&self.executable)
             .args([
                 "profile",
@@ -423,6 +429,12 @@ impl AcpFixture {
             profile.status.success(),
             "profile setup failed: {}",
             String::from_utf8_lossy(&profile.stderr)
+        );
+        let stored: openengine_cluster_protocol::RunProfileMutationResult =
+            serde_json::from_slice(&profile.stdout).unwrap();
+        assert_eq!(
+            stored.profile.runtime.size().map(|size| size.as_str()),
+            size
         );
     }
 
@@ -565,6 +577,7 @@ impl AcpFixture {
                 String::from_utf8_lossy(&output.stderr)
             );
             let status: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(status["size"], "host");
             assert_eq!(
                 status["status"]["terminalResult"]["output"]["response"],
                 expected
@@ -846,7 +859,11 @@ fn install_fake_claude(bin: &Path) {
     .unwrap();
 }
 
-fn write_profile_files(root: &Path, worker_lane: Option<Value>) -> (PathBuf, PathBuf) {
+fn write_profile_files(
+    root: &Path,
+    worker_lane: Option<Value>,
+    size: Option<&str>,
+) -> (PathBuf, PathBuf) {
     let string = || json!({"kind":"string"});
     let field = || json!({"type":string(),"required":true});
     let state = json!({"kind":"record","fields":{
@@ -890,13 +907,15 @@ fn write_profile_files(root: &Path, worker_lane: Option<Value>) -> (PathBuf, Pat
     let mut runtime = json!({
         "harness":"codex",
         "provider":"openai",
-        "size":"host",
         "nodes":{"worker":{
             "kind":"agent",
             "model":"test-model",
             "sessionScope":"node_instance"
         }}
     });
+    if let Some(size) = size {
+        runtime["size"] = json!(size);
+    }
     if let Some(lane) = worker_lane {
         runtime["nodes"]["worker"]["lane"] = lane;
     }

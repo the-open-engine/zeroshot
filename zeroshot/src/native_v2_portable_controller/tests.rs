@@ -141,7 +141,7 @@ pub(super) fn submission(key: &str) -> RunSubmission {
         graph: full_graph(vec![success_node()]),
         initial_input: Value::Null,
         runtime: crate::native_v2_candidate::test_support::codex_runtime(
-            run_size("small"),
+            run_size("host"),
             BTreeMap::new(),
         ),
         source: Some(ResolvedSource {
@@ -235,7 +235,8 @@ async fn one_run_server_is_ready_reconnectable_and_rejects_external_submission()
     std::fs::create_dir(&workspace).assert_value_with("workspace");
     std::fs::write(workspace.join("user.txt"), "keep local workspace").assert_value();
     let run_id = RunId::new("run-portable-server");
-    let submitted = submission("portable-server");
+    let mut submitted = submission("portable-server");
+    submitted.runtime.size = None;
     let controller = Arc::new(
         PortableRunController::start(
             bootstrap(
@@ -248,6 +249,13 @@ async fn one_run_server_is_ready_reconnectable_and_rejects_external_submission()
         )
         .await
         .assert_value_with("start portable controller"),
+    );
+    let ledger = SqliteRunLedger::open(controller.paths().ledger()).assert_value();
+    let stored = ledger.get(&run_id).await.assert_value().assert_value();
+    assert_eq!(stored.admitted.runtime.size(), Some(&run_size("host")));
+    assert_eq!(
+        stored.submission_digest,
+        crate::native_v2_platform::submission_digest(&submitted).assert_value()
     );
     #[cfg(unix)]
     if std::os::unix::net::SocketAddr::from_pathname(storage.join("controller.sock")).is_ok() {

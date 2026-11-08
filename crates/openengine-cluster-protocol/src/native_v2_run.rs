@@ -236,6 +236,14 @@ fn validate_runtime_id(value: &str) -> Result<(), NativeV2RunValueError> {
     )
 }
 
+fn validate_run_size(value: &str) -> Result<(), NativeV2RunValueError> {
+    validate_non_control_text(
+        value,
+        128,
+        "run size must be 1..=128 non-control characters",
+    )
+}
+
 fn validate_environment_name(value: &str) -> Result<(), NativeV2RunValueError> {
     let mut bytes = value.bytes();
     let first = bytes
@@ -468,7 +476,7 @@ pub enum CopilotProvider {
 native_v2_string_kind!(
     RunSizeKind,
     RunSize,
-    validate_runtime_id,
+    validate_run_size,
     json_schema!({ "type": "string", "minLength": 1, "maxLength": 128,
         "pattern": r"^[^\u0000-\u001f\u007f-\u009f]+$" })
 );

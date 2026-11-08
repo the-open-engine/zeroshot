@@ -451,6 +451,24 @@ fn size_descriptor(id: &str, description: &str) -> RunSizeDescriptor {
 }
 
 #[test]
+fn size_descriptions_keep_their_explicit_utf8_byte_limit() {
+    let id = crate::RunSize::new("custom").assert_value();
+    for (description, valid) in [("é".repeat(512), true), ("é".repeat(513), false)] {
+        assert_eq!(
+            RunSizeDescriptor::new(id.clone(), &description).is_ok(),
+            valid
+        );
+        assert_eq!(
+            serde_json::from_value::<RunSizeDescriptor>(serde_json::json!({
+                "id":id, "description":description,
+            }))
+            .is_ok(),
+            valid
+        );
+    }
+}
+
+#[test]
 fn run_size_discovery_preserves_target_descriptions_and_default() {
     let catalog = TargetRunSizesDiscovery::new(
         Some(crate::RunSize::new("custom-big-box").assert_value()),

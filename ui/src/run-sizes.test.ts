@@ -45,9 +45,40 @@ test('catalog metadata rejects duplicate IDs, invalid defaults and malformed des
   }
 });
 
-test('size IDs are bounded opaque UTF-8 strings without semantic normalization', () => {
-  for (const id of ['medium', 'GPU/2027', 'tiny', 'standard', 'a box', 'é'.repeat(64)])
+test('size IDs use Unicode character bounds without semantic normalization', () => {
+  for (const id of [
+    'medium',
+    'GPU/2027',
+    'tiny',
+    'standard',
+    'a box',
+    'é'.repeat(65),
+    'é'.repeat(128),
+    '🚀'.repeat(128),
+  ])
     assert.equal(validSizeId(id), true);
-  for (const id of ['', 'é'.repeat(65), 'x'.repeat(129), 'bad\nsize', 'bad\u0085size', null])
+  for (const id of [
+    '',
+    'é'.repeat(129),
+    '🚀'.repeat(129),
+    'x'.repeat(129),
+    'bad\nsize',
+    'bad\u0085size',
+    null,
+  ])
     assert.equal(validSizeId(id), false);
+});
+
+test('size descriptions retain an explicit UTF-8 byte bound', () => {
+  for (const [description, valid] of [
+    ['é'.repeat(512), true],
+    ['é'.repeat(513), false],
+  ] as const)
+    assert.equal(
+      validRunSizeCatalog({
+        ...catalog,
+        sizes: [{ id: catalog.default, description }],
+      }),
+      valid
+    );
 });

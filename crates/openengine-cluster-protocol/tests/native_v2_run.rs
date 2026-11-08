@@ -290,3 +290,21 @@ fn run_size_schema_accepts_future_ids_and_rejects_malformed_identifiers() {
         assert!(serde_json::from_value::<RunSize>(json!(invalid)).is_err());
     }
 }
+
+#[test]
+fn run_size_length_matches_unicode_character_limits_in_schema_and_rust() {
+    let schema = serde_json::to_value(schemars::schema_for!(RunSize)).assert_value();
+    let validator = jsonschema::validator_for(&schema).assert_value();
+    for (id, valid) in [
+        ("é".repeat(65), true),
+        ("é".repeat(128), true),
+        ("🚀".repeat(128), true),
+        ("é".repeat(129), false),
+        ("🚀".repeat(129), false),
+    ] {
+        let value = json!(id);
+        assert_eq!(validator.is_valid(&value), valid);
+        assert_eq!(RunSize::new(id).is_ok(), valid);
+        assert_eq!(serde_json::from_value::<RunSize>(value).is_ok(), valid);
+    }
+}

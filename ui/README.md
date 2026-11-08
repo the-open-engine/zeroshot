@@ -37,9 +37,10 @@ host's enabled registry. Existing unavailable selections remain visible and stay
 the author changes them.
 
 The bootstrap `runSizes` catalog contains `kind: "openengine.run-sizes/v2"`, a target-owned
-`default` identifier, and `sizes: [{id, description}]`. Identifiers are opaque strings; the editor
-does not maintain or infer size names from the runtime schema. An empty catalog offers no sizes
-and has no default. New runtime plans omit `size` so the target resolves its default at admission;
+`default` identifier, and `sizes: [{id, description}]`. Identifiers are opaque strings of 1–128
+non-control Unicode characters; the editor does not maintain or infer size names from the runtime
+schema. An empty catalog offers no sizes and has no default. New runtime plans omit `size` so the
+target resolves its default at admission;
 choosing Target default removes an explicit size rather than copying today's default into the profile.
 An explicit `size: null` also uses the target default and stays unchanged through JSON and form
 views until the author edits that field.

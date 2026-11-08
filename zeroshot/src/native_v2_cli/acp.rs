@@ -858,11 +858,16 @@ fn submission(
     task: &str,
     identity: &str,
 ) -> Result<RunSubmission, AcpServeError> {
+    let mut runtime = profile.runtime.clone();
+    crate::native_v2_admission::resolve_runtime_size(
+        &mut runtime,
+        &crate::native_v2_hosting::host_run_sizes(),
+    )?;
     Ok(RunSubmission {
         title: RunTitle::new("ACP turn").map_err(|_| AcpServeError::Profile("invalid title"))?,
         graph: profile.graph.clone(),
         initial_input: json!({ "task": task }),
-        runtime: profile.runtime.clone(),
+        runtime,
         environment: None,
         source: source.clone(),
         submission_key: IdempotencyKey::new(format!("acp-{identity}"))

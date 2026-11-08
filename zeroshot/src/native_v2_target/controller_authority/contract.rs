@@ -29,7 +29,8 @@ use super::DEVICE_GRANT;
 use crate::native_v2_target::TargetAuthorityError;
 
 pub(super) const MAX_RESPONSE_BYTES: usize = 64 * 1024;
-pub(super) const MAX_DISCOVERY_RESPONSE_BYTES: usize = 512 * 1024;
+// A full catalog can exceed 512 KiB when Unicode IDs and descriptions are JSON-escaped.
+pub(super) const MAX_DISCOVERY_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_TOKEN_BYTES: usize = 16 * 1024;
 
 #[derive(Deserialize)]

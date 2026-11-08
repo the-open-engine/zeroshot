@@ -59,7 +59,7 @@ async fn review_git_preparation_requires_the_workspace_lease_before_any_mutation
         submission.runtime = RuntimePlan::new(
             openengine_cluster_protocol::RuntimeLane::new("codex", (CodexProvider::OpenAi).name())
                 .assert_value(),
-            run_size("small"),
+            run_size("host"),
             std::collections::BTreeMap::from([
                 (
                     NodeName::new("reviewer").assert_value(),

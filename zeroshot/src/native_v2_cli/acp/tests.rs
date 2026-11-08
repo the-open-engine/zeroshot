@@ -291,6 +291,26 @@ fn with_worker_lane(mut runtime: RuntimePlan, lane: RuntimeLane) -> RuntimePlan 
 }
 
 #[tokio::test]
+async fn acp_admission_resolves_an_omitted_size_without_changing_the_profile() {
+    let mut profile = acp_profile(runtime("codex", "node_instance", json!({})));
+    profile.runtime.size = None;
+    validate_profile(&profile).await.assert_value();
+
+    let request = submission(&profile, &None, "first task", "omitted-size").assert_value();
+    let admitted = NativeV2Admission.admit(request).await.assert_value();
+    assert_eq!(admitted.runtime.size(), Some(&run_size("host")));
+    assert!(profile.runtime.size().is_none());
+
+    profile.runtime.size = Some(run_size("gpu"));
+    assert!(matches!(
+        submission(&profile, &None, "unsupported machine", "unoffered-size"),
+        Err(AcpServeError::Admission(
+            NativeV2AdmissionError::InvalidRuntime(_)
+        ))
+    ));
+}
+
+#[tokio::test]
 async fn acp_profile_validation_checks_every_effective_lane() {
     let claude_worker = with_worker_lane(
         runtime("codex", "node_instance", json!({})),

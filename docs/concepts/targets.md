@@ -13,8 +13,8 @@ requesting an access token or submitting a run or profile, and the target enforc
 again during admission. Older targets without this extension accept only the established core
 harnesses through client preflight.
 
-Sizes are target-owned identifiers. A target advertises its catalog through
-`extensions.run_size_catalog`:
+Sizes are target-owned identifiers of 1–128 non-control Unicode characters. A target advertises
+its catalog through `extensions.run_size_catalog`:
 
 ```json
 {

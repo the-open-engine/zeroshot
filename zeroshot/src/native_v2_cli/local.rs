@@ -255,13 +255,8 @@ impl LocalCliBackend {
 
     async fn start_controller(
         &self,
-        mut request: PreparedRunRequest,
+        request: PreparedRunRequest,
     ) -> Result<openengine_cluster_protocol::RunId, NativeV2CliError> {
-        crate::native_v2_admission::resolve_runtime_size(
-            &mut request.intent.runtime,
-            &crate::native_v2_hosting::host_run_sizes(),
-        )
-        .map_err(NativeV2CliError::InvalidRun)?;
         NativeV2Admission
             .validate_intent(&request.intent, DeliveryPolicy::Optional)
             .await

@@ -7,7 +7,7 @@ export type RunSizeCatalog = {
 };
 
 export function validSizeId(value: unknown): value is string {
-  return typeof value === 'string' && validText(value, 128);
+  return typeof value === 'string' && validText(value) && [...value].length <= 128;
 }
 
 export function validRunSizeCatalog(value: unknown): value is RunSizeCatalog | undefined {
@@ -37,14 +37,11 @@ function validSizeOption(value: unknown): value is RunSizeOption {
     validSizeId(size.id) &&
     typeof size.description === 'string' &&
     size.description.trim().length > 0 &&
-    validText(size.description, 1024)
+    validText(size.description) &&
+    new TextEncoder().encode(size.description).length <= 1024
   );
 }
 
-function validText(value: string, maxBytes: number): boolean {
-  return (
-    value.length > 0 &&
-    new TextEncoder().encode(value).length <= maxBytes &&
-    !/[\u0000-\u001f\u007f-\u009f]/u.test(value)
-  );
+function validText(value: string): boolean {
+  return value.length > 0 && !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
 }
