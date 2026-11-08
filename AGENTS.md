@@ -771,16 +771,17 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   interrupted commit never leaves those changes committed without the credit. Its `where=end`,
   `ifexists=addIfDifferent`, `ifmissing=add` and separator are pinned with `-c`, so Git ends the
   trailer block with the credit once despite workspace trailer defaults. No pin sets a `key`: Git
-  would rename existing trailers whose names prefix it, and the run's own trailers stay as written.
-  Workspace settings for the `Co-authored-by` trailer itself, such as a `key` or `cmd`, still apply,
-  as other workspace Git configuration affects delivery Git. A message the pinned cleanup empties
-  (only blank or `Signed-off-by: ` lines) gets no trailer, so Git refuses it instead of committing
-  the credit as the whole message; without a co-author the commit command is unchanged. A
-  conflicted merge that `prepare_revision` concludes after repair carries the run's resolution and
-  is credited; merges Git completes itself (reconcile `merge --no-edit`, target integration) and
-  the identity pinned for conflict repair never name it. It flows beside `commitIdentity` from
-  source credentials to `NativeV2DeliveryConfig`, the shared transport, and workspace Git. Local
-  resume rejects it, and requests without it are byte-identical.
+  would rename existing trailers whose names prefix it. The run's own trailers keep their names and
+  values; Git only normalises the spacing around their separators. Workspace settings for the
+  `Co-authored-by` trailer itself, such as a `key` or `cmd`, still apply, as other workspace Git
+  configuration affects delivery Git. A message the pinned cleanup empties (only blank or
+  `Signed-off-by: ` lines) gets no trailer, so Git refuses it instead of committing the credit as
+  the whole message; without a co-author the commit command is unchanged. A conflicted merge that
+  `prepare_revision` concludes after repair carries the run's resolution and is credited; merges
+  Git completes itself (reconcile `merge --no-edit`, target integration) and the identity pinned
+  for conflict repair never name it. It flows beside `commitIdentity` from source credentials to
+  `NativeV2DeliveryConfig`, the shared transport, and workspace Git. Local resume rejects it, and
+  requests without it are byte-identical.
 - Delivery clears the environment of its Git and GitHub CLI processes, so local composition pins
   delivery Git and, when the GitHub adapter is selected, `gh` to the files `find_executable` finds
   on the captured search path. Local `run`/`resume` reject a missing one as a usage error with the
