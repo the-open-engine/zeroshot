@@ -260,12 +260,13 @@ async fn spawn_contained_process(
     command: &ProcessSessionCommand,
     containment: ProcessContainment,
 ) -> Result<SpawnRecovery, ProcessRunnerError> {
-    let process_tree_registration = register_process_tree_for(containment).map_err(|error| {
-        ProcessRunnerError::Launch(super::io_error_detail(
-            "process containment registration failed",
-            &error,
-        ))
-    })?;
+    let mut process_tree_registration =
+        register_process_tree_for(containment).map_err(|error| {
+            ProcessRunnerError::Launch(super::io_error_detail(
+                "process containment registration failed",
+                &error,
+            ))
+        })?;
     let mut recovery = SpawnRecovery::registered();
     let mut child_command = build_child_command(
         ChildCommandSpec {
@@ -276,7 +277,20 @@ async fn spawn_contained_process(
         },
         containment,
     );
-    child_command.kill_on_drop(true);
+    let supervised = super::platform::prepare_supervisor(
+        &mut child_command,
+        &mut process_tree_registration,
+        &command.workspace.current_dir,
+    )
+    .map_err(|error| {
+        ProcessRunnerError::Launch(super::io_error_detail(
+            "process supervisor preparation failed",
+            &error,
+        ))
+    })?;
+    // Dropping observation closes the lifetime socket. The supervisor must remain alive to
+    // finish killing/reaping its tree and to retain workspace ownership until then.
+    child_command.kill_on_drop(!supervised);
     let child = child_command.spawn().map_err(|error| {
         ProcessRunnerError::Launch(super::io_error_detail("process spawn failed", &error))
     })?;

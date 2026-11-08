@@ -127,6 +127,9 @@ as bounded diagnostics with resolved connection values redacted. Truncated stder
 may split a credential. A nonzero exit becomes `crash`, and invalid or oversized
 JSON becomes `malformed`. The ordinary graph error and retry rules apply. Cancellation and the
 step's optional `timeoutMs` terminate the process tree through the shared process runner.
+Linux cleanup also covers detached descendants and controller death; Windows uses Job Objects.
+macOS process-group cleanup cannot cover descendants that detach themselves. See
+[process ownership](../concepts/execution.md#durable-run-state).
 Script steps record zero native model tokens. Services started separately by the application
 may keep indexes or models warm across script invocations. Service lifecycle is application owned.
 

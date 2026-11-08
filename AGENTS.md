@@ -773,6 +773,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Hosted source checkout retries only its fresh platform-owned staging workspace, within one
   allocation and one total deadline. Preserve the exact admitted revision before starting any
   graph node; terminal Git details remain redacted and private operator diagnostics.
+- Linux local process-group commands use one private subreaper per command. The supervisor keeps
+  only its lifetime socket and matching workspace lease descriptors above stdio, closes unrelated
+  inherited descriptors, and kills/reaps its kernel-owned descendants after root exit or owner loss.
+  Cleanup evidence and the original root status publish only after every descendant is reaped;
+  abrupt controller death keeps workspace locks held until then. No PID registry, cgroup or root
+  privilege is required; procfs provides owned-child enumeration. Dedicated worker identities and
+  Windows Job Objects keep their existing containment. macOS process groups do not cover descendants
+  that detach themselves; stronger macOS ownership remains deferred.
 - Contained provider sessions clean up surviving descendants immediately after the main process exits,
   before draining inherited output streams. Buffered output still drains under any explicit command
   deadline and a ten-minute ceiling while observing cancellation; cleanup stays scoped to its session.
@@ -1384,6 +1392,9 @@ python -m mkdocs build --strict
 - `.github/workflows/coverage.yml` measures the default workspace, UI-feature Rust tests, and hosted
   root boundary tests on native changes, enforces coverage floors, and publishes LCOV to Coveralls.
   It is reusable from the required merge-group CI aggregate and may also run manually.
+  Linux coverage maps LLVM counters continuously with runtime counter relocation so post-fork
+  helpers ending in `_exit` retain coverage without a profile-runtime call in the child. Profile
+  filenames keep both process (`%p`) and binary (`%m`) identities to avoid unrelated writers.
   Keep Rust test implementations in `tests/`, `tests.rs`,
   `*_tests.rs`, or `*-tests.rs`; do not embed test bodies in production-named source files, because
   production coverage totals explicitly exclude those test-source paths.
