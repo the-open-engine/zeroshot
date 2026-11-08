@@ -113,3 +113,65 @@ test('Restic source-only staging still refuses a prefetched archive that violate
   );
   await assert.rejects(access(path.join(output, 'restic.tar.gz')));
 });
+
+test(
+  'release sidecar setup preserves old source interfaces and prefetches only when supported',
+  { skip: process.platform === 'win32' },
+  async (t) => {
+    const { mkdir } = require('node:fs/promises');
+    const yaml = require('js-yaml');
+    const workflow = yaml.load(
+      await readFile(path.resolve(__dirname, '../../.github/workflows/release.yml'), 'utf8')
+    );
+    const run = workflow.jobs.restic.steps.find(
+      (step) => step.name === 'Build pinned Restic sidecars for every target'
+    ).run;
+    for (const modern of [false, true]) {
+      const root = await mkdtemp(path.join(tmpdir(), 'restic-release-interface-'));
+      t.after(() => rm(root, { recursive: true, force: true }));
+      const bin = path.join(root, 'bin'),
+        source = path.join(root, 'scripts/distribution');
+      await mkdir(bin);
+      await mkdir(source, { recursive: true });
+      const script = modern
+        ? '#!/bin/bash\n# --source-only\nprintf "%s" "$2" > "$MODE_RESULT"\nmkdir -p "$1"\n'
+        : '#!/bin/bash\necho "old source must run inside its original Go builder" >&2\nexit 99\n';
+      const builder = path.join(source, 'build-restic.sh');
+      await writeFile(builder, script, { mode: 0o755 });
+      await writeFile(
+        path.join(bin, 'docker'),
+        '#!' +
+          process.execPath +
+          '\n' +
+          'require("node:fs").writeFileSync(process.env.ARGUMENTS_RESULT, JSON.stringify(process.argv.slice(2)));\n',
+        { mode: 0o755 }
+      );
+      const argsPath = path.join(root, 'args.json'),
+        modePath = path.join(root, 'mode.txt');
+      await command('bash', ['-c', run], {
+        cwd: root,
+        env: {
+          ...process.env,
+          PATH: bin + path.delimiter + process.env.PATH,
+          RUNNER_TEMP: root,
+          ARGUMENTS_RESULT: argsPath,
+          MODE_RESULT: modePath,
+        },
+      });
+      const args = JSON.parse(await readFile(argsPath, 'utf8'));
+      assert.equal(
+        args.includes('ZEROSHOT_RESTIC_SOURCE_ARCHIVE=/restic-source/restic.tar.gz'),
+        modern
+      );
+      assert.equal(args.at(-2), '/source/scripts/distribution/build-restic.sh');
+      assert.equal(args.at(-1), '/out');
+      assert.equal(
+        await readFile(builder, 'utf8'),
+        script,
+        'immutable release source stays unchanged'
+      );
+      if (modern) assert.equal(await readFile(modePath, 'utf8'), '--source-only');
+      else await assert.rejects(access(modePath));
+    }
+  }
+);

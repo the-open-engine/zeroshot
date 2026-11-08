@@ -240,13 +240,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p restic-output
-          source_root="$RUNNER_TEMP/zeroshot-restic-source"
-          scripts/distribution/build-restic.sh "$source_root" --source-only
+          source_arguments=()
+          # Immutable older release source retains its original builder interface.
+          if grep --quiet -- --source-only scripts/distribution/build-restic.sh; then
+            source_root="$RUNNER_TEMP/zeroshot-restic-source"
+            scripts/distribution/build-restic.sh "$source_root" --source-only
+            source_arguments=(--volume "$source_root:/restic-source:ro"
+              --env ZEROSHOT_RESTIC_SOURCE_ARCHIVE=/restic-source/restic.tar.gz)
+          fi
           docker run --rm \
             --volume "${PWD}:/source:ro" \
             --volume "${PWD}/restic-output:/out" \
-            --volume "$source_root:/restic-source:ro" \
-            --env ZEROSHOT_RESTIC_SOURCE_ARCHIVE=/restic-source/restic.tar.gz \
+            "${source_arguments[@]}" \
             golang:1.27.1-trixie@sha256:9baa6b4187bbb98d240372a8a235ac0bb6b5ddd52bba1431dc2f7c0705862728 \
             /source/scripts/distribution/build-restic.sh /out
 
