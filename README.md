@@ -89,8 +89,8 @@ Agents do the work. The graph decides what happens next.
 - **[Reviewers route the run](docs/concepts/execution.md#state-reduction-chooses-the-next-step):**
   each reviewer returns a verdict such as `accepted` or `rejected`, and the graph says where each
   one goes, for example back to a repair step.
-- **[Script steps](docs/reference/runtime-plan.md#script):** run your own commands, like tests or
-  a linter, as steps in the graph. No model involved.
+- **[Script steps](docs/reference/runtime-plan.md#script):** run your own program as a step in
+  local runs. No model involved.
 - **[Secrets stay out of the record](docs/concepts/runtimes-and-connections.md#runtime-configuration-contains-names-not-secret-values):**
   credentials are stored once as named connections and kept out of graphs, run history, logs and
   the UI.
