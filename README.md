@@ -8,6 +8,10 @@
 
 </div>
 
+```bash
+npm install -g @the-open-engine-company/zeroshot
+```
+
 Single agents have a reliability ceiling. As context grows and complexity compounds, requirements
 get buried, assumptions go unchallenged, and shortcuts start to accumulate. The agent will
 optimize for completion and lose track of what correctness requires.
@@ -116,11 +120,7 @@ Drive zeroshot from your own code, CI or UI.
 
 ## Get started
 
-```bash
-npm install -g @the-open-engine-company/zeroshot
-```
-
-This installs skills for Claude Code, Codex, Copilot CLI and Pi. Open your agent in a repo and ask:
+The installer adds skills for Claude Code, Codex, Copilot CLI and Pi. Open your agent in a repo and ask:
 
 ```text
 design a zeroshot graph for this repo
