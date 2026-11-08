@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use reqwest::{Method, StatusCode};
 use serde_json::{Value, json};
 use super::*;
@@ -19,6 +20,7 @@ struct StateData {
     version: String,
     project: Value,
     review: Option<Value>,
+    review_sequence: Vec<Value>,
     notes: Vec<Value>,
     note_pages: BTreeMap<u32, Vec<Value>>,
     note_headers: BTreeMap<u32, Vec<String>>,
@@ -50,6 +52,7 @@ impl Fixture {
             version: "19.5.1-ee".into(),
             project: project(),
             review: None,
+            review_sequence: Vec::new(),
             notes: Vec::new(),
             note_pages: BTreeMap::new(),
             note_headers: BTreeMap::new(),
@@ -88,6 +91,39 @@ impl Fixture {
             .unwrap()
             .responses
             .insert((method.to_owned(), suffix.to_owned()), response);
+    }
+
+    fn move_branch_to(&self, revision: &str) {
+        self.response(
+            "GET",
+            "/repository/branches/zeroshot%2Ftest",
+            (
+                StatusCode::OK,
+                json!({"name":"zeroshot/test","commit":{"id":revision}}),
+            ),
+        );
+    }
+
+    async fn observe_review(
+        &self,
+        known: bool,
+    ) -> Result<SourceDeliverySnapshot, SourceDeliveryError> {
+        let request = request();
+        let receipt = receipt();
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            self.authority.observe_delivery(
+                SourceDeliveryRead {
+                    target: &request.target,
+                    head_branch: &request.head_branch,
+                    known_review: known.then_some(&receipt),
+                    include_review: true,
+                },
+                credential(),
+            ),
+        )
+        .await
+        .unwrap()
     }
 
     fn writes(&self, suffix: &str) -> usize {
@@ -169,6 +205,15 @@ fn overridden_response(state: &StateData, method: &Method, path: &str) -> Option
         .map(|(_, (status, body))| (*status, Json(body.clone())).into_response())
 }
 
+fn advance_review_sequence(state: &mut StateData, method: &Method, path: &str) {
+    if method == Method::GET
+        && (path.ends_with("/merge_requests") || path.ends_with("/merge_requests/17"))
+        && !state.review_sequence.is_empty()
+    {
+        state.review = Some(state.review_sequence.remove(0));
+    }
+}
+
 fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Response {
     let http_fixture::Request {
         method,
@@ -193,13 +238,14 @@ fn handler(state: &Arc<Mutex<StateData>>, request: http_fixture::Request) -> Res
     if state.disconnect_membership && path.contains("/members/all/") {
         return Response::disconnected();
     }
+    advance_review_sequence(&mut state, &method, path);
     if let Some(response) =
         overridden_response(&state, &method, path).or_else(|| simple_response(&state, path))
     {
         return response;
     }
     if path.ends_with("/merge_requests") {
-        return list_or_create(&mut state, &method, body);
+        return list_or_create(&mut state, &method, body, query);
     }
     if path.ends_with("/merge_requests/17/merge") {
         return merge_response(&mut state, body);
@@ -240,9 +286,20 @@ fn simple_response(state: &StateData, path: &str) -> Option<Response> {
     Some(Json(value).into_response())
 }
 
-fn list_or_create(state: &mut StateData, method: &Method, body: Value) -> Response {
+fn list_or_create(state: &mut StateData, method: &Method, body: Value, query: &str) -> Response {
     if method == Method::GET {
-        let values = state.review.clone().into_iter().collect::<Vec<_>>();
+        let url = reqwest::Url::parse(&format!("http://fixture/?{query}")).unwrap();
+        let values = state
+            .review
+            .clone()
+            .into_iter()
+            .filter(|review| {
+                url.query_pairs().all(|(key, value)| {
+                    !matches!(key.as_ref(), "source_branch" | "target_branch")
+                        || review[key.as_ref()] == value.as_ref()
+                })
+            })
+            .collect::<Vec<_>>();
         return Json(values).into_response();
     }
     let mut created = merge_request();
@@ -1227,3 +1284,51 @@ mod policy_tests;
 
 #[path = "effect_tests.rs"]
 mod effect_tests;
+
+#[tokio::test]
+async fn briefly_lagging_merge_request_head_is_reread() {
+    for known in [false, true] {
+        let fixture = Fixture::new().await;
+        fixture.open_review();
+        let mut moved = merge_request();
+        moved["sha"] = json!(MERGED);
+        fixture.state.lock().unwrap().review_sequence = vec![merge_request(), moved];
+        fixture.move_branch_to(MERGED);
+        let observed = fixture.observe_review(known).await.unwrap();
+        assert_eq!(observed.head_revision.as_deref(), Some(MERGED));
+        assert_eq!(observed.review.unwrap().head_revision, MERGED);
+    }
+}
+
+#[tokio::test]
+async fn persistent_merge_request_ref_disagreement_is_terminal() {
+    for known in [false, true] {
+        let fixture = Fixture::new().await;
+        fixture.open_review();
+        fixture.move_branch_to(MERGED);
+        let error = fixture.observe_review(known).await.unwrap_err();
+        assert!(!error.retryable_operation(), "{error}");
+        assert!(
+            matches!(error, SourceDeliveryError::Identity(_)),
+            "{error:?}"
+        );
+        for expected in ["17", "zeroshot/test", &HEAD[..12], &MERGED[..12]] {
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn run_branch_review_outside_the_target_is_refused() {
+    let fixture = Fixture::new().await;
+    let mut review = merge_request();
+    review["target_branch"] = json!("other");
+    fixture.state.lock().unwrap().review = Some(review);
+    let error = fixture
+        .authority
+        .open_or_update_review(&request(), credential())
+        .await
+        .unwrap_err();
+    assert!(!error.retryable_operation(), "{error}");
+    assert_eq!(fixture.writes("/merge_requests"), 0);
+}

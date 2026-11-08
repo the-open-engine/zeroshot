@@ -22,7 +22,6 @@ async fn find(
                 .query("scope", "all")
                 .query("state", "all")
                 .query("source_branch", branch)
-                .query("target_branch", &target.target_branch)
                 .query("per_page", "100"),
             credential,
         )
@@ -51,13 +50,9 @@ pub(super) async fn observe(
     request: SourceDeliveryRead<'_>,
     credential: SourceDeliveryCredential<'_>,
 ) -> Result<SourceDeliverySnapshot, SourceDeliveryError> {
-    let observed = observed_review(authority, request, credential).await?;
-    let head_revision = authority
-        .branch_revision(&request.target.repository, request.head_branch, credential)
-        .await?;
+    let (observed, head_revision) = consistent_review_ref(authority, request, credential).await?;
     let review = match observed {
         Some(value) => {
-            require_consistent_ref(&value, head_revision.as_deref())?;
             let project = authority
                 .project(&request.target.repository, credential)
                 .await?;
@@ -76,6 +71,31 @@ pub(super) async fn observe(
         review,
         head_revision,
     })
+}
+
+async fn consistent_review_ref(
+    authority: &GitLabDeliveryAuthority,
+    request: SourceDeliveryRead<'_>,
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<(Option<MergeRequest>, Option<String>), SourceDeliveryError> {
+    let mut rechecks = 2;
+    loop {
+        let observed = observed_review(authority, request, credential).await?;
+        let head_revision = authority
+            .branch_revision(&request.target.repository, request.head_branch, credential)
+            .await?;
+        if let Some(value) = &observed
+            && let Err(error) = require_consistent_ref(value, head_revision.as_deref())
+        {
+            if rechecks == 0 {
+                return Err(error);
+            }
+            rechecks -= 1;
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            continue;
+        }
+        return Ok((observed, head_revision));
+    }
 }
 
 async fn observed_review(
@@ -120,11 +140,14 @@ fn require_consistent_ref(
     revision: Option<&str>,
 ) -> Result<(), SourceDeliveryError> {
     if matches!(value.state.as_str(), "opened" | "locked") && revision != Some(value.sha.as_str()) {
-        return Err(SourceDeliveryError::api(
-            None,
-            "GitLab merge request/ref observations changed",
-        )
-        .temporary());
+        return Err(SourceDeliveryError::identity(format!(
+            "GitLab merge request {} on branch {} still disagrees with its ref after rechecking: \
+             merge request head {}; branch head {}",
+            value.iid,
+            value.source_branch,
+            value.sha,
+            revision.unwrap_or("missing"),
+        )));
     }
     Ok(())
 }

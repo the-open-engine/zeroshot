@@ -1185,3 +1185,29 @@ async fn bounded_git_output_refuses_truncated_success() {
     assert!(error.to_string().contains("exceeded 8 bytes"));
     assert!(error.to_string().contains("candidate-output"));
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn run_branch_pr_outside_the_target_is_refused() {
+    let request = test_review_request();
+    let mut changed = review_wire(&request, Some(&request.title), Some("Human context."));
+    changed["base"]["ref"] = json!("other");
+    let root = tempfile::tempdir().assert_value();
+    let program = root.path().join("gh-retargeted");
+    write_executable(
+        &program,
+        format!(
+            "#!/bin/sh\ncase \"$2:$4\" in\nrepos/acme/project/pulls:GET) case \"$*\" in *base=main*) printf '[]\\n';; *) printf '%s\\n' {};; esac;;\n*) printf x >> \"$HOME/writes\"; exit 19;;\nesac\n",
+            shell_literal(&json!([changed]).to_string())
+        ),
+    );
+    let error = authority(program, root.path())
+        .open_or_update_review(&request, SourceDeliveryCredential::token("test-token"))
+        .await
+        .assert_error();
+    assert!(!error.retryable_operation(), "{error}");
+    assert!(
+        !root.path().join("writes").exists(),
+        "discovery must refuse before writes"
+    );
+}

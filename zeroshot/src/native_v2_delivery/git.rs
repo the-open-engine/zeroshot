@@ -241,7 +241,7 @@ impl SystemGit {
         }
     }
 
-    async fn merge_pending(&self, workspace: &Path) -> Result<bool, GitError> {
+    pub(crate) async fn merge_pending(&self, workspace: &Path) -> Result<bool, GitError> {
         let merge = self
             .execute(workspace, &["rev-parse", "-q", "--verify", "MERGE_HEAD"])
             .await?;
