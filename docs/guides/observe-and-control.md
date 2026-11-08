@@ -112,8 +112,10 @@ must be idle while they are restored.
 
 A local resume restores the snapshot before any agent starts. That preparation may take up to 10
 minutes. For larger workspaces or slower disks, set `ZEROSHOT_PREPARATION_TIMEOUT` to a whole number
-of seconds from 1 to 86400 before `zeroshot resume`. When a restore fails or reaches that deadline,
-the error names the step that stopped and its elapsed time, and the run stays recoverable.
+of seconds from 1 to 86400 before `zeroshot resume`. When a restore fails, or its extraction reaches
+that deadline, the error names the step that stopped and its elapsed time. Replacing the workspace
+files, once started, is allowed to finish. If it is still running 30 seconds after the deadline,
+the resume is stopped with an error that names the deadline. Either way the run stays recoverable.
 
 A restore never changes the checkout before the complete snapshot is extracted. If a crash
 interrupts it while it replaces files, the checkout can stay partially restored. The next
