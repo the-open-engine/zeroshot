@@ -1,9 +1,10 @@
+use openengine_cluster_testkit::fixture::run_size;
 use std::collections::BTreeMap;
 
 use openengine_cluster_protocol::{
     DeclaredConnections, EnumLabel, FieldName, IdempotencyKey, NodeName, PositiveInteger, RunId,
-    RunSize, RunTitle, SessionScope, SourceBranchId, SourceRepositoryId, SourceRevisionId,
-    ResolvedSource, TerminalResult, WorkerOutcome,
+    RunTitle, SessionScope, SourceBranchId, SourceRepositoryId, SourceRevisionId, ResolvedSource,
+    TerminalResult, WorkerOutcome,
 };
 use serde_json::{Value, json};
 
@@ -81,7 +82,7 @@ async fn admitted_with_git_mode(mode: crate::native_v2_delivery::DeliveryMode) -
         success_node(),
     ]);
     let runtime = crate::native_v2_candidate::test_support::codex_runtime(
-        RunSize::Medium,
+        run_size("medium"),
         BTreeMap::from([
             (NodeName::new("worker").assert_value(), agent_binding()),
             (
@@ -119,7 +120,7 @@ async fn admitted_without_delivery() -> AdmittedRun {
             graph: full_graph(vec![success_node()]),
             initial_input: Value::Null,
             runtime: crate::native_v2_candidate::test_support::codex_runtime(
-                RunSize::Medium,
+                run_size("medium"),
                 BTreeMap::new(),
             ),
             source: Some(source()),
@@ -184,7 +185,7 @@ fn snapshot(
     completions: impl IntoIterator<Item = (&'static str, WorkerOutcome)>,
 ) -> RunSnapshot {
     let run_id = RunId::new("delivery-gate-run");
-    let mut snapshot = RunSnapshot::admitted(run_id.clone(), admitted);
+    let mut snapshot = RunSnapshot::admitted(run_id.clone(), admitted).assert_value();
     snapshot.phase = RunPhase::Running;
     for (index, (node, outcome)) in completions.into_iter().enumerate() {
         let identity = u64::try_from(index + 1).assert_value();
@@ -367,7 +368,7 @@ async fn optional_local_success_still_allows_no_delivery() {
         enforce_delivery_terminal(
             DeliveryPolicy::Optional,
             &admitted,
-            &RunSnapshot::admitted(RunId::new("local-run"), &admitted),
+            &RunSnapshot::admitted(RunId::new("local-run"), &admitted).assert_value(),
             terminal.clone(),
         )
         .assert_value(),
@@ -778,7 +779,7 @@ async fn all_supported_builtin_graphs_keep_success_independent_of_receipt_projec
                 nodes.insert(name.clone(), binding.clone());
             }
             let runtime =
-                crate::native_v2_candidate::test_support::codex_runtime(RunSize::Medium, nodes);
+                crate::native_v2_candidate::test_support::codex_runtime(run_size("medium"), nodes);
             let is_pr = matches!(
                 template,
                 BuiltinGraphTemplate::PrReview | BuiltinGraphTemplate::CodeReview

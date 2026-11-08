@@ -22,7 +22,7 @@ export type Binding = {
 export type Runtime = {
   harness: string;
   provider: string;
-  size: string;
+  size?: string | null;
   nodes: Record<string, Binding>;
   [key: string]: any;
 };
@@ -92,7 +92,6 @@ export function newDocument(template: Template): Document {
     runtime: {
       harness: '',
       provider: '',
-      size: 'small',
       nodes: Object.fromEntries(
         allNodes(graph.root)
           .filter(executable)
@@ -427,8 +426,10 @@ function assertRuntime(value: any): void {
     throw new Error('Include both graph and runtime objects, with runtime.nodes.');
   if (typeof value.runtime.nodes !== 'object')
     throw new Error('runtime.nodes must be an object of node bindings.');
-  for (const key of ['harness', 'provider', 'size'])
+  for (const key of ['harness', 'provider'])
     if (typeof value.runtime[key] !== 'string') throw new Error(`Runtime ${key} must be text.`);
+  if (value.runtime.size != null && typeof value.runtime.size !== 'string')
+    throw new Error('Runtime size must be text.');
   for (const [name, binding] of Object.entries(value.runtime.nodes) as [string, any][]) {
     if (
       !binding ||

@@ -231,7 +231,7 @@ fn write_retry_files(root: &TempRoot, lane: RetryLane) -> (PathBuf, PathBuf, Pat
         serde_json::to_vec(&json!({
             "harness":harness,
             "provider":provider,
-            "size":"medium",
+            "size":"host",
             "nodes":{"worker":{
                 "kind":"agent","model":model,"effort":"max",
                 "sessionScope":"execution","connections":{"provider":[lane.credential()]}

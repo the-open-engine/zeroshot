@@ -37,6 +37,7 @@ struct UiState {
     origin: server::BrowserOrigin,
     shutdown: server::Shutdown,
     workspace: UiWorkspace,
+    run_sizes: openengine_cluster_protocol::TargetRunSizesDiscovery,
 }
 
 #[derive(Clone, Serialize)]
@@ -60,6 +61,7 @@ impl UiState {
             origin,
             shutdown: server::Shutdown::default(),
             workspace: UiWorkspace { kind, id },
+            run_sizes: crate::native_v2_hosting::host_run_sizes(),
         })
     }
 }
@@ -99,6 +101,8 @@ fn router(state: UiState, target_history: bool) -> Router {
 
 async fn bootstrap(State(state): State<UiState>) -> Result<Json<Value>, ApiError> {
     let mut catalog = workspace::catalog_with_harnesses(&harness_registry(&state))?;
+    catalog["runSizes"] = serde_json::to_value(&state.run_sizes)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
     catalog["workspace"] = serde_json::to_value(state.workspace)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     Ok(Json(catalog))

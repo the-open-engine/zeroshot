@@ -8,7 +8,7 @@ pub(crate) use std::time::Duration;
 
 pub(crate) use async_trait::async_trait;
 pub(crate) use openengine_cluster_protocol::{
-    IdempotencyKey, RunId, RunSubmitParams, RunTitle, WorkerOutcome,
+    IdempotencyKey, RunId, RunSubmitParams, RunTitle, TargetRunSizesDiscovery, WorkerOutcome,
 };
 pub(crate) use openengine_cluster_server::identity::{
     BindingAttributes, ConnectionIdentity, ConnectionIdentityConfig, PrincipalId, TenantId,
@@ -36,7 +36,7 @@ pub(crate) use zeroshot_engine::native_v2_delivery::{
     SourceReviewState, NativeV2DeliveryAdapter, NativeV2DeliveryConfig, GITHUB_TOKEN_ENV,
 };
 pub(crate) use zeroshot_engine::native_v2_hosting::{
-    ProductionHostingConfig, ProductionTargetControllerFactory,
+    ProductionHostingConfig, ProductionTargetControllerFactory, host_run_sizes,
 };
 pub(crate) use zeroshot_engine::native_v2_runner::{
     DriverControl, DriverInvocation, LiveOutput, LiveOutputStream, NativeNodeRunner, NodeDriver,
@@ -199,6 +199,10 @@ pub(crate) struct TestControllerFactory;
 
 #[async_trait]
 impl TargetControllerFactory for TestControllerFactory {
+    fn run_sizes(&self) -> Option<TargetRunSizesDiscovery> {
+        Some(host_run_sizes())
+    }
+
     async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
         test_controller(Arc::new(ImmediateAllocator::default())).await
     }
@@ -219,6 +223,10 @@ pub(crate) struct FixedAllocatorFactory {
 
 #[async_trait]
 impl TargetControllerFactory for FixedAllocatorFactory {
+    fn run_sizes(&self) -> Option<TargetRunSizesDiscovery> {
+        Some(host_run_sizes())
+    }
+
     async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
         test_controller_with_policy(self.allocator.clone(), self.delivery_policy).await
     }
@@ -248,7 +256,7 @@ async fn test_controller_with_policy(
         delivery_policy,
     )
     .await
-    .map(Arc::new)
+    .map(|controller| Arc::new(controller.with_run_sizes(host_run_sizes())))
     .map_err(|error| TargetAuthorityError::unavailable(error.to_string()))
 }
 

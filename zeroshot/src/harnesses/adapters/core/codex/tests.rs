@@ -1,5 +1,6 @@
 #![cfg(unix)]
 
+use openengine_cluster_testkit::fixture::run_size;
 #[path = "tests/cancellation.rs"]
 mod cancellation;
 #[path = "tests/correction.rs"]
@@ -24,9 +25,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use openengine_cluster_protocol::{
-    IdempotencyKey, NodeName, RunSize, RunTitle, TokenCount, WorkerOutcome,
-};
+use openengine_cluster_protocol::{IdempotencyKey, NodeName, RunTitle, TokenCount, WorkerOutcome};
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{json, Value};
 
@@ -262,17 +261,17 @@ async fn admitted(binding: NodeRuntimeBinding, provider: CodexProvider) -> Admit
         }),
         success_node(),
     ]);
+    let runtime = RuntimePlan::new(
+        openengine_cluster_protocol::RuntimeLane::new("codex", provider.name()).assert_value(),
+        run_size("medium"),
+        BTreeMap::from([(NodeName::new("work").assert_value(), binding)]),
+    );
     admit(RunSubmission {
         environment: None,
         title: RunTitle::new("Codex adapter test").assert_value(),
         graph,
         initial_input: Value::Null,
-        runtime: RuntimePlan::new(
-            openengine_cluster_protocol::RuntimeLane::new("codex", (provider).name())
-                .assert_value(),
-            RunSize::Medium,
-            BTreeMap::from([(NodeName::new("work").assert_value(), binding)]),
-        ),
+        runtime,
         source: serde_json::from_value(json!({
             "repository": "open-engine/zeroshot",
             "branch": "main",

@@ -30,20 +30,30 @@ this mount. See the [target image guide](../docker/zeroshot-target/README.md) fo
 
 The bootstrap `harnesses` catalog supplies each host-enabled adapter's `id`, `label`, and
 `providers`. The editor uses this catalog for runtime choices; `runtimeSchema` supplies structural
-fields such as run size and effort. For older hosts that omit the catalog, choices come from their
+fields and effort choices. For older hosts that omit the harness catalog, choices come from their
 legacy runtime schema; an explicit empty catalog offers no adapters. Local catalogs include compiled
 [contributed adapters](../docs/project/harness-adapters.md); target and Platform catalogs use their
 host's enabled registry. Existing unavailable selections remain visible and stay in the profile until
 the author changes them.
 
-Hosting shells may supply a `machines` array in the existing bootstrap. Each entry has `size`,
+The bootstrap `runSizes` catalog contains `kind: "openengine.run-sizes/v2"`, a target-owned
+`default` identifier, and `sizes: [{id, description}]`. Identifiers are opaque strings; the editor
+does not maintain or infer size names from the runtime schema. An empty catalog offers no sizes
+and has no default. New runtime plans omit `size` so the target resolves its default at admission;
+choosing Target default removes an explicit size rather than copying today's default into the profile.
+An explicit `size: null` also uses the target default and stays unchanged through JSON and form
+views until the author edits that field.
+Unavailable authored selections stay visible and unchanged until the author changes them.
+
+Hosting shells may also supply a `machines` array in the existing bootstrap. Each entry has `size`,
 `label`, `vcpus`, `memoryMiB`, `diskGiB`, `laneUnits`, and optional
 `gpu: {name, memoryMiB}` or `null`. The shared size picker displays the host label and lane count. Starting a size with Boost uses its full `laneUnits` in Boosts for that run; ordinary
 runs do not spend Boosts merely because a size is selected. This is presentation metadata: the host
-owns admission and billing. An explicit empty list offers no machines. When the array is absent,
-the native `RunSize` schema supplies size identities without resource or pricing claims. Unavailable
-saved selections remain visible until the author changes them. Resource descriptors never enter
-the saved runtime plan.
+owns admission and billing. `runSizes` owns offered identifiers when present; matching machine
+metadata supplies labels and lane counts. A host providing only machine metadata offers those
+identifiers, and an explicit empty list offers none. Without either catalog, the editor accepts a
+freeform target-owned identifier or leaves size omitted; it never invents a global size list.
+Resource descriptors never enter the saved runtime plan.
 
 Profiles contain graphs and agent runtime configuration. Environments belong to run submission,
 not profile authoring. Plain local UI has no environment catalog or management page.
@@ -133,15 +143,15 @@ After `init`, every message carries `version`, `workspaceId`, `documentId`, `gen
 state's document ID/generation, including any recovered draft; the initial document ID is null.
 The workspace rejects stale document generations. A document switch may change both values.
 
-| Host message   | Payload in addition to the envelope                                                                                           |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `open_profile` | `nextDocumentId`, optional `discard`, and either `profile: {name, graph, runtime}` with optional `revision`, or `templateId`. |
-| `open_run`     | `nextDocumentId`, `runId`, optional `discard`. History is fetched through the API.                                            |
-| `request_save` | Optional `name` for profile save-as. Captures the current profile or environment draft.                                      |
-| `save_ack`     | The snapshot's request ID and generation, with a saved profile/environment or `problem: {code, message, details?}`.          |
-| `environment_settings` | Environment view only; reports whether opaque host-owned settings are dirty.                                          |
-| `theme`        | `theme: "light"` or `"dark"`.                                                                                                 |
-| `navigate`     | `action: "profiles"`, `"runs"` or `"leave"`, optional `discard`.                                                              |
+| Host message           | Payload in addition to the envelope                                                                                           |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `open_profile`         | `nextDocumentId`, optional `discard`, and either `profile: {name, graph, runtime}` with optional `revision`, or `templateId`. |
+| `open_run`             | `nextDocumentId`, `runId`, optional `discard`. History is fetched through the API.                                            |
+| `request_save`         | Optional `name` for profile save-as. Captures the current profile or environment draft.                                       |
+| `save_ack`             | The snapshot's request ID and generation, with a saved profile/environment or `problem: {code, message, details?}`.           |
+| `environment_settings` | Environment view only; reports whether opaque host-owned settings are dirty.                                                  |
+| `theme`                | `theme: "light"` or `"dark"`.                                                                                                 |
+| `navigate`             | `action: "profiles"`, `"runs"` or `"leave"`, optional `discard`.                                                              |
 
 `templateId: "blank"` creates an empty profile using the existing editor factory; otherwise use a
 bootstrap template's `id` (or `name` when it has no ID). Template opens cannot carry a profile or
@@ -176,18 +186,18 @@ preserve the draft and saved revision.
 `apiBase` must be a same-origin absolute path ending with `/`. The embedded workspace uses these
 paths beneath it; its profile load/save work passes through the host bridge instead:
 
-| Request                              | Response                                                                                      |
-| ------------------------------------ | --------------------------------------------------------------------------------------------- |
-| `GET environmentApi`                 | `{environments: [{id, name, revision}]}`.                                                     |
-| `GET environmentApi/{id}`            | `{id, name, definition, revision}`.                                                           |
+| Request                              | Response                                                                                                                     |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `GET environmentApi`                 | `{environments: [{id, name, revision}]}`.                                                                                    |
+| `GET environmentApi/{id}`            | `{id, name, definition, revision}`.                                                                                          |
 | `POST environmentApi`                | Host save of `{id?, name, definition, expectedRevision: string or null}` plus host-owned fields; returns the saved resource. |
-| `DELETE environmentApi/{id}`         | Delete with `{expectedRevision}`; returns `{deleted: true}`.                                  |
-| `GET bootstrap`                      | Existing workspace bootstrap with templates, workers and runtime schema.                      |
-| `POST validate`                      | Native validation of `{graph, runtime}`.                                                      |
-| `POST authoring`, `POST data`        | Native draft transform of `{graph, runtime, action}`.                                         |
-| `GET runs/{id}`                      | Version 1 admitted definition with projection version 1.                                      |
-| `GET runs/{id}/history?after=CURSOR` | Existing ordered native history page.                                                         |
-| `GET runs/{id}/events?after=CURSOR`  | SSE `history` pages and structured `history_error` problems.                                  |
+| `DELETE environmentApi/{id}`         | Delete with `{expectedRevision}`; returns `{deleted: true}`.                                                                 |
+| `GET bootstrap`                      | Existing workspace bootstrap with templates, workers and runtime schema.                                                     |
+| `POST validate`                      | Native validation of `{graph, runtime}`.                                                                                     |
+| `POST authoring`, `POST data`        | Native draft transform of `{graph, runtime, action}`.                                                                        |
+| `GET runs/{id}`                      | Version 1 admitted definition with projection version 1.                                                                     |
+| `GET runs/{id}/history?after=CURSOR` | Existing ordered native history page.                                                                                        |
+| `GET runs/{id}/events?after=CURSOR`  | SSE `history` pages and structured `history_error` problems.                                                                 |
 
 Environment writes carry the pinned `X-Zeroshot-Workspace` bootstrap identity. The generic hosted
 manager preserves the explicit collection URL's query parameters for reads, deletion, and draft

@@ -1,8 +1,9 @@
 //! Exercises hosted permission defaults and the shared run workspace.
 #![cfg(unix)]
 
+use openengine_cluster_testkit::fixture::run_size;
 use std::{collections::BTreeMap, fs, sync::Arc};
-use openengine_cluster_protocol::{IdempotencyKey, NodeName, RunId, RunSize, RunTitle, WorkerOutcome};
+use openengine_cluster_protocol::{IdempotencyKey, NodeName, RunId, RunTitle, WorkerOutcome};
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{Value, json};
 use crate::execution::{SessionScope, process::HostedProcessPool};
@@ -228,7 +229,7 @@ async fn admission(harness: &str, verifier: bool, binding: NodeRuntimeBinding) -
         RuntimePlan::new(
             openengine_cluster_protocol::RuntimeLane::new("codex", (CodexProvider::OpenAi).name())
                 .assert_value(),
-            RunSize::Medium,
+            run_size("medium"),
             nodes,
         )
     } else {
@@ -238,7 +239,7 @@ async fn admission(harness: &str, verifier: bool, binding: NodeRuntimeBinding) -
                 (ClaudeProvider::Anthropic).name(),
             )
             .assert_value(),
-            RunSize::Medium,
+            run_size("medium"),
             nodes,
         )
     };

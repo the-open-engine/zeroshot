@@ -1,10 +1,11 @@
+use openengine_cluster_testkit::fixture::run_size;
 use std::collections::{BTreeMap, BTreeSet};
 
 use acp::Agent as _;
 use super::*;
 use openengine_cluster_protocol::{
     ClaudeProvider, CodexProvider, CopilotProvider, DeclaredConnections, ModelId, NodeName,
-    RecordField, RunSize, RuntimeLane,
+    RecordField, RuntimeLane,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
@@ -228,7 +229,7 @@ fn runtime(harness: &str, scope: &str, connections: Value) -> RuntimePlan {
                 (ClaudeProvider::Anthropic).name(),
             )
             .assert_value(),
-            RunSize::Small,
+            run_size("small"),
             nodes,
         ),
         "copilot" => RuntimePlan::new(
@@ -237,13 +238,13 @@ fn runtime(harness: &str, scope: &str, connections: Value) -> RuntimePlan {
                 (CopilotProvider::Github).name(),
             )
             .assert_value(),
-            RunSize::Small,
+            run_size("small"),
             nodes,
         ),
         _ => RuntimePlan::new(
             openengine_cluster_protocol::RuntimeLane::new("codex", (CodexProvider::OpenAi).name())
                 .assert_value(),
-            RunSize::Small,
+            run_size("small"),
             nodes,
         ),
     }

@@ -124,14 +124,18 @@ pub struct RunSnapshot {
 }
 
 impl RunSnapshot {
-    #[must_use]
-    pub fn admitted(run_id: RunId, admitted: &AdmittedRun) -> Self {
-        Self::empty(
+    pub fn admitted(run_id: RunId, admitted: &AdmittedRun) -> Result<Self, RunLedgerError> {
+        let size = admitted
+            .runtime
+            .size()
+            .cloned()
+            .ok_or(RunLedgerError::Corrupt)?;
+        Ok(Self::empty(
             run_id,
             admitted.title.clone(),
             admitted.source.clone(),
-            admitted.runtime.size(),
-        )
+            size,
+        ))
     }
 
     /// Returns immutable metadata and the empty projection used to replay durable events.
@@ -141,7 +145,7 @@ impl RunSnapshot {
             self.run_id.clone(),
             self.title.clone(),
             self.source.clone(),
-            self.size,
+            self.size.clone(),
         )
     }
 
@@ -388,7 +392,7 @@ impl From<&RunSnapshot> for RunSummary {
             run_id: snapshot.run_id.clone(),
             title: snapshot.title.clone(),
             source: snapshot.source.clone(),
-            size: snapshot.size,
+            size: snapshot.size.clone(),
             cursor: snapshot.cursor.clone(),
             phase: snapshot.phase.clone(),
             force_stop_requested: snapshot.force_stop_requested,

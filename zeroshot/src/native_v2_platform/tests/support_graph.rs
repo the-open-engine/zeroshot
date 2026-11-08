@@ -1,8 +1,9 @@
+use openengine_cluster_testkit::fixture::run_size;
 use super::*;
 
 pub(super) fn runtime() -> RuntimePlan {
     crate::native_v2_candidate::test_support::codex_runtime(
-        RunSize::Small,
+        run_size("small"),
         BTreeMap::from([
             (
                 NodeName::new("worker").assert_value_with("node"),
@@ -216,7 +217,7 @@ pub(super) fn complex_runtime() -> RuntimePlan {
         connections: DeclaredConnections::empty(),
     };
     crate::native_v2_candidate::test_support::codex_runtime(
-        RunSize::Small,
+        run_size("small"),
         BTreeMap::from([
             (
                 NodeName::new("worker").assert_value_with("node"),

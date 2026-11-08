@@ -156,6 +156,13 @@ where
         self.connector.login(name).await
     }
 
+    async fn target_sizes(
+        &self,
+        name: &str,
+    ) -> Result<openengine_cluster_protocol::TargetRunSizesDiscovery, NativeV2CliError> {
+        self.connector.sizes(name).await
+    }
+
     async fn default_resource_scope(
         &self,
         target: Option<&str>,

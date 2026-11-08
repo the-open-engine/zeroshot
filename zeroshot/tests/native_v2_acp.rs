@@ -890,7 +890,7 @@ fn write_profile_files(root: &Path, worker_lane: Option<Value>) -> (PathBuf, Pat
     let mut runtime = json!({
         "harness":"codex",
         "provider":"openai",
-        "size":"medium",
+        "size":"host",
         "nodes":{"worker":{
             "kind":"agent",
             "model":"test-model",

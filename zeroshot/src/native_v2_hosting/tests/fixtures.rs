@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -5,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use openengine_cluster_protocol::{
-    DeclaredConnections, DeclaredEnvironment, GraphSpec, IdempotencyKey, NodeName, RunSize,
-    RunTitle, RuntimePlan, SourceBranchId, SourceRepositoryId, SourceRevisionId, ResolvedSource,
+    DeclaredConnections, DeclaredEnvironment, GraphSpec, IdempotencyKey, NodeName, RunTitle,
+    RuntimePlan, SourceBranchId, SourceRepositoryId, SourceRevisionId, ResolvedSource,
 };
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{Value, json};
@@ -88,6 +89,7 @@ impl RepositoryFixture {
 
 pub(super) fn hosting_config(storage_root: PathBuf) -> ProductionHostingConfig {
     ProductionHostingConfig {
+        run_sizes: None,
         agent_context: None,
         memory_storage: None,
         memory_backend: None,
@@ -154,7 +156,7 @@ pub(super) fn runtime(environment: BTreeSet<EnvironmentVariableName>) -> Runtime
         .assert_value_with("declared connection")
     };
     crate::native_v2_candidate::test_support::codex_runtime(
-        RunSize::Small,
+        run_size("small"),
         BTreeMap::from([(
             NodeName::new("work").assert_value_with("node"),
             NodeRuntimeBinding::Agent {
@@ -175,7 +177,7 @@ pub(super) fn claude_runtime() -> RuntimePlan {
     RuntimePlan::new(
         openengine_cluster_protocol::RuntimeLane::new("claude", (ClaudeProvider::Anthropic).name())
             .assert_value(),
-        RunSize::Small,
+        run_size("small"),
         BTreeMap::from([(
             NodeName::new("work").assert_value_with("node"),
             NodeRuntimeBinding::Agent {

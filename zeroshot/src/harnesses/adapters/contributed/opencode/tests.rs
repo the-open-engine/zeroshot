@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use std::collections::BTreeMap;
 #[cfg(unix)]
 use std::sync::Arc;
@@ -242,7 +243,7 @@ fn contained_contribution_derives_explicit_auth_without_native_login_reuse() {
     let binding = crate::native_v2_runner::test_support::binding(SessionScope::Execution);
     let mut runtime = crate::native_v2_contract::RuntimePlan::new(
         lane,
-        openengine_cluster_protocol::RunSize::Medium,
+        run_size("medium"),
         BTreeMap::from([(NodeName::new("worker").assert_value(), binding)]),
     );
     materialize_provider_access(&mut runtime, ProviderAccessPlacement::Contained).assert_value();

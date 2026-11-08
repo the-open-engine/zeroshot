@@ -71,6 +71,9 @@ async fn definition_validation_covers_versions_identity_cursors_and_runtime_fail
     );
 
     let mut changed = valid.clone();
+    changed.runtime.size = None;
+    assert!(validate_run_definition(&changed, &valid.run_id).is_err());
+    changed = valid.clone();
     changed.version = 2;
     assert!(validate_run_definition(&changed, &valid.run_id).is_err());
     changed = valid.clone();

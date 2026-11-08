@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use super::*;
 use crate::native_v2_contract::{RuntimeLane, RuntimePlan};
 
@@ -76,7 +77,7 @@ fn runtime_validation_checks_default_and_each_node_override_without_effects() {
         .unwrap();
     let mut runtime = RuntimePlan::new(
         RuntimeLane::new("fixture", "provider").unwrap(),
-        crate::native_v2_contract::RunSize::Small,
+        run_size("small"),
         Default::default(),
     );
     registry.validate_runtime(&runtime).unwrap();

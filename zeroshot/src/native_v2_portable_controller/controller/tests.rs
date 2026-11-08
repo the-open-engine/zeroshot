@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use openengine_cluster_protocol::{
     ExecutionRef, GetParams, IdempotencyKey, InitializeParams, NOT_FOUND, PROTOCOL_VERSION,
     RunAttachParams, RunCheckpointsParams, RunForceParams, RunLogsParams, RunStatus,
@@ -26,7 +27,7 @@ async fn insert_fake_run(ledger: &FakeRunLedger, run: &str, key: &str, digest: c
 async fn review_git_preparation_requires_the_workspace_lease_before_any_mutation() {
     use crate::native_v2_cli::{BuiltinGraphTemplate, TemplateDelivery};
     use openengine_cluster_protocol::{
-        CodexProvider, DeclaredConnections, NodeName, NodeRuntimeBinding, RunSize, RuntimePlan,
+        CodexProvider, DeclaredConnections, NodeName, NodeRuntimeBinding, RuntimePlan,
     };
     use serde_json::json;
     for occupied in [true, false] {
@@ -58,7 +59,7 @@ async fn review_git_preparation_requires_the_workspace_lease_before_any_mutation
         submission.runtime = RuntimePlan::new(
             openengine_cluster_protocol::RuntimeLane::new("codex", (CodexProvider::OpenAi).name())
                 .assert_value(),
-            RunSize::Small,
+            run_size("small"),
             std::collections::BTreeMap::from([
                 (
                     NodeName::new("reviewer").assert_value(),

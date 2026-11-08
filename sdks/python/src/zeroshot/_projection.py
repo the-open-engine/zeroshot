@@ -19,7 +19,6 @@ from .source import ResolvedGitRemote, ResolvedSource, SourceForgeIdentity
 from .stacks import StackRunStatus, StackStatus
 from .values import JsonValue
 
-_Size: TypeAlias = Literal["small", "medium", "large", "xl", "gpu_t4"]
 _Phase: TypeAlias = Literal["admitted", "running", "stopping", "finished"]
 _Level: TypeAlias = Literal["debug", "info", "error"]
 _MAX_JAVASCRIPT_SAFE_INTEGER = 9_007_199_254_740_991
@@ -58,15 +57,7 @@ def _status(value: object) -> RunStatus:
         run_id=_string(root, "runId", "run status"),
         title=_string(root, "title", "run status"),
         source=_source(root.get("source")),
-        size=cast(
-            _Size,
-            _enum_string(
-                root,
-                "size",
-                {"small", "medium", "large", "xl", "gpu_t4"},
-                "run status",
-            ),
-        ),
+        size=_string(root, "size", "run status"),
         cursor=_cursor(root),
         phase=phase,
         active_executions=active,

@@ -13,6 +13,7 @@ async fn ui_shutdown_closes_a_live_sse_without_stopping_the_run() {
         fixture.root.join("runs").join(fixture.id.as_str()),
         &format!("http://{address}"),
         fixture.observations(),
+        crate::native_v2_hosting::host_run_sizes(),
     )
     .assert_value();
     let serving = service.clone();

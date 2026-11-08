@@ -798,6 +798,43 @@ async fn named_target_commands_delegate_without_interpreting_runtime_configurati
 }
 
 #[tokio::test]
+async fn target_sizes_renders_advertised_table_and_explicit_json() {
+    for json in [false, true] {
+        let backend = FakeBackend::default();
+        let mut argv = args(&["target", "sizes", "prod"]);
+        if json {
+            argv.push("--json".into());
+        }
+        let mut output = Vec::new();
+        execute_native_v2_cli(
+            parse_native_v2_args(argv).assert_value(),
+            &backend,
+            &mut NeverDetach,
+            &mut output,
+        )
+        .await
+        .assert_value();
+        assert_eq!(
+            backend.calls(),
+            [Call::TargetSizes {
+                name: "prod".to_owned()
+            }]
+        );
+        if json {
+            let result: serde_json::Value = serde_json::from_slice(&output).assert_value();
+            assert_eq!(result["default"], "lab-custom-48");
+            assert_eq!(result["sizes"][0]["id"], "lab-custom-48");
+            assert_eq!(result["sizes"][0]["description"], "48 vCPU, 192 GiB RAM");
+        } else {
+            let output = String::from_utf8(output).assert_value();
+            assert!(output.starts_with("Identifier"));
+            assert!(output.contains("lab-custom-48"));
+            assert!(output.contains("48 vCPU, 192 GiB RAM"));
+        }
+    }
+}
+
+#[tokio::test]
 async fn target_serve_stops_at_the_process_execution_boundary() {
     let command = parse_native_v2_args(args(&[
         "target",

@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use super::*;
 
 struct RetainedCleanupFailureAllocator {
@@ -116,7 +117,7 @@ async fn allocator_defaults_are_explicit_fail_closed_and_side_effect_free() {
         "environment_startup_failed"
     );
     let quiet_runtime = crate::native_v2_candidate::test_support::codex_runtime(
-        RunSize::Small,
+        run_size("small"),
         BTreeMap::from([(
             NodeName::new("quiet").assert_value(),
             NodeRuntimeBinding::Agent {

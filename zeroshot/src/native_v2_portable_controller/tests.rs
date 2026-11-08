@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -140,7 +141,7 @@ pub(super) fn submission(key: &str) -> RunSubmission {
         graph: full_graph(vec![success_node()]),
         initial_input: Value::Null,
         runtime: crate::native_v2_candidate::test_support::codex_runtime(
-            openengine_cluster_protocol::RunSize::Small,
+            run_size("small"),
             BTreeMap::new(),
         ),
         source: Some(ResolvedSource {

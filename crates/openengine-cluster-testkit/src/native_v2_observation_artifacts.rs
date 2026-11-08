@@ -94,7 +94,7 @@ fn status() -> RunStatusResult {
         run_id: run_id(),
         title: title(),
         source: Some(native_v2_source_fixture()),
-        size: RunSize::Medium,
+        size: RunSize::new("medium").assert_value(),
         at_cursor: cursor(7),
         status: RunStatus::Running {
             active_executions: vec![
@@ -128,7 +128,7 @@ fn watch_fixture() -> Value {
             run_id: run_id(),
             title: title(),
             source: Some(native_v2_source_fixture()),
-            size: RunSize::Medium,
+            size: RunSize::new("medium").assert_value(),
             cursor: cursor(8),
             status: RunStatus::Finished {
                 terminal_result: TerminalResult::Succeeded {

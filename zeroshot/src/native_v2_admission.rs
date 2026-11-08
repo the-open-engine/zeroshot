@@ -30,6 +30,9 @@ use openengine_cluster_protocol::MAX_DECLARED_ENVIRONMENT_NAMES;
 
 pub(crate) const MAX_AGENT_VERIFIER_ATTEMPTS: u64 = 2;
 
+mod sizes;
+pub use sizes::resolve_runtime_size;
+
 const fn stack_delivery_node(delivery: &StackDelivery) -> &'static str {
     match delivery {
         StackDelivery::Merge => "Git merge delivery node (merge@2 or merge@3)",
@@ -138,6 +141,7 @@ pub struct NativeV2AdmissionContext<'a> {
     pub harnesses: &'a crate::harnesses::HarnessRegistry,
     pub source: Option<&'a crate::source_code_provider::SourceCodeProviderRegistry>,
     pub delivery_policy: DeliveryPolicy,
+    pub run_sizes: Option<&'a openengine_cluster_protocol::TargetRunSizesDiscovery>,
 }
 
 impl<'a> NativeV2AdmissionContext<'a> {
@@ -150,6 +154,7 @@ impl<'a> NativeV2AdmissionContext<'a> {
             harnesses,
             source: None,
             delivery_policy,
+            run_sizes: None,
         }
     }
 
@@ -159,6 +164,15 @@ impl<'a> NativeV2AdmissionContext<'a> {
         source: &'a crate::source_code_provider::SourceCodeProviderRegistry,
     ) -> Self {
         self.source = Some(source);
+        self
+    }
+
+    #[must_use]
+    pub fn with_run_sizes(
+        mut self,
+        run_sizes: &'a openengine_cluster_protocol::TargetRunSizesDiscovery,
+    ) -> Self {
+        self.run_sizes = Some(run_sizes);
         self
     }
 }
@@ -276,9 +290,16 @@ impl NativeV2Admission {
     /// Admits through exactly the implementation registries selected by the execution host.
     pub async fn admit_with_context(
         &self,
-        submission: RunSubmission,
+        mut submission: RunSubmission,
         context: NativeV2AdmissionContext<'_>,
     ) -> Result<AdmittedRun, NativeV2AdmissionError> {
+        if let Some(catalog) = context.run_sizes {
+            resolve_runtime_size(&mut submission.runtime, catalog)?;
+        } else if submission.runtime.size.is_none() {
+            return Err(NativeV2AdmissionError::InvalidRuntime(
+                "the target must resolve a concrete run size before admission".to_owned(),
+            ));
+        }
         let RunSubmission {
             title,
             graph,

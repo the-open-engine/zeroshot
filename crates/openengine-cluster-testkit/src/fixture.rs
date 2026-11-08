@@ -3,6 +3,11 @@
 //! `ClusterBackend::watch` with an explicit queue capacity — rather than only a wrapped
 //! `ClusterClient`.
 
+/// Constructs a target-owned size identity for a test fixture, without a shared size catalog.
+pub fn run_size(id: &str) -> openengine_cluster_protocol::RunSize {
+    openengine_cluster_protocol::RunSize::new(id).expect("valid fixture size identifier")
+}
+
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

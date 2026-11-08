@@ -181,29 +181,29 @@ fn environment_values_and_graph_runtime_fields_are_rejected() {
 
 #[test]
 fn title_size_and_present_source_are_bounded() {
-    for (pointer, owner_pointer, field) in [
-        ("/title", "", "title"),
-        ("/runtime/size", "/runtime", "size"),
-    ] {
-        let mut missing = canonical_submission();
-        missing
-            .pointer_mut(owner_pointer)
+    let mut missing_title = canonical_submission();
+    missing_title.as_object_mut().assert_value().remove("title");
+    assert!(serde_json::from_value::<RunSubmission>(missing_title).is_err());
+
+    let mut default_size = canonical_submission();
+    default_size["runtime"]
+        .as_object_mut()
+        .assert_value()
+        .remove("size");
+    assert!(
+        serde_json::from_value::<RunSubmission>(default_size)
             .assert_value()
-            .as_object_mut()
-            .assert_value()
-            .remove(field);
-        assert!(
-            serde_json::from_value::<RunSubmission>(missing).is_err(),
-            "{pointer} must be required"
-        );
-    }
+            .runtime
+            .size()
+            .is_none()
+    );
 
     let mut invalid_title = canonical_submission();
     *invalid_title.pointer_mut("/title").assert_value() = json!("");
     assert!(serde_json::from_value::<RunSubmission>(invalid_title).is_err());
 
     let mut invalid_size = canonical_submission();
-    *invalid_size.pointer_mut("/runtime/size").assert_value() = json!("xlarge");
+    *invalid_size.pointer_mut("/runtime/size").assert_value() = json!("");
     assert!(serde_json::from_value::<RunSubmission>(invalid_size).is_err());
 
     for (pointer, value) in [

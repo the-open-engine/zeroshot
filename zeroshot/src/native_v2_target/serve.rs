@@ -138,6 +138,10 @@ async fn prepare_target(
     TargetServeError,
 > {
     let hosting = ProductionHostingConfig {
+        run_sizes: config
+            .bootstrap_key_file
+            .is_none()
+            .then(zeroshot_engine::native_v2_hosting::host_run_sizes),
         memory_storage: Some(config.storage.join("active-memory").join("lessons.sqlite3")),
         storage_root: config.storage.clone(),
         operator_diagnostic_output: output,
@@ -160,6 +164,7 @@ fn with_ui(
         std::fs::canonicalize(&config.storage)?,
         public_origin,
         controller.observations(),
+        zeroshot_engine::native_v2_hosting::host_run_sizes(),
     )?;
     Ok(server.with_ui(ui)?)
 }

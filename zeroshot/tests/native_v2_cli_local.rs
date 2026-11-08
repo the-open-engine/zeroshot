@@ -105,7 +105,7 @@ async fn target_omitted_run_derives_source_and_preserves_workspace_mutation() {
         status.assert_key("source").assert_key("revision"),
         &fixture.head
     );
-    assert_eq!(status.assert_key("size"), "small");
+    assert_eq!(status.assert_key("size"), "host");
     assert_eq!(status.assert_key("status").assert_key("phase"), "finished");
     assert_eq!(
         status

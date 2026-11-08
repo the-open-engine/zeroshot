@@ -159,14 +159,18 @@ fn resolved_source_identifiers_enforce_git_and_host_boundaries() {
 }
 
 #[test]
-fn legacy_run_sizes_reopen_and_serialize_with_current_names() {
-    for (legacy, current, expected) in [
-        ("tiny", "small", RunSize::Small),
-        ("standard", "medium", RunSize::Medium),
+fn target_size_identifiers_round_trip_without_aliases_or_a_global_catalog() {
+    for id in [
+        "tiny",
+        "standard",
+        "medium",
+        "gpu",
+        "custom-big-box",
+        "GPU.X.48",
     ] {
-        let size: RunSize = serde_json::from_value(json!(legacy)).assert_value();
-        assert_eq!(size, expected);
-        assert_eq!(serde_json::to_value(size).assert_value(), json!(current));
+        let size: RunSize = serde_json::from_value(json!(id)).assert_value();
+        assert_eq!(size.as_str(), id);
+        assert_eq!(serde_json::to_value(size).assert_value(), json!(id));
     }
 }
 
@@ -236,7 +240,7 @@ fn submit_and_list_results_expose_only_public_run_identity_and_status() {
             run_id,
             title: RunTitle::new("Protocol contract").assert_value(),
             source: Some(openengine_cluster_testkit::native_v2_source_fixture()),
-            size: RunSize::Small,
+            size: RunSize::new("small").assert_value(),
             at_cursor: openengine_cluster_protocol::Cursor::new("v2:1"),
             status: RunStatus::Admitted {},
             workspace_recovery: Default::default(),
@@ -272,11 +276,17 @@ fn resume_debug_exposes_connection_names_but_redacts_credentials() {
 }
 
 #[test]
-fn xl_and_gpu_sizes_round_trip_without_rewriting_machine_identity() {
-    for (wire, expected) in [("xl", RunSize::Xl), ("gpu_t4", RunSize::GpuT4)] {
-        let size: RunSize = serde_json::from_value(json!(wire)).assert_value();
-        assert_eq!(size, expected);
-        assert_eq!(serde_json::to_value(size).assert_value(), json!(wire));
+fn run_size_schema_accepts_future_ids_and_rejects_malformed_identifiers() {
+    let schema = serde_json::to_value(schemars::schema_for!(RunSize)).assert_value();
+    let validator = jsonschema::validator_for(&schema).assert_value();
+    assert_eq!(schema["type"], "string");
+    assert!(schema.get("enum").is_none());
+    for valid in ["xxxl", "future-size-2027", "gpu_t4", "gpu"] {
+        assert!(validator.is_valid(&json!(valid)));
+        assert!(serde_json::from_value::<RunSize>(json!(valid)).is_ok());
     }
-    assert!(serde_json::from_value::<RunSize>(json!("gpu")).is_err());
+    for invalid in [String::new(), "x".repeat(129), "bad\nsize".to_owned()] {
+        assert!(!validator.is_valid(&json!(invalid)));
+        assert!(serde_json::from_value::<RunSize>(json!(invalid)).is_err());
+    }
 }

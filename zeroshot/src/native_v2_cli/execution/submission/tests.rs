@@ -1,7 +1,8 @@
+use openengine_cluster_testkit::fixture::run_size;
 use openengine_cluster_protocol::{
     ConnectionKey, EnvironmentVariableName, GraphProfile, MAX_MODEL_CONTEXT_WINDOW,
     MAX_MODEL_MAX_TOKENS, ModelId, NodeRuntimeBinding, PullRequestFeedback,
-    RunConnectionRequirements, RunSize, RunTitle, SessionScope,
+    RunConnectionRequirements, RunTitle, SessionScope,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
@@ -27,7 +28,7 @@ fn uniform(harness: &str, provider: &str) -> UniformRuntimePlan {
     UniformRuntimePlan {
         harness: openengine_cluster_protocol::HarnessId::new(harness).assert_value(),
         provider: openengine_cluster_protocol::ProviderId::new(provider).assert_value(),
-        size: RunSize::Small,
+        size: Some(run_size("small")),
         workspace_checkpoints: true,
         model: ModelId::new("provider-owned-model").assert_value(),
         effort: None,
@@ -795,7 +796,7 @@ fn prepare_intent_preserves_an_explicit_submission_key() {
 fn template_binding_insertion_owns_comment_and_git_delivery_nodes() {
     let mut runtime = RuntimePlan::new(
         crate::native_v2_contract::RuntimeLane::new("pi", "anthropic").assert_value(),
-        RunSize::Small,
+        run_size("small"),
         BTreeMap::new(),
     );
     let delivery = openengine_cluster_protocol::NodeName::new("delivery").assert_value();

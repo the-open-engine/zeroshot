@@ -260,6 +260,14 @@ test('mounted Runtime dialog edits a draft shared by its Form and JSON views', a
   const bootstrap: Bootstrap = {
     version: 1,
     workspace: { kind: 'platform', id: 'runtime-dialog-test' },
+    runSizes: {
+      kind: 'openengine.run-sizes/v2',
+      default: 'large',
+      sizes: [
+        { id: 'large', description: '4 vCPU, 16 GiB RAM, 128 GiB disk; 2 lanes' },
+        { id: 'future-box/v2', description: 'Resources offered by this target.' },
+      ],
+    },
     machines: [
       {
         size: 'large',
@@ -380,6 +388,26 @@ test('mounted Runtime dialog edits a draft shared by its Form and JSON views', a
   await click(button(dialog()!, 'Cancel'));
   assert.equal(dialog(), null);
   assert.equal(confirmDialog(), null);
+
+  // Target-owned IDs pass through JSON unchanged; Target default keeps size omitted.
+  await openRuntime();
+  await choose(labelled('Run size'), 'future-box/v2');
+  const targetRuntime = await runtimeJson();
+  assert.equal(targetRuntime.value.size, 'future-box/v2');
+  targetRuntime.value.size = null;
+  await type(targetRuntime.editor, JSON.stringify(targetRuntime.value));
+  await click(button(dialog()!, 'Form'));
+  assert.equal(labelled('Run size').value, '');
+  assert.equal((await runtimeJson()).value.size, null, 'rendering preserves explicit null');
+  await click(button(dialog()!, 'Form'));
+  await choose(labelled('Run size'), 'Target default (large)');
+  assert.equal(Object.hasOwn((await runtimeJson()).value, 'size'), false);
+  await click(button(dialog()!, 'Form'));
+  await click(button(dialog()!, 'Apply changes'));
+  await openRuntime();
+  assert.equal(labelled('Run size').value, '');
+  await click(button(dialog()!, 'Cancel'));
+  await click(undo());
 
   // Form edits stay in the draft; closing asks before discarding them.
   await openRuntime();

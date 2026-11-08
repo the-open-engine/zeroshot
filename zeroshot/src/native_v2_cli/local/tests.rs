@@ -1,8 +1,9 @@
+use openengine_cluster_testkit::fixture::run_size;
 use std::collections::BTreeMap;
 use std::io::Write as _;
 
 use openengine_cluster_protocol::{
-    Cursor, EnumLabel, NodeName, RunResumeParams, RunSize, RunStatus, RunStatusResult, RunTitle,
+    Cursor, EnumLabel, NodeName, RunResumeParams, RunStatus, RunStatusResult, RunTitle,
     TerminalResult,
 };
 #[cfg(unix)]
@@ -39,7 +40,7 @@ pub(super) fn contract_submission(key: &str) -> RunSubmission {
         "runtime": {
             "harness": "codex",
             "provider": "openai",
-            "size": "small",
+            "size": "host",
             "nodes": {}
         },
         "source": {
@@ -72,7 +73,7 @@ fn contract_status(submission: &RunSubmission, run_id: RunId, failed: bool) -> R
         run_id,
         title: RunTitle::new("Local storage contract").assert_value(),
         source: submission.source.clone(),
-        size: RunSize::Small,
+        size: run_size("host"),
         at_cursor: Cursor::new(crate::v2_run_ledger::INITIAL_CURSOR),
         status: if failed {
             RunStatus::Finished {

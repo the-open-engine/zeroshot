@@ -63,7 +63,7 @@ pub trait NativeV2StringKind: string_kind_sealed::Sealed {
     fn schema() -> Schema;
 }
 
-/// Validated protocol string tagged by one closed native-v2 value domain.
+/// Validated protocol string tagged by its native-v2 value domain.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[serde(try_from = "String")]
 pub struct NativeV2String<Kind: NativeV2StringKind>(String, #[serde(skip)] PhantomData<Kind>);
@@ -465,19 +465,13 @@ pub enum CopilotProvider {
     Bedrock,
 }
 
-#[derive(
-    Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum RunSize {
-    #[serde(alias = "tiny")]
-    Small,
-    #[serde(alias = "standard")]
-    Medium,
-    Large,
-    Xl,
-    GpuT4,
-}
+native_v2_string_kind!(
+    RunSizeKind,
+    RunSize,
+    validate_runtime_id,
+    json_schema!({ "type": "string", "minLength": 1, "maxLength": 128,
+        "pattern": r"^[^\u0000-\u001f\u007f-\u009f]+$" })
+);
 
 #[derive(
     Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,

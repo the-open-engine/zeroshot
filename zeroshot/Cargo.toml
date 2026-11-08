@@ -65,6 +65,7 @@ tokio-util = { workspace = true, features = ["compat"] }
 tokio-tungstenite.workspace = true
 url.workspace = true
 uuid.workspace = true
+unicode-width.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = [

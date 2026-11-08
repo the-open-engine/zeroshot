@@ -211,7 +211,11 @@ impl TargetHttpControlAuthority {
             .join(DISCOVERY_PATH)
             .map_err(|_| authority_error("hosted target discovery URL is invalid"))?;
         let wire: TargetDiscoveryDocument = self
-            .get_json(&discovery_url, "native-v2 target discovery")
+            .get_json_with_limit(
+                &discovery_url,
+                "native-v2 target discovery",
+                contract::MAX_DISCOVERY_RESPONSE_BYTES,
+            )
             .await?;
         Ok((origin, wire))
     }
@@ -530,6 +534,16 @@ impl TargetHttpControlAuthority {
         url: &Url,
         operation: &'static str,
     ) -> Result<T, TargetAuthorityError> {
+        self.get_json_with_limit(url, operation, contract::MAX_RESPONSE_BYTES)
+            .await
+    }
+
+    async fn get_json_with_limit<T: DeserializeOwned>(
+        &self,
+        url: &Url,
+        operation: &'static str,
+        maximum_bytes: usize,
+    ) -> Result<T, TargetAuthorityError> {
         let response = self
             .client
             .get(url.clone())
@@ -537,7 +551,7 @@ impl TargetHttpControlAuthority {
             .send()
             .await
             .map_err(|error| TargetAuthorityError::request_failed(operation, &error))?;
-        read_success_json(response, url, operation).await
+        contract::read_success_json_with_limit(response, url, operation, maximum_bytes).await
     }
 
     async fn post_form_json<T: DeserializeOwned>(
@@ -614,7 +628,6 @@ fn require_runtime_capabilities(
             "script bindings currently require local execution",
         ));
     }
-    require_run_size(controller, runtime.size())?;
     require_node_runtime_lanes(controller, runtime)?;
     require_runtime_harnesses(controller, runtime)?;
     if !runtime.workspace_checkpoints {
@@ -664,23 +677,6 @@ fn require_runtime_harnesses(
                 "target does not advertise runtime lane {lane}"
             )));
         }
-    }
-    Ok(())
-}
-
-fn require_run_size(
-    controller: &ControllerDescriptor,
-    size: openengine_cluster_protocol::RunSize,
-) -> Result<(), TargetAuthorityError> {
-    use openengine_cluster_protocol::RunSize;
-    let supported = match &controller.run_sizes {
-        Some(sizes) => sizes.contains(&size),
-        None => matches!(size, RunSize::Small | RunSize::Medium | RunSize::Large),
-    };
-    if !supported {
-        return Err(authority_error(
-            "target does not advertise the requested run size (openengine.run-sizes/v1)",
-        ));
     }
     Ok(())
 }

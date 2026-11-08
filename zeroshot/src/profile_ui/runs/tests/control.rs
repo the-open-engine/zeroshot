@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use super::*;
 use crate::full_v1_reducer::{Decision, FullV1Reducer, ReductionInput};
 use crate::native_v2_admission::NativeV2Admission;
@@ -20,7 +21,7 @@ async fn software_fixture() -> Fixture {
         .materialize(TemplateDelivery::None)
         .assert_value();
     let runtime = crate::native_v2_candidate::test_support::codex_runtime(
-        RunSize::Small,
+        run_size("small"),
         ["worker", "acceptance", "code"]
             .into_iter()
             .map(|name| {

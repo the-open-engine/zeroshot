@@ -41,8 +41,53 @@ fn target_service(root: &openengine_cluster_testkit::TemporaryDirectory) -> UiSe
         root.as_path().to_owned(),
         "https://target.example",
         observations,
+        crate::native_v2_hosting::host_run_sizes(),
     )
     .assert_value()
+}
+
+#[tokio::test]
+async fn target_bootstrap_uses_the_configured_catalog_instead_of_local_host_sizes() {
+    use openengine_cluster_protocol::{RunSize, RunSizeDescriptor, TargetRunSizesDiscovery};
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test("custom-size-ui");
+    let listener = TcpListener::bind("127.0.0.1:0").await.assert_value();
+    let origin = format!("http://{}", listener.local_addr().assert_value());
+    let id = RunSize::new("custom-machine").assert_value();
+    let catalog = TargetRunSizesDiscovery::new(
+        Some(id.clone()),
+        vec![RunSizeDescriptor::new(id, "16 vCPU, 64 GiB RAM").assert_value()],
+    )
+    .assert_value();
+    let observations = crate::native_v2_observability::NativeV2Observability::new(Arc::new(
+        crate::v2_run_ledger::fake::FakeRunLedger::new(),
+    ));
+    let service = UiService::for_target(
+        root.as_path().to_owned(),
+        &origin,
+        observations,
+        catalog.clone(),
+    )
+    .assert_value();
+    let serving = service.clone();
+    let task = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.assert_value();
+        serving.serve_connection(stream).await.assert_value();
+    });
+    let response: serde_json::Value = reqwest::Client::new()
+        .get(format!("{origin}/ui/api/bootstrap"))
+        .header(header::CONNECTION, "close")
+        .send()
+        .await
+        .assert_value()
+        .json()
+        .await
+        .assert_value();
+    assert_eq!(
+        response["runSizes"],
+        serde_json::to_value(catalog).assert_value()
+    );
+    service.shutdown();
+    task.await.assert_value();
 }
 
 #[test]
@@ -267,18 +312,26 @@ async fn shutdown_and_target_service_boundaries_are_immediate_and_shared() {
         UiService::for_target(
             PathBuf::from("relative"),
             "https://target.example",
-            observations.clone()
+            observations.clone(),
+            crate::native_v2_hosting::host_run_sizes(),
         )
         .is_err()
     );
     let root = openengine_cluster_testkit::TemporaryDirectory::for_test("profile-ui-target");
     assert!(
-        UiService::for_target(root.as_path().to_owned(), "invalid", observations.clone()).is_err()
+        UiService::for_target(
+            root.as_path().to_owned(),
+            "invalid",
+            observations.clone(),
+            crate::native_v2_hosting::host_run_sizes(),
+        )
+        .is_err()
     );
     let service = UiService::for_target(
         root.as_path().to_owned(),
         "https://target.example",
         observations,
+        crate::native_v2_hosting::host_run_sizes(),
     )
     .assert_value();
     let discovery = service.run_history_discovery().assert_value();
