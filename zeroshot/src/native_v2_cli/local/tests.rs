@@ -63,6 +63,7 @@ fn recovery_document(
         resumed_from,
         delivery_run_id: None,
         successor_run_id: None,
+        pending_restore: None,
     }
 }
 
@@ -314,8 +315,8 @@ async fn local_idempotency_contract_finds_matches_and_fails_closed() {
     ));
 }
 
-#[test]
-fn local_recovery_contract_preserves_lineage_and_recoverability() {
+#[tokio::test]
+async fn local_recovery_contract_preserves_lineage_and_recoverability() {
     let root = TestDirectory::new("local-recovery-contract");
     let backend = contract_backend(root.path());
     let original = RunId::new("0199f33f-3b44-7d21-9000-000000000021");
@@ -348,6 +349,7 @@ fn local_recovery_contract_preserves_lineage_and_recoverability() {
     assert!(
         backend
             .workspace_recovery(&failed)
+            .await
             .assert_value()
             .recoverable
     );
@@ -355,9 +357,33 @@ fn local_recovery_contract_preserves_lineage_and_recoverability() {
     assert!(
         !backend
             .workspace_recovery(&admitted)
+            .await
             .assert_value()
             .recoverable
     );
+
+    // A launch that left its storage without a running or admitted controller, and whose
+    // launcher released the claim, does not block the resume that reconciles it.
+    let interrupted = RunId::new("0199f33f-3b44-7d21-9000-000000000024");
+    let interrupted_storage = backend.create_run_storage(&interrupted).assert_value();
+    let mut launching = successor_document.clone();
+    launching.successor_run_id = Some(interrupted.clone());
+    backend
+        .write_recovery_document(&successor, &launching)
+        .assert_value();
+    let released = backend.workspace_recovery(&failed).await.assert_value();
+    assert!(released.recoverable && released.successor_run_id.is_none());
+    let lease = ControllerLease::acquire(PortableControllerPaths::new(interrupted_storage).lease())
+        .assert_value();
+    let live = backend.workspace_recovery(&failed).await.assert_value();
+    assert!(!live.recoverable);
+    assert_eq!(live.successor_run_id.as_ref(), Some(&interrupted));
+    drop(lease);
+    let claim = backend.claim_recovery_workspace(&successor).assert_value();
+    let launcher = backend.workspace_recovery(&failed).await.assert_value();
+    assert!(!launcher.recoverable);
+    assert_eq!(launcher.successor_run_id, Some(interrupted));
+    drop(claim);
 
     let missing_successor = RunId::new("0199f33f-3b44-7d21-9000-000000000023");
     let mut claimed = successor_document;
@@ -437,7 +463,8 @@ async fn lane_preflight_checks_the_retained_workspace_only_without_checkpoint_re
         let error = backend
             .start_prepared_controller_with_lineage(prepared, None, checkpoint)
             .await
-            .unwrap_err();
+            .unwrap_err()
+            .error;
 
         if restoring {
             assert!(matches!(error, NativeV2CliError::Local(_)), "{error}");
@@ -499,7 +526,8 @@ async fn github_delivery_preflight_rejects_a_missing_gh_before_launch() {
     let error = backend
         .start_prepared_controller_with_lineage(prepared, None, None)
         .await
-        .unwrap_err();
+        .unwrap_err()
+        .error;
 
     assert!(matches!(error, NativeV2CliError::Usage(_)));
     assert_eq!(
@@ -637,6 +665,7 @@ fn local_recovery_lineage_is_bounded_and_honors_root_delivery() {
         resumed_from: None,
         delivery_run_id: Some(delivery.clone()),
         successor_run_id: None,
+        pending_restore: None,
     };
     assert_eq!(
         backend.delivery_run_id(&first, &direct).assert_value(),
@@ -720,42 +749,107 @@ async fn local_stale_state_and_readiness_fail_closed() {
             .spawn()
             .assert_value();
         exited.wait().await.assert_value();
-        assert!(
+        assert!(matches!(
             wait_for_controller(&mut exited, &paths, &run_id, Duration::ZERO)
                 .await
-                .assert_error()
-                .to_string()
-                .contains("exited before becoming ready")
-        );
+                .assert_value(),
+            ControllerWait::Exited(None)
+        ));
         crate::execution::process::write_new_file(
             &paths.startup_failure(),
             b"portable controller I/O failed: restic is unavailable",
             0o600,
         )
         .assert_value();
-        assert_eq!(
+        let ControllerWait::Exited(reason) =
             wait_for_controller(&mut exited, &paths, &run_id, Duration::ZERO)
                 .await
-                .assert_error()
+                .assert_value()
+        else {
+            panic!("an exited controller must report its recorded cause");
+        };
+        assert!(!paths.startup_failure().exists());
+        let backend =
+            contract_backend(root.path()).with_preparation_timeout(Duration::from_secs(5));
+        assert_eq!(
+            backend
+                .controller_exit_error(reason.clone(), Duration::from_secs(1))
                 .to_string(),
             "local controller operation failed: controller exited before becoming ready: \
              portable controller I/O failed: restic is unavailable"
         );
-        assert!(!paths.startup_failure().exists());
+        assert_eq!(
+            backend
+                .controller_exit_error(reason, Duration::from_secs(5))
+                .to_string(),
+            "local controller operation failed: controller exited before becoming ready: \
+             portable controller I/O failed: restic is unavailable; \
+             ZEROSHOT_PREPARATION_TIMEOUT sets its 5 s preparation deadline"
+        );
 
         let mut waiting = tokio::process::Command::new("sh")
             .args(["-c", "read _"])
             .stdin(std::process::Stdio::piped())
             .spawn()
             .assert_value();
-        assert!(
+        assert!(matches!(
             wait_for_controller(&mut waiting, &paths, &run_id, Duration::ZERO)
                 .await
-                .assert_error()
-                .to_string()
-                .contains("before the deadline")
+                .assert_value(),
+            ControllerWait::TimedOut
+        ));
+        crate::execution::platform::stop_controller(&mut waiting)
+            .await
+            .assert_value();
+        assert!(waiting.try_wait().assert_value().is_some());
+        assert_eq!(
+            backend
+                .preparation_timeout_error(
+                    Some("workspace checkpoint restore did not complete".to_owned()),
+                    Duration::from_millis(35_250),
+                    true,
+                )
+                .to_string(),
+            "local controller operation failed: controller did not become ready within its 5 s \
+             preparation deadline (ZEROSHOT_PREPARATION_TIMEOUT) and was stopped after 35.2 s: \
+             workspace checkpoint restore did not complete"
         );
-        waiting.kill().await.assert_value();
+        assert!(
+            backend
+                .preparation_timeout_error(None, Duration::from_secs(36), false)
+                .to_string()
+                .ends_with("and could not be confirmed stopped after 36.0 s")
+        );
+    }
+}
+
+#[test]
+fn preparation_timeout_override_is_finite_and_positive() {
+    assert_eq!(
+        preparation_timeout(None).assert_value(),
+        DEFAULT_PREPARATION_TIMEOUT
+    );
+    for (value, seconds) in [("1", 1), ("900", 900), ("86400", 86_400)] {
+        assert_eq!(
+            preparation_timeout(Some(value.into())).assert_value(),
+            Duration::from_secs(seconds)
+        );
+    }
+    for value in [
+        "0",
+        "-5",
+        "+5",
+        "1.5",
+        "10s",
+        " 10",
+        "86401",
+        "18446744073709551616",
+    ] {
+        let error = preparation_timeout(Some(value.into())).unwrap_err();
+        assert!(
+            matches!(&error, NativeV2CliError::Usage(message) if message.contains("ZEROSHOT_PREPARATION_TIMEOUT")),
+            "{value:?} was accepted or misreported: {error}"
+        );
     }
 }
 
@@ -996,7 +1090,11 @@ async fn assert_successor_claim_and_submission_lock_edges(
     let lease = ControllerLease::acquire(successor_paths.lease()).assert_value();
     assert!(
         backend
-            .successor_claim_is_live_or_admitted(&successor, &successor_storage,)
+            .successor_claim_is_live_or_admitted(
+                &successor,
+                &successor_storage,
+                backend.ready_timeout,
+            )
             .await
             .assert_value()
     );
@@ -1029,7 +1127,11 @@ async fn assert_successor_claim_and_submission_lock_edges(
     let retry_storage = retry_backend.create_run_storage(&retry_run).assert_value();
     assert!(
         !retry_backend
-            .successor_claim_is_live_or_admitted(&retry_run, &retry_storage)
+            .successor_claim_is_live_or_admitted(
+                &retry_run,
+                &retry_storage,
+                retry_backend.ready_timeout,
+            )
             .await
             .assert_value()
     );
@@ -1104,7 +1206,7 @@ async fn assert_zero_deadline_cleanup_and_recovery_claim_edges() {
             .is_none()
     );
     backend
-        .reconcile_local_resume_claim(&recovery_run)
+        .reconcile_local_resume_claim(&recovery_run, backend.ready_timeout)
         .await
         .assert_value();
     assert_successor_claim_and_submission_lock_edges(&backend, &root).await;
@@ -1243,10 +1345,12 @@ async fn local_controller_readiness_reports_exit_and_deadline() {
         .arg("exit 7")
         .spawn()
         .assert_value();
-    let error = wait_for_controller(&mut child, &exited, &run_id, Duration::from_secs(30))
-        .await
-        .expect_err("an exited controller never becomes ready");
-    assert!(error.to_string().contains("exited before becoming ready"));
+    assert!(matches!(
+        wait_for_controller(&mut child, &exited, &run_id, Duration::from_secs(30))
+            .await
+            .assert_value(),
+        ControllerWait::Exited(None)
+    ));
 
     let waiting = PortableControllerPaths::new(root.child("waiting"));
     let mut child = tokio::process::Command::new("sh")
@@ -1254,10 +1358,12 @@ async fn local_controller_readiness_reports_exit_and_deadline() {
         .arg("sleep 60")
         .spawn()
         .assert_value();
-    let error = wait_for_controller(&mut child, &waiting, &run_id, Duration::from_millis(50))
-        .await
-        .expect_err("a live controller must publish readiness before the deadline");
-    assert!(error.to_string().contains("before the deadline"));
+    assert!(matches!(
+        wait_for_controller(&mut child, &waiting, &run_id, Duration::from_millis(50))
+            .await
+            .assert_value(),
+        ControllerWait::TimedOut
+    ));
     child.kill().await.assert_value();
     child.wait().await.assert_value();
 }

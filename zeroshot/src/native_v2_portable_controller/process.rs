@@ -38,6 +38,7 @@ const READY_KIND: &str = "zeroshot.portable-controller-ready/v1";
 struct PortableBootstrapDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
+    preparation_timeout_ms: u64,
     run_id: RunId,
     delivery_run_id: RunId,
     adopt_existing_delivery: bool,
@@ -88,8 +89,12 @@ impl PortableBootstrapDocument {
             })
             .transpose()
             .map_err(|_| PortableControllerError::Bootstrap)?;
+        if self.preparation_timeout_ms == 0 {
+            return Err(PortableControllerError::Bootstrap);
+        }
         Ok(PortableControllerBootstrap {
             checkpoint: self.checkpoint,
+            preparation_timeout: Duration::from_millis(self.preparation_timeout_ms),
             run_id: self.run_id,
             delivery_run_id: self.delivery_run_id,
             adopt_existing_delivery: self.adopt_existing_delivery,
@@ -248,8 +253,13 @@ fn encode_bootstrap(
         &bootstrap.submission,
         bootstrap.environment.bootstrap_values(),
     )?;
+    let preparation_timeout_ms = u64::try_from(bootstrap.preparation_timeout.as_millis())
+        .ok()
+        .filter(|milliseconds| *milliseconds > 0)
+        .ok_or(PortableControllerError::Bootstrap)?;
     let document = PortableBootstrapDocument {
         checkpoint: bootstrap.checkpoint.clone(),
+        preparation_timeout_ms,
         run_id: bootstrap.run_id.clone(),
         delivery_run_id: bootstrap.delivery_run_id.clone(),
         adopt_existing_delivery: bootstrap.adopt_existing_delivery,

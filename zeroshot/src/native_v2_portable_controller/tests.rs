@@ -173,6 +173,7 @@ pub(super) fn bootstrap(
         git_credentials: None,
 
         checkpoint: None,
+        preparation_timeout: super::DEFAULT_PREPARATION_TIMEOUT,
         delivery_run_id: run_id.clone(),
         adopt_existing_delivery: false,
         run_id,

@@ -10,8 +10,13 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::Command;
+use tokio::time::Instant;
 
 use crate::execution::platform::{self, FileAccess};
+use crate::execution::process::platform::{
+    ProcessContainment, capture_process_tree, configure_process, register_process_tree_for,
+    terminate_process_tree,
+};
 
 const MAX_RECORD_BYTES: usize = 2 * 1024 * 1024;
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(900);
@@ -120,11 +125,23 @@ impl SnapshotId {
 pub(super) struct Repository {
     program: ResticProgram,
     root: PathBuf,
+    deadline: Option<Instant>,
 }
 
 impl Repository {
     pub(super) fn new(program: ResticProgram, root: PathBuf) -> Self {
-        Self { program, root }
+        Self {
+            program,
+            root,
+            deadline: None,
+        }
+    }
+
+    /// Stops every later operation at `deadline`, which replaces the per-operation limit: a
+    /// configured preparation deadline may allow a restore longer than that limit.
+    pub(super) fn with_deadline(mut self, deadline: Instant) -> Self {
+        self.deadline = Some(deadline);
+        self
     }
 
     pub(super) async fn initialize(&self) -> io::Result<()> {
@@ -213,8 +230,14 @@ impl Repository {
         if self.program.in_process_test_fake {
             return self.run_test_fake(directory, arguments);
         }
-        self.run_with_timeout(directory, arguments, OPERATION_TIMEOUT)
+        self.run_with_timeout(directory, arguments, self.operation_timeout())
             .await
+    }
+
+    fn operation_timeout(&self) -> Duration {
+        self.deadline.map_or(OPERATION_TIMEOUT, |deadline| {
+            deadline.saturating_duration_since(Instant::now())
+        })
     }
 
     async fn run_with_timeout(
@@ -241,8 +264,15 @@ impl Repository {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        // A configured Restic may be a wrapper with its own children. Contain the whole tree so a
+        // failed or timed-out operation is confirmed stopped before its caller releases ownership.
+        let registration = register_process_tree_for(ProcessContainment::ProcessGroup)
+            .map_err(|error| operation_io_error(operation, "start", error))?;
+        configure_process(&mut command, ProcessContainment::ProcessGroup);
         let mut child = command
             .spawn()
+            .map_err(|error| operation_io_error(operation, "start", error))?;
+        let tree = capture_process_tree(registration, &mut child)
             .map_err(|error| operation_io_error(operation, "start", error))?;
         let stdout = child
             .stdout
@@ -276,15 +306,21 @@ impl Repository {
         let (output, (), status) = match result {
             Ok(Ok(value)) => value,
             failure => {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-                return Err(match failure {
+                let termination = terminate_process_tree(&tree, &mut child).await;
+                let error = match failure {
                     Ok(Err(error)) => error,
                     _ => io::Error::new(
                         io::ErrorKind::TimedOut,
                         format!("restic {operation} timed out"),
                     ),
-                });
+                };
+                if termination.cleanup.proves_tree_empty() && termination.error.is_none() {
+                    return Err(error);
+                }
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!("{error}; its process cleanup is unconfirmed"),
+                ));
             }
         };
         if !status.success() {

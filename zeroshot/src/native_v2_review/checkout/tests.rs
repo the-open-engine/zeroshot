@@ -150,6 +150,7 @@ mod local_auth {
         let environment = RunEnvironment::exact_for_admitted(admitted, values).assert_value();
         PortableControllerBootstrap {
             checkpoint: None,
+            preparation_timeout: crate::native_v2_portable_controller::DEFAULT_PREPARATION_TIMEOUT,
             run_id: RunId::new("review-auth"),
             delivery_run_id: RunId::new("review-auth"),
             adopt_existing_delivery: false,

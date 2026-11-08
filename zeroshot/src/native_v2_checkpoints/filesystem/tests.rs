@@ -1124,3 +1124,94 @@ fn unborn_capture_refuses_symlinked_head_without_touching_its_target() {
     );
     assert_eq!(fs::read_dir(&fixture.snapshots).assert_value().count(), 0);
 }
+
+/// A restore that fails while publishing Git objects has already replaced the working tree.
+/// Repeating it from the same snapshot completes the checkout, its index and HEAD.
+#[test]
+fn restore_repeated_after_failed_git_publication_installs_the_complete_checkout() {
+    let fixture = Fixture::new();
+    fixture.initialize_git();
+    fs::write(fixture.workspace.join("untracked"), "checkpoint").assert_value();
+    let expected = git(&fixture.workspace, &["rev-parse", "HEAD"]);
+    let id = capture(&fixture.workspace, &fixture.snapshots, &()).assert_value();
+    fs::write(fixture.workspace.join("tracked"), "later").assert_value();
+    git(&fixture.workspace, &["commit", "-am", "later"]);
+    fs::remove_file(fixture.workspace.join("untracked")).assert_value();
+    fs::write(fixture.workspace.join("later-only"), "later").assert_value();
+
+    let objects = fixture.workspace.join(".git/objects");
+    let prefix = fs::read_dir(fixture.tree(&id).join(".git/objects"))
+        .assert_value()
+        .map(|entry| entry.assert_value().file_name())
+        .find(|name| name.len() == 2)
+        .assert_value();
+    let aside = fixture.workspace.join(".git/objects-aside");
+    fs::rename(objects.join(&prefix), &aside).assert_value();
+    fs::write(objects.join(&prefix), "not an object directory").assert_value();
+    assert!(restore(&fixture.snapshots, &id, &fixture.workspace).is_err());
+    assert!(fixture.workspace.join("untracked").exists());
+    assert!(!fixture.workspace.join("later-only").exists());
+
+    fs::remove_file(objects.join(&prefix)).assert_value();
+    fs::rename(&aside, objects.join(&prefix)).assert_value();
+    // An earlier interrupted publication leaves only a temporary object, which Git ignores.
+    fs::write(objects.join(&prefix).join("tmp_obj_interrupted"), "partial").assert_value();
+    restore(&fixture.snapshots, &id, &fixture.workspace).assert_value();
+
+    assert_eq!(git(&fixture.workspace, &["rev-parse", "HEAD"]), expected);
+    assert_eq!(
+        git(&fixture.workspace, &["status", "--porcelain"]),
+        "?? untracked"
+    );
+    git(&fixture.workspace, &["fsck", "--no-dangling"]);
+    assert_eq!(
+        fs::read_to_string(fixture.workspace.join("tracked")).assert_value(),
+        "initial"
+    );
+}
+
+/// A restore that stops while it clears the workspace leaves a partial checkout. Repeating it
+/// from the same snapshot installs exactly the snapshot.
+#[cfg(unix)]
+#[test]
+fn restore_repeated_after_interrupted_workspace_replacement_installs_the_snapshot() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Directory permissions interrupt the first restore; root would bypass them.
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    }
+    let fixture = Fixture::new();
+    for name in ["first", "second", "third"] {
+        fs::write(fixture.workspace.join(name), "checkpoint").assert_value();
+    }
+    let id = capture(&fixture.workspace, &fixture.snapshots, &()).assert_value();
+    for name in ["first", "second", "third"] {
+        fs::write(fixture.workspace.join(name), "later").assert_value();
+    }
+    let locked = fixture.workspace.join("later-only/locked");
+    fs::create_dir_all(&locked).assert_value();
+    fs::write(locked.join("entry"), "later").assert_value();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o500)).assert_value();
+
+    let interrupted = restore(&fixture.snapshots, &id, &fixture.workspace);
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).assert_value();
+    assert!(
+        interrupted.is_err(),
+        "the locked directory must stop the first restore"
+    );
+
+    restore(&fixture.snapshots, &id, &fixture.workspace).assert_value();
+    let mut names = fs::read_dir(&fixture.workspace)
+        .assert_value()
+        .map(|entry| entry.assert_value().file_name())
+        .collect::<Vec<_>>();
+    names.sort();
+    assert_eq!(names, ["first", "second", "third"]);
+    for name in ["first", "second", "third"] {
+        assert_eq!(
+            fs::read_to_string(fixture.workspace.join(name)).assert_value(),
+            "checkpoint"
+        );
+    }
+}

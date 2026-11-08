@@ -110,6 +110,17 @@ files. Restart restores the latest completed snapshot and starts the graph at it
 target loss can precede the next snapshot boundary, so the last writer may run again. Local workspaces
 must be idle while they are restored.
 
+A local resume restores the snapshot before any agent starts. That preparation may take up to 10
+minutes. For larger workspaces or slower disks, set `ZEROSHOT_PREPARATION_TIMEOUT` to a whole number
+of seconds from 1 to 86400 before `zeroshot resume`. When a restore fails or reaches that deadline,
+the error names the step that stopped and its elapsed time, and the run stays recoverable.
+
+A restore never changes the checkout before the complete snapshot is extracted. If a crash
+interrupts it while it replaces files, the checkout can stay partially restored. The next
+`zeroshot resume` then removes the interrupted staging copy beside the workspace. It finishes the
+restore with the same or another checkpoint before any agent runs. A resume that would start
+without restoring a snapshot is refused until a restore completes.
+
 Local and Docker targets deduplicate checkpoints in a private Restic repository beside their run
 storage and advertise `openengine.workspace-checkpoints/v1`. They retain that repository only for a
 failed recovery lineage and delete it after a successful run. Platform exposes recovery through

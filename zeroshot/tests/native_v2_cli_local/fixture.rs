@@ -450,7 +450,17 @@ pub(super) async fn wait_for_exit(pid: u32) {
 }
 
 pub(super) fn process_exists(pid: u32) -> bool {
-    unsafe { libc::kill(pid as i32, 0) == 0 }
+    let signalable = unsafe { libc::kill(pid as i32, 0) == 0 };
+    signalable && !unreaped_zombie(pid)
+}
+
+/// A detached controller that exited can stay a zombie when an ancestor subreaper, such as an
+/// enclosing Zeroshot controller, never waits for it. It no longer runs or holds leases.
+fn unreaped_zombie(pid: u32) -> bool {
+    fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+        stat.rsplit_once(") ")
+            .is_some_and(|(_, fields)| fields.starts_with('Z'))
+    })
 }
 
 pub(super) fn signal(pid: u32, value: i32) -> std::io::Result<()> {
@@ -710,6 +720,9 @@ mod harness_environment;
 
 #[path = "restic_selector.rs"]
 mod restic_selector;
+
+#[path = "slow_checkpoint_restore.rs"]
+mod slow_checkpoint_restore;
 
 #[cfg(target_os = "linux")]
 #[path = "agent_tmpdir.rs"]

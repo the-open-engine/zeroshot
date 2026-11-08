@@ -228,6 +228,20 @@ fn pipe_and_start_failures_keep_stage_and_kind_without_private_error_text() {
     }
 }
 
+#[tokio::test]
+async fn a_preparation_deadline_replaces_the_per_operation_limit() {
+    let root = tempfile::tempdir().assert_value();
+    let program = ResticProgram::fake(root.path()).assert_value();
+    let repository = Repository::new(program.clone(), root.path().to_owned());
+    assert_eq!(repository.operation_timeout(), OPERATION_TIMEOUT);
+
+    let generous = Repository::new(program.clone(), root.path().to_owned())
+        .with_deadline(Instant::now() + Duration::from_secs(3_600));
+    assert!(generous.operation_timeout() > Duration::from_secs(3_500));
+    let expired = Repository::new(program, root.path().to_owned()).with_deadline(Instant::now());
+    assert_eq!(expired.operation_timeout(), Duration::ZERO);
+}
+
 #[cfg(unix)]
 fn scripted_repository(root: &Path, script: &str) -> Repository {
     let executable = root.join("restic");

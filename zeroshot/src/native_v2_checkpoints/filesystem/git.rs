@@ -260,8 +260,38 @@ fn replace_optional(source: &Path, target: &Path) -> io::Result<()> {
         .parent()
         .ok_or_else(|| invalid("Git entry has no parent"))?;
     ensure_object_directory(parent)?;
-    remove_entry(target)?;
-    copy_optional(source, target)
+    match fs::symlink_metadata(source) {
+        // HEAD and the index must never be absent: an interrupted restore is retried in this
+        // checkout, and Git refuses a directory without HEAD.
+        Ok(metadata) if metadata.is_file() => publish_file(source, target),
+        Ok(_) => {
+            remove_entry(target)?;
+            copy_optional(source, target)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => remove_entry(target),
+        Err(error) => Err(error),
+    }
+}
+
+/// Installs a complete copy of `source` at `target` with one rename, so an interrupted restore
+/// leaves either the previous file or the new one. The temporary uses Git's prefix for temporary
+/// objects, which `git fsck` tolerates and `git prune` removes from object directories. A hard
+/// crash between copy and rename can still leave one inert temporary in the administrative
+/// directory, which Git ignores.
+fn publish_file(source: &Path, target: &Path) -> io::Result<()> {
+    let parent = target
+        .parent()
+        .ok_or_else(|| invalid("Git entry has no parent"))?;
+    if entry_metadata(target)?.is_some_and(|metadata| metadata.is_dir()) {
+        remove_entry(target)?;
+    }
+    let temporary = parent.join(format!("tmp_obj_{}", uuid::Uuid::now_v7().simple()));
+    let result =
+        copy_workspace_entry(source, &temporary).and_then(|()| fs::rename(&temporary, target));
+    if result.is_err() {
+        let _ = remove_entry(&temporary);
+    }
+    result
 }
 
 fn copy_optional(source: &Path, target: &Path) -> io::Result<()> {
@@ -611,9 +641,8 @@ fn add_object(source: &Path, target: &Path) -> io::Result<()> {
     match fs::symlink_metadata(target) {
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(()),
         Ok(_) => Err(invalid("Git object destination is not a plain file")),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            copy_workspace_entry(source, target)
-        }
+        // A complete object is never replaced; publication keeps every new one complete too.
+        Err(error) if error.kind() == io::ErrorKind::NotFound => publish_file(source, target),
         Err(error) => Err(error),
     }
 }

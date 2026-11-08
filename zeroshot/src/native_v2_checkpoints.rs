@@ -21,11 +21,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    CheckpointId, NodeName, RunCheckpoint, RunCheckpointsParams, RunCheckpointsResult,
+    CheckpointId, NodeName, RunCheckpoint, RunCheckpointsParams, RunCheckpointsResult, RunId,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::Mutex;
+use tokio::time::Instant;
 
 use crate::full_v1_reducer::{DurableExecution, DurableExecutionState, ExecutionBoundary};
 use filesystem::SnapshotId;
@@ -59,7 +60,7 @@ pub struct CheckpointRestore {
     pub selection: CheckpointRestoreSelection,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase", tag = "kind")]
 pub enum CheckpointRestoreSelection {
     Latest,
@@ -75,6 +76,9 @@ struct RecoveryPoint {
     seed_format: u32,
 }
 
+/// Restore stages are private siblings of the workspace so final replacement stays on one
+/// filesystem.
+const RESTORE_STAGE_PREFIX: &str = ".zeroshot-restore-";
 const STORAGE_FORMAT: u32 = 1;
 const RECOVERY_POINT_FORMAT: u32 = 1;
 const CHECKPOINT_SEED_FORMAT: u32 = 1;
@@ -366,13 +370,36 @@ pub fn restore_selection(
 }
 
 pub fn validate_selection(selection: &CheckpointRestore) -> Result<(), CheckpointError> {
-    let snapshot = match &selection.selection {
-        CheckpointRestoreSelection::Latest => catalog::latest(&selection.directory)?,
+    pin(selection).map(|_| ())
+}
+
+/// Resolves a selection to the immutable snapshot its restore installs and checks that the
+/// snapshot's storage record and the selected execution seed are readable. No workspace changes.
+pub fn pin(selection: &CheckpointRestore) -> Result<SnapshotId, CheckpointError> {
+    let snapshot = selected_snapshot(selection)?;
+    stored_snapshot(&selection.directory, &snapshot)?;
+    selected_seed(selection)?;
+    Ok(snapshot)
+}
+
+fn selected_snapshot(selection: &CheckpointRestore) -> Result<SnapshotId, CheckpointError> {
+    match &selection.selection {
+        CheckpointRestoreSelection::Latest => catalog::latest(&selection.directory),
         CheckpointRestoreSelection::Checkpoint { checkpoint_id } => {
-            catalog::point(&selection.directory, checkpoint_id)?.snapshot
+            Ok(catalog::point(&selection.directory, checkpoint_id)?.snapshot)
         }
-    };
-    stored_snapshot(&selection.directory, &snapshot).map(|_| ())
+    }
+}
+
+/// Restart imports no seed; a selected checkpoint continues from its settled prerequisites.
+fn selected_seed(selection: &CheckpointRestore) -> Result<Vec<DurableExecution>, CheckpointError> {
+    match &selection.selection {
+        CheckpointRestoreSelection::Latest => Ok(Vec::new()),
+        CheckpointRestoreSelection::Checkpoint { checkpoint_id } => Ok(CheckpointSeed::read(
+            &catalog::seed_path(&selection.directory, checkpoint_id),
+        )?
+        .into_executions()),
+    }
 }
 
 /// A missing latest pointer is valid for workspaces retained before checkpoints existed or after
@@ -391,45 +418,122 @@ pub fn list(
     catalog::list(directory, params)
 }
 
+/// One restore owned by a controller start. The owner names the private stage, so a later
+/// attempt can remove exactly the stage an interrupted one left behind.
+#[derive(Clone, Copy, Debug)]
+pub struct RestoreAttempt<'a> {
+    pub owner: &'a RunId,
+    /// End of controller preparation. Restic stops, with its process tree confirmed gone, here.
+    pub deadline: Instant,
+}
+
 pub async fn restore(
     selection: &CheckpointRestore,
     workspace: &Path,
 ) -> Result<Vec<DurableExecution>, CheckpointError> {
-    match &selection.selection {
-        CheckpointRestoreSelection::Latest => {
-            let snapshot = catalog::latest(&selection.directory)?;
-            restore_snapshot(&selection.directory, &snapshot, workspace).await?;
-            Ok(Vec::new())
-        }
-        CheckpointRestoreSelection::Checkpoint { checkpoint_id } => {
-            let point = catalog::point(&selection.directory, checkpoint_id)?;
-            restore_snapshot(&selection.directory, &point.snapshot, workspace).await?;
-            Ok(
-                CheckpointSeed::read(&catalog::seed_path(&selection.directory, checkpoint_id))?
-                    .into_executions(),
-            )
-        }
-    }
+    restore_with(selection, workspace, None).await
 }
 
-async fn restore_snapshot(
-    directory: &Path,
-    point: &SnapshotId,
+/// Restores like [`restore`] within one bounded, owner-named attempt. Repeating the same pinned
+/// selection after an interruption at any step installs the complete snapshot again.
+pub async fn restore_attempt(
+    selection: &CheckpointRestore,
     workspace: &Path,
-) -> Result<(), CheckpointError> {
-    let (repository, snapshot) = stored_snapshot(directory, point)?;
-    repository.initialize().await?;
-    let restore_root = workspace
+    attempt: RestoreAttempt<'_>,
+) -> Result<Vec<DurableExecution>, CheckpointError> {
+    restore_with(selection, workspace, Some(attempt)).await
+}
+
+/// Removes the stage an interrupted attempt by `owner` left beside `workspace`, if any.
+/// The caller must first confirm that the attempt's controller has stopped.
+pub fn remove_restore_stage(workspace: &Path, owner: &RunId) -> Result<(), CheckpointError> {
+    Ok(filesystem::remove_disposable_tree(&restore_stage_path(
+        workspace, owner,
+    )?)?)
+}
+
+fn restore_stage_path(workspace: &Path, owner: &RunId) -> Result<PathBuf, CheckpointError> {
+    let owner = uuid::Uuid::parse_str(owner.as_str())
+        .map_err(|_| catalog::invalid("restore owner is not a run identity"))?;
+    Ok(restore_parent(workspace)?.join(format!("{RESTORE_STAGE_PREFIX}{owner}")))
+}
+
+fn restore_parent(workspace: &Path) -> Result<&Path, CheckpointError> {
+    workspace
         .parent()
-        .ok_or_else(|| catalog::invalid("workspace has no parent directory"))?;
-    let stage = filesystem::private_stage(restore_root, ".zeroshot-restore-")?;
+        .ok_or_else(|| catalog::invalid("workspace has no parent directory"))
+}
+
+async fn restore_with(
+    selection: &CheckpointRestore,
+    workspace: &Path,
+    attempt: Option<RestoreAttempt<'_>>,
+) -> Result<Vec<DurableExecution>, CheckpointError> {
+    let progress = RestoreProgress {
+        started: Instant::now(),
+        deadline: attempt.map(|attempt| attempt.deadline),
+    };
+    let resolving = "resolving the checkpoint";
+    let snapshot =
+        selected_snapshot(selection).map_err(|error| progress.failed(resolving, error))?;
+    let (repository, restic_snapshot) = stored_snapshot(&selection.directory, &snapshot)
+        .map_err(|error| progress.failed(resolving, error))?;
+    // Read the prerequisites first: a damaged seed must fail before the workspace changes.
+    let seed = selected_seed(selection)
+        .map_err(|error| progress.failed("reading the execution seed", error))?;
+    let repository = match progress.deadline {
+        Some(deadline) => repository.with_deadline(deadline),
+        None => repository,
+    };
+    repository
+        .initialize()
+        .await
+        .map_err(|error| progress.failed("opening the checkpoint repository", error))?;
+    let extracting = "extracting the snapshot";
+    let stage = match attempt {
+        Some(attempt) => restore_stage_path(workspace, attempt.owner)
+            .and_then(|path| Ok(filesystem::owned_stage(&path)?)),
+        None => restore_parent(workspace)
+            .and_then(|parent| Ok(filesystem::private_stage(parent, RESTORE_STAGE_PREFIX)?)),
+    }
+    .map_err(|error| progress.failed(extracting, error))?;
     let snapshots = stage.path().join("snapshots");
-    crate::execution::platform::private_directory(&snapshots)?;
-    let restored = snapshots.join(point.as_str());
-    crate::execution::platform::private_directory(&restored)?;
-    repository.restore(&snapshot, &restored).await?;
-    filesystem::restore_staged(&restored, workspace)?;
-    Ok(())
+    let restored = snapshots.join(snapshot.as_str());
+    crate::execution::platform::private_directory(&snapshots)
+        .and_then(|()| crate::execution::platform::private_directory(&restored))
+        .map_err(|error| progress.failed(extracting, error))?;
+    repository
+        .restore(&restic_snapshot, &restored)
+        .await
+        .map_err(|error| progress.failed(extracting, error))?;
+    // The complete stage is validated before the first workspace change. An interruption from
+    // here on can leave a partial checkout, which repeating this restore replaces completely.
+    filesystem::restore_staged(&restored, workspace)
+        .map_err(|error| progress.failed("replacing the workspace", error))?;
+    Ok(seed)
+}
+
+struct RestoreProgress {
+    started: Instant,
+    deadline: Option<Instant>,
+}
+
+impl RestoreProgress {
+    /// Names the step that failed and the elapsed restore time. Causes stay bounded and private.
+    fn failed(&self, step: &str, error: impl Into<CheckpointError>) -> CheckpointError {
+        let CheckpointError(error) = error.into();
+        let elapsed = self.started.elapsed().as_secs_f64();
+        let message = if error.kind() == std::io::ErrorKind::TimedOut
+            && self
+                .deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            format!("{step} reached the preparation deadline after {elapsed:.1} s ({error})")
+        } else {
+            format!("{step} failed after {elapsed:.1} s: {error}")
+        };
+        CheckpointError(std::io::Error::new(error.kind(), message))
+    }
 }
 
 fn remove_if_present(path: &Path) -> Result<(), CheckpointError> {

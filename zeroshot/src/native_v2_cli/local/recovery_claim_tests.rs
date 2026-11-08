@@ -39,6 +39,7 @@ fn resume_claim_fixture(name: &str, submission_key: &str) -> ResumeClaimFixture 
                 delivery_run_id: Some(run_id.clone()),
                 resumed_from: None,
                 successor_run_id: Some(successor_run_id.clone()),
+                pending_restore: None,
             },
         )
         .assert_value();
@@ -101,7 +102,7 @@ async fn interrupted_resume_with_empty_ledger_clears_the_successor_claim() {
 
     fixture
         .backend
-        .reconcile_local_resume_claim(&fixture.run_id)
+        .reconcile_local_resume_claim(&fixture.run_id, Duration::ZERO)
         .await
         .assert_value();
 
@@ -139,7 +140,7 @@ async fn interrupted_resume_with_a_durable_successor_keeps_the_claim() {
 
     fixture
         .backend
-        .reconcile_local_resume_claim(&fixture.run_id)
+        .reconcile_local_resume_claim(&fixture.run_id, Duration::ZERO)
         .await
         .assert_value();
 

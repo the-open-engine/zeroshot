@@ -117,8 +117,10 @@ impl PortableRunController {
         F: FnOnce(&AdmittedRun) -> Result<PortableRuntime, E>,
         E: std::error::Error + Send + Sync + 'static,
     {
+        let preparation_deadline = tokio::time::Instant::now() + bootstrap.preparation_timeout;
         let prepared = prepare_controller_start(&bootstrap).await?;
-        let prepared_runtime = prepare_runtime(&prepared, &bootstrap, runtime_factory).await?;
+        let prepared_runtime =
+            prepare_runtime(&prepared, &bootstrap, runtime_factory, preparation_deadline).await?;
         let allocator = Arc::new(SingleRunAllocator::new(
             bootstrap.run_id.clone(),
             prepared_runtime.runtime,
@@ -303,6 +305,7 @@ async fn prepare_runtime<F, E>(
     prepared: &PreparedControllerStart,
     bootstrap: &PortableControllerBootstrap,
     runtime_factory: F,
+    preparation_deadline: tokio::time::Instant,
 ) -> Result<PreparedRuntime, PortableControllerError>
 where
     F: FnOnce(&AdmittedRun) -> Result<PortableRuntime, E>,
@@ -323,7 +326,7 @@ where
     if !workspace_identity.is_current(&bootstrap.workspace) {
         return Err(PortableControllerError::Workspace);
     }
-    let execution_seed = restore_execution_seed(bootstrap).await?;
+    let execution_seed = restore_execution_seed(bootstrap, preparation_deadline).await?;
     crate::native_v2_review::prepare_local_checkout(&prepared.admitted, bootstrap).await?;
     let mut runtime = runtime_factory(&prepared.admitted)
         .map_err(|_| PortableControllerError::RuntimeUnavailable)?;
@@ -361,17 +364,29 @@ fn configure_workspace_checkpoints(
     Ok(runtime)
 }
 
+/// Restores under the workspace lease before any runtime exists. Restic stops at the deadline. A
+/// failure removes the stage; one left by a hard stop is named after this run, and the next local
+/// resume removes it.
 async fn restore_execution_seed(
     bootstrap: &PortableControllerBootstrap,
+    deadline: tokio::time::Instant,
 ) -> Result<Vec<crate::full_v1_reducer::DurableExecution>, PortableControllerError> {
+    use crate::native_v2_supervisor::checkpoints::{RestoreAttempt, restore_attempt};
     match &bootstrap.checkpoint {
         Some(selection) => {
             if !bootstrap.submission.runtime.workspace_checkpoints {
                 return Err(PortableControllerError::CheckpointsDisabled);
             }
-            crate::native_v2_supervisor::checkpoints::restore(selection, &bootstrap.workspace)
-                .await
-                .map_err(|error| PortableControllerError::Io(error.0))
+            restore_attempt(
+                selection,
+                &bootstrap.workspace,
+                RestoreAttempt {
+                    owner: &bootstrap.run_id,
+                    deadline,
+                },
+            )
+            .await
+            .map_err(|error| PortableControllerError::Restore(error.0))
         }
         None => Ok(Vec::new()),
     }
