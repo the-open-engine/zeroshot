@@ -1285,6 +1285,9 @@ mod policy_tests;
 #[path = "effect_tests.rs"]
 mod effect_tests;
 
+#[path = "diagnostic_tests.rs"]
+mod diagnostic_tests;
+
 #[tokio::test]
 async fn briefly_lagging_merge_request_head_is_reread() {
     for known in [false, true] {
