@@ -100,7 +100,7 @@ Agents do the work. The graph decides what happens next.
   logs in the browser, on a timeline you can replay.
 - **[CLI](docs/guides/observe-and-control.md#resume-event-and-log-streams):** `status` and `list`
   return JSON, `watch` and `logs` stream resumable events, `attach` follows a running agent.
-- **[SQLite](docs/concepts/execution.md#durable-run-state):** one SQLite file per run.
+- **[SQLite](docs/concepts/execution.md#durable-run-state):** one SQLite file per local run.
 - **[Resume](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run):** restart a failed
   run from a checkpoint without redoing finished steps.
 
