@@ -59,6 +59,7 @@ async fn detached_and_absent_process_boundaries_settle_without_waiting() {
     let detached = ProcessTreeHandle {
         process_group_id: None,
         containment: ProcessContainment::ProcessGroup,
+        supervisor: None,
     };
     assert!(!detached.requires_explicit_cleanup_evidence());
     assert!(!process_tree_has_live_members(&detached).assert_value());
@@ -80,6 +81,7 @@ async fn detached_and_absent_process_boundaries_settle_without_waiting() {
     let absent = ProcessTreeHandle {
         process_group_id: Some(absent_group),
         containment: ProcessContainment::ProcessGroup,
+        supervisor: None,
     };
     assert!(!process_tree_has_live_members(&absent).assert_value());
     assert_eq!(
@@ -101,6 +103,7 @@ async fn detached_and_absent_process_boundaries_settle_without_waiting() {
             uid: u32::MAX,
             gid: 1,
         },
+        supervisor: None,
     };
     assert!(!process_tree_has_live_members(&absent_worker).assert_value());
     assert_eq!(

@@ -74,6 +74,13 @@ When a run closes, Zeroshot atomically closes its execution activity; a late pro
 after the terminal result. [Observe and control runs](../guides/observe-and-control.md) covers the
 read and stop commands.
 
+On Linux, each local command has a private supervisor that also owns descendants which detach with
+`setsid`, change process group, or double-fork. It stops and reaps them when the command finishes,
+the run cancels, or the controller dies. Workspace ownership remains held through cleanup, so a
+successor cannot resume while that command's descendants can still write. This uses the kernel's
+subreaper support and procfs; it needs no root access or cgroup setup. Windows uses Job Objects.
+macOS retains process-group cleanup; descendants that detach can outlive the command there.
+
 ## Built-in templates are ordinary graphs
 
 The executable contains `single-worker`, `software-change`, `auto-research`, `issue-review`,

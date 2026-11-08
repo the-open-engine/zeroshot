@@ -148,7 +148,7 @@ impl LocalFixture {
     async fn output(&self, args: &[&str], mode: &str) -> Output {
         timeout(CLI_TIMEOUT, self.command(args, mode).output())
             .await
-            .assert_value_with("local CLI deadline")
+            .assert_value_with(&format!("local CLI deadline: {args:?}"))
             .assert_value_with("start local CLI")
     }
 
@@ -553,6 +553,10 @@ if test "${FAKE_CODEX_MODE-}" = fail; then
   printf '%s\n' '{"type":"turn.failed","error":{"message":"injected failure"}}'
   exit 1
 fi
+if test "${FAKE_CODEX_MODE-}" = orphan-tool; then
+  "$FAKE_TOOL_PYTHON" "$FAKE_TOOL_SCRIPT" setsid "$FAKE_TOOL_ROOT" &
+  while :; do sleep 0.05; done
+fi
 if test "${FAKE_CODEX_MODE-}" = block; then
   parent="$PPID"
   trap 'exit 0' TERM INT HUP
@@ -714,3 +718,81 @@ mod restic_selector;
 #[cfg(target_os = "linux")]
 #[path = "agent_tmpdir.rs"]
 mod agent_tmpdir;
+
+#[cfg(target_os = "linux")]
+#[path = "../support/process_tree_ownership.rs"]
+mod tree_ownership;
+
+#[cfg(target_os = "linux")]
+impl LocalFixture {
+    pub(super) async fn check_owned_tool_stops(&mut self, signal_value: Option<i32>) {
+        let tool = tree_ownership::EscapedTool::new();
+        let fields = [
+            (
+                "FAKE_TOOL_SCRIPT",
+                tool.script.to_string_lossy().into_owned(),
+            ),
+            (
+                "FAKE_TOOL_ROOT",
+                tool.directory().to_string_lossy().into_owned(),
+            ),
+            ("FAKE_TOOL_PYTHON", tool.python.clone()),
+        ];
+        let mut runtime = local_runtime();
+        let connections = runtime["nodes"]["worker"]["connections"]["openai"]
+            .as_array_mut()
+            .assert_value();
+        for (name, value) in fields {
+            self.harness_environment.insert(name.to_owned(), value);
+            connections.push(json!(name));
+        }
+        write_json(&self.runtime, &runtime);
+        let run_id = self.submit_detached("orphan-tool").await;
+        tool.wait_started().await;
+        if let Some(value) = signal_value {
+            signal(self.ready_pid(&run_id), value).assert_value();
+            if value == libc::SIGKILL {
+                let end = Instant::now() + Duration::from_secs(5);
+                while tool.live() && Instant::now() < end {
+                    sleep(Duration::from_millis(10)).await;
+                }
+                assert!(!tool.live(), "owner death alone did not stop the writer");
+            }
+            let end = Instant::now() + Duration::from_secs(20);
+            loop {
+                let output = self.output(&["resume", &run_id], "finish").await;
+                if output.status.success() {
+                    assert!(
+                        !tool.live(),
+                        "resume admitted while predecessor work was live"
+                    );
+                    self.wait_succeeded(&receipt_run_id(&output), "finish")
+                        .await;
+                    break;
+                }
+                assert!(
+                    Instant::now() < end,
+                    "resume did not recover after owner loss: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                sleep(Duration::from_millis(20)).await;
+            }
+        } else {
+            self.json(&["force-stop", &run_id], "orphan-tool").await;
+            self.wait_terminal(&run_id, "orphan-tool", "force_stopped")
+                .await;
+        }
+        let ticks = fs::read(tool.directory().join("tool.log"))
+            .assert_value()
+            .len();
+        sleep(Duration::from_millis(150)).await;
+        assert!(
+            !tool.live()
+                && fs::read(tool.directory().join("tool.log"))
+                    .assert_value()
+                    .len()
+                    == ticks,
+            "settled run left its tool command writing"
+        );
+    }
+}

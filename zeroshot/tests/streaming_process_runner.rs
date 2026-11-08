@@ -349,7 +349,14 @@ async fn close_and_release_are_idempotent_for_one_shot_sessions() {
     let second_release = session.release().await.assert_value();
     assert_eq!(waited, first_release);
     assert_eq!(first_release, second_release);
-    assert_eq!(first_release.cleanup, ProcessCleanupEvidence::NotRequired);
+    assert_eq!(
+        first_release.cleanup,
+        if cfg!(target_os = "linux") {
+            ProcessCleanupEvidence::Reaped
+        } else {
+            ProcessCleanupEvidence::NotRequired
+        }
+    );
 }
 
 #[cfg(windows)]
@@ -448,4 +455,61 @@ async fn unbounded_process_remains_cancellable_and_reaped() {
     assert!(completion.cancelled);
     assert!(!completion.timed_out);
     assert_eq!(completion.cleanup, ProcessCleanupEvidence::Reaped);
+}
+
+#[cfg(target_os = "linux")]
+#[path = "support/process_tree_ownership.rs"]
+mod tree_ownership;
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn descendants_that_leave_the_process_group_stop_before_settlement() {
+    let mut violations = Vec::new();
+    for escape in ["setsid", "setpgid", "double-fork"] {
+        for finish in ["exit", "cancel", "deadline"] {
+            let tool = tree_ownership::EscapedTool::new();
+            let root = r#"import os,sys,subprocess,time
+subprocess.Popen([sys.executable,sys.argv[1],sys.argv[2],sys.argv[3]])
+while not os.path.exists(sys.argv[3]+'/tool.pid'): time.sleep(.01)
+if sys.argv[4]=='exit': sys.exit(0)
+time.sleep(60)
+"#;
+            let args = vec![
+                "-c".to_owned(),
+                root.to_owned(),
+                tool.script.to_string_lossy().into_owned(),
+                escape.to_owned(),
+                tool.directory().to_string_lossy().into_owned(),
+                finish.to_owned(),
+            ];
+            let mut request = command(&tool.python, vec![]);
+            request.argv = args;
+            request.deadline =
+                (finish == "deadline").then(|| Instant::now() + Duration::from_secs(2));
+            let (cancel, cancellation) = cancellation_pair();
+            let mut session = LocalProcessRunner::new()
+                .open(request, cancellation)
+                .await
+                .assert_value();
+            tool.wait_started().await;
+            if finish == "cancel" {
+                cancel.send_replace(true);
+            }
+            let result = timeout(Duration::from_secs(4), async {
+                collect_stdout(&mut session).await;
+                session.wait().await
+            })
+            .await;
+            if result.is_err() {
+                violations.push(format!(
+                    "{escape}/{finish}: settlement waits for escaped stdout"
+                ));
+            }
+            let _ = session.release().await;
+            if tool.live() {
+                violations.push(format!("{escape}/{finish}: writer outlived settlement"));
+            }
+        }
+    }
+    assert!(violations.is_empty(), "{}", violations.join("\n"));
 }

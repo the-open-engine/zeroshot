@@ -8,6 +8,8 @@ mod session_io;
 mod session_runtime;
 mod spawn_recovery;
 mod tail_buffer;
+#[cfg(target_os = "linux")]
+pub(crate) mod tree_supervisor;
 
 #[path = "process/diagnostic.rs"]
 mod diagnostic;
