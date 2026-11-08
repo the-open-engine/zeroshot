@@ -159,18 +159,6 @@ shows validation and execution.
 Run locally, [self-host with Docker](docker/zeroshot-target/README.md), or share graphs and run
 on [zeroshot Platform](https://app.zeroshot.sh/docs) using your own model API keys.
 
-## What users say
-
-> I used Zeroshot for my last two contracts: a production line automation and control
-> system, and a multi-host sync and admin system for Webflow and Guesty. Very happy with it!
->
-> — Mark Dingwall
-
-> you guys are solving this in a way that is more satisfying than the google ADK (to me) and it’s
-> fuckin google.
->
-> — Fav
-
 ## Contributing
 
 [Development guide](CONTRIBUTING.md) · [UI development](ui/README.md) ·
