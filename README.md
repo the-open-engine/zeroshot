@@ -66,7 +66,7 @@ See more graph examples on [zeroshot.sh](https://zeroshot.sh/#one-graph).
 
 ### Bring your own graphs
 
-One graph per process: feature work, bug fixes, PR review.
+One graph per process your team runs.
 
 - **[Graphs are JSON](docs/reference/cluster/graph.md):** steps, reviewers, branches, parallel
   work, bounded loops, and steps that repeat over a list.
@@ -87,8 +87,7 @@ Agents do the work. The graph decides what happens next.
   node's output doesn't fit the next node's input, a loop has no limit, or a branch can never run
   is rejected before any agent starts. `--validate-only` runs just the checks.
 - **[Reviewers route the run](docs/concepts/execution.md#state-reduction-chooses-the-next-step):**
-  each reviewer returns a verdict such as `accepted` or `rejected`, and the graph says where each
-  one goes, for example back to a repair step.
+  each reviewer returns a verdict from a fixed set, and the graph says where each verdict goes.
 - **[Script steps](docs/reference/runtime-plan.md#script):** run your own program as a step in
   local runs. No model involved.
 - **[Secrets stay out of the record](docs/concepts/runtimes-and-connections.md#runtime-configuration-contains-names-not-secret-values):**
