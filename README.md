@@ -62,6 +62,62 @@ and run the same process across tasks.
 
 See more graph examples on [zeroshot.sh](https://zeroshot.sh/#one-graph).
 
+## Features
+
+### Bring your own graphs
+
+Each process your team runs is its own graph.
+
+- **[JSON graphs](docs/reference/cluster/graph.md):** steps, verifiers, branches, parallel joins,
+  bounded loops, maps.
+- **[Templates](docs/zeroshot-cli.md#zeroshot-template-list):** start from `zeroshot template list`,
+  or ask your agent to `design a zeroshot graph for this repo`.
+- **[Profiles](docs/zeroshot-cli.md#zeroshot-profile-set):** save a graph by name, run it with
+  `--profile bugfix`.
+- **[Harness and model per node](docs/reference/runtime-plan.md#per-node-lanes):** `codex`,
+  `claude`, `copilot`, `pi` and [more](docs/project/harness-adapters.md). Providers vary by
+  harness: OpenAI, Anthropic, OpenRouter, Bedrock, Foundry, your own gateway.
+- **[Delivery](docs/guides/forge-delivery.md):** PR, push, merge or none, on GitHub, GitHub
+  Enterprise or GitLab. `software-change` defaults to PR delivery.
+
+### The engine enforces them
+
+Agents do the work. The graph decides what happens next.
+
+- **[Checked before it runs](docs/concepts/execution.md#the-run-boundary):** types between nodes,
+  loop bounds, unreachable branches, bindings, input. `--validate-only` checks without running.
+- **[Routing by verdict](docs/concepts/execution.md#state-reduction-chooses-the-next-step):**
+  verifiers return a fixed verdict, and the graph maps each verdict and error to an edge.
+- **[Secrets stay in connections](docs/concepts/runtimes-and-connections.md#runtime-configuration-contains-names-not-secret-values):**
+  out of graphs, runtime files, the run ledger, logs and the UI.
+
+### See inside every run
+
+Every node's input and output, and every run event, are yours to read.
+
+- **[`zeroshot ui`](docs/guides/observe-and-control.md#browser):** a replayable timeline of each
+  node's input, output and text output.
+- **[CLI](docs/guides/observe-and-control.md#resume-event-and-log-streams):** JSON `status` and
+  `list`, `watch` and `logs` that resume from a cursor, `attach` to a live execution.
+- **[Run ledger](docs/concepts/execution.md#durable-run-state):** one SQLite file per run.
+- **[Resume](docs/guides/observe-and-control.md#restart-or-resume-a-failed-run):** restart a failed
+  run from a checkpoint. Finished steps don't re-run.
+
+### Build on it
+
+Drive zeroshot from your own code or UI, and plug in your own pieces.
+
+- **[Python SDK](sdks/python/README.md):** submit, watch and wait on runs. Each wheel bundles the
+  matching zeroshot binary.
+- **[Cluster API](https://zeroshot.sh/docs/current/reference/cluster/api/):** JSON-RPC over
+  WebSocket (`zeroshot target serve`) with an OpenRPC spec: submit runs, watch status and active
+  nodes, stream logs.
+- **[API keys](docs/zeroshot-cli.md#zeroshot-delegation):** expiring, revocable keys for CI on
+  hosted targets.
+- **[Script steps](docs/reference/runtime-plan.md#script):** your own commands as graph nodes.
+- **[Harness adapters](docs/project/harness-adapters.md):** add an agent through a documented
+  contract.
+
 ## Get started
 
 ```bash
@@ -118,13 +174,6 @@ on [zeroshot Platform](https://app.zeroshot.sh/docs) using your own model API ke
 > fuckin google.
 >
 > — Fav
-
-## Docs
-
-- [Graph contract](docs/reference/cluster/graph.md) and [execution](docs/concepts/execution.md)
-- [CLI reference](docs/zeroshot-cli.md), [Python SDK](sdks/python/README.md), and [Cluster API](https://zeroshot.sh/docs/current/reference/cluster/api/)
-- [Delivery](docs/guides/forge-delivery.md): `software-change` defaults to PR delivery. Runs can also stay local, push a branch, or merge.
-- [Active Memory](docs/guides/active-memory.md)
 
 ## Contributing
 
