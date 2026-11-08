@@ -293,7 +293,9 @@ async fn reconcile_creation(
         }
         None => Err(SourceDeliveryError::api(
             None,
-            "GitLab review creation response was lost and no exact review was observed",
+            format!(
+                "GitLab review creation response was lost and no exact review was observed\n{original}"
+            ),
         )),
     }
 }
