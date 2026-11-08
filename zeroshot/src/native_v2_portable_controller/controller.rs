@@ -364,9 +364,9 @@ fn configure_workspace_checkpoints(
     Ok(runtime)
 }
 
-/// Restores under the workspace lease before any runtime exists. Restic stops at the deadline. A
-/// failure removes the stage; one left by a hard stop is named after this run, and the next local
-/// resume removes it.
+/// Restores under the workspace lease before any runtime exists. Extraction stops at the deadline;
+/// replacement, once begun, completes. A failure removes the stage; one left by a hard stop is
+/// named after this run, and the next local resume removes it.
 async fn restore_execution_seed(
     bootstrap: &PortableControllerBootstrap,
     deadline: tokio::time::Instant,

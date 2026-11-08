@@ -506,8 +506,9 @@ async fn restore_with(
         .restore(&restic_snapshot, &restored)
         .await
         .map_err(|error| progress.failed(extracting, error))?;
-    // The complete stage is validated before the first workspace change. An interruption from
-    // here on can leave a partial checkout, which repeating this restore replaces completely.
+    // The complete stage is validated before the first workspace change. Replacement ignores the
+    // deadline: stopping it halfway would itself leave a partial checkout. The CLI's stop grace
+    // covers it; a hard stop from here on is repaired by repeating this restore completely.
     filesystem::restore_staged(&restored, workspace)
         .map_err(|error| progress.failed("replacing the workspace", error))?;
     Ok(seed)

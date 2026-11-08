@@ -331,9 +331,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   before it is written of the bootstrap's credentials and of every captured shell value except
   short or known-public ones; the waiting CLI consumes it and appends it to its startup error.
   Preparation before readiness, including a checkpoint restore, has one finite deadline: 600 s, or
-  `ZEROSHOT_PREPARATION_TIMEOUT` whole seconds from 1 to 86400. The controller stops its restore
-  there; the CLI waits a short stop grace longer, then stops the controller's process group (Unix)
-  or process (Windows) and names the deadline. Handoff waits keep their separate short bound.
+  `ZEROSHOT_PREPARATION_TIMEOUT` whole seconds from 1 to 86400. The controller stops a restore
+  that is still extracting there; workspace replacement, once begun, runs to completion so it is
+  never stopped halfway on purpose. The CLI waits a short stop grace longer, then stops the
+  controller's process group (Unix) or process (Windows) and names the deadline. Handoff waits keep
+  their separate short bound.
   A later local CLI startup scavenges orphaned bootstrap files after the bounded controller handoff
   window without removing other run state.
   The in-memory snapshot supplies bounded native-context forwarding and Codex config-referenced

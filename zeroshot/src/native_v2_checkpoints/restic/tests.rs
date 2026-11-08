@@ -228,6 +228,32 @@ fn pipe_and_start_failures_keep_stage_and_kind_without_private_error_text() {
     }
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn a_failed_child_does_not_leave_a_detached_helper_running() {
+    let root = tempfile::tempdir().assert_value();
+    let pid = root.path().join("helper-pid");
+    let script = format!(
+        "#!/bin/sh\n/bin/sleep 60 </dev/null >/dev/null 2>&1 &\nprintf '%s' \"$!\" > '{}'\nexit 1\n",
+        pid.display()
+    );
+    let repository = scripted_repository(root.path(), &script);
+    let error = repository
+        .run_with_timeout(root.path(), &arguments(["backup"]), Duration::from_secs(30))
+        .await
+        .unwrap_err();
+    assert_eq!(error.to_string(), "restic backup failed (exit status: 1)");
+    let helper: libc::pid_t = std::fs::read_to_string(pid)
+        .assert_value()
+        .parse()
+        .assert_value();
+    assert_ne!(
+        unsafe { libc::kill(helper, 0) },
+        0,
+        "the helper of a failed Restic is still running"
+    );
+}
+
 #[tokio::test]
 async fn a_preparation_deadline_replaces_the_per_operation_limit() {
     let root = tempfile::tempdir().assert_value();

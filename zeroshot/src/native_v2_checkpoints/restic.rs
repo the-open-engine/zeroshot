@@ -264,8 +264,8 @@ impl Repository {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        // A configured Restic may be a wrapper with its own children. Contain the whole tree so a
-        // failed or timed-out operation is confirmed stopped before its caller releases ownership.
+        // A configured Restic may be a wrapper with its own children. Contain the whole tree so
+        // every operation ends with it confirmed stopped before its caller releases ownership.
         let registration = register_process_tree_for(ProcessContainment::ProcessGroup)
             .map_err(|error| operation_io_error(operation, "start", error))?;
         configure_process(&mut command, ProcessContainment::ProcessGroup);
@@ -303,32 +303,29 @@ impl Repository {
             )
         })
         .await;
-        let (output, (), status) = match result {
-            Ok(Ok(value)) => value,
-            failure => {
-                let termination = terminate_process_tree(&tree, &mut child).await;
-                let error = match failure {
-                    Ok(Err(error)) => error,
-                    _ => io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        format!("restic {operation} timed out"),
-                    ),
-                };
-                if termination.cleanup.proves_tree_empty() && termination.error.is_none() {
-                    return Err(error);
-                }
-                return Err(io::Error::new(
-                    error.kind(),
-                    format!("{error}; its process cleanup is unconfirmed"),
-                ));
-            }
-        };
-        if !status.success() {
-            return Err(io::Error::other(format!(
+        // Main-process exit is not tree exit: a helper that closed its output may still run.
+        let termination = terminate_process_tree(&tree, &mut child).await;
+        let outcome = match result {
+            Ok(Ok((output, (), status))) if status.success() => Ok(output),
+            Ok(Ok((_, (), status))) => Err(io::Error::other(format!(
                 "restic {operation} failed ({status})"
-            )));
+            ))),
+            Ok(Err(error)) => Err(error),
+            Err(_) => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("restic {operation} timed out"),
+            )),
+        };
+        if termination.cleanup.proves_tree_empty() && termination.error.is_none() {
+            return outcome;
         }
-        Ok(output)
+        let error = outcome
+            .err()
+            .unwrap_or_else(|| io::Error::other(format!("restic {operation} succeeded")));
+        Err(io::Error::new(
+            error.kind(),
+            format!("{error}; its process cleanup is unconfirmed"),
+        ))
     }
 
     #[cfg(test)]
