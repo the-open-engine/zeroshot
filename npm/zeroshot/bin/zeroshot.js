@@ -2,6 +2,7 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { selectTarget } = require('../lib/install');
@@ -16,8 +17,15 @@ try {
   }
   const result = spawnSync(binary, process.argv.slice(2), { stdio: 'inherit' });
   if (result.error) throw result.error;
-  if (result.signal) process.kill(process.pid, result.signal);
-  else process.exitCode = result.status === null ? 1 : result.status;
+  if (result.signal) {
+    // Node ignores some signals, such as SIGPIPE and SIGXFSZ, so the re-raise can return.
+    // Then exit with the status a shell reports for that signal death.
+    const number = os.constants.signals[result.signal];
+    process.exitCode = number === undefined ? 1 : 128 + number;
+    process.kill(process.pid, result.signal);
+  } else {
+    process.exitCode = result.status === null ? 1 : result.status;
+  }
 } catch (error) {
   process.stderr.write(`zeroshot: ${error.message}\n`);
   process.exitCode = 1;
