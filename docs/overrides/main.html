@@ -1,20 +1,31 @@
 {% extends "base.html" %}
 
+{% if page and page.is_homepage %}
+  {% set search_title = "zeroshot documentation | Coding agents and QA workflows" %}
+{% elif page %}
+  {% set search_title = (page.meta.title | default(page.title, true)) ~ " | zeroshot docs" %}
+{% else %}
+  {% set search_title = "zeroshot docs" %}
+{% endif %}
+
+{% block htmltitle %}
+  <title>{{ search_title | e }}</title>
+{% endblock %}
+
 {% block extrahead %}
   {{ super() }}
   {% if page %}
-    {% set title = page.title ~ " | zeroshot docs" %}
     {% set description = page.meta.description | default(config.site_description, true) %}
     <meta property="og:type" content="article">
     <meta property="og:site_name" content="zeroshot">
-    <meta property="og:title" content="{{ title | e }}">
+    <meta property="og:title" content="{{ search_title | e }}">
     <meta property="og:description" content="{{ description | e }}">
     <meta property="og:url" content="{{ page.canonical_url | e }}">
     <meta property="og:image" content="https://zeroshot.sh/og.jpg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="{{ title | e }}">
+    <meta name="twitter:title" content="{{ search_title | e }}">
     <meta name="twitter:description" content="{{ description | e }}">
     <meta name="twitter:image" content="https://zeroshot.sh/og.jpg">
     {% if not page.is_homepage %}
