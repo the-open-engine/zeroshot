@@ -594,15 +594,18 @@ time.sleep(60)
                 session.wait().await
             })
             .await;
-            if result.is_err() {
-                violations.push(format!(
-                    "{escape}/{finish}: settlement waits for escaped stdout"
-                ));
+            match result {
+                Ok(Ok(completion))
+                    if completion.cleanup == ProcessCleanupEvidence::Reaped
+                        && completion.post_launch_error.is_none() => {}
+                other => violations.push(format!(
+                    "{escape}/{finish}: unsuccessful settlement {other:?}"
+                )),
             }
-            let _ = session.release().await;
             if tool.live() {
                 violations.push(format!("{escape}/{finish}: writer outlived settlement"));
             }
+            let _ = session.release().await;
         }
     }
     assert!(violations.is_empty(), "{}", violations.join("\n"));

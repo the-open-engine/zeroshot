@@ -751,13 +751,11 @@ impl LocalFixture {
         tool.wait_started().await;
         if let Some(value) = signal_value {
             signal(self.ready_pid(&run_id), value).assert_value();
-            if value == libc::SIGKILL {
-                let end = Instant::now() + Duration::from_secs(5);
-                while tool.live() && Instant::now() < end {
-                    sleep(Duration::from_millis(10)).await;
-                }
-                assert!(!tool.live(), "owner death alone did not stop the writer");
+            let end = Instant::now() + Duration::from_secs(5);
+            while tool.live() && Instant::now() < end {
+                sleep(Duration::from_millis(10)).await;
             }
+            assert!(!tool.live(), "owner death alone did not stop the writer");
             let end = Instant::now() + Duration::from_secs(20);
             loop {
                 let output = self.output(&["resume", &run_id], "finish").await;

@@ -1,13 +1,14 @@
 //! Real escaped descendants shared by the process runner and local-controller regressions.
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::Duration;
 use openengine_cluster_testkit::TemporaryDirectory;
 use openengine_cluster_testkit::assertions::AssertValue;
+use openengine_cluster_testkit::fixture::{python3_interpreter, python3_script, write_executable};
 use tokio::time::{Instant, sleep};
 
-const WRITER: &str = r#"import os,sys,time
+const WRITER: &str = r#"#!/usr/bin/env python3
+import os,sys,time
 mode,root=sys.argv[1:]
 if mode=='setpgid': os.setpgid(0,0)
 else: os.setsid()
@@ -27,19 +28,11 @@ impl EscapedTool {
     pub fn new() -> Self {
         let root = TemporaryDirectory::for_test("zs-owned-tree");
         let script = root.path("writer.py");
-        fs::write(&script, WRITER).assert_value();
-        let output = Command::new("python3")
-            .args(["-c", "import sys;print(sys.executable)"])
-            .output()
-            .assert_value();
-        assert!(output.status.success(), "Python prerequisite failed");
+        write_executable(&script, python3_script(WRITER), 0o700).assert_value();
         Self {
             root,
             script,
-            python: String::from_utf8(output.stdout)
-                .assert_value()
-                .trim()
-                .to_owned(),
+            python: python3_interpreter().to_str().assert_value().to_owned(),
         }
     }
     pub fn directory(&self) -> PathBuf {
