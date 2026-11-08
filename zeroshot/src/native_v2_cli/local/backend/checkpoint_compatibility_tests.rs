@@ -70,26 +70,104 @@ fn interrupted_restore_blocks_a_resume_that_would_not_restore() {
     let root = TestDirectory::new("lir");
     let backend = backend(&root);
     let mut recovery = recovery(&root, true);
-    recovery.pending_restore = Some(PendingRestore {
-        selection: CheckpointRestoreSelection::Checkpoint {
-            checkpoint_id: CheckpointId::new("entry-1").assert_value(),
-        },
-        snapshot: serde_json::from_value(serde_json::json!(uuid::Uuid::now_v7().to_string()))
-            .assert_value(),
-        attempt: RunId::new("0199f33f-3b44-7d21-9000-000000000003"),
-    });
-
-    for from in [None, Some(RunResumeFrom::Restart {})] {
-        let error = backend
-            .checkpoint_selection(&params(from), &recovery)
-            .assert_error()
-            .to_string();
-        assert!(
-            error.contains("partially restored")
-                && error.contains("resume with --from-checkpoint entry-1"),
-            "{error}"
-        );
+    for (selection, hint) in [
+        (
+            CheckpointRestoreSelection::Latest,
+            "resume with plain resume",
+        ),
+        (
+            CheckpointRestoreSelection::Checkpoint {
+                checkpoint_id: CheckpointId::new("entry-1").assert_value(),
+            },
+            "resume with --from-checkpoint entry-1",
+        ),
+    ] {
+        recovery.pending_restore = Some(PendingRestore {
+            selection,
+            snapshot: serde_json::from_value(serde_json::json!(uuid::Uuid::now_v7().to_string()))
+                .assert_value(),
+            attempt: RunId::new("0199f33f-3b44-7d21-9000-000000000003"),
+        });
+        for from in [None, Some(RunResumeFrom::Restart {})] {
+            let error = backend
+                .checkpoint_selection(&params(from), &recovery)
+                .assert_error()
+                .to_string();
+            assert!(
+                error.contains("partially restored") && error.contains(hint),
+                "{error}"
+            );
+        }
     }
+}
+
+#[tokio::test]
+async fn interrupted_latest_restore_rejects_a_changed_pinned_snapshot() {
+    use crate::native_v2_supervisor::checkpoints::{RunCheckpointStore, fake_checkpoint_store};
+
+    let root = TestDirectory::new("restore-pin");
+    let backend = backend(&root);
+    let mut recovery = recovery(&root, true);
+    let workspace = recovery.workspace.clone();
+    std::fs::create_dir(&workspace).assert_value();
+    let source = workspace.join("source.txt");
+    std::fs::write(&source, "original").assert_value();
+    let request = params(None);
+    let directory = backend
+        .paths(&request.run_id)
+        .assert_value()
+        .storage()
+        .join("checkpoints");
+    let store = || {
+        fake_checkpoint_store(
+            root.path(),
+            directory.clone(),
+            workspace.clone(),
+            Default::default(),
+        )
+    };
+    store().finish(&[]).await.assert_value();
+
+    let (restore, pending) = backend
+        .checkpoint_selection(&request, &recovery)
+        .assert_value()
+        .assert_value();
+    assert_eq!(restore.selection, CheckpointRestoreSelection::Latest);
+    assert_eq!(pending.attempt, request.successor_run_id);
+    recovery.pending_restore = Some(pending.clone());
+    assert!(
+        backend
+            .checkpoint_selection(&request, &recovery)
+            .assert_value()
+            .is_some()
+    );
+
+    std::fs::write(&source, "newer workspace").assert_value();
+    store().finish(&[]).await.assert_value();
+    let error = backend
+        .checkpoint_selection(&request, &recovery)
+        .assert_error();
+    assert!(
+        error
+            .to_string()
+            .contains("no longer resolves to its pinned snapshot"),
+        "{error}"
+    );
+    assert_eq!(
+        recovery.pending_restore.as_ref().assert_value().snapshot,
+        pending.snapshot
+    );
+    assert_eq!(
+        std::fs::read_to_string(source).assert_value(),
+        "newer workspace"
+    );
+    assert!(
+        !backend
+            .paths(&request.successor_run_id)
+            .assert_value()
+            .storage()
+            .exists()
+    );
 }
 
 #[test]
