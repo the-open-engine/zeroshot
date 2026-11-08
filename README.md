@@ -88,7 +88,7 @@ Agents do the work. The graph decides what happens next.
   is rejected before any agent starts. `--validate-only` runs just the checks.
 - **[Reviewers route the run](docs/concepts/execution.md#state-reduction-chooses-the-next-step):**
   each reviewer returns a verdict from a fixed set, and the graph says where each verdict goes.
-- **[Script steps](docs/reference/runtime-plan.md#script):** run your own program as a step in
+- **[Script steps](docs/reference/runtime-plan.md#script):** run your own command as a step in
   local runs. No model involved.
 - **[Secrets stay out of the record](docs/concepts/runtimes-and-connections.md#runtime-configuration-contains-names-not-secret-values):**
   credentials are stored once as named connections and kept out of graphs, run history, logs and
