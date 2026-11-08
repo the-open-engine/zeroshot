@@ -55,6 +55,18 @@ function publisherFixture(t, name) {
   return { temporary, repository, commands, ...sourceFixture(repository) };
 }
 
+function installPublicationPolicy(repository) {
+  for (const name of [
+    'scripts/docs_hook.py',
+    'docs/project/versioning.md',
+    'docs/overrides/sitemap.xml',
+  ]) {
+    const destination = path.join(repository, '.docs-publisher', name);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(destination, 'publication policy');
+  }
+}
+
 function publishStep(name) {
   const workflow = yaml.load(
     fs.readFileSync(path.resolve(__dirname, '../../.github/workflows/docs.yml'), 'utf8')
@@ -71,18 +83,28 @@ it('migrates published documentation and guards minor updates', () => {
   assert.equal(result.status, 0, result.error?.message ?? result.stdout + result.stderr);
 });
 
+it('applies current sitemap policy when rebuilding an older release', (t) => {
+  const { repository } = publisherFixture(t, 'policy');
+  installPublicationPolicy(repository);
+  execute('bash', [], {
+    cwd: repository,
+    input: publishStep('Apply publication policy to the exact source').run,
+  });
+  assert.equal(
+    fs.readFileSync(path.join(repository, 'docs/overrides/sitemap.xml'), 'utf8'),
+    'publication policy'
+  );
+});
+
 it('bootstraps missing Current from main without inheriting release identity', (t) => {
   const { temporary, repository, commands, git, release, main } = publisherFixture(t, 'bootstrap');
-  for (const name of ['scripts/docs_hook.py', 'docs/project/versioning.md']) {
-    const destination = path.join(repository, '.docs-publisher', name);
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    fs.writeFileSync(destination, 'publication policy');
-  }
+  installPublicationPolicy(repository);
   fs.writeFileSync(path.join(commands, 'cargo'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   fs.writeFileSync(
     path.join(commands, 'mike'),
     '#!/bin/sh\nset -eu\n' +
       'cmp scripts/docs_hook.py "$GITHUB_WORKSPACE/.docs-publisher/scripts/docs_hook.py"\n' +
+      'cmp docs/overrides/sitemap.xml "$GITHUB_WORKSPACE/.docs-publisher/docs/overrides/sitemap.xml"\n' +
       'printf "%s\\n" "$ZEROSHOT_DOCS_VERSION" "$ZEROSHOT_PRODUCT_DOCS_VERSION" ' +
       '"$ZEROSHOT_DOCS_COMMIT" "$(cat source-marker)" > "$CAPTURE"\n',
     { mode: 0o755 }
