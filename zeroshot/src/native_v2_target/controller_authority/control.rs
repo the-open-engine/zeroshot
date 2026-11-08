@@ -83,17 +83,20 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
     async fn review_cache_namespace(
         &self,
         target: &TargetRecord,
+        github_token: Option<&str>,
     ) -> Result<Option<String>, TargetAuthorityError> {
-        self.review_snapshot_namespace(target).await.map(Some)
+        self.review_snapshot_namespace(target, github_token)
+            .await
+            .map(Some)
     }
 
     async fn resolve_review(
         &self,
         target: &TargetRecord,
         request: zeroshot_engine::native_v2_review::ReviewResolutionRequest,
-        runtime: &openengine_cluster_protocol::RuntimePlan,
+        access: zeroshot_engine::native_v2_review::ReviewResolutionAccess<'_>,
     ) -> Result<zeroshot_engine::native_v2_review::PreparedReview, TargetAuthorityError> {
-        self.resolve_review_request(target, request, runtime).await
+        self.resolve_review_request(target, request, access).await
     }
 
     async fn discover(&self, target: &TargetRecord) -> Result<(), TargetAuthorityError> {

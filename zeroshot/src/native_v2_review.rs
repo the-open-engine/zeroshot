@@ -17,6 +17,14 @@ pub struct ReviewResolutionRequest {
     pub revision: Option<SourceRevisionId>,
 }
 
+/// The authored runtime and the GitHub token one review resolution may use. The CLI supplies a
+/// token for a named target only after `--forward-gh-token`; it is never serialized or cached.
+#[derive(Clone, Copy)]
+pub struct ReviewResolutionAccess<'a> {
+    pub runtime: &'a openengine_cluster_protocol::RuntimePlan,
+    pub github_token: Option<&'a str>,
+}
+
 /// Ordinary graph input and the exact committed checkout it describes. Contains no credentials.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]

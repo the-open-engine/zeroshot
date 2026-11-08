@@ -776,8 +776,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   is removed from provider context, travels only through the consumed private bootstrap, and is
   freshly selected on resume, never persisted in recovery or run history.
 - Named-target `run`, `resume`, and `stack submit` never read the invoking shell's `GH_TOKEN`
-  without `--forward-gh-token`, neither as the legacy GitHub.com token nor as a declared connection
-  field, so targets resolve GitHub access from their stored connections. Each command reads every
+  without `--forward-gh-token`, neither as the legacy GitHub.com token, a declared connection field
+  nor a direct target's `--task-from` review credential, so targets resolve GitHub access from
+  their stored connections. Target authorities never read `GH_TOKEN` themselves; the CLI passes it. Each command reads every
   outbound value through one `GitHubTokenScope` environment. The flag fails closed when `GH_TOKEN`
   is unset, including under `--validate-only`. Direct-target resumes whose retained requirements
   need `GH_TOKEN` fail early without it. The local branch-tip lookup for an omitted `--revision`

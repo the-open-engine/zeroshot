@@ -34,6 +34,7 @@ pub trait TargetControlAuthority: Send + Sync {
     async fn review_cache_namespace(
         &self,
         _target: &TargetRecord,
+        _github_token: Option<&str>,
     ) -> Result<Option<String>, TargetAuthorityError> {
         Ok(None)
     }
@@ -42,7 +43,7 @@ pub trait TargetControlAuthority: Send + Sync {
         &self,
         _target: &TargetRecord,
         _request: zeroshot_engine::native_v2_review::ReviewResolutionRequest,
-        _runtime: &openengine_cluster_protocol::RuntimePlan,
+        _access: zeroshot_engine::native_v2_review::ReviewResolutionAccess<'_>,
     ) -> Result<zeroshot_engine::native_v2_review::PreparedReview, TargetAuthorityError> {
         Err(TargetAuthorityError::new(
             "target does not advertise task resolution",

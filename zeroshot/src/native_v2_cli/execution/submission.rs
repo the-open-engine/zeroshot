@@ -438,7 +438,9 @@ where
         () = detach.as_mut() => return Ok(RunSubmission::Interrupted),
         result = async {
             let resolved = resolve_run_profile(run, context.backend).await?;
-            let input = review_input::resolve(run, &resolved, context.backend).await?;
+            let input =
+                review_input::resolve(run, &resolved, context.backend, context.environment)
+                    .await?;
             prepare_validated_submission_with_environment(
                 run,
                 resolved,

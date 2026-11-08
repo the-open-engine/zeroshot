@@ -314,8 +314,8 @@ and its private key. Contained runs inherit no host Git login state.
 Named runs never send the invoking shell's `GH_TOKEN` unless you pass `--forward-gh-token` to `run`,
 `resume`, or `stack submit`. Without the flag, the target resolves GitHub access from its own stored
 `github` connection, even when `GH_TOKEN` is set locally. With the flag, the CLI sends `GH_TOKEN`
-for GitHub.com checkout and delivery and to fill a declared `GH_TOKEN` connection field, and fails
-when it is unset. That token is not automatically applied to another Git host. A model provider
+for GitHub.com checkout and delivery, to fill a declared `GH_TOKEN` connection field, and for a
+direct target's `--task-from` review resolution, and fails when it is unset. That token is not automatically applied to another Git host. A model provider
 receives a connection field only when its own runtime binding declares it. Transport values stay out
 of source records, ledgers, observations, and checkpoint snapshots. Direct-target resume reuses the
 original source connection authorization and resolves fresh values.

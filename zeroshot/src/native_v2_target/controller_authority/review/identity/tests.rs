@@ -57,7 +57,7 @@ async fn human_identity_survives_refresh_rotation_and_changes_before_login() {
     );
     let target = target();
     let first = authority
-        .review_snapshot_namespace(&target)
+        .review_snapshot_namespace(&target, None)
         .await
         .assert_value();
     credentials
@@ -66,7 +66,7 @@ async fn human_identity_survives_refresh_rotation_and_changes_before_login() {
         .assert_value();
     assert_eq!(
         authority
-            .review_snapshot_namespace(&target)
+            .review_snapshot_namespace(&target, None)
             .await
             .assert_value(),
         first
@@ -82,7 +82,7 @@ async fn human_identity_survives_refresh_rotation_and_changes_before_login() {
     }
     assert_ne!(
         authority
-            .review_snapshot_namespace(&target)
+            .review_snapshot_namespace(&target, None)
             .await
             .assert_value(),
         first
@@ -99,18 +99,18 @@ async fn machine_identity_is_isolated_from_human_and_other_machine_selections() 
     );
     let target = target();
     let human = authority
-        .review_snapshot_namespace(&target)
+        .review_snapshot_namespace(&target, None)
         .await
         .assert_value();
     let machine = authority.clone().with_machine_key("machine-one", None);
     let first = machine
-        .review_snapshot_namespace(&target)
+        .review_snapshot_namespace(&target, None)
         .await
         .assert_value();
     assert_ne!(first, human);
     assert_eq!(
         machine
-            .review_snapshot_namespace(&target)
+            .review_snapshot_namespace(&target, None)
             .await
             .assert_value(),
         first
@@ -118,7 +118,7 @@ async fn machine_identity_is_isolated_from_human_and_other_machine_selections() 
     let other = authority.clone().with_machine_key("machine-two", None);
     assert_ne!(
         other
-            .review_snapshot_namespace(&target)
+            .review_snapshot_namespace(&target, None)
             .await
             .assert_value(),
         first
@@ -127,7 +127,7 @@ async fn machine_identity_is_isolated_from_human_and_other_machine_selections() 
         authority.with_machine_key("machine-one", Some("01932da1-8b39-7000-a000-000000000001"));
     assert_ne!(
         organization
-            .review_snapshot_namespace(&target)
+            .review_snapshot_namespace(&target, None)
             .await
             .assert_value(),
         first

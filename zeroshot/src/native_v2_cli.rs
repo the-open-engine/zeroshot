@@ -581,6 +581,7 @@ pub trait NativeV2CliBackend: Send + Sync {
     async fn review_cache_namespace(
         &self,
         target: Option<&str>,
+        _github_token: Option<&str>,
     ) -> Result<Option<String>, NativeV2CliError> {
         Ok(target.is_none().then(|| "local".to_owned()))
     }
@@ -589,7 +590,7 @@ pub trait NativeV2CliBackend: Send + Sync {
         &self,
         _target: Option<&str>,
         _request: crate::native_v2_review::ReviewResolutionRequest,
-        _runtime: &openengine_cluster_protocol::RuntimePlan,
+        _access: crate::native_v2_review::ReviewResolutionAccess<'_>,
     ) -> Result<crate::native_v2_review::PreparedReview, NativeV2CliError> {
         Err(NativeV2CliError::Target(
             "target does not advertise task resolution".to_owned(),
