@@ -372,8 +372,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   reuses the stored workspace; local idempotency cannot return a run from a different folder.
   New local Git-delivery submissions require a clean index and worktree, including unignored
   untracked files, after idempotent-replay lookup and before controller launch. Use the captured
-  native Git environment so admission and staging share ignore rules. Git's successful staging
-  warnings reach run output before delivery preflight; unregistered embedded repositories warn
+  native Git environment so admission and staging share ignore rules. Pending merges and moved
+  or staged gitlinks block admission; non-stageable contents inside registered submodules do not.
+  Git's successful staging warnings reach run output after terminal review observation and before
+  reconciliation; unregistered embedded repositories warn
   without being blocked. Runs without Git delivery and retained-workspace resumes are unchanged.
   Workspace leases hold shared ancestor locks and an exclusive selected-root lock, so overlapping
   folders exclude each other while sibling folders remain concurrent. Lease guards explicitly

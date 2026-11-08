@@ -123,12 +123,20 @@ impl SystemGit {
                     "status",
                     "--porcelain=v1",
                     "--untracked-files=all",
-                    "--ignore-submodules=none",
+                    "--ignore-submodules=dirty",
                 ],
             )
             .await?;
-        Ok((!status.stdout().is_empty() || status.stdout_truncated())
-            .then(|| status.into_diagnostic()))
+        let pending_merge = self.merge_pending(workspace).await?;
+        if status.stdout().is_empty() && !status.stdout_truncated() && !pending_merge {
+            return Ok(None);
+        }
+        let diagnostic = status.into_diagnostic();
+        Ok(Some(if pending_merge {
+            diagnostic.with_context("workspace has a pending MERGE_HEAD; finish or abort the merge before starting a delivery run")
+        } else {
+            diagnostic
+        }))
     }
 
     async fn require_supported_operation(&self, workspace: &Path) -> Result<(), GitError> {
