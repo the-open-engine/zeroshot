@@ -2,6 +2,7 @@
 
 import json
 import unittest
+import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from pathlib import Path
 from types import SimpleNamespace
@@ -124,6 +125,29 @@ class MetadataTests(unittest.TestCase):
         parsed = HeadParser()
         parsed.feed(self.environment.get_template("main.html").render(page=None))
         self.assertEqual(parsed.title, "zeroshot docs")
+
+    def test_sitemap_uses_verified_content_dates_and_omits_unknown_dates(self):
+        pages = [
+            SimpleNamespace(
+                page=SimpleNamespace(
+                    is_link=False,
+                    canonical_url=f"https://zeroshot.sh/docs/current/{route}/",
+                    abs_url=None,
+                    update_date="2026-11-08",
+                    meta={"sitemap_lastmod": changed},
+                )
+            )
+            for route, changed in (("known", "2026-10-04"), ("unknown", None))
+        ]
+        rendered = self.environment.get_template("sitemap.xml").render(pages=pages)
+        root = ET.fromstring(rendered)
+        namespace = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+        urls = root.findall("s:url", namespace)
+        self.assertEqual(len(urls), 2)
+        self.assertEqual(
+            urls[0].findtext("s:lastmod", namespaces=namespace), "2026-10-04"
+        )
+        self.assertIsNone(urls[1].find("s:lastmod", namespace))
 
 
 if __name__ == "__main__":

@@ -169,8 +169,8 @@ def on_page_markdown(markdown: str, *, page: Any, **_: Any) -> str:
     if page.file.src_uri in descriptions:
         page.meta["description"] = descriptions[page.file.src_uri]
     changed = _last_change(_content_sources(Path(page.file.abs_src_path), markdown))
-    # MkDocs otherwise reports the build date as every page's sitemap lastmod.
-    page.update_date = changed.isoformat() if changed is not None else None
+    # Keep MkDocs' update_date intact for its compressed sitemap timestamp.
+    page.meta["sitemap_lastmod"] = changed.isoformat() if changed is not None else None
     if changed is not None:
         page.meta["revision_date"] = (
             f'Last updated <time datetime="{changed.isoformat()}">'
