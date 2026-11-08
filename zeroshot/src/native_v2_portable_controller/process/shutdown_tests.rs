@@ -10,9 +10,9 @@ use crate::v2_run_ledger::sqlite::SqliteRunLedger;
 
 #[tokio::test]
 async fn terminal_server_closes_idle_connections_and_releases_controller_ownership() {
-    let storage = tempfile::tempdir().assert_value();
-    crate::execution::platform::private_directory(storage.path()).assert_value();
-    let paths = PortableControllerPaths::new(storage.path());
+    let root = tempfile::tempdir().assert_value();
+    let paths = PortableControllerPaths::new(root.path().join("state"));
+    crate::execution::platform::create_private_directory(paths.storage()).assert_value();
     let run_id = RunId::new("terminal-connection-retirement");
     let ledger = SqliteRunLedger::open(paths.ledger()).assert_value();
     ledger
