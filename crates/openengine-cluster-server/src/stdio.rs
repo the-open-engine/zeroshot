@@ -2,6 +2,8 @@
 
 use std::io;
 
+use futures_util::FutureExt;
+
 use openengine_cluster_protocol::{RequestId, PARSE_ERROR};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -72,17 +74,48 @@ where
     I: ConnectionIdentityResolver,
     T: ConnectionTimeSource,
 {
+    serve_ndjson_until_shutdown(binding, io, std::future::pending()).await
+}
+
+/// Stops a host-owned connection before its runtime ends. Output closes before in-flight
+/// requests are cancelled and joined; peers can reconnect through their durable cursor.
+pub async fn serve_ndjson_until_shutdown<B, I, T>(
+    binding: ConnectionBinding<B, I, T>,
+    io: NdjsonIo<
+        impl AsyncRead + Send + Unpin + 'static,
+        impl AsyncWrite + Send + Unpin + 'static,
+        impl AsyncWrite + Send + Unpin + 'static,
+    >,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) -> io::Result<()>
+where
+    B: ClusterBackend,
+    I: ConnectionIdentityResolver,
+    T: ConnectionTimeSource,
+{
+    let shutdown = shutdown.shared();
     let ResolvedConnection {
         dispatcher,
         time_source,
-    } = binding.resolve().await?;
+    } = tokio::select! {
+        biased;
+        () = shutdown.clone() => return Ok(()),
+        resolved = binding.resolve() => resolved?,
+    };
     let NdjsonIo {
         reader,
         writer,
         mut diagnostics,
     } = io;
     let (outbound_tx, outbound_rx) = mpsc::channel::<String>(OUTBOUND_QUEUE_CAPACITY);
-    let writer_task = tokio::spawn(run_writer(writer, outbound_rx));
+    let writer_shutdown = shutdown.clone();
+    let writer_task = tokio::spawn(async move {
+        tokio::select! {
+            biased;
+            () = writer_shutdown => {}
+            () = run_writer(writer, outbound_rx) => {}
+        }
+    });
 
     let ConnectionSetup {
         subscriptions,
@@ -91,13 +124,52 @@ where
         state,
     } = new_connection_setup(&outbound_tx);
 
+    let result = {
+        let mut ctx = DispatchCtx {
+            dispatcher: &dispatcher,
+            state: &state,
+            task_slots: &task_slots,
+            tasks: &mut tasks,
+        };
+        tokio::select! {
+            biased;
+            () = shutdown => {
+                writer_task.abort();
+                Ok(())
+            }
+            result = receive_ndjson(reader, &mut diagnostics, &mut ctx, &time_source) => result,
+        }
+    };
+    shutdown_connection(ShutdownArgs {
+        subscriptions,
+        tasks,
+        outbound_tx,
+        state,
+        writer_task,
+    })
+    .await;
+    result
+}
+
+async fn receive_ndjson<B, R, E, T>(
+    reader: R,
+    diagnostics: &mut E,
+    ctx: &mut DispatchCtx<'_, B>,
+    time_source: &T,
+) -> io::Result<()>
+where
+    B: ClusterBackend,
+    R: AsyncRead + Send + Unpin,
+    E: AsyncWrite + Send + Unpin,
+    T: ConnectionTimeSource,
+{
     let mut lines = Framed::new(reader, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
     loop {
         // Reap completed request tasks even while the connection remains idle. A concurrency cap
         // alone is insufficient: `JoinSet` retains every completed output until it is joined.
         let next_line = loop {
             tokio::select! {
-                completed = tasks.join_next(), if !tasks.is_empty() => {
+                completed = ctx.tasks.join_next(), if !ctx.tasks.is_empty() => {
                     let _ = completed;
                 }
                 line = lines.next() => break line,
@@ -106,21 +178,25 @@ where
         let Some(next_line) = next_line else {
             break;
         };
-        if dispatcher
+        if ctx
+            .dispatcher
             .context()
             .identity()
             .is_expired_at(time_source.now_ms())
         {
-            diagnostics
-                .write_all(b"cluster protocol connection identity expired\n")
-                .await?;
-            diagnostics.flush().await?;
+            write_diagnostic(
+                diagnostics,
+                "cluster protocol connection identity expired\n",
+            )
+            .await?;
             break;
         }
         let line = match next_line {
             Ok(line) => line,
             Err(LinesCodecError::MaxLineLengthExceeded) => {
-                let _ = outbound_tx
+                let _ = ctx
+                    .state
+                    .outbound_tx
                     .send(serialize_error(None, PARSE_ERROR, "Parse error", None))
                     .await;
                 // `Framed`'s stream terminates for good after yielding any decode error, so
@@ -134,32 +210,24 @@ where
                 continue;
             }
             Err(LinesCodecError::Io(error)) => {
-                diagnostics
-                    .write_all(format!("cluster protocol input error: {error}\n").as_bytes())
-                    .await?;
-                diagnostics.flush().await?;
+                write_diagnostic(
+                    diagnostics,
+                    &format!("cluster protocol input error: {error}\n"),
+                )
+                .await?;
                 break;
             }
         };
 
-        let mut ctx = DispatchCtx {
-            dispatcher: &dispatcher,
-            state: &state,
-            task_slots: &task_slots,
-            tasks: &mut tasks,
-        };
-        dispatch_ndjson_line(line, &mut ctx).await;
+        dispatch_ndjson_line(line, ctx).await;
     }
 
-    shutdown_connection(ShutdownArgs {
-        subscriptions,
-        tasks,
-        outbound_tx,
-        state,
-        writer_task,
-    })
-    .await;
     Ok(())
+}
+
+async fn write_diagnostic(writer: &mut (impl AsyncWrite + Unpin), message: &str) -> io::Result<()> {
+    writer.write_all(message.as_bytes()).await?;
+    writer.flush().await
 }
 
 /// Decodes and dispatches one NDJSON line, spawning every passthrough outcome after the shared
@@ -224,3 +292,7 @@ where
     )
     .await
 }
+
+#[cfg(test)]
+#[path = "stdio/shutdown_tests.rs"]
+mod shutdown_tests;

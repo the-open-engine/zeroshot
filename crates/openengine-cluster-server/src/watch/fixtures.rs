@@ -33,7 +33,7 @@ use crate::stdio::{serve_ndjson, NdjsonIo};
 use crate::websocket::{serve_websocket, websocket_config};
 use crate::{BackendError, ClusterBackend, ConnectionContext};
 
-fn fixture_binding<B>(
+pub(crate) fn fixture_binding<B>(
     backend: B,
 ) -> ConnectionBinding<B, StaticConnectionIdentityResolver, SystemConnectionTime>
 where
