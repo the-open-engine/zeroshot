@@ -881,7 +881,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   own method. Queue admission uses explicit `enqueuePullRequest` with the validated PR node ID and
   exact `expectedHeadOid`; enabling auto-merge alone is not enqueue confirmation. Completed transient
   submissions retry after fresh exact-head policy checks; retries retain earlier uncertainty so an
-  empty snapshot cannot authorize repair. Before a merge
+  empty snapshot cannot authorize repair. A complete GraphQL `UNPROCESSABLE` rejection rooted exactly
+  at a null enqueue mutation adds no uncertainty; partial, nested, truncated, or unconfirmed responses
+  remain unknown. Classification uses protocol bytes before credential redaction and never invents
+  an HTTP status. Permanent forge policy failures remain execution errors. Before a merge
   delivery returns repair, refusal, error, or cancellation, trusted authority confirms withdrawal
   of queued/auto-merge effects or the exact already-merged revision. Failed withdrawal never
   authorizes agent repair. Authorities that schedule deferred merges must override
@@ -1065,6 +1068,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `cargo run -p zeroshot --example generate_cli_docs -- --write` and verify with `--check`.
 - Page descriptions live in Markdown front matter; generated reference descriptions live in
   `scripts/docs_hook.py`. `docs/overrides/main.html` renders social metadata and breadcrumbs.
+  Search titles and social titles share the same template. Sitemap `lastmod` uses the verified
+  content-change date from Git and is omitted when history cannot establish it.
   Fonts are self-hosted in `docs/assets/fonts/` with their licenses.
 - The public documentation site is the root `mkdocs.yml`. Python API pages are generated from the
   curated SDK exports and docstrings. Do not restore a second SDK-only MkDocs site.

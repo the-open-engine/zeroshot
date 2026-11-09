@@ -362,10 +362,12 @@ class PublicationTests(unittest.TestCase):
             page.meta["revision_date"],
             'Last updated <time datetime="2026-10-04">4 October 2026</time>',
         )
+        self.assertEqual(page.meta["sitemap_lastmod"], "2026-10-04")
         page.meta.clear()
         with patch.object(hook, "_last_change", return_value=None):
             self.assertEqual(hook.on_page_markdown("text", page=page), "text")
         self.assertNotIn("revision_date", page.meta)
+        self.assertIsNone(page.meta["sitemap_lastmod"])
 
     def test_generated_references_receive_distinct_descriptions(self):
         descriptions = []

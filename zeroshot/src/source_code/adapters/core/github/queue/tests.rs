@@ -102,6 +102,14 @@ fn response(value: &Value) -> String {
     format!("printf '%s' {}", shell_literal(&value.to_string()))
 }
 
+fn rejected_enqueue() -> Value {
+    json!({
+        "data": {"enqueuePullRequest": null},
+        "errors": [{"type": "UNPROCESSABLE", "path": ["enqueuePullRequest"],
+            "message": "A conversation must be resolved before this pull request can be merged."}]
+    })
+}
+
 #[tokio::test]
 async fn queue_admission_is_explicit_exact_head_and_keeps_direct_policy_out() {
     let root = tempfile::tempdir().assert_value();
@@ -298,6 +306,115 @@ async fn unresolved_enqueue_cannot_turn_an_empty_observation_into_safe_withdrawa
         .await
         .assert_error();
     assert!(error.to_string().contains("submission remains unconfirmed"));
+}
+
+#[tokio::test]
+async fn explicit_graphql_enqueue_rejection_allows_confirmed_withdrawal() {
+    let root = tempfile::tempdir().assert_value();
+    let action = format!("{}; exit 1", response(&rejected_enqueue()));
+    let provider = admission(root.path(), &action);
+    let rejected = provider
+        .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+        .await;
+    assert!(matches!(&rejected, Err(SourceDeliveryError::Api(_))));
+    let error = rejected.assert_error();
+    assert_eq!(
+        error.api_status(),
+        None,
+        "GraphQL rejection does not invent HTTP status"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("A conversation must be resolved")
+    );
+    let withdrawn = provider
+        .withdraw_merge_request(&review(), SourceDeliveryCredential::token("test-token"))
+        .await;
+    assert_eq!(withdrawn, Ok(SourceMergeWithdrawal::Withdrawn));
+}
+
+#[tokio::test]
+async fn ambiguous_graphql_errors_cannot_authorize_empty_queue_withdrawal() {
+    let mut nested = rejected_enqueue();
+    nested["errors"][0]["path"] = json!(["enqueuePullRequest", "mergeQueueEntry"]);
+    let mut unknown = rejected_enqueue();
+    unknown["errors"][0]["type"] = json!("INTERNAL");
+    let mut partial = rejected_enqueue();
+    partial["data"] = enqueue_response()["data"].clone();
+    let mut mixed = rejected_enqueue();
+    mixed["errors"]
+        .as_array_mut()
+        .assert_value()
+        .push(unknown["errors"][0].clone());
+    let mut missing_data = rejected_enqueue();
+    missing_data.as_object_mut().assert_value().remove("data");
+    let mut empty_errors = rejected_enqueue();
+    empty_errors["errors"] = json!([]);
+    for response_value in [nested, unknown, partial, mixed, missing_data, empty_errors] {
+        let root = tempfile::tempdir().assert_value();
+        let provider = admission(
+            root.path(),
+            &format!("{}; exit 1", response(&response_value)),
+        );
+        provider
+            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .await
+            .assert_error();
+        let result = provider
+            .withdraw_merge_request(&review(), SourceDeliveryCredential::token("test-token"))
+            .await;
+        assert!(
+            matches!(result, Err(error) if error.to_string().contains("submission remains unconfirmed"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn explicit_rejection_does_not_erase_prior_submission_uncertainty() {
+    let root = tempfile::tempdir().assert_value();
+    let action = format!(
+        "if [ ! -f \"$HOME/attempted\" ]; then printf seen > \"$HOME/attempted\"; printf 'error connecting to api.github.com\\n' >&2; exit 1; fi; {}; exit 1",
+        response(&rejected_enqueue())
+    );
+    let provider = admission(root.path(), &action);
+    for _ in 0..2 {
+        provider
+            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .await
+            .assert_error();
+    }
+    let withdrawn = provider
+        .withdraw_merge_request(&review(), SourceDeliveryCredential::token("test-token"))
+        .await;
+    assert!(
+        matches!(withdrawn, Err(error) if error.to_string().contains("submission remains unconfirmed"))
+    );
+}
+
+#[tokio::test]
+async fn explicit_rejection_never_waives_changed_review_identity() {
+    let root = tempfile::tempdir().assert_value();
+    let mut changed = queued(false, false);
+    changed["data"]["repository"]["pullRequest"]["headRefOid"] = json!("d".repeat(40));
+    let provider = queue_authority(
+        root.path(),
+        &[queued(false, false), changed],
+        &[(
+            "enqueuePullRequest",
+            &format!("{}; exit 1", response(&rejected_enqueue())),
+        )],
+    );
+    provider
+        .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+        .await
+        .assert_error();
+    assert!(
+        provider
+            .withdraw_merge_request(&review(), SourceDeliveryCredential::token("test-token"))
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
