@@ -53,7 +53,7 @@ async fn optional_control_authority_defaults_are_explicitly_unavailable() {
     let target = direct_target("http://127.0.0.1:8080");
     assert_eq!(
         authority
-            .review_cache_namespace(&target)
+            .review_cache_namespace(&target, None)
             .await
             .assert_value(),
         None
@@ -73,7 +73,14 @@ async fn optional_control_authority_defaults_are_explicitly_unavailable() {
     };
     assert!(
         authority
-            .resolve_review(&target, request, &prepared.intent.runtime)
+            .resolve_review(
+                &target,
+                request,
+                zeroshot_engine::native_v2_review::ReviewResolutionAccess {
+                    runtime: &prepared.intent.runtime,
+                    github_token: None
+                }
+            )
             .await
             .assert_error()
             .to_string()

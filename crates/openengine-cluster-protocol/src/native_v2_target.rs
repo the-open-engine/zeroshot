@@ -245,13 +245,18 @@ pub struct TargetRunRequest {
     /// target's default delivery identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit_identity: Option<CommitIdentity>,
+    /// Person credited by a `Co-authored-by` trailer on every commit carrying this run's changes.
+    /// Author and committer stay as `commitIdentity` selects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_co_author: Option<CommitIdentity>,
 }
 
 const MAX_COMMIT_IDENTITY_FIELD_BYTES: usize = 256;
 
-/// A host-selected Git author and committer for commits created by delivery. Each value has at
-/// most 256 UTF-8 bytes, no control characters, `<` or `>`, and at least one character that Git
-/// keeps after trimming whitespace and `.,:;"'\`.
+/// A host-selected Git identity for commits created by delivery: their author and committer, or
+/// the co-author credited in their messages. Each value has at most 256 UTF-8 bytes, no control
+/// characters, `<` or `>`, and at least one character that Git keeps after trimming whitespace
+/// and `.,:;"'\`.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(try_from = "CommitIdentityWire")]
 pub struct CommitIdentity {
@@ -349,6 +354,7 @@ impl fmt::Debug for TargetRunRequest {
             .field("github_token", &redacted(&self.github_token))
             .field("git_credentials", &self.git_credentials)
             .field("commit_identity", &self.commit_identity)
+            .field("commit_co_author", &self.commit_co_author)
             .finish()
     }
 }

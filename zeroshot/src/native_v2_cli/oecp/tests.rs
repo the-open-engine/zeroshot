@@ -423,6 +423,7 @@ async fn wave7_cli_contract_oecp_default_optional_authority_is_refused() {
     let resume = openengine_cluster_protocol::RunResumeParams {
         git_credentials: None,
         commit_identity: None,
+        commit_co_author: None,
 
         run_id: run_id.clone(),
         successor_run_id,
@@ -454,7 +455,7 @@ async fn oecp_optional_authority_defaults_are_explicit_and_fail_closed() {
     let connector = StubConnector::new(None);
     assert_eq!(
         connector
-            .review_cache_namespace("prod")
+            .review_cache_namespace("prod", None)
             .await
             .assert_value(),
         None
@@ -473,7 +474,14 @@ async fn oecp_optional_authority_defaults_are_explicit_and_fail_closed() {
     };
     assert!(
         connector
-            .resolve_review("prod", request.clone(), &profile_set_request().runtime,)
+            .resolve_review(
+                "prod",
+                request.clone(),
+                crate::native_v2_review::ReviewResolutionAccess {
+                    runtime: &profile_set_request().runtime,
+                    github_token: None
+                }
+            )
             .await
             .assert_error()
             .to_string()
@@ -497,7 +505,7 @@ async fn oecp_optional_authority_defaults_are_explicit_and_fail_closed() {
     let backend = NamedTargetCliBackend::new(StubConnector::new(None));
     assert_eq!(
         backend
-            .review_cache_namespace(Some("prod"))
+            .review_cache_namespace(Some("prod"), None)
             .await
             .assert_value(),
         None
@@ -511,7 +519,14 @@ async fn oecp_optional_authority_defaults_are_explicit_and_fail_closed() {
     );
     assert!(
         backend
-            .resolve_review(Some("prod"), request, &profile_set_request().runtime)
+            .resolve_review(
+                Some("prod"),
+                request,
+                crate::native_v2_review::ReviewResolutionAccess {
+                    runtime: &profile_set_request().runtime,
+                    github_token: None
+                }
+            )
             .await
             .assert_error()
             .to_string()
@@ -561,6 +576,7 @@ async fn oecp_optional_authority_defaults_are_explicit_and_fail_closed() {
                     github_token: None,
                     git_credentials: None,
                     commit_identity: None,
+                    commit_co_author: None,
                 },
             )
             .await

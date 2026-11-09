@@ -192,7 +192,10 @@ async fn remote_review_resolves_context_and_source_without_a_client_git_checkout
     assert_eq!(outcome, CliOutcome::Detached);
     assert!(!output.is_empty());
     let calls = backend.calls();
-    assert!(matches!(&calls[0],Call::ResolveReview {target:Some(target),..} if target=="platform"));
+    assert!(matches!(
+        &calls[0],
+        Call::ResolveReview { target: Some(target), github_token: None, .. } if target == "platform"
+    ));
     let Call::Submit { input, runtime, .. } = &calls[1] else {
         panic!("expected prepared submission");
     };
@@ -203,6 +206,59 @@ async fn remote_review_resolves_context_and_source_without_a_client_git_checkout
             .get(&openengine_cluster_protocol::NodeName::new("deliver").assert_value()),
         Some(openengine_cluster_protocol::NodeRuntimeBinding::CommentDelivery { .. })
     ));
+}
+
+#[tokio::test]
+async fn named_review_resolution_receives_the_shell_gh_token_only_on_opt_in() {
+    let directory = tempfile::tempdir().assert_value();
+    let environment = |name: &str| {
+        matches!(name, "OPENAI_API_KEY" | "GH_TOKEN")
+            .then(|| OsString::from("test-only-credential"))
+    };
+    for validate_only in [false, true] {
+        let mut command = remote_review_command(directory.path());
+        let NativeV2CliCommand::Run(run) = &mut command else {
+            panic!("expected run");
+        };
+        run.forward_github_token = true;
+        run.validate_only = validate_only;
+        let backend = FakeBackend::with_review(prepared_review_fixture());
+        execute_native_v2_cli_with_context(
+            command,
+            &CliExecutionContext::new(&backend, &environment),
+            &mut NeverDetach,
+            &mut Vec::new(),
+        )
+        .await
+        .assert_value();
+        assert!(matches!(
+            &backend.calls()[0],
+            Call::ResolveReview { github_token: Some(token), .. } if token == "test-only-credential"
+        ));
+    }
+
+    let mut command = remote_review_command(directory.path());
+    let NativeV2CliCommand::Run(run) = &mut command else {
+        panic!("expected run");
+    };
+    run.forward_github_token = true;
+    let backend = FakeBackend::with_review(prepared_review_fixture());
+    let without_token =
+        |name: &str| (name == "OPENAI_API_KEY").then(|| OsString::from("test-only-credential"));
+    let error = execute_native_v2_cli_with_context(
+        command,
+        &CliExecutionContext::new(&backend, &without_token),
+        &mut NeverDetach,
+        &mut Vec::new(),
+    )
+    .await
+    .assert_error();
+    assert!(
+        error
+            .to_string()
+            .contains("--forward-gh-token requires GH_TOKEN")
+    );
+    assert!(backend.calls().is_empty());
 }
 
 #[tokio::test]

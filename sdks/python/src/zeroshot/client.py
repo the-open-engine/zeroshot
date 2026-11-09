@@ -91,6 +91,12 @@ class Client:
         environment: Submission environment values. None reads the ambient environment; an
             explicit mapping replaces ambient credential variables. Native saved connections and
             local harness login still apply.
+        forward_github_token: Send the submission environment's GH_TOKEN to a direct or hosted
+            target. Without it, the target resolves GitHub access from its own stored connection
+            and GH_TOKEN is not sent. Requires GH_TOKEN in the submission environment.
+
+    Raises:
+        InvalidRequestError: If forward_github_token is set for a local target.
 
     The SDK never guesses a harness, provider, or model. Closing the client detaches observation
     and never stops runs.
@@ -103,8 +109,15 @@ class Client:
         preset: Preset | None = None,
         runtime: _Runtime | None = None,
         environment: Mapping[str, str] | None = None,
+        forward_github_token: bool = False,
     ) -> None:
         self.target = target or LocalTarget()
+        if forward_github_token and isinstance(self.target, LocalTarget):
+            raise InvalidRequestError(
+                "forward_github_token requires a direct or hosted target",
+                code="target.named_required",
+            )
+        self.forward_github_token = forward_github_token
         self.preset = preset or Preset("software-change")
         self.runtime = runtime
         self._provided_environment = environment
@@ -253,6 +266,7 @@ class Client:
                     "submit",
                     str(manifest),
                     *self._route_arguments(),
+                    *self._forwarding_arguments(),
                     "--submission-key",
                     submission_key,
                     "--detach",
@@ -388,7 +402,12 @@ class Client:
         if submission.revision is not None:
             arguments.extend(["--revision", submission.revision])
         arguments.extend(["--submission-key", submission.submission_key])
-        return [*arguments, *self._route_arguments(), "--detach"]
+        return [
+            *arguments,
+            *self._route_arguments(),
+            *self._forwarding_arguments(),
+            "--detach",
+        ]
 
     @staticmethod
     def _append_graph(arguments: list[str], selected: _Graph, root: Path) -> None:
@@ -492,6 +511,9 @@ class Client:
         if isinstance(self.target, HostedTarget):
             return ["--target", self.target.name]
         return []
+
+    def _forwarding_arguments(self) -> list[str]:
+        return ["--forward-gh-token"] if self.forward_github_token else []
 
     def _require_hosted_target(self) -> HostedTarget:
         self._ensure_open()

@@ -233,6 +233,7 @@ async fn delivery_factory_keeps_private_push_diagnostics_for_git_and_github() {
                 operator_diagnostics: Some((run_id.clone(), diagnostics.clone())),
             },
             None,
+            None,
         )
         .assert_value();
         assert_eq!(

@@ -420,6 +420,7 @@ pub(super) fn exact_run_request() -> TargetRunRequest {
         connection_resolver: None,
         github_token: request.github_token,
         commit_identity: None,
+        commit_co_author: None,
         git_credentials: request.git_credentials,
     }
 }

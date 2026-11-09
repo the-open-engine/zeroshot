@@ -38,9 +38,9 @@ impl LocalCliBackend {
         &self,
         params: openengine_cluster_protocol::RunResumeParams,
     ) -> Result<openengine_cluster_protocol::RunResumeResult, NativeV2CliError> {
-        if params.commit_identity.is_some() {
+        if params.commit_identity.is_some() || params.commit_co_author.is_some() {
             return Err(local_message(
-                "local runs keep the default delivery commit identity",
+                "local runs keep the default delivery commit identity and credit no co-author",
             ));
         }
         let _submission_lock = self.acquire_submission_lock().await?;
@@ -240,7 +240,7 @@ impl NativeV2CliBackend for LocalCliBackend {
         &self,
         target: Option<&str>,
         request: crate::native_v2_review::ReviewResolutionRequest,
-        _runtime: &openengine_cluster_protocol::RuntimePlan,
+        _access: crate::native_v2_review::ReviewResolutionAccess<'_>,
     ) -> Result<crate::native_v2_review::PreparedReview, NativeV2CliError> {
         require_local(target)?;
         let token = super::review_token(&self.current_directory).await?;

@@ -1,4 +1,5 @@
 //! Reuse one resolved review snapshot across uncertain submission retries.
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
@@ -9,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::execution::platform::{FileAccess, private_directory, private_file};
 use crate::native_v2_cli::{NativeV2CliBackend, NativeV2CliError, RunCommand, RunInput};
-use crate::native_v2_review::{PreparedReview, ReviewResolutionRequest};
+use crate::native_v2_review::{PreparedReview, ReviewResolutionAccess, ReviewResolutionRequest};
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -29,16 +30,32 @@ pub(super) async fn resolve<B: NativeV2CliBackend>(
     run: &RunCommand,
     profile: &super::ResolvedRunProfile,
     backend: &B,
+    available: &dyn Fn(&str) -> Option<OsString>,
 ) -> Result<super::SubmissionInput, NativeV2CliError> {
     let mut input = super::SubmissionInput::capture(run)?;
     let Some(request) = review_request(run) else {
         return Ok(input);
     };
+    // A named target receives the shell's GH_TOKEN for review resolution only on opt-in.
+    let github_token = super::GitHubTokenScope::new(run.target.is_some(), run.forward_github_token)
+        .forwarded_token(available)?;
+    let access = ReviewResolutionAccess {
+        runtime: &profile.runtime,
+        github_token: github_token.as_deref(),
+    };
+    let namespace = match &run.submission_key {
+        Some(_) => {
+            backend
+                .review_cache_namespace(run.target.as_deref(), access.github_token)
+                .await?
+        }
+        None => None,
+    };
     input.review = Some(
-        if let Some(cache) = cache_for(run, profile, backend, input.environment.as_ref()).await? {
-            cache.prepare(run, &profile.runtime, backend).await?
+        if let Some(cache) = cache_for(run, profile, namespace, input.environment.as_ref()).await? {
+            cache.prepare(run, backend, access).await?
         } else {
-            fresh_review(run, backend, request, &profile.runtime).await?
+            fresh_review(run, backend, request, access).await?
         },
     );
     Ok(input)
@@ -55,19 +72,13 @@ fn review_request(run: &RunCommand) -> Option<ReviewResolutionRequest> {
     })
 }
 
-async fn cache_for<B: NativeV2CliBackend>(
+async fn cache_for(
     run: &RunCommand,
     profile: &super::ResolvedRunProfile,
-    backend: &B,
+    namespace: Option<String>,
     environment: Option<&openengine_cluster_protocol::RuntimeEnvironment>,
 ) -> Result<Option<ReviewCache>, NativeV2CliError> {
-    let Some(key) = &run.submission_key else {
-        return Ok(None);
-    };
-    let Some(namespace) = backend
-        .review_cache_namespace(run.target.as_deref())
-        .await?
-    else {
+    let (Some(key), Some(namespace)) = (&run.submission_key, namespace) else {
         return Ok(None);
     };
     let identity = snapshot_identity(run, profile, environment)?;
@@ -85,10 +96,10 @@ async fn fresh_review<B: NativeV2CliBackend>(
     run: &RunCommand,
     backend: &B,
     request: ReviewResolutionRequest,
-    runtime: &openengine_cluster_protocol::RuntimePlan,
+    access: ReviewResolutionAccess<'_>,
 ) -> Result<PreparedReview, NativeV2CliError> {
     let mut prepared = backend
-        .resolve_review(run.target.as_deref(), request, runtime)
+        .resolve_review(run.target.as_deref(), request, access)
         .await?;
     local_snapshot(run, &mut prepared, false).await?;
     Ok(prepared)
@@ -144,14 +155,14 @@ impl ReviewCache {
     async fn prepare<B: NativeV2CliBackend>(
         &self,
         run: &RunCommand,
-        runtime: &openengine_cluster_protocol::RuntimePlan,
         backend: &B,
+        access: ReviewResolutionAccess<'_>,
     ) -> Result<PreparedReview, NativeV2CliError> {
         if let Some(mut prepared) = self.read()? {
             local_snapshot(run, &mut prepared, true).await?;
             return Ok(prepared);
         }
-        let prepared = fresh_review(run, backend, self.identity.request.clone(), runtime).await?;
+        let prepared = fresh_review(run, backend, self.identity.request.clone(), access).await?;
         self.write(&prepared)?;
         Ok(prepared)
     }

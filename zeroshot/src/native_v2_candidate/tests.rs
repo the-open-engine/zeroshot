@@ -407,6 +407,7 @@ impl CapsuleAllocator for CandidateAllocator {
                 adopt_existing_delivery: false,
                 git_identity: None,
                 commit_identity: None,
+                commit_co_author: None,
                 workspace: self.workspace.clone(),
                 git_program: PathBuf::from("/usr/bin/git"),
                 target: self.target.clone(),
@@ -717,6 +718,8 @@ async fn submit_through_cli(
             submission_key: Some(
                 IdempotencyKey::new("candidate-e2e").assert_value_with("submission key"),
             ),
+            // The in-process target has no stored GitHub connection, so the shell token is sent.
+            forward_github_token: true,
         })),
         &context,
         &mut NeverDetach,
@@ -1091,6 +1094,7 @@ fn routing_delivery(workspace: &Path) -> Arc<NativeV2DeliveryAdapter> {
             adopt_existing_delivery: false,
             git_identity: None,
             commit_identity: None,
+            commit_co_author: None,
             workspace: workspace.to_owned(),
             git_program: PathBuf::from("/usr/bin/git"),
             target: DeliveryTarget::new("acme/project", "main", "a".repeat(40))
@@ -1157,9 +1161,10 @@ use fixtures::{
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue, JsonAt};
 
 #[tokio::test]
-async fn candidate_delivery_applies_its_commit_identity_to_transport_commits() {
+async fn candidate_delivery_applies_its_commit_identity_and_co_author_to_transport_commits() {
     use crate::native_v2_candidate::test_support::{
-        BOT_AUTHOR, bot_commit_identity, commit_all, commit_authorship, git, path_text,
+        BOT_AUTHOR, CO_AUTHOR, bot_commit_identity, co_author_identity, commit_all,
+        commit_attribution, commit_authorship, git, path_text,
     };
     const REMOTE: &str = "https://forge.example/team/project.git";
     let repository = TestGitRepository::candidate();
@@ -1210,6 +1215,7 @@ exec /usr/bin/git "${{arguments[@]}}"
             adopt_existing_delivery: false,
             git_identity: None,
             commit_identity: Some(bot_commit_identity()),
+            commit_co_author: Some(co_author_identity()),
             workspace: workspace.clone(),
             git_program: program.clone(),
             target: DeliveryTarget::new("team/project", "main", &repository.base).assert_value(),
@@ -1274,4 +1280,12 @@ exec /usr/bin/git "${{arguments[@]}}"
             "{kind}"
         );
     }
+    assert_eq!(
+        commit_attribution(workspace, "HEAD^1"),
+        format!("{BOT_AUTHOR}|{BOT_AUTHOR}\nPreserve local work\n\nCo-authored-by: {CO_AUTHOR}")
+    );
+    assert!(
+        !git_output(workspace, &["show", "-s", "--format=%B", "HEAD"]).contains("Co-authored-by"),
+        "the reconcile merge carries no work by the co-author"
+    );
 }

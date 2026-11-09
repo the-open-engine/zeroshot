@@ -45,6 +45,7 @@ pub(in crate::native_v2_cli) enum Call {
         target: Option<String>,
         request: crate::native_v2_review::ReviewResolutionRequest,
         runtime: RuntimePlan,
+        github_token: Option<String>,
     },
     TargetAdd {
         name: String,
@@ -501,12 +502,13 @@ impl NativeV2CliBackend for FakeBackend {
         &self,
         target: Option<&str>,
         request: crate::native_v2_review::ReviewResolutionRequest,
-        runtime: &openengine_cluster_protocol::RuntimePlan,
+        access: crate::native_v2_review::ReviewResolutionAccess<'_>,
     ) -> Result<crate::native_v2_review::PreparedReview, NativeV2CliError> {
         self.calls.lock().assert_value().push(Call::ResolveReview {
             target: target.map(str::to_owned),
             request,
-            runtime: runtime.clone(),
+            runtime: access.runtime.clone(),
+            github_token: access.github_token.map(str::to_owned),
         });
         if let Some((path, contents)) = &self.review_file_change {
             std::fs::write(path, contents).assert_value();

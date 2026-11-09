@@ -13,7 +13,7 @@ use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;
 use time::{Duration as TimeDuration, OffsetDateTime};
 
-use super::submission::{read_json, select_connections, validate_github_token};
+use super::submission::{GitHubTokenScope, read_json, select_connections};
 use super::{CliExecutionContext, write_json};
 use crate::native_v2_admission::NativeV2Admission;
 use crate::native_v2_cli::{
@@ -112,17 +112,20 @@ where
     S: DetachSignal,
 {
     let manifest = load_manifest(&command.file)?;
+    let scope = GitHubTokenScope::new(true, command.forward_github_token);
+    let github_token = scope.forwarded_token(context.environment)?;
     let profile = context
         .backend
         .profile_show(Some(&command.target), manifest.profile.clone())
         .await?;
     validate_profile_and_inputs(&profile, manifest.delivery, &manifest.runs).await?;
-    let request = prepared_request(
+    let mut request = prepared_request(
         command.submission_key,
         manifest,
         &profile,
-        context.environment,
+        &scope.outbound(context.environment),
     )?;
+    request.github_token = github_token;
     let stack = context
         .backend
         .stack_submit(&command.target, request)
@@ -157,15 +160,6 @@ fn prepared_request(
     .map_err(NativeV2CliError::InvalidRun)?;
     let connections =
         select_connections(&profile.runtime, manifest.environment.as_ref(), environment)?;
-    let github_token = environment("GH_TOKEN")
-        .map(|value| {
-            value
-                .into_string()
-                .map_err(|_| NativeV2CliError::GitHubToken)
-        })
-        .transpose()?
-        .map(validate_github_token)
-        .transpose()?;
     Ok(PreparedStackRequest {
         submission_key,
         title: manifest.title,
@@ -176,7 +170,7 @@ fn prepared_request(
         runs: manifest.runs,
         environment: manifest.environment,
         connections,
-        github_token,
+        github_token: None,
     })
 }
 

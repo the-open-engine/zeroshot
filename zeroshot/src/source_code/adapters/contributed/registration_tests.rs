@@ -241,6 +241,7 @@ async fn ordinary_runtime_factory_binds_the_contributed_context_transport() {
             operator_diagnostics: None,
         },
         None,
+        None,
     )
     .assert_value();
     let target = DeliveryTarget::new(REPOSITORY, "main", source.revision.as_str()).assert_value();

@@ -47,8 +47,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Releases are authoritative. Never commit a staged release version to `main`.
 - `zeroshot update` resolves the newest canonical GitHub Release, verifies the declared host archive
   and canonical skill assets through that release's `SHA256SUMS`, smoke-checks the
-  staged executable, and replaces the running executable in place without privilege escalation. It
-  installs or refreshes only unchanged managed skill copies and preserves conflicts.
+  staged executable, and replaces the running executable in place without privilege escalation.
+  Staging and replacement hold an exclusive `.zeroshot-update.lock` beside the executable. Under it,
+  an update removes what interrupted updates left there, restoring a moved-aside Restic sidecar when
+  none is installed, and reports `updated: false` when the executable and sidecar already hold the
+  release's bytes. It installs or refreshes only unchanged managed skill copies and preserves
+  conflicts.
   Development-placeholder builds refuse self-update. Update downloads use an idle timeout, never a
   whole-request limit, and keep their size caps. Failures carry the complete cause chain and GitHub's
   bounded, control-safe `message`, never request URLs.
@@ -829,6 +833,24 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `NativeV2CandidateDelivery::new` derives the shared transport's identity from the delivery
   config. Local runs keep the default and reject a resume identity. It travels with ephemeral
   source credentials, never run state or agent configuration; hosts decide which forges get one.
+- An optional `commitCoAuthor` on the same requests is one more `CommitIdentity`, credited and
+  never authoring, and resupplied for each successor. `SystemGit::prepare_revision`, where delivery
+  commits the run's changes, credits it in that same single `git commit`, using
+  `--cleanup=whitespace` and `--trailer "Co-authored-by: Name <email>"`, so a failed or
+  interrupted commit never leaves those changes committed without the credit. Its `where=end`,
+  `ifexists=addIfDifferent`, `ifmissing=add` and separator are pinned with `-c`, so Git ends the
+  trailer block with the credit once despite workspace trailer defaults. No pin sets a `key`: Git
+  would rename existing trailers whose names prefix it. The run's own trailers keep their names and
+  values; Git only normalises the spacing around their separators. Workspace settings for the
+  `Co-authored-by` trailer itself, such as a `key` or `cmd`, still apply, as other workspace Git
+  configuration affects delivery Git. A message the pinned cleanup empties (only blank or
+  `Signed-off-by: ` lines) gets no trailer, so Git refuses it instead of committing the credit as
+  the whole message; without a co-author the commit command is unchanged. A conflicted merge that
+  `prepare_revision` concludes after repair carries the run's resolution and is credited; merges
+  Git completes itself (reconcile `merge --no-edit`, target integration) and the identity pinned
+  for conflict repair never name it. It flows beside `commitIdentity` from source credentials to
+  `NativeV2DeliveryConfig`, the shared transport, and workspace Git. Local resume rejects it, and
+  requests without it are byte-identical.
 - Delivery clears the environment of its Git and GitHub CLI processes, so local composition pins
   delivery Git and, when the GitHub adapter is selected, `gh` to the files `find_executable` finds
   on the captured search path. Local `run`/`resume` reject a missing one as a usage error with the
@@ -840,6 +862,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   host rotates the file atomically; unchanged rejected issuances wait for rotation. The file setting
   is removed from provider context, travels only through the consumed private bootstrap, and is
   freshly selected on resume, never persisted in recovery or run history.
+- Named-target `run`, `resume`, and `stack submit` never read the invoking shell's `GH_TOKEN`
+  without `--forward-gh-token`, neither as the legacy GitHub.com token, a declared connection field
+  nor a direct target's `--task-from` review credential, so targets resolve GitHub access from
+  their stored connections. Target authorities never read `GH_TOKEN` themselves; the CLI passes it. Each command reads every
+  outbound value through one `GitHubTokenScope` environment. The flag fails closed when `GH_TOKEN`
+  is unset, including under `--validate-only`. Direct-target resumes whose retained requirements
+  need `GH_TOKEN` fail early without it. The local branch-tip lookup for an omitted `--revision`
+  still reads `GH_TOKEN` and never sends it. Local controllers keep reading explicit `GH_TOKEN`.
+  The Python SDK opts in with `Client(forward_github_token=True)`.
 - `ZEROSHOT_DELIVERY_CHECK_COMMAND` selects one private absolute executable outside the checkout
   for trusted local publication, review observation and merge validation. Its capability travels only through the consumed
   private bootstrap, never provider context or recovery metadata; resume selects it freshly. The

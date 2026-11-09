@@ -218,11 +218,27 @@ pub(crate) fn bot_commit_identity() -> openengine_cluster_protocol::CommitIdenti
     .assert_value()
 }
 
+/// The person who started a run, as a host would credit them on delivered commits.
+pub(crate) const CO_AUTHOR: &str = "Ada Lovelace <ada@example.com>";
+
+pub(crate) fn co_author_identity() -> openengine_cluster_protocol::CommitIdentity {
+    openengine_cluster_protocol::CommitIdentity::new("Ada Lovelace", "ada@example.com")
+        .assert_value()
+}
+
 /// Author and committer of one commit, as `name <email>|name <email>`.
 pub(crate) fn commit_authorship(directory: &Path, revision: &str) -> String {
     git_output(
         directory,
         &["show", "-s", "--format=%an <%ae>|%cn <%ce>", revision],
+    )
+}
+
+/// [`commit_authorship`] followed by the commit's full message on the next line.
+pub(crate) fn commit_attribution(directory: &Path, revision: &str) -> String {
+    git_output(
+        directory,
+        &["show", "-s", "--format=%an <%ae>|%cn <%ce>%n%B", revision],
     )
 }
 
@@ -349,6 +365,7 @@ pub(crate) fn allocation_request<'a>(
     crate::native_v2_platform::CapsuleAllocationRequest {
         git_credentials: None,
         commit_identity: None,
+        commit_co_author: None,
 
         run_id,
         admitted,

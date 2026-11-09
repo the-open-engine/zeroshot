@@ -254,6 +254,7 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
             github_token,
             git_credentials,
             commit_identity,
+            commit_co_author,
         } = request;
         prepare_contained_submission(&mut submission)?;
         let digest = submission_digest(&submission)
@@ -283,6 +284,7 @@ impl TargetControllerFactory for ProductionTargetControllerFactory {
                     github_token,
                     git_credentials,
                     commit_identity,
+                    commit_co_author,
                 },
             )
             .await

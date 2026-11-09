@@ -74,13 +74,18 @@ pub struct NativeV2CandidateDelivery {
 
 impl NativeV2CandidateDelivery {
     /// Builds the source authority from `config`, so its commit identity authors both workspace
-    /// commits and every merge the shared transport creates.
+    /// commits and every merge the shared transport creates, and its co-author is credited on
+    /// every revision the transport prepares.
     pub(crate) fn new(
         config: NativeV2DeliveryConfig,
         source: SourceDeliveryFactoryRequest<'_>,
         git_credentials: Option<GitTransportCredentials>,
     ) -> Result<Self, SourceDeliveryFactoryError> {
-        let authority = delivery_authority(source, config.commit_identity.as_ref())?;
+        let authority = delivery_authority(
+            source,
+            config.commit_identity.as_ref(),
+            config.commit_co_author.as_ref(),
+        )?;
         Ok(Self {
             config,
             authority,

@@ -83,6 +83,7 @@ struct CapsuleBuildRequest<'a> {
     github_token: Option<&'a str>,
     git_credentials: Option<&'a GitTransportCredentials>,
     commit_identity: Option<&'a openengine_cluster_protocol::CommitIdentity>,
+    commit_co_author: Option<&'a openengine_cluster_protocol::CommitIdentity>,
     install_source: bool,
     transfer_retained_workspace: bool,
     preparation: CapsulePreparation,
@@ -201,6 +202,7 @@ impl ProductionCapsuleAllocator {
             github_token,
             git_credentials,
             commit_identity,
+            commit_co_author,
             preparation,
         } = request;
         let allocation = self
@@ -212,6 +214,7 @@ impl ProductionCapsuleAllocator {
                 github_token,
                 git_credentials,
                 commit_identity,
+                commit_co_author,
                 install_source: true,
                 transfer_retained_workspace: false,
                 preparation,
@@ -471,6 +474,7 @@ impl ProductionCapsuleAllocator {
                 .map_err(|_| CapsuleAllocationUnavailable::Runtime)?;
             let config = NativeV2DeliveryConfig {
                 commit_identity: request.commit_identity.cloned(),
+                commit_co_author: request.commit_co_author.cloned(),
                 ..NativeV2DeliveryConfig::for_hosted_workspace(
                     DeliveryLineage::new(
                         delivery_run_id.clone(),
@@ -846,6 +850,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
             github_token,
             git_credentials,
             commit_identity,
+            commit_co_author,
             preparation,
         } = request;
         self.validate_retained_selection(source_run_id, &selection)?;
@@ -862,6 +867,7 @@ impl CapsuleAllocator for ProductionCapsuleAllocator {
                 github_token,
                 git_credentials,
                 commit_identity,
+                commit_co_author,
                 install_source: false,
                 transfer_retained_workspace: true,
                 preparation,

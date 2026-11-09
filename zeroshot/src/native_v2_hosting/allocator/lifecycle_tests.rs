@@ -658,6 +658,7 @@ async fn environment_hooks_prepare_private_homes_without_starting_scripts() {
         github_token: None,
         git_credentials: None,
         commit_identity: None,
+        commit_co_author: None,
         install_source: false,
         transfer_retained_workspace: false,
         preparation,

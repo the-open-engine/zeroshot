@@ -33,6 +33,11 @@ const SKILL_ASSETS: [(&str, &str); 4] = [
     ("zeroshot-plan", "zeroshot-plan-skill.md"),
 ];
 const RESTIC_VERSION: &str = "0.19.1";
+/// Name prefixes of the executables an update stages next to the installed one.
+const STAGED_ZEROSHOT_PREFIX: &str = ".zeroshot-update-";
+const STAGED_RESTIC_PREFIX: &str = ".restic-update-";
+/// Serializes the updates of one installation. No cleanup pattern matches its name.
+const UPDATE_LOCK: &str = ".zeroshot-update.lock";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Longest wait for a response, then for each next part of its body. A download that keeps
 /// receiving data is never cut off, however slow, while one that stops fails as a timeout.
@@ -117,10 +122,10 @@ async fn apply_release(
         return Ok((false, false));
     }
     let release = download_release(client, current, latest).await?;
-    let updated = release.executables.is_some();
-    if let Some(executables) = release.executables {
-        install(&executables, latest)?;
-    }
+    let updated = match &release.executables {
+        Some(executables) => install(executables, latest)?,
+        None => false,
+    };
     let skill_updated = install_skills(&release.skills)?;
     Ok((updated, skill_updated))
 }
@@ -502,10 +507,11 @@ fn insert_archive_entry<R: Read>(
     Ok(())
 }
 
+/// Installs `executables` over the executable this process runs. Returns whether it replaced it.
 fn install(
     executables: &ReleaseExecutables,
     version: ReleaseVersion,
-) -> Result<(), NativeV2CliError> {
+) -> Result<bool, NativeV2CliError> {
     let current = std::env::current_exe()
         .map_err(|error| update_error(format!("could not locate this executable: {error}")))?;
     install_at(
@@ -530,42 +536,147 @@ struct InstallOperations<Verify, VerifyRestic, Replace> {
     replace: Replace,
 }
 
+/// Installs `executables` over `current`, the path this process reports for its executable, and
+/// over its Restic sidecar, while holding the installation's update lock. Returns `false` without
+/// replacing anything when the installation already holds exactly these executables, as it does
+/// after an update that finished while this one waited installed the same release.
 fn install_at<Verify, VerifyRestic, Replace>(
     current: &Path,
     executables: &ReleaseExecutables,
     version: ReleaseVersion,
     operations: InstallOperations<Verify, VerifyRestic, Replace>,
-) -> Result<(), NativeV2CliError>
+) -> Result<bool, NativeV2CliError>
 where
     Verify: FnOnce(&Path, ReleaseVersion) -> Result<(), NativeV2CliError>,
     VerifyRestic: FnOnce(&Path) -> Result<(), NativeV2CliError>,
     Replace: FnOnce(&Path) -> Result<(), NativeV2CliError>,
 {
+    let current = installed_path(current);
     let parent = current
         .parent()
         .ok_or_else(|| update_error("this executable has no parent directory"))?;
+    let restic = parent.join(executables.restic_name);
+    let _lock = lock_installation(parent)?;
+    remove_interrupted_updates(parent, &current, executables.restic_name);
+    if holds_exactly(&current, &executables.zeroshot) && holds_exactly(&restic, &executables.restic)
+    {
+        return Ok(false);
+    }
     let staged = stage_executable(
         parent,
-        ".zeroshot-update-",
+        STAGED_ZEROSHOT_PREFIX,
         std::env::consts::EXE_SUFFIX,
         &executables.zeroshot,
     )?;
     let staged_restic = stage_executable(
         parent,
-        ".restic-update-",
+        STAGED_RESTIC_PREFIX,
         std::env::consts::EXE_SUFFIX,
         &executables.restic,
     )?;
     (operations.verify)(&staged, version)?;
     (operations.verify_restic)(&staged_restic)?;
-    let sidecar =
-        SidecarReplacement::install(&staged_restic, &parent.join(executables.restic_name))?;
+    let sidecar = SidecarReplacement::install(&staged_restic, &restic)?;
     if let Err(error) = (operations.replace)(&staged) {
         sidecar.rollback()?;
         return Err(error);
     }
     sidecar.commit();
-    Ok(())
+    Ok(true)
+}
+
+/// The installed path of the executable a process reports as `current`. Once another update has
+/// replaced the executable, Linux reports the former path followed by ` (deleted)`, and the
+/// installation is still at that former path.
+fn installed_path(current: &Path) -> std::path::PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::ffi::OsStrExt as _;
+
+        if let Some(installed) = current.as_os_str().as_bytes().strip_suffix(b" (deleted)") {
+            return std::ffi::OsStr::from_bytes(installed).into();
+        }
+    }
+    current.to_owned()
+}
+
+/// Takes the exclusive update lock of the installation in `parent`, waiting while another update
+/// holds it. The lock ends when the returned file closes, which the operating system also does
+/// when its holder dies, so an interrupted update never blocks later ones.
+fn lock_installation(parent: &Path) -> Result<std::fs::File, NativeV2CliError> {
+    let path = parent.join(UPDATE_LOCK);
+    let lock_error =
+        |error: std::io::Error| update_error(format!("could not lock this installation: {error}"));
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .or_else(|error| {
+            // Another user sharing the installation may own the lock file. Locking only reads it.
+            if error.kind() == std::io::ErrorKind::PermissionDenied {
+                std::fs::File::open(&path).map_err(|_| error)
+            } else {
+                Err(error)
+            }
+        })
+        .map_err(lock_error)?;
+    fs2::FileExt::lock_exclusive(&lock).map_err(lock_error)?;
+    Ok(lock)
+}
+
+/// Removes what interrupted updates left in `parent`: the executables they staged, the copy
+/// `self_replace` makes before renaming it over `current`, and Restic sidecars they moved aside.
+/// Updates create these files only while holding the installation lock, so under that lock each
+/// one is abandoned. A missing sidecar means an update stopped after moving it aside and before
+/// installing its own, so the newest backup is restored instead. Files that cannot be removed,
+/// such as ones still in use on Windows, are left for a later update.
+fn remove_interrupted_updates(parent: &Path, current: &Path, restic_name: &str) {
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return;
+    };
+    let backup_prefix = sidecar_backup_prefix(restic_name);
+    // self_replace 1.5.0 names its copy `.zeroshot.__temp__*` on Unix and
+    // `.zeroshot.*.__temp__.exe` on Windows.
+    let replacement_prefix = current
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| format!(".{stem}."));
+    let mut backups = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(&backup_prefix) {
+            backups.push(entry.path());
+        } else if name.starts_with(STAGED_ZEROSHOT_PREFIX)
+            || name.starts_with(STAGED_RESTIC_PREFIX)
+            || replacement_prefix.as_deref().is_some_and(|prefix| {
+                name.strip_prefix(prefix)
+                    .is_some_and(|rest| rest.contains("__temp__"))
+            })
+        {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    let sidecar = parent.join(restic_name);
+    let Ok(sidecar_installed) = sidecar.try_exists() else {
+        return;
+    };
+    // Backup names end in a UUIDv7, so they sort in the order they were made.
+    backups.sort();
+    if !sidecar_installed && let Some(newest) = backups.pop() {
+        let _ = std::fs::rename(newest, sidecar);
+    }
+    for backup in backups {
+        let _ = std::fs::remove_file(backup);
+    }
+}
+
+/// Whether the file at `path` holds exactly `contents`.
+fn holds_exactly(path: &Path, contents: &[u8]) -> bool {
+    std::fs::metadata(path).is_ok_and(|metadata| metadata.len() == contents.len() as u64)
+        && std::fs::read(path).is_ok_and(|installed| installed == contents)
 }
 
 fn stage_executable(
@@ -590,6 +701,9 @@ fn stage_executable(
     Ok(staged.into_temp_path())
 }
 
+/// A Restic sidecar installed in place of the previous one, which stays aside until the update
+/// commits or rolls back. The installation lock keeps other updates away in the meantime, so a
+/// rollback only ever removes the sidecar this update installed.
 struct SidecarReplacement {
     destination: std::path::PathBuf,
     backup: Option<std::path::PathBuf>,
@@ -599,11 +713,13 @@ impl SidecarReplacement {
     fn install(staged: &Path, destination: &Path) -> Result<Self, NativeV2CliError> {
         let backup = destination.exists().then(|| {
             destination.with_file_name(format!(
-                ".{}-update-backup-{}",
-                destination
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("restic"),
+                "{}{}",
+                sidecar_backup_prefix(
+                    destination
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("restic")
+                ),
                 uuid::Uuid::now_v7()
             ))
         });
@@ -645,6 +761,11 @@ impl SidecarReplacement {
             let _ = std::fs::remove_file(backup);
         }
     }
+}
+
+/// Name prefix of the backups an update makes of the installed sidecar `name`.
+fn sidecar_backup_prefix(name: &str) -> String {
+    format!(".{name}-update-backup-")
 }
 
 #[cfg(unix)]
