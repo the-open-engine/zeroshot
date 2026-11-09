@@ -6,7 +6,9 @@
 
 #[path = "native_v2_candidate/provider_access.rs"]
 mod provider_access;
-pub(crate) use provider_access::{ProviderAccessPlacement, materialize_provider_access};
+pub(crate) use provider_access::{
+    ProviderAccessPlacement, materialize_provider_access, materialize_provider_access_with_registry,
+};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;

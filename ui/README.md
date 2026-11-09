@@ -50,7 +50,9 @@ The `setupLanes` array comes from the same harness registry. Each entry contains
 request access without maintaining a parallel provider table. `workspace::profile_setup({runtime})`
 returns `{runtime, requirements}` after applying native contained-provider access defaults. It reads no
 secrets and never saves or runs a profile. Authored custom connections and alternative credential
-forms remain intact. Environment and source access stay with run submission.
+forms remain intact. `profile_setup_with_harnesses` uses the host-selected registry for validation and
+access derivation. Local setup uses its advertised contributed harnesses; target/default setup remains
+core-only. Environment and source access stay with run submission.
 
 The bootstrap `runSizes` catalog contains `kind: "openengine.run-sizes/v2"`, a target-owned
 `default` identifier, and `sizes: [{id, description}]`. Identifiers are opaque strings of 1–128

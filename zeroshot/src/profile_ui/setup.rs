@@ -12,11 +12,17 @@ struct Request {
     runtime: RuntimePlan,
 }
 
-pub(super) fn apply(value: Value) -> Result<Value, WorkspaceError> {
+pub(super) fn apply(
+    value: Value,
+    harnesses: &crate::harnesses::HarnessRegistry,
+) -> Result<Value, WorkspaceError> {
     let request: Request = serde_json::from_value(value).map_err(invalid)?;
     let mut runtime = request.runtime;
-    crate::native_v2_hosting::materialize_contained_provider_access(&mut runtime)
-        .map_err(invalid)?;
+    crate::native_v2_hosting::materialize_contained_provider_access_with_registry(
+        &mut runtime,
+        harnesses,
+    )
+    .map_err(invalid)?;
     Ok(json!({"requirements":runtime.connection_requirements(), "runtime":runtime}))
 }
 

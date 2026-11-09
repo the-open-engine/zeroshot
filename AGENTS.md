@@ -1296,7 +1296,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   target-owned size and enable checkpoints.
   `workspace::profile_setup` materializes hosted provider access after caller edits without saving,
   resolving secrets or replacing custom declarations. `setupLanes` exports the same registry's accepted
-  provider field sets. New graph/runtime definitions need no template-specific host wizard registry.
+  provider field sets. Host-selected setup validates and materializes through the same registry as
+  bootstrap/admission; local contributions remain unavailable to default and target setup.
+  New graph/runtime definitions need no template-specific host wizard registry.
 - Runtime schemas/workers come from native contracts in `profile_ui/catalog.rs`, compiled under
   `workspace`. Git delivery keeps its fixed contracts and explicit pull-request/merge modes. Model suggestions are non-authoritative;
   identifiers remain opaque. Missing harness/provider links to runtime settings. JSON stays lossless.

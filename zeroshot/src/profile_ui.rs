@@ -155,9 +155,13 @@ async fn validate(
     Ok(Json(json!({"valid":true})))
 }
 async fn setup(
+    State(state): State<UiState>,
     bytes: Result<Bytes, axum::extract::rejection::BytesRejection>,
 ) -> Result<Json<Value>, ApiError> {
-    Ok(Json(workspace::profile_setup(decode(bytes)?)?))
+    Ok(Json(workspace::profile_setup_with_harnesses(
+        decode(bytes)?,
+        &harness_registry(&state),
+    )?))
 }
 async fn author(
     bytes: Result<Bytes, axum::extract::rejection::BytesRejection>,

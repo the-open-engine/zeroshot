@@ -14,7 +14,7 @@ fn requirements_cover_effective_lanes_and_custom_worker_access() {
             "deliver":{"kind":"comment_delivery", "connections":{"forge":["GH_TOKEN"]}}
         }
     });
-    let result = apply(json!({"runtime":runtime})).assert_value();
+    let result = crate::workspace::profile_setup(json!({"runtime":runtime})).assert_value();
     assert_eq!(
         result["requirements"],
         json!({
@@ -37,13 +37,13 @@ fn requirements_cover_effective_lanes_and_custom_worker_access() {
     );
     assert_eq!(
         result,
-        apply(json!({"runtime":result["runtime"]})).assert_value()
+        crate::workspace::profile_setup(json!({"runtime":result["runtime"]})).assert_value()
     );
 }
 
 #[test]
 fn authored_alternative_endpoints_and_custom_connections_survive_setup() {
-    let result = apply(json!({"runtime":{
+    let result = crate::workspace::profile_setup(json!({"runtime":{
         "harness":"codex", "provider":"foundry", "nodes":{
             "work":{"kind":"agent", "model":"account-deployment", "connections":{
                 "azure":["AZURE_FOUNDRY_BASE_URL", "AZURE_FOUNDRY_API_KEY"],
@@ -68,19 +68,19 @@ fn authored_alternative_endpoints_and_custom_connections_survive_setup() {
 #[test]
 fn setup_rejects_unknown_lanes_and_unexpected_request_fields() {
     assert!(
-        apply(json!({"runtime":{
+        crate::workspace::profile_setup(json!({"runtime":{
             "harness":"unknown", "provider":"unknown", "nodes":{}
         }}))
         .is_err()
     );
     assert!(
-        apply(json!({"runtime":{
+        crate::workspace::profile_setup(json!({"runtime":{
             "harness":"codex", "provider":"anthropic", "nodes":{}
         }}))
         .is_err()
     );
     assert!(
-        apply(json!({"runtime":{
+        crate::workspace::profile_setup(json!({"runtime":{
         "harness":"codex", "provider":"openai", "nodes":{}
     }, "secret":"not-an-allowed-carrier"}))
         .is_err()
@@ -107,4 +107,47 @@ fn setup_choices_reuse_registered_provider_access_contracts() {
             .assert_value()
             .is_empty()
     );
+}
+
+#[test]
+fn setup_materializes_access_through_the_selected_custom_registry() {
+    use crate::harnesses::{
+        HarnessDescriptor, HarnessError, HarnessRegistration, HarnessRegistry, HarnessSource,
+        ProviderAccessContract,
+    };
+    let mut registry = HarnessRegistry::core();
+    registry
+        .register(HarnessRegistration {
+            descriptor: HarnessDescriptor {
+                id: "fixture",
+                label: "Fixture",
+                providers: &["openai"],
+                executable: "fixture",
+                source: HarnessSource::Contributed,
+            },
+            build: |_, _| Err(HarnessError::Configuration("not executed".into())),
+            access: |_| {
+                Ok(ProviderAccessContract::new(
+                    false,
+                    "custom_auth",
+                    &["CUSTOM_PROVIDER_TOKEN"],
+                    &[&["CUSTOM_PROVIDER_TOKEN"]],
+                ))
+            },
+            normalize_local: |_, _| Ok(()),
+            validate_config: |_| Ok(()),
+        })
+        .assert_value();
+    let request = json!({"runtime": {
+        "harness":"fixture", "provider":"openai", "nodes": {
+            "worker":{"kind":"agent", "model":"caller-owned"}
+        }
+    }});
+    let prepared =
+        crate::workspace::profile_setup_with_harnesses(request.clone(), &registry).assert_value();
+    assert_eq!(
+        prepared["requirements"],
+        json!({"custom_auth":["CUSTOM_PROVIDER_TOKEN"]})
+    );
+    assert!(crate::workspace::profile_setup(request).is_err());
 }

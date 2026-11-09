@@ -66,7 +66,15 @@ pub fn catalog_with_harnesses(
 /// Derive hosted access from an authored runtime without reading secrets or saving a profile.
 /// The returned runtime preserves custom declarations and applies native contained-provider defaults.
 pub fn profile_setup(request: Value) -> Result<Value, WorkspaceError> {
-    setup::apply(request)
+    profile_setup_with_harnesses(request, &crate::harnesses::HarnessRegistry::core())
+}
+
+/// Prepare connection access using the same registry advertised and admitted by this host.
+pub fn profile_setup_with_harnesses(
+    request: Value,
+    harnesses: &crate::harnesses::HarnessRegistry,
+) -> Result<Value, WorkspaceError> {
+    setup::apply(request, harnesses)
 }
 
 /// Apply a graph outcome operation to a draft without persisting or admitting it.
