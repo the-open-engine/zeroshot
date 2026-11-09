@@ -434,7 +434,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `GH_HOST`/`GITLAB_HOST`, defaulting only to GitHub.com/GitLab.com when absent. Unknown hosts require native configured
   identity or paired `--source-provider`/`--source-base-url` overrides. Shared Git transport remains
   independent of forge API credentials. GitLab uses bounded HTTP effects and synchronous SHA-guarded
-  merges; required merge trains remain pending. Synthetic pipeline SHAs do not prove captured-head CI.
+  merges; required merge trains remain pending. GitLab readiness, approval handoff and merge share
+  required-CI policy: explicit `only_allow_merge_if_pipeline_succeeds: false` yields `NotRequired`
+  regardless of head-pipeline presence or status, never `Passed`. Required or unknown policy needs
+  captured-head CI evidence; absent/running CI stays pending and failure/skipped rules still apply.
+  Synthetic pipeline SHAs do not prove required captured-head CI. All non-CI gates remain authoritative.
   Empty generated delivery bindings acquire the adapter's default connection only after source or
   comment destination selection. Managed GitHub.com token/file fallback never authorizes another instance.
   Adapters own optional canonical review/commit receipt links and comment permalink validation.
