@@ -408,14 +408,11 @@ fn pipeline_checks(
     value: &MergeRequest,
     project: &Project,
 ) -> Result<SourceChecks, SourceDeliveryError> {
+    if project.only_allow_merge_if_pipeline_succeeds == Some(false) {
+        return Ok(SourceChecks::NotRequired);
+    }
     let Some(pipeline) = &value.head_pipeline else {
-        return Ok(
-            if project.only_allow_merge_if_pipeline_succeeds == Some(false) {
-                SourceChecks::NotRequired
-            } else {
-                SourceChecks::Pending
-            },
-        );
+        return Ok(SourceChecks::Pending);
     };
     if !pipeline_associated(pipeline, value, project)? {
         return Ok(SourceChecks::Pending);

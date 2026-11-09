@@ -40,7 +40,15 @@ const DOCS_PATHS = new Set([
   'tests/tooling/docs-versions.test.js',
 ]);
 
-const TOOLING_PREFIXES = ['.github/', '.husky/', 'scripts/', 'tests/'];
+const TOOLING_PREFIXES = [
+  '.github/',
+  '.husky/',
+  '.agents/plugins/',
+  '.claude-plugin/',
+  'plugins/',
+  'scripts/',
+  'tests/',
+];
 const TOOLING_PATHS = new Set([
   '.gitignore',
   '.prettierignore',
@@ -65,7 +73,9 @@ const MULTI_LANE_PATHS = new Map([
   // docs-agent-contract.test.js checks the package's product description and README.
   ['npm/zeroshot/README.md', ['npm', 'docs']],
   ['npm/zeroshot/package.json', ['npm', 'docs']],
+  ['npm/zeroshot/skills/zeroshot/SKILL.md', ['npm', 'tooling']],
   ['npm/zeroshot/skills/zeroshot-plan/SKILL.md', ['npm', 'tooling']],
+  ['npm/zeroshot/skills/zeroshot-graph-design/SKILL.md', ['npm', 'tooling']],
   ['package-lock.json', ['tooling', 'npm']],
   ['package.json', ['tooling', 'npm']],
   ['scripts/distribution.js', ['native', 'npm']],

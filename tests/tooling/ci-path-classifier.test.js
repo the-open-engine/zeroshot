@@ -92,6 +92,49 @@ it('keeps npm-only changes out of native, Python, and docs checks', () => {
   });
 });
 
+it('runs package generation checks for canonical remote skills and both client catalogs', () => {
+  for (const name of ['zeroshot', 'zeroshot-plan', 'zeroshot-graph-design']) {
+    assert.deepEqual(selections(classifyPaths([`npm/zeroshot/skills/${name}/SKILL.md`])), {
+      native: false,
+      python: false,
+      tooling: true,
+      npm: true,
+      docs: false,
+    });
+  }
+  for (const filename of [
+    'plugins/metadata.json',
+    'plugins/zeroshot-openai/.codex-plugin/plugin.json',
+    'plugins/zeroshot-claude/.mcp.json',
+    '.agents/plugins/marketplace.json',
+    '.claude-plugin/marketplace.json',
+  ]) {
+    assert.deepEqual(
+      selections(classifyPaths([filename])),
+      {
+        native: false,
+        python: false,
+        tooling: true,
+        npm: false,
+        docs: false,
+      },
+      filename
+    );
+  }
+  const workflow = yaml.load(
+    fs.readFileSync(path.join(projectRoot, '.github/workflows/ci.yml'), 'utf8')
+  );
+  const quick = workflow.jobs['quick-check'].steps;
+  assert.equal(
+    quick.find((step) => step.uses?.startsWith('actions/checkout@')).with['fetch-depth'],
+    0
+  );
+  const gate = quick.find((step) => step.name === 'Check generated plugins and content versions');
+  assert.equal(gate.env.PLUGIN_BASE_SHA, '${{ github.event.pull_request.base.sha }}');
+  assert.equal(gate.run, 'node scripts/plugins.js check --base "$PLUGIN_BASE_SHA"');
+  assert.ok(quick.some((step) => step.run?.includes('tests/tooling/plugins.test.js')));
+});
+
 it('keeps ordinary documentation changes in the strict docs lane', () => {
   assert.equal(classifyPath('docs/concepts/targets.md'), 'docs');
   assert.deepEqual(selections(classifyPaths(['docs/concepts/targets.md'])), {
@@ -285,6 +328,25 @@ it('makes README checks mandatory and gates heavy Opcore steps with the shared c
   );
   assert.equal(heavy.length, 5);
   for (const step of heavy) assert.equal(step.if, "steps.paths.outputs.readme_only != 'true'");
+
+  const prSteps = ci.jobs['quick-check'].steps;
+  const fullInstall = opcore.jobs.check.steps.find((step) => step.name === 'Install Opcore');
+  const fullFast = opcore.jobs.check.steps.find(
+    (step) => step.name === 'Check all supported source'
+  );
+  const prInstall = prSteps.find((step) => step.name === fullInstall.name);
+  const prFast = prSteps.find((step) => step.run === fullFast.run);
+  const rustSetup = prSteps.find((step) => step.uses?.startsWith('dtolnay/'));
+  assert.ok(prInstall, 'PR checks must install the pinned checker');
+  assert.ok(prFast, 'PR checks must run the same Fast command as full CI');
+  assert.ok(rustSetup, 'Native PR checks must retain Rust setup');
+  const prGuard = fullFast.if.replace('steps.paths.outputs', 'needs.classify.outputs');
+  assert.equal(prInstall.if, prGuard);
+  assert.equal(prFast.if, prGuard);
+  assert.equal(prInstall.run, fullInstall.run);
+  assert.equal(ci.jobs.classify.outputs.readme_only, '${{ steps.paths.outputs.readme_only }}');
+  assert.ok(prSteps.indexOf(prInstall) < prSteps.indexOf(prFast));
+  assert.ok(prSteps.indexOf(prFast) < prSteps.indexOf(rustSetup));
 });
 
 it(

@@ -13,6 +13,10 @@ mod catalog;
 mod data;
 #[path = "profile_ui/outcomes.rs"]
 mod outcomes;
+#[path = "profile_ui/setup.rs"]
+mod setup;
+#[path = "profile_ui/template_runtime.rs"]
+mod template_runtime;
 
 /// A native workspace problem, independent of an HTTP framework or profile store.
 #[derive(Debug, thiserror::Error)]
@@ -55,7 +59,22 @@ pub fn catalog_with_harnesses(
         "workers": catalog::workers()?,
         "runtimeSchema": schemars::schema_for!(RuntimePlan),
         "harnesses": harnesses.descriptors().collect::<Vec<_>>(),
+        "setupLanes": setup::lanes(harnesses)?,
     }))
+}
+
+/// Derive hosted access from an authored runtime without reading secrets or saving a profile.
+/// The returned runtime preserves custom declarations and applies native contained-provider defaults.
+pub fn profile_setup(request: Value) -> Result<Value, WorkspaceError> {
+    profile_setup_with_harnesses(request, &crate::harnesses::HarnessRegistry::core())
+}
+
+/// Prepare connection access using the same registry advertised and admitted by this host.
+pub fn profile_setup_with_harnesses(
+    request: Value,
+    harnesses: &crate::harnesses::HarnessRegistry,
+) -> Result<Value, WorkspaceError> {
+    setup::apply(request, harnesses)
 }
 
 /// Apply a graph outcome operation to a draft without persisting or admitting it.

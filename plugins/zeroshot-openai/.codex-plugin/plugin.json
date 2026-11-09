@@ -1,0 +1,31 @@
+{
+  "name": "zeroshot",
+  "version": "0.1.0",
+  "description": "Plan software changes, design workflows, and run verified work on Zeroshot Platform.",
+  "author": {
+    "name": "The Open Engine",
+    "url": "https://zeroshot.sh"
+  },
+  "homepage": "https://zeroshot.sh",
+  "repository": "https://github.com/the-open-engine/zeroshot",
+  "license": "MIT",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Zeroshot",
+    "shortDescription": "Plan and run software work",
+    "longDescription": "Plan software changes, design workflows, and run verified work on Zeroshot Platform.",
+    "developerName": "The Open Engine",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://zeroshot.sh",
+    "supportURL": "https://github.com/the-open-engine/zeroshot/issues",
+    "privacyPolicyURL": "https://app.zeroshot.sh/legal/privacy",
+    "termsOfServiceURL": "https://app.zeroshot.sh/legal/terms",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png"
+  }
+}

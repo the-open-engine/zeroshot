@@ -35,6 +35,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `zeroshot update`; only the exact value `1` enables it. Executables still install/update, existing
   skills stay untouched, and updates skip skill downloads. Keep default managed-copy protections
   when the opt-out is unset.
+- The remote OpenAI and Claude plugin packages under `plugins/zeroshot-*` contain unchanged copies
+  of the canonical run, plan, and graph-design skills. `npm run plugins:generate` owns those folders
+  and both marketplace catalogs; never edit generated files. Keep each skill self-contained so npm
+  installation, native self-update, and the four existing skill release assets keep their formats.
+  `plugins/metadata.json` owns one plugin content version for both client packages. Increase it when
+  emitted package content changes; `plugins:check -- --base SHA` verifies the fetched exact PR base
+  and fails on missing history. This client-cache version adds no runtime release tag or workflow.
 - The target image is `ghcr.io/the-open-engine/zeroshot-target`.
 - The Python distribution is `the-open-engine-zeroshot`; its import package remains `zeroshot`.
 - Python SDK tags are `zeroshot-python-vZEROSHOT_SDK` and package versions are
@@ -47,8 +54,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Releases are authoritative. Never commit a staged release version to `main`.
 - `zeroshot update` resolves the newest canonical GitHub Release, verifies the declared host archive
   and canonical skill assets through that release's `SHA256SUMS`, smoke-checks the
-  staged executable, and replaces the running executable in place without privilege escalation. It
-  installs or refreshes only unchanged managed skill copies and preserves conflicts.
+  staged executable, and replaces the running executable in place without privilege escalation.
+  Staging and replacement hold an exclusive `.zeroshot-update.lock` beside the executable. Under it,
+  an update removes what interrupted updates left there, restoring a moved-aside Restic sidecar when
+  none is installed, and reports `updated: false` when the executable and sidecar already hold the
+  release's bytes. It installs or refreshes only unchanged managed skill copies and preserves
+  conflicts.
   Development-placeholder builds refuse self-update. Update downloads use an idle timeout, never a
   whole-request limit, and keep their size caps. Failures carry the complete cause chain and GitHub's
   bounded, control-safe `message`, never request URLs.
@@ -430,7 +441,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `GH_HOST`/`GITLAB_HOST`, defaulting only to GitHub.com/GitLab.com when absent. Unknown hosts require native configured
   identity or paired `--source-provider`/`--source-base-url` overrides. Shared Git transport remains
   independent of forge API credentials. GitLab uses bounded HTTP effects and synchronous SHA-guarded
-  merges; required merge trains remain pending. Synthetic pipeline SHAs do not prove captured-head CI.
+  merges; required merge trains remain pending. GitLab readiness, approval handoff and merge share
+  required-CI policy: explicit `only_allow_merge_if_pipeline_succeeds: false` yields `NotRequired`
+  regardless of head-pipeline presence or status, never `Passed`. Required or unknown policy needs
+  captured-head CI evidence; absent/running CI stays pending and failure/skipped rules still apply.
+  Synthetic pipeline SHAs do not prove required captured-head CI. All non-CI gates remain authoritative.
   Empty generated delivery bindings acquire the adapter's default connection only after source or
   comment destination selection. Managed GitHub.com token/file fallback never authorizes another instance.
   Adapters own optional canonical review/commit receipt links and comment permalink validation.
@@ -1297,6 +1312,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   without inventing global choices. An explicit empty catalog offers none. Omitted/null sizes use
   the target default; unavailable authored sizes stay visible and unchanged. Hosts enforce
   availability and billing; descriptors are not profile data.
+- The native template catalog exposes each complete authored default runtime, a concise description,
+  and contained connection requirements derived through the harness registry. Code review preserves
+  its supplied mixed Claude/Codex agent plan and native source-neutral delivery; catalog defaults omit
+  target-owned size and enable checkpoints.
+  `workspace::profile_setup` materializes hosted provider access after caller edits without saving,
+  resolving secrets or replacing custom declarations. `setupLanes` exports the same registry's accepted
+  provider field sets. Host-selected setup validates and materializes through the same registry as
+  bootstrap/admission; local contributions remain unavailable to default and target setup.
+  New graph/runtime definitions need no template-specific host wizard registry.
 - Runtime schemas/workers come from native contracts in `profile_ui/catalog.rs`, compiled under
   `workspace`. Git delivery keeps its fixed contracts and explicit pull-request/merge modes. Model suggestions are non-authoritative;
   identifiers remain opaque. Missing harness/provider links to runtime settings. JSON stays lossless.
@@ -1385,9 +1409,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   descriptors inherited by concurrent process spawns.
 - Python test doubles use `openengine_cluster_testkit::fixture::python3_script`, which resolves
   the test PATH's actual interpreter before entering a pinned or cleared child environment.
-- `.opcore.json` owns the full-source Opcore policy. The reusable `.github/workflows/opcore.yml`
-  runs the Fast provider and Cargo with warnings denied in merge-group/manual full CI, except
-  for root-README-only changes identified by the shared CI classifier. Cargo uses the complete checkout
+- `.opcore.json` owns the full-source Opcore policy. PR quick checks run checksum-pinned Opcore Fast
+  before queue admission. The reusable `.github/workflows/opcore.yml` checks the actual merge candidate
+  with Fast and Cargo with warnings denied in merge-group/manual full CI. Both Fast passes skip
+  root-README-only changes identified by the shared CI classifier. Cargo uses the complete checkout
   because Opcore's Rust snapshot omits embedded Python assets. The two exact PowerShell exclusions
   reflect unsupported parsing; the Windows native CI lane still runs those scripts.
 - Preserve bounded values, explicit overflow, cancellation safety, and exact source provenance at

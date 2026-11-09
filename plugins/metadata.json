@@ -1,0 +1,14 @@
+{
+  "name": "zeroshot",
+  "version": "0.1.0",
+  "marketplace": "the-open-engine",
+  "displayName": "Zeroshot",
+  "description": "Plan software changes, design workflows, and run verified work on Zeroshot Platform.",
+  "publisher": "The Open Engine",
+  "websiteURL": "https://zeroshot.sh",
+  "supportURL": "https://github.com/the-open-engine/zeroshot/issues",
+  "privacyPolicyURL": "https://app.zeroshot.sh/legal/privacy",
+  "termsOfServiceURL": "https://app.zeroshot.sh/legal/terms",
+  "documentationURL": "https://the-open-engine.github.io/zeroshot/current/guides/plugins/",
+  "icon": "plugins/assets/zeroshot-seal.png"
+}

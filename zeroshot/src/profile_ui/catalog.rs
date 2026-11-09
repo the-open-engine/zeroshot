@@ -36,6 +36,8 @@ pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
         for delivery in deliveries {
             let graph = materialize(*template, *delivery)?;
             let bindings = template_bindings(*template, *delivery, &graph)?;
+            let runtime = super::template_runtime::for_template(*template, *delivery, &graph)?;
+            let setup = super::profile_setup(json!({"runtime":runtime}))?;
             result.push(json!({
                 "id":format!("{}:{}", template.name(), delivery.name()),
                 "name":template.name(),
@@ -43,6 +45,9 @@ pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
                 "label":template_label(*template, *delivery),
                 "graph":graph,
                 "runtimeBindings":bindings,
+                "description":super::template_runtime::description(*template),
+                "runtime":runtime,
+                "requirements":setup["requirements"],
             }));
         }
     }

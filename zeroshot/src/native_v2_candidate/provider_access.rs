@@ -19,9 +19,17 @@ pub(crate) fn materialize_provider_access(
     runtime: &mut RuntimePlan,
     placement: ProviderAccessPlacement,
 ) -> Result<(), crate::harnesses::HarnessError> {
+    materialize_provider_access_with_registry(runtime, placement, &HarnessRegistry::local())
+}
+
+pub(crate) fn materialize_provider_access_with_registry(
+    runtime: &mut RuntimePlan,
+    placement: ProviderAccessPlacement,
+    registry: &HarnessRegistry,
+) -> Result<(), crate::harnesses::HarnessError> {
     let default_lane = runtime.lane();
     for binding in runtime.nodes_mut().values_mut() {
-        materialize_binding(binding, default_lane.clone(), placement)?;
+        materialize_binding(binding, default_lane.clone(), placement, registry)?;
     }
     Ok(())
 }
@@ -30,6 +38,7 @@ fn materialize_binding(
     binding: &mut NodeRuntimeBinding,
     default_lane: RuntimeLane,
     placement: ProviderAccessPlacement,
+    registry: &HarnessRegistry,
 ) -> Result<(), crate::harnesses::HarnessError> {
     let NodeRuntimeBinding::Agent {
         lane, connections, ..
@@ -38,7 +47,6 @@ fn materialize_binding(
         return Ok(());
     };
     let effective_lane = lane.clone().unwrap_or(default_lane);
-    let registry = HarnessRegistry::local();
     let contract = registry
         .access(&effective_lane)
         .map_err(|error| crate::harnesses::HarnessError::Configuration(error.to_string()))?;

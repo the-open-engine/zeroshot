@@ -4,6 +4,9 @@ description: 'Install the zeroshot CLI and its agent skills, connect Cloud, open
 
 # Install Zeroshot
 
+To use Zeroshot from ChatGPT, Codex, or Claude without installing this CLI,
+[install the plugin and connect MCP](../guides/plugins.md).
+
 Install the `zeroshot` command and its agent skills through the npm delivery package, which requires
 Node.js 18 or newer. The installer selects the release target declared for the current system and
 checks the downloaded archive against `SHA256SUMS` before writing the native executable.
@@ -21,6 +24,9 @@ zeroshot update
 ```
 
 The update does not elevate privileges; the current executable must be writable by the caller.
+Updates of one installation replace it one at a time. An update that waited for another one and
+finds the same release already installed reports `"updated":false`. Before installing a newer
+release, an update also removes the files that interrupted updates left next to the executable.
 A download fails with a timeout once the server has sent nothing for 30 seconds; a slow download
 that keeps receiving data is never cut off. Failures name their cause, such as an unreachable or
 refusing proxy, an untrusted certificate, or GitHub's explanation of a rate limit.
