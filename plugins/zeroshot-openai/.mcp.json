@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "zeroshot": {
+      "type": "http",
+      "url": "https://api.app.zeroshot.sh/mcp",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": {
+              "mode": "dcr"
+            }
+          }
+        }
+      }
+    }
+  }
+}

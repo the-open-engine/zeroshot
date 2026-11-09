@@ -1,0 +1,14 @@
+{
+  "name": "the-open-engine",
+  "owner": {
+    "name": "The Open Engine"
+  },
+  "description": "Zeroshot skills and its hosted Platform connection.",
+  "plugins": [
+    {
+      "name": "zeroshot",
+      "source": "./plugins/zeroshot-claude",
+      "description": "Plan software changes, design workflows, and run verified work on Zeroshot Platform."
+    }
+  ]
+}

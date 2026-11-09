@@ -1,6 +1,6 @@
 ---
 name: zeroshot-graph-design
-description: Design or revise a Zeroshot graph through a guided interview grounded in the invoking repository. Review an ASCII diagram and exact node instructions, select runtimes, then confirm the profile name and local or platform storage scope before saving.
+description: Design or revise a Zeroshot graph through a guided interview grounded in available repository evidence. Review an ASCII diagram and exact node instructions, select runtimes, then confirm the profile name and local or Platform storage scope before saving through CLI or MCP.
 ---
 
 # Zeroshot graph design
@@ -9,17 +9,31 @@ Help the user design a lean graph they understand and can reuse. Keep the conver
 
 ## Confirm the starting point
 
-Begin by asking:
+For a local checkout, begin by asking:
 
 > I'll assume you want a reusable code-change graph for the repository this skill was called from: `<invoking directory>`. Is that right, or do you have a different purpose or repository in mind?
 
-Use the actual invoking directory. Wait for the answer before inspecting the repository or proposing a graph. If the user already confirmed this in the conversation, continue without repeating the question. Honor any specific task or different purpose they provide; otherwise keep the task as a per-run input.
+Use the actual invoking directory. In a browser chat without a checkout, ask which repository or
+purpose the profile should serve and use available host context, attachments, or user-supplied
+evidence instead of inventing an invoking path. Wait for the answer before proposing a graph. If
+the user already confirmed the purpose or repository, continue without repeating the question;
+otherwise keep the task as a per-run input.
+
+Keep target and transport separate. Explicit MCP/plugin access requires the connected Zeroshot
+server; when disconnected, help set it up rather than switching to CLI/local execution. Explicit
+CLI access, including Platform through `--target platform`, uses native CLI login without needing
+MCP. Use logical tool names below and discover their client-qualified names from the connected
+server instead of assuming a host-specific prefix.
 
 Do not ask for harnesses, models, or effort yet.
 
 ## Inspect and propose
 
 Read applicable repository guidance, manifests, scripts, CI workflows, test configuration, and enough representative code to identify the stack and normal development workflow. Use read-only inspection; designing a graph does not require running the test suite or changing application code.
+
+Ask for unavailable evidence needed to choose meaningful checks. Label a provisional graph and its
+unresolved facts; do not claim to have inspected inaccessible files or invent test commands. Missing
+evidence needed for a runnable profile remains a blocking question.
 
 Infer what the user would almost always check after a code change. Ground the proposal in concrete commands and file paths, and label uncertain assumptions. Distinguish routine checks from checks that depend on the affected code:
 
@@ -81,15 +95,38 @@ Prefer a continuing worker session and fresh independent reviewer sessions when 
 
 ## Prepare the profile
 
-Use installed Zeroshot help and version-matched documentation as the contract. The official [review-loop guide](https://the-open-engine.github.io/zeroshot/current/guides/review-loop/) and [runtime-plan reference](https://the-open-engine.github.io/zeroshot/current/reference/runtime-plan/) describe the separate graph and runtime documents; check compatibility with the installed version.
+For MCP, read `get_authoring_catalog` for the connected server's graph/runtime schemas and
+templates; validate the resulting documents with `validate_profile`. Use each tool's typed input
+schema, without a generic `request` or `action` wrapper. For CLI, use installed help and
+version-matched documentation as the contract. The official [review-loop guide](https://the-open-engine.github.io/zeroshot/current/guides/review-loop/) and [runtime-plan reference](https://the-open-engine.github.io/zeroshot/current/reference/runtime-plan/) describe the separate graph and runtime documents; check compatibility with the chosen server or installed version.
 
-Produce `graph.json` and `runtime.json` in the user's chosen location, or a dedicated local artifact directory if none was specified. Preserve the reviewed node instructions verbatim. Bind every executable node and connect reviewer verdicts and diagnostics to the loop's acceptance condition and repair feedback. Give bound exhaustion and execution failures explicit unsuccessful outcomes.
+Produce `graph.json` and `runtime.json` in the user's chosen location, or a dedicated local artifact directory if none was specified. When no writable checkout exists, return portable JSON text or downloadable artifacts and say where they exist; do not claim repository writes. Preserve the reviewed node instructions verbatim. Bind every executable node and connect reviewer verdicts and diagnostics to the loop's acceptance condition and repair feedback. Give bound exhaustion and execution failures explicit unsuccessful outcomes.
 
 Use supported validation that does not start a run, subject to repository guidance. Report what was actually validated; JSON parsing alone does not prove graph admission. If Zeroshot or full validation is unavailable, still provide the design and files and state the remaining validation clearly.
 
 ## Final step: save, configure, and explain how to run
 
-Suggest a name and offer local, platform user, or platform organization storage. Use `cloud` unless another target is specified.
+Suggest a name and offer local, Platform user, or Platform organization storage. Use `platform` for
+the built-in remote CLI target unless another target is specified. A local profile requires CLI
+access; MCP saves to the user's chosen Platform scope.
+
+For MCP:
+
+1. Inspect access and name conflicts with `list_profiles`/`get_profile` in the intended scope. Reuse
+   the current authorized organization; ask only if the destination is unresolved. Confirm the
+   name, scope, and any replacement once; an explicit save instruction counts as confirmation.
+2. Validate the exact graph/runtime with `validate_profile`, then call `save_profile` with `scope`,
+   `name`, `graph`, and `runtime`. Read it back with `get_profile` and compare the agreed node
+   instructions and runtime choices. Retain the draft if validation or saving fails. Only call
+   `set_default_profile` when the user requests that default change.
+3. Inspect required named credentials with `list_connections`. When values are missing, link to
+   [Platform](https://app.zeroshot.sh) Connections or a verified browser setup URL. Never request
+   keys in chat or tool arguments. MCP authorization does not configure runtime providers.
+4. Return the saved selector, minimal `initialInput` matching its schema, and the source fields a
+   future run needs: repository, branch, and exact committed revision. Explain that an authorized
+   run uses `submit_profile_run`; hand execution to the `zeroshot` skill only when requested.
+
+The remaining save commands apply to CLI access; a successful MCP save needs no CLI installation.
 
 Before asking for login or an organization, check existing access with `zeroshot profile list --target TARGET --scope SCOPE`. Reuse the session and selected organization; ask only if unresolved. Follow host credential-store guidance if login is needed.
 

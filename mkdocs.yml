@@ -55,6 +55,7 @@ nav:
       - Targets: concepts/targets.md
       - Delivery validation: concepts/delivery-validation.md
   - Guides:
+      - Use Zeroshot through a plugin: guides/plugins.md
       - Plan work before running it: guides/planning.md
       - Prepare a runtime environment: guides/runtime-environments.md
       - Active Memory: guides/active-memory.md
@@ -84,6 +85,7 @@ nav:
           - WebSocket data plane: reference/cluster/data-plane.md
           - Portable bindings: reference/cluster/portable-bindings.md
   - Project:
+      - Plugin review cases: guides/plugins-review.md
       - Documentation versions: project/versioning.md
       - Distribution contract: zeroshot-distribution.md
       - Source-code adapters: project/source-code-adapters.md
