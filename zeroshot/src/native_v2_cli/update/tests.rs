@@ -11,6 +11,8 @@ use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
 use super::*;
 
+mod recovery_tests;
+
 fn rerun_without_skill_opt_out(test_name: &str) -> bool {
     if std::env::var_os("ZEROSHOT_SKIP_SKILLS").is_none() {
         return false;
