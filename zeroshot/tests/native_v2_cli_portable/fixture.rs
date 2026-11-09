@@ -81,7 +81,7 @@ impl Fixture {
         fixture.write(
             "runtime.json",
             // This stand-in mutates the workspace on every graph worker invocation.
-            &json!({"harness":"codex","provider":"openai","size":"small",
+            &json!({"harness":"codex","provider":"openai","size":"host",
             "activeMemory":{"repository":false,"graph":false},
             "nodes":{"worker":{"kind":"agent","model":"fixture-owned-model",
                 "connections":{"openai":["OPENAI_API_KEY","FIXTURE_MODE"]}}}}),

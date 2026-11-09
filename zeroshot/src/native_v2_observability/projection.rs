@@ -7,7 +7,7 @@ pub(super) fn status_result(
         run_id: snapshot.run_id.clone(),
         title: snapshot.title.clone(),
         source: snapshot.source.clone(),
-        size: snapshot.size,
+        size: snapshot.size.clone(),
         at_cursor: snapshot.cursor.clone(),
         status: status_from_snapshot(snapshot)?,
         workspace_recovery: Default::default(),

@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use super::*;
 use crate::native_v2_cli::{BuiltinGraphTemplate, TemplateDelivery};
 use openengine_cluster_protocol::{NonEmptyVec, PayloadType, RecordField, VerifierNode};
@@ -33,7 +34,7 @@ pub(super) fn comment_submission() -> RunSubmission {
         runtime: RuntimePlan::new(
             openengine_cluster_protocol::RuntimeLane::new("codex", (CodexProvider::OpenAi).name())
                 .assert_value(),
-            RunSize::Medium,
+            run_size("medium"),
             BTreeMap::from([(
                 named("deliver"),
                 NodeRuntimeBinding::CommentDelivery {

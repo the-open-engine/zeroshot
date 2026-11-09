@@ -696,7 +696,7 @@ fn local_runtime() -> Value {
     json!({
         "harness":"codex",
         "provider":"openai",
-        "size":"small",
+        "size":"host",
         // Prompt and argument captures describe graph workers, not optional global work.
         "activeMemory":{"repository":false,"graph":false},
         "nodes":{

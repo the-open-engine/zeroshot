@@ -1,5 +1,6 @@
+use openengine_cluster_testkit::fixture::run_size;
 use openengine_cluster_protocol::{
-    HarnessConfiguration, NodeRuntimeBinding, NodeName, RuntimeLane, RuntimePlan, RunSize,
+    HarnessConfiguration, NodeRuntimeBinding, NodeName, RuntimeLane, RuntimePlan,
 };
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -76,7 +77,7 @@ fn native_configuration_admission_reports_node_harness_and_reserved_path() {
         set(&mut binding, config);
         let runtime = RuntimePlan::new(
             RuntimeLane::new(harness, provider).unwrap(),
-            RunSize::Small,
+            run_size("small"),
             BTreeMap::from([(NodeName::new("configured-node").unwrap(), binding)]),
         );
         let detail = registry.validate_runtime(&runtime).unwrap_err().to_string();
@@ -110,7 +111,7 @@ fn unknown_native_json_options_are_left_to_native_semantics() {
         );
         let runtime = RuntimePlan::new(
             RuntimeLane::new(harness, provider).unwrap(),
-            RunSize::Small,
+            run_size("small"),
             BTreeMap::from([(NodeName::new("work").unwrap(), binding)]),
         );
         registry.validate_runtime(&runtime).unwrap();

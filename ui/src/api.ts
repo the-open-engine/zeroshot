@@ -1,5 +1,6 @@
 import type { WorkerOption } from './workers';
 import { validMachineCatalog, type MachineOption } from './machines';
+import { validRunSizeCatalog, type RunSizeCatalog } from './run-sizes';
 import type { Document, Template } from './domain';
 export type Summary = { id: string; name: string; isDefault: boolean };
 export type ProfileProblem = { name: string; isDefault: boolean; message: string };
@@ -76,6 +77,7 @@ export type Bootstrap = {
   runtimeSchema: any;
   harnesses?: HarnessOption[];
   machines?: MachineOption[];
+  runSizes?: RunSizeCatalog;
   version: number;
   workspace: WorkspaceIdentity;
 };
@@ -110,6 +112,7 @@ export function readBootstrap(value: unknown): Bootstrap {
     !result.runtimeSchema ||
     !validHarnessCatalog(result.harnesses) ||
     !validMachineCatalog(result.machines) ||
+    !validRunSizeCatalog(result.runSizes) ||
     !['local', 'target', 'platform'].includes(result.workspace?.kind ?? '') ||
     typeof result.workspace?.id !== 'string' ||
     !result.workspace.id.trim()

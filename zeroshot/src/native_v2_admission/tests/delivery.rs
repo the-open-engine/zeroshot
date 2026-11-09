@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use super::*;
 
 #[tokio::test]
@@ -278,7 +279,7 @@ async fn legacy_merge_worker_remains_admissible_but_is_not_a_stack_profile() {
                         (ClaudeProvider::Anthropic).name()
                     )
                     .assert_value(),
-                    RunSize::Medium,
+                    run_size("medium"),
                     legacy_nodes
                 ),
                 StackDelivery::Merge,

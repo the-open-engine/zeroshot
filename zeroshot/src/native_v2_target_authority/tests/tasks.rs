@@ -13,6 +13,10 @@ struct TaskFactory {
 
 #[async_trait]
 impl TargetControllerFactory for TaskFactory {
+    fn run_sizes(&self) -> Option<openengine_cluster_protocol::TargetRunSizesDiscovery> {
+        Some(fixture_run_sizes())
+    }
+
     fn supports_comment_delivery(&self) -> bool {
         true
     }

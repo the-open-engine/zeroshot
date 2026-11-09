@@ -50,6 +50,14 @@ pub trait TargetControlAuthority: Send + Sync {
     }
 
     async fn discover(&self, target: &TargetRecord) -> Result<(), TargetAuthorityError>;
+    async fn run_sizes(
+        &self,
+        _target: &TargetRecord,
+    ) -> Result<openengine_cluster_protocol::TargetRunSizesDiscovery, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise run sizes",
+        ))
+    }
     async fn login(&self, target: &TargetRecord) -> Result<(), TargetAuthorityError>;
     async fn default_resource_scope(
         &self,

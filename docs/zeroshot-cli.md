@@ -147,6 +147,7 @@ Usage: zeroshot target <COMMAND>
 Commands:
   add    Register a named target
   login  Authenticate with a hosted named target
+  sizes  List the target's offered size identifiers and descriptions
   serve  Serve an unauthenticated direct target
   help   Print this message or the help of the given subcommand(s)
 
@@ -195,6 +196,27 @@ Options:
           Print help (see a summary with '-h')
 ```
 
+#### `zeroshot target sizes`
+
+```text
+List the target's offered size identifiers and descriptions.
+
+Requested size identifiers are forwarded unchanged; the target decides admission.
+
+Usage: zeroshot target sizes [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+          Local target name
+
+Options:
+      --json
+          Emit the complete advertised size catalog as JSON
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 #### `zeroshot target serve`
 
 ```text
@@ -235,6 +257,7 @@ Usage: zeroshot target help [COMMAND]
 Commands:
   add    Register a named target
   login  Authenticate with a hosted named target
+  sizes  List the target's offered size identifiers and descriptions
   serve  Serve an unauthenticated direct target
   help   Print this message or the help of the given subcommand(s)
 ```
@@ -1208,7 +1231,8 @@ RUNTIME CONFIGURATION
     unchanged to the selected harness and
     provider; Zeroshot does not maintain or validate provider model catalogs.
 
-    Sizes are small, medium, large, xl, and gpu_t4. Named targets advertise supported sizes.
+    Size identifiers are target-owned strings. List offered sizes with `zeroshot target sizes NAME`.
+    Omit size to use the target default; the target decides whether a requested size is available.
 
     Every executable graph node needs a same-named binding. Agent bindings require kind and model.
     Optional fields are effort (low, medium, high, xhigh, or max when supported), sessionScope

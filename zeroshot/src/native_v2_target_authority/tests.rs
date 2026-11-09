@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -90,6 +91,18 @@ async fn test_controller() -> Result<Arc<NativeV2PlatformController>, TargetAuth
         .map_err(|error| TargetAuthorityError::unavailable(error.to_string()))
 }
 
+fn fixture_run_sizes() -> openengine_cluster_protocol::TargetRunSizesDiscovery {
+    let id = openengine_cluster_testkit::fixture::run_size("small");
+    openengine_cluster_protocol::TargetRunSizesDiscovery::new(
+        Some(id.clone()),
+        vec![
+            openengine_cluster_protocol::RunSizeDescriptor::new(id, "Test fixture resources")
+                .assert_value(),
+        ],
+    )
+    .assert_value()
+}
+
 #[derive(Default)]
 struct FakeFactory {
     workspace_checkpoints: bool,
@@ -102,6 +115,10 @@ struct FakeFactory {
 
 #[async_trait]
 impl TargetControllerFactory for FakeFactory {
+    fn run_sizes(&self) -> Option<openengine_cluster_protocol::TargetRunSizesDiscovery> {
+        Some(fixture_run_sizes())
+    }
+
     fn supports_workspace_recovery(&self) -> bool {
         true
     }
@@ -142,6 +159,10 @@ struct RejectingFactory;
 
 #[async_trait]
 impl TargetControllerFactory for RejectingFactory {
+    fn run_sizes(&self) -> Option<openengine_cluster_protocol::TargetRunSizesDiscovery> {
+        Some(fixture_run_sizes())
+    }
+
     async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
         test_controller().await
     }
@@ -239,7 +260,7 @@ fn request() -> TargetRunRequest {
             graph: graph_fixture("worker", json!({"kind": "null"})),
             initial_input: Value::Null,
             runtime: crate::native_v2_candidate::test_support::codex_runtime(
-                openengine_cluster_protocol::RunSize::Small,
+                run_size("small"),
                 BTreeMap::new(),
             ),
             source: Some(ResolvedSource {
@@ -944,5 +965,60 @@ async fn assert_workspace_recovery(endpoint: &str, bearer: Option<&str>, adverti
     ];
     for error in errors {
         assert_eq!(!error.to_string().contains("does not support"), advertised);
+    }
+}
+
+#[test]
+fn public_servers_reject_factories_without_a_size_catalog() {
+    struct NoCatalog;
+    #[async_trait]
+    impl TargetControllerFactory for NoCatalog {
+        async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
+            Err(TargetAuthorityError::unavailable(
+                "must not create a controller",
+            ))
+        }
+        async fn submit(
+            &self,
+            _controller: &NativeV2PlatformController,
+            _request: TargetRunRequest,
+        ) -> Result<TargetRunReceipt, TargetAuthorityError> {
+            Err(TargetAuthorityError::unavailable("must not submit a run"))
+        }
+    }
+    let authority = Arc::new(NativeV2TargetAuthority::new(Arc::new(NoCatalog)));
+    for hosted in [false, true] {
+        let endpoint = "ws://127.0.0.1:8080/native-v2/oecp";
+        let server = if hosted {
+            NativeV2TargetServer::new_hosted(authority.clone(), Arc::new(FakeSessions), endpoint)
+        } else {
+            NativeV2TargetServer::new_direct(authority.clone(), identity(), endpoint)
+        };
+        let error = server.err().assert_value();
+        assert_eq!(error.kind(), TargetAuthorityErrorKind::Invalid);
+        assert!(
+            error
+                .message()
+                .contains("must advertise its run size catalog")
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let root =
+            openengine_cluster_testkit::TemporaryDirectory::for_test("private-no-size-catalog");
+        let path = root.path("bootstrap-key");
+        std::fs::write(&path, "07".repeat(32)).assert_value();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).assert_value();
+        let key = TargetBootstrapKey::load_and_unlink(&path).assert_value();
+        assert!(
+            NativeV2TargetServer::new_private(
+                authority,
+                identity(),
+                "ws://127.0.0.1:8080/native-v2/oecp",
+                key,
+            )
+            .is_ok()
+        );
     }
 }

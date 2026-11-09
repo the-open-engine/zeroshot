@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use openengine_cluster_protocol::GraphSpec;
 
 use super::*;
@@ -95,7 +96,7 @@ pub(super) fn runtime(kind: RuntimePlanKind) -> RuntimePlan {
         RuntimePlanKind::Claude => claude_anthropic(),
         RuntimePlanKind::Pi => RuntimeLane::new("pi", "anthropic").assert_value(),
     };
-    RuntimePlan::new(lane, RunSize::Medium, nodes)
+    RuntimePlan::new(lane, run_size("medium"), nodes)
 }
 
 pub(super) fn shipping_graph(kind: RuntimePlanKind) -> GraphSpec {

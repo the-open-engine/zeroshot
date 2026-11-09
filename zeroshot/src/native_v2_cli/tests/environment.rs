@@ -408,7 +408,7 @@ async fn uniform_runtime_is_materialized_by_rust_against_the_selected_graph() {
         runtime.pointer("/nodes/worker/connections/openrouter/0"),
         Some(&json!("OPENROUTER_API_KEY"))
     );
-    assert_eq!(runtime.pointer("/size"), Some(&json!("medium")));
+    assert_eq!(runtime.pointer("/size"), None);
 }
 
 #[tokio::test]

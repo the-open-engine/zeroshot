@@ -1,10 +1,11 @@
+use openengine_cluster_testkit::fixture::run_size;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use openengine_cluster_protocol::{
     ArtifactRef, CompiledGraphIr, Cursor, IdempotencyKey, MAX_SAFE_GENERATION, NodeName, Phase,
-    PositiveInteger, RunId, Sha256Digest, RunSize, RunTitle, ResolvedSource, TerminalResult,
-    TokenCount, TokenUsage, UnixTimestampMillis, WorkerOutcome,
+    PositiveInteger, RunId, Sha256Digest, RunTitle, ResolvedSource, TerminalResult, TokenCount,
+    TokenUsage, UnixTimestampMillis, WorkerOutcome,
 };
 use serde_json::{Value, json};
 
@@ -34,7 +35,7 @@ fn admitted_run() -> AdmittedRun {
         graph,
         initial_input: Value::Null,
         runtime: crate::native_v2_candidate::test_support::codex_runtime(
-            RunSize::Medium,
+            run_size("medium"),
             Default::default(),
         ),
         source: Some(openengine_cluster_testkit::native_v2_source_fixture()),
@@ -92,7 +93,17 @@ fn usage(
 
 fn projected_snapshot(run: &str) -> RunSnapshot {
     let admitted = admitted_run();
-    RunSnapshot::admitted(RunId::new(run), &admitted)
+    RunSnapshot::admitted(RunId::new(run), &admitted).assert_value()
+}
+
+#[test]
+fn unresolved_admitted_size_returns_a_ledger_error_without_panicking() {
+    let mut admitted = admitted_run();
+    admitted.runtime.size = None;
+    assert_eq!(
+        RunSnapshot::admitted(RunId::new("unresolved"), &admitted),
+        Err(RunLedgerError::Corrupt)
+    );
 }
 
 fn safe_log(execution: Option<ExecutionId>) -> RunEvent {
@@ -779,3 +790,40 @@ async fn sqlite_reopens_legacy_generic_and_absent_source_without_fabricated_prov
 
 #[path = "tests/failure_context.rs"]
 mod failure_context;
+
+#[tokio::test]
+async fn sqlite_rejects_unresolved_or_inconsistent_persisted_size_without_panicking() {
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test("corrupt-run-size");
+    let path = root.path("runs.sqlite3");
+    let ledger = SqliteRunLedger::open(&path).assert_value();
+    let created = ledger
+        .create_or_get(create("run-size", "key-size", 'e'))
+        .await
+        .assert_value();
+    let original = serde_json::to_value(created.stored()).assert_value();
+    let database = rusqlite::Connection::open(&path).assert_value();
+    for mutation in ["missing", "null", "mismatch"] {
+        let mut stored = original.clone();
+        match mutation {
+            "missing" => {
+                stored["admitted"]["runtime"]
+                    .as_object_mut()
+                    .assert_value()
+                    .remove("size");
+            }
+            "null" => stored["admitted"]["runtime"]["size"] = Value::Null,
+            _ => stored["admitted"]["runtime"]["size"] = json!("different-size"),
+        }
+        database
+            .execute(
+                "UPDATE v2_runs SET stored_json = ?1 WHERE run_id = 'run-size'",
+                [stored.to_string()],
+            )
+            .assert_value();
+        assert_eq!(
+            ledger.get(&RunId::new("run-size")).await,
+            Err(RunLedgerError::Corrupt)
+        );
+        assert_eq!(ledger.list().await, Err(RunLedgerError::Corrupt));
+    }
+}

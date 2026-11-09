@@ -13,13 +13,35 @@ requesting an access token or submitting a run or profile, and the target enforc
 again during admission. Older targets without this extension accept only the established core
 harnesses through client preflight.
 
-Targets may advertise accepted machine size identities through
-`extensions.run_sizes: {kind: "openengine.run-sizes/v1", sizes: ["medium", "large", "xl", "gpu_t4"]}`.
-The CLI checks this catalog before requesting access tokens or submitting inline runs or profiles.
-An explicit empty list permits no sizes. Without the exact extension, client preflight retains
-`small`, `medium` and `large`; `xl` and `gpu_t4` require positive advertisement. Hosts choose machine
-resources and enforce size availability at admission. A runtime size is shared by the graph's agents,
-independently of their harness/provider lanes. Zeroshot does not define AWS shapes or billing prices.
+Sizes are target-owned identifiers of 1–128 non-control Unicode characters. A target advertises
+its catalog through `extensions.run_size_catalog`:
+
+```json
+{
+  "kind": "openengine.run-sizes/v2",
+  "default": "standard",
+  "sizes": [
+    { "id": "standard", "description": "4 vCPU, 16 GiB RAM, 128 GiB disk" },
+    { "id": "big-box", "description": "32 vCPU, 128 GiB RAM, 1024 GiB disk" }
+  ]
+}
+```
+
+List a named target's identifiers and descriptions with `zeroshot target sizes NAME`.
+The default output is a table that wraps to terminal width; add `--json` for the structured catalog.
+Hosted targets may return the current organization's enabled catalog through authenticated discovery.
+
+The CLI and SDK forward an explicitly requested identifier unchanged. They do not maintain size
+names or reject a request because a discovery list is missing, empty, or stale. The target decides
+availability and rejects unsupported or disabled sizes. An omitted or null size selects the target's
+default at admission; the accepted run stores that concrete size. Requests retain their original
+identity, so an exact retry still returns the accepted run after a catalog/default change.
+
+An empty catalog offers no sizes and has no default. Local execution and `target serve` offer `host`,
+which uses the current host's CPU, memory and storage. Private capsules preserve the concrete size
+already admitted by their host. The descriptor extension uses its own key so older string-based size
+advertisements cannot break unrelated discovery operations. Size is shared by the graph's agents,
+independently of their harness/provider lanes; Zeroshot defines no AWS shapes or billing prices.
 
 Official local builds include contributed adapters; Platform and the default target image enable
 only core adapters. See [Harness adapters](../project/harness-adapters.md) for availability and

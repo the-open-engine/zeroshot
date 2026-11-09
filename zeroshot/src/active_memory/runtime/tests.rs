@@ -556,7 +556,8 @@ async fn wrappers_preserve_runner_admission_and_postmortem_opt_out_without_model
                     snapshot: crate::v2_run_ledger::RunSnapshot::admitted(
                         run_id.clone(),
                         &admitted,
-                    ),
+                    )
+                    .unwrap(),
                     admitted: admitted.clone(),
                     primary_terminal: openengine_cluster_protocol::TerminalResult::Succeeded {
                         output: Value::Null,

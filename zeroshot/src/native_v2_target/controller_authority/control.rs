@@ -106,6 +106,48 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         }
     }
 
+    async fn run_sizes(
+        &self,
+        target: &TargetRecord,
+    ) -> Result<openengine_cluster_protocol::TargetRunSizesDiscovery, TargetAuthorityError> {
+        let (controller, access) = self.controller_access(target).await?;
+        let controller = match target.access {
+            TargetAccess::Direct => controller,
+            TargetAccess::Hosted { .. } => {
+                let origin = super::contract::parse_origin(&target.origin)?;
+                let url = origin
+                    .join(super::DISCOVERY_PATH)
+                    .map_err(|_| authority_error("target discovery URL is invalid"))?;
+                let response = self
+                    .with_access(self.client.get(url.clone()), access.as_deref())?
+                    .header(ACCEPT, "application/json")
+                    .send()
+                    .await
+                    .map_err(|error| {
+                        TargetAuthorityError::request_failed("target run sizes", &error)
+                    })?;
+                require_response_route(&response, &url)?;
+                self.invalidate_rejected_access(&response, access.as_ref())
+                    .await;
+                let wire = super::contract::read_success_json_with_limit(
+                    response,
+                    &url,
+                    "target run sizes",
+                    super::contract::MAX_DISCOVERY_RESPONSE_BYTES,
+                )
+                .await?;
+                super::contract::build_controller_descriptor(
+                    &origin,
+                    wire,
+                    target.access.authentication(),
+                )?
+            }
+        };
+        controller
+            .run_sizes
+            .ok_or_else(|| authority_error("target does not advertise run sizes"))
+    }
+
     async fn login(&self, target: &TargetRecord) -> Result<(), TargetAuthorityError> {
         self.require_human_credential()?;
         let device_token = target

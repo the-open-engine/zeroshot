@@ -289,7 +289,7 @@ fn node_edits_through_nodes_mut_are_visible_through_nodes() {
 fn runtime_plan_constructor_preserves_existing_wire_defaults() {
     let plan = RuntimePlan::new(
         lane("opencode", "openai"),
-        RunSize::Medium,
+        RunSize::new("medium").assert_value(),
         Default::default(),
     );
     assert_eq!(
@@ -297,6 +297,31 @@ fn runtime_plan_constructor_preserves_existing_wire_defaults() {
         serde_json::json!({
             "harness":"opencode", "provider":"openai", "size":"medium", "nodes":{}
         })
+    );
+}
+
+#[test]
+fn omitted_runtime_size_remains_omitted_for_target_default_resolution() {
+    let wire = serde_json::json!({"harness":"codex", "provider":"openai", "nodes":{}});
+    let plan = serde_json::from_value::<RuntimePlan>(wire.clone()).assert_value();
+    assert_eq!(plan.size(), None);
+    assert_eq!(serde_json::to_value(&plan).assert_value(), wire);
+    assert_eq!(
+        RuntimePlan::new(lane("codex", "openai"), None, Default::default()),
+        plan
+    );
+}
+
+#[test]
+fn authored_target_size_is_preserved_in_runtime_plans() {
+    let size = RunSize::new("custom-big-box").assert_value();
+    let plan = RuntimePlan::new(lane("codex", "openai"), size.clone(), Default::default());
+    assert_eq!(plan.size(), Some(&size));
+    let wire = serde_json::to_value(&plan).assert_value();
+    assert_eq!(wire["size"], "custom-big-box");
+    assert_eq!(
+        serde_json::from_value::<RuntimePlan>(wire).assert_value(),
+        plan
     );
 }
 

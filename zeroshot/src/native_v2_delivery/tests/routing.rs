@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use super::*;
 use openengine_cluster_protocol::GraphSpec;
 use openengine_cluster_testkit::assertions::JsonAt;
@@ -366,7 +367,7 @@ async fn admitted_routing_graph(
                     (crate::native_v2_contract::CodexProvider::OpenAi).name(),
                 )
                 .assert_value(),
-                RunSize::Medium,
+                run_size("medium"),
                 BTreeMap::from([
                     (NodeName::new("deliver").assert_value(), delivery),
                     (NodeName::new("repair").assert_value(), repair),

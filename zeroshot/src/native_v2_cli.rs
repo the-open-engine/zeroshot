@@ -333,6 +333,10 @@ pub enum NativeV2CliCommand {
         name: String,
     },
     TargetServe(TargetServe),
+    TargetSizes {
+        name: String,
+        json: bool,
+    },
     Delegation(DelegationCommand),
     Ui {
         listen: SocketAddr,
@@ -433,7 +437,10 @@ impl NativeV2CliCommand {
     }
 
     fn is_target_operation(&self) -> bool {
-        matches!(self, Self::TargetAdd(_) | Self::TargetLogin { .. })
+        matches!(
+            self,
+            Self::TargetAdd(_) | Self::TargetLogin { .. } | Self::TargetSizes { .. }
+        )
     }
 }
 
@@ -569,6 +576,15 @@ pub trait NativeV2CliBackend: Send + Sync {
 
     async fn target_add(&self, request: TargetAdd) -> Result<(), NativeV2CliError>;
     async fn target_login(&self, name: &str) -> Result<(), NativeV2CliError>;
+
+    async fn target_sizes(
+        &self,
+        _name: &str,
+    ) -> Result<openengine_cluster_protocol::TargetRunSizesDiscovery, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise run sizes".to_owned(),
+        ))
+    }
 
     /// A secret-free namespace separating retry snapshots by execution authority.
     /// Backends without a stable identity leave snapshots uncached.

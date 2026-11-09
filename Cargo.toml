@@ -54,6 +54,7 @@ tar = "0.4.44"
 tempfile = "3.20.0"
 windows-sys = "0.61.2"
 uuid = { version = "1.23.5", features = ["v7"] }
+unicode-width = "0.2"
 
 openengine-cluster-protocol = { path = "crates/openengine-cluster-protocol" }
 openengine-cluster-server = { path = "crates/openengine-cluster-server" }

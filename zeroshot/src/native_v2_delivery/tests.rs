@@ -1,5 +1,6 @@
 #![cfg(unix)]
 
+use openengine_cluster_testkit::fixture::run_size;
 use std::{any::Any, collections::BTreeMap, fs, path::PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -24,8 +25,8 @@ use crate::native_v2_candidate::test_support::{
 };
 use crate::native_v2_contract::{
     self, DeclaredConnections, DeclaredEnvironment, ExecutionRef, NodeInvocation,
-    NodeRuntimeBinding, PullRequestFeedback, RunSize, RunSubmission, RunTitle, RuntimePlan,
-    SourceBranchId, SourceRepositoryId, SourceRevisionId, ResolvedSource,
+    NodeRuntimeBinding, PullRequestFeedback, RunSubmission, RunTitle, RuntimePlan, SourceBranchId,
+    SourceRepositoryId, SourceRevisionId, ResolvedSource,
 };
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, NativeNodeRunner, NodeDriver, NodeRunRequest, NodeRunner,
@@ -1310,7 +1311,7 @@ async fn admitted_with_feedback(
 
 fn delivery_runtime(binding: NodeRuntimeBinding) -> RuntimePlan {
     crate::native_v2_candidate::test_support::codex_runtime(
-        RunSize::Medium,
+        run_size("medium"),
         BTreeMap::from([(NodeName::new("deliver").assert_value(), binding)]),
     )
 }

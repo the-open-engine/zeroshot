@@ -446,21 +446,50 @@ fn decision_capability_has_its_own_strict_marker_and_preserves_unknown_extension
     );
 }
 
+fn size_descriptor(id: &str, description: &str) -> RunSizeDescriptor {
+    RunSizeDescriptor::new(crate::RunSize::new(id).assert_value(), description).assert_value()
+}
+
 #[test]
-fn run_size_discovery_is_strict_and_independent_of_other_capabilities() {
-    let catalog = TargetRunSizesDiscovery::new(vec![
-        crate::RunSize::Medium,
-        crate::RunSize::Xl,
-        crate::RunSize::GpuT4,
-    ])
+fn size_descriptions_keep_their_explicit_utf8_byte_limit() {
+    let id = crate::RunSize::new("custom").assert_value();
+    for (description, valid) in [("é".repeat(512), true), ("é".repeat(513), false)] {
+        assert_eq!(
+            RunSizeDescriptor::new(id.clone(), &description).is_ok(),
+            valid
+        );
+        assert_eq!(
+            serde_json::from_value::<RunSizeDescriptor>(serde_json::json!({
+                "id":id, "description":description,
+            }))
+            .is_ok(),
+            valid
+        );
+    }
+}
+
+#[test]
+fn run_size_discovery_preserves_target_descriptions_and_default() {
+    let catalog = TargetRunSizesDiscovery::new(
+        Some(crate::RunSize::new("custom-big-box").assert_value()),
+        vec![
+            size_descriptor("custom-big-box", "48 vCPU, 192 GiB RAM"),
+            size_descriptor("gpu", "One target-owned accelerator"),
+        ],
+    )
     .assert_value();
-    let document = TargetDiscoveryDocument::direct(TargetAuthentication::HostedOauth)
-        .with_run_sizes(catalog.clone());
+    let document =
+        TargetDiscoveryDocument::direct(TargetAuthentication::HostedOauth).with_run_sizes(catalog);
     let wire = serde_json::to_value(&document).assert_value();
     assert_eq!(
-        wire["extensions"]["run_sizes"],
+        wire["extensions"]["run_size_catalog"],
         serde_json::json!({
-            "kind": RUN_SIZES_KIND, "sizes": ["medium", "xl", "gpu_t4"]
+            "kind": RUN_SIZES_KIND,
+            "default": "custom-big-box",
+            "sizes": [
+                {"id":"custom-big-box", "description":"48 vCPU, 192 GiB RAM"},
+                {"id":"gpu", "description":"One target-owned accelerator"}
+            ]
         })
     );
     assert!(!document.extensions.is_empty());
@@ -468,23 +497,129 @@ fn run_size_discovery_is_strict_and_independent_of_other_capabilities() {
         serde_json::from_value::<TargetDiscoveryDocument>(wire).assert_value(),
         document
     );
-    assert!(TargetRunSizesDiscovery::new(vec![crate::RunSize::Xl; 2]).is_err());
-    assert!(TargetRunSizesDiscovery::new(Vec::new()).is_ok());
-    for sizes in [serde_json::json!(["xl", "xl"]), serde_json::json!(["gpu"])] {
+}
+
+#[test]
+fn run_size_catalog_requires_unique_ids_and_an_offered_default() {
+    let descriptor = size_descriptor("xxl", "16 vCPU, 64 GiB RAM");
+    assert!(TargetRunSizesDiscovery::new(None, Vec::new()).is_ok());
+    assert!(TargetRunSizesDiscovery::new(None, vec![descriptor.clone()]).is_err());
+    assert!(
+        TargetRunSizesDiscovery::new(
+            Some(crate::RunSize::new("unknown").assert_value()),
+            vec![descriptor.clone()]
+        )
+        .is_err()
+    );
+    assert!(TargetRunSizesDiscovery::new(Some(descriptor.id.clone()), Vec::new()).is_err());
+    assert!(
+        TargetRunSizesDiscovery::new(
+            Some(descriptor.id.clone()),
+            vec![descriptor.clone(), descriptor.clone()]
+        )
+        .is_err()
+    );
+    let mut catalog =
+        TargetRunSizesDiscovery::new(Some(descriptor.id.clone()), vec![descriptor.clone()])
+            .assert_value();
+    catalog.kind = "openengine.run-sizes/v1".to_owned();
+    assert!(catalog.validate().is_err());
+    catalog.kind = RUN_SIZES_KIND.to_owned();
+    catalog.sizes.push(descriptor);
+    assert!(catalog.validate().is_err());
+    let too_many = (0..=MAX_TARGET_RUN_SIZES)
+        .map(|index| size_descriptor(&format!("size-{index}"), "Target-owned machine"))
+        .collect();
+    assert!(
+        TargetRunSizesDiscovery::new(Some(crate::RunSize::new("size-0").assert_value()), too_many)
+            .is_err()
+    );
+}
+
+#[test]
+fn discovery_ignores_legacy_and_future_size_extensions_without_name_fallbacks() {
+    let wire = serde_json::to_value(TargetDiscoveryDocument::direct(TargetAuthentication::None))
+        .assert_value();
+    for (key, extension) in [
+        (
+            "run_sizes",
+            serde_json::json!({"kind":"openengine.run-sizes/v1", "sizes":["medium","large","xl"]}),
+        ),
+        (
+            "run_size_catalog",
+            serde_json::json!({"kind":"openengine.run-sizes/v999", "futureShape":true}),
+        ),
+    ] {
+        let mut value = wire.clone();
+        value["extensions"][key] = extension;
+        let decoded: TargetDiscoveryDocument = serde_json::from_value(value).assert_value();
+        assert!(decoded.extensions.run_size_catalog.is_none());
+    }
+    let mut invalid = wire;
+    invalid["extensions"]["run_size_catalog"] = serde_json::json!({
+        "kind":RUN_SIZES_KIND, "default":"custom", "sizes":["custom"]
+    });
+    assert!(serde_json::from_value::<TargetDiscoveryDocument>(invalid).is_err());
+}
+
+#[test]
+fn run_size_catalog_rejects_invalid_descriptions_and_cross_field_wire_values() {
+    for description in [
+        "".to_owned(),
+        " ".to_owned(),
+        "a\nb".to_owned(),
+        "é".repeat(513),
+    ] {
         assert!(
-            serde_json::from_value::<TargetRunSizesDiscovery>(serde_json::json!({
-                "kind": RUN_SIZES_KIND, "sizes": sizes
+            RunSizeDescriptor::new(
+                crate::RunSize::new("custom").assert_value(),
+                description.clone()
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<RunSizeDescriptor>(serde_json::json!({
+                "id":"custom", "description":description
             }))
             .is_err()
         );
     }
     assert!(
-        serde_json::from_value::<TargetRunSizesDiscovery>(serde_json::json!({
-            "kind": RUN_SIZES_KIND, "sizes": ["xl"], "extra": true
-        }))
-        .is_err()
+        RunSizeDescriptor::new(
+            crate::RunSize::new("custom").assert_value(),
+            "é".repeat(512)
+        )
+        .is_ok()
     );
-    let mut invalid = catalog;
-    invalid.sizes.push(crate::RunSize::Xl);
-    assert!(invalid.validate().is_err());
+    let valid = serde_json::json!({
+        "kind":RUN_SIZES_KIND,
+        "default":"custom",
+        "sizes":[{"id":"custom", "description":"Target-owned resources"}]
+    });
+    for pointer in ["/default", "/sizes/0/description"] {
+        let mut invalid = valid.clone();
+        *invalid.pointer_mut(pointer).assert_value() = serde_json::json!("missing");
+        if pointer.ends_with("description") {
+            *invalid.pointer_mut(pointer).assert_value() =
+                serde_json::json!("bad\u{1b}description");
+        }
+        assert!(serde_json::from_value::<TargetRunSizesDiscovery>(invalid).is_err());
+    }
+    let mut duplicate = valid.clone();
+    duplicate["sizes"]
+        .as_array_mut()
+        .assert_value()
+        .push(serde_json::json!({"id":"custom", "description":"Different description"}));
+    assert!(serde_json::from_value::<TargetRunSizesDiscovery>(duplicate).is_err());
+    let mut invalid = valid.clone();
+    invalid["sizes"][0]["extra"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<TargetRunSizesDiscovery>(invalid).is_err());
+    let mut invalid = valid;
+    invalid["extra"] = serde_json::json!(true);
+    assert!(serde_json::from_value::<TargetRunSizesDiscovery>(invalid).is_err());
+    let descriptor = RunSizeDescriptor {
+        id: crate::RunSize::new("custom").assert_value(),
+        description: "bad\u{1b}description".to_owned(),
+    };
+    assert!(TargetRunSizesDiscovery::new(Some(descriptor.id.clone()), vec![descriptor]).is_err());
 }

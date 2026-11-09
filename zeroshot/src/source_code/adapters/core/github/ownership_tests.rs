@@ -1,5 +1,6 @@
 //! Root-supervisor delivery must leave the candidate usable by its contained writer.
 
+use openengine_cluster_testkit::fixture::run_size;
 use std::{
     collections::BTreeMap,
     fs,
@@ -481,7 +482,7 @@ async fn start_delivery(fixture: &OwnershipFixture) -> crate::native_v2_runner::
                 (contract::CodexProvider::OpenAi).name(),
             )
             .assert_value(),
-            contract::RunSize::Small,
+            run_size("small"),
             BTreeMap::from([(node.clone(), binding.clone())]),
         ),
         source: Some(contract::ResolvedSource {

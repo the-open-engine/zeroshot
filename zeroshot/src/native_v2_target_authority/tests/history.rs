@@ -1,4 +1,4 @@
-use openengine_cluster_protocol::RunSize;
+use openengine_cluster_testkit::fixture::run_size;
 use super::*;
 use openengine_cluster_protocol::{
     NodeName, NodeRuntimeBinding, PositiveInteger, Sha256Digest, TerminalResult,
@@ -24,6 +24,10 @@ struct HistoryFactory {
 
 #[async_trait]
 impl TargetControllerFactory for HistoryFactory {
+    fn run_sizes(&self) -> Option<openengine_cluster_protocol::TargetRunSizesDiscovery> {
+        Some(fixture_run_sizes())
+    }
+
     async fn create(&self) -> Result<Arc<NativeV2PlatformController>, TargetAuthorityError> {
         self.creates.fetch_add(1, Ordering::SeqCst);
         NativeV2PlatformController::new(self.ledger.clone(), Arc::new(NoAllocation))
@@ -112,7 +116,7 @@ impl HistoryServer {
             .assert_value();
         submission.initial_input = json!({"task":"Inspect native history"});
         submission.runtime = crate::native_v2_candidate::test_support::codex_runtime(
-            RunSize::Small,
+            run_size("small"),
             BTreeMap::from([(
                 NodeName::new("worker").assert_value(),
                 serde_json::from_value::<NodeRuntimeBinding>(json!({

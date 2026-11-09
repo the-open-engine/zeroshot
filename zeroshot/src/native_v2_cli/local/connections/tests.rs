@@ -1,9 +1,9 @@
+use openengine_cluster_testkit::fixture::run_size;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
 
 use openengine_cluster_protocol::{
-    DeclaredConnections, DeclaredEnvironment, ModelId, NodeName, NodeRuntimeBinding, RunSize,
-    SessionScope,
+    DeclaredConnections, DeclaredEnvironment, ModelId, NodeName, NodeRuntimeBinding, SessionScope,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
@@ -46,7 +46,7 @@ fn runtime(fields: &[&str]) -> RuntimePlan {
         DeclaredEnvironment::new(fields.iter().map(|name| field(name))).assert_value();
     let connections = DeclaredConnections::single("provider", environment).assert_value();
     crate::native_v2_candidate::test_support::codex_runtime(
-        RunSize::Small,
+        run_size("host"),
         BTreeMap::from([(
             NodeName::new("worker").assert_value(),
             NodeRuntimeBinding::Agent {

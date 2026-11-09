@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use super::*;
 use std::sync::Arc;
 use axum::http::HeaderValue;
@@ -11,7 +12,7 @@ use crate::v2_run_ledger::{
     CreateRun, RunEvent, SafeLogLine, SafeLogStream, MAX_EVENT_BYTES, MAX_REPLAY_EVENTS,
 };
 use openengine_cluster_protocol::{
-    CompiledGraphIr, IdempotencyKey, NodeName, PositiveInteger, RunSize, RunTitle, Sha256Digest,
+    CompiledGraphIr, IdempotencyKey, NodeName, PositiveInteger, RunTitle, Sha256Digest,
     SourceBranchId, SourceRepositoryId, SourceRevisionId, ResolvedSource, TerminalResult,
     UnixTimestampMillis, WorkerOutcome,
 };
@@ -380,7 +381,7 @@ impl Fixture {
                     graph,
                     initial_input,
                     runtime: crate::native_v2_candidate::test_support::codex_runtime(
-                        RunSize::Small,
+                        run_size("small"),
                         Default::default(),
                     ),
                     source: Some(repository_source()),

@@ -54,6 +54,9 @@ pub(in crate::native_v2_cli) enum Call {
     TargetLogin {
         name: String,
     },
+    TargetSizes {
+        name: String,
+    },
     ConnectionList {
         target: Option<String>,
         request: ConnectionListRequest,
@@ -527,6 +530,22 @@ impl NativeV2CliBackend for FakeBackend {
             name: name.to_owned(),
         });
         Ok(())
+    }
+
+    async fn target_sizes(
+        &self,
+        name: &str,
+    ) -> Result<openengine_cluster_protocol::TargetRunSizesDiscovery, NativeV2CliError> {
+        use openengine_cluster_protocol::{RunSize, RunSizeDescriptor, TargetRunSizesDiscovery};
+        self.calls.lock().assert_value().push(Call::TargetSizes {
+            name: name.to_owned(),
+        });
+        let id = RunSize::new("lab-custom-48").assert_value();
+        Ok(TargetRunSizesDiscovery::new(
+            Some(id.clone()),
+            vec![RunSizeDescriptor::new(id, "48 vCPU, 192 GiB RAM").assert_value()],
+        )
+        .assert_value())
     }
 
     async fn default_resource_scope(

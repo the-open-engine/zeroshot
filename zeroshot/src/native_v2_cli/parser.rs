@@ -258,6 +258,11 @@ enum TargetCommand {
     /// automatic selection.
     Login(TargetNameArgs),
 
+    /// List the target's offered size identifiers and descriptions.
+    ///
+    /// Requested size identifiers are forwarded unchanged; the target decides admission.
+    Sizes(TargetSizesArgs),
+
     /// Serve an unauthenticated direct target.
     ///
     /// Builds with UI support also serve the profile editor and run history at /ui/.
@@ -382,6 +387,17 @@ struct TargetNameArgs {
     /// Local target name.
     #[arg(value_name = "NAME")]
     name: String,
+}
+
+#[derive(Debug, Args)]
+struct TargetSizesArgs {
+    /// Local target name.
+    #[arg(value_name = "NAME")]
+    name: String,
+
+    /// Emit the complete advertised size catalog as JSON.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -515,7 +531,8 @@ struct TemplateShowArgs {
     unchanged to the selected harness and
     provider; Zeroshot does not maintain or validate provider model catalogs.
 
-    Sizes are small, medium, large, xl, and gpu_t4. Named targets advertise supported sizes.
+    Size identifiers are target-owned strings. List offered sizes with `zeroshot target sizes NAME`.
+    Omit size to use the target default; the target decides whether a requested size is available.
 
     Every executable graph node needs a same-named binding. Agent bindings require kind and model.
     Optional fields are effort (low, medium, high, xhigh, or max when supported), sessionScope

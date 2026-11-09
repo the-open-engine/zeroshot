@@ -772,8 +772,11 @@
           "type": "string"
         },
         "size": {
-          "$ref": "#/$defs/RunSize",
-          "description": "Immutable execution size selected for the run."
+          "description": "Immutable execution size selected for the run.",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
         },
         "source": {
           "anyOf": [
@@ -919,16 +922,6 @@
       },
       "type": "object"
     },
-    "RunSize": {
-      "enum": [
-        "small",
-        "medium",
-        "large",
-        "xl",
-        "gpu_t4"
-      ],
-      "type": "string"
-    },
     "RunStatus": {
       "description": "Public run state. The closed phase variants make impossible combinations unrepresentable:\nadmitted runs have no execution, stopping means force was requested, and finished runs have\nexactly one terminal result and no active execution. Running/stopping report every active\nexecution rather than a single \"current worker\" slot.",
       "oneOf": [
@@ -1030,7 +1023,10 @@
           "type": "string"
         },
         "size": {
-          "$ref": "#/$defs/RunSize"
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
         },
         "source": {
           "anyOf": [
@@ -1075,7 +1071,10 @@
           "type": "string"
         },
         "size": {
-          "$ref": "#/$defs/RunSize"
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "type": "string"
         },
         "source": {
           "anyOf": [

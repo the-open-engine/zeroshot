@@ -134,7 +134,8 @@ impl PortableRunController {
                 bootstrap.delivery_policy,
             )
             .await?
-            .with_harness_registry(crate::harnesses::HarnessRegistry::local()),
+            .with_harness_registry(crate::harnesses::HarnessRegistry::local())
+            .with_run_sizes(crate::native_v2_hosting::host_run_sizes()),
         );
         let receipt = inner
             .submit_with_exact_environment(
@@ -264,8 +265,15 @@ async fn prepare_controller_start(
     bootstrap: &PortableControllerBootstrap,
 ) -> Result<PreparedControllerStart, PortableControllerError> {
     require_absolute(&bootstrap.workspace)?;
+    let harnesses = crate::harnesses::HarnessRegistry::local();
+    let sizes = crate::native_v2_hosting::host_run_sizes();
+    let admission = crate::native_v2_admission::NativeV2AdmissionContext::new(
+        &harnesses,
+        bootstrap.delivery_policy,
+    )
+    .with_run_sizes(&sizes);
     let admitted = NativeV2Admission
-        .admit_with_policy(bootstrap.submission.clone(), bootstrap.delivery_policy)
+        .admit_with_context(bootstrap.submission.clone(), admission)
         .await?;
     let environment = bootstrap
         .environment

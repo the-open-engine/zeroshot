@@ -113,7 +113,7 @@ class UniformRuntime:
             own default.
         max_tokens: Optional caller-declared model output limit. None keeps the provider's own
             default.
-        size: Native small, medium, large, xl, or gpu_t4 run size, subject to target support.
+        size: Opaque target-owned size identifier. None leaves the choice to the target default.
         workspace_checkpoints: Whether to capture workspace snapshots. Defaults to enabled.
         session_scope: execution opens a fresh session for each execution; node_instance reuses a
             live session when that graph node instance runs again.
@@ -131,7 +131,7 @@ class UniformRuntime:
     effort: str | None = None
     context_window: int | None = None
     max_tokens: int | None = None
-    size: str = "medium"
+    size: str | None = None
     workspace_checkpoints: bool = True
     session_scope: str = "execution"
     connections: Mapping[str, tuple[str, ...]] | None = None
@@ -144,10 +144,11 @@ class UniformRuntime:
         value: dict[str, JsonValue] = {
             "provider": self.provider,
             "model": self.model,
-            "size": self.size,
             "sessionScope": self.session_scope,
         }
         value["harness"] = self.harness
+        if self.size is not None:
+            value["size"] = self.size
         if not self.workspace_checkpoints:
             value["workspaceCheckpoints"] = False
         if self.effort is not None:

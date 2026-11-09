@@ -31,7 +31,7 @@ fn prepared_request(run_id: RunId) -> PreparedRunRequest {
         "title":"Local backend routing",
         "graph": full_graph(vec![success_node()]),
         "initialInput":null,
-        "runtime":{"harness":"codex","provider":"openai","size":"small","nodes":{}},
+        "runtime":{"harness":"codex","provider":"openai","size":"host","nodes":{}},
         "submissionKey":"local-backend-routing"
     }))
     .assert_value();

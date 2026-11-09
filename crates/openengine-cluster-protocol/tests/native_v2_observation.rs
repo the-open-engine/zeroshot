@@ -55,7 +55,7 @@ fn status_exposes_every_parallel_execution_without_private_identity() {
         run_id: RunId::new("run-1"),
         title: title(),
         source: Some(source()),
-        size: RunSize::Medium,
+        size: RunSize::new("medium").assert_value(),
         at_cursor: Cursor::new("v2:7"),
         status: running_status(),
         workspace_recovery: Default::default(),
@@ -178,7 +178,7 @@ fn durable_events_carry_run_and_stable_cursor() {
         run_id: RunId::new("run-1"),
         title: title(),
         source: Some(source()),
-        size: RunSize::Medium,
+        size: RunSize::new("medium").assert_value(),
         cursor: Cursor::new("v2:8"),
         status: RunStatus::Finished {
             terminal_result: TerminalResult::Succeeded {
@@ -298,7 +298,7 @@ fn force_is_the_only_stop_shape_and_returns_durable_status() {
         run_id: RunId::new("run-1"),
         title: title(),
         source: Some(source()),
-        size: RunSize::Medium,
+        size: RunSize::new("medium").assert_value(),
         at_cursor: Cursor::new("v2:10"),
         status: RunStatus::Stopping {
             active_executions: vec![active("opaque-verifier-b", "verify-b")],

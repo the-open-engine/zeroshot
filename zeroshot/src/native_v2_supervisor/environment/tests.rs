@@ -1,8 +1,9 @@
+use openengine_cluster_testkit::fixture::run_size;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
 use openengine_cluster_protocol::{
-    DeclaredConnections, DeclaredEnvironment, ModelId, NodeName, RunSize, SessionScope,
+    DeclaredConnections, DeclaredEnvironment, ModelId, NodeName, SessionScope,
 };
 use openengine_cluster_testkit::assertions::AssertValue;
 
@@ -56,7 +57,7 @@ async fn same_environment_name_can_resolve_from_different_keys_on_different_node
     let first = binding("first", &name);
     let second = binding("second", &name);
     let runtime = crate::native_v2_candidate::test_support::codex_runtime(
-        RunSize::Small,
+        run_size("small"),
         BTreeMap::from([
             (NodeName::new("one").assert_value(), first.clone()),
             (NodeName::new("two").assert_value(), second.clone()),
@@ -132,7 +133,7 @@ fn dynamic_environment(
     let name = EnvironmentVariableName::new("GH_TOKEN").assert_value();
     let node = binding("github", &name);
     let runtime = crate::native_v2_candidate::test_support::codex_runtime(
-        openengine_cluster_protocol::RunSize::Small,
+        run_size("small"),
         BTreeMap::from([(NodeName::new("deliver").assert_value(), node.clone())]),
     );
     let key = ConnectionKey::new("github").assert_value();
@@ -205,7 +206,7 @@ async fn rebind_uses_admitted_public_variables_without_replacing_connection_valu
     let setting = EnvironmentVariableName::new("NODE_ENV").assert_value();
     let node = binding("registry", &token);
     let runtime = crate::native_v2_candidate::test_support::codex_runtime(
-        RunSize::Small,
+        run_size("small"),
         BTreeMap::from([(NodeName::new("agent").assert_value(), node.clone())]),
     );
     let definition = |value: &str| RuntimeEnvironment {

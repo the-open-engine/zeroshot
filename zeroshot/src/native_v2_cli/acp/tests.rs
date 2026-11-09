@@ -1,10 +1,11 @@
+use openengine_cluster_testkit::fixture::run_size;
 use std::collections::{BTreeMap, BTreeSet};
 
 use acp::Agent as _;
 use super::*;
 use openengine_cluster_protocol::{
     ClaudeProvider, CodexProvider, CopilotProvider, DeclaredConnections, ModelId, NodeName,
-    RecordField, RunSize, RuntimeLane,
+    RecordField, RuntimeLane,
 };
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 
@@ -228,7 +229,7 @@ fn runtime(harness: &str, scope: &str, connections: Value) -> RuntimePlan {
                 (ClaudeProvider::Anthropic).name(),
             )
             .assert_value(),
-            RunSize::Small,
+            run_size("small"),
             nodes,
         ),
         "copilot" => RuntimePlan::new(
@@ -237,13 +238,13 @@ fn runtime(harness: &str, scope: &str, connections: Value) -> RuntimePlan {
                 (CopilotProvider::Github).name(),
             )
             .assert_value(),
-            RunSize::Small,
+            run_size("small"),
             nodes,
         ),
         _ => RuntimePlan::new(
             openengine_cluster_protocol::RuntimeLane::new("codex", (CodexProvider::OpenAi).name())
                 .assert_value(),
-            RunSize::Small,
+            run_size("small"),
             nodes,
         ),
     }
@@ -287,6 +288,63 @@ fn with_worker_lane(mut runtime: RuntimePlan, lane: RuntimeLane) -> RuntimePlan 
     };
     *worker_lane = Some(lane);
     runtime
+}
+
+#[tokio::test]
+async fn acp_admission_keeps_authored_size_identity_and_pins_the_accepted_host() {
+    let mut profile = acp_profile(runtime("codex", "node_instance", json!({})));
+    profile.runtime.size = None;
+    validate_profile(&profile).await.assert_value();
+
+    let request = submission(&profile, &None, "first task", "omitted-size").assert_value();
+    assert!(request.runtime.size().is_none());
+    let digest = submission_digest(&request).assert_value();
+    let mut explicit = request.clone();
+    explicit.runtime.size = Some(run_size("host"));
+    let explicit_digest = submission_digest(&explicit).assert_value();
+    assert_ne!(digest, explicit_digest);
+    let admitted = admit_submission(request.clone()).await.assert_value();
+    let explicit_admitted = admit_submission(explicit).await.assert_value();
+    assert_eq!(admitted, explicit_admitted);
+    assert_eq!(admitted.runtime.size(), Some(&run_size("host")));
+    assert!(profile.runtime.size().is_none());
+
+    let ledger = SqliteRunLedger::open_in_memory().assert_value();
+    let run_id = new_run_id();
+    ledger
+        .create_or_get(CreateRun {
+            run_id: run_id.clone(),
+            submission_key: request.submission_key.clone(),
+            submission_digest: digest.clone(),
+            admitted,
+        })
+        .await
+        .assert_value();
+    let stored = ledger.get(&run_id).await.assert_value().assert_value();
+    assert_eq!(stored.submission_digest, digest);
+    assert_eq!(stored.snapshot.size, run_size("host"));
+    assert_eq!(
+        ledger
+            .create_or_get(CreateRun {
+                run_id: new_run_id(),
+                submission_key: request.submission_key,
+                submission_digest: explicit_digest,
+                admitted: explicit_admitted,
+            })
+            .await
+            .assert_error(),
+        RunLedgerError::SubmissionConflict {
+            existing_run_id: run_id
+        }
+    );
+
+    profile.runtime.size = Some(run_size("gpu"));
+    let unsupported =
+        submission(&profile, &None, "unsupported machine", "unoffered-size").assert_value();
+    assert!(matches!(
+        admit_submission(unsupported).await,
+        Err(NativeV2AdmissionError::InvalidRuntime(_))
+    ));
 }
 
 #[tokio::test]
