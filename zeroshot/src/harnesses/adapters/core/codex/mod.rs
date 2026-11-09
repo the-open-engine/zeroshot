@@ -503,6 +503,7 @@ impl CodexRunState {
         turn: &CodexTurn<'_>,
         response: AgentResponse,
     ) -> Result<Option<WorkerOutcome>, NodeRunnerError> {
+        self.retry.report_response(turn.control, &response).await?;
         self.response.accept("Codex", turn.control, response).await
     }
 

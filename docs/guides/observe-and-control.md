@@ -1,5 +1,5 @@
 ---
-description: "Observe durable run state in the browser or CLI, inspect node transcripts, reconnect to a run and stop work without changing its history."
+description: 'Observe durable run state in the browser or CLI, inspect node transcripts, reconnect to a run and stop work without changing its history.'
 ---
 
 # Observe and control runs
@@ -46,6 +46,34 @@ zeroshot status RUN_ID
 A run ID belongs to the controller or target that created it. Pass `--target NAME` when reading one
 from a named target. Finished status separates graph-authored `terminalResult.output` from optional
 runtime-confirmed `metadata.deliveryReceipt`; graphs without delivery omit the receipt.
+
+## Failure evidence and mapped executions
+
+Failed `terminalResult.context` separates the known runtime cause (`primary`) from recent recorded
+execution errors (`recorded`) and verifier results (`verifiers`). Each verifier result is the latest
+recorded result for that graph node and map path. Its bounded, credential-redacted `message` contains
+the graph's actual `signals` and `diagnostic`; the runtime assigns no general meaning to their names
+or labels. A later result replaces an earlier result in this summary, while logs retain both.
+Recorded evidence can include recovered attempts or parallel work and does not prove that a result
+caused the terminal failure. An independently known runtime cause remains in `primary`.
+
+`exhaustedLoops` identifies completed exhausted loop visits with `node`, `completedIterations`, and
+an optional `mapIndices` path. The count is the actual number of completed loop rounds, including
+all work within each round; execution retries and verifier completion counts do not add rounds.
+Completed exhausted loops in settled branches of an unreachable parallel join are retained.
+Discarded race and map-item paths do not contribute loop entries or consume the summary bound.
+A converged loop does not appear as exhausted. The summary keeps at most five entries in each
+collection. `incomplete: true` means evidence was omitted or could not be retained. This warning
+persists even if later loop visits converge and remove all retained loop entries. Full details may
+still be available in logs. Failure context freezes with the main outcome, before auxiliary work.
+
+Each diagnostic can carry an `execution` object with the node name and stable opaque execution
+selector, and a `cursor` pointing to its retained log. Missing cursors cannot be used for log
+navigation. Status/watch `activeExecutions` and execution-associated log notifications also expose
+`mapIndices`: zero-based indices, outermost map first. For example, `[1]` is the second item and
+`[1, 2]` is its third nested item. Outside maps the field is omitted (older data also reads as an
+empty path). Indices supplement execution identity without changing its opaque selector.
+Successful terminal results keep their existing representation.
 
 ## Resume event and log streams
 

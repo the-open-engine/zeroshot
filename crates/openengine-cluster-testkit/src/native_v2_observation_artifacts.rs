@@ -99,10 +99,12 @@ fn status() -> RunStatusResult {
         status: RunStatus::Running {
             active_executions: vec![
                 ActiveExecution {
+                    map_indices: Vec::new(),
                     execution: execution("opaque-verifier-a"),
                     node: NodeName::new("verify-a").assert_value(),
                 },
                 ActiveExecution {
+                    map_indices: Vec::new(),
                     execution: execution("opaque-verifier-b"),
                     node: NodeName::new("verify-b").assert_value(),
                 },
@@ -166,7 +168,7 @@ fn logs_fixture() -> Value {
             at_cursor: cursor(7),
         },
         "event": RunLogEventNotification {
-            subscription_id: SubscriptionId::new("logs-1"),
+            map_indices: Vec::new(), subscription_id: SubscriptionId::new("logs-1"),
             run_id: run_id(),
             cursor: cursor(9),
             timestamp: UnixTimestampMillis::new(1_725_000_000_123).assert_value(),

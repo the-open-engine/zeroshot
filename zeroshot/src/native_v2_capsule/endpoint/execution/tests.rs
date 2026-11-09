@@ -318,3 +318,22 @@ fn diagnostic_kind(event: &CapsuleNodeEvent) -> Option<FailureDiagnosticKind> {
         _ => None,
     }
 }
+
+#[test]
+fn verifier_system_evidence_survives_capsule_terminal_buffer_and_wire_validation() {
+    let mut output =
+        LiveOutput::new(LiveOutputStream::System, "graph-defined verifier result").assert_value();
+    output.diagnostic = Some(FailureDiagnosticKind::Verifier);
+    let wire = CapsuleOutput::from(output.clone());
+    assert_eq!(wire.clone().into_live().assert_value(), output);
+    let mut metadata = TerminalMetadata::default();
+    metadata.retain(CapsuleNodeEvent::Output {
+        output: wire,
+        timestamp: UnixTimestampMillis::MIN,
+    });
+    let events = metadata.into_events(Err(NodeRunnerError::Cancelled));
+    assert_eq!(
+        diagnostic_kind(&events[0]),
+        Some(FailureDiagnosticKind::Verifier)
+    );
+}

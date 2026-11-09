@@ -182,6 +182,7 @@ impl ClusterBackend for FakeBackend {
                 cursor: cursor(4),
                 timestamp: UnixTimestampMillis::new(1_725_000_000_123).assert_value(),
                 execution: Some(execution()),
+                map_indices: Vec::new(),
                 record: LogRecord {
                     level: LogLevel::Info,
                     target: BoundedLogTarget::new("agent").assert_value(),

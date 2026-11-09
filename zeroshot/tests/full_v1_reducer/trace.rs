@@ -1,7 +1,7 @@
 use super::*;
 use zeroshot_engine::full_v1_reducer::{StructuralTrace, StructuralTraceState};
 
-async fn observed_graph(root: Value) -> VerifiedGraph {
+pub(super) async fn observed_graph(root: Value) -> VerifiedGraph {
     let graph: GraphSpec = serde_json::from_value(json!({"profile":"openengine.graph.full/v1","initialInput":root["state"],"policy":{"policy":"policy.test@1","default":"deny"},"root":root})).assert_value();
     let result = ProductionGraphVerifier::new(TestWorkers { rich_outputs: true })
         .verify(&graph)

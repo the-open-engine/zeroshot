@@ -1,6 +1,8 @@
 use futures_util::FutureExt;
 
-use crate::native_v2_capsule::provider_process::{report_cleanup_failure, report_provider_error};
+use crate::native_v2_capsule::provider_process::{
+    report_cleanup_failure, report_provider_error, report_verifier_result,
+};
 
 use super::*;
 
@@ -263,6 +265,14 @@ impl NativeV2DeliveryAdapter {
         let outcome = self
             .finish_merge_handoff((mode, &invocation.response), &mut credentials, outcome)
             .await;
+        let outcome = match outcome {
+            Ok(outcome) => {
+                report_verifier_result(&outcome, &self.feedback_secrets(&credentials), &control)
+                    .await
+                    .map(|()| outcome)
+            }
+            Err(error) => Err(error),
+        };
         if outcome.is_err() {
             self.state
                 .lock()

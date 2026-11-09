@@ -10,6 +10,15 @@
           "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "type": "string"
         },
+        "mapIndices": {
+          "description": "Zero-based map indices, outermost first; empty outside maps.",
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
         "node": {
           "maxLength": 128,
           "minLength": 1,
@@ -85,10 +94,48 @@
       ],
       "type": "object"
     },
+    "ExhaustedLoop": {
+      "additionalProperties": false,
+      "description": "One completed exhausted loop visit, counted by the reducer rather than worker attempts.",
+      "properties": {
+        "completedIterations": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "mapIndices": {
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "node": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node",
+        "completedIterations"
+      ],
+      "type": "object"
+    },
     "FailureContext": {
       "additionalProperties": false,
       "description": "The known runtime cause and recent recorded node failures are deliberately separate.\nRecorded failures are evidence; retries or parallel branches may have recovered from them.",
       "properties": {
+        "exhaustedLoops": {
+          "description": "Latest exhausted visit per loop node and map path.",
+          "items": {
+            "$ref": "#/$defs/ExhaustedLoop"
+          },
+          "maxItems": 5,
+          "type": "array"
+        },
         "incomplete": {
           "default": false,
           "type": "boolean"
@@ -105,6 +152,14 @@
         },
         "recorded": {
           "default": [],
+          "items": {
+            "$ref": "#/$defs/FailureDiagnostic"
+          },
+          "maxItems": 5,
+          "type": "array"
+        },
+        "verifiers": {
+          "description": "Latest recorded result per verifier node and map path, oldest first.",
           "items": {
             "$ref": "#/$defs/FailureDiagnostic"
           },
@@ -828,6 +883,15 @@
             "string",
             "null"
           ]
+        },
+        "mapIndices": {
+          "description": "Zero-based map indices of the associated execution; empty outside maps.",
+          "items": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
         },
         "record": {
           "$ref": "#/$defs/LogRecord"
