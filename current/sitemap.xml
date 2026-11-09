@@ -50,7 +50,7 @@
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/forge-delivery/</loc>
-         <lastmod>2026-11-08</lastmod>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/observe-and-control/</loc>
@@ -59,6 +59,14 @@
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/planning/</loc>
          <lastmod>2026-11-05</lastmod>
+    </url>
+    <url>
+         <loc>https://zeroshot.sh/docs/current/guides/plugins-review/</loc>
+         <lastmod>2026-11-09</lastmod>
+    </url>
+    <url>
+         <loc>https://zeroshot.sh/docs/current/guides/plugins/</loc>
+         <lastmod>2026-11-09</lastmod>
     </url>
     <url>
          <loc>https://zeroshot.sh/docs/current/guides/python-sdk/</loc>
