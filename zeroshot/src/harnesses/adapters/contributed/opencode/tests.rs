@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 use super::*;
 use crate::execution::SessionScope;
 use crate::native_v2_capsule::provider_process::turn::ProviderTranscript;
+use crate::native_v2_capsule::provider_process::{ProviderProcessFailure, ProviderProcessFailureKind};
 
 #[cfg(unix)]
 fn node_command() -> std::process::Command {
@@ -172,6 +173,100 @@ fn final_record_without_a_newline_still_settles() {
     transcript.push(&serde_json::to_vec(&finish_event("f1", "m1", "stop")).assert_value());
     transcript.finish_stream();
     assert!(transcript.is_success());
+}
+
+fn tool_event(id: &str, message: &str) -> Value {
+    let mut event = event("tool_use", id, message);
+    event["part"]["tool"] = json!("shell");
+    event
+}
+
+/// OpenCode 2.x `run` output for a tool turn: the answer step never reports its finish.
+fn unfinished_tool_turn() -> transcript::OpenCodeTranscript {
+    let mut transcript = transcript::OpenCodeTranscript::new(None, vec![]);
+    push(&mut transcript, &event("step_start", "s1", "m1"));
+    push(&mut transcript, &tool_event("u1", "m1"));
+    push(&mut transcript, &finish_event("f1", "m1", "tool-calls"));
+    push(&mut transcript, &event("step_start", "s2", "m2"));
+    push(
+        &mut transcript,
+        &text_event("t2", "m2", "{\"response\":\"done\"}"),
+    );
+    transcript
+}
+
+fn clean_stderr() -> Option<ProviderProcessFailure> {
+    Some(ProviderProcessFailure {
+        kind: ProviderProcessFailureKind::Stderr,
+        detail: "native notice".to_owned(),
+    })
+}
+
+#[test]
+fn answer_step_after_tools_settles_on_a_clean_exit_with_unknown_usage() {
+    for process_failure in [None, clean_stderr()] {
+        let transcript = unfinished_tool_turn();
+        assert!(!transcript.is_success());
+        assert!(transcript.token_usage().is_none());
+        match transcript.finish(process_failure).assert_value() {
+            ProviderAttempt::Complete(result) => {
+                assert_eq!(result.message, "{\"response\":\"done\"}");
+                assert_eq!(result.session_id.as_deref(), Some("ses_fixture"));
+            }
+            ProviderAttempt::Failed(_) => panic!("2.x answer step must settle on a clean exit"),
+        }
+    }
+}
+
+#[test]
+fn reported_answer_step_after_tools_keeps_complete_usage() {
+    let mut transcript = unfinished_tool_turn();
+    push(&mut transcript, &finish_event("f2", "m2", "stop"));
+    assert!(transcript.is_success());
+    assert_eq!(
+        transcript.token_usage().assert_value().input_tokens.get(),
+        22
+    );
+}
+
+#[test]
+fn unfinished_steps_without_the_exact_two_x_shape_still_fail() {
+    let failed_exit = Some(ProviderProcessFailure {
+        kind: ProviderProcessFailureKind::Completion,
+        detail: "exit status 1".to_owned(),
+    });
+    let mut cases = vec![("nonzero exit", unfinished_tool_turn(), failed_exit)];
+
+    let mut native_error = unfinished_tool_turn();
+    push(
+        &mut native_error,
+        &json!({"type":"error","sessionID":"ses_fixture","error":{"name":"APIError"}}),
+    );
+    cases.push(("native error", native_error, None));
+
+    let mut tools_in_final_step = unfinished_tool_turn();
+    push(&mut tools_in_final_step, &tool_event("u2", "m2"));
+    cases.push(("tools in the final step", tools_in_final_step, None));
+
+    let mut no_tool_step = transcript::OpenCodeTranscript::new(None, vec![]);
+    push(&mut no_tool_step, &event("step_start", "s1", "m1"));
+    push(&mut no_tool_step, &text_event("t1", "m1", "partial"));
+    cases.push(("no earlier tool step", no_tool_step, None));
+
+    let mut no_answer = transcript::OpenCodeTranscript::new(None, vec![]);
+    push(&mut no_answer, &finish_event("f1", "m1", "tool-calls"));
+    push(&mut no_answer, &event("step_start", "s2", "m2"));
+    cases.push(("no answer text", no_answer, None));
+
+    for (case, transcript, process_failure) in cases {
+        assert!(
+            matches!(
+                transcript.finish(process_failure).assert_value(),
+                ProviderAttempt::Failed(_)
+            ),
+            "{case}"
+        );
+    }
 }
 
 #[test]

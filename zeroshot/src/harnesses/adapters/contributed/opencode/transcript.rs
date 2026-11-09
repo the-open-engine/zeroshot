@@ -1,4 +1,8 @@
-//! OpenCode v1 native JSONL events, independently settled from process exit status.
+//! OpenCode native JSONL events, settled from native step evidence.
+//!
+//! The OpenCode 2.x `run` client stops reading its event stream once the session is idle, so
+//! the final `step_finish` of a turn that used tools can be lost with its token usage. Only
+//! that exact shape (a tool step, then a tool-free answer step) settles from a clean exit.
 
 use std::collections::BTreeSet;
 
@@ -25,6 +29,9 @@ pub(super) struct OpenCodeTranscript {
     message_id: Option<String>,
     text: String,
     complete: bool,
+    after_tool_step: bool,
+    step_open: bool,
+    step_used_tools: bool,
     failure: Option<String>,
     seen: BTreeSet<String>,
     usage: Option<TokenUsageDelta>,
@@ -40,6 +47,9 @@ impl OpenCodeTranscript {
             message_id: None,
             text: String::new(),
             complete: false,
+            after_tool_step: false,
+            step_open: false,
+            step_used_tools: false,
             failure: None,
             seen: BTreeSet::new(),
             usage: None,
@@ -101,9 +111,14 @@ impl OpenCodeTranscript {
     fn dispatch_part(&mut self, kind: &str, part: &Value, emissions: &mut Vec<ProviderEmission>) {
         match kind {
             "text" => self.accept_text(part, emissions),
-            "step_start" => self.complete = false,
+            "step_start" => {
+                self.complete = false;
+                self.step_open = true;
+                self.step_used_tools = false;
+            }
             "step_finish" => self.accept_finish(part, emissions),
             "tool_use" => {
+                self.step_used_tools = true;
                 // Tool failure is evidence for the agent, not a terminal model failure.
                 if let Some(name) = part.get("tool").and_then(Value::as_str) {
                     self.output.emit(
@@ -119,11 +134,25 @@ impl OpenCodeTranscript {
 
     fn accept_finish(&mut self, part: &Value, emissions: &mut Vec<ProviderEmission>) {
         self.record_usage(part.get("tokens"));
-        self.complete = matches!(
-            part.get("reason").and_then(Value::as_str),
-            Some("stop" | "end-turn")
-        );
+        let reason = part.get("reason").and_then(Value::as_str);
+        self.complete = matches!(reason, Some("stop" | "end-turn"));
+        self.after_tool_step = reason == Some("tool-calls");
+        self.step_open = false;
         self.output.boundary(emissions);
+    }
+
+    /// The OpenCode 2.x answer step that follows tool calls and never reports its finish.
+    fn unfinished_answer_step(&self) -> bool {
+        self.after_tool_step && self.step_open && !self.step_used_tools
+    }
+
+    /// A clean exit is required; stderr alone accompanies an unfinished transcript.
+    fn settles_unfinished_answer(&self, process_failure: Option<&ProviderProcessFailure>) -> bool {
+        self.unfinished_answer_step()
+            && self.failure.is_none()
+            && !self.text.is_empty()
+            && process_failure
+                .is_none_or(|failure| failure.kind == ProviderProcessFailureKind::Stderr)
     }
 
     fn part_for_record<'a>(&mut self, value: &'a Value) -> Option<&'a Value> {
@@ -250,7 +279,12 @@ impl ProviderTranscript for OpenCodeTranscript {
     }
 
     fn token_usage(&self) -> Option<TokenUsageDelta> {
-        if self.usage_invalid { None } else { self.usage }
+        // The unfinished answer step's usage was never reported, so the total is unknown.
+        if self.usage_invalid || self.unfinished_answer_step() {
+            None
+        } else {
+            self.usage
+        }
     }
 
     fn is_success(&self) -> bool {
@@ -269,7 +303,9 @@ impl ProviderTranscript for OpenCodeTranscript {
         process_failure: Option<ProviderProcessFailure>,
     ) -> Result<ProviderAttempt, NodeRunnerError> {
         let _ = self.finish_stream();
-        if self.is_success() && process_failure.is_none() {
+        if (self.is_success() && process_failure.is_none())
+            || self.settles_unfinished_answer(process_failure.as_ref())
+        {
             return Ok(ProviderAttempt::Complete(ProviderResult {
                 session_id: self.session_id,
                 message: self.text,
