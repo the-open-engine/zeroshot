@@ -6,14 +6,14 @@ description: 'Available harnesses, local and target support, and the contract fo
 
 Official local builds include every adapter below. Install each native CLI separately for local use.
 
-| Harness ID | Providers                                                           | Distribution |
-| ---------- | ------------------------------------------------------------------- | ------------ |
-| `codex`    | `openai`, `openrouter`, `gateway`, `bedrock`, `foundry`             | Core         |
-| `claude`   | `anthropic`, `openrouter`, `gateway`, `bedrock`, `foundry`          | Core         |
-| `copilot`  | `github`, `openai`, `anthropic`, `openrouter`, `gateway`, `bedrock` | Core         |
-| `pi`       | `anthropic`, `openai`, `openrouter`, `gateway`, `bedrock`, `github` | Core         |
-| `opencode` | `openai`, `anthropic`, `openrouter`, `bedrock`, `gateway`, `github` | Contributed  |
-| `hermes`   | `openai`, `anthropic`, `openrouter`, `gateway`, `github`, `bedrock` | Contributed  |
+| Harness ID | Providers                                                                                      | Distribution |
+| ---------- | ---------------------------------------------------------------------------------------------- | ------------ |
+| `codex`    | `openai`, `openrouter`, `gateway`, `bedrock`, `foundry`                                        | Core         |
+| `claude`   | `anthropic`, `openrouter`, `gateway`, `bedrock`, `foundry`                                     | Core         |
+| `copilot`  | `github`, `openai`, `anthropic`, `openrouter`, `gateway`, `bedrock`                            | Core         |
+| `pi`       | `anthropic`, `openai`, `openrouter`, `gateway`, `bedrock`, `github`                            | Core         |
+| `opencode` | `openai`, `anthropic`, `openrouter`, `bedrock`, `gateway`, `github`, `opencode`, `opencode-go` | Contributed  |
+| `hermes`   | `openai`, `anthropic`, `openrouter`, `gateway`, `github`, `bedrock`                            | Contributed  |
 
 The `claude` adapter requires Claude Code 2.1.310 or newer. Before its first model turn it runs the
 selected executable with `--version` and fails the node, naming the reported version, when that
@@ -41,7 +41,9 @@ Codex and Claude `foundry` lanes share one Microsoft Foundry connection; see
 Local native login works for Codex/OpenAI, Claude/Anthropic, Copilot/GitHub and its OpenAI,
 Anthropic and OpenRouter BYOK lanes, and Pi/Anthropic, OpenAI and GitHub. OpenCode and Hermes retain
 native authentication for every supported provider except gateway, including the native AWS
-credential chain for Bedrock. Other lanes require declared connections. GitHub connections use
+credential chain for Bedrock. OpenCode's `opencode` (Zen) and `opencode-go` (Go) lanes reuse the
+native OpenCode account login; a declared `OPENCODE_API_KEY` serves both. Other lanes require
+declared connections. GitHub connections use
 `COPILOT_GITHUB_TOKEN`; each harness owns its native exchange and refresh behavior. Declared
 credentials use private runtime state and preserve saved logins.
 

@@ -23,6 +23,8 @@ pub(crate) fn registration() -> HarnessRegistration {
                 "bedrock",
                 "gateway",
                 "github",
+                "opencode",
+                "opencode-go",
             ],
             executable: "opencode",
             source: HarnessSource::Contributed,
@@ -102,6 +104,12 @@ fn access(provider: &str) -> Result<ProviderAccessContract, HarnessError> {
             "gateway",
             &["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "GATEWAY_API"],
             &[&["GATEWAY_BASE_URL", "GATEWAY_API_KEY", "GATEWAY_API"]],
+        )),
+        "opencode" | "opencode-go" => Ok(ProviderAccessContract::new(
+            true,
+            "opencode",
+            &["OPENCODE_API_KEY"],
+            &[&["OPENCODE_API_KEY"]],
         )),
         _ => Err(HarnessError::Configuration(
             "OpenCode provider is unsupported".to_owned(),
