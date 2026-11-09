@@ -2127,13 +2127,30 @@ run state and resolves connections. The graph protocol stays the same when the t
 requesting an access token or submitting a run or profile, and the target enforces its catalog
 again during admission. Older targets without this extension accept only the established core
 harnesses through client preflight.</p>
-<p>Targets may advertise accepted machine size identities through
-<code>extensions.run_sizes: {kind: "openengine.run-sizes/v1", sizes: ["medium", "large", "xl", "gpu_t4"]}</code>.
-The CLI checks this catalog before requesting access tokens or submitting inline runs or profiles.
-An explicit empty list permits no sizes. Without the exact extension, client preflight retains
-<code>small</code>, <code>medium</code> and <code>large</code>; <code>xl</code> and <code>gpu_t4</code> require positive advertisement. Hosts choose machine
-resources and enforce size availability at admission. A runtime size is shared by the graph's agents,
-independently of their harness/provider lanes. Zeroshot does not define AWS shapes or billing prices.</p>
+<p>Sizes are target-owned identifiers of 1–128 non-control Unicode characters. A target advertises
+its catalog through <code>extensions.run_size_catalog</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"openengine.run-sizes/v2"</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="nt">"default"</span><span class="p">:</span><span class="w"> </span><span class="s2">"standard"</span><span class="p">,</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="nt">"sizes"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"standard"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4 vCPU, 16 GiB RAM, 128 GiB disk"</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"big-box"</span><span class="p">,</span><span class="w"> </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"32 vCPU, 128 GiB RAM, 1024 GiB disk"</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="p">}</span>
+</code></pre></div>
+<p>List a named target's identifiers and descriptions with <code>zeroshot target sizes NAME</code>.
+The default output is a table that wraps to terminal width; add <code>--json</code> for the structured catalog.
+Hosted targets may return the current organization's enabled catalog through authenticated discovery.</p>
+<p>The CLI and SDK forward an explicitly requested identifier unchanged. They do not maintain size
+names or reject a request because a discovery list is missing, empty, or stale. The target decides
+availability and rejects unsupported or disabled sizes. An omitted or null size selects the target's
+default at admission; the accepted run stores that concrete size. Requests retain their original
+identity, so an exact retry still returns the accepted run after a catalog/default change.</p>
+<p>An empty catalog offers no sizes and has no default. Local execution and <code>target serve</code> offer <code>host</code>,
+which uses the current host's CPU, memory and storage. Private capsules preserve the concrete size
+already admitted by their host. The descriptor extension uses its own key so older string-based size
+advertisements cannot break unrelated discovery operations. Size is shared by the graph's agents,
+independently of their harness/provider lanes; Zeroshot defines no AWS shapes or billing prices.</p>
 <p>Official local builds include contributed adapters; Platform and the default target image enable
 only core adapters. See <a href="../../project/harness-adapters/">Harness adapters</a> for availability and
 provider support.</p>
@@ -2265,14 +2282,14 @@ The released container includes Zeroshot plus the pinned core harness CLIs liste
 <a href="../../project/harness-adapters/">Harness adapters</a>.
 A run can mix their lanes; its connection requirements are then the union over its nodes, such as
 <code>OPENAI_API_KEY</code> and <code>ANTHROPIC_API_KEY</code> for a Codex worker with Claude Code reviewers.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="go">docker run --detach --restart unless-stopped --name zeroshot-target \</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="go">  -p 127.0.0.1:8080:8080 \</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="go">  -v zeroshot-data:/var/lib/zeroshot \</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">  ghcr.io/the-open-engine/zeroshot-target:latest</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="go">zeroshot target add local-target \</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="go">  --url http://127.0.0.1:8080 \</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="go">  --direct</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="go">docker run --detach --restart unless-stopped --name zeroshot-target \</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">  -p 127.0.0.1:8080:8080 \</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="go">  -v zeroshot-data:/var/lib/zeroshot \</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="go">  ghcr.io/the-open-engine/zeroshot-target:latest</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="go">zeroshot target add local-target \</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="go">  --url http://127.0.0.1:8080 \</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="go">  --direct</span>
 </code></pre></div>
 <p>The target keeps running between runs. Docker restarts it after a reboot or unexpected exit with
 <code>--restart unless-stopped</code>; manually stopping it keeps it stopped until <code>docker start zeroshot-target</code>.
@@ -2309,8 +2326,8 @@ run instead of starting a second one.</p>
 release, so pin a version tag or an image digest when a host must keep the same image.</p>
 <p>To use a target on another machine, keep the published port on that host's loopback interface, as in
 the command above, and open an SSH tunnel from your workstation:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="go">ssh -N -L 8080:127.0.0.1:8080 USER@HOST</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">zeroshot target add remote-target --url http://127.0.0.1:8080 --direct</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="go">ssh -N -L 8080:127.0.0.1:8080 USER@HOST</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">zeroshot target add remote-target --url http://127.0.0.1:8080 --direct</span>
 </code></pre></div>
 <p>Keep the tunnel open while you use the target. If a local target already uses port 8080, forward
 another local port and start the remote target with <code>--public-origin</code> set to that local origin,
@@ -2319,8 +2336,8 @@ such as <code>http://127.0.0.1:18080</code>; the target advertises its endpoint 
 covers reverse proxies, Docker access for runs, and building the image.</p>
 <h2 id="hosted-target">Hosted target<a class="headerlink" href="#hosted-target" title="Permanent link">&para;</a></h2>
 <p>A hosted target adds discovery and user authentication around the same native contracts:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="go">zeroshot target add production --url https://TARGET_ORIGIN</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">zeroshot target login production</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot target add production --url https://TARGET_ORIGIN</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">zeroshot target login production</span>
 </code></pre></div>
 <p>The hosting service owns login, source authorization, organization-scoped connections, queue policy,
 and capacity. Zeroshot's CLI and protocol do not prescribe those product policies.</p>
@@ -2330,9 +2347,9 @@ should link to the version of these core docs that matches the deployed target, 
 <h3 id="api-keys">API keys<a class="headerlink" href="#api-keys" title="Permanent link">&para;</a></h3>
 <p>Hosted targets that advertise API key authentication support machine delegations. Sign in as a
 human to create one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="go">zeroshot target login platform</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">zeroshot delegation create ci</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go">zeroshot delegation create release --owner org --organization ORGANIZATION_UUID</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot target login platform</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">zeroshot delegation create ci</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="go">zeroshot delegation create release --owner org --organization ORGANIZATION_UUID</span>
 </code></pre></div>
 <p>Any user can delegate their own current permissions. Organization owners and admins can create
 organization delegations. Creation prints an <code>api_key</code> once; store it as <code>ZEROSHOT_API_KEY</code> in your
@@ -2342,10 +2359,10 @@ plans, live sessions, and resume. For a user key, set <code>ZEROSHOT_ORGANIZATIO
 UUID when organization selection is needed. Organization keys stay in their own organization.
 Omitted connection and profile scopes follow the owner's scope.</p>
 <p>Delegation management requires human login. Unset <code>ZEROSHOT_API_KEY</code> before managing keys:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">zeroshot delegation list</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">zeroshot delegation key create DELEGATION_ID --name rotation</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="go">zeroshot delegation key revoke DELEGATION_ID OLD_KEY_ID</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="go">zeroshot delegation disable DELEGATION_ID</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="go">zeroshot delegation list</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">zeroshot delegation key create DELEGATION_ID --name rotation</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="go">zeroshot delegation key revoke DELEGATION_ID OLD_KEY_ID</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="go">zeroshot delegation disable DELEGATION_ID</span>
 </code></pre></div>
 <p>Create the replacement before revoking the old key. Revoking a key blocks further calls while
 accepted runs continue. API keys authenticate the CLI; keep provider and source credentials in
@@ -2394,7 +2411,7 @@ See <a href="../../project/source-code-adapters/">Source-code adapters</a> for t
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-06">6 November 2026</time>
+    Last updated <time datetime="2026-11-09">9 November 2026</time>
   </span>
 
     
