@@ -1534,7 +1534,7 @@ fn an_update_whose_executable_was_replaced_while_it_waited_finds_the_installed_r
     fs::write(&installed, b"new binary").unwrap();
     fs::write(&restic, b"new restic").unwrap();
 
-    let outcome = update_outcome(install_at(
+    let reported = reported_update(install_at(
         // How Linux reports the executable of a process whose executable another update replaced.
         &directory.path().join("zeroshot (deleted)"),
         &test_executables(),
@@ -1548,18 +1548,57 @@ fn an_update_whose_executable_was_replaced_while_it_waited_finds_the_installed_r
 
     assert_eq!(
         (
-            outcome,
+            reported,
             read_text(&installed),
             read_text(&restic),
             staged_update_files(directory.path()),
         ),
         (
-            Ok(()),
+            Ok(Some(false)),
             "new binary".to_owned(),
             "new restic".to_owned(),
             Vec::<String>::new(),
         ),
-        "(outcome, executable, Restic, staged files)"
+        "(reported update, executable, Restic, staged files)"
+    );
+}
+
+#[test]
+fn concurrent_installs_of_one_release_report_one_update() {
+    let directory = tempfile::tempdir().unwrap();
+    let current = directory
+        .path()
+        .join(format!("zeroshot{}", std::env::consts::EXE_SUFFIX));
+    fs::write(&current, b"old binary").unwrap();
+    fs::write(directory.path().join("restic"), b"old restic").unwrap();
+    let executables = test_executables();
+    let install = || {
+        reported_update(install_at(
+            &current,
+            &executables,
+            TARGET_RELEASE,
+            InstallOperations {
+                verify: verify_release_executable,
+                verify_restic: verify_release_restic,
+                replace: |staged: &Path| {
+                    fs::copy(staged, &current)?;
+                    Ok(())
+                },
+            },
+        ))
+    };
+
+    let mut reported = std::thread::scope(|scope| {
+        let first = scope.spawn(install);
+        let second = scope.spawn(install);
+        [first.join().unwrap(), second.join().unwrap()]
+    });
+    reported.sort();
+
+    assert_eq!(
+        (reported, read_text(&current)),
+        ([Ok(Some(false)), Ok(Some(true))], "new binary".to_owned()),
+        "(reported updates, executable)"
     );
 }
 
@@ -1665,6 +1704,16 @@ fn an_install_shares_an_update_lock_file_it_cannot_write() {
 /// The outcome of one update, whatever a successful installation reports.
 fn update_outcome<T>(result: Result<T, NativeV2CliError>) -> Result<(), String> {
     result.map(|_| ()).map_err(|error| error.to_string())
+}
+
+/// What one update reports as `updated`, or `None` when its installation reports nothing. Generic
+/// like `update_outcome`, so these tests also run against an updater that reports nothing.
+fn reported_update<T: Into<serde_json::Value>>(
+    result: Result<T, NativeV2CliError>,
+) -> Result<Option<bool>, String> {
+    result
+        .map(|updated| updated.into().as_bool())
+        .map_err(|error| error.to_string())
 }
 
 /// Fake executables report the target release exactly when they hold its bytes.
