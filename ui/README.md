@@ -36,6 +36,24 @@ legacy runtime schema; an explicit empty catalog offers no adapters. Local catal
 host's enabled registry. Existing unavailable selections remain visible and stay in the profile until
 the author changes them.
 
+Each bootstrap template includes its complete authored `runtime`, a concise `description`, and
+`requirements`, a map from connection key to sorted field names for contained execution. New profile
+documents clone the graph and runtime without flattening explicit node lanes, effort, sessions or
+custom connection declarations. Blank profiles keep empty runtime settings. Templates omit size so
+the selected target owns its default, and keep workspace checkpoints enabled; the supplied local
+Code review runtime remains available separately with its local snapshot opt-out and GitHub-specific
+publication connection. Catalog defaults use the native source-neutral delivery binding, so selecting
+a graph does not demand GitHub before the run's source or comment destination is selected.
+
+The `setupLanes` array comes from the same harness registry. Each entry contains `harness`, `provider`,
+`connectionKey`, `requiredFields`, and `acceptedFieldSets`; a host can offer compatible providers and
+request access without maintaining a parallel provider table. `workspace::profile_setup({runtime})`
+returns `{runtime, requirements}` after applying native contained-provider access defaults. It reads no
+secrets and never saves or runs a profile. Authored custom connections and alternative credential
+forms remain intact. `profile_setup_with_harnesses` uses the host-selected registry for validation and
+access derivation. Local setup uses its advertised contributed harnesses; target/default setup remains
+core-only. Environment and source access stay with run submission.
+
 The bootstrap `runSizes` catalog contains `kind: "openengine.run-sizes/v2"`, a target-owned
 `default` identifier, and `sizes: [{id, description}]`. Identifiers are opaque strings of 1–128
 non-control Unicode characters; the editor does not maintain or infer size names from the runtime
@@ -107,7 +125,7 @@ Platform origin independently of run containers. The shell-less entry is `embed.
 `index.html` retains the standalone toolbar. Both entries use the same editor and viewer.
 Platform must permit its same-origin frame and the workspace's bundled assets/ELK worker in CSP.
 
-The API-gateway can call `zeroshot_engine::workspace::{catalog, author, data, validate_profile}`
+The API-gateway can call `zeroshot_engine::workspace::{catalog, author, data, profile_setup, validate_profile}`
 with Cargo's `workspace` feature; this does not embed UI assets. Authenticated private targets
 export native definition/history pages separately from the standalone UI. See the
 [approved implementation plan](../planning/plans/cloud-workspace-ui-301.md).
