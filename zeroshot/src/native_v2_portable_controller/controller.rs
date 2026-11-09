@@ -337,7 +337,7 @@ where
     let execution_seed = restore_execution_seed(bootstrap, preparation_deadline).await?;
     crate::native_v2_review::prepare_local_checkout(&prepared.admitted, bootstrap).await?;
     let mut runtime = runtime_factory(&prepared.admitted)
-        .map_err(|_| PortableControllerError::RuntimeUnavailable)?;
+        .map_err(|error| PortableControllerError::RuntimeComposition(Box::new(error)))?;
     runtime.execution_seed = execution_seed;
     let runtime = configure_workspace_checkpoints(prepared, bootstrap, runtime)?;
     Ok(PreparedRuntime {

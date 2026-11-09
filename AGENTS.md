@@ -290,8 +290,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   extension key, because older clients ignore unknown extension keys but reject unknown fields
   inside a marker. `TargetDiscoveryExtensions` must keep ignoring unknown keys. Local `run`/`resume`
   and `zeroshot acp` check every lane's executable on the captured search path before launch,
-  report a missing one as a usage error, and never probe login state. Checkpoint resumes defer
-  lookup to provider startup after the controller restores the selected workspace under its lease. Each `zeroshot acp` session
+  report a missing one as a usage error, and never probe login state. Checkpoint resumes check
+  instead when the controller composes the run after restoring the selected workspace under its
+  lease, before admission; the CLI's controller startup error carries the same lane message and
+  no successor remains. Each `zeroshot acp` session
   checks against its own workspace when it opens and returns the error as ACP invalid params; the
   startup check also runs, but only when every search-path entry is absolute. The lookup is
   `find_executable`: it follows the OS search that spawning relies on, including Rust's Windows

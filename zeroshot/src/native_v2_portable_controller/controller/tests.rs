@@ -108,7 +108,8 @@ async fn review_git_preparation_requires_the_workspace_lease_before_any_mutation
         } else {
             assert!(matches!(
                 result,
-                Err(PortableControllerError::RuntimeUnavailable)
+                Err(PortableControllerError::RuntimeComposition(error))
+                    if error.to_string() == "stop before graph dispatch"
             ));
             let calls = std::fs::read_to_string(git.with_extension("calls")).assert_value();
             assert!(calls.lines().any(|arg| arg == "fetch"));

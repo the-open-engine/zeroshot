@@ -336,10 +336,18 @@ fn git_output(
 ///
 /// `storage` owns only provider session homes and controller state. No cleanup object is returned
 /// because the existing workspace and every mutation within it remain user-owned.
+///
+/// Lane executables are checked first. The controller composes after any checkpoint restore and
+/// before admission, so this is the check a checkpoint resume gets, against the restored workspace.
 pub fn build_local_process_candidate(
     request: LocalProcessCandidateRequest<'_>,
 ) -> Result<Arc<dyn NodeRunner>, LocalCompositionError> {
     let admitted = request.admitted;
+    check_lane_executables(
+        &admitted.runtime,
+        request.native_environment,
+        request.workspace,
+    )?;
     let prepared = crate::active_memory::runtime::PreparedActiveMemory::prepare(
         crate::active_memory::runtime::MemoryPreparation {
             admitted,
