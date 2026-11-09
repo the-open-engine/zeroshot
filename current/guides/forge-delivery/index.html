@@ -2148,6 +2148,11 @@ connection fields their own bindings declare.</p>
 <p>GitHub.com-only features include <code>--task-from</code>, Platform repository browsing and App/OAuth setup,
 inbound commands, and hosted <a href="../stacks/">stacks</a>. For GHE or GitLab comments, supply the graph input
 directly.</p>
+<p>When the forge refuses the run-branch push because of branch protection or missing push permission,
+delivery stops with a policy refusal naming the run branch and the forge's message, without another
+agent round. Local work is preserved: let delivery push its run branch, then
+<a href="../observe-and-control/#restart-or-resume-a-failed-run">resume the run</a>. Other push rejections,
+including generic pre-receive hook messages, return to the repair loop.</p>
 <p>Delivery preserves review identity across retries and confirms the integrated revision before
 reporting a merge. Comment retries reuse the original publication; captured MR scopes refuse stale
 base/head revisions. Required GitLab merge trains remain pending; synthetic merged-results
