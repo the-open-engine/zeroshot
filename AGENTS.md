@@ -390,7 +390,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Shared inspection owns bounded JSONL exchange and process cleanup. Each harness owns native
   permission handling and any parser it needs; `PermissionPolicy` distinguishes unset,
   configured, and unavailable inspection results. Codex browser/computer access controls and explicit
-  approval-review features count as authored policy.
+  approval-review features count as authored policy. Unavailable inspection carries a cause; the
+  harness that withholds its bypass reports it once through `report_unavailable_inspection` as a
+  redacted, bounded error-stream record without a failure diagnostic, never as a debug line or
+  outcome change. Never publish configuration responses; overrides, configured policy,
+  cancellation and unconfirmed cleanup are not fallbacks.
 - The local target registry initializes `platform` at `https://api.app.zeroshot.sh` with a persistent hosted device identity.
 - Local runs select an optional `--cwd` workspace, defaulting to the invoking folder. File arguments
   stay relative to the invoking folder. A Git checkout uses its canonical root; plain, unborn, and

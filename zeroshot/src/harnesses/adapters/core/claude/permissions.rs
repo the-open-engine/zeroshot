@@ -7,14 +7,13 @@
 //! <https://code.claude.com/docs/en/cli-reference> for precedence and safe-mode semantics.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use serde_json::{Value, json};
 
 use super::ClaudeAdapter;
 use crate::execution::process::ProcessSessionCommand;
 use crate::native_v2_capsule::provider_process::{
-    ConfigurationRequest, PermissionPolicy, ProviderExecutionFiles, inspect_configuration,
+    ConfigurationRequest, PermissionPolicy, inspect_configuration, report_unavailable_inspection,
 };
 use crate::native_v2_runner::{DriverControl, NodeRunnerError};
 
@@ -30,7 +29,7 @@ impl ClaudeAdapter {
         } else if input.has_overrides() {
             false
         } else {
-            self.inspect_permission_policy(input.files, command.clone(), control)
+            self.inspect_permission_policy(input, command.clone(), control)
                 .await?
                 == PermissionPolicy::Unset
         };
@@ -44,7 +43,7 @@ impl ClaudeAdapter {
 
     async fn inspect_permission_policy(
         &self,
-        files: Arc<ProviderExecutionFiles>,
+        input: crate::harnesses::native_config::PermissionInput<'_>,
         mut command: ProcessSessionCommand,
         control: &DriverControl,
     ) -> Result<PermissionPolicy, NodeRunnerError> {
@@ -60,11 +59,15 @@ impl ClaudeAdapter {
         }
         let (arguments, requests) = permission_inspection(&self.prefix_arguments);
         command.argv = arguments;
-        let Some(responses) = inspect_configuration(files, command, control, requests).await?
-        else {
-            return Ok(PermissionPolicy::Unavailable);
+        let cause = match inspect_configuration(input.files, command, control, requests).await? {
+            Ok(responses) => match permission_policy(&responses) {
+                PermissionPolicy::Unavailable => unavailable_settings(&responses),
+                policy => return Ok(policy),
+            },
+            Err(cause) => cause,
         };
-        Ok(permission_policy(&responses))
+        report_unavailable_inspection(control, "Claude", &cause, input.redactions).await?;
+        Ok(PermissionPolicy::Unavailable)
     }
 }
 
@@ -150,6 +153,29 @@ fn permission_environment(name: &str, value: &str) -> bool {
         "CLAUDE_BG_SESSION_PERMISSION_RULES" => !value.trim().is_empty(),
         _ => false,
     }
+}
+
+/// Claude's own error explains a rejected request; settings content is never published.
+fn unavailable_settings(responses: &[Value]) -> String {
+    responses
+        .iter()
+        .find(|response| {
+            response.get("type").and_then(Value::as_str) == Some("control_response")
+                && response
+                    .pointer("/response/subtype")
+                    .and_then(Value::as_str)
+                    == Some("error")
+        })
+        .map_or_else(
+            || "Claude Code did not return complete, error-free settings".to_owned(),
+            |response| {
+                let error = response
+                    .pointer("/response/error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("no detail");
+                format!("Claude Code rejected the settings request: {error}")
+            },
+        )
 }
 
 fn success(response: &Value) -> Option<&Value> {

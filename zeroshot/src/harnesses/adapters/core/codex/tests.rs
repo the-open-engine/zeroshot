@@ -13,6 +13,8 @@ mod large_output;
 mod large_prompt;
 #[path = "tests/local_identity.rs"]
 mod local_identity;
+#[path = "tests/permission_inspection.rs"]
+mod permission_inspection;
 #[path = "tests/process_start.rs"]
 mod process_start;
 #[path = "tests/retry.rs"]

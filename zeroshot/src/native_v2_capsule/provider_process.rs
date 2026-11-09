@@ -59,7 +59,9 @@ impl ProviderAttempt {
 }
 
 mod configuration;
-pub(crate) use configuration::{ConfigurationRequest, PermissionPolicy, inspect_configuration};
+pub(crate) use configuration::{
+    ConfigurationRequest, PermissionPolicy, inspect_configuration, report_unavailable_inspection,
+};
 mod contained;
 mod filesystem;
 mod provider_file;

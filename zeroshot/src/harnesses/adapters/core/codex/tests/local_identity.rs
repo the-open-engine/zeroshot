@@ -58,7 +58,7 @@ async fn slow_configuration_preserves_bypass_and_native_provider_environment() {
         fs::read_to_string(workspace.join("turn-environment")).assert_value(),
         "custom-provider-secret\ncustom-account\n"
     );
-    assert!(!logs.contains("Native configuration inspection timed out"));
+    assert!(!logs.contains("Could not inspect Codex permission settings"));
 }
 
 #[test]
