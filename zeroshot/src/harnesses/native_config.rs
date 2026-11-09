@@ -195,6 +195,8 @@ pub(crate) struct PermissionInput<'a> {
     pub(crate) files:
         std::sync::Arc<crate::native_v2_capsule::provider_process::ProviderExecutionFiles>,
     pub(crate) config: Option<&'a HarnessConfiguration>,
+    /// The turn's credential redactions, applied to any reported inspection failure.
+    pub(crate) redactions: &'a [String],
 }
 
 impl PermissionInput<'_> {

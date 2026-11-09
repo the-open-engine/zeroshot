@@ -10,7 +10,7 @@ use super::NativeV2CodexAdapter;
 use crate::execution::process::ProcessSessionCommand;
 use crate::native_v2_capsule::provider_process::{
     ConfigurationRequest, PermissionPolicy, ProviderExecutionFiles, inspect_configuration,
-    redaction_values,
+    redaction_values, report_unavailable_inspection,
 };
 use crate::native_v2_contract::{CodexProvider, EnvironmentVariableName};
 use crate::native_v2_runner::{DriverControl, NodeRunnerError};
@@ -18,7 +18,8 @@ use crate::native_v2_runner::{DriverControl, NodeRunnerError};
 const MAX_NATIVE_PROVIDER_ENVIRONMENT: usize = 64;
 
 struct CodexConfigurationInspection {
-    permission_policy: PermissionPolicy,
+    /// `Err` carries why native inspection is unavailable.
+    permission_policy: Result<PermissionPolicy, String>,
     provider_environment: Vec<String>,
 }
 
@@ -56,10 +57,18 @@ impl NativeV2CodexAdapter {
             } else {
                 Vec::new()
             };
-        if !has_overrides && inspection.permission_policy == PermissionPolicy::Unset {
-            command
-                .argv
-                .insert(1, "--dangerously-bypass-approvals-and-sandbox".to_owned());
+        // Native overrides never receive the bypass, so their inspection is not a fallback.
+        if !has_overrides {
+            match inspection.permission_policy {
+                Ok(PermissionPolicy::Unset) => command
+                    .argv
+                    .insert(1, "--dangerously-bypass-approvals-and-sandbox".to_owned()),
+                Ok(_) => {}
+                Err(cause) => {
+                    report_unavailable_inspection(control, "Codex", &cause, input.redactions)
+                        .await?;
+                }
+            }
         }
         Ok(redactions)
     }
@@ -74,7 +83,7 @@ impl NativeV2CodexAdapter {
         #[cfg(test)]
         if let Some(default) = self.test_permission_policy {
             return Ok(CodexConfigurationInspection {
-                permission_policy: default,
+                permission_policy: Ok(default),
                 provider_environment: Vec::new(),
             });
         }
@@ -100,18 +109,40 @@ impl NativeV2CodexAdapter {
                 vec![json!({"id":3,"method":"configRequirements/read","params":{}})],
             ),
         ];
-        let Some(responses) = inspect_configuration(files, command, control, requests).await?
-        else {
-            return Ok(CodexConfigurationInspection {
-                permission_policy: PermissionPolicy::Unavailable,
-                provider_environment: Vec::new(),
-            });
+        let responses = match inspect_configuration(files, command, control, requests).await? {
+            Ok(responses) => responses,
+            Err(cause) => {
+                return Ok(CodexConfigurationInspection {
+                    permission_policy: Err(cause),
+                    provider_environment: Vec::new(),
+                });
+            }
         };
         Ok(CodexConfigurationInspection {
-            permission_policy: permission_policy(&responses, &cwd),
+            permission_policy: match permission_policy(&responses, &cwd) {
+                PermissionPolicy::Unavailable => Err(unavailable_configuration(&responses)),
+                policy => Ok(policy),
+            },
             provider_environment: provider_environment_names(&responses),
         })
     }
+}
+
+/// Codex's JSON-RPC error explains a rejected request; configuration content is never published.
+fn unavailable_configuration(responses: &[Value]) -> String {
+    responses
+        .iter()
+        .find_map(|response| response.get("error"))
+        .map_or_else(
+            || "codex app-server did not return a complete configuration".to_owned(),
+            |error| {
+                let message = error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("no detail");
+                format!("codex app-server returned a JSON-RPC error: {message}")
+            },
+        )
 }
 
 fn provider_environment_names(responses: &[Value]) -> Vec<String> {
