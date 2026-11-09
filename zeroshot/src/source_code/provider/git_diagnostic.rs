@@ -21,6 +21,7 @@ pub(crate) struct GitCommandClassification {
     http_status: Option<u16>,
     authentication_rejection: bool,
     transient_transport_failure: bool,
+    policy_rejection: bool,
 }
 
 impl fmt::Display for GitCommandFailure {
@@ -73,6 +74,12 @@ impl GitCommandFailure {
         self.http_status() == Some(401) || self.stderr_classification().authentication_rejection
     }
 
+    /// The forge definitively refused the push by branch protection or push permission, which no
+    /// candidate change can satisfy.
+    pub(crate) fn policy_rejected(&self) -> bool {
+        self.stderr_classification().policy_rejection
+    }
+
     pub(crate) fn retryable_transport(&self) -> bool {
         !self.cleanup_unconfirmed
             && (self.timed_out
@@ -120,10 +127,12 @@ impl GitCommandClassification {
                 || line.contains("Permission denied (publickey")
         });
         let transient_transport_failure = stderr.lines().any(transient_transport_line);
+        let policy_rejection = stderr.lines().any(policy_rejection_line);
         Self {
             http_status,
             authentication_rejection,
             transient_transport_failure,
+            policy_rejection,
         }
     }
 }
@@ -139,6 +148,60 @@ fn transient_transport_line(line: &str) -> bool {
         ]
         .iter()
         .any(|message| line.contains(message))
+}
+
+// Git relays server text as `remote: ` lines, padded with trailing spaces; GitLab's SSH shell
+// writes that prefix itself, and its pre-receive check adds `GitLab: `. GitHub's SSH frontend
+// refuses before Git starts, so its own `ERROR: ` lines arrive unprefixed. Only these
+// forge-authored refusals are definitive; a generic hook decline or `[remote rejected]` status
+// alone may describe repairable content.
+fn policy_rejection_line(line: &str) -> bool {
+    if let Some(message) = line.strip_prefix("ERROR: ") {
+        return message
+            .starts_with("The key you are authenticating with has been marked as read only.")
+            || github_permission_denial(message);
+    }
+    let Some(message) = line.strip_prefix("remote: ") else {
+        return false;
+    };
+    let gitlab = message.strip_prefix("GitLab: ").unwrap_or(message);
+    [
+        // GitHub branch protection, ruleset ref restrictions and push permission.
+        "error: GH006: Protected branch update failed for ",
+        "- Cannot create ref due to creations being restricted.",
+        "- Cannot update this protected ref.",
+        "Write access to repository not granted.",
+    ]
+    .iter()
+    .any(|refusal| message.starts_with(refusal))
+        || github_permission_denial(message)
+        || [
+            // GitLab protected branches (`Gitlab::Checks::BranchCheck`).
+            "You are not allowed to push code to protected branches on this project.",
+            "You are not allowed to create protected branches on this project.",
+            "You can only use an existing protected branch ref as the basis of a new protected \
+             branch.",
+            "You can only create protected branches using the web interface and API.",
+            // GitLab push permission (`Gitlab::GitAccess`).
+            "You are not allowed to push code to this project.",
+            "You are not allowed to upload code for this project.",
+            "You are not allowed to upload code.",
+            "This deploy key does not have write access to this project.",
+        ]
+        .iter()
+        .any(|refusal| gitlab.starts_with(refusal))
+}
+
+// `Permission to OWNER/REPO.git denied to ACTOR.`, where a deploy key's ACTOR is `OWNER/REPO`.
+fn github_permission_denial(message: &str) -> bool {
+    message
+        .strip_prefix("Permission to ")
+        .and_then(|denial| denial.split_once(" denied to "))
+        .is_some_and(|(repository, actor)| {
+            repository.contains('/')
+                && !repository.contains(char::is_whitespace)
+                && !actor.trim().is_empty()
+        })
 }
 
 // With terminal prompts disabled, Git reports an HTTP authentication challenge this way
