@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn enqueue_response() -> Value {
     json!({"data":{"enqueuePullRequest":{"mergeQueueEntry":{
-        "id":"QUEUE_17","pullRequest":{
+        "id":"QUEUE_17","enqueuedAt":"2026-11-09T01:00:00Z","pullRequest":{
             "id":"PR_node_17","number":17,"repository":{"nameWithOwner":"acme/project"},
             "baseRefName":"main","headRefName":"zeroshot/v2-run","headRefOid":review().head_revision
         }
@@ -59,8 +59,10 @@ case "$2" in
     printf '%s\n' "$@" >> "$HOME/rules-reads"
     if [ -f "$HOME/branch-rules-error" ]; then /bin/cat "$HOME/branch-rules-error" >&2; exit 1; fi
     if [ -f "$HOME/branch-rules.json" ]; then /bin/cat "$HOME/branch-rules.json"; else printf '[[]]\n'; fi ;;
+repos/acme/project/actions/jobs/*/logs) /bin/cat "$HOME/job-log" ;;
 graphql)
 case "$*" in
+*'query QueueOutcome('*) /bin/cat "$HOME/queue-outcome.json" ;;
 {branches}
 *'query($owner:'*)
     index=0
@@ -132,6 +134,7 @@ async fn queue_admission_is_explicit_exact_head_and_keeps_direct_policy_out() {
     assert!(args.contains(&format!("expectedHeadOid={}", review().head_revision)));
     for forbidden in [
         "enablePullRequestAutoMerge",
+        "timelineItems",
         "mergePullRequest(",
         "--admin",
         "--auto",
@@ -169,6 +172,8 @@ async fn malformed_queue_receipts_never_become_accepted_requests() {
         ("/pullRequest/baseRefName", json!("other")),
         ("/pullRequest/headRefName", json!("other")),
         ("/pullRequest/headRefOid", json!("c".repeat(40))),
+        ("/enqueuedAt", Value::Null),
+        ("/enqueuedAt", json!("invalid")),
     ] {
         let mut value_root = good.clone();
         *value_root
@@ -475,7 +480,7 @@ async fn cancelled_enqueue_drains_the_owned_submission_before_withdrawing() {
 }
 
 #[tokio::test]
-async fn removed_entries_can_be_enqueued_again_and_rejected_auth_can_rotate() {
+async fn successful_queue_admission_is_not_resubmitted_by_polling_and_rejected_auth_can_rotate() {
     let root = tempfile::tempdir().assert_value();
     let action = response(&enqueue_response());
     let provider = queue_authority(
@@ -501,7 +506,7 @@ async fn removed_entries_can_be_enqueued_again_and_rejected_auth_can_rotate() {
         );
     }
     let args = std::fs::read_to_string(root.path().join("mutations")).assert_value();
-    assert_eq!(args.matches("expectedHeadOid=").count(), 2);
+    assert_eq!(args.matches("expectedHeadOid=").count(), 1);
 
     let root = tempfile::tempdir().assert_value();
     let action = format!(
@@ -675,5 +680,235 @@ async fn rejected_dequeue_keeps_the_live_candidate_under_delivery_authority() {
             std::fs::read_to_string(root.path().join("reads")).assert_value(),
             "2"
         );
+    }
+}
+
+fn enqueue_count(root: &std::path::Path) -> usize {
+    std::fs::read_to_string(root.join("mutations"))
+        .assert_value()
+        .matches("expectedHeadOid=")
+        .count()
+}
+
+async fn enqueue_accepted(provider: &GhCliDeliveryAuthority) {
+    assert_eq!(
+        provider
+            .request_merge(&review(), SourceDeliveryCredential::token("test-token"))
+            .await
+            .assert_value(),
+        SourceMergeRequestOutcome::Accepted
+    );
+}
+
+async fn inspect_outcome(
+    root: &std::path::Path,
+    provider: &GhCliDeliveryAuthority,
+    value: Value,
+) -> Result<SourceReviewObservation, SourceDeliveryError> {
+    std::fs::write(root.join("queue-outcome.json"), value.to_string()).assert_value();
+    enqueue_accepted(provider).await;
+    provider
+        .inspect_review(&review(), SourceDeliveryCredential::token("test-token"))
+        .await
+}
+
+fn removed_queue_candidate(created_at: &str, reason: &str, checks: Vec<Value>) -> Value {
+    json!({"data":{"repository":{"nameWithOwner":"acme/project","pullRequest":{
+        "id":"PR_node_17","number":17,"baseRefName":"main","headRefName":"zeroshot/v2-run",
+        "headRefOid":review().head_revision,"timelineItems":{"nodes":[
+            {"__typename":"RemovedFromMergeQueueEvent","id":"REMOVED_17","reason":reason,"createdAt":created_at,
+             "beforeCommit":{"oid":"c".repeat(40),"statusCheckRollup":{"contexts":{
+                 "nodes":checks,"pageInfo":{"hasNextPage":false,"endCursor":null}
+             }}}}
+        ]}
+    }}}})
+}
+
+#[tokio::test]
+async fn removed_queue_candidate_returns_ci_feedback_before_an_explicit_new_admission() {
+    let root = tempfile::tempdir().assert_value();
+    let provider = queue_authority(
+        root.path(),
+        &[
+            queued(false, false),
+            queued(true, false),
+            queued(false, false),
+        ],
+        &[("enqueuePullRequest", &response(&enqueue_response()))],
+    );
+    let outcome = removed_queue_candidate(
+        "2026-11-09T01:30:00Z",
+        "failed_checks",
+        vec![
+            check_run("required", "COMPLETED", Some("FAILURE"), true),
+            check_run("coverage-check", "COMPLETED", Some("FAILURE"), false),
+        ],
+    );
+    std::fs::write(
+        root.path().join("queue-outcome.json"),
+        json!([outcome]).to_string(),
+    )
+    .assert_value();
+    std::fs::write(
+        root.path().join("job-log"),
+        "##[error]coverage reporter download failed",
+    )
+    .assert_value();
+    enqueue_accepted(&provider).await;
+    assert!(matches!(
+        provider
+            .inspect_review(&review(), SourceDeliveryCredential::token("test-token"))
+            .await
+            .assert_value()
+            .state,
+        SourceReviewState::Open {
+            checks: SourceChecks::Pending
+        }
+    ));
+    let failed = provider
+        .inspect_review(&review(), SourceDeliveryCredential::token("test-token"))
+        .await
+        .assert_value();
+    let SourceReviewState::Open {
+        checks: SourceChecks::Failed { diagnostic },
+    } = failed.state
+    else {
+        panic!("queue failure must be routed as CI feedback");
+    };
+    for expected in [
+        "removed candidate",
+        &"c".repeat(40),
+        "failed_checks",
+        "coverage-check",
+        "coverage reporter download failed",
+    ] {
+        assert!(diagnostic.contains(expected), "{diagnostic}");
+    }
+    enqueue_accepted(&provider).await;
+    assert_eq!(enqueue_count(root.path()), 1);
+    assert_withdrawn(&provider).await;
+    enqueue_accepted(&provider).await;
+    assert_eq!(enqueue_count(root.path()), 2);
+}
+
+#[tokio::test]
+async fn queue_failure_evidence_is_bound_to_the_current_admission_and_review() {
+    for (pointer, value, expected) in [
+        (
+            "/data/repository/pullRequest/timelineItems/nodes/0/createdAt",
+            json!("2026-11-09T00:59:59Z"),
+            "ignored",
+        ),
+        (
+            "/data/repository/pullRequest/timelineItems/nodes/0/createdAt",
+            json!("2026-11-09T01:00:00Z"),
+            "feedback",
+        ),
+        (
+            "/data/repository/pullRequest/timelineItems/nodes/0/createdAt",
+            json!("2026-11-09T02:00:00Z"),
+            "feedback",
+        ),
+        (
+            "/data/repository/nameWithOwner",
+            json!("other/repo"),
+            "rejected",
+        ),
+        (
+            "/data/repository/pullRequest/id",
+            json!("OTHER_PR_NODE"),
+            "rejected",
+        ),
+        (
+            "/data/repository/pullRequest/headRefOid",
+            json!("d".repeat(40)),
+            "rejected",
+        ),
+        (
+            "/data/repository/pullRequest/timelineItems/nodes/0/beforeCommit/oid",
+            json!("invalid"),
+            "rejected",
+        ),
+        (
+            "/data/repository/pullRequest/timelineItems/nodes/0/createdAt",
+            json!("invalid"),
+            "rejected",
+        ),
+        (
+            "/data/repository/pullRequest/timelineItems/nodes/0/reason",
+            json!("merged"),
+            "ignored",
+        ),
+    ] {
+        let root = tempfile::tempdir().assert_value();
+        let provider = admission(root.path(), &response(&enqueue_response()));
+        let mut outcome = removed_queue_candidate("2026-11-09T01:30:00Z", "failed_checks", vec![]);
+        *outcome.pointer_mut(pointer).assert_value() = value;
+        let observed = inspect_outcome(root.path(), &provider, json!([outcome])).await;
+        match expected {
+            "rejected" => {
+                observed.assert_error();
+            }
+            "feedback" => assert!(matches!(
+                observed.assert_value().state,
+                SourceReviewState::Open {
+                    checks: SourceChecks::Failed { .. }
+                }
+            )),
+            _ => assert!(!matches!(
+                observed.assert_value().state,
+                SourceReviewState::Open {
+                    checks: SourceChecks::Failed { .. }
+                }
+            )),
+        }
+        assert_eq!(enqueue_count(root.path()), 1);
+    }
+}
+
+#[tokio::test]
+async fn queue_candidate_check_pagination_is_complete_and_generation_stable() {
+    for bad_page in [false, true] {
+        let root = tempfile::tempdir().assert_value();
+        let provider = admission(root.path(), &response(&enqueue_response()));
+        let mut first = removed_queue_candidate(
+            "2026-11-09T01:30:00Z",
+            "failed_checks",
+            vec![check_run("required", "COMPLETED", Some("FAILURE"), true)],
+        );
+        let connection = "/data/repository/pullRequest/timelineItems/nodes/0/beforeCommit/statusCheckRollup/contexts";
+        first.pointer_mut(connection).assert_value()["pageInfo"] =
+            json!({"hasNextPage":true,"endCursor":"next"});
+        let mut second = removed_queue_candidate(
+            "2026-11-09T01:30:00Z",
+            "failed_checks",
+            vec![check_run(
+                "coverage-check",
+                "COMPLETED",
+                Some("FAILURE"),
+                false,
+            )],
+        );
+        if bad_page {
+            second["data"]["repository"]["pullRequest"]["timelineItems"]["nodes"][0]["id"] =
+                json!("NEW_REMOVAL");
+        }
+        std::fs::write(
+            root.path().join("job-log"),
+            "##[error]same queue candidate failed",
+        )
+        .assert_value();
+        let observed = inspect_outcome(root.path(), &provider, json!([first, second])).await;
+        if bad_page {
+            observed.assert_error();
+        } else {
+            let SourceReviewState::Open {
+                checks: SourceChecks::Failed { diagnostic },
+            } = observed.assert_value().state
+            else {
+                panic!("missing queue failure");
+            };
+            assert!(diagnostic.contains("coverage-check"), "{diagnostic}");
+        }
     }
 }

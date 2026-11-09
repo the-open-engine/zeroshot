@@ -274,6 +274,7 @@ impl GhCliDeliveryAuthority {
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<PolicySnapshot, SourceDeliveryError> {
         let mut snapshot = self.policy_snapshot(review, credential).await?;
+        queue::observe_removal(self, review, &mut snapshot, credential).await?;
         let mut logs = Vec::new();
         for job in &snapshot.failed_job_ids {
             let log = job_log_excerpt(
