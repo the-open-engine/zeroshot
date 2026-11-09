@@ -2383,11 +2383,14 @@ remote access or authentication failure.</p>
 HTTPS connections declare <code>GIT_USERNAME</code> and <code>GIT_PASSWORD</code>; SSH connections declare
 <code>GIT_SSH_PRIVATE_KEY</code> and <code>GIT_SSH_KNOWN_HOSTS</code>. Explicit SSH authentication uses those pinned hosts
 and its private key. Contained runs inherit no host Git login state.</p>
-<p>Named GitHub.com runs retain <code>GH_TOKEN</code> checkout and delivery support. That token is not automatically
-applied to another Git host. A model provider receives a connection field only when its own runtime
-binding declares it. Transport values stay out of source records, ledgers, observations, and
-checkpoint snapshots. Direct-target resume reuses the original source connection authorization and
-resolves fresh values.</p>
+<p>Named runs never send the invoking shell's <code>GH_TOKEN</code> unless you pass <code>--forward-gh-token</code> to <code>run</code>,
+<code>resume</code>, or <code>stack submit</code>. Without the flag, the target resolves GitHub access from its own stored
+<code>github</code> connection, even when <code>GH_TOKEN</code> is set locally. With the flag, the CLI sends <code>GH_TOKEN</code>
+for GitHub.com checkout and delivery, to fill a declared <code>GH_TOKEN</code> connection field, and for a
+direct target's <code>--task-from</code> review resolution, and fails when it is unset. That token is not automatically applied to another Git host. A model provider
+receives a connection field only when its own runtime binding declares it. Transport values stay out
+of source records, ledgers, observations, and checkpoint snapshots. Direct-target resume reuses the
+original source connection authorization and resolves fresh values.</p>
 <p>After admission, the CLI reports the target, repository, branch, exact revision, and whether the
 client checkout is dirty before emitting the receipt. Uncommitted files stay on the client.
 See <a href="../../project/source-code-adapters/">Source-code adapters</a> for the contribution boundary.</p>

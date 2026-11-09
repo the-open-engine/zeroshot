@@ -2575,7 +2575,7 @@
 
 
 <h2 id="zeroshot.Client" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">Client</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">target</span><span class="p">:</span> <span class="n">Target</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">preset</span><span class="p">:</span> <span class="n">Preset</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">runtime</span><span class="p">:</span> <span class="n">_Runtime</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">environment</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">Client</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">target</span><span class="p">:</span> <span class="n">Target</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">preset</span><span class="p">:</span> <span class="n">Preset</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">runtime</span><span class="p">:</span> <span class="n">_Runtime</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">environment</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">forward_github_token</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span></code>
 
 <a href="#zeroshot.Client" class="headerlink" title="Permanent link">&para;</a></h2>
 
@@ -2639,6 +2639,30 @@ explicit mapping replaces ambient credential variables. Native saved connections
 local harness login still apply.</p>
           </div>
         </li>
+        <li class="doc-section-item field-body">
+            <b><code>forward_github_token</code></b>
+              (<code><span title="bool">bool</span></code>, default:
+                  <code>False</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Send the submission environment's GH_TOKEN to a direct or hosted
+target. Without it, the target resolves GitHub access from its own stored connection
+and GH_TOKEN is not sent. Requires GH_TOKEN in the submission environment.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-internal" title="              InvalidRequestError(message: str, *, code: str = 'request.invalid', path: tuple[str | int, ...] | None = None, node: str | None = None, details: Mapping[str, JsonValue] | None = None) (zeroshot.errors.InvalidRequestError)" href="../errors/#zeroshot.InvalidRequestError">InvalidRequestError</a></code>
+            –
+          <div class="doc-md-description">
+            <p>If forward_github_token is set for a local target.</p>
+          </div>
+        </li>
     </ul>
         <p>The SDK never guesses a harness, provider, or model. Closing the client detaches observation
 and never stops runs.</p>
@@ -2685,7 +2709,7 @@ and never stops runs.</p>
 <p><span class="doc-section-title">Returns:</span></p>
     <ul>
         <li class="doc-section-item field-body">
-              <code><a class="autorefs autorefs-internal" title="              Client(*, target: Target | None = None, preset: Preset | None = None, runtime: _Runtime | None = None, environment: Mapping[str, str] | None = None) (zeroshot.client.Client)" href="#zeroshot.Client">Client</a></code>
+              <code><a class="autorefs autorefs-internal" title="              Client(*, target: Target | None = None, preset: Preset | None = None, runtime: _Runtime | None = None, environment: Mapping[str, str] | None = None, forward_github_token: bool = False) (zeroshot.client.Client)" href="#zeroshot.Client">Client</a></code>
           –
           <div class="doc-md-description">
             <p>This client.</p>
