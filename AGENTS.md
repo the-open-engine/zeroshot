@@ -1387,9 +1387,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   descriptors inherited by concurrent process spawns.
 - Python test doubles use `openengine_cluster_testkit::fixture::python3_script`, which resolves
   the test PATH's actual interpreter before entering a pinned or cleared child environment.
-- `.opcore.json` owns the full-source Opcore policy. The reusable `.github/workflows/opcore.yml`
-  runs the Fast provider and Cargo with warnings denied in merge-group/manual full CI, except
-  for root-README-only changes identified by the shared CI classifier. Cargo uses the complete checkout
+- `.opcore.json` owns the full-source Opcore policy. PR quick checks run checksum-pinned Opcore Fast
+  before queue admission. The reusable `.github/workflows/opcore.yml` checks the actual merge candidate
+  with Fast and Cargo with warnings denied in merge-group/manual full CI. Both Fast passes skip
+  root-README-only changes identified by the shared CI classifier. Cargo uses the complete checkout
   because Opcore's Rust snapshot omits embedded Python assets. The two exact PowerShell exclusions
   reflect unsupported parsing; the Windows native CI lane still runs those scripts.
 - Preserve bounded values, explicit overflow, cancellation safety, and exact source provenance at
