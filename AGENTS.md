@@ -904,7 +904,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   diagnostics, including when native credentials collide with object IDs or Git-directory paths;
   parsing and failure classification must preserve raw evidence before credential redaction. Final delivery feedback
   also redacts the invocation's source credentials and its current refreshed issuance;
-  unfamiliar failures use the existing optional `repair_required` signal. Only successful receipts
+  unfamiliar failures use the existing optional `repair_required` signal. After exact-ref
+  confirmation, only the exact forge-authored branch-protection and push-permission texts in
+  `git_diagnostic.rs` (relayed `remote:` lines or GitHub's SSH `ERROR:` lines) become
+  `policy_refusal`, never repair; generic hook declines, `[remote rejected]` and bare HTTP 403 stay
+  on their existing paths. Only successful receipts
   require complete remote identity. Live output splits large UTF-8 diagnostics into bounded records.
   Delivery checks unresolved index entries before `git add --all` and completes resolved merges even
   when their tree has no staged difference. Other unfinished Git operations return raw status for

@@ -52,6 +52,15 @@ impl From<SourceDeliveryError> for DeliveryStop {
             )
         } else if error.authentication_failed() {
             Self::failure(WorkerOutcome::authentication_refusal(), diagnostic)
+        } else if error.policy_rejected() {
+            Self::failure(
+                WorkerOutcome::policy_refusal(),
+                format!(
+                    "forge branch protection or permissions refused the push; local work was \
+                     preserved. Allow delivery to publish its managed branch, then resume the \
+                     run.\n{diagnostic}"
+                ),
+            )
         } else if error.retryable_operation() {
             Self::Retry(error)
         } else if matches!(
