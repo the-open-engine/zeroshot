@@ -420,6 +420,7 @@ fn build_local_candidate_config(
             adopt_existing_delivery,
             git_identity: None,
             commit_identity: None,
+            commit_co_author: None,
             workspace: workspace.to_owned(),
             git_program: programs.git.clone(),
             target,

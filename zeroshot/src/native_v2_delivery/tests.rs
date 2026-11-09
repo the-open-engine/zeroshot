@@ -228,44 +228,70 @@ async fn embedded_repository_warning_reaches_run_output_without_blocking_push() 
 }
 
 #[tokio::test]
-async fn configured_commit_identity_authors_the_delivered_commit() {
-    use crate::native_v2_candidate::test_support::{BOT_AUTHOR, bot_commit_identity, commit_authorship};
-    let repo = TempRepo::delivery();
-    let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::NoCi));
-    let adapter = Arc::new(NativeV2DeliveryAdapter::new(
-        NativeV2DeliveryConfig {
-            delivery_run_id: RunId::new("delivery-bot-identity"),
-            adopt_existing_delivery: false,
-            git_identity: None,
-            commit_identity: Some(bot_commit_identity()),
-            workspace: repo.workspace.clone(),
-            git_program: "/usr/bin/git".into(),
-            target: target(&repo),
-            poll: DeliveryPollPolicy::new(1, Duration::ZERO).assert_value(),
-        },
-        authority,
-    ));
-    let outcome = run_with_adapter(
-        DeliveryRunRequest {
-            repo: &repo,
-            attempts: 1,
-            mode: DeliveryMode::Push,
-            run_id: "delivery-bot-identity",
-            refresh: None,
-        },
-        adapter,
-    )
-    .await
-    .outcome;
-    let output = assert_delivery_signal(&outcome, DELIVERY_PUSHED_LABEL);
-    let head = output
-        .pointer("/headRevision")
-        .and_then(Value::as_str)
-        .assert_value();
-    assert_eq!(
-        commit_authorship(&repo.workspace, head),
-        format!("{BOT_AUTHOR}|{BOT_AUTHOR}")
-    );
+async fn configured_commit_attribution_reaches_original_and_resumed_delivered_commits() {
+    use crate::native_v2_candidate::test_support::{
+        BOT_AUTHOR, CO_AUTHOR, bot_commit_identity, co_author_identity, commit_attribution,
+        git_output,
+    };
+    for (identity, author) in [
+        (None, "Zeroshot <delivery@zeroshot.invalid>"),
+        (Some(bot_commit_identity()), BOT_AUTHOR),
+    ] {
+        let repo = TempRepo::delivery();
+        let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::NoCi));
+        let deliver = |run_id, adopt_existing_delivery| {
+            let adapter = Arc::new(NativeV2DeliveryAdapter::new(
+                NativeV2DeliveryConfig {
+                    delivery_run_id: RunId::new("delivery-attribution"),
+                    adopt_existing_delivery,
+                    git_identity: None,
+                    commit_identity: identity.clone(),
+                    commit_co_author: Some(co_author_identity()),
+                    workspace: repo.workspace.clone(),
+                    git_program: "/usr/bin/git".into(),
+                    target: target(&repo),
+                    poll: DeliveryPollPolicy::new(1, Duration::ZERO).assert_value(),
+                },
+                authority.clone(),
+            ));
+            let request = DeliveryRunRequest {
+                repo: &repo,
+                attempts: 1,
+                mode: DeliveryMode::Push,
+                run_id,
+                refresh: None,
+            };
+            async move {
+                let outcome = run_with_adapter(request, adapter).await.outcome;
+                assert_delivery_signal(&outcome, DELIVERY_PUSHED_LABEL)
+                    .pointer("/headRevision")
+                    .and_then(Value::as_str)
+                    .assert_value()
+                    .to_owned()
+            }
+        };
+        let original = deliver("delivery-attribution", false).await;
+        fs::write(repo.workspace.join("resumed.txt"), "resumed\n").assert_value();
+        let resumed = deliver("delivery-attribution-successor", true).await;
+        assert_eq!(
+            git_output(&repo.workspace, &["rev-parse", &format!("{resumed}^")]),
+            original
+        );
+        for head in [original, resumed] {
+            let attribution = commit_attribution(&repo.workspace, &head);
+            let (authorship, message) = attribution.split_once('\n').assert_value();
+            assert_eq!(authorship, format!("{author}|{author}"));
+            assert_eq!(
+                message.matches("Co-authored-by:").count(),
+                1,
+                "{attribution}"
+            );
+            assert!(
+                message.ends_with(&format!("\n\nCo-authored-by: {CO_AUTHOR}")),
+                "{attribution}"
+            );
+        }
+    }
 }
 
 #[tokio::test]
@@ -1100,6 +1126,7 @@ async fn run_delivery_execution_with_identity_and_adoption(
         adopt_existing_delivery,
         git_identity: None,
         commit_identity: None,
+        commit_co_author: None,
         workspace: request.repo.workspace.clone(),
         git_program: PathBuf::from("/usr/bin/git"),
         target: target(request.repo),
@@ -1143,6 +1170,7 @@ fn retained_adapter(
             adopt_existing_delivery: lineage.adopt_existing,
             git_identity: None,
             commit_identity: None,
+            commit_co_author: None,
             workspace: repo.workspace.clone(),
             git_program: "/usr/bin/git".into(),
             target: target(repo),

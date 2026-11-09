@@ -59,6 +59,7 @@ mod queued_handoff {
                     adopt_existing_delivery: false,
                     git_identity: None,
                     commit_identity: None,
+                    commit_co_author: None,
                     workspace: root.path().to_owned(),
                     git_program: "/usr/bin/git".into(),
                     target: DeliveryTarget::new("acme/project", "main", "a".repeat(40)).unwrap(),

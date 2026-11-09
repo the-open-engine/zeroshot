@@ -141,6 +141,7 @@ fn resume(
         github_token: None,
         git_credentials: None,
         commit_identity: None,
+        commit_co_author: None,
     }
 }
 

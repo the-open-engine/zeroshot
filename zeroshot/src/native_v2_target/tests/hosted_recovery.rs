@@ -44,6 +44,7 @@ async fn hosted_recovery_uses_authenticated_http_without_the_deleted_capsules_tr
                     github_token: None,
                     git_credentials: None,
                     commit_identity: None,
+                    commit_co_author: None,
                 },
             )
             .await

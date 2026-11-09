@@ -272,6 +272,7 @@ async fn registered_contribution_executes_existing_pr_and_merge_nodes_with_opaqu
                 git_program: "/usr/bin/git".into(),
                 git_identity: None,
                 commit_identity: None,
+                commit_co_author: None,
                 target: source_target(&source, mode).assert_value(),
                 poll: DeliveryPollPolicy::new(3, Duration::ZERO).assert_value(),
             },
