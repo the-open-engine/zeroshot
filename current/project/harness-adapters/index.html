@@ -2026,7 +2026,7 @@
 </tr>
 <tr>
 <td><code>opencode</code></td>
-<td><code>openai</code>, <code>anthropic</code>, <code>openrouter</code>, <code>bedrock</code>, <code>gateway</code>, <code>github</code></td>
+<td><code>openai</code>, <code>anthropic</code>, <code>openrouter</code>, <code>bedrock</code>, <code>gateway</code>, <code>github</code>, <code>opencode</code>, <code>opencode-go</code></td>
 <td>Contributed</td>
 </tr>
 <tr>
@@ -2058,7 +2058,9 @@ Codex and Claude <code>foundry</code> lanes share one Microsoft Foundry connecti
 <p>Local native login works for Codex/OpenAI, Claude/Anthropic, Copilot/GitHub and its OpenAI,
 Anthropic and OpenRouter BYOK lanes, and Pi/Anthropic, OpenAI and GitHub. OpenCode and Hermes retain
 native authentication for every supported provider except gateway, including the native AWS
-credential chain for Bedrock. Other lanes require declared connections. GitHub connections use
+credential chain for Bedrock. OpenCode's <code>opencode</code> (Zen) and <code>opencode-go</code> (Go) lanes reuse the
+native OpenCode account login; a declared <code>OPENCODE_API_KEY</code> serves both. Other lanes require
+declared connections. GitHub connections use
 <code>COPILOT_GITHUB_TOKEN</code>; each harness owns its native exchange and refresh behavior. Declared
 credentials use private runtime state and preserve saved logins.</p>
 <p>Local OpenCode and Hermes runs preserve native configuration discovery with declared credentials.
@@ -2186,7 +2188,7 @@ must cover forwarding, isolation, reuse and rejection for every registered adapt
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-07">7 November 2026</time>
+    Last updated <time datetime="2026-11-09">9 November 2026</time>
   </span>
 
     
