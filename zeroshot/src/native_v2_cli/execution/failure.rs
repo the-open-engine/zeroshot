@@ -173,6 +173,21 @@ impl fmt::Display for RunFailure {
                     write_diagnostic(formatter, diagnostic)?;
                 }
             }
+            if !context.verifiers.is_empty() {
+                formatter.write_str("\nRecorded verifier results:")?;
+                for diagnostic in &context.verifiers {
+                    write_diagnostic(formatter, diagnostic)?;
+                }
+            }
+            for visit in &context.exhausted_loops {
+                write!(formatter, "\nLoop {}", visit.node.as_str())?;
+                write_indices(formatter, &visit.map_indices)?;
+                write!(
+                    formatter,
+                    " exhausted after {} completed iterations",
+                    visit.completed_iterations.get()
+                )?;
+            }
         } else if !self.errors.is_empty() {
             let shown = self.errors.len();
             if self.omitted == 0 {
@@ -210,11 +225,20 @@ fn write_diagnostic(
 ) -> fmt::Result {
     formatter.write_str("\n  ")?;
     if let Some(execution) = &diagnostic.execution {
-        write!(formatter, "{}: ", execution.node.as_str())?;
+        formatter.write_str(execution.node.as_str())?;
+        write_indices(formatter, &execution.map_indices)?;
+        formatter.write_str(": ")?;
     }
     formatter.write_str(diagnostic.message.as_str())?;
     if let Some(cursor) = &diagnostic.cursor {
         write!(formatter, " (log {})", cursor.as_str())?;
+    }
+    Ok(())
+}
+
+fn write_indices(formatter: &mut fmt::Formatter<'_>, indices: &[u64]) -> fmt::Result {
+    for index in indices {
+        write!(formatter, "[{index}]")?;
     }
     Ok(())
 }

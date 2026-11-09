@@ -35,6 +35,7 @@ fn execution(value: &str) -> ExecutionRef {
 
 fn active(execution_ref: &str, node: &str) -> ActiveExecution {
     ActiveExecution {
+        map_indices: Vec::new(),
         execution: execution(execution_ref),
         node: NodeName::new(node).assert_value(),
     }

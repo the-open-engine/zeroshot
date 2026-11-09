@@ -191,3 +191,27 @@ async fn usage_and_diagnostic_overflow_each_keep_their_own_marker() {
     assert_eq!(marker.diagnostic, Some(FailureDiagnosticKind::Incomplete));
     assert_eq!(output.recv().await, Err(AttachReceiveError::Closed));
 }
+
+#[tokio::test]
+async fn cancelled_system_verifier_evidence_uses_the_bounded_terminal_lane() {
+    let (sender, mut output) = durable_event_channel_with_capacity(1);
+    sender
+        .cancelled_terminal_active
+        .store(true, Ordering::Release);
+    let (_cancel, cancellation) = watch::channel(true);
+    let mut result =
+        LiveOutput::new(LiveOutputStream::System, "graph-defined result").expect("safe text");
+    result.diagnostic = Some(FailureDiagnosticKind::Verifier);
+    sender
+        .send(durable_output_event(result.clone()), cancellation)
+        .await
+        .expect("retain verifier evidence");
+    drop(sender);
+    let DurableNodeEvent::Output {
+        output: retained, ..
+    } = output.recv().await.expect("retained evidence")
+    else {
+        panic!("missing result")
+    };
+    assert_eq!(retained, result);
+}

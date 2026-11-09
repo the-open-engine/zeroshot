@@ -47,10 +47,12 @@ class ActiveExecution:
     Args:
         execution: Opaque selector accepted by log filtering.
         node: Executable graph node name.
+        map_indices: Zero-based map path, outermost first; empty outside maps.
     """
 
     execution: str
     node: str
+    map_indices: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -69,17 +71,36 @@ class FailureDiagnostic:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ExhaustedLoop:
+    """A reducer-confirmed exhausted loop visit.
+
+    Args:
+        node: Graph loop name.
+        completed_iterations: Completed rounds, independent of execution retries.
+        map_indices: Zero-based map path, outermost first.
+    """
+
+    node: str
+    completed_iterations: int
+    map_indices: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class FailureContext:
     """Recorded failure evidence without inferring causality from log order.
 
     Args:
         primary: Explicitly identified runtime failure, when available.
         recorded: Recent failure records, which may include recovered or voided attempts.
+        verifiers: Latest recorded graph-defined results per verifier and map path.
+        exhausted_loops: Reducer-confirmed exhausted loop visits.
         incomplete: Whether additional failure evidence may be missing from this summary.
     """
 
     primary: FailureDiagnostic | None = None
     recorded: tuple[FailureDiagnostic, ...] = ()
+    verifiers: tuple[FailureDiagnostic, ...] = ()
+    exhausted_loops: tuple[ExhaustedLoop, ...] = ()
     incomplete: bool = False
 
 
@@ -169,6 +190,7 @@ class LogEvent:
         timestamp: Producer-captured Unix epoch milliseconds, preserved by replay.
         execution: Opaque execution selector, or None for run-wide records.
         level: Native debug, info, or error level.
+        map_indices: Zero-based map path, outermost first; empty outside maps.
         target: Bounded native log target.
         message: Bounded secret-safe message.
     """
@@ -180,3 +202,4 @@ class LogEvent:
     level: Literal["debug", "info", "error"]
     target: str
     message: str
+    map_indices: tuple[int, ...] = ()

@@ -8,6 +8,7 @@ description: "Python API reference for run results, summaries, statuses, stack s
     options:
       members:
         - ActiveExecution
+        - ExhaustedLoop
         - FailureContext
         - FailureDiagnostic
         - LogEvent

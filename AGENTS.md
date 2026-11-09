@@ -764,7 +764,18 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and attaches it to failed terminal results in the same append transaction. Status, watch, SDK,
   shared UI and archived history carry that result directly. Known runtime causes remain distinct
   from recorded node failures; recovered/voided evidence never establishes terminal causality.
-  Diagnostic overflow marks context incomplete independently of token usage. Producer and capsule
+  Verifier adapters, including Git delivery, publish bounded graph-defined signals and diagnostics
+  through the existing output/log bridge using their complete effective credential redactions (including
+  captured native authentication), before truncation and SafeLog persistence. Failure context retains latest verifier
+  results per node and map path separately from runtime causes and recorded execution errors.
+  Only actual failure diagnostics suppress duplicate settlement errors; verifier results never do.
+  The reducer supplies bounded exhausted-loop visits and completed round counts; retries never count
+  as rounds. Settled unreachable parallel joins replay canonical branches without scheduling
+  decisions; speculative probes and race/map losers never contribute loop evidence or consume its bound.
+  Public execution and log projections expose zero-based outermost-first map indices,
+  omitted outside maps, without changing opaque execution selectors.
+  Diagnostic overflow marks context incomplete independently of token usage, even after retained
+  exhausted-loop entries are removed by later convergence. Producer and capsule
   records retain their existing execution/cursor identity; no separate diagnostics API or store exists.
   When history is unavailable, the viewer separates current failure status from recorded playback
   and offers log navigation only for loaded evidence.

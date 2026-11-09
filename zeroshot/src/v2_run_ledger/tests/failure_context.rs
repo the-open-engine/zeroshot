@@ -363,3 +363,79 @@ async fn primary_failure_retains_its_diagnostics_across_auxiliary_interruption()
         );
     }
 }
+
+#[tokio::test]
+async fn verifier_evidence_and_loop_counts_freeze_without_replacing_a_later_runtime_cause() {
+    for ledger in ledgers() {
+        let request = create("verifier-freeze", "verifier-freeze-key", 'c');
+        let run_id = request.run_id.clone();
+        ledger.create_or_get(request).await.assert_value();
+        let worker = reference(&run_id, 1);
+        let mut verifier = diagnostic(
+            Some(worker.execution),
+            "readiness=ready; all clear",
+            FailureDiagnosticKind::Verifier,
+        );
+        if let RunEvent::SafeLog { stream, .. } = &mut verifier {
+            *stream = SafeLogStream::System;
+        }
+        let mut reducer_context = openengine_cluster_protocol::FailureContext::default();
+        reducer_context.record_exhausted_loop(openengine_cluster_protocol::ExhaustedLoop {
+            node: "bounded_loop".parse().assert_value(),
+            completed_iterations: PositiveInteger::new(3).assert_value(),
+            map_indices: vec![1, 2],
+        });
+        let latched = ledger
+            .append(
+                &run_id,
+                vec![
+                    RunEvent::RunStarted,
+                    started(worker.clone()),
+                    verifier,
+                    completed(worker, Value::Null),
+                    diagnostic(
+                        None,
+                        "Runtime failed: snapshot unavailable",
+                        FailureDiagnosticKind::Failure,
+                    ),
+                    RunEvent::PrimaryGraphCompleted {
+                        result: TerminalResult::Failed {
+                            reason: "runtime_failed".parse().assert_value(),
+                            context: Some(Box::new(reducer_context)),
+                        },
+                        auxiliary_pending: true,
+                        delivery_execution: None,
+                    },
+                ],
+            )
+            .await
+            .assert_value();
+        let result = latched.snapshot.primary_graph.assert_value().result;
+        let TerminalResult::Failed {
+            context: Some(context),
+            ..
+        } = &result
+        else {
+            panic!("missing frozen context")
+        };
+        assert_eq!(
+            context.primary.as_ref().assert_value().message.as_str(),
+            "Runtime failed: snapshot unavailable"
+        );
+        assert_eq!(context.verifiers.len(), 1);
+        assert_eq!(context.exhausted_loops[0].completed_iterations.get(), 3);
+        let finished = ledger
+            .append(
+                &run_id,
+                vec![
+                    diagnostic(None, "auxiliary failure", FailureDiagnosticKind::Failure),
+                    RunEvent::Terminal {
+                        result: result.clone(),
+                    },
+                ],
+            )
+            .await
+            .assert_value();
+        assert_eq!(finished.snapshot.terminal, Some(result));
+    }
+}

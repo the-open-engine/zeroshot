@@ -63,7 +63,12 @@ impl CapsuleOutput {
             CapsuleOutputStream::Error => LiveOutputStream::Error,
             CapsuleOutputStream::System => LiveOutputStream::System,
         };
-        if self.diagnostic.is_some() && stream != LiveOutputStream::Error {
+        if self.diagnostic.is_some_and(|kind| match kind {
+            FailureDiagnosticKind::Verifier => stream != LiveOutputStream::System,
+            FailureDiagnosticKind::Failure | FailureDiagnosticKind::Incomplete => {
+                stream != LiveOutputStream::Error
+            }
+        }) {
             return Err(NodeRunnerError::UnsafeOutput);
         }
         let mut output = LiveOutput::new(stream, self.text)?;

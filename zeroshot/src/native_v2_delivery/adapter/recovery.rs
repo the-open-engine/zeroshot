@@ -146,6 +146,10 @@ impl NativeV2DeliveryAdapter {
         credentials: &DeliveryCredentials<'_>,
         diagnostic: impl AsRef<str>,
     ) -> String {
+        super::super::command::redact(diagnostic.as_ref(), &self.feedback_secrets(credentials))
+    }
+
+    pub(super) fn feedback_secrets(&self, credentials: &DeliveryCredentials<'_>) -> Vec<String> {
         let mut secrets = credentials.feedback_secrets();
         for token in [self.trusted_github_token.as_deref()].into_iter().flatten() {
             secrets.extend([token.to_owned(), git_auth::encode_basic_credential(token)]);
@@ -156,7 +160,7 @@ impl NativeV2DeliveryAdapter {
         {
             source_secrets(credentials, &mut secrets);
         }
-        super::super::command::redact(diagnostic.as_ref(), &secrets)
+        secrets
     }
 }
 

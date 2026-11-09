@@ -166,7 +166,7 @@ impl Engine<'_> {
             .get(selected.index)
             .ok_or(ReducerError::InconsistentHistory)?
             .scope;
-        let terminal = if traversal.mode == EvalMode::Decide {
+        let terminal = if traversal.mode != EvalMode::Probe {
             let mut terminal_context = context.clone();
             self.eval(
                 &group.body,
