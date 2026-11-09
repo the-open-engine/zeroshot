@@ -209,6 +209,16 @@ closed enums. Paths are arrays of field, index, or node segments, never JSONPath
 cover schema safety, reachability, choice exhaustiveness, loop exit satisfiability, missing bounds,
 write conflicts, ceiling excess, cyclic references, undefined reads, and invalid graph shape.
 
+A rejected graph's error text names the first diagnostic's path and message, then the number of
+further diagnostics. The path shows field names with their `[index]` and node names in backquotes.
+The message is never shortened. The count and then the path only use the bytes the message leaves
+within 1,024 bytes: the count is left out when it does not fit, and `.../` replaces leading path
+segments that do not fit:
+
+```text
+graph verification rejected the graph at root/`run`/children[1]/`check`/branches: control assignment space exceeds 65536 (and 1 more diagnostic)
+```
+
 `StructuralBounds` carries a termination witness, positive maximum node executions, positive peak
 concurrency, and positive per-node attempt ceilings. A termination witness is either an acyclic node
 order or a bounded structural ranking with positive maximum iterations.

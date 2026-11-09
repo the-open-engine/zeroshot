@@ -1072,8 +1072,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   ends either command with a process error (exit 1) that carries its latest bounded, control-safe
   error-log records and the `zeroshot logs` command. That read is best effort, deadline- and
   Ctrl-C-bounded, and never replaces the failure. `logs` exits 0 whatever the run's result.
-- Graph verification errors display their first safe diagnostic through the shared verifier error,
-  so local validation and hosted rejection report the same cause.
+- Graph verification errors display their first safe diagnostic, its path and the count of further
+  diagnostics through the shared verifier error, so local validation and hosted rejection report the
+  same cause. Within the 1,024-byte target problem message bound, the count and then the path's
+  innermost tail use only the bytes the message leaves.
 - Do not hand-edit `docs/zeroshot-cli.md` or `docs/zeroshot-cli.html`; regenerate with
   `cargo run -p zeroshot --example generate_cli_docs -- --write` and verify with `--check`.
 - Page descriptions live in Markdown front matter; generated reference descriptions live in

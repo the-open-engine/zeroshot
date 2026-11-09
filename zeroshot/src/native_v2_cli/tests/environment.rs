@@ -554,8 +554,8 @@ async fn validation_only_reports_graph_and_runtime_causes_without_backend_contac
         (
             invalid,
             concat!(
-                "run validation failed: graph verification rejected the graph: ",
-                "required payload target issueNumber is not defined by a binding"
+                "run validation failed: graph verification rejected the graph at ",
+                "root/`done`/bindings: required payload target issueNumber is not defined by a binding"
             ),
         ),
     ] {

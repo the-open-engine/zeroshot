@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    GraphDiagnostic, GraphDiagnosticCode, GraphSpec, WorkerDescriptor, WorkerRef,
+    DiagnosticPathSegment, GraphDiagnostic, GraphDiagnosticCode, GraphSpec, TargetHttpProblem,
+    WorkerDescriptor, WorkerRef, MAX_IDENTIFIER_LENGTH, MAX_TARGET_HTTP_PROBLEM_MESSAGE_BYTES,
+    TARGET_RUN_REJECTED_CODE,
 };
 use openengine_cluster_server::admission::{GraphVerifier, VerificationError};
 use openengine_cluster_server::graph_verifier::{
@@ -486,6 +488,115 @@ async fn parallel_concurrency_rejects_limit_plus_one_at_combining_branches() {
         .await
         .assert_error();
     assert!(has_ceiling(error, "branches"));
+}
+
+fn path_nodes(path: &[DiagnosticPathSegment]) -> Vec<&str> {
+    path.iter()
+        .filter_map(|segment| match segment {
+            DiagnosticPathSegment::Node { name } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn checked_map(name: &str, work: &str) -> Value {
+    json!({
+        "kind":"map","name":name,"state":state(),"body":null_step(work,1),
+        "over":{"source":"state","path":["items"]},"maxItems":33,"promotedStatePaths":[]
+    })
+}
+
+fn item_error_check(name: &str, work: &str, otherwise: Value) -> Value {
+    json!({
+        "kind":"choice","name":name,"state":state(),"promotedStatePaths":[],
+        "branches":[{
+            "when":{
+                "kind":"k_of_map","count":1,
+                "value":{"source":"error","name":work,"field":null},
+                "labels":["timeout","crash","malformed","refusal"]
+            },
+            "node":{"kind":"fail","name":format!("{name}Failed"),"reason":"item_failed"}
+        }],
+        "otherwise":otherwise
+    })
+}
+
+#[tokio::test]
+async fn rejection_message_names_the_diagnostic_node_path_and_further_diagnostics() {
+    let error = verify(&graph(vec![
+        checked_map("fanOut", "itemWork"),
+        item_error_check("itemCheck", "itemWork", succeed("done")),
+    ]))
+    .await
+    .assert_error();
+    let message = error.to_string();
+    let rejected = diagnostics(error);
+    assert_eq!(rejected.len(), 1);
+    assert_eq!(rejected[0].code, GraphDiagnosticCode::CeilingExceeded);
+    assert_eq!(path_nodes(&rejected[0].path), ["root", "itemCheck"]);
+    assert!(message.contains(&rejected[0].message), "{message:?}");
+    for node in path_nodes(&rejected[0].path) {
+        assert!(
+            message.contains(node),
+            "{message:?} does not name node {node}"
+        );
+    }
+
+    let error = verify(&graph(vec![
+        checked_map("fanOut", "itemWork"),
+        checked_map("fanOutAgain", "againWork"),
+        item_error_check(
+            "itemCheck",
+            "itemWork",
+            item_error_check("againCheck", "againWork", succeed("done")),
+        ),
+    ]))
+    .await
+    .assert_error();
+    let message = error.to_string();
+    let rejected = diagnostics(error);
+    assert_eq!(rejected.len(), 2);
+    let first_only = VerificationError::Rejected {
+        diagnostics: rejected[..1].to_vec(),
+    }
+    .to_string();
+    assert_ne!(message, first_only, "further diagnostics are not mentioned");
+}
+
+#[tokio::test]
+async fn rejection_message_names_the_innermost_node_within_the_target_problem_bound() {
+    let long_name = |level: u64| {
+        let prefix = format!("level{level}");
+        format!(
+            "{prefix}{}",
+            "x".repeat(MAX_IDENTIFIER_LENGTH - prefix.len())
+        )
+    };
+    let depth = FULL_V1_MAX_GRAPH_DEPTH + 1;
+    let mut node = null_step(&long_name(depth), 1);
+    for level in (2..depth).rev() {
+        node = json!({
+            "kind":"seq","name":long_name(level),"state":state(),
+            "children":[node],"promotedStatePaths":[]
+        });
+    }
+    let error = verify(&graph(vec![node, succeed("done")]))
+        .await
+        .assert_error();
+    let message = error.to_string();
+    let rejected = diagnostics(error);
+    let nodes = path_nodes(&rejected[0].path);
+    assert!(nodes.concat().len() > MAX_TARGET_HTTP_PROBLEM_MESSAGE_BYTES);
+    let innermost = nodes.last().copied().assert_value();
+    assert!(
+        message.contains(innermost),
+        "{message:?} does not name node {innermost}"
+    );
+    assert!(
+        TargetHttpProblem::new(TARGET_RUN_REJECTED_CODE, message.as_str(), None).is_ok(),
+        "{} byte rejection text is not a valid target problem message",
+        message.len()
+    );
 }
 #[path = "support/assert_value.rs"]
 mod assert_value;
