@@ -1,6 +1,6 @@
 # GitLab metadata regression validation — issue #1409
 
-The current result is recorded under [Current checkout validation](#current-checkout-validation).
+The latest result is recorded under [Latest captured-main integration](#latest-captured-main-integration).
 Earlier sections retain historical evidence.
 
 Executed on 2026-11-09 against the submitted checkout at base
@@ -433,3 +433,67 @@ independent real-provider journeys remain for the behavior review environment. H
 results above are not current passes. Required external CI, including `CI / required`, remains
 pending; the saved GitHub merge delivery and its other gates are unchanged. No Greptile feedback
 was supplied, so there are no suggestions to apply or dismiss.
+
+## Latest captured-main integration
+
+Trusted delivery integrated captured target `dc44b68d87d0b8b210a42da8ce7265208db71788` in merge `c198e0f7e4e99a57a9b990d62621eeb82f9822d3`. Inspection confirmed that the target is an ancestor, there are no unresolved conflicts, and all upstream catalog, provider-access, UI, Docker and CI changes remain integrated. The issue-specific production files, regression tests, acceptance guidance and forge documentation are byte-identical to reviewed candidate `afa1134d2aa7fd87515ce73737c8ee790c673510789bf83e3fe675dfdaca5726`. The API implementation and diagnostic tests from #1454 also remain unchanged against the captured target. No corrective product edits were needed; this follow-up adds current evidence.
+
+Candidate: `$ZEROSHOT_TOOLS/bin/zeroshot-1409-integrated`, built from the merged checkout above with `cargo build --frozen -p zeroshot --lib --bin zeroshot --message-format=json`. SHA-256: `9e95ec32a7ca77b943697b6e2c987adb2ba99460e0466e9de0e4f102ffb2d87b`. The candidate reports `zeroshot 0.1.0`, the checked-in development placeholder. Build provenance, commands, exit statuses, logs and live API evidence are under `$ZEROSHOT_TOOLS/integrated-1409-dc44b68d/`.
+
+Setup completed successfully: root and UI `npm ci --no-audit --no-fund`, `.venv/bin/python -m pip install -e 'sdks/python[dev]' -r docs/requirements.lock`, `.venv/bin/python -m pip check`, `cargo fetch --locked`, and `npm --prefix ui run build`. Manifests and lockfiles are unchanged; installed dependencies and refreshed ignored UI assets remain available. The prepared fixture's sibling `zeroshot-matrix.REVISION`, `ZEROSHOT_MATRIX_REVISION` and Git HEAD match `998c66fa78a9ee21a1b79466f7dc7d1c53cf47cf`. Its complete before/after fingerprint remains `1ff2bee700da12298a1d73de73c9ebd8e7fc75dc3f6d086786d7c945968daab5`; all live work used separate copies, and the fresh seed passed 972 tests.
+
+Fresh checks on the merged checkout:
+
+| Command                                                                                               | Result                                                                                            |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `cargo test --frozen -p zeroshot --lib gitlab -- --test-threads=2`                                    | 72 passed; existing #1454 diagnostics included                                                    |
+| `cargo test --frozen -p zeroshot --lib native_v2_delivery:: -- --test-threads=2`                      | 218 passed; 1 existing opt-in ignored                                                             |
+| `cargo test --frozen -p zeroshot --lib native_v2_comment_delivery:: -- --test-threads=2`              | 46 passed                                                                                         |
+| `cargo test --frozen -p zeroshot --lib native_v2_cli::templates:: -- --test-threads=2`                | 39 passed                                                                                         |
+| `cargo test --frozen --workspace -- --test-threads=2`                                                 | exit 0; main library 2440 passed / 13 existing opt-ins ignored; integrations and doc tests passed |
+| `cargo test --frozen -p zeroshot --features ui --lib workspace:: -- --test-threads=2`                 | 80 passed, including integrated catalog and setup tests                                           |
+| `cargo test --frozen -p zeroshot --features ui --lib profile_ui:: -- --test-threads=2`                | 73 passed                                                                                         |
+| `cargo clippy --frozen --workspace --all-targets --all-features -- -D warnings`                       | exit 0                                                                                            |
+| `RUSTDOCFLAGS=-Dwarnings cargo doc --frozen --workspace --all-features --no-deps`                     | exit 0                                                                                            |
+| `npm --prefix ui test`, `npm --prefix ui run build`                                                   | 450 tests passed; asset/type build exit 0                                                         |
+| `npm run lint`, `npm test`, `npm run distribution:check`                                              | exit 0 each; 137 tooling tests passed                                                             |
+| `cargo run --quiet --frozen -p openengine-cluster-testkit --bin generate-cluster-protocol -- --check` | exit 0                                                                                            |
+| `.venv/bin/python -m mkdocs build --strict --site-dir ARTIFACTS/site`                                 | exit 0                                                                                            |
+| `opcore check --repo . --committed --comparison all --providers fast`                                 | exit 0; 0 diagnostics; checksum-pinned Opcore 0.3.2                                               |
+| `cargo fmt --all -- --check`                                                                          | exit 0                                                                                            |
+
+Rust checks used one build job, two test threads, debug information disabled and incremental compilation disabled. The effective prepared Cargo cache is `/var/lib/zeroshot/native-v2/runs/2ad0b080c25823e816e2c7ac108a5114568e55373262f653025675403cfe56b4/runtime/writer-node-instance-1/.cargo`. Local subprocess fixtures used `$ZEROSHOT_TOOLS/current-1409/loopback-bin` on `PATH`, the real private executable `TMPDIR=/var/tmp/zs1409-integrated-tests`, and `ZEROSHOT_RESTIC=$ZEROSHOT_TOOLS/zeroshot-restic/x86_64-unknown-linux-musl/restic`. Live GitLab retained Platform egress. These are fresh completed commands, rather than historical results.
+
+Fresh real GitLab execution:
+
+```sh
+.venv/bin/python "$ZEROSHOT_TOOLS/integrated-1409-dc44b68d/live.py"
+$ZEROSHOT_TOOLS/integrated-1409-dc44b68d/cli run --title "GitLab 1409 CASE" --graph CASE/graph.json --runtime-config CASE/runtime.json --input CASE/input.json --cwd CASE/repo --source-connection gitlab-validation-transport-1409 --source-provider source.gitlab --source-base-url https://gitlab.com
+```
+
+Authenticated `/version` confirmed GitLab **19.6.0-pre**, revision `b53243fc6a6`; `/user` confirmed `michael.eichelbeck`, ID `15584353`. The new private project was [michael.eichelbeck/zs1409-integrated-cc574108d9b7](https://gitlab.com/michael.eichelbeck/zs1409-integrated-cc574108d9b7), ID `88720353`. The API credential came through declared connection `gitlab-validation-1409-20261109`; Git used its separate declared transport connection. The launcher was rebuilt against this candidate's library and uses the frozen candidate controller through the existing Platform Bash egress wrapper. Actual Git commits/pushes and GitLab MR create/update/rediscovery used the trusted delivery path. The validation-only Git wrapper retains its three-second wait after successful pushes for existing MR/head propagation lag; product identity checks and polling behavior were unchanged.
+
+| Case               | MR                                                                                              | Stored title characters | Run ID                                 |
+| ------------------ | ----------------------------------------------------------------------------------------------- | ----------------------: | -------------------------------------- |
+| literal            | [!1](https://gitlab.com/michael.eichelbeck/zs1409-integrated-cc574108d9b7/-/merge_requests/1)   |                      29 | `01a1c1c9-02b7-7602-b5ac-db0a3e9ae239` |
+| long-ascii         | [!2](https://gitlab.com/michael.eichelbeck/zs1409-integrated-cc574108d9b7/-/merge_requests/2)   |                     255 | `01a1c1c9-ba00-7511-9832-f79cf31ada72` |
+| long-unicode       | [!3](https://gitlab.com/michael.eichelbeck/zs1409-integrated-cc574108d9b7/-/merge_requests/3)   |                     255 | `01a1c1ca-cccf-7822-82a8-216daf91d709` |
+| draft-colon        | [!4](https://gitlab.com/michael.eichelbeck/zs1409-integrated-cc574108d9b7/-/merge_requests/4)   |                      11 | `01a1c1cb-8eb0-7ae2-b990-4105fcfd81ea` |
+| draft-bracket      | [!5](https://gitlab.com/michael.eichelbeck/zs1409-integrated-cc574108d9b7/-/merge_requests/5)   |                      11 | `01a1c1cc-535f-7680-a9c4-38e190665d5c` |
+| draft-paren        | [!6](https://gitlab.com/michael.eichelbeck/zs1409-integrated-cc574108d9b7/-/merge_requests/6)   |                      11 | `01a1c1cd-0adb-7252-8d1f-e740fe64587a` |
+| only-colon         | [!7](https://gitlab.com/michael.eichelbeck/zs1409-integrated-cc574108d9b7/-/merge_requests/7)   |                      15 | `01a1c1ce-1cf1-7420-aaae-4c8e6c8749a1` |
+| only-bracket       | [!8](https://gitlab.com/michael.eichelbeck/zs1409-integrated-cc574108d9b7/-/merge_requests/8)   |                      15 | `01a1c1cf-2eb4-7612-8e4a-f0901bb4c2d9` |
+| only-paren         | [!9](https://gitlab.com/michael.eichelbeck/zs1409-integrated-cc574108d9b7/-/merge_requests/9)   |                      15 | `01a1c1d0-3b53-7a72-8eca-d722207bec32` |
+| long-draft-ascii   | [!10](https://gitlab.com/michael.eichelbeck/zs1409-integrated-cc574108d9b7/-/merge_requests/10) |                     255 | `01a1c1d0-fd77-7181-a8b0-bb39feac3ee9` |
+| long-draft-unicode | [!11](https://gitlab.com/michael.eichelbeck/zs1409-integrated-cc574108d9b7/-/merge_requests/11) |                     255 | `01a1c1d1-b2a0-7983-9c5c-f444078b261c` |
+| repeat-draft       | [!12](https://gitlab.com/michael.eichelbeck/zs1409-integrated-cc574108d9b7/-/merge_requests/12) |                      11 | `01a1c1d3-1109-7c83-9451-fee18bb4a488` |
+
+All 12 cases completed creation, a tracked-file-changing repair push/update, and an unchanged retry: **36 ready delivery completions and 12 durably succeeded terminal results**. Stored prose contains single backslash escapes for `/health returns 200` and `/close`; pre-existing escapes remain single. GitLab rendered the prose as literal text without visible escapes. Code examples retain the documented conservative escapes. ASCII and multibyte originals, including combined draft/long inputs, occur exactly once in the generated section. Prefix-only titles become `Zeroshot change`; all three draft prefixes and repeated prefixes produce ready titles. Every stored title is nonempty and at most 255 Unicode characters.
+
+Human text outside the generated markers remained exact. Each repair commit message equals the normalized title, and its parent is the creation SHA. Matching MR diff versions and added-commit system notes were observed before four further open/nondraft API samples; no close/reopen side effects occurred. Final retries retained the same MR, head and description; final native receipts matched the API branch heads. A separate API read confirmed exactly 12 MRs, all open and nondraft, and zero disposable-project pipelines. `post-validation.json` records these additional checks.
+
+Cleanup DELETE was accepted for newly created project `88720353`. Readback confirmed `michael.eichelbeck/zs1409-integrated-cc574108d9b7-deletion_scheduled-88720353`, marked for deletion on `2026-11-09`. Private connections and temporary askpass were removed; credential scans passed, and the pinned fixture was unchanged. No pre-existing project was modified.
+
+Latest accepted independent feedback reports no code or behavior defects. `$ZEROSHOT_TOOLS/verify-current-1409/summary.md` records the preceding reviewed candidate (`afa1134d2aa7...`): 12 metadata scenarios plus two required high-effort provider journeys, with 42 ready delivery completions. Codex/OpenAI `gpt-6.1-sol` run `01a1c1b1-9d8c-7593-87c2-cd3a583a8756` passed 982 fixture tests; Claude/Anthropic `claude-opus-5-5` run `01a1c1b3-7e48-7093-8782-b150871ddc5e` passed 980. Their private projects were scheduled for deletion and credential scans passed. Those provider results retain their preceding-candidate provenance; this worker still lacks both provider E2E keys. The optional transport campaign stopped at its existing fixture precondition and is not counted as passing.
+
+The integrated candidate above has fresh local and live GitLab results. Independent review and required external CI remain separate gates; no external CI pass is asserted. No Greptile suggestions were supplied in the latest delivery feedback. The saved GitHub merge delivery remains unchanged.
