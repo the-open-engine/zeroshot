@@ -6,9 +6,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    ApplyResult, ClusterStatus, CompiledGraphIr, Cursor, DeleteParams, DeleteResult, DispatchState,
-    Generation, GraphDiagnostic, GraphSpec, IdempotencyKey, NoRetryableFrontierReason, Phase,
-    RequestFingerprint, ResubmitParams, ResubmitResult, RunId,
+    ApplyResult, ClusterStatus, CompiledGraphIr, Cursor, DeleteParams, DeleteResult,
+    DiagnosticPathSegment, DispatchState, Generation, GraphDiagnostic, GraphSpec, IdempotencyKey,
+    NoRetryableFrontierReason, Phase, RequestFingerprint, ResubmitParams, ResubmitResult, RunId,
+    MAX_TARGET_HTTP_PROBLEM_MESSAGE_BYTES,
 };
 use serde_json::Value;
 use thiserror::Error;
@@ -93,16 +94,67 @@ pub enum VerificationError {
     Internal(String),
 }
 
+const REJECTED_GRAPH: &str = "graph verification rejected the graph";
+const ELIDED_PATH: &str = ".../";
+
 fn rejected_graph_message(diagnostics: &[GraphDiagnostic]) -> String {
-    diagnostics.first().map_or_else(
-        || "graph verification rejected the graph".to_owned(),
-        |diagnostic| {
-            format!(
-                "graph verification rejected the graph: {}",
-                diagnostic.message
-            )
-        },
-    )
+    let Some((first, further)) = diagnostics.split_first() else {
+        return REJECTED_GRAPH.to_owned();
+    };
+    // Hosted targets publish this text as a bounded problem message, so the count and then the
+    // location only use the bytes the cause leaves free.
+    let free = MAX_TARGET_HTTP_PROBLEM_MESSAGE_BYTES
+        .saturating_sub(REJECTED_GRAPH.len() + ": ".len() + first.message.len());
+    let more = match further.len() {
+        0 => String::new(),
+        1 => " (and 1 more diagnostic)".to_owned(),
+        count => format!(" (and {count} more diagnostics)"),
+    };
+    let more = if more.len() <= free {
+        more
+    } else {
+        String::new()
+    };
+    let budget = free.saturating_sub(more.len() + " at ".len());
+    match diagnostic_location(&first.path, budget) {
+        Some(location) => format!("{REJECTED_GRAPH} at {location}: {}{more}", first.message),
+        None => format!("{REJECTED_GRAPH}: {}{more}", first.message),
+    }
+}
+
+/// Renders the longest tail of `path` that fits in `budget` bytes as `/`-separated fields with
+/// their `[index]` suffixes and backquoted node names, marking elided leading components.
+fn diagnostic_location(path: &[DiagnosticPathSegment], budget: usize) -> Option<String> {
+    let mut components = Vec::<String>::new();
+    for segment in path {
+        match (segment, components.last_mut()) {
+            (DiagnosticPathSegment::Index { index }, Some(field)) => {
+                field.push_str(&format!("[{index}]"));
+            }
+            (DiagnosticPathSegment::Index { index }, None) => components.push(format!("[{index}]")),
+            (DiagnosticPathSegment::Field { name }, _) => components.push(name.to_string()),
+            (DiagnosticPathSegment::Node { name }, _) => components.push(format!("`{name}`")),
+        }
+    }
+    let (mut kept, mut length) = (0, 0);
+    for component in components.iter().rev() {
+        let joined = length + component.len() + usize::from(kept > 0);
+        let elision = if kept + 1 < components.len() {
+            ELIDED_PATH.len()
+        } else {
+            0
+        };
+        if joined + elision > budget {
+            break;
+        }
+        (kept, length) = (kept + 1, joined);
+    }
+    let tail = components[components.len() - kept..].join("/");
+    match kept {
+        0 => None,
+        _ if kept < components.len() => Some(format!("{ELIDED_PATH}{tail}")),
+        _ => Some(tail),
+    }
 }
 
 #[async_trait]
