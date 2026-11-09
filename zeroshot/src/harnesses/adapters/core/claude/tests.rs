@@ -823,3 +823,6 @@ async fn dispatch_metadata_reaches_claude_corrections() {
         );
     }
 }
+
+#[path = "tests/verifier_evidence.rs"]
+mod verifier_evidence;

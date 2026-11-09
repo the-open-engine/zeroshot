@@ -187,7 +187,15 @@ impl<'a> FullV1Reducer<'a> {
         engine.ensure_history_consumed()?;
         engine.canonicalize_void_decisions();
         let terminal = match status {
-            Status::Terminal { projection, .. } => Some(projection),
+            Status::Terminal { mut projection, .. } => {
+                if let TerminalResult::Failed { context, .. } = &mut projection
+                    && (!engine.loop_evidence.exhausted_loops.is_empty()
+                        || engine.loop_evidence.incomplete)
+                {
+                    *context = Some(Box::new(engine.loop_evidence));
+                }
+                Some(projection)
+            }
             Status::Continue { .. } | Status::Pending => None,
         };
         if let Some(projection) = terminal.clone() {
@@ -249,6 +257,8 @@ struct ControlKey {
 enum EvalMode {
     Decide,
     Probe,
+    /// Retain canonical settled paths without emitting scheduling decisions.
+    Replay,
 }
 
 #[derive(Clone, Copy)]
@@ -378,6 +388,7 @@ struct Engine<'a> {
     void_cutoffs: BTreeMap<ExecutionId, VoidCutoff>,
     execution_mode: ExecutionMode,
     trace: Option<TraceCollector>,
+    loop_evidence: openengine_cluster_protocol::FailureContext,
 }
 
 impl<'a> Engine<'a> {
@@ -414,6 +425,7 @@ impl<'a> Engine<'a> {
             void_cutoffs: BTreeMap::new(),
             execution_mode,
             trace: None,
+            loop_evidence: Default::default(),
         })
     }
 

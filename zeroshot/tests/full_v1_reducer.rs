@@ -231,3 +231,6 @@ mod checkpoints;
 
 #[path = "full_v1_reducer/dispatch_metadata.rs"]
 mod dispatch_metadata;
+
+#[path = "full_v1_reducer/loop_evidence.rs"]
+mod loop_evidence;

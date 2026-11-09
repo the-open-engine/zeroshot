@@ -121,6 +121,7 @@ impl PiAdapter {
         match self.advance_turn(turn, state, prompt).await? {
             PiTurnAdvance::Response(response) => {
                 // A correction prompt is sent in the same session, so the derived ID is unchanged.
+                state.retry.report_response(control, &response).await?;
                 state.response.accept("Pi", control, response).await
             }
             PiTurnAdvance::ProviderFailure {

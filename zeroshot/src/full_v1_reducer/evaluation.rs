@@ -223,6 +223,19 @@ impl Engine<'_> {
             position,
             label,
         } = completion;
+        if traversal.mode != EvalMode::Probe {
+            self.loop_evidence.exhausted_loops.retain(|prior| {
+                prior.node != group.name || prior.map_indices != traversal.map_indices
+            });
+        }
+        if traversal.mode != EvalMode::Probe && label == "exhausted" {
+            self.loop_evidence
+                .record_exhausted_loop(openengine_cluster_protocol::ExhaustedLoop {
+                    node: group.name.clone(),
+                    completed_iterations: group.max_iterations,
+                    map_indices: traversal.map_indices.to_vec(),
+                });
+        }
         let mut loop_names = descendant_names(&group.body);
         loop_names.insert(group.name.clone());
         clear_scoped_runtime_facts(context, &loop_names, traversal.map_indices);
@@ -412,7 +425,7 @@ impl Engine<'_> {
             input,
             traversal,
         } = request;
-        if traversal.mode == EvalMode::Probe || traversal.cutoff != HistoryPosition::MAX {
+        if traversal.mode != EvalMode::Decide || traversal.cutoff != HistoryPosition::MAX {
             return Ok(Status::Pending);
         }
         let node_instance = match visit.matching.last() {
@@ -451,7 +464,7 @@ impl Engine<'_> {
             execution: previous,
             input,
         } = request;
-        if traversal.mode == EvalMode::Probe || traversal.cutoff != HistoryPosition::MAX {
+        if traversal.mode != EvalMode::Decide || traversal.cutoff != HistoryPosition::MAX {
             return Ok(Status::Pending);
         }
         let attempt = previous

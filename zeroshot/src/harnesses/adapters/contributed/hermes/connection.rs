@@ -94,6 +94,7 @@ impl<'a> HermesConnection<'a> {
             feedback
                 .report_correction(self.control, &answer, response.corrections_exhausted())
                 .await?;
+            feedback.report_response(self.control, &answer).await?;
             if let Some(outcome) = response.accept("Hermes", self.control, answer).await? {
                 return Ok(outcome);
             }

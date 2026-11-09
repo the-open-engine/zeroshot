@@ -307,6 +307,14 @@ impl<'a> CopilotRpc<'a> {
                 self.control.emit(output).await?;
             }
         }
+        if let crate::native_v2_runner::AgentResponse::Complete(outcome) = &response {
+            crate::native_v2_capsule::provider_process::report_verifier_result(
+                outcome,
+                &self.redactions,
+                self.control,
+            )
+            .await?;
+        }
         state.accept("Copilot", self.control, response).await
     }
 

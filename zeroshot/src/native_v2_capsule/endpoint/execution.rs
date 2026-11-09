@@ -70,6 +70,10 @@ impl TerminalMetadata {
                     CapsuleOutput {
                         stream: CapsuleOutputStream::Error,
                         ..
+                    }
+                    | CapsuleOutput {
+                        diagnostic: Some(_),
+                        ..
                     },
                 ..
             } => {

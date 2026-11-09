@@ -8,6 +8,7 @@ from typing import Literal, TypeAlias, cast
 from .errors import ProtocolError
 from .runs import (
     ActiveExecution,
+    ExhaustedLoop,
     FailureContext,
     FailureDiagnostic,
     LogEvent,
@@ -40,6 +41,7 @@ def _status(value: object) -> RunStatus:
         ActiveExecution(
             execution=_string(item, "execution", "active execution"),
             node=_string(item, "node", "active execution"),
+            map_indices=_map_indices(item),
         )
         for item in _mapping_list(
             native_status.get("activeExecutions", []),
@@ -95,6 +97,7 @@ def _log_event(value: object) -> LogEvent:
         ),
         target=_string(record, "target", "log event.record"),
         message=_string(record, "message", "log event.record"),
+        map_indices=_map_indices(root),
     )
 
 
@@ -163,6 +166,22 @@ def _terminal_result(run_id: str, value: object, metadata: object = None) -> Run
     )
 
 
+def _map_indices(value: Mapping[str, object]) -> tuple[int, ...]:
+    indices = value.get("mapIndices", [])
+    if not isinstance(indices, list) or any(
+        type(index) is not int or not 0 <= index <= 2**53 - 1 for index in indices
+    ):
+        raise ProtocolError("Zeroshot emitted malformed mapIndices")
+    return tuple(indices)
+
+
+def _completed_iterations(value: Mapping[str, object]) -> int:
+    count = value.get("completedIterations")
+    if type(count) is not int or not 1 <= count <= 2**53 - 1:
+        raise ProtocolError("Zeroshot emitted malformed completedIterations")
+    return count
+
+
 def _failure_context(value: object) -> FailureContext | None:
     if value is None:
         return None
@@ -177,6 +196,20 @@ def _failure_context(value: object) -> FailureContext | None:
             _failure_diagnostic(item)
             for item in _mapping_list(context.get("recorded", []), "failure context.recorded")
         ),
+        verifiers=tuple(
+            _failure_diagnostic(item)
+            for item in _mapping_list(context.get("verifiers", []), "failure context.verifiers")
+        ),
+        exhausted_loops=tuple(
+            ExhaustedLoop(
+                node=_string(item, "node", "exhausted loop"),
+                completed_iterations=_completed_iterations(item),
+                map_indices=_map_indices(item),
+            )
+            for item in _mapping_list(
+                context.get("exhaustedLoops", []), "failure context.exhaustedLoops"
+            )
+        ),
         incomplete=incomplete,
     )
 
@@ -190,6 +223,7 @@ def _failure_diagnostic(value: object) -> FailureDiagnostic:
         active = ActiveExecution(
             execution=_string(identity, "execution", "failure diagnostic.execution"),
             node=_string(identity, "node", "failure diagnostic.execution"),
+            map_indices=_map_indices(identity),
         )
     cursor = diagnostic.get("cursor")
     if cursor is not None and not isinstance(cursor, str):

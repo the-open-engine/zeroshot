@@ -166,6 +166,7 @@ impl OpenCodeAdapter {
             feedback
                 .report_correction(turn.control, &answer, response.corrections_exhausted())
                 .await?;
+            feedback.report_response(turn.control, &answer).await?;
             if let Some(outcome) = response.accept("OpenCode", turn.control, answer).await? {
                 return Ok(outcome);
             }

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
-use openengine_cluster_protocol::FailureDiagnosticKind;
+use openengine_cluster_protocol::{FailureDiagnosticKind, WorkerOutcome};
 
 use crate::execution::{SessionScope, WorkspaceAccessMode};
 use crate::execution::process::{
@@ -567,6 +567,18 @@ impl ProviderFailureRetry {
         })
     }
 
+    pub(crate) async fn report_response(
+        &self,
+        control: &DriverControl,
+        response: &crate::native_v2_runner::AgentResponse,
+    ) -> Result<(), NodeRunnerError> {
+        if let crate::native_v2_runner::AgentResponse::Complete(outcome) = response {
+            report_verifier_result(outcome, &self.redactions, control).await?;
+        }
+        // The response remains unchanged for graph reduction.
+        Ok(())
+    }
+
     pub(crate) fn redact_error(&self, error: NodeRunnerError) -> NodeRunnerError {
         redact_provider_error(error, &self.redactions)
     }
@@ -586,6 +598,39 @@ impl ProviderFailureRetry {
         }
         Ok(())
     }
+}
+
+/// Publish only verifier channels, with the complete adapter-owned credential set.
+pub(crate) async fn report_verifier_result(
+    outcome: &WorkerOutcome,
+    redactions: &[String],
+    control: &DriverControl,
+) -> Result<(), NodeRunnerError> {
+    if let WorkerOutcome::Verifier {
+        signals,
+        diagnostic,
+        ..
+    } = outcome
+    {
+        let text = serde_json::to_string(
+            &serde_json::json!({"signals": signals, "diagnostic": diagnostic}),
+        )
+        .map_err(|_| NodeRunnerError::Driver)?;
+        let mut public_redactions = redactions.to_vec();
+        for secret in redactions {
+            if let Ok(encoded) = serde_json::to_string(secret) {
+                public_redactions.push(encoded[1..encoded.len() - 1].to_owned());
+            }
+        }
+        let text = crate::native_v2_runner::bounded_log_text(
+            safe_provider_text(&text, &public_redactions),
+            openengine_cluster_protocol::MAX_LOG_MESSAGE_BYTES,
+        );
+        let mut output = LiveOutput::new(LiveOutputStream::System, text)?;
+        output.diagnostic = Some(FailureDiagnosticKind::Verifier);
+        control.emit(output).await?;
+    }
+    Ok(())
 }
 
 /// Publish useful provider-owned detail after redacting credentials known at this boundary.

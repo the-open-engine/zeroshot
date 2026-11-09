@@ -74,7 +74,14 @@ impl Engine<'_> {
         traversal: Traversal<'_>,
     ) -> Result<Status, ReducerError> {
         let checkpoint = self.trace_checkpoint();
-        let probes = self.probe_parallel(group, context, traversal)?;
+        let probes = self.evaluate_parallel_branches(
+            group,
+            context,
+            Traversal {
+                mode: EvalMode::Probe,
+                ..traversal
+            },
+        )?;
         let probe_trace = self.take_trace_since(checkpoint);
         let (mut ordered, required) = self.parallel_completions(group, &probes, traversal)?;
         ordered.sort_by_key(|(index, position)| (*position, *index));
@@ -93,7 +100,18 @@ impl Engine<'_> {
             // A settled, unreachable join has no winner pass. Its completed branch paths are
             // canonical facts of the reduction; pending probes and race losers stay private.
             if !matches!(status, Status::Pending) {
-                self.restore_trace(probe_trace)?;
+                if traversal.mode == EvalMode::Probe {
+                    self.restore_trace(probe_trace)?;
+                } else {
+                    self.evaluate_parallel_branches(
+                        group,
+                        context,
+                        Traversal {
+                            mode: EvalMode::Replay,
+                            ..traversal
+                        },
+                    )?;
+                }
             }
             return Ok(status);
         }
@@ -122,7 +140,7 @@ impl Engine<'_> {
         )
     }
 
-    fn probe_parallel(
+    fn evaluate_parallel_branches(
         &mut self,
         group: &ParNode,
         context: &Context,
@@ -135,14 +153,7 @@ impl Engine<'_> {
             .map(|branch| {
                 let mut branch_context = context.clone();
                 branch_context.local_writes.clear();
-                let status = self.eval(
-                    branch,
-                    &mut branch_context,
-                    Traversal {
-                        mode: EvalMode::Probe,
-                        ..traversal
-                    },
-                )?;
+                let status = self.eval(branch, &mut branch_context, traversal)?;
                 Ok((status, branch_context))
             })
             .collect()
