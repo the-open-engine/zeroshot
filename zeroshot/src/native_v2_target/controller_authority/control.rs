@@ -350,6 +350,14 @@ impl TargetControlAuthority for TargetHttpControlAuthority {
         TargetHttpControlAuthority::hosted_run_resume(self, target, params).await
     }
 
+    async fn hosted_run_export_workspace(
+        &self,
+        target: &TargetRecord,
+        params: openengine_cluster_protocol::RunExportWorkspaceParams,
+    ) -> Result<zeroshot_engine::native_v2_cli::WorkspaceExportStream, TargetAuthorityError> {
+        TargetHttpControlAuthority::hosted_run_export_workspace(self, target, params).await
+    }
+
     async fn hosted_run_checkpoints(
         &self,
         target: &TargetRecord,

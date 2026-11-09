@@ -313,6 +313,59 @@ Create the replacement before revoking the old key. Revoking a key blocks furthe
 accepted runs continue. API keys authenticate the CLI; keep provider and source credentials in
 their usual connections.
 
+### Workspace export protocol
+
+Hosted targets can advertise workspace downloads independently of resume/checkpoints. Add this
+outer discovery extension alongside the existing `hosted_runs` extension:
+
+```json
+{
+  "workspace_export": {
+    "kind": "openengine.workspace-export/v1",
+    "route_template": "/native-v2/runs/{run_id}/export-workspace"
+  }
+}
+```
+
+`TargetWorkspaceExportDiscovery` is the authoritative Rust type. The extension object is strict;
+unknown outer extension keys remain compatible with older clients. Do not add export fields to
+`zeroshot.hosted-runs/v1` or `openengine.hosted-workspace-recovery/v1`. Export requires the exact
+kind above; an absent or unfamiliar kind disables it without a fallback operation.
+
+The route uses the same-origin `hosted_runs.base_url`, including any installation path prefix,
+just like hosted recovery routes. It must contain exactly one `{run_id}` path segment, no other
+variables, query, fragment, traversal, or origin. The client escapes the run identity as one segment
+and never follows redirects.
+
+The client sends an authenticated POST with `Accept: application/x-tar`, `Cache-Control: no-store`,
+and a strict JSON `RunExportWorkspaceParams` body:
+
+```json
+{ "runId": "RUN_ID", "fromCheckpoint": "CHECKPOINT_ID" }
+```
+
+Omit `fromCheckpoint` for the latest retained workspace. Path and body run identity must agree.
+Checkpoint IDs select entry snapshots and remain opaque. The server owns authorization, retention,
+checkpoint selection and storage/decryption credentials. The request accepts no storage URLs,
+paths, repository prefixes or export filters. Existing hosted OAuth session organization selection
+and API-key `X-Zeroshot-Organization` handling apply unchanged.
+
+Success is `200 OK`, `Content-Type: application/x-tar`, `Cache-Control: no-store`, with raw streamed
+tar bytes. HTTP/1 transfers need a Content-Length without Transfer-Encoding, or a single chunked
+transfer coding (case-insensitive). Transfer-Encoding takes precedence over Content-Length;
+the CLI rejects unsupported codings. Close-delimited responses cannot prove exporter success and
+are rejected. See [RFC 9112 framing](https://www.rfc-editor.org/rfc/rfc9112.html#section-6.3).
+HTTP/2 uses its native stream completion. The server must finish HTTP framing only after its
+exporter exits successfully and retained-state availability
+is rechecked. An exporter/storage failure after bytes were emitted must abort the transfer, even
+when those bytes already form a complete tar. Failures before streaming use the existing bounded
+`TargetHttpProblem` response and a non-success status.
+
+The client consumes the entire transfer before publishing a private file without replacement;
+HTTP/body errors, truncated framing and cancellation remove temporary output. It does not trust a
+server filename, extract files, resume a run or receive storage keys. This is an HTTP streaming
+contract, not a new OECP method. The generated protocol schema includes its request body.
+
 ## Source and delivery credentials
 
 Git checkout and push use shared HTTPS or SSH transport. A local push needs an attached, committed branch

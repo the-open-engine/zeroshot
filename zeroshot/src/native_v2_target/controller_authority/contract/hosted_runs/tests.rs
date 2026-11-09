@@ -203,3 +203,54 @@ fn recovery_routes() -> Value {
         "discard_workspace": "/runs/{run_id}/discard-workspace"
     })
 }
+
+#[test]
+fn export_routes_require_the_exact_capability_and_safe_run_template() {
+    let origin = Url::parse("https://target.example").assert_value();
+    let make = |export: Value| {
+        let extensions: TargetDiscoveryExtensions = serde_json::from_value(json!({
+            "hosted_runs": {"kind": HOSTED_RUNS_KIND, "base_url": "https://target.example/prefix/", "route_templates": routes()},
+            "workspace_export": export,
+        })).assert_value();
+        build_hosted_runs_descriptor(&origin, &extensions)
+    };
+    for missing in [
+        Value::Null,
+        json!({"kind":"future", "route_template":"/runs/{run_id}/export"}),
+    ] {
+        assert!(
+            make(missing)
+                .assert_value()
+                .export_workspace_url(&RunId::new("run"))
+                .is_err()
+        );
+    }
+    let descriptor = make(json!({"kind":openengine_cluster_protocol::WORKSPACE_EXPORT_KIND,"route_template":"/runs/{run_id}/export"})).assert_value();
+    assert_eq!(
+        descriptor
+            .export_workspace_url(&RunId::new("run/1"))
+            .assert_value()
+            .as_str(),
+        "https://target.example/prefix/runs/run%2F1/export"
+    );
+    for run_id in [".", ".."] {
+        assert!(
+            descriptor
+                .export_workspace_url(&RunId::new(run_id))
+                .is_err(),
+            "accepted dot path segment {run_id}"
+        );
+    }
+    for invalid in [
+        "https://other.example/{run_id}",
+        "//other.example/{run_id}",
+        "/runs/{run_id}/../export",
+        "/runs/export",
+        "/runs/{run_id}/{run_id}",
+        "/runs/{run_id}/{checkpoint_id}",
+        "/runs/{run_id}/export{?from_cursor}",
+        "/runs/{run_id}/%2e%2e/export",
+    ] {
+        assert!(make(json!({"kind":openengine_cluster_protocol::WORKSPACE_EXPORT_KIND,"route_template":invalid})).is_err(), "accepted {invalid}");
+    }
+}

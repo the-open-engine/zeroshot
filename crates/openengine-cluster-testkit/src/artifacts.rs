@@ -58,6 +58,8 @@ pub enum ArtifactError {
 
 #[derive(JsonSchema)]
 pub struct ImplementedProtocolSchema {
+    /// HTTP export request, outside the JSON-RPC method registry.
+    pub run_export_workspace_request: openengine_cluster_protocol::RunExportWorkspaceParams,
     pub initialize_request: JsonRpcRequest<InitializeParams>,
     pub initialize_response: JsonRpcResponse<InitializeResult>,
     pub plan_request: JsonRpcRequest<PlanParams>,

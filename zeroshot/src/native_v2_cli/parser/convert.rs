@@ -8,9 +8,10 @@ use openengine_cluster_protocol::{
 };
 
 use super::{
-    AcpArgs, AttachArgs, Cli, CliCommand, ConnectionCommand, ConnectionScopeArg, StackCommand,
-    StackSelectorArgs, StackSubmitArgs, RunArgs, RunCheckpointsArgs, RunResumeArgs, RunLogsArgs,
-    RunSelectorArgs, RunWatchArgs, TargetCommand, TemplateCommand, TemplateName, UtilityCommand,
+    RunExportWorkspaceArgs, AcpArgs, AttachArgs, Cli, CliCommand, ConnectionCommand,
+    ConnectionScopeArg, StackCommand, StackSelectorArgs, StackSubmitArgs, RunArgs,
+    RunCheckpointsArgs, RunResumeArgs, RunLogsArgs, RunSelectorArgs, RunWatchArgs, TargetCommand,
+    TemplateCommand, TemplateName, UtilityCommand,
 };
 use crate::native_v2_cli::{
     BuiltinGraphTemplate, ConnectionInput, ConnectionRoute, ConnectionSetCommand, StackSelector,
@@ -194,6 +195,7 @@ impl UtilityCommand {
             recovery @ (Self::Resume(_) | Self::Checkpoints(_) | Self::DiscardWorkspace(_)) => {
                 recovery.into_recovery_command()
             }
+            Self::ExportWorkspace(args) => args.into_command(),
             Self::Version => Ok(NativeV2CliCommand::Version),
         }
     }
@@ -223,6 +225,34 @@ impl RunResumeArgs {
             from,
             forward_github_token: self.forward_gh_token,
         }))
+    }
+}
+
+impl RunExportWorkspaceArgs {
+    fn into_command(self) -> Result<NativeV2CliCommand, NativeV2CliError> {
+        let run = RunSelectorArgs {
+            run_id: self.run_id,
+            target: Some(self.target),
+        }
+        .into_selector()?;
+        let from_checkpoint = self
+            .from_checkpoint
+            .map(CheckpointId::new)
+            .transpose()
+            .map_err(|error| usage(format!("invalid --from-checkpoint: {error}")))?;
+        if self.output.as_os_str().is_empty() {
+            return Err(usage("--output must be a nonempty path"));
+        }
+        Ok(NativeV2CliCommand::ExportWorkspace(
+            crate::native_v2_cli::RunExportWorkspaceCommand {
+                target: run.target.ok_or_else(|| usage("--target is required"))?,
+                params: openengine_cluster_protocol::RunExportWorkspaceParams {
+                    run_id: run.run_id,
+                    from_checkpoint,
+                },
+                output: self.output,
+            },
+        ))
     }
 }
 

@@ -1,5 +1,5 @@
 ---
-description: "Observe durable run state in the browser or CLI, inspect node transcripts, reconnect to a run and stop work without changing its history."
+description: 'Observe durable run state in the browser or CLI, inspect node transcripts, reconnect to a run and stop work without changing its history.'
 ---
 
 # Observe and control runs
@@ -78,6 +78,30 @@ zeroshot attach RUN_ID EXECUTION_REF
 ```
 
 Closing the attachment stream does not cancel the execution.
+
+## Download a retained workspace
+
+Download the latest retained files without starting another run:
+
+```console
+zeroshot export-workspace RUN_ID --target platform --output workspace.tar
+zeroshot export-workspace RUN_ID --target platform --from-checkpoint CHECKPOINT_ID --output checkpoint.tar
+```
+
+Use `zeroshot checkpoints RUN_ID --target platform` to find an entry checkpoint ID. Omit
+`--from-checkpoint` to export the latest retained workspace. The target authorizes access and
+checks whether the retained state is still available. Other named hosted targets work the same way,
+using their existing device login or `ZEROSHOT_API_KEY` and organization selection.
+
+The target must advertise [workspace export](../concepts/targets.md#workspace-export-protocol).
+An older target without this capability returns a clear unsupported error. Local and direct-target
+exports are unavailable.
+
+`--output` is required and must name a UTF-8 path that does not exist, including directories and dangling
+symlinks. The CLI streams the raw tar into a private temporary file beside that path and publishes it
+atomically without overwriting a competing file. It waits for the entire HTTP transfer, including
+its framing, even after a complete tar has arrived. Transfer failures and Ctrl-C remove temporary
+output and fail the command. The archive is never extracted and its contents are never executed.
 
 ## Restart or resume a failed run
 

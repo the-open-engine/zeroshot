@@ -246,6 +246,23 @@ describe('Embedded UI distribution', () => {
 });
 
 describe('CI efficiency contract', () => {
+  it('executes macOS workspace export integration and private publication regressions', () => {
+    const workflow = yaml.load(read('.github/workflows/ci.yml'));
+    const step = workflow.jobs['macos-check'].steps.find(
+      (step) => step.name === 'Run macOS workspace export regressions'
+    );
+    assert.ok(step);
+    assert.match(
+      step.run,
+      /cargo test --locked --package zeroshot --features ui --test native_v2_export_workspace/
+    );
+    assert.match(
+      step.run,
+      /cargo test --locked --package zeroshot --features ui --lib native_v2_cli::execution::export_workspace::tests/
+    );
+    assert.doesNotMatch(step.run, /--no-run/);
+  });
+
   it('cancels only superseded pull-request runs and classifies both sides of renames', () => {
     const source = read('.github/workflows/ci.yml');
     const workflow = yaml.load(source);

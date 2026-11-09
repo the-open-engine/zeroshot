@@ -195,6 +195,15 @@ pub trait TargetConnector: Send + Sync {
     ) -> Result<Option<openengine_cluster_protocol::RunResumeResult>, NativeV2CliError> {
         Ok(None)
     }
+    async fn hosted_run_export_workspace(
+        &self,
+        _name: &str,
+        _params: openengine_cluster_protocol::RunExportWorkspaceParams,
+    ) -> Result<crate::native_v2_cli::WorkspaceExportStream, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise workspace export".to_owned(),
+        ))
+    }
     async fn hosted_run_checkpoints(
         &self,
         _name: &str,

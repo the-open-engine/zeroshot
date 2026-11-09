@@ -577,6 +577,18 @@ where
             .map(Some)
     }
 
+    async fn hosted_run_export_workspace(
+        &self,
+        name: &str,
+        params: openengine_cluster_protocol::RunExportWorkspaceParams,
+    ) -> Result<zeroshot_engine::native_v2_cli::WorkspaceExportStream, NativeV2CliError> {
+        let target = self.target(name)?;
+        self.authority
+            .hosted_run_export_workspace(&target, params)
+            .await
+            .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+    }
+
     async fn hosted_run_checkpoints(
         &self,
         name: &str,

@@ -408,6 +408,10 @@ jobs:
           cargo test --locked --package zeroshot --lib --features ui --
           native_v2_portable_controller::transport::unix::tests
           native_v2_supervisor::checkpoints::filesystem::tests::macos_
+      - name: Run macOS workspace export regressions
+        run: |
+          cargo test --locked --package zeroshot --features ui --test native_v2_export_workspace
+          cargo test --locked --package zeroshot --features ui --lib native_v2_cli::execution::export_workspace::tests
 
   python-check:
     name: Python SDK

@@ -21,6 +21,8 @@ mod attach;
 mod connections;
 #[path = "execution/context.rs"]
 mod context;
+#[path = "execution/export_workspace.rs"]
+mod export_workspace;
 #[path = "execution/failure.rs"]
 mod failure;
 #[path = "graph_tree.rs"]
@@ -155,6 +157,9 @@ where
         }
         NativeV2CliCommand::Resume(run) => {
             return execute_resume(run, context, output).await;
+        }
+        NativeV2CliCommand::ExportWorkspace(command) => {
+            return export_workspace::execute(command, backend, signal, output).await;
         }
         NativeV2CliCommand::Checkpoints(command) => {
             return execute_checkpoints(command, backend, output).await;

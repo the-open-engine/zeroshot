@@ -1103,6 +1103,17 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 ## CLI and target contracts
 
 - CLI grammar/help comes from the derived Clap `Cli` tree and Rust doc comments.
+- `export-workspace` downloads only from named hosted targets advertising the separate
+  `openengine.workspace-export/v1` extension. Its one strict `route_template` is relative to
+  `hosted_runs.base_url`; existing hosted run/recovery route objects stay unchanged. The HTTP-only
+  `RunExportWorkspaceParams` contains run identity and an optional entry checkpoint, never storage
+  authority. Shared target authentication/organization selection and same-origin, no-redirect rules
+  apply. Export rejects dot-only run path segments before credential access. The CLI requires an
+  explicit absent destination representable in its JSON receipt, stages with `platform::private_file`,
+  consumes complete framed HTTP tar bytes, and uses `persist_noclobber` for atomic publication.
+  HTTP/1 Transfer-Encoding overrides Content-Length; only one case-insensitive chunked coding is
+  supported, otherwise a length is required with no Transfer-Encoding.
+  Cancellation/body/status failures remove the stage; no local exporter, resume, or extraction exists.
 - `template show` renders the materialized graph as a tree only on terminal stdout; piped or
   redirected stdout and explicit `--json` retain the complete, single-line `GraphSpec` JSON.
   The CLI graph renderer preserves authored structure and marks every step/verifier RuntimePlan
@@ -1462,7 +1473,8 @@ python -m mkdocs build --strict
   head to complete; findings remain review input for the worker rather than automatic CI failures.
   Merge groups use the completed PR gate because Greptile does not review merge-group commits.
   Native changes also require macOS product and test compilation with the UI
-  feature, focused Unix controller socket regression tests, and APFS workspace clone tests that
+  feature, workspace export integration and private publication regressions, focused Unix controller
+  socket regression tests, and APFS workspace clone tests that
   `ZEROSHOT_REQUIRE_APFS_CLONE` keeps from skipping. `.github/ci-path-classifier.js` owns
   fail-closed path routing and cross-lane
   producer/consumer dependencies. The native lane runs on Linux and Windows, including real local
