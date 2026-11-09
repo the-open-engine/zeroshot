@@ -270,6 +270,25 @@ test('portable profile JSON rejects environment references and definitions', () 
   }
 });
 
+test('runtime size may be omitted or target-owned without changing imported values', () => {
+  const doc = fixture();
+  delete doc.runtime.size;
+  assertDocument(doc);
+  assert.equal(Object.hasOwn(doc.runtime, 'size'), false);
+  doc.runtime.size = null;
+  const imported = JSON.parse(JSON.stringify(doc)) as Document;
+  assertDocument(imported);
+  assert.equal(Object.hasOwn(imported.runtime, 'size'), true);
+  assert.equal(imported.runtime.size, null);
+  doc.runtime.size = 'future-box/v2';
+  assertDocument(doc);
+  assert.equal(doc.runtime.size, 'future-box/v2');
+  assert.throws(
+    () => assertDocument({ ...doc, runtime: { ...doc.runtime, size: 4 } }),
+    /Runtime size must be text/
+  );
+});
+
 test('native configuration is lossless through document JSON and lane changes', () => {
   const doc = fixture();
   doc.runtime.nodes.worker = {

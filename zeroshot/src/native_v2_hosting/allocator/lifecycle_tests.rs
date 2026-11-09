@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use openengine_cluster_testkit::assertions::AssertValue;
 
 use super::*;
@@ -484,7 +485,7 @@ fn hosted_copilot_harness_and_invalid_filesystem_layout_preserve_capsule_boundar
     let nodes = admitted.runtime.nodes().clone();
     admitted.runtime = crate::native_v2_contract::RuntimePlan::new(
         RuntimeLane::new("copilot", "github").assert_value(),
-        crate::native_v2_contract::RunSize::Medium,
+        run_size("medium"),
         nodes,
     );
     let filesystem = CapsuleFilesystem {
@@ -569,7 +570,7 @@ fn hosted_pi_harness_builds_the_contained_lane_from_the_capsule() {
     let nodes = admitted.runtime.nodes().clone();
     admitted.runtime = crate::native_v2_contract::RuntimePlan::new(
         RuntimeLane::new("pi", "anthropic").assert_value(),
-        crate::native_v2_contract::RunSize::Medium,
+        run_size("medium"),
         nodes,
     );
     let filesystem = CapsuleFilesystem {

@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 mod skill;
 
 use super::{CliOutcome, NativeV2CliError};
+use crate::native_v2_runner::bounded_log_text;
 
 const LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/the-open-engine/zeroshot/releases/latest";
@@ -33,7 +34,11 @@ const SKILL_ASSETS: [(&str, &str); 4] = [
 ];
 const RESTIC_VERSION: &str = "0.19.1";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// Longest wait for a response, then for each next part of its body. A download that keeps
+/// receiving data is never cut off, however slow, while one that stops fails as a timeout.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_FAILURE_BODY_BYTES: usize = 64 * 1024;
+const MAX_FAILURE_MESSAGE_BYTES: usize = 512;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct ReleaseVersion([u64; 3]);
@@ -58,6 +63,12 @@ impl fmt::Display for ReleaseVersion {
 #[derive(Debug, Deserialize)]
 struct LatestRelease {
     tag_name: String,
+}
+
+/// The explanation GitHub returns with a failed request, such as an exhausted rate limit.
+#[derive(Debug, Deserialize)]
+struct GitHubFailure {
+    message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -129,10 +140,15 @@ fn http_client() -> Result<reqwest::Client, NativeV2CliError> {
     reqwest::Client::builder()
         .redirect(Policy::limited(5))
         .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(DOWNLOAD_TIMEOUT)
+        .read_timeout(IDLE_TIMEOUT)
         .user_agent("zeroshot self-update")
         .build()
-        .map_err(|error| update_error(format!("could not initialize HTTPS: {error}")))
+        .map_err(|error| {
+            update_error(format!(
+                "could not initialize HTTPS: {}",
+                http_failure(error)
+            ))
+        })
 }
 
 async fn latest_version(client: &reqwest::Client) -> Result<ReleaseVersion, NativeV2CliError> {
@@ -295,32 +311,83 @@ async fn download(
     label: &str,
 ) -> Result<Vec<u8>, NativeV2CliError> {
     let response = client.get(url).send().await.map_err(|error| {
-        update_error(format!("could not fetch {label}: {}", error.without_url()))
+        update_error(format!("could not fetch {label}: {}", http_failure(error)))
     })?;
-    if !response.status().is_success() {
+    let status = response.status();
+    if !status.is_success() {
+        let explanation = github_message(response)
+            .await
+            .map(|message| format!(": {message}"))
+            .unwrap_or_default();
         return Err(update_error(format!(
-            "could not fetch {label}: HTTP {}",
-            response.status()
+            "could not fetch {label}: HTTP {status}{explanation}"
         )));
     }
+    read_bounded(response, maximum)
+        .await
+        .map_err(|error| update_error(format!("could not read {label}: {}", http_failure(error))))?
+        .ok_or_else(|| update_error(format!("{label} exceeds {maximum} bytes")))
+}
+
+/// Reads the whole body, or returns `None` as soon as it would exceed `maximum` bytes.
+async fn read_bounded(
+    response: reqwest::Response,
+    maximum: usize,
+) -> Result<Option<Vec<u8>>, reqwest::Error> {
     if response
         .content_length()
         .is_some_and(|length| length > maximum as u64)
     {
-        return Err(update_error(format!("{label} exceeds {maximum} bytes")));
+        return Ok(None);
     }
     let mut contents = Vec::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| {
-            update_error(format!("could not read {label}: {}", error.without_url()))
-        })?;
+        let chunk = chunk?;
         if contents.len().saturating_add(chunk.len()) > maximum {
-            return Err(update_error(format!("{label} exceeds {maximum} bytes")));
+            return Ok(None);
         }
         contents.extend_from_slice(&chunk);
     }
-    Ok(contents)
+    Ok(Some(contents))
+}
+
+/// GitHub's explanation of a failed request as bounded, control-safe single-line text.
+async fn github_message(response: reqwest::Response) -> Option<String> {
+    let body = read_bounded(response, MAX_FAILURE_BODY_BYTES)
+        .await
+        .ok()
+        .flatten()?;
+    let failure: GitHubFailure = serde_json::from_slice(&body).ok()?;
+    let message =
+        bounded_log_text(failure.message, MAX_FAILURE_MESSAGE_BYTES).replace(['\n', '\t'], " ");
+    let message = message.trim();
+    (!message.is_empty()).then(|| message.to_owned())
+}
+
+/// Describes an HTTP failure by its complete cause chain, because reqwest's own text omits the
+/// proxy, TLS, connection or timeout cause. URLs stay out: release assets redirect to signed URLs.
+fn http_failure(error: reqwest::Error) -> String {
+    let error = error.without_url();
+    let causes = std::iter::successors(
+        Some(&error as &(dyn std::error::Error + 'static)),
+        |error| error.source(),
+    )
+    .map(ToString::to_string)
+    .collect::<Vec<_>>()
+    .join(": ");
+    if !error.is_timeout() {
+        return causes;
+    }
+    let (limit, awaited) = if error.is_connect() {
+        (CONNECT_TIMEOUT, "to connect")
+    } else {
+        (IDLE_TIMEOUT, "for the server")
+    };
+    format!(
+        "timed out after waiting {} seconds {awaited}: {causes}",
+        limit.as_secs()
+    )
 }
 
 fn checksum_for(manifest: &[u8], filename: &str) -> Result<String, NativeV2CliError> {

@@ -98,6 +98,7 @@ pub struct NativeV2PlatformController {
     reconstructed_turn: Arc<Mutex<()>>,
     delivery_policy: DeliveryPolicy,
     harnesses: Arc<crate::harnesses::HarnessRegistry>,
+    run_sizes: Option<Arc<openengine_cluster_protocol::TargetRunSizesDiscovery>>,
     operator_diagnostics: Arc<crate::native_v2_target_authority::OperatorDiagnosticStore>,
 }
 
@@ -161,6 +162,7 @@ impl NativeV2PlatformController {
             reconstructed_turn: Arc::new(Mutex::new(())),
             delivery_policy,
             harnesses: Arc::new(crate::harnesses::HarnessRegistry::core()),
+            run_sizes: None,
             operator_diagnostics: Arc::default(),
         };
         controller.reconcile_persisted_runs().await?;
@@ -181,6 +183,16 @@ impl NativeV2PlatformController {
     #[must_use]
     pub fn with_harness_registry(mut self, harnesses: crate::harnesses::HarnessRegistry) -> Self {
         self.harnesses = Arc::new(harnesses);
+        self
+    }
+
+    /// Installs this host's size choices without constraining the portable protocol.
+    #[must_use]
+    pub fn with_run_sizes(
+        mut self,
+        run_sizes: openengine_cluster_protocol::TargetRunSizesDiscovery,
+    ) -> Self {
+        self.run_sizes = Some(Arc::new(run_sizes));
         self
     }
 
@@ -293,13 +305,19 @@ impl NativeV2PlatformController {
         let _turn = self.submission_turn.lock().await;
         let RunSubmitParams { run_id, submission } = request;
         let harnesses = self.harnesses.as_ref();
-        self.validate_harnesses(&submission.runtime)?;
         let digest = submission_digest(&submission)?;
         let submission_key = submission.submission_key.clone();
-        let admission = crate::native_v2_admission::NativeV2AdmissionContext::new(
+        if let Some(receipt) = self.existing_submission(&submission_key, &digest).await? {
+            return Ok(receipt);
+        }
+        self.validate_harnesses(&submission.runtime)?;
+        let mut admission = crate::native_v2_admission::NativeV2AdmissionContext::new(
             harnesses,
             self.delivery_policy,
         );
+        if let Some(catalog) = self.run_sizes.as_deref() {
+            admission = admission.with_run_sizes(catalog);
+        }
         let admitted = NativeV2Admission
             .admit_with_context(submission, admission)
             .await?;
@@ -342,6 +360,15 @@ impl NativeV2PlatformController {
         submission_digest: &Sha256Digest,
     ) -> Result<Option<PlatformRunReceipt>, NativeV2PlatformError> {
         let _turn = self.submission_turn.lock().await;
+        self.existing_submission(submission_key, submission_digest)
+            .await
+    }
+
+    async fn existing_submission(
+        &self,
+        submission_key: &openengine_cluster_protocol::IdempotencyKey,
+        submission_digest: &Sha256Digest,
+    ) -> Result<Option<PlatformRunReceipt>, NativeV2PlatformError> {
         let Some(stored) = self.ledger.get_by_submission_key(submission_key).await? else {
             return Ok(None);
         };
@@ -469,7 +496,10 @@ impl NativeV2PlatformController {
         let source = self.recoverable_resume_source(&run_id).await?;
         let (submission_key, submission_digest) =
             retained_submission_identity(&run_id, &successor_run_id)?;
-        let admitted = source.admitted.clone();
+        let mut admitted = source.admitted.clone();
+        if let Some(catalog) = self.run_sizes.as_deref() {
+            crate::native_v2_admission::resolve_runtime_size(&mut admitted.runtime, catalog)?;
+        }
         self.validate_harnesses(&admitted.runtime)?;
         let secrets = resume_secret_envelope(ResumeSecretRequest {
             admitted: &admitted,

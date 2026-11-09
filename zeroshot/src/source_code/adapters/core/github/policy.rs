@@ -395,6 +395,18 @@ fn page_is_complete(
     }
 }
 
+pub(super) fn queue_check_failures(
+    value: Value,
+) -> Result<(String, Vec<u64>), SourceDeliveryError> {
+    let contexts: Vec<CheckContextWire> =
+        serde_json::from_value(value).map_err(|_| SourceDeliveryError::Rejected)?;
+    let evidence = classify_required_checks(&contexts);
+    Ok((
+        failure_diagnostic(evidence.failures),
+        evidence.failed_job_ids,
+    ))
+}
+
 pub(super) fn include_check_logs(snapshot: &mut PolicySnapshot, logs: &[(u64, String)]) {
     let SourceReviewState::Open {
         checks: SourceChecks::Failed { diagnostic },

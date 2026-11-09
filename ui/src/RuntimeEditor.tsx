@@ -8,6 +8,7 @@ import { modelGroups } from './models';
 import { effectiveLane } from './runtime-readiness';
 import type { HarnessOption } from './api';
 import type { MachineOption } from './machines';
+import type { RunSizeCatalog } from './run-sizes';
 import { RunSizePicker } from './RunSizePicker';
 
 export function RuntimeEditor(p: {
@@ -15,6 +16,7 @@ export function RuntimeEditor(p: {
   schema: any;
   harnesses?: readonly HarnessOption[];
   machines?: readonly MachineOption[];
+  runSizes?: RunSizeCatalog;
   /** JSON path of the field the last validation rejected, e.g. `runtime.nodes.work.model`. */
   invalidField?: string;
   /** The runtime `invalidField` was found in; fields the draft changed since then are not flagged. */
@@ -50,7 +52,8 @@ export function RuntimeEditor(p: {
     (!changed && p.invalidField === `runtime.${field}`) || undefined;
   function runtimeChange(key: string, value: string) {
     const next = clone(doc);
-    next.runtime[key] = value;
+    if (key === 'size' && value === '') delete next.runtime.size;
+    else next.runtime[key] = value;
     if (key === 'harness') next.runtime.provider = '';
     p.edit(next, `runtime.${key}`);
   }
@@ -126,11 +129,11 @@ export function RuntimeEditor(p: {
         </select>
       </Field>
       <RunSizePicker
-        value={doc.runtime.size}
-        schema={p.schema}
+        value={doc.runtime.size ?? undefined}
+        runSizes={p.runSizes}
         machines={p.machines}
         invalid={invalid('size', settingChanged('size'))}
-        onChange={(value) => runtimeChange('size', value)}
+        onChange={(value) => runtimeChange('size', value ?? '')}
       />
       <div className="section-rule" />
       <div className="section-title model-heading">

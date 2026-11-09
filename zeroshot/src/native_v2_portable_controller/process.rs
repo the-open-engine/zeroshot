@@ -38,6 +38,7 @@ const READY_KIND: &str = "zeroshot.portable-controller-ready/v1";
 struct PortableBootstrapDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
+    preparation_timeout_ms: u64,
     run_id: RunId,
     delivery_run_id: RunId,
     adopt_existing_delivery: bool,
@@ -88,8 +89,12 @@ impl PortableBootstrapDocument {
             })
             .transpose()
             .map_err(|_| PortableControllerError::Bootstrap)?;
+        if self.preparation_timeout_ms == 0 {
+            return Err(PortableControllerError::Bootstrap);
+        }
         Ok(PortableControllerBootstrap {
             checkpoint: self.checkpoint,
+            preparation_timeout: Duration::from_millis(self.preparation_timeout_ms),
             run_id: self.run_id,
             delivery_run_id: self.delivery_run_id,
             adopt_existing_delivery: self.adopt_existing_delivery,
@@ -248,8 +253,13 @@ fn encode_bootstrap(
         &bootstrap.submission,
         bootstrap.environment.bootstrap_values(),
     )?;
+    let preparation_timeout_ms = u64::try_from(bootstrap.preparation_timeout.as_millis())
+        .ok()
+        .filter(|milliseconds| *milliseconds > 0)
+        .ok_or(PortableControllerError::Bootstrap)?;
     let document = PortableBootstrapDocument {
         checkpoint: bootstrap.checkpoint.clone(),
+        preparation_timeout_ms,
         run_id: bootstrap.run_id.clone(),
         delivery_run_id: bootstrap.delivery_run_id.clone(),
         adopt_existing_delivery: bootstrap.adopt_existing_delivery,
@@ -354,41 +364,73 @@ impl PortableControllerServer {
     /// readiness cannot race normal startup. Later observation reopens the durable ledger.
     async fn serve_until_terminal(self) -> Result<(), PortableControllerError> {
         let mut lifecycle = ServerLifecycle::default();
-        // One wait spans every accepted connection, so observers cannot restart its bound.
-        let terminal = self.controller.wait_terminal();
-        tokio::pin!(terminal);
-        loop {
-            if lifecycle.is_complete() {
-                return Ok(());
-            }
-            tokio::select! {
-                result = self.accept() => {
-                    result.map_err(PortableControllerError::Io)?;
-                    lifecycle.accepted();
+        let mut connections = tokio::task::JoinSet::new();
+        let (shutdown, _) = tokio::sync::watch::channel(());
+        let result = {
+            // One wait spans every connection, so observers cannot restart its bound.
+            let terminal = self.controller.wait_terminal();
+            tokio::pin!(terminal);
+            loop {
+                if lifecycle.is_complete() {
+                    break Ok(());
                 }
-                result = &mut terminal, if !lifecycle.terminal => {
-                    result?;
-                    lifecycle.terminal();
+                tokio::select! {
+                    accepted = self.listener.accept() => {
+                        let stream = match accepted {
+                            Ok(stream) => stream,
+                            Err(error) => break Err(PortableControllerError::Io(error)),
+                        };
+                        let mut stopped = shutdown.subscribe();
+                        connections.spawn(serve_connection(self.controller.clone(), stream, async move {
+                            let _ = stopped.changed().await;
+                        }));
+                        lifecycle.accepted();
+                    }
+                    _ = connections.join_next(), if !connections.is_empty() => {}
+                    result = &mut terminal, if !lifecycle.terminal => {
+                        if let Err(error) = result {
+                            break Err(error);
+                        }
+                        lifecycle.terminal();
+                    }
                 }
             }
-        }
+        };
+        drop(self.listener);
+        drop(shutdown);
+        // Each connection runs the existing request cleanup before the runtime can close.
+        while connections.join_next().await.is_some() {}
+        result
     }
 
     async fn accept(&self) -> io::Result<()> {
         let stream = self.listener.accept().await?;
-        let controller = self.controller.clone();
-        tokio::spawn(async move {
-            let (reader, writer) = tokio::io::split(stream);
-            let binding = local_binding(controller);
-            let _ = openengine_cluster_server::stdio::serve_ndjson(
-                binding,
-                openengine_cluster_server::stdio::NdjsonIo::new(reader, writer, tokio::io::sink()),
-            )
-            .await;
-        });
+        tokio::spawn(serve_connection(
+            self.controller.clone(),
+            stream,
+            std::future::pending(),
+        ));
         Ok(())
     }
 }
+
+async fn serve_connection(
+    controller: Arc<PortableRunController>,
+    stream: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) {
+    let (reader, writer) = tokio::io::split(stream);
+    let _ = openengine_cluster_server::stdio::serve_ndjson_until_shutdown(
+        local_binding(controller),
+        openengine_cluster_server::stdio::NdjsonIo::new(reader, writer, tokio::io::sink()),
+        shutdown,
+    )
+    .await;
+}
+
+#[cfg(test)]
+#[path = "process/shutdown_tests.rs"]
+mod shutdown_tests;
 
 fn local_binding(
     controller: Arc<PortableRunController>,

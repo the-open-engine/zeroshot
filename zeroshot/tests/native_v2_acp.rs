@@ -10,10 +10,13 @@ use std::time::Duration;
 use agent_client_protocol::{self as acp, Agent as _};
 use async_trait::async_trait;
 use fs2::FileExt;
+use openengine_cluster_protocol::{GraphSpec, RunId, RunSubmission, RuntimePlan};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 #[cfg(feature = "ui")]
 use tokio::io::{AsyncBufReadExt as _, BufReader};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
+use zeroshot_engine::v2_run_ledger::{sqlite::SqliteRunLedger, RunLedger};
 
 #[derive(Default)]
 struct RecordingClient {
@@ -43,18 +46,20 @@ impl acp::Client for RecordingClient {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn acp_turns_reuse_provider_session_and_remain_observable() {
-    let fixture = AcpFixture::new();
-    fixture.install_profile();
-    let (run_ids, messages) = fixture.run_session().await;
+async fn acp_initial_and_later_turns_accept_explicit_or_omitted_host_size() {
+    for size in [Some("host"), None] {
+        let fixture = AcpFixture::new();
+        fixture.install_profile_with_size(None, size);
+        let (run_ids, messages) = fixture.run_session().await;
 
-    assert_eq!(messages, ["first", "second"]);
-    assert_eq!(run_ids.len(), 2);
-    assert_ne!(run_ids[0], run_ids[1]);
-    let capture = std::fs::read_to_string(&fixture.capture).unwrap();
-    assert_eq!(capture.matches("arg=resume\n").count(), 1);
-    assert_eq!(capture.matches("arg=acp-test-thread\n").count(), 1);
-    fixture.assert_durable_runs(&run_ids);
+        assert_eq!(messages, ["first", "second"]);
+        assert_eq!(run_ids.len(), 2);
+        assert_ne!(run_ids[0], run_ids[1]);
+        let capture = std::fs::read_to_string(&fixture.capture).unwrap();
+        assert_eq!(capture.matches("arg=resume\n").count(), 1);
+        assert_eq!(capture.matches("arg=acp-test-thread\n").count(), 1);
+        fixture.assert_durable_runs(&run_ids).await;
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -404,7 +409,11 @@ impl AcpFixture {
     }
 
     fn install_profile_with_worker_lane(&self, lane: Option<Value>) {
-        let (graph, runtime) = write_profile_files(self._root.path(), lane);
+        self.install_profile_with_size(lane, Some("host"));
+    }
+
+    fn install_profile_with_size(&self, lane: Option<Value>, size: Option<&str>) {
+        let (graph, runtime) = write_profile_files(self._root.path(), lane, size);
         let profile = Command::new(&self.executable)
             .args([
                 "profile",
@@ -423,6 +432,12 @@ impl AcpFixture {
             profile.status.success(),
             "profile setup failed: {}",
             String::from_utf8_lossy(&profile.stderr)
+        );
+        let stored: openengine_cluster_protocol::RunProfileMutationResult =
+            serde_json::from_slice(&profile.stdout).unwrap();
+        assert_eq!(
+            stored.profile.runtime.size().map(|size| size.as_str()),
+            size
         );
     }
 
@@ -550,7 +565,13 @@ impl AcpFixture {
         result
     }
 
-    fn assert_durable_runs(&self, run_ids: &[String]) {
+    async fn assert_durable_runs(&self, run_ids: &[String]) {
+        let graph: GraphSpec =
+            serde_json::from_slice(&std::fs::read(self._root.path().join("graph.json")).unwrap())
+                .unwrap();
+        let runtime: RuntimePlan =
+            serde_json::from_slice(&std::fs::read(self._root.path().join("runtime.json")).unwrap())
+                .unwrap();
         let mut revisions = Vec::new();
         for (run_id, expected) in run_ids.iter().zip(["first", "second"]) {
             let output = Command::new(&self.executable)
@@ -565,18 +586,29 @@ impl AcpFixture {
                 String::from_utf8_lossy(&output.stderr)
             );
             let status: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(status["size"], "host");
             assert_eq!(
                 status["status"]["terminalResult"]["output"]["response"],
                 expected
             );
             revisions.push(status["source"]["revision"].as_str().unwrap().to_owned());
-            assert!(
-                self.state
-                    .join("runs")
-                    .join(run_id)
-                    .join("runs.sqlite3")
-                    .is_file()
+            let path = self.state.join("runs").join(run_id).join("runs.sqlite3");
+            let ledger = SqliteRunLedger::open_read_only(path).unwrap();
+            let stored = ledger.get(&RunId::new(run_id)).await.unwrap().unwrap();
+            let authored = RunSubmission {
+                title: stored.admitted.title,
+                graph: graph.clone(),
+                initial_input: stored.admitted.initial_input,
+                runtime: runtime.clone(),
+                environment: stored.admitted.environment,
+                source: stored.admitted.source,
+                submission_key: stored.submission_key,
+            };
+            let expected_digest = format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_vec(&authored).unwrap())
             );
+            assert_eq!(stored.submission_digest.as_str(), expected_digest);
         }
         assert_ne!(revisions[0], revisions[1]);
     }
@@ -846,7 +878,11 @@ fn install_fake_claude(bin: &Path) {
     .unwrap();
 }
 
-fn write_profile_files(root: &Path, worker_lane: Option<Value>) -> (PathBuf, PathBuf) {
+fn write_profile_files(
+    root: &Path,
+    worker_lane: Option<Value>,
+    size: Option<&str>,
+) -> (PathBuf, PathBuf) {
     let string = || json!({"kind":"string"});
     let field = || json!({"type":string(),"required":true});
     let state = json!({"kind":"record","fields":{
@@ -890,13 +926,15 @@ fn write_profile_files(root: &Path, worker_lane: Option<Value>) -> (PathBuf, Pat
     let mut runtime = json!({
         "harness":"codex",
         "provider":"openai",
-        "size":"medium",
         "nodes":{"worker":{
             "kind":"agent",
             "model":"test-model",
             "sessionScope":"node_instance"
         }}
     });
+    if let Some(size) = size {
+        runtime["size"] = json!(size);
+    }
     if let Some(lane) = worker_lane {
         runtime["nodes"]["worker"]["lane"] = lane;
     }

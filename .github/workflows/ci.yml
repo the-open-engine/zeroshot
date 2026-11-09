@@ -228,6 +228,8 @@ jobs:
 
       - name: Build pinned Restic sidecar for native tests
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           case "$RUNNER_OS" in
             Linux)
@@ -531,8 +533,11 @@ jobs:
           node-version: 24
 
       - name: Build canonical target image
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           docker build --pull --platform linux/amd64 \
+            --secret id=github_token,env=GH_TOKEN \
             --file docker/zeroshot-target/Dockerfile \
             --tag zeroshot-target:ci .
 

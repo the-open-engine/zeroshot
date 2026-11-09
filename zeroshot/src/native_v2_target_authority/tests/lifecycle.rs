@@ -125,6 +125,7 @@ mod ui {
                 crate::native_v2_observability::NativeV2Observability::new(Arc::new(
                     crate::v2_run_ledger::fake::FakeRunLedger::new(),
                 )),
+                crate::native_v2_hosting::host_run_sizes(),
             )
             .assert_value()
         }

@@ -6,6 +6,162 @@ use super::*;
 use super::test_support::{ConfigLocation, GitFixture};
 
 #[tokio::test]
+async fn checkout_admission_uses_native_ignore_rules_without_changing_the_index() {
+    let fixture = GitFixture::new("[core]\n autocrlf = false\n", ConfigLocation::Home);
+    fixture.seed();
+    let excludes = fixture.root.path().join("global-ignore");
+    std::fs::write(&excludes, "ignored.log\n").assert_value();
+    fixture.git(&[
+        "config",
+        "core.excludesFile",
+        excludes.to_str().assert_value(),
+    ]);
+    fixture.edit();
+    for name in ["staged.txt", "untracked.txt", "ignored.log"] {
+        std::fs::write(fixture.workspace.join(name), "local work\n").assert_value();
+    }
+    fixture.git(&["add", "staged.txt"]);
+    let index = std::fs::read(fixture.workspace.join(".git/index")).assert_value();
+    let changed = fixture
+        .system_git()
+        .uncommitted_changes(&fixture.workspace)
+        .await
+        .assert_value()
+        .assert_value()
+        .to_string();
+    for path in ["sample.txt", "staged.txt", "untracked.txt"] {
+        assert!(changed.contains(path), "{changed}");
+    }
+    assert!(!changed.contains("ignored.log"), "{changed}");
+    assert_eq!(
+        std::fs::read(fixture.workspace.join(".git/index")).assert_value(),
+        index
+    );
+    fixture.git(&["add", "--all"]);
+    fixture.git(&["commit", "-m", "save work"]);
+    assert!(
+        fixture
+            .system_git()
+            .uncommitted_changes(&fixture.workspace)
+            .await
+            .assert_value()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn checkout_admission_rejects_pending_merge_with_a_clean_porcelain_status() {
+    let fixture = GitFixture::new("", ConfigLocation::Home);
+    let base = fixture.seed();
+    fixture.git(&["checkout", "-b", "other"]);
+    fixture.edit();
+    fixture.git(&["commit", "-am", "other change"]);
+    fixture.git(&["checkout", "main"]);
+    fixture.git(&["merge", "--no-commit", "--no-ff", "-s", "ours", "other"]);
+    assert!(fixture.git(&["status", "--porcelain=v1"]).is_empty());
+    assert!(fixture.workspace.join(".git/MERGE_HEAD").is_file());
+    let system = fixture.system_git();
+    let changed = system
+        .uncommitted_changes(&fixture.workspace)
+        .await
+        .assert_value();
+    assert!(
+        changed.is_some(),
+        "an unfinished merge was accepted as a clean checkout"
+    );
+    assert!(changed.assert_value().to_string().contains("MERGE_HEAD"));
+
+    // This admission rule must not prevent delivery from committing a worker-resolved merge.
+    system
+        .prepare_revision(&fixture.workspace, &base, "finish reviewed merge")
+        .await
+        .assert_value();
+    assert!(!fixture.workspace.join(".git/MERGE_HEAD").exists());
+}
+
+fn registered_submodule() -> (GitFixture, GitFixture) {
+    let source = GitFixture::new("", ConfigLocation::Home);
+    source.seed();
+    let fixture = GitFixture::new("", ConfigLocation::Home);
+    fixture.seed();
+    fixture.git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        source.workspace.to_str().assert_value(),
+        "dependency",
+    ]);
+    fixture.git(&["commit", "-m", "register dependency"]);
+    fixture.git(&["config", "submodule.dependency.ignore", "all"]);
+    (source, fixture)
+}
+
+#[tokio::test]
+async fn checkout_admission_ignores_submodule_contents_that_root_staging_cannot_publish() {
+    let (_source, fixture) = registered_submodule();
+    for (name, value) in [
+        ("scratch.txt", "scratch\n"),
+        ("sample.txt", "local child edit\n"),
+    ] {
+        std::fs::write(fixture.workspace.join("dependency").join(name), value).assert_value();
+    }
+    assert!(
+        fixture
+            .git(&["status", "--porcelain=v1", "--untracked-files=all"])
+            .is_empty()
+    );
+    let head_tree = fixture.git(&["rev-parse", "HEAD^{tree}"]);
+    fixture.git(&["add", "--all"]);
+    assert_eq!(fixture.git(&["write-tree"]), head_tree);
+    assert!(
+        fixture
+            .system_git()
+            .uncommitted_changes(&fixture.workspace)
+            .await
+            .assert_value()
+            .is_none(),
+        "root admission must not reject child contents that root git add does not stage"
+    );
+}
+
+#[tokio::test]
+async fn checkout_admission_rejects_changed_and_staged_gitlinks_even_when_submodule_is_ignored() {
+    let (_source, fixture) = registered_submodule();
+    fixture.git(&[
+        "-C",
+        "dependency",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "advance dependency",
+    ]);
+    assert!(fixture.git(&["status", "--porcelain=v1"]).is_empty());
+    let system = fixture.system_git();
+    let head_tree = fixture.git(&["rev-parse", "HEAD^{tree}"]);
+    for staged in [false, true] {
+        if staged {
+            fixture.git(&["add", "--all"]);
+            assert_ne!(fixture.git(&["write-tree"]), head_tree);
+        }
+        assert!(
+            system
+                .uncommitted_changes(&fixture.workspace)
+                .await
+                .assert_value()
+                .is_some()
+        );
+        assert!(
+            system
+                .workspace_state(&fixture.workspace)
+                .await
+                .assert_value()
+                .1
+        );
+    }
+}
+
+#[tokio::test]
 async fn native_credentials_cannot_corrupt_revisions_or_tree_ids() {
     let mut fixture = GitFixture::new("[core]\n autocrlf = true\n", ConfigLocation::Home);
     for name in ["GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE"] {

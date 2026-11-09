@@ -43,6 +43,8 @@ jobs:
 
       - name: Build pinned Restic sidecar for coverage
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           output_root="$RUNNER_TEMP/zeroshot-restic"
           target=x86_64-unknown-linux-musl
@@ -66,6 +68,9 @@ jobs:
         env:
           CARGO_INCREMENTAL: '0'
           CARGO_PROFILE_TEST_DEBUG: '1'
+          # Helpers use _exit after fork; map counters before fork instead of flushing there.
+          RUSTFLAGS: '-C llvm-args=-runtime-counter-relocation'
+          LLVM_PROFILE_FILE_NAME: 'zeroshot-%c%p-%m.profraw'
           COVERAGE_IGNORE_REGEX: '(^|/)(tests(/|\.rs$)|test_support\.rs$|[^/]+[_-]tests\.rs$)'
           RUST_TEST_THREADS: '4'
         run: |
@@ -125,7 +130,8 @@ jobs:
           NODE
 
       - name: Publish coverage
-        if: ${{ always() }}
+        if: ${{ !cancelled() && hashFiles('lcov.info') != '' }}
+        continue-on-error: true
         uses: coverallsapp/github-action@8d6379e14d29928660c4ba802d8e85393440b329 # v2.3.8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}

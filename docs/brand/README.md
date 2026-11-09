@@ -17,7 +17,7 @@ handwritten headings and diagrams, yellow notes, and the company mascot.
 - `zeroshot-hero-mobile.png`: 1122 × 1402 portrait banner, exported from a 561 × 701 canvas at
   2× scale. The README used to select it below 641px viewport width. It uses the warm-paper design
   in both themes.
-- `social/starred-by.html`: the "Starred by engineers at" strip under the README badges. Its
+- `social/starred-by.html`: the "Starred by engineers at" strip, out of the README since #1362. Its
   companies come from the self-reported GitHub company field of zeroshot stargazers, each profile
   checked by hand, so the copy says "engineers at", never "used by". Marks are Simple Icons (CC0).
   Simple Icons later removed Microsoft and Amazon over those companies' trademark terms; the strip

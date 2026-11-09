@@ -80,7 +80,7 @@ fn assert_watch_metadata(events: &[RunWatchEventNotification], admitted: &Admitt
     for event in events {
         assert_eq!(&event.title, &admitted.title);
         assert_eq!(&event.source, &admitted.source);
-        assert_eq!(event.size, admitted.runtime.size());
+        assert_eq!(Some(&event.size), admitted.runtime.size());
     }
 }
 

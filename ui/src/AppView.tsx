@@ -585,6 +585,7 @@ function RuntimeContent({ model }: { model: AppModel }) {
           schema={bootstrap?.runtimeSchema}
           harnesses={bootstrap?.harnesses}
           machines={bootstrap?.machines}
+          runSizes={bootstrap?.runSizes}
           recentModels={savedModels}
           invalidField={validation.state === 'invalid' ? validation.field : undefined}
           validated={doc.runtime}

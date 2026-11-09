@@ -172,6 +172,7 @@ impl RunLedger for SqliteRunLedger {
             rows.map(|row| {
                 let stored: StoredRun = serde_json::from_str(&row.map_err(sqlite_error)?)
                     .map_err(|_| RunLedgerError::Corrupt)?;
+                validate_stored_size(&stored)?;
                 Ok(RunSummary::from(&stored.snapshot))
             })
             .collect()
@@ -411,7 +412,7 @@ fn insert_new_run(
     transaction: &Transaction<'_>,
     request: CreateRun,
 ) -> Result<StoredRun, RunLedgerError> {
-    let snapshot = super::RunSnapshot::admitted(request.run_id.clone(), &request.admitted);
+    let snapshot = super::RunSnapshot::admitted(request.run_id.clone(), &request.admitted)?;
     let stored = StoredRun {
         submission_key: request.submission_key,
         submission_digest: request.submission_digest,
@@ -484,6 +485,7 @@ fn decode_stored(
     json: &str,
 ) -> Result<StoredRun, RunLedgerError> {
     let stored: StoredRun = serde_json::from_str(json).map_err(|_| RunLedgerError::Corrupt)?;
+    validate_stored_size(&stored)?;
     let cursor = u64::try_from(cursor).map_err(|_| RunLedgerError::Corrupt)?;
     if stored.snapshot.run_id != *expected_run_id
         || cursor_sequence(&stored.snapshot.cursor)? != cursor
@@ -491,6 +493,13 @@ fn decode_stored(
         return Err(RunLedgerError::Corrupt);
     }
     Ok(stored)
+}
+
+fn validate_stored_size(stored: &StoredRun) -> Result<(), RunLedgerError> {
+    if stored.admitted.runtime.size() != Some(&stored.snapshot.size) {
+        return Err(RunLedgerError::Corrupt);
+    }
+    Ok(())
 }
 
 fn sqlite_error(error: rusqlite::Error) -> RunLedgerError {

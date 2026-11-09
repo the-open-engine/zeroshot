@@ -28,7 +28,9 @@ pub(super) use profiles::RunProfilesDescriptor;
 use super::DEVICE_GRANT;
 use crate::native_v2_target::TargetAuthorityError;
 
-const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+pub(super) const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+// A full catalog can exceed 512 KiB when Unicode IDs and descriptions are JSON-escaped.
+pub(super) const MAX_DISCOVERY_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_TOKEN_BYTES: usize = 16 * 1024;
 
 #[derive(Deserialize)]
@@ -62,7 +64,7 @@ pub(super) struct ControllerDescriptor {
     pub(super) workspace_checkpoints: bool,
     pub(super) node_runtime_lanes: bool,
     pub(super) runtime_harnesses: Option<Vec<openengine_cluster_protocol::RuntimeLane>>,
-    pub(super) run_sizes: Option<Vec<openengine_cluster_protocol::RunSize>>,
+    pub(super) run_sizes: Option<openengine_cluster_protocol::TargetRunSizesDiscovery>,
     pub(super) decision_models: bool,
     pub(super) git_transport: bool,
     pub(super) comment_delivery: bool,
@@ -92,14 +94,14 @@ pub(super) fn build_controller_descriptor(
         .transpose()?;
     let run_sizes = wire
         .extensions
-        .run_sizes
+        .run_size_catalog
         .as_ref()
         .filter(|catalog| catalog.kind == openengine_cluster_protocol::RUN_SIZES_KIND)
         .map(|catalog| {
             catalog
                 .validate()
                 .map_err(|error| authority_error(error.to_string()))?;
-            Ok::<_, TargetAuthorityError>(catalog.sizes.clone())
+            Ok::<_, TargetAuthorityError>(catalog.clone())
         })
         .transpose()?;
     let decision_models = wire

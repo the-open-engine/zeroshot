@@ -1,9 +1,10 @@
 #![cfg(unix)]
 
+use openengine_cluster_testkit::fixture::run_size;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
-use openengine_cluster_protocol::{FailureDiagnosticKind, IdempotencyKey, NodeName, RunSize, RunTitle};
+use openengine_cluster_protocol::{FailureDiagnosticKind, IdempotencyKey, NodeName, RunTitle};
 use openengine_cluster_testkit::assertions::{AssertError, AssertValue};
 use serde_json::{Value, json};
 use super::*;
@@ -89,7 +90,7 @@ async fn admitted_for(
         runtime: RuntimePlan::new(
             openengine_cluster_protocol::RuntimeLane::new("copilot", provider.name())
                 .assert_value(),
-            RunSize::Medium,
+            run_size("medium"),
             BTreeMap::from([(NodeName::new("work").assert_value(), binding)]),
         ),
         source: serde_json::from_value(

@@ -449,12 +449,7 @@ async fn final_partial_workspace_does_not_replace_the_failed_visits_input_checkp
     assert_eq!(fixture.snapshot_count(), 2);
     assert!(fixture.restore(&point).await.is_empty());
     assert_eq!(fixture.source(), "initial");
-    let latest: SnapshotId =
-        serde_json::from_slice(&fs::read(fixture.directory.join("latest.json")).assert_value())
-            .assert_value();
-    restore_snapshot(&fixture.directory, &latest, &fixture.workspace)
-        .await
-        .assert_value();
+    assert!(fixture.restore_latest().await.is_empty());
     assert_eq!(fixture.source(), "partial failed edits");
 }
 
@@ -698,4 +693,72 @@ async fn real_restic_deduplicates_incremental_stages_and_restores_the_latest_byt
         repository_bytes < two_full_copies * 3 / 4,
         "Restic used {repository_bytes} bytes for {two_full_copies} bytes of full copies"
     );
+}
+
+#[tokio::test]
+async fn attempt_restores_own_their_stage_and_remove_only_that_stage() {
+    let fixture = Fixture::new();
+    let point = fixture.input_checkpoint("writer").await;
+    let selection = CheckpointRestore {
+        directory: fixture.directory.clone(),
+        selection: CheckpointRestoreSelection::Checkpoint {
+            checkpoint_id: point.checkpoint_id,
+        },
+    };
+    let owner = RunId::new(uuid::Uuid::now_v7().to_string());
+    let parent = fixture.workspace.parent().assert_value().to_owned();
+    let owned = parent.join(format!(".zeroshot-restore-{}", owner.as_str()));
+    let unrelated = parent.join(format!(".zeroshot-restore-{}", uuid::Uuid::now_v7()));
+    for stage in [&owned, &unrelated] {
+        fs::create_dir(stage).assert_value();
+        fs::write(stage.join("partial"), "interrupted extraction").assert_value();
+    }
+    fs::write(fixture.workspace.join("source"), "live edits").assert_value();
+
+    let seed = restore_attempt(
+        &selection,
+        &fixture.workspace,
+        RestoreAttempt {
+            owner: &owner,
+            deadline: Instant::now() + std::time::Duration::from_secs(60),
+        },
+    )
+    .await
+    .assert_value();
+
+    assert!(seed.is_empty());
+    assert_eq!(fixture.source(), "initial");
+    assert!(!owned.exists() && unrelated.exists());
+    fs::create_dir(&owned).assert_value();
+    remove_restore_stage(&fixture.workspace, &owner).assert_value();
+    assert!(!owned.exists() && unrelated.exists());
+    assert!(remove_restore_stage(&fixture.workspace, &RunId::new("../outside")).is_err());
+}
+
+#[tokio::test]
+async fn damaged_selected_seed_fails_before_the_workspace_changes() {
+    let fixture = Fixture::new();
+    let point = fixture.input_checkpoint("writer").await;
+    fs::write(
+        catalog::seed_path(&fixture.directory, &point.checkpoint_id),
+        "incompatible seed",
+    )
+    .assert_value();
+    fs::write(fixture.workspace.join("source"), "live edits").assert_value();
+    let selection = CheckpointRestore {
+        directory: fixture.directory.clone(),
+        selection: CheckpointRestoreSelection::Checkpoint {
+            checkpoint_id: point.checkpoint_id,
+        },
+    };
+
+    assert!(pin(&selection).is_err());
+    let error = restore(&selection, &fixture.workspace).await.unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("reading the execution seed failed"),
+        "{error}"
+    );
+    assert_eq!(fixture.source(), "live edits");
 }

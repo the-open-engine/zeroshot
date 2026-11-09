@@ -16,7 +16,9 @@ use windows_sys::Win32::Storage::FileSystem::{
 use super::FileAccess;
 mod controller;
 pub(crate) mod security;
-pub(crate) use controller::{ControllerChild, guard_controller_console, spawn_controller};
+pub(crate) use controller::{
+    ControllerChild, guard_controller_console, spawn_controller, stop_controller,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct FileIdentity {

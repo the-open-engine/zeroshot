@@ -42,6 +42,7 @@ fn validate_definition_header(
         || definition.projection_version != PROJECTION_VERSION
         || &definition.run_id != expected_run_id
         || !definition.history_available
+        || definition.runtime.size().is_none()
     {
         return invalid();
     }

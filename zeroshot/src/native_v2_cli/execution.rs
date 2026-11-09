@@ -27,6 +27,8 @@ mod failure;
 mod graph_tree;
 #[path = "execution/profiles.rs"]
 mod profiles;
+#[path = "execution/sizes.rs"]
+mod sizes;
 #[path = "execution/stacks.rs"]
 mod stacks;
 #[path = "execution/status.rs"]
@@ -106,6 +108,9 @@ async fn execute_management<B: NativeV2CliBackend, W: Write>(
         NativeV2CliCommand::Delegation(command) => {
             write_json(output, &backend.delegation(command).await?)?;
             Ok(CliOutcome::Completed)
+        }
+        NativeV2CliCommand::TargetSizes { name, json } => {
+            sizes::execute(backend, &name, json, output).await
         }
         command => execute_target(command, backend).await,
     }

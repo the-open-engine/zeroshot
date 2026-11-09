@@ -1,7 +1,8 @@
+use openengine_cluster_testkit::fixture::run_size;
 use super::*;
 use openengine_cluster_protocol::{
-    CodexProvider, IdempotencyKey, NodeRuntimeBinding, ResolvedSource, RunSize, RunSubmission,
-    RunTitle, RuntimePlan, TerminalResult, WorkerOutcome,
+    IdempotencyKey, NodeRuntimeBinding, ResolvedSource, RunSubmission, RunTitle, RuntimePlan,
+    TerminalResult, WorkerOutcome,
 };
 use openengine_cluster_server::admission::VerifiedGraph;
 use openengine_cluster_testkit::assertions::AssertValue;
@@ -33,12 +34,7 @@ fn runtime(delivery: TemplateDelivery) -> RuntimePlan {
     {
         nodes.insert(name, binding);
     }
-    RuntimePlan::new(
-        openengine_cluster_protocol::RuntimeLane::new("codex", (CodexProvider::OpenAi).name())
-            .assert_value(),
-        RunSize::Small,
-        nodes,
-    )
+    crate::native_v2_candidate::test_support::codex_runtime(run_size("small"), nodes)
 }
 
 #[tokio::test]

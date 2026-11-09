@@ -123,7 +123,7 @@ fn source_omission_and_null_never_materialize_a_dummy_repository() {
         run_id: openengine_cluster_protocol::RunId::new("local-folder"),
         title: openengine_cluster_protocol::RunTitle::new("Local folder").assert_value(),
         source: None,
-        size: openengine_cluster_protocol::RunSize::Small,
+        size: openengine_cluster_protocol::RunSize::new("small").assert_value(),
         at_cursor: openengine_cluster_protocol::Cursor::new("v2:0"),
         status: openengine_cluster_protocol::RunStatus::Admitted {},
         workspace_recovery: Default::default(),

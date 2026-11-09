@@ -1,3 +1,5 @@
+import { validSizeId } from './run-sizes';
+
 /** Host-owned resources and lane weights; native profiles retain only the size identity. */
 export type MachineOption = {
   size: string;
@@ -17,15 +19,11 @@ export function validMachineCatalog(value: unknown): value is MachineOption[] | 
 
 function validMachine(value: unknown): value is MachineOption {
   const machine = value as Partial<MachineOption> | null;
-  if (!machine || !validSize(machine.size) || !validLabel(machine.label)) return false;
+  if (!machine || !validSizeId(machine.size) || !validLabel(machine.label)) return false;
   return (
     [machine.vcpus, machine.memoryMiB, machine.diskGiB, machine.laneUnits].every(positiveInteger) &&
     validGpu(machine.gpu)
   );
-}
-
-function validSize(value: unknown): value is string {
-  return typeof value === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(value);
 }
 
 function validLabel(value: unknown): value is string {

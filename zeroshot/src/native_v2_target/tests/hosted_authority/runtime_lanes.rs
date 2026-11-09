@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use std::sync::{Arc, Mutex};
 
 use openengine_cluster_protocol::{
@@ -122,7 +123,7 @@ fn hosted_response(
 }
 
 fn hosted_lane_discovery(origin: &str, advertises_lanes: bool) -> String {
-    let mut document: Value = serde_json::from_str(&hosted_discovery(origin)).assert_value();
+    let mut document: Value = hosted_document(origin);
     if advertises_lanes {
         document["extensions"]["node_runtime_lanes"] = json!({"kind": NODE_RUNTIME_LANES_KIND});
     }
@@ -675,14 +676,21 @@ async fn unsupported_contribution_defaults_and_overrides_stop_before_oauth_or_re
     }
 }
 
+fn hosted_document(origin: &str) -> Value {
+    serde_json::from_str(&hosted_discovery(origin)).assert_value()
+}
+
 async fn size_target(sizes: Option<Vec<openengine_cluster_protocol::RunSize>>) -> RecordingTarget {
     RecordingTarget::spawn(move |request, origin, tokens| {
         if (request.method.as_str(), request.path.as_str()) == DISCOVERY {
-            let mut document: Value =
-                serde_json::from_str(&hosted_discovery(origin)).assert_value();
+            let mut document: Value = hosted_document(origin);
             if let Some(sizes) = &sizes {
-                document["extensions"]["run_sizes"] = json!({
-                    "kind": openengine_cluster_protocol::RUN_SIZES_KIND, "sizes": sizes
+                document["extensions"]["run_size_catalog"] = json!({
+                    "kind": openengine_cluster_protocol::RUN_SIZES_KIND,
+                    "default": sizes.first(),
+                    "sizes": sizes.iter().map(|id| json!({
+                        "id":id, "description":"Target-owned hardware description"
+                    })).collect::<Vec<_>>()
                 });
             }
             return ("200 OK", document.to_string());
@@ -693,51 +701,174 @@ async fn size_target(sizes: Option<Vec<openengine_cluster_protocol::RunSize>>) -
 }
 
 #[tokio::test]
-async fn unsupported_run_sizes_send_no_hosted_tokens_or_profile_or_run_bodies() {
-    use openengine_cluster_protocol::RunSize;
-    for size in [RunSize::Xl, RunSize::GpuT4] {
+async fn arbitrary_run_sizes_reach_the_hosted_target_without_discovery_allowlisting() {
+    for sizes in [
+        None,
+        Some(Vec::new()),
+        Some(vec![run_size("custom-big-box")]),
+    ] {
         for profile in [false, true] {
             let root = temp_root();
-            let target = size_target(None).await;
+            let target = size_target(sizes.clone()).await;
             let (record, authority) = authenticated_authority(&root, &target.origin).await;
-            let error = if profile {
+            let size = run_size("custom-big-box");
+            if profile {
                 let mut request = profile_request(lane_free_binding());
-                request.runtime.size = size;
-                authority.profile_set(&record, request).await.assert_error()
+                request.runtime.size = Some(size.clone());
+                authority.profile_set(&record, request).await.assert_value();
             } else {
                 let mut request = run_request(lane_free_binding());
-                request.submission.runtime.size = size;
-                authority.submit(&record, &request).await.assert_error()
-            };
-            assert!(
-                error
-                    .to_string()
-                    .contains(openengine_cluster_protocol::RUN_SIZES_KIND)
+                request.submission.runtime.size = Some(size.clone());
+                authority.submit(&record, &request).await.assert_value();
+            }
+            let requests = target.stop();
+            let route = if profile { PROFILE_SET } else { RUN };
+            assert_eq!(
+                routes(&requests),
+                [DISCOVERY, OAUTH_METADATA, TOKEN, SESSION, route]
             );
-            assert_eq!(routes(&target.stop()), [DISCOVERY, OAUTH_METADATA]);
+            let body: Value =
+                serde_json::from_str(&requests.last().assert_value().body).assert_value();
+            let runtime = if profile {
+                &body["runtime"]
+            } else {
+                &body["submission"]["runtime"]
+            };
+            assert_eq!(runtime["size"], size.as_str());
         }
     }
 }
 
 #[tokio::test]
-async fn supported_run_sizes_preserve_the_selected_machine_in_the_hosted_request() {
-    use openengine_cluster_protocol::RunSize;
-    for size in [RunSize::Xl, RunSize::GpuT4] {
-        let root = temp_root();
-        let target = size_target(Some(vec![size])).await;
+async fn target_size_rejection_reaches_the_caller_after_the_request_is_sent() {
+    let target =
+        RecordingTarget::spawn(|request, origin, tokens| {
+            if (request.method.as_str(), request.path.as_str()) == RUN {
+                return ("400 Bad Request", json!({
+                "code":"unsupported_size", "message":"this target does not offer custom-big-box"
+            }).to_string());
+            }
+            hosted_response(request, origin, tokens, false)
+        })
+        .await;
+    let root = temp_root();
+    let (record, authority) = authenticated_authority(&root, &target.origin).await;
+    let mut request = run_request(lane_free_binding());
+    request.submission.runtime.size = Some(run_size("custom-big-box"));
+    let error = authority.submit(&record, &request).await.assert_error();
+    assert!(
+        error
+            .to_string()
+            .contains("this target does not offer custom-big-box")
+    );
+    assert_eq!(
+        routes(&target.stop()),
+        [DISCOVERY, OAUTH_METADATA, TOKEN, SESSION, RUN]
+    );
+}
+
+#[tokio::test]
+async fn size_listing_reads_authenticated_catalogs_with_maximum_unicode_descriptors() {
+    let root = temp_root();
+    for count in [1, 128] {
+        let target = RecordingTarget::spawn(move |request, origin, tokens| {
+            if (request.method.as_str(), request.path.as_str()) != DISCOVERY {
+                return hosted_response(request, origin, tokens, false);
+            }
+            let prefix = if request.authorization.is_some() {
+                "org-enabled"
+            } else {
+                "deployment"
+            };
+            let description = if count == 1 {
+                "16 vCPU, 64 GiB RAM".to_owned()
+            } else {
+                "é".repeat(512)
+            };
+            let identifier = |index| {
+                let mut id = format!("{prefix}-{index}");
+                if count == 128 {
+                    id.push_str(&"🚀".repeat(128 - id.chars().count()));
+                }
+                id
+            };
+            let mut document = hosted_document(origin);
+            document["extensions"]["run_size_catalog"] = json!({
+                "kind":openengine_cluster_protocol::RUN_SIZES_KIND,
+                "default":identifier(0),
+                "sizes":(0..count).map(|index| json!({
+                    "id":identifier(index), "description":description,
+                })).collect::<Vec<_>>()
+            });
+            // ASCII-escaping JSON encoders emit surrogate pairs for supplementary characters.
+            let encoded = document
+                .to_string()
+                .replace('é', "\\u00e9")
+                .replace('🚀', "\\ud83d\\ude80");
+            if count == 128 {
+                assert!(encoded.len() > 512 * 1024);
+                assert!(encoded.len() < 1024 * 1024);
+            }
+            ("200 OK", encoded)
+        })
+        .await;
         let (record, authority) = authenticated_authority(&root, &target.origin).await;
-        let mut request = run_request(lane_free_binding());
-        request.submission.runtime.size = size;
-        authority.submit(&record, &request).await.assert_value();
+        let catalog = authority.run_sizes(&record).await.assert_value();
+        let default = catalog.default.as_ref().assert_value().as_str();
+        assert!(default.starts_with("org-enabled-0"));
+        assert_eq!(catalog.sizes.len(), count);
+        if count == 1 {
+            assert_eq!(default, "org-enabled-0");
+            assert_eq!(catalog.sizes[0].description, "16 vCPU, 64 GiB RAM");
+        } else {
+            assert_eq!(default.chars().count(), 128);
+            assert_eq!(catalog.sizes[127].id.as_str().chars().count(), 128);
+            assert_eq!(catalog.sizes[127].description.len(), 1024);
+        }
         let requests = target.stop();
         assert_eq!(
             routes(&requests),
-            [DISCOVERY, OAUTH_METADATA, TOKEN, SESSION, RUN]
+            [DISCOVERY, OAUTH_METADATA, TOKEN, SESSION, DISCOVERY]
         );
-        let body: Value = serde_json::from_str(&requests.last().assert_value().body).assert_value();
+        assert!(requests.first().assert_value().authorization.is_none());
+        assert!(requests.last().assert_value().authorization.is_some());
+    }
+}
+
+#[tokio::test]
+async fn size_listing_rejects_public_and_authenticated_discovery_above_one_mebibyte() {
+    for authenticated in [false, true] {
+        let root = temp_root();
+        let target = RecordingTarget::spawn(move |request, origin, tokens| {
+            if (request.method.as_str(), request.path.as_str()) == DISCOVERY
+                && request.authorization.is_some() == authenticated
+            {
+                let body = hosted_discovery(origin) + &" ".repeat(1024 * 1024);
+                assert!(body.len() > 1024 * 1024);
+                return ("200 OK", body);
+            }
+            hosted_response(request, origin, tokens, false)
+        })
+        .await;
+        let (record, authority) = authenticated_authority(&root, &target.origin).await;
+        let error = authority.run_sizes(&record).await.assert_error();
+        let operation = if authenticated {
+            "target run sizes"
+        } else {
+            "native-v2 target discovery"
+        };
         assert_eq!(
-            body["submission"]["runtime"]["size"],
-            serde_json::to_value(size).assert_value()
+            error.to_string(),
+            format!("{operation} response is too large")
+        );
+        let requests = target.stop();
+        assert_eq!(
+            routes(&requests),
+            if authenticated {
+                vec![DISCOVERY, OAUTH_METADATA, TOKEN, SESSION, DISCOVERY]
+            } else {
+                vec![DISCOVERY]
+            }
         );
     }
 }

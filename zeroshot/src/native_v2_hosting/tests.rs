@@ -1,5 +1,6 @@
 #![cfg(unix)]
 
+use openengine_cluster_testkit::fixture::run_size;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
@@ -10,7 +11,7 @@ use std::time::Duration;
 
 use openengine_cluster_protocol::{
     ConnectionKey, DiagnosticSeverity, GraphDiagnostic, GraphDiagnosticCode, NodeName, RunId,
-    RunSize, RuntimePlan, StaticConnectionValues, WorkerRef,
+    RuntimePlan, StaticConnectionValues, WorkerRef,
 };
 use openengine_cluster_server::admission::VerificationError;
 use serde_json::{Value, json};
@@ -492,7 +493,7 @@ async fn invalid_submission_fails_before_run_allocation() {
             (crate::native_v2_contract::CodexProvider::OpenAi).name(),
         )
         .assert_value(),
-        RunSize::Small,
+        run_size("small"),
         BTreeMap::new(),
     );
 

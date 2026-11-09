@@ -57,7 +57,7 @@ fn status(phase: RunStatus, at: u64) -> RunStatusResult {
         run_id: run_id(),
         title: title(),
         source: Some(native_v2_source_fixture()),
-        size: RunSize::Small,
+        size: RunSize::new("small").assert_value(),
         at_cursor: cursor(at),
         status: phase,
         workspace_recovery: Default::default(),
@@ -140,7 +140,7 @@ impl ClusterBackend for FakeBackend {
                     run_id: run_id(),
                     title: title(),
                     source: Some(native_v2_source_fixture()),
-                    size: RunSize::Small,
+                    size: RunSize::new("small").assert_value(),
                     cursor: cursor(3),
                     status: RunStatus::Running {
                         active_executions: vec![],
@@ -154,7 +154,7 @@ impl ClusterBackend for FakeBackend {
                     run_id: run_id(),
                     title: title(),
                     source: Some(native_v2_source_fixture()),
-                    size: RunSize::Small,
+                    size: RunSize::new("small").assert_value(),
                     cursor: cursor(99),
                     status: RunStatus::Running {
                         active_executions: vec![],

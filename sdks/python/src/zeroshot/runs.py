@@ -119,7 +119,7 @@ class RunStatus:
         run_id: Public durable run identity.
         title: Immutable persisted title.
         source: Immutable Git source snapshot, or None when unavailable for a local run.
-        size: Native run size.
+        size: Opaque size identifier accepted by the target.
         cursor: Opaque durable status cursor.
         phase: admitted, running, stopping, or finished.
         active_executions: Every currently active graph execution.
@@ -129,7 +129,7 @@ class RunStatus:
     run_id: str
     title: str
     source: ResolvedSource | None
-    size: Literal["small", "medium", "large", "xl", "gpu_t4"]
+    size: str
     cursor: str
     phase: Literal["admitted", "running", "stopping", "finished"]
     active_executions: tuple[ActiveExecution, ...] = ()
@@ -144,7 +144,7 @@ class RunSummary:
         run_id: Public durable run identity.
         title: Immutable persisted title.
         source: Immutable Git source snapshot, or None when unavailable for a local run.
-        size: Native run size.
+        size: Opaque size identifier accepted by the target.
         cursor: Opaque durable status cursor.
         phase: admitted, running, stopping, or finished.
         force_stop_requested: Whether the current projection reflects a force-stop request.
@@ -153,7 +153,7 @@ class RunSummary:
     run_id: str
     title: str
     source: ResolvedSource | None
-    size: Literal["small", "medium", "large", "xl", "gpu_t4"]
+    size: str
     cursor: str
     phase: Literal["admitted", "running", "stopping", "finished"]
     force_stop_requested: bool

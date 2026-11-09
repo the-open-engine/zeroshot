@@ -1,7 +1,8 @@
+use openengine_cluster_testkit::fixture::run_size;
 use std::collections::BTreeMap;
 
 use openengine_cluster_protocol::{
-    EnumLabel, FieldName, NodeName, NodeRuntimeBinding, PositiveInteger, ReasoningEffort, RunSize,
+    EnumLabel, FieldName, NodeName, NodeRuntimeBinding, PositiveInteger, ReasoningEffort,
     RuntimePlan, SessionScope, SourceBranchId, SourceRepositoryId, SourceRevisionId,
     ResolvedSource, WorkerErrorCode, WorkerOutcome,
 };
@@ -73,7 +74,7 @@ pub(super) fn runtime_for(
     RuntimePlan::new(
         openengine_cluster_protocol::RuntimeLane::new("codex", (CodexProvider::OpenAi).name())
             .assert_value(),
-        RunSize::Medium,
+        run_size("medium"),
         nodes,
     )
 }

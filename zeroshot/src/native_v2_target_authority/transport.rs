@@ -98,15 +98,7 @@ impl NativeV2TargetServer {
         sessions: Arc<dyn TargetSessionAuthority>,
         oecp_endpoint: impl Into<String>,
     ) -> Result<Self, TargetAuthorityError> {
-        let endpoint = oecp_endpoint.into();
-        validate_oecp_endpoint(&endpoint)?;
-        Ok(Self {
-            target,
-            access: TargetServerAccess::Hosted(sessions),
-            oecp_endpoint: endpoint,
-            #[cfg(feature = "ui")]
-            ui: None,
-        })
+        Self::new(target, TargetServerAccess::Hosted(sessions), oecp_endpoint)
     }
 
     pub fn new_direct(
@@ -114,15 +106,7 @@ impl NativeV2TargetServer {
         identity: ConnectionIdentity,
         oecp_endpoint: impl Into<String>,
     ) -> Result<Self, TargetAuthorityError> {
-        let endpoint = oecp_endpoint.into();
-        validate_oecp_endpoint(&endpoint)?;
-        Ok(Self {
-            target,
-            access: TargetServerAccess::Direct(identity),
-            oecp_endpoint: endpoint,
-            #[cfg(feature = "ui")]
-            ui: None,
-        })
+        Self::new(target, TargetServerAccess::Direct(identity), oecp_endpoint)
     }
 
     pub fn new_private(
@@ -131,14 +115,37 @@ impl NativeV2TargetServer {
         oecp_endpoint: impl Into<String>,
         bootstrap_key: TargetBootstrapKey,
     ) -> Result<Self, TargetAuthorityError> {
+        Self::new(
+            target,
+            TargetServerAccess::Private {
+                access: Arc::new(PrivateTargetAccess::new(bootstrap_key)),
+                identity,
+            },
+            oecp_endpoint,
+        )
+    }
+
+    fn new(
+        target: Arc<NativeV2TargetAuthority>,
+        access: TargetServerAccess,
+        oecp_endpoint: impl Into<String>,
+    ) -> Result<Self, TargetAuthorityError> {
+        if !matches!(&access, TargetServerAccess::Private { .. }) {
+            target
+                .run_sizes()
+                .ok_or_else(|| {
+                    TargetAuthorityError::invalid(
+                        "a public target must advertise its run size catalog",
+                    )
+                })?
+                .validate()
+                .map_err(|error| TargetAuthorityError::invalid(error.to_string()))?;
+        }
         let endpoint = oecp_endpoint.into();
         validate_oecp_endpoint(&endpoint)?;
         Ok(Self {
             target,
-            access: TargetServerAccess::Private {
-                access: Arc::new(PrivateTargetAccess::new(bootstrap_key)),
-                identity,
-            },
+            access,
             oecp_endpoint: endpoint,
             #[cfg(feature = "ui")]
             ui: None,

@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -5,8 +6,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
-    CompiledGraphIr, DeclaredConnections, NodeName, NonEmptyVec, PositiveInteger, RunId, RunSize,
-    RunTitle, ResolvedSource, StructuralBounds, TerminationWitness, WorkerRef,
+    CompiledGraphIr, DeclaredConnections, NodeName, NonEmptyVec, PositiveInteger, RunId, RunTitle,
+    ResolvedSource, StructuralBounds, TerminationWitness, WorkerRef,
 };
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, watch};
@@ -141,7 +142,7 @@ pub(crate) fn admitted() -> AdmittedRun {
         },
         initial_input: Value::Null,
         runtime: crate::native_v2_candidate::test_support::codex_runtime(
-            RunSize::Medium,
+            run_size("medium"),
             runtime_nodes,
         ),
         source: Some(source()),

@@ -65,7 +65,10 @@ impl SessionState {
     async fn release(&mut self, request: &mut SupervisorRequest) {
         request.writer_stop.send_replace(true);
         match timeout(PROCESS_RELEASE_WAIT_TIMEOUT, request.child.wait()).await {
-            Ok(Ok(status)) => self.exit_status = Some(status),
+            Ok(Ok(status)) => self.record_wait(super::platform::command_exit_status(
+                &request.process_tree,
+                status,
+            )),
             Ok(Err(error)) => self
                 .errors
                 .push(io_error_detail("process release wait failed", &error)),
@@ -85,7 +88,7 @@ pub(super) async fn supervise_session(mut request: SupervisorRequest) {
         tokio::select! {
             biased;
             status = request.child.wait() => {
-                state.record_wait(status);
+                state.record_wait(status.and_then(|status| super::platform::command_exit_status(&request.process_tree, status)));
                 break;
             }
             _ = request.cancellation.cancelled() => {

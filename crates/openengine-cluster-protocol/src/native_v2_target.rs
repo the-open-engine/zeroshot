@@ -12,7 +12,10 @@ use serde::{Deserialize, Serialize};
 mod problem;
 mod run_sizes;
 
-pub use run_sizes::{RUN_SIZES_KIND, TargetRunSizesDiscovery};
+pub use run_sizes::{
+    MAX_RUN_SIZE_DESCRIPTION_BYTES, MAX_TARGET_RUN_SIZES, RUN_SIZES_KIND, RunSizeDescriptor,
+    TargetRunSizesDiscovery,
+};
 
 pub use problem::{
     MAX_TARGET_HTTP_PROBLEM_CODE_BYTES, MAX_TARGET_HTTP_PROBLEM_DETAILS_BYTES,
@@ -675,8 +678,12 @@ pub struct TargetDiscoveryExtensions {
     pub node_runtime_lanes: Option<TargetNodeRuntimeLanesDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_harnesses: Option<TargetRuntimeHarnessesDiscovery>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub run_sizes: Option<TargetRunSizesDiscovery>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "run_sizes::deserialize_catalog"
+    )]
+    pub run_size_catalog: Option<TargetRunSizesDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub decision_models: Option<TargetDecisionModelsDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -725,7 +732,7 @@ impl TargetDiscoveryExtensions {
             && self.hosted_workspace_recovery.is_none()
             && self.node_runtime_lanes.is_none()
             && self.runtime_harnesses.is_none()
-            && self.run_sizes.is_none()
+            && self.run_size_catalog.is_none()
             && self.decision_models.is_none()
             && self.git_transport.is_none()
             && self.comment_delivery.is_none()
@@ -737,7 +744,7 @@ impl TargetDiscoveryDocument {
     /// Advertises machine sizes accepted by this host independently of billing or credentials.
     #[must_use]
     pub fn with_run_sizes(mut self, catalog: TargetRunSizesDiscovery) -> Self {
-        self.extensions.run_sizes = Some(catalog);
+        self.extensions.run_size_catalog = Some(catalog);
         self
     }
 

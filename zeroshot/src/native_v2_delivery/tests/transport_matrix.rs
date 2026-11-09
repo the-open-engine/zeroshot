@@ -613,3 +613,194 @@ async fn http_remote_update_preserves_dirty_repairs_without_reusing_old_approval
     );
     assert_eq!(server.faults.receive_packs.load(Ordering::SeqCst), 0);
 }
+
+#[tokio::test]
+async fn resumed_delivery_checkpoint_reuses_the_identical_complete_candidate() {
+    resumed_candidate(&TempRepo::delivery(), false).await;
+}
+
+#[tokio::test]
+async fn resumed_delivery_checkpoint_preserves_different_candidate_content() {
+    resumed_candidate(&TempRepo::delivery(), true).await;
+}
+
+async fn resumed_candidate(repo: &TempRepo, different: bool) {
+    let base = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
+    fs::write(repo.workspace.join("staged.txt"), "staged\n").assert_value();
+    git(&repo.workspace, &["add", "staged.txt"]);
+    fs::write(repo.workspace.join("README.md"), "restored edit\n").assert_value();
+    fs::write(repo.workspace.join("result.txt"), "untracked\n").assert_value();
+    git(&repo.workspace, &["add", "--all"]);
+    git(
+        &repo.workspace,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-m",
+            "published candidate",
+        ],
+    );
+    let published = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
+    let branch = delivery_head_branch(&RunId::new(RUN));
+    git(
+        &repo.workspace,
+        &[
+            "push",
+            "origin",
+            &format!("{published}:refs/heads/{branch}"),
+        ],
+    );
+    git(&repo.workspace, &["reset", "--mixed", &base]);
+    git(&repo.workspace, &["add", "staged.txt"]);
+    fs::write(repo.workspace.join(".git/info/exclude"), "ignored.txt\n").assert_value();
+    fs::write(repo.workspace.join("ignored.txt"), "private\n").assert_value();
+    if different {
+        fs::write(repo.workspace.join("extra.txt"), "preserve\n").assert_value();
+    }
+    let before = git_output(&repo.workspace, &["status", "--porcelain"]);
+    assert!(
+        before.contains("A  staged.txt") && before.contains("?? result.txt"),
+        "{before}"
+    );
+    let server = HttpGit::start(&repo.remote);
+    let authority = Arc::new(TransportAuthority::new(repo, &server, Update::None));
+    let execution = execute(repo, adopting_adapter(repo, authority.clone()), false).await;
+    assert_delivery_signal(
+        &execution.outcome,
+        if different {
+            DELIVERY_REPAIR_REQUIRED_LABEL
+        } else {
+            DELIVERY_MERGED_LABEL
+        },
+    );
+    assert_eq!(reference(&repo.remote, &branch), Some(published.clone()));
+    assert_eq!(
+        authority.pushes.load(Ordering::SeqCst),
+        usize::from(!different)
+    );
+    assert_eq!(authority.merged.load(Ordering::SeqCst), !different);
+    assert_eq!(
+        fs::read_to_string(repo.workspace.join("ignored.txt")).assert_value(),
+        "private\n"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.workspace.join("result.txt")).assert_value(),
+        "untracked\n"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.workspace.join("README.md")).assert_value(),
+        "restored edit\n"
+    );
+    if different {
+        assert_eq!(
+            fs::read_to_string(repo.workspace.join("extra.txt")).assert_value(),
+            "preserve\n"
+        );
+    } else {
+        assert_eq!(
+            git_output(&repo.workspace, &["rev-parse", "HEAD"]),
+            published
+        );
+        assert!(git_output(&repo.workspace, &["status", "--porcelain"]).is_empty());
+    }
+}
+
+#[tokio::test]
+async fn resumed_delivery_checkpoint_preserves_a_pending_merge() {
+    let repo = TempRepo::delivery();
+    let base = git_output(&repo.workspace, &["rev-parse", "HEAD"]);
+    let published = publish_reviewed_candidate(&repo);
+    git(&repo.workspace, &["reset", "--hard", &base]);
+    git(
+        &repo.workspace,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "merge",
+            "--no-ff",
+            "--no-commit",
+            &published.head_revision,
+        ],
+    );
+    assert_eq!(
+        git_output(&repo.workspace, &["rev-parse", "MERGE_HEAD"]),
+        published.head_revision
+    );
+    let server = HttpGit::start(&repo.remote);
+    let outcome = authority(&repo, &server)
+        .reconcile_delivery_head(
+            SourceHeadReconciliation {
+                workspace: &repo.workspace,
+                published: &published,
+                observed: &published,
+                commit_message: "Preserve pending merge",
+                authorized_update: false,
+                adopting_existing: true,
+            },
+            SourceDeliveryCredential::token("test-token"),
+        )
+        .await
+        .assert_value();
+    assert!(
+        matches!(outcome, SourceReconciliationOutcome::NeedsWork(_)),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        git_output(&repo.workspace, &["show", "-s", "--format=%P", "HEAD"]),
+        format!("{base} {}", published.head_revision)
+    );
+    assert!(git_output(&repo.workspace, &["status", "--porcelain"]).is_empty());
+    assert_eq!(
+        reference(&repo.remote, &published.head_branch),
+        Some(published.head_revision)
+    );
+}
+
+#[tokio::test]
+async fn resumed_delivery_checkpoint_preserves_nonstageable_submodule_contents() {
+    let repo = TempRepo::delivery();
+    let source = TempRepo::candidate();
+    git(
+        &repo.workspace,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            source.workspace.to_str().assert_value(),
+            "dependency",
+        ],
+    );
+    commit_file(
+        &repo.workspace,
+        "dependency-note.txt",
+        "registered dependency\n",
+    );
+    git(
+        &repo.workspace,
+        &["config", "submodule.dependency.ignore", "all"],
+    );
+    let dependency = repo.workspace.join("dependency");
+    fs::write(dependency.join("README.md"), "pre-existing child edit\n").assert_value();
+    fs::write(
+        dependency.join("scratch.txt"),
+        "pre-existing child scratch\n",
+    )
+    .assert_value();
+
+    resumed_candidate(&repo, false).await;
+
+    assert_eq!(
+        fs::read_to_string(dependency.join("README.md")).assert_value(),
+        "pre-existing child edit\n"
+    );
+    assert_eq!(
+        fs::read_to_string(dependency.join("scratch.txt")).assert_value(),
+        "pre-existing child scratch\n"
+    );
+}

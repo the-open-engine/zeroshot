@@ -1,8 +1,8 @@
+use openengine_cluster_testkit::fixture::run_size;
 use super::*;
 use crate::native_v2_contract::{
     ClaudeProvider, CodexProvider, DeclaredConnections, DeclaredEnvironment,
-    EnvironmentVariableName, GIT_DELIVERY_PR_WORKER_REF, ResolvedSource, RunSize, RunTitle,
-    SessionScope,
+    EnvironmentVariableName, GIT_DELIVERY_PR_WORKER_REF, ResolvedSource, RunTitle, SessionScope,
 };
 use crate::native_v2_delivery::{DeliveryMode, GITHUB_TOKEN_ENV};
 use crate::native_v2_delivery::contract::{delivery_result_schema, delivery_signal_labels};
@@ -139,7 +139,7 @@ fn submission(graph: GraphSpec, nodes: BTreeMap<NodeName, NodeRuntimeBinding>) -
                 (ClaudeProvider::Anthropic).name(),
             )
             .assert_value(),
-            RunSize::Medium,
+            run_size("medium"),
             nodes,
         ),
         source: Some(resolved_source()),
@@ -371,7 +371,7 @@ async fn admits_bedrock_for_both_harnesses_and_preserves_provider_owned_models()
         runtime: RuntimePlan::new(
             openengine_cluster_protocol::RuntimeLane::new("codex", (CodexProvider::Bedrock).name())
                 .assert_value(),
-            RunSize::Small,
+            run_size("small"),
             BTreeMap::from([(
                 named("work"),
                 binding("provider/future-model", Some(ReasoningEffort::Max)),

@@ -14,6 +14,14 @@ mod guidance;
 const MAX_RESPONSE_ERROR_BYTES: usize = 8 * 1024;
 const MAX_OUTPUT_CORRECTIONS: usize = 2;
 const OPENAI_OPTIONAL_NULL_OMISSION: &str = "__zeroshot_omitted_optional_null__";
+const EXPECTED_SHAPE_HEADER: &str = "Expected shape (angle-bracket placeholders are not JSON; \
+     replace each with a real value; \"name\"? marks an optional field; the schema or contract above \
+     stays authoritative):";
+const STRICT_EXPECTED_SHAPE_HEADER: &str = "Expected shape (angle-bracket placeholders are not JSON; \
+     replace each with a real value; every field must be present, and \"X or Y\" means write Y \
+     when the optional field has no value; the schema above stays authoritative):";
+const START_REPLY_SENTENCE: &str = "Start the reply with the opening brace and end it with the final \
+     closing brace of that one object.";
 
 /// Ephemeral response contract derived from the admitted graph leaf.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -315,23 +323,22 @@ fn resolve_agent_response_rendering(
     dialect: ProviderSchemaDialect,
     correction: CorrectionRendering,
 ) -> Result<AgentResponse, NodeRunnerError> {
-    let semantic_response = parse_provider_envelope(response);
-    let parsed = match semantic_response {
-        Ok(mut response) => {
+    let (parsed, fault) = match parse_provider_envelope(response) {
+        Ok(mut semantic_response) => {
             if dialect == ProviderSchemaDialect::OpenAiStrict {
-                contract.normalize_openai_response(&mut response);
+                contract.normalize_openai_response(&mut semantic_response);
             }
-            contract.parse_agent_value(response)
+            (contract.parse_agent_value(semantic_response), None)
         }
-        Err(error) => Err(error),
+        Err(error) => (Err(error), envelope_fault(response)),
     };
     Ok(match parsed {
         Ok(outcome) => AgentResponse::Complete(outcome),
         Err(error) => {
             let prompt = match correction {
-                CorrectionRendering::Contract => render_agent_correction(contract, &error)?,
+                CorrectionRendering::Contract => render_agent_correction(contract, &error, fault)?,
                 CorrectionRendering::Schema(dialect) => {
-                    render_agent_correction_with_schema(contract, &error, dialect)?
+                    render_agent_correction_with_schema(contract, &error, fault, dialect)?
                 }
             };
             AgentResponse::Correction {
@@ -349,6 +356,165 @@ fn parse_provider_envelope(response: &str) -> Result<Value, NodeResponseError> {
         ))
     })?;
     Ok(envelope.response)
+}
+
+/// Envelope-level syntactic fault, detected only after the envelope failed to parse.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum EnvelopeFault {
+    Empty,
+    LeadingText,
+    Unterminated,
+    TrailingContent,
+}
+
+impl EnvelopeFault {
+    fn problem(self) -> &'static str {
+        match self {
+            Self::Empty => "The reply was empty. Return the JSON object shown below.",
+            Self::LeadingText => {
+                "The reply began with text before the JSON object. Start the reply with the opening \
+                 brace of the object; put no explanation, heading, or code fence before it."
+            }
+            Self::Unterminated => {
+                "The reply ended before the JSON object was complete. Close every object and array \
+                 you open; the expected shape below shows every closing brace the reply must end \
+                 with."
+            }
+            Self::TrailingContent => {
+                "The reply continued after one complete JSON object, for example with a second copy \
+                 of it. Return the object exactly once and nothing after it."
+            }
+        }
+    }
+}
+
+fn envelope_fault(response: &str) -> Option<EnvelopeFault> {
+    let trimmed = response.trim();
+    if trimmed.is_empty() {
+        return Some(EnvelopeFault::Empty);
+    }
+    if !trimmed.starts_with('{') {
+        return Some(EnvelopeFault::LeadingText);
+    }
+    let mut stream = serde_json::Deserializer::from_str(trimmed).into_iter::<Value>();
+    match stream.next() {
+        Some(Err(error)) if error.classify() == serde_json::error::Category::Eof => {
+            Some(EnvelopeFault::Unterminated)
+        }
+        Some(Ok(_)) if stream.byte_offset() < trimmed.len() => Some(EnvelopeFault::TrailingContent),
+        _ => None,
+    }
+}
+
+/// One-line skeleton of the expected provider response. Angle-bracket placeholders are not JSON,
+/// so copying the skeleton verbatim can never pass validation. The strict dialect writes every
+/// optional field with its omission value instead of a `?` marker, matching the strict schema.
+fn response_skeleton(
+    contract: &NodeResponseContract,
+    dialect: ProviderSchemaDialect,
+) -> Result<String, NodeRunnerError> {
+    let mut out = String::from("{\"response\":");
+    match contract {
+        NodeResponseContract::Worker { output } => payload_skeleton(output, dialect, &mut out)?,
+        NodeResponseContract::Verifier {
+            output,
+            signals,
+            diagnostic,
+        } => {
+            out.push_str("{\"output\":");
+            payload_skeleton(output, dialect, &mut out)?;
+            out.push_str(",\"signals\":{");
+            for (index, (name, labels)) in signals.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                out.push_str(&json_string(name.as_str())?);
+                out.push_str(":<one of ");
+                for (label_index, label) in labels.values().iter().enumerate() {
+                    if label_index > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(&json_string(label.as_str())?);
+                }
+                out.push('>');
+            }
+            out.push_str("},\"diagnostic\":");
+            payload_skeleton(diagnostic, dialect, &mut out)?;
+            out.push('}');
+        }
+    }
+    out.push('}');
+    Ok(out)
+}
+
+/// The correction-turn header matching the skeleton's dialect: the standard dialect marks
+/// optional fields with `?`, while the strict dialect requires every field and names its
+/// omission value.
+fn expected_shape_header(dialect: ProviderSchemaDialect) -> &'static str {
+    match dialect {
+        ProviderSchemaDialect::Standard => EXPECTED_SHAPE_HEADER,
+        ProviderSchemaDialect::OpenAiStrict => STRICT_EXPECTED_SHAPE_HEADER,
+    }
+}
+
+fn payload_skeleton(
+    payload: &PayloadType,
+    dialect: ProviderSchemaDialect,
+    out: &mut String,
+) -> Result<(), NodeRunnerError> {
+    match payload {
+        PayloadType::Null => out.push_str("null"),
+        PayloadType::Boolean => out.push_str("<boolean>"),
+        PayloadType::Integer => out.push_str("<integer>"),
+        PayloadType::Number => out.push_str("<number>"),
+        PayloadType::String => out.push_str("<string>"),
+        PayloadType::Record { fields } => {
+            out.push('{');
+            for (index, (name, field)) in fields.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                out.push_str(&json_string(name.as_str())?);
+                if !field.required && dialect == ProviderSchemaDialect::OpenAiStrict {
+                    out.push(':');
+                    if matches!(field.value_type, PayloadType::Null) {
+                        out.push_str("null or ");
+                        out.push_str(&json_string(OPENAI_OPTIONAL_NULL_OMISSION)?);
+                    } else {
+                        payload_skeleton(&field.value_type, dialect, out)?;
+                        out.push_str(" or null");
+                    }
+                } else {
+                    if !field.required {
+                        out.push('?');
+                    }
+                    out.push(':');
+                    payload_skeleton(&field.value_type, dialect, out)?;
+                }
+            }
+            out.push('}');
+        }
+        PayloadType::Array { items } => {
+            out.push('[');
+            payload_skeleton(items, dialect, out)?;
+            out.push_str(",...]");
+        }
+        PayloadType::Enum { values } => {
+            out.push_str("<one of ");
+            for (index, label) in values.values().iter().enumerate() {
+                if index > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(&json_string(label.as_str())?);
+            }
+            out.push('>');
+        }
+    }
+    Ok(())
+}
+
+fn json_string(value: &str) -> Result<String, NodeRunnerError> {
+    serde_json::to_string(value).map_err(|_| NodeRunnerError::Driver)
 }
 
 #[derive(Deserialize)]
@@ -578,14 +744,20 @@ pub(crate) fn render_agent_prompt_with_schema(
 pub(crate) fn render_agent_correction(
     response: &NodeResponseContract,
     error: &NodeResponseError,
+    fault: Option<EnvelopeFault>,
 ) -> Result<String, NodeRunnerError> {
+    let problem = correction_problem(fault);
+    let skeleton = response_skeleton(response, ProviderSchemaDialect::Standard)?;
     let response = serde_json::to_string(response).map_err(|_| NodeRunnerError::Driver)?;
     Ok(format!(
         "Your previous final response was rejected mechanically and was not passed to the graph.\n\
          Validation error:\n{error}\n\
+         {problem}\
          Response contract:\n{response}\n\
+         {EXPECTED_SHAPE_HEADER}\n{skeleton}\n\
          Return a corrected provider response only: exactly an object with one field named \
-         response. It must be valid JSON with no Markdown or commentary."
+         response. It must be valid JSON with no Markdown or commentary.\n\
+         {START_REPLY_SENTENCE}"
     ))
 }
 
@@ -594,18 +766,31 @@ pub(crate) fn render_agent_correction(
 pub(crate) fn render_agent_correction_with_schema(
     response: &NodeResponseContract,
     error: &NodeResponseError,
+    fault: Option<EnvelopeFault>,
     dialect: ProviderSchemaDialect,
 ) -> Result<String, NodeRunnerError> {
     let response_schema = serde_json::to_string(&response.provider_schema(dialect))
         .map_err(|_| NodeRunnerError::Driver)?;
+    let problem = correction_problem(fault);
+    let header = expected_shape_header(dialect);
+    let skeleton = response_skeleton(response, dialect)?;
     Ok(format!(
         "Your previous final response was rejected mechanically and was not passed to the graph.\n\
          Validation error:\n{error}\n\
+         {problem}\
          Response schema:\n{response_schema}\n\
+         {header}\n{skeleton}\n\
          Return a corrected provider response only: exactly an object with one field named \
          response whose value matches the schema above. It must be valid JSON with no Markdown \
-         or commentary."
+         or commentary.\n\
+         {START_REPLY_SENTENCE}"
     ))
+}
+
+fn correction_problem(fault: Option<EnvelopeFault>) -> String {
+    fault.map_or_else(String::new, |fault| {
+        format!("Problem:\n{}\n", fault.problem())
+    })
 }
 
 #[cfg(test)]

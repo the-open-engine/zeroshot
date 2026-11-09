@@ -2,11 +2,12 @@
 //! No credentials, model names or native harness choices are embedded in this test.
 #![cfg(unix)]
 
+use openengine_cluster_testkit::fixture::run_size;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use openengine_cluster_protocol::{IdempotencyKey, NodeName, RunId, RunSize, RunTitle, WorkerOutcome};
+use openengine_cluster_protocol::{IdempotencyKey, NodeName, RunId, RunTitle, WorkerOutcome};
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{Value, json};
 
@@ -222,7 +223,7 @@ async fn registered_harness_live_memory_sessions_and_verifier_contract() {
                 success_node(),
             ]),
             initial_input: Value::Null,
-            runtime: RuntimePlan::new(settings.lane.clone(), RunSize::Medium, bindings.clone()),
+            runtime: RuntimePlan::new(settings.lane.clone(), run_size("medium"), bindings.clone()),
             environment: None,
             source: None,
             submission_key: IdempotencyKey::new(&run).assert_value(),

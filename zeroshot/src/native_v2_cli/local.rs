@@ -25,7 +25,7 @@ use tokio::process::Command;
 use tokio::time::{Instant, sleep};
 
 use super::oecp::{ChannelSubscription, spawn_attach, spawn_logs, spawn_watch};
-use super::support::{CommitPaths, cleanup_temporary, write_and_commit};
+use super::support::{CommitPaths, cleanup_temporary, nonempty_environment, write_and_commit};
 use super::{
     CliRunForceResult, CliRunListResult, CliRunStatusResult, CliRunWatchEventNotification,
     CliProfileListResult, LocalRunProfileStore, NativeV2CliBackend, NativeV2CliError,
@@ -37,9 +37,10 @@ use crate::native_v2_platform::submission_digest;
 use crate::native_v2_local::{PreparedLocalRun, prepare_local_run};
 use crate::native_v2_supervisor::RunEnvironment;
 use crate::native_v2_portable_controller::{
-    ControllerLease, ControllerLeaseError, PortableControllerBootstrap, PortableControllerError,
-    PortableControllerPaths, PortableControllerServer, PortableRunController, read_ready,
-    take_startup_failure, write_bootstrap_file,
+    ControllerLease, ControllerLeaseError, DEFAULT_PREPARATION_TIMEOUT,
+    PortableControllerBootstrap, PortableControllerError, PortableControllerPaths,
+    PortableControllerServer, PortableRunController, read_ready, take_startup_failure,
+    write_bootstrap_file,
 };
 use crate::native_v2_portable_controller::process::{PortableControllerTransport, connect_transport};
 use crate::v2_run_ledger::sqlite::SqliteRunLedger;
@@ -65,7 +66,14 @@ pub const LOCAL_CONTROLLER_MODE: &str = "__zeroshot-run-controller";
 
 const BOOTSTRAP_FILE: &str = "controller.bootstrap.json";
 const SUBMISSION_LOCK_FILE: &str = "submission.lock";
+/// Bounds controller handoffs: reconnecting to a live controller and reconciling a successor
+/// whose launcher may still be starting it. Preparation before readiness has its own deadline.
 const DEFAULT_READY_TIMEOUT: Duration = Duration::from_secs(10);
+const PREPARATION_TIMEOUT_ENV: &str = "ZEROSHOT_PREPARATION_TIMEOUT";
+const MAX_PREPARATION_TIMEOUT_SECONDS: u64 = 86_400;
+/// Lets a controller that reached its own preparation deadline stop its helpers, record why, and
+/// exit before the waiting CLI stops it.
+const CONTROLLER_STOP_GRACE: Duration = Duration::from_secs(30);
 const STALE_BOOTSTRAP_AGE: Duration = Duration::from_secs(60);
 const CONTROLLER_HANDOFF_RETRY_DELAY: Duration = Duration::from_millis(25);
 const RECOVERY_FILE: &str = "workspace-recovery.json";
@@ -83,6 +91,41 @@ struct LocalRecoveryDocument {
     delivery_run_id: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     successor_run_id: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending_restore: Option<PendingRestore>,
+}
+
+/// A checkpoint restore recorded before its successor launched. It stays until a successor
+/// becomes ready, because a controller stopped during replacement can leave a partial checkout
+/// that only a complete restore repairs. `attempt` owns the private stage beside the workspace.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct PendingRestore {
+    selection: crate::native_v2_supervisor::checkpoints::CheckpointRestoreSelection,
+    snapshot: crate::native_v2_supervisor::checkpoints::filesystem::SnapshotId,
+    attempt: RunId,
+}
+
+/// A failed controller start. `controller_stopped` is false only when a launched controller
+/// could not be confirmed to have exited, so its claim must be reconciled like an unknown one.
+struct StartFailure {
+    error: NativeV2CliError,
+    controller_stopped: bool,
+}
+
+impl From<NativeV2CliError> for StartFailure {
+    fn from(error: NativeV2CliError) -> Self {
+        Self {
+            error,
+            controller_stopped: true,
+        }
+    }
+}
+
+enum ControllerWait {
+    Ready,
+    Exited(Option<String>),
+    TimedOut,
 }
 
 struct LocalRecoveryClaim(File);
@@ -100,6 +143,7 @@ pub struct LocalCliBackend {
     current_directory: PathBuf,
     git_program: PathBuf,
     ready_timeout: Duration,
+    preparation_timeout: Duration,
 }
 
 impl LocalCliBackend {
@@ -110,6 +154,9 @@ impl LocalCliBackend {
             current_directory: std::env::current_dir().map_err(local_io)?,
             git_program: PathBuf::from("git"),
             ready_timeout: DEFAULT_READY_TIMEOUT,
+            preparation_timeout: preparation_timeout(nonempty_environment(
+                PREPARATION_TIMEOUT_ENV,
+            ))?,
         };
         backend.remove_stale_bootstraps(STALE_BOOTSTRAP_AGE)?;
         Ok(backend)
@@ -128,12 +175,20 @@ impl LocalCliBackend {
             current_directory,
             git_program,
             ready_timeout: DEFAULT_READY_TIMEOUT,
+            preparation_timeout: DEFAULT_PREPARATION_TIMEOUT,
         }
     }
 
     #[must_use]
     pub fn with_ready_timeout(mut self, timeout: Duration) -> Self {
         self.ready_timeout = timeout;
+        self
+    }
+
+    /// Bounds controller preparation before readiness, including any checkpoint restore.
+    #[must_use]
+    pub fn with_preparation_timeout(mut self, timeout: Duration) -> Self {
+        self.preparation_timeout = timeout;
         self
     }
 
@@ -241,6 +296,9 @@ impl LocalCliBackend {
         if let Some(run_id) = existing().await? {
             return Ok(run_id);
         }
+        crate::native_v2_local::validate_clean_checkout(&prepared, &self.git_program)
+            .await
+            .map_err(|error| NativeV2CliError::Usage(error.to_string()))?;
         self.start_prepared_controller(prepared).await
     }
 
@@ -344,6 +402,7 @@ impl LocalCliBackend {
     ) -> Result<RunId, NativeV2CliError> {
         self.start_prepared_controller_with_lineage(prepared, None, None)
             .await
+            .map_err(|failure| failure.error)
     }
 
     async fn start_prepared_controller_with_lineage(
@@ -351,10 +410,10 @@ impl LocalCliBackend {
         prepared: PreparedLocalRun,
         resumed_from: Option<RunId>,
         checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
-    ) -> Result<RunId, NativeV2CliError> {
+    ) -> Result<RunId, StartFailure> {
         // Checkpoint restoration replaces this workspace under the controller's lease. A relative
-        // executable may exist only in that snapshot, so defer its lookup to the controller, which
-        // composes delivery after the restore and starts providers later.
+        // executable may exist only in that snapshot, so the controller checks lanes and delivery
+        // when it composes the restored run, before admission, and its startup report names them.
         if checkpoint.is_none() {
             crate::native_v2_local::check_lane_executables(
                 &prepared.submission.runtime,
@@ -372,12 +431,15 @@ impl LocalCliBackend {
         }
         let adopt_existing_delivery = resumed_from.is_some();
         let paths = self.paths(&prepared.run_id)?;
-        let ready_timeout = self.ready_timeout.saturating_add(
-            crate::native_v2_admission::comment_node(&prepared.submission.graph.root)
-                .map_or(Duration::ZERO, |_| {
-                    crate::native_v2_review::LOCAL_CHECKOUT_TIMEOUT
-                }),
-        );
+        let ready_timeout = self
+            .preparation_timeout
+            .saturating_add(CONTROLLER_STOP_GRACE)
+            .saturating_add(
+                crate::native_v2_admission::comment_node(&prepared.submission.graph.root)
+                    .map_or(Duration::ZERO, |_| {
+                        crate::native_v2_review::LOCAL_CHECKOUT_TIMEOUT
+                    }),
+            );
         let storage = self.create_run_storage(&prepared.run_id)?;
         self.write_recovery_document(
             &prepared.run_id,
@@ -387,6 +449,7 @@ impl LocalCliBackend {
                 delivery_run_id: Some(prepared.delivery_run_id.clone()),
                 resumed_from,
                 successor_run_id: None,
+                pending_restore: None,
             },
         )?;
         let workspace_lease = self.workspace_lease(&prepared.workspace)?;
@@ -399,6 +462,7 @@ impl LocalCliBackend {
                     .join("lessons.sqlite3"),
             ),
             checkpoint,
+            preparation_timeout: self.preparation_timeout,
             run_id: prepared.run_id.clone(),
             delivery_run_id: prepared.delivery_run_id,
             adopt_existing_delivery,
@@ -420,19 +484,73 @@ impl LocalCliBackend {
             Ok(child) => child,
             Err(error) => {
                 remove_private_bootstrap(&bootstrap_path);
-                return Err(error);
+                return Err(error.into());
             }
         };
-        if let Err(error) =
-            wait_for_controller(&mut child, &paths, &prepared.run_id, ready_timeout).await
-        {
-            let _ = child.kill().await;
-            remove_private_bootstrap(&bootstrap_path);
-            // A controller past the deadline may still have recorded why; nobody will read it.
-            let _ = take_startup_failure(&paths);
-            return Err(error);
+        let started = Instant::now();
+        let wait = wait_for_controller(&mut child, &paths, &prepared.run_id, ready_timeout).await;
+        if matches!(wait, Ok(ControllerWait::Ready)) {
+            return Ok(prepared.run_id);
         }
-        Ok(prepared.run_id)
+        let controller_stopped = matches!(wait, Ok(ControllerWait::Exited(_)))
+            || crate::execution::platform::stop_controller(&mut child)
+                .await
+                .is_ok();
+        remove_private_bootstrap(&bootstrap_path);
+        // A stopped controller may still have recorded why it had not become ready.
+        let recorded = take_startup_failure(&paths);
+        let error = match wait {
+            Ok(ControllerWait::Exited(reason)) => {
+                self.controller_exit_error(reason.or(recorded), started.elapsed())
+            }
+            Ok(ControllerWait::TimedOut) => {
+                self.preparation_timeout_error(recorded, started.elapsed(), controller_stopped)
+            }
+            Ok(ControllerWait::Ready) => unreachable!("a ready controller returned above"),
+            Err(error) => error,
+        };
+        Err(StartFailure {
+            error,
+            controller_stopped,
+        })
+    }
+
+    fn controller_exit_error(&self, reason: Option<String>, elapsed: Duration) -> NativeV2CliError {
+        let mut message = match reason {
+            Some(reason) => format!("controller exited before becoming ready: {reason}"),
+            None => "controller exited before becoming ready".to_owned(),
+        };
+        // The controller measures the same deadline from its own, later start.
+        if elapsed >= self.preparation_timeout {
+            message.push_str(&format!(
+                "; {PREPARATION_TIMEOUT_ENV} sets its {} s preparation deadline",
+                self.preparation_timeout.as_secs()
+            ));
+        }
+        local_message(message)
+    }
+
+    fn preparation_timeout_error(
+        &self,
+        reason: Option<String>,
+        elapsed: Duration,
+        stopped: bool,
+    ) -> NativeV2CliError {
+        let outcome = if stopped {
+            "was stopped"
+        } else {
+            "could not be confirmed stopped"
+        };
+        let mut message = format!(
+            "controller did not become ready within its {} s preparation deadline ({PREPARATION_TIMEOUT_ENV}) and {outcome} after {:.1} s",
+            self.preparation_timeout.as_secs(),
+            elapsed.as_secs_f64()
+        );
+        if let Some(reason) = reason {
+            message.push_str(": ");
+            message.push_str(&reason);
+        }
+        local_message(message)
     }
 
     async fn acquire_submission_lock(&self) -> Result<ControllerLease, NativeV2CliError> {
@@ -609,7 +727,7 @@ impl LocalCliBackend {
             .await
             .map_err(protocol_error)?;
         for status in &mut result.runs {
-            status.workspace_recovery = self.workspace_recovery(status)?;
+            status.workspace_recovery = self.workspace_recovery(status).await?;
         }
         Ok(result)
     }
@@ -621,13 +739,13 @@ impl LocalCliBackend {
         let retry = params.clone();
         match self.status_once(params).await {
             Ok(mut result) => {
-                result.workspace_recovery = self.workspace_recovery(&result)?;
+                result.workspace_recovery = self.workspace_recovery(&result).await?;
                 Ok(result)
             }
             Err(_) => {
                 sleep(CONTROLLER_HANDOFF_RETRY_DELAY).await;
                 let mut result = self.status_once(retry).await?;
-                result.workspace_recovery = self.workspace_recovery(&result)?;
+                result.workspace_recovery = self.workspace_recovery(&result).await?;
                 Ok(result)
             }
         }
@@ -677,14 +795,21 @@ impl LocalCliBackend {
         }
     }
 
-    async fn reconcile_local_resume_claim(&self, run_id: &RunId) -> Result<(), NativeV2CliError> {
+    /// Releases a successor claim whose controller never admitted the run. `handoff` bounds the
+    /// wait for a launcher that may still be starting that controller; it is zero once the
+    /// controller is known to have stopped. A pending restore stays for the next attempt.
+    async fn reconcile_local_resume_claim(
+        &self,
+        run_id: &RunId,
+        handoff: Duration,
+    ) -> Result<(), NativeV2CliError> {
         let Some((mut recovery, successor_run_id, successor_storage)) =
             self.claimed_local_successor(run_id)?
         else {
             return Ok(());
         };
         if self
-            .successor_claim_is_live_or_admitted(&successor_run_id, &successor_storage)
+            .successor_claim_is_live_or_admitted(&successor_run_id, &successor_storage, handoff)
             .await?
         {
             return Ok(());
@@ -698,10 +823,11 @@ impl LocalCliBackend {
         &self,
         successor_run_id: &RunId,
         successor_storage: &Path,
+        handoff: Duration,
     ) -> Result<bool, NativeV2CliError> {
         let paths = self.paths(successor_run_id)?;
         let ledger_path = successor_storage.join("runs.sqlite3");
-        let deadline = Instant::now() + self.ready_timeout;
+        let deadline = Instant::now() + handoff;
         loop {
             match ControllerLease::acquire(paths.lease()) {
                 Err(ControllerLeaseError::Held) => return Ok(true),
@@ -813,7 +939,7 @@ impl LocalCliBackend {
         Err(local_message("workspace recovery lineage is too deep"))
     }
 
-    fn workspace_recovery(
+    async fn workspace_recovery(
         &self,
         status: &RunStatusResult,
     ) -> Result<WorkspaceRecovery, NativeV2CliError> {
@@ -828,11 +954,18 @@ impl LocalCliBackend {
                 ..
             }
         );
+        let unclaimed = failed
+            && document.workspace.is_dir()
+            && self.recovery_workspace_is_unclaimed(&status.run_id)?;
+        // With the recovery claim released, a successor that neither runs nor was admitted is
+        // an interrupted launch, such as a crash during its restore. The next resume reconciles
+        // it before claiming the workspace, so it does not block recovery.
+        let successor_run_id = match document.successor_run_id {
+            Some(successor) if unclaimed && self.interrupted_launch(&successor).await => None,
+            successor => successor,
+        };
         Ok(WorkspaceRecovery {
-            recoverable: failed
-                && document.successor_run_id.is_none()
-                && document.workspace.is_dir()
-                && self.recovery_workspace_is_unclaimed(&status.run_id)?,
+            recoverable: unclaimed && successor_run_id.is_none(),
             connection_requirements: document
                 .submission
                 .connection_requirements()
@@ -840,8 +973,24 @@ impl LocalCliBackend {
                 .map(|(key, fields)| (key, fields.into_iter().collect()))
                 .collect(),
             resumed_from: document.resumed_from,
-            successor_run_id: document.successor_run_id,
+            successor_run_id,
         })
+    }
+
+    async fn interrupted_launch(&self, successor_run_id: &RunId) -> bool {
+        let Ok(storage) = self.run_storage(successor_run_id) else {
+            return false;
+        };
+        !storage.exists()
+            || matches!(
+                self.successor_claim_is_live_or_admitted(
+                    successor_run_id,
+                    &storage,
+                    Duration::ZERO
+                )
+                .await,
+                Ok(false)
+            )
     }
 
     async fn status_once(
@@ -940,7 +1089,7 @@ async fn wait_for_controller(
     paths: &PortableControllerPaths,
     run_id: &openengine_cluster_protocol::RunId,
     timeout: Duration,
-) -> Result<(), NativeV2CliError> {
+) -> Result<ControllerWait, NativeV2CliError> {
     let deadline = Instant::now() + timeout;
     loop {
         if let Ok(ready) = read_ready(paths) {
@@ -948,25 +1097,36 @@ async fn wait_for_controller(
                 // Windows readiness can be visible while no named-pipe instance is currently
                 // available. Keep the connection in the existing bounded readiness loop.
                 if connect_transport(paths).await.is_ok() {
-                    return Ok(());
+                    return Ok(ControllerWait::Ready);
                 }
             }
         }
         if child.try_wait().map_err(local_io)?.is_some() {
-            return Err(match take_startup_failure(paths) {
-                Some(reason) => {
-                    local_message(format!("controller exited before becoming ready: {reason}"))
-                }
-                None => local_message("controller exited before becoming ready"),
-            });
+            return Ok(ControllerWait::Exited(take_startup_failure(paths)));
         }
         if Instant::now() >= deadline {
-            return Err(local_message(
-                "controller did not become ready before the deadline",
-            ));
+            return Ok(ControllerWait::TimedOut);
         }
         sleep(Duration::from_millis(20)).await;
     }
+}
+
+/// Reads the finite preparation deadline override. Empty means unset, like other local settings.
+fn preparation_timeout(value: Option<std::ffi::OsString>) -> Result<Duration, NativeV2CliError> {
+    let Some(value) = value else {
+        return Ok(DEFAULT_PREPARATION_TIMEOUT);
+    };
+    value
+        .to_str()
+        .filter(|seconds| seconds.bytes().all(|byte| byte.is_ascii_digit()))
+        .and_then(|seconds| seconds.parse::<u64>().ok())
+        .filter(|seconds| (1..=MAX_PREPARATION_TIMEOUT_SECONDS).contains(seconds))
+        .map(Duration::from_secs)
+        .ok_or_else(|| {
+            NativeV2CliError::Usage(format!(
+                "{PREPARATION_TIMEOUT_ENV} must be a whole number of seconds from 1 to {MAX_PREPARATION_TIMEOUT_SECONDS}"
+            ))
+        })
 }
 
 async fn bind_observer(

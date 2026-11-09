@@ -166,6 +166,8 @@ jobs:
         run: |
           cp .docs-publisher/scripts/docs_hook.py scripts/docs_hook.py
           cp .docs-publisher/docs/project/versioning.md docs/project/versioning.md
+          mkdir -p docs/overrides
+          cp .docs-publisher/docs/overrides/sitemap.xml docs/overrides/sitemap.xml
 
       - name: Verify generated CLI reference
         run: cargo run --locked -p zeroshot --example generate_cli_docs -- --check
@@ -263,6 +265,8 @@ jobs:
             export ZEROSHOT_DOCS_COMMIT="$(git rev-parse HEAD)"
             cp "$GITHUB_WORKSPACE/.docs-publisher/scripts/docs_hook.py" scripts/docs_hook.py
             cp "$GITHUB_WORKSPACE/.docs-publisher/docs/project/versioning.md" docs/project/versioning.md
+            mkdir -p docs/overrides
+            cp "$GITHUB_WORKSPACE/.docs-publisher/docs/overrides/sitemap.xml" docs/overrides/sitemap.xml
             cargo run --locked -p zeroshot --example generate_cli_docs -- --check
             cargo run --locked -p openengine-cluster-testkit --bin generate-cluster-protocol -- --check
             mike deploy --config-file mkdocs.yml --alias-type redirect \

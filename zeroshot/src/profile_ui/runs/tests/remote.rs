@@ -30,6 +30,7 @@ async fn target_server(fixture: &Fixture) -> TargetServer {
         fixture.root.join("runs").join(fixture.id.as_str()),
         &origin,
         fixture.observations(),
+        crate::native_v2_hosting::host_run_sizes(),
     )
     .assert_value();
     let serving = service.clone();

@@ -13,6 +13,7 @@ use std::fmt;
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use openengine_cluster_protocol::{GitTransportCredentials, RunId, RunSubmission};
 use serde::{Deserialize, Serialize};
@@ -115,8 +116,13 @@ impl PortableControllerPaths {
     }
 }
 
+/// Default bound on controller preparation, including a checkpoint restore, before readiness.
+pub const DEFAULT_PREPARATION_TIMEOUT: Duration = Duration::from_secs(600);
+
 pub struct PortableControllerBootstrap {
     pub checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
+    /// Bounds preparation work measured from controller start; a checkpoint restore stops here.
+    pub preparation_timeout: Duration,
     pub run_id: RunId,
     pub delivery_run_id: RunId,
     pub adopt_existing_delivery: bool,
@@ -142,6 +148,7 @@ impl fmt::Debug for PortableControllerBootstrap {
             .debug_struct("PortableControllerBootstrap")
             .field("run_id", &self.run_id)
             .field("delivery_run_id", &self.delivery_run_id)
+            .field("preparation_timeout", &self.preparation_timeout)
             .field("submission", &self.submission)
             .field("environment", &self.environment)
             .field("native_environment_fields", &self.native_environment.len())
@@ -192,8 +199,13 @@ pub enum PortableControllerError {
     DurableIdentity,
     #[error("workspace checkpoint restore is unavailable because workspaceCheckpoints is false")]
     CheckpointsDisabled,
+    #[error("workspace checkpoint restore did not complete")]
+    Restore(#[source] io::Error),
     #[error("portable runtime could not be constructed")]
     RuntimeUnavailable,
+    /// The runtime factory's own reason, such as a lane executable missing after a restore.
+    #[error(transparent)]
+    RuntimeComposition(Box<dyn std::error::Error + Send + Sync>),
     #[error("portable controller could not install its console control guard")]
     ConsoleGuard(#[source] io::Error),
     #[error(transparent)]

@@ -378,7 +378,10 @@ describe('Native coverage contract', () => {
       publish.uses,
       'coverallsapp/github-action@8d6379e14d29928660c4ba802d8e85393440b329'
     );
-    assert.equal(publish.if, '${{ always() }}');
+    assert.equal(publish.if, "${{ !cancelled() && hashFiles('lcov.info') != '' }}");
+    assert.equal(publish['continue-on-error'], true);
+    assert.notEqual(measure['continue-on-error'], true);
+    assert.notEqual(enforce['continue-on-error'], true);
     assert.deepEqual(publish.with, {
       'github-token': '${{ secrets.GITHUB_TOKEN }}',
       file: 'lcov.info',

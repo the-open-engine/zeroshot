@@ -9,7 +9,7 @@ pub(crate) fn write_fixture_files(root: &TempRoot) -> (PathBuf, PathBuf, PathBuf
         serde_json::to_vec(&json!({
             "harness":"codex",
             "provider":"openai",
-            "size":"medium",
+            "size":"host",
             "nodes":{
                 "worker":{
                     "kind":"agent",
@@ -47,7 +47,7 @@ pub(crate) fn write_delivery_fixture_files(root: &TempRoot) -> (PathBuf, PathBuf
     let runtime_value = json!({
         "harness":"codex",
         "provider":"openai",
-        "size":"medium",
+        "size":"host",
         "nodes":{
             "deliver":{"kind":"git_delivery","connections":{"github":[GITHUB_TOKEN_ENV]}},
             "repair":{
@@ -388,6 +388,7 @@ pub(crate) fn live_hosting_config(root: &TempRoot, lane: LiveLane) -> Production
     };
     ProductionHostingConfig {
         agent_context: None,
+        run_sizes: Some(zeroshot_engine::native_v2_hosting::host_run_sizes()),
         memory_storage: None,
         memory_backend: None,
         storage_root: root.path("live-target"),

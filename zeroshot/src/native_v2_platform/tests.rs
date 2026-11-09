@@ -417,6 +417,9 @@ mod primary_restart;
 #[path = "tests/restart_logs.rs"]
 mod restart_logs;
 
+#[path = "tests/sizes.rs"]
+mod sizes;
+
 fn test_preparation() -> CapsulePreparation {
     struct Quiet;
     #[async_trait]

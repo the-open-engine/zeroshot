@@ -23,20 +23,29 @@ esac
 
 suffix="$$-$(date +%s)-$RANDOM"
 restic_container="zeroshot-stale-worktree-restic-$suffix"
+source_container="${restic_container}-source"
 test_container="zeroshot-stale-worktree-test-$suffix"
 scratch="$(mktemp -d)"
 cleanup() {
-  docker rm --force "$restic_container" "$test_container" >/dev/null 2>&1 || true
+  docker rm --force "$source_container" "$restic_container" "$test_container" >/dev/null 2>&1 || true
   rm -rf -- "$scratch"
 }
 trap cleanup EXIT
 
-tar -C "$checkout" -cf - scripts/distribution/build-restic.sh |
+tar -C "$checkout" -cf - scripts/distribution/build-restic.sh scripts/distribution/github-release-asset.js |
+  docker run --rm --interactive --name "$source_container" --env GH_TOKEN node:24-trixie-slim bash -c '
+    set -euo pipefail
+    mkdir /source
+    tar -xf - -C /source
+    bash /source/scripts/distribution/build-restic.sh /source --source-only >&2
+    tar -C /source -cf - scripts/distribution/build-restic.sh restic.tar.gz
+  ' |
   docker run --rm --interactive --name "$restic_container" "$GO_IMAGE" bash -c "
     set -euo pipefail
     mkdir /source
     tar -xf - -C /source
-    bash /source/scripts/distribution/build-restic.sh /restic $restic_target >&2
+    ZEROSHOT_RESTIC_SOURCE_ARCHIVE=/source/restic.tar.gz \
+      bash /source/scripts/distribution/build-restic.sh /restic $restic_target >&2
     tar -C /restic/$restic_target -cf - restic
   " >"$scratch/restic.tar"
 

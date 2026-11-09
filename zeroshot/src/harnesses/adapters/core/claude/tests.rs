@@ -1,5 +1,6 @@
 #![cfg(unix)]
 
+use openengine_cluster_testkit::fixture::run_size;
 #[path = "tests/backpressure.rs"]
 mod backpressure;
 #[path = "tests/command.rs"]
@@ -23,7 +24,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use openengine_cluster_protocol::{
-    EnumLabel, FieldName, GraphSpec, IdempotencyKey, NodeName, RunSize, RunTitle, WorkerOutcome,
+    EnumLabel, FieldName, GraphSpec, IdempotencyKey, NodeName, RunTitle, WorkerOutcome,
 };
 use openengine_cluster_testkit::assertions::AssertValue;
 use serde_json::{json, Value};
@@ -340,7 +341,7 @@ async fn admitted_claude(
 ) -> crate::native_v2_contract::AdmittedRun {
     let runtime = RuntimePlan::new(
         openengine_cluster_protocol::RuntimeLane::new("claude", (provider).name()).assert_value(),
-        RunSize::Medium,
+        run_size("medium"),
         BTreeMap::from([(NodeName::new("agent").assert_value(), binding)]),
     );
     admit(RunSubmission {

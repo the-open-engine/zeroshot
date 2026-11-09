@@ -255,6 +255,13 @@ impl TargetCommand {
                 validate_public_id(&args.name, "target name")?;
                 Ok(NativeV2CliCommand::TargetLogin { name: args.name })
             }
+            Self::Sizes(args) => {
+                validate_public_id(&args.name, "target name")?;
+                Ok(NativeV2CliCommand::TargetSizes {
+                    name: args.name,
+                    json: args.json,
+                })
+            }
             Self::Serve(args) => Ok(NativeV2CliCommand::TargetServe(TargetServe {
                 listen: args.listen,
                 public_origin: args.public_origin,

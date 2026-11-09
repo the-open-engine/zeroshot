@@ -1,3 +1,4 @@
+use openengine_cluster_testkit::fixture::run_size;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -5,7 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use openengine_cluster_protocol::{
     ConnectionKey, DeclaredConnections, DeclaredEnvironment, ModelId, NodeName,
-    RunConnectionRequirements, RunConnectionValues, RunSize, SessionScope, StaticConnectionValues,
+    RunConnectionRequirements, RunConnectionValues, SessionScope, StaticConnectionValues,
 };
 use openengine_cluster_testkit::assertions::AssertValue;
 
@@ -59,7 +60,7 @@ async fn source_checkout_resolves_again_instead_of_reusing_an_earlier_token() {
         .assert_value(),
     };
     let runtime = crate::native_v2_candidate::test_support::codex_runtime(
-        RunSize::Small,
+        run_size("small"),
         BTreeMap::from([(NodeName::new("deliver").assert_value(), node)]),
     );
     let environment = RunEnvironment::with_resolver(

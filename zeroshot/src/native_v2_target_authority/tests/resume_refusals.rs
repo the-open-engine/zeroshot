@@ -1,5 +1,6 @@
+use openengine_cluster_testkit::fixture::run_size;
 use openengine_cluster_protocol::{
-    ConnectionKey, EnvironmentVariableName, NodeName, NodeRuntimeBinding, RunSize, RunStatusParams,
+    ConnectionKey, EnvironmentVariableName, NodeName, NodeRuntimeBinding, RunStatusParams,
     RuntimeLane, Sha256Digest, StaticConnectionValues, WorkerErrorCode, WorkspaceRecovery,
     INTERNAL_ERROR_CODE,
 };
@@ -51,6 +52,10 @@ struct FailedRunFactory {
 
 #[async_trait]
 impl TargetControllerFactory for FailedRunFactory {
+    fn run_sizes(&self) -> Option<openengine_cluster_protocol::TargetRunSizesDiscovery> {
+        Some(fixture_run_sizes())
+    }
+
     fn supports_workspace_recovery(&self) -> bool {
         true
     }
@@ -90,7 +95,7 @@ async fn failed_run_declaring_a_connection() -> Arc<FakeRunLedger> {
     submission.initial_input = json!({"task": "say hi"});
     submission.runtime = crate::native_v2_contract::RuntimePlan::new(
         RuntimeLane::new("claude", "anthropic").assert_value(),
-        RunSize::Small,
+        run_size("small"),
         BTreeMap::from([(
             NodeName::new("worker").assert_value(),
             serde_json::from_value::<NodeRuntimeBinding>(json!({

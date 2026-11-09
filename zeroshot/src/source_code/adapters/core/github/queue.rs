@@ -3,24 +3,42 @@ use super::*;
 use serde_json::Value;
 
 type QueueIdentity = (String, String, String, String, String);
-type Submission = Result<(), SourceDeliveryError>;
+type Submission = Result<QueueAdmission, SourceDeliveryError>;
+
+#[derive(Clone, Debug)]
+struct QueueAdmission {
+    enqueued_at: time::OffsetDateTime,
+    pull_request_id: String,
+}
+
+mod outcome;
+pub(super) use outcome::observe_removal;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct QueueEffects(Arc<tokio::sync::Mutex<BTreeMap<QueueIdentity, QueueEffect>>>);
 
 #[derive(Debug)]
 struct QueueEffect {
-    task: Option<tokio::task::JoinHandle<Submission>>,
+    task: Option<tokio::task::JoinHandle<QueueSubmission>>,
     settled: Option<Submission>,
+    uncertain: bool,
+}
+
+#[derive(Debug)]
+struct QueueSubmission {
+    result: Submission,
     uncertain: bool,
 }
 
 impl QueueEffect {
     async fn settle(&mut self) -> Submission {
         if let Some(task) = self.task.as_mut() {
-            let result = task.await.unwrap_or_else(|_| Err(submission_panicked()));
-            self.uncertain |= matches!(&result, Err(error) if uncertain_submission(error));
-            self.settled = Some(result);
+            let submitted = task.await.unwrap_or_else(|_| QueueSubmission {
+                result: Err(submission_panicked()),
+                uncertain: true,
+            });
+            self.uncertain |= submitted.uncertain;
+            self.settled = Some(submitted.result);
             self.task = None;
         }
         self.settled
@@ -33,7 +51,7 @@ const ENQUEUE: &str = r#"
 mutation($pullRequestId: ID!, $expectedHeadOid: GitObjectID!) {
   enqueuePullRequest(input: {pullRequestId: $pullRequestId, expectedHeadOid: $expectedHeadOid}) {
     mergeQueueEntry {
-      id
+      id enqueuedAt
       pullRequest { id number repository { nameWithOwner } baseRefName headRefName headRefOid }
     }
   }
@@ -55,17 +73,18 @@ pub(super) async fn enqueue(
     review: &SourceReviewReceipt,
     node_id: &str,
     credential: SourceDeliveryCredential<'_>,
-) -> Submission {
+) -> Result<(), SourceDeliveryError> {
     let mut effects = authority.queue_effects.0.lock().await;
     let key = identity(review);
     if let Some(effect) = effects.get_mut(&key) {
         if effect.task.is_some()
             || effect.settled.as_ref().is_some_and(|result| {
-                matches!(result, Err(error) if error.cleanup_unconfirmed()
+                result.is_ok()
+                    || matches!(result, Err(error) if error.cleanup_unconfirmed()
                     || uncertain_submission(error) && !error.retryable_operation())
             })
         {
-            return effect.settle().await;
+            return effect.settle().await.map(|_| ());
         }
     }
     {
@@ -77,10 +96,25 @@ pub(super) async fn enqueue(
         let review = review.clone();
         let node_id = node_id.to_owned();
         let task = tokio::spawn(async move {
-            let value =
-                api::command_json(command, deadline, SourceDeliveryCredential::token(&token))
-                    .await?;
-            confirm_receipt(value, &review, &node_id)
+            let response = api::command_json(
+                command,
+                deadline,
+                SourceDeliveryCredential::token(&token),
+                Some("enqueuePullRequest"),
+            )
+            .await;
+            let rejected = response
+                .as_ref()
+                .err()
+                .is_some_and(|failure| failure.rejected);
+            let result = response
+                .map_err(|failure| failure.error)
+                .and_then(|value| confirm_receipt(value, &review, &node_id));
+            QueueSubmission {
+                uncertain: !rejected
+                    && matches!(&result, Err(error) if uncertain_submission(error)),
+                result,
+            }
         });
         effects.insert(
             key.clone(),
@@ -97,6 +131,7 @@ pub(super) async fn enqueue(
         .ok_or_else(invalid_receipt)?
         .settle()
         .await
+        .map(|_| ())
 }
 
 fn confirm_receipt(value: Value, review: &SourceReviewReceipt, node_id: &str) -> Submission {
@@ -122,7 +157,20 @@ fn confirm_receipt(value: Value, review: &SourceReviewReceipt, node_id: &str) ->
         && pull.get("baseRefName").and_then(Value::as_str) == Some(review.target_branch.as_str())
         && pull.get("headRefName").and_then(Value::as_str) == Some(review.head_branch.as_str())
         && pull.get("headRefOid").and_then(Value::as_str) == Some(review.head_revision.as_str());
-    valid.then_some(()).ok_or_else(invalid_receipt)
+    valid
+        .then_some(QueueAdmission {
+            enqueued_at: queue_timestamp(&entry["enqueuedAt"]).ok_or_else(invalid_receipt)?,
+            pull_request_id: node_id.to_owned(),
+        })
+        .ok_or_else(invalid_receipt)
+}
+
+fn queue_timestamp(value: &Value) -> Option<time::OffsetDateTime> {
+    time::OffsetDateTime::parse(
+        value.as_str()?,
+        &time::format_description::well_known::Rfc3339,
+    )
+    .ok()
 }
 
 pub(super) async fn withdraw(
@@ -214,8 +262,10 @@ async fn withdraw_step(
         mutation(authority, query, node_id, credential)?,
         authority.config.api_deadline,
         credential,
+        None,
     )
-    .await;
+    .await
+    .map_err(|failure| failure.error);
     if let Err(error) = &submitted {
         if error.cleanup_unconfirmed() {
             return Err(error.clone());

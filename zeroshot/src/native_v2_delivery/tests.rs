@@ -1,5 +1,6 @@
 #![cfg(unix)]
 
+use openengine_cluster_testkit::fixture::run_size;
 use std::{any::Any, collections::BTreeMap, fs, path::PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -24,8 +25,8 @@ use crate::native_v2_candidate::test_support::{
 };
 use crate::native_v2_contract::{
     self, DeclaredConnections, DeclaredEnvironment, ExecutionRef, NodeInvocation,
-    NodeRuntimeBinding, PullRequestFeedback, RunSize, RunSubmission, RunTitle, RuntimePlan,
-    SourceBranchId, SourceRepositoryId, SourceRevisionId, ResolvedSource,
+    NodeRuntimeBinding, PullRequestFeedback, RunSubmission, RunTitle, RuntimePlan, SourceBranchId,
+    SourceRepositoryId, SourceRevisionId, ResolvedSource,
 };
 use crate::native_v2_runner::{
     DriverControl, DriverInvocation, NativeNodeRunner, NodeDriver, NodeRunRequest, NodeRunner,
@@ -158,6 +159,72 @@ async fn push_worker_publishes_only_the_exact_managed_branch() {
     assert!(authority.pushed.load(Ordering::SeqCst));
     assert!(authority.review_requests().is_empty());
     assert_eq!(authority.merge_requests.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn embedded_repository_warning_reaches_run_output_without_blocking_push() {
+    let repo = TempRepo::delivery();
+    git(
+        &repo.workspace,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            repo.remote.to_str().assert_value(),
+            "libs/registered",
+        ],
+    );
+    fs::write(repo.workspace.join(".gitignore"), "ignored-nested/\n").assert_value();
+    fs::create_dir_all(repo.workspace.join("ignored-nested")).assert_value();
+    git(&repo.workspace.join("ignored-nested"), &["init"]);
+    let nested = repo.workspace.join("vendor/dep");
+    fs::create_dir_all(&nested).assert_value();
+    git(&nested, &["init"]);
+    git(
+        &nested,
+        &[
+            "-c",
+            "user.name=Nested",
+            "-c",
+            "user.email=nested@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "nested",
+        ],
+    );
+    let authority = Arc::new(FakeGitHub::new(repo.remote.clone(), Script::NoCi));
+    let execution = run_delivery_execution(
+        DeliveryRunRequest {
+            repo: &repo,
+            attempts: 1,
+            mode: DeliveryMode::Push,
+            run_id: "embedded-repository-warning",
+            refresh: None,
+        },
+        authority,
+    )
+    .await;
+    assert_delivery_signal(&execution.outcome, DELIVERY_PUSHED_LABEL);
+    assert!(
+        execution
+            .output
+            .iter()
+            .any(|event| event.text.contains("vendor/dep")),
+        "Git's warning was discarded: {:?}",
+        execution.output
+    );
+    for path in ["libs/registered", "ignored-nested"] {
+        assert!(
+            !execution
+                .output
+                .iter()
+                .any(|event| event.text.contains(path)),
+            "spurious warning for {path}"
+        );
+    }
+    assert!(git_output(&repo.workspace, &["ls-tree", "HEAD", "vendor/dep"]).starts_with("160000"));
 }
 
 #[tokio::test]
@@ -1272,7 +1339,7 @@ async fn admitted_with_feedback(
 
 fn delivery_runtime(binding: NodeRuntimeBinding) -> RuntimePlan {
     crate::native_v2_candidate::test_support::codex_runtime(
-        RunSize::Medium,
+        run_size("medium"),
         BTreeMap::from([(NodeName::new("deliver").assert_value(), binding)]),
     )
 }

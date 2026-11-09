@@ -95,21 +95,24 @@ impl UiService {
         storage: PathBuf,
         public_origin: &str,
         observations: crate::native_v2_observability::NativeV2Observability,
+        run_sizes: openengine_cluster_protocol::TargetRunSizesDiscovery,
     ) -> Result<Self, NativeV2CliError> {
         if !storage.is_absolute() {
             return Err(NativeV2CliError::Local(
                 "target UI storage must be absolute".into(),
             ));
         }
-        Ok(Self::new(
-            UiState::new(
-                LocalRunProfileStore::new(storage.clone()),
-                NativeRunHistory::target(storage, observations),
-                public_origin,
-                "target",
-            )?,
-            true,
-        ))
+        run_sizes
+            .validate()
+            .map_err(|error| NativeV2CliError::Local(error.to_string()))?;
+        let mut state = UiState::new(
+            LocalRunProfileStore::new(storage.clone()),
+            NativeRunHistory::target(storage, observations),
+            public_origin,
+            "target",
+        )?;
+        state.run_sizes = run_sizes;
+        Ok(Self::new(state, true))
     }
 
     pub(crate) fn run_history_discovery(&self) -> Option<TargetRunHistoryDiscovery> {

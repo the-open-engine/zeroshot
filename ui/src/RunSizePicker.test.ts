@@ -4,8 +4,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { RunSizePicker } from './RunSizePicker';
 import type { MachineOption } from './machines';
+import type { RunSizeCatalog } from './run-sizes';
 
-const schema = { $defs: { RunSize: { enum: ['small', 'medium', 'large', 'xl', 'gpu_t4'] } } };
 const large: MachineOption = {
   size: 'large',
   label: 'Large',
@@ -15,60 +15,81 @@ const large: MachineOption = {
   laneUnits: 2,
 };
 const gpu: MachineOption = {
-  size: 'gpu_t4',
-  label: 'T4 GPU',
+  size: 'future-gpu/2027',
+  label: 'Future GPU',
   vcpus: 4,
   memoryMiB: 16384,
   diskGiB: 64,
   laneUnits: 6,
   gpu: { name: 'NVIDIA T4', memoryMiB: 16384 },
 };
+const catalog: RunSizeCatalog = {
+  kind: 'openengine.run-sizes/v2',
+  default: 'large',
+  sizes: [
+    { id: 'large', description: '4 vCPU and 16 GiB RAM.' },
+    { id: 'future-gpu/2027', description: 'Target-provided GPU resources.' },
+  ],
+};
 
-function render(value: string, machines?: readonly MachineOption[]) {
+function render(value?: string, machines?: readonly MachineOption[], runSizes?: RunSizeCatalog) {
   return renderToStaticMarkup(
     createElement(RunSizePicker, {
       value,
       machines,
-      schema,
+      runSizes,
       onChange: () => assert.fail('rendering cannot edit the profile'),
     })
   );
 }
 
-test('host machine choices state size, lane weight and full Boost cost', () => {
-  const html = render('large', [large, gpu]);
+test('host machine choices annotate arbitrary target size IDs with lane and Boost cost', () => {
+  const html = render('large', [large, gpu], catalog);
   assert.match(html, /Large · 2 lanes/);
   assert.doesNotMatch(html, /vCPU|GiB|VRAM/);
   assert.match(html, /Starting this size with Boost uses 2 Boosts for the run/);
-  assert.doesNotMatch(html, /value="small"|value="medium"|value="xl"/);
-  const gpuHtml = render('gpu_t4', [large, gpu]);
-  assert.match(gpuHtml, /T4 GPU · 6 lanes/);
-  assert.doesNotMatch(gpuHtml, /vCPU|GiB|VRAM/);
+  const gpuHtml = render('future-gpu/2027', [large, gpu], catalog);
+  assert.match(gpuHtml, /Future GPU · 6 lanes/);
   assert.match(gpuHtml, /Starting this size with Boost uses 6 Boosts for the run/);
 });
 
-test('an unavailable saved size remains selected without replacing it', () => {
-  const html = render('small', [large]);
-  assert.match(html, /<option value="small"[^>]*disabled=""[^>]*selected=""/);
-  assert.match(html, /small \(unavailable\)/);
-  const empty = render('large', []);
+test('unavailable authored sizes remain selected without replacing the runtime', () => {
+  const html = render('removed-big-box', [large], catalog);
+  assert.match(html, /<option value="removed-big-box"[^>]*disabled=""[^>]*selected=""/);
+  assert.match(html, /removed-big-box \(unavailable\)/);
+  const empty = render('large', [], { kind: 'openengine.run-sizes/v2', sizes: [] });
   assert.match(empty, /large \(unavailable\)/);
+  assert.match(empty, /No sizes available/);
   assert.doesNotMatch(empty, /4 vCPU|Boost uses/);
 });
 
-test('local schema fallback lists sizes without adding billing facts', () => {
-  const html = render('small');
-  for (const size of schema.$defs.RunSize.enum) assert.match(html, new RegExp(`value="${size}"`));
+test('target catalog supplies choices without a global schema or billing facts', () => {
+  const html = render('future-gpu/2027', undefined, catalog);
+  for (const { id } of catalog.sizes) assert.ok(html.includes(`value="${id}"`));
+  assert.match(html, /Target default \(large\)/);
   assert.doesNotMatch(html, /Boost|lanes|unavailable/);
 });
 
-test('host metadata cannot offer sizes outside the native schema', () => {
-  const machines = [large, { ...gpu, size: 'gpu' }];
-  const html = render('large', machines);
-  assert.match(html, /value="large"/);
-  assert.doesNotMatch(html, /value="gpu"/);
-  const saved = render('gpu', machines);
-  assert.match(saved, /<option value="gpu"[^>]*disabled=""[^>]*selected=""/);
-  assert.match(saved, /gpu \(unavailable\)/);
+test('target catalog controls offered IDs independently of machine presentation metadata', () => {
+  const html = render('large', [large, { ...gpu, size: 'not-offered' }], catalog);
+  assert.match(html, /value="future-gpu\/2027"/);
+  assert.doesNotMatch(html, /value="not-offered"/);
+  const saved = render('not-offered', [gpu], catalog);
+  assert.match(saved, /not-offered \(unavailable\)/);
   assert.doesNotMatch(saved, /Starting this size with Boost/);
+});
+
+test('omitted size stays the target default without choosing an explicit size', () => {
+  const html = render(undefined, undefined, catalog);
+  assert.match(html, /<option value="" selected="">Target default \(large\)/);
+  assert.doesNotMatch(html, /<option value="large" selected/);
+});
+
+test('without host catalogs size is an opaque freeform input, with no global fallback', () => {
+  const html = render('custom/GPU-42');
+  assert.match(html, /<input[^>]*value="custom\/GPU-42"/);
+  assert.doesNotMatch(html, /<select|<option|unavailable|Boost/);
+  const omitted = render();
+  assert.match(omitted, /placeholder="Target default"/);
+  assert.match(omitted, /value=""/);
 });

@@ -188,7 +188,7 @@ fn comment_submission(host: &str, fields: &[&str]) -> RunSubmission {
         "graph":graph,
         "initialInput":{"url":format!("https://{host}/team/repo/issues/17"),
             "context":{"title":"Proposal","body":"Review this","reviewScope":{}}},
-        "runtime":{"harness":"codex","provider":"openai","size":"small","nodes":{
+        "runtime":{"harness":"codex","provider":"openai","size":"host","nodes":{
             "reviewer":{"kind":"agent","model":"caller-model"},
             "deliver":{"kind":"comment_delivery","connections":{"work-ghe":fields}}
         }},

@@ -1,5 +1,22 @@
 # syntax=docker/dockerfile:1
 
+ARG GH_VERSION=2.101.0
+
+FROM node:24-trixie-slim AS release-assets
+ARG GH_VERSION
+ARG TARGETARCH
+COPY scripts/distribution/build-restic.sh scripts/distribution/github-release-asset.js /usr/local/bin/
+RUN --mount=type=secret,id=github_token \
+    export GH_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || true)" \
+    && mkdir -p /out/github-cli \
+    && build-restic.sh /out --source-only \
+    && node /usr/local/bin/github-release-asset.js cli/cli "v${GH_VERSION}" \
+        "gh_${GH_VERSION}_checksums.txt" /out/github-cli/checksums.txt \
+    && echo "f8bbc37fc5568a6a162d1a67b1e9c1afa9139f7b5a46dcde4a57bdaa0db33b60  /out/github-cli/checksums.txt" | sha256sum --check - \
+    && node /usr/local/bin/github-release-asset.js cli/cli "v${GH_VERSION}" \
+        "gh_${GH_VERSION}_linux_${TARGETARCH}.deb" "/out/github-cli/gh_${GH_VERSION}_linux_${TARGETARCH}.deb" \
+    && cd /out/github-cli && sha256sum --check --ignore-missing checksums.txt
+
 FROM node:24-trixie-slim AS ui-builder
 
 WORKDIR /src
@@ -17,8 +34,10 @@ RUN rustup component add rustfmt clippy \
 
 FROM golang:1.27.1-trixie@sha256:9baa6b4187bbb98d240372a8a235ac0bb6b5ddd52bba1431dc2f7c0705862728 AS restic-builder
 ARG TARGETARCH
-ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-p=4
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-p=4 \
+    ZEROSHOT_RESTIC_SOURCE_ARCHIVE=/tmp/restic.tar.gz
 COPY scripts/distribution/build-restic.sh /usr/local/bin/build-restic
+COPY --from=release-assets /out/restic.tar.gz /tmp/restic.tar.gz
 RUN case "$TARGETARCH" in \
       amd64) target=x86_64-unknown-linux-musl ;; \
       arm64) target=aarch64-unknown-linux-musl ;; \
@@ -48,7 +67,7 @@ ARG CODEX_VERSION=0.164.0
 ARG CLAUDE_CODE_VERSION=2.1.310
 ARG PI_VERSION=1.4.0
 ARG TARGETARCH
-ARG GH_VERSION=2.101.0
+ARG GH_VERSION
 ARG NPM_VERSION=11.19.1
 ARG ZEROSHOT_VERSION=development
 ARG VCS_REF=unknown
@@ -58,10 +77,8 @@ LABEL org.opencontainers.image.source="https://github.com/the-open-engine/zerosh
       org.opencontainers.image.version="${ZEROSHOT_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}"
 
-# Verify the upstream package independently of Debian's GitHub CLI version.
-ADD --checksum=sha256:f8bbc37fc5568a6a162d1a67b1e9c1afa9139f7b5a46dcde4a57bdaa0db33b60 \
-    https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_checksums.txt /tmp/github-cli/checksums.txt
-ADD https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.deb /tmp/github-cli/
+# The asset stage verifies the pinned upstream manifest and package before installation.
+COPY --from=release-assets /out/github-cli /tmp/github-cli
 
 RUN cd /tmp/github-cli \
     && sha256sum --check --ignore-missing checksums.txt \

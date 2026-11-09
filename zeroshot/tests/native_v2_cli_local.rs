@@ -105,7 +105,7 @@ async fn target_omitted_run_derives_source_and_preserves_workspace_mutation() {
         status.assert_key("source").assert_key("revision"),
         &fixture.head
     );
-    assert_eq!(status.assert_key("size"), "small");
+    assert_eq!(status.assert_key("size"), "host");
     assert_eq!(status.assert_key("status").assert_key("phase"), "finished");
     assert_eq!(
         status
@@ -434,4 +434,26 @@ async fn failed_local_run_restarts_from_its_latest_snapshot_with_fresh_connectio
             .assert_key("recoverable"),
         false
     );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread")]
+async fn force_stop_settles_after_the_agents_tool_commands_stop() {
+    LocalFixture::new().check_owned_tool_stops(None).await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread")]
+async fn killed_controller_stops_agent_work_before_resume() {
+    LocalFixture::new()
+        .check_owned_tool_stops(Some(libc::SIGKILL))
+        .await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread")]
+async fn terminated_controller_stops_agent_work_before_resume() {
+    LocalFixture::new()
+        .check_owned_tool_stops(Some(libc::SIGTERM))
+        .await;
 }

@@ -65,6 +65,27 @@ def test_uniform_runtime_requires_an_explicit_harness() -> None:
         UniformRuntime(provider="openrouter", model="gpt-5.6-luna")  # type: ignore[call-arg]
 
 
+@pytest.mark.parametrize("size", [None, "custom-big-box", "GPU/2027", "tiny", "standard"])
+def test_target_owned_size_is_forwarded_without_normalization(
+    size: str | None, fake_native: Path
+) -> None:
+    selected = UniformRuntime(harness="codex", provider="openai", model="caller-model", size=size)
+
+    async def exercise() -> None:
+        async with Client(target=HostedTarget("platform"), runtime=selected) as client:
+            await client.submit("use the requested size")
+
+    asyncio.run(exercise())
+    invocations = [item for item in read_invocations(fake_native) if item["args"][0] == "run"]
+    assert len(invocations) == 2
+    for invocation in invocations:
+        encoded = invocation["--uniform-runtime-config"]
+        if size is None:
+            assert "size" not in encoded
+        else:
+            assert encoded["size"] == size
+
+
 @pytest.mark.parametrize(
     ("target_kind", "workspace_override"),
     [("local", False), ("local", True), ("direct", False), ("direct", True), ("hosted", False)],
@@ -183,7 +204,6 @@ def test_run_waits_for_terminal_result(fake_native: Path, tmp_path: Path) -> Non
             "provider": "openrouter",
             "model": "gpt-5.6-luna",
             "effort": "max",
-            "size": "medium",
             "sessionScope": "execution",
         }
         for item in runs
@@ -263,7 +283,6 @@ def test_uniform_runtime_encodes_exact_connection_requirements() -> None:
         "harness": "codex",
         "provider": "openai",
         "model": "gpt-5.6-luna",
-        "size": "medium",
         "sessionScope": "execution",
         "connections": {"subscription": ["SESSION_MARKER"]},
     }

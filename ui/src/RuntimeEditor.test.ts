@@ -18,6 +18,7 @@ test('template runtime metadata keeps delivery bindings when creating a profile'
     runtimeBindings: { deliver: { kind: 'git_delivery', connections: { github: ['GH_TOKEN'] } } },
   };
   const doc = newDocument(template);
+  assert.equal(Object.hasOwn(doc.runtime, 'size'), false, 'new profiles use the target default');
   assert.deepEqual(doc.runtime.nodes.deliver, template.runtimeBindings.deliver);
   doc.runtime.nodes.deliver.connections!.github.push('EXTRA');
   assert.deepEqual(template.runtimeBindings.deliver.connections.github, ['GH_TOKEN']);

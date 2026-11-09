@@ -214,13 +214,21 @@ def test_failed_status_rejects_malformed_failure_evidence(context: object) -> No
         _status(failed_status(context))
 
 
-@pytest.mark.parametrize("size", ["small", "medium", "large", "xl", "gpu_t4"])
+@pytest.mark.parametrize("size", ["medium", "custom-big-box", "GPU/2027", "tiny", "standard"])
 def test_machine_sizes_survive_status_and_summary_projection(size: str) -> None:
     value = local_status()
     value["size"] = size
     status = _status(value)
     assert status.size == size
     assert _summary(status).size == size
+
+
+@pytest.mark.parametrize("size", [None, 3, ["medium"]])
+def test_machine_size_projection_rejects_non_string_values(size: object) -> None:
+    value = local_status()
+    value["size"] = size
+    with pytest.raises(ProtocolError, match=r"run status\.size"):
+        _status(value)
 
 
 @pytest.mark.parametrize("failed", [False, True])

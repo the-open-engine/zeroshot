@@ -191,7 +191,7 @@ fn template_runtime(lane: LiveLane, template: &str) -> serde_json::Value {
     json!({
         "harness":lane.harness(),
         "provider":lane.provider(),
-        "size":"medium",
+        "size":"host",
         "nodes":nodes
     })
 }

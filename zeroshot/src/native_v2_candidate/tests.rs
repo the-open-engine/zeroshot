@@ -39,8 +39,8 @@ use crate::native_v2_platform::{
 };
 use crate::native_v2_contract::{
     ClaudeProvider, CodexProvider, DeclaredConnections, DeclaredEnvironment,
-    EnvironmentVariableName, NodeInvocation, RunSize, RunSubmission, RunTitle, RuntimePlan,
-    SourceBranchId, SourceRepositoryId, SourceRevisionId, ResolvedSource,
+    EnvironmentVariableName, NodeInvocation, RunSubmission, RunTitle, RuntimePlan, SourceBranchId,
+    SourceRepositoryId, SourceRevisionId, ResolvedSource,
 };
 use crate::native_v2_delivery::{
     SourceDeliveryRead, SourceDeliverySnapshot, SourceHeadReconciliation,

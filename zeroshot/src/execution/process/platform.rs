@@ -82,6 +82,8 @@ pub struct ProcessTreeRegistration {
     job: Option<usize>,
     #[cfg(unix)]
     containment: ProcessContainment,
+    #[cfg(target_os = "linux")]
+    supervisor: Option<super::tree_supervisor::Registration>,
 }
 
 impl ProcessTreeRegistration {
@@ -109,13 +111,15 @@ pub struct ProcessTreeHandle {
 
     #[cfg(windows)]
     job: usize,
+    #[cfg(target_os = "linux")]
+    supervisor: Option<super::tree_supervisor::Supervisor>,
 }
 impl ProcessTreeHandle {
     #[must_use]
     pub const fn requires_explicit_cleanup_evidence(&self) -> bool {
         #[cfg(target_os = "linux")]
         {
-            self.containment.membership().is_some()
+            self.supervisor.is_some() || self.containment.membership().is_some()
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -149,6 +153,8 @@ pub fn register_process_tree_for(
         Ok(ProcessTreeRegistration {
             #[cfg(unix)]
             containment,
+            #[cfg(target_os = "linux")]
+            supervisor: None,
         })
     }
 }
@@ -162,6 +168,10 @@ pub fn capture_process_tree(
         Ok(ProcessTreeHandle {
             process_group_id: child.id().and_then(|value| i32::try_from(value).ok()),
             containment: registration.containment,
+            #[cfg(target_os = "linux")]
+            supervisor: registration
+                .supervisor
+                .map(super::tree_supervisor::Registration::capture),
         })
     }
 
@@ -192,8 +202,13 @@ pub async fn terminate_process_tree(
         Ok(Ok(status)) => {
             let cleanup = await_group_exit(handle, cleanup_deadline).await;
             errors.extend(cleanup.error);
+            let exit_status = command_exit_status(handle, status)
+                .map_err(|error| {
+                    errors.push(io_error_detail("process root status unavailable", &error))
+                })
+                .ok();
             TerminationOutcome {
-                exit_status: Some(status),
+                exit_status,
                 cleanup: cleanup.cleanup,
                 error: join_errors(errors),
             }
@@ -223,6 +238,15 @@ pub fn configure_process(_command: &mut Command, _containment: ProcessContainmen
 
 #[cfg(unix)]
 fn kill_process_tree(handle: &ProcessTreeHandle, child: &mut tokio::process::Child) -> Vec<String> {
+    #[cfg(target_os = "linux")]
+    if let Some(supervisor) = &handle.supervisor {
+        return supervisor
+            .stop()
+            .err()
+            .map(|error| io_error_detail("process supervisor stop failed", &error))
+            .into_iter()
+            .collect();
+    }
     super::platform_unix::kill_process_tree(handle.process_group_id, handle.containment, child)
 }
 
@@ -243,6 +267,10 @@ fn kill_process_tree(
 }
 
 pub fn process_tree_has_live_members(handle: &ProcessTreeHandle) -> Result<bool, io::Error> {
+    #[cfg(target_os = "linux")]
+    if let Some(supervisor) = &handle.supervisor {
+        return supervisor.status().map(|status| status.is_none());
+    }
     #[cfg(unix)]
     {
         #[cfg(target_os = "linux")]
@@ -268,6 +296,25 @@ pub fn process_tree_has_live_members(handle: &ProcessTreeHandle) -> Result<bool,
 
 #[cfg(unix)]
 async fn await_group_exit(handle: &ProcessTreeHandle, deadline: Instant) -> CleanupOutcome {
+    #[cfg(target_os = "linux")]
+    if let Some(supervisor) = &handle.supervisor {
+        loop {
+            match supervisor.status() {
+                Ok(Some(_)) => {
+                    return CleanupOutcome {
+                        cleanup: ProcessCleanupEvidence::Reaped,
+                        error: None,
+                    };
+                }
+                Ok(None) => {}
+                Err(error) => return cleanup_failure("process supervisor cleanup failed", &error),
+            }
+            if Instant::now() >= deadline {
+                return cleanup_timeout();
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    }
     #[cfg(target_os = "linux")]
     if let Some(membership) = handle.containment.membership() {
         return await_worker_exit(membership, deadline).await;
@@ -408,3 +455,33 @@ fn join_errors(errors: Vec<String>) -> Option<String> {
 #[cfg(test)]
 #[path = "platform/tests.rs"]
 mod tests;
+
+pub(super) fn prepare_supervisor(
+    command: &mut Command,
+    registration: &mut ProcessTreeRegistration,
+    workspace: &std::path::Path,
+) -> io::Result<bool> {
+    #[cfg(target_os = "linux")]
+    if registration.containment == ProcessContainment::ProcessGroup {
+        let supervisor = super::tree_supervisor::Registration::new(workspace)?;
+        supervisor.configure(command);
+        registration.supervisor = Some(supervisor);
+        return Ok(true);
+    }
+    let _ = (command, registration, workspace);
+    Ok(false)
+}
+
+pub(super) fn command_exit_status(
+    handle: &ProcessTreeHandle,
+    status: std::process::ExitStatus,
+) -> io::Result<std::process::ExitStatus> {
+    #[cfg(target_os = "linux")]
+    if let Some(supervisor) = &handle.supervisor {
+        return supervisor
+            .status()?
+            .ok_or_else(|| io::Error::other("process supervisor did not publish root status"));
+    }
+    let _ = handle;
+    Ok(status)
+}

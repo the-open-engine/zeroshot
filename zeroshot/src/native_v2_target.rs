@@ -211,6 +211,17 @@ where
             .map_err(|error| self.authority.redact_error(error).into_cli(&target))
     }
 
+    async fn sizes(
+        &self,
+        name: &str,
+    ) -> Result<openengine_cluster_protocol::TargetRunSizesDiscovery, NativeV2CliError> {
+        let target = self.target(name)?;
+        self.authority
+            .run_sizes(&target)
+            .await
+            .map_err(|error| self.authority.redact_error(error).into_cli(&target))
+    }
+
     async fn default_resource_scope(
         &self,
         name: &str,

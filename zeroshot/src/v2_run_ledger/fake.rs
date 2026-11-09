@@ -64,7 +64,7 @@ impl RunLedger for FakeRunLedger {
         if state.runs.contains_key(&request.run_id) {
             return Err(RunLedgerError::RunIdConflict);
         }
-        let snapshot = super::RunSnapshot::admitted(request.run_id.clone(), &request.admitted);
+        let snapshot = super::RunSnapshot::admitted(request.run_id.clone(), &request.admitted)?;
         let stored = StoredRun {
             submission_key: request.submission_key.clone(),
             submission_digest: request.submission_digest,

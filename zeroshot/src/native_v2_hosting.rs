@@ -28,7 +28,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use openengine_cluster_protocol::{RunSubmitParams, RuntimePlan};
+use openengine_cluster_protocol::{
+    RunSize, RunSizeDescriptor, RunSubmitParams, RuntimePlan, TargetRunSizesDiscovery,
+};
 use thiserror::Error;
 
 use crate::execution::process::HostedProcessPool;
@@ -66,6 +68,11 @@ pub fn materialize_contained_provider_access(
 pub async fn build_production_target_authority(
     config: ProductionHostingConfig,
 ) -> Result<NativeV2TargetAuthority, ProductionHostingError> {
+    if let Some(catalog) = &config.run_sizes {
+        catalog
+            .validate()
+            .map_err(|_| ProductionHostingError::CapsuleConfiguration)?;
+    }
     prepare_storage_root(&config.storage_root)?;
     let factory = Arc::new(ProductionTargetControllerFactory::new(config));
     Ok(NativeV2TargetAuthority::new_with_operator_diagnostics(
@@ -77,6 +84,8 @@ pub async fn build_production_target_authority(
 /// Host-owned non-secret capabilities used to compose one installed target.
 #[derive(Clone)]
 pub struct ProductionHostingConfig {
+    /// User-facing size choices. Private capsules retain sizes already admitted by their host.
+    pub run_sizes: Option<TargetRunSizesDiscovery>,
     /// Optional host facts sampled for each agent execution, including resumed attempts.
     pub agent_context: Option<Arc<dyn crate::native_v2_runner::AgentContextProvider>>,
     /// A host-owned namespace. Platform embedders select their own tenant-scoped storage.
@@ -148,7 +157,7 @@ impl ProductionTargetControllerFactory {
             Arc::new(capsule_config),
             self.operator_diagnostics.clone(),
         )?);
-        let controller = NativeV2PlatformController::new_with_delivery_policy(
+        let mut controller = NativeV2PlatformController::new_with_delivery_policy(
             ledger,
             allocator,
             DeliveryPolicy::Optional,
@@ -156,12 +165,19 @@ impl ProductionTargetControllerFactory {
         .await
         .map_err(|_| ProductionHostingError::Controller)?
         .with_operator_diagnostics(self.operator_diagnostics.clone());
+        if let Some(catalog) = &self.config.run_sizes {
+            controller = controller.with_run_sizes(catalog.clone());
+        }
         Ok(Arc::new(controller))
     }
 }
 
 #[async_trait]
 impl TargetControllerFactory for ProductionTargetControllerFactory {
+    fn run_sizes(&self) -> Option<TargetRunSizesDiscovery> {
+        self.config.run_sizes.clone()
+    }
+
     fn runtime_harnesses(
         &self,
     ) -> Option<openengine_cluster_protocol::TargetRuntimeHarnessesDiscovery> {
@@ -424,6 +440,7 @@ fn set_traversable_directory(_path: &std::path::Path) -> Result<(), std::io::Err
 impl Default for ProductionHostingConfig {
     fn default() -> Self {
         Self {
+            run_sizes: None,
             agent_context: None,
             memory_storage: None,
             memory_backend: None,
@@ -444,4 +461,17 @@ impl Default for ProductionHostingConfig {
             process_pool: HostedProcessPool::hosted_default(),
         }
     }
+}
+
+/// The local/direct host runs on its current resources rather than emulating machine shapes.
+#[must_use]
+pub fn host_run_sizes() -> TargetRunSizesDiscovery {
+    let id = RunSize::new("host").expect("the host size ID is bounded");
+    let descriptor = RunSizeDescriptor::new(
+        id.clone(),
+        "Uses the current host's CPU, memory and storage.",
+    )
+    .expect("the host size description is bounded");
+    TargetRunSizesDiscovery::new(Some(id), vec![descriptor])
+        .expect("the host catalog contains its unique default")
 }

@@ -1,7 +1,7 @@
 use std::process::{Command, Output};
 
 use openengine_cluster_testkit::assertions::{AssertValue, JsonAt};
-use zeroshot_engine::native_v2_contract::{ReasoningEffort, RunSize, SessionScope};
+use zeroshot_engine::native_v2_contract::{ReasoningEffort, SessionScope};
 use zeroshot_engine::native_v2_cli::{ERROR_FORMAT_ENV, JSON_ERROR_FORMAT};
 
 macro_rules! exhaustive_values {
@@ -23,6 +23,7 @@ const HELP_PATHS: &[&[&str]] = &[
     &["target"],
     &["target", "add"],
     &["target", "login"],
+    &["target", "sizes"],
     &["target", "serve"],
     &["connection"],
     &["connection", "list"],
@@ -99,13 +100,6 @@ fn help_explains_runtime_configuration() {
         ],
     );
 
-    let sizes = serialized_names(&exhaustive_values!(RunSize => [
-        RunSize::Small,
-        RunSize::Medium,
-        RunSize::Large,
-        RunSize::Xl,
-        RunSize::GpuT4,
-    ]));
     let efforts = serialized_names(&exhaustive_values!(ReasoningEffort => [
         ReasoningEffort::Low,
         ReasoningEffort::Medium,
@@ -140,7 +134,8 @@ fn help_explains_runtime_configuration() {
             "zeroshot does not maintain or validate provider model catalogs."
         )
         .to_owned(),
-        format!("sizes are {}.", prose_list(sizes, "and")),
+        "size identifiers are target-owned strings.".to_owned(),
+        "zeroshot target sizes name".to_owned(),
         format!(
             "optional fields are effort ({} when supported), sessionscope ({}), and connections.",
             prose_list(efforts, "or"),

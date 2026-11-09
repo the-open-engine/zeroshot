@@ -37,7 +37,20 @@ jobs:
 
       - name: Install Opcore
         if: steps.paths.outputs.readme_only != 'true'
-        run: OPCORE_NO_HOOKS=1 npm install --global @the-open-engine-company/opcore@0.3.2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          directory="$RUNNER_TEMP/opcore"
+          archive=opcore-v0.3.2-linux-x86_64.tar.gz
+          mkdir -p "$directory"
+          node scripts/distribution/github-release-asset.js the-open-engine/opcore v0.3.2 SHA256SUMS "$directory/SHA256SUMS"
+          node scripts/distribution/github-release-asset.js the-open-engine/opcore v0.3.2 "$archive" "$directory/$archive"
+          # Preserve the immutable archive binding published in the npm 0.3.2 package.
+          echo "c88ec2e1e2cbcbc20aada9fad35811108f15a9f1b7e7a2f48a59a726eb3daaf9  $directory/$archive" | sha256sum --check -
+          (cd "$directory" && sha256sum --check --ignore-missing SHA256SUMS)
+          tar -xzf "$directory/$archive" -C "$directory" opcore-linux-x86_64/bin/opcore
+          echo "$directory/opcore-linux-x86_64/bin" >> "$GITHUB_PATH"
+          "$directory/opcore-linux-x86_64/bin/opcore" --version
 
       - name: Fetch locked Rust dependencies
         if: steps.paths.outputs.readme_only != 'true'

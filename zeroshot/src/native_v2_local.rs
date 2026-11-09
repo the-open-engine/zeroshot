@@ -96,6 +96,12 @@ pub enum LocalCompositionError {
     },
     #[error("Git delivery needs the `{executable}` executable on PATH")]
     MissingDeliveryExecutable { executable: &'static str },
+    #[error(
+        "Git delivery requires a clean checkout; commit, stash or remove these changes before starting the run:\n{0}"
+    )]
+    DirtyCheckout(Box<crate::source_code_provider::GitCommandFailure>),
+    #[error("could not inspect the Git checkout before delivery: {0}")]
+    CheckoutInspection(String),
     #[error(transparent)]
     Harness(#[from] crate::harnesses::HarnessError),
     #[error(transparent)]
@@ -128,6 +134,25 @@ pub struct LocalProcessCandidateRequest<'a> {
     pub delivery_validator: Option<TrustedDeliveryValidator>,
     pub git_credentials: Option<GitTransportCredentials>,
     pub native_environment: &'a BTreeMap<String, String>,
+}
+
+pub(crate) async fn validate_clean_checkout(
+    prepared: &PreparedLocalRun,
+    git_program: &Path,
+) -> Result<(), LocalCompositionError> {
+    if crate::native_v2_admission::delivery_capabilities(&prepared.submission.graph.root).is_empty()
+    {
+        return Ok(());
+    }
+    let changed = crate::native_v2_delivery::git::SystemGit::new(git_program.to_owned())
+        .with_local_environment(Some(prepared.native_environment.clone()))
+        .uncommitted_changes(&prepared.workspace)
+        .await
+        .map_err(|error| LocalCompositionError::CheckoutInspection(error.to_string()))?;
+    match changed {
+        Some(diagnostic) => Err(LocalCompositionError::DirtyCheckout(Box::new(diagnostic))),
+        None => Ok(()),
+    }
 }
 
 /// Snapshots local source and revalidates the request's exact runtime environment.
@@ -311,10 +336,18 @@ fn git_output(
 ///
 /// `storage` owns only provider session homes and controller state. No cleanup object is returned
 /// because the existing workspace and every mutation within it remain user-owned.
+///
+/// Lane executables are checked first. The controller composes after any checkpoint restore and
+/// before admission, so this is the check a checkpoint resume gets, against the restored workspace.
 pub fn build_local_process_candidate(
     request: LocalProcessCandidateRequest<'_>,
 ) -> Result<Arc<dyn NodeRunner>, LocalCompositionError> {
     let admitted = request.admitted;
+    check_lane_executables(
+        &admitted.runtime,
+        request.native_environment,
+        request.workspace,
+    )?;
     let prepared = crate::active_memory::runtime::PreparedActiveMemory::prepare(
         crate::active_memory::runtime::MemoryPreparation {
             admitted,

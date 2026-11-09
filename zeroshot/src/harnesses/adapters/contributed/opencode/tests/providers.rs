@@ -180,3 +180,119 @@ async fn native_aws_errors_redact_ambient_bearer_and_iam_secrets() {
     assert!(!error.contains("synthetic-iam-secret"));
     assert!(error.contains("[REDACTED]"));
 }
+
+fn provider_config(command: &ProcessSessionCommand, provider: &str) -> Option<Value> {
+    let config: Value =
+        serde_json::from_str(&command.environment["OPENCODE_CONFIG_CONTENT"]).assert_value();
+    config.get("provider")?.get(provider).cloned()
+}
+
+#[test]
+fn opencode_zen_and_go_reuse_native_login_with_native_provider_ids() {
+    for provider in ["opencode", "opencode-go"] {
+        let directory = TestDirectory::new("opencode-account-native");
+        let (_files, command) = prepared(&directory, provider, &[]);
+        assert!(
+            command
+                .argv
+                .iter()
+                .any(|arg| *arg == format!("{provider}/opaque/model"))
+        );
+        assert!(provider_config(&command, provider).is_none());
+        assert!(!command.environment.contains_key("OPENCODE_AUTH_CONTENT"));
+    }
+}
+
+#[test]
+fn opencode_zen_and_go_apply_a_declared_account_key_to_their_own_provider() {
+    for provider in ["opencode", "opencode-go"] {
+        let directory = TestDirectory::new("opencode-account-declared");
+        let (_files, command) = prepared(
+            &directory,
+            provider,
+            &[("OPENCODE_API_KEY", "selected-secret")],
+        );
+        assert!(
+            command
+                .argv
+                .iter()
+                .any(|arg| *arg == format!("{provider}/opaque/model"))
+        );
+        assert_eq!(
+            provider_config(&command, provider).assert_value()["options"]["apiKey"],
+            "{env:OPENCODE_API_KEY}"
+        );
+        run_plugin(
+            &command,
+            r#"
+const {default:create} = await import(process.argv[1]);
+const hook = await create({client:{}});
+const selected = process.env.ZEROSHOT_TEST_PROVIDER;
+const config = {provider:{[selected]:{options:{apiKey:'old'},models:{'opaque/model':{limit:{output:4096}}}},other:{options:{apiKey:'unrelated'}}}};
+await hook.config(config);
+const provider = config.provider[selected];
+if (provider.options.apiKey !== 'selected-secret' || provider.models['opaque/model'].limit.output !== 4096 || config.provider.other.options.apiKey !== 'unrelated') throw Error('declared OpenCode account key or native settings lost');
+"#
+            .replace("process.env.ZEROSHOT_TEST_PROVIDER", &format!("'{provider}'"))
+            .as_str(),
+        );
+    }
+}
+
+#[test]
+fn opencode_account_key_is_declarable_while_other_native_controls_stay_reserved() {
+    command::validate_connection_name("OPENCODE_API_KEY", false).assert_value();
+    command::validate_connection_name("OPENCODE_PERMISSION", false).assert_value();
+    for reserved in ["OPENCODE_CONFIG", "OPENCODE_AUTH_CONTENT", "OPENCODE_PURE"] {
+        assert!(command::validate_connection_name(reserved, false).is_err());
+    }
+}
+
+#[test]
+fn opencode_account_key_is_foreign_to_other_lanes() {
+    let directory = TestDirectory::new("opencode-account-foreign");
+    let mut adapter = super::process::adapter(&directory, "#!/bin/sh\nexit 0\n");
+    adapter.config.provider = "openai".to_owned();
+    let files =
+        ProviderExecutionFiles::for_test(directory.path(), HostedProcessScope::WriterExecution(1))
+            .assert_value();
+    let error = command::command(command::CommandRequest {
+        adapter: &adapter,
+        invocation: &super::process::invocation(&[("OPENCODE_API_KEY", "foreign-secret")]),
+        files: &files,
+        session_id: None,
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains("another provider's credential"));
+}
+
+#[test]
+fn ambient_opencode_account_key_reaches_only_the_opencode_lanes() {
+    for (provider, inherited) in [("opencode-go", true), ("opencode", true), ("openai", false)] {
+        let directory = TestDirectory::new("opencode-account-ambient");
+        let mut config = super::process::adapter(&directory, "#!/bin/sh\nexit 0\n").config;
+        config.provider = provider.to_owned();
+        config.native_environment = LocalHarnessEnvironment::new(BTreeMap::from([(
+            "OPENCODE_API_KEY".to_owned(),
+            "ambient-account-secret".to_owned(),
+        )]));
+        let adapter = OpenCodeAdapter::new_local(config).assert_value();
+        let files = ProviderExecutionFiles::for_test(
+            directory.path(),
+            HostedProcessScope::WriterExecution(1),
+        )
+        .assert_value();
+        let command = command::command(command::CommandRequest {
+            adapter: &adapter,
+            invocation: &super::process::invocation(&[]),
+            files: &files,
+            session_id: None,
+        })
+        .assert_value();
+        assert_eq!(
+            command.environment.contains_key("OPENCODE_API_KEY"),
+            inherited,
+            "{provider}"
+        );
+    }
+}

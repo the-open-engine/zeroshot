@@ -127,6 +127,9 @@ as bounded diagnostics with resolved connection values redacted. Truncated stder
 may split a credential. A nonzero exit becomes `crash`, and invalid or oversized
 JSON becomes `malformed`. The ordinary graph error and retry rules apply. Cancellation and the
 step's optional `timeoutMs` terminate the process tree through the shared process runner.
+Linux cleanup also covers detached descendants and controller death; Windows uses Job Objects.
+macOS process-group cleanup cannot cover descendants that detach themselves. See
+[process ownership](../concepts/execution.md#durable-run-state).
 Script steps record zero native model tokens. Services started separately by the application
 may keep indexes or models warm across script invocations. Service lifecycle is application owned.
 
@@ -348,13 +351,17 @@ the profile or its `lane` fields with the newer binary.
 
 ### Local runs
 
-Before the controller starts, a local `zeroshot run` or `zeroshot resume` checks that each lane's
-registered executable is on `PATH`. A missing executable fails the
-command with a message such as:
+Before any agent starts, a local `zeroshot run` or `zeroshot resume` checks that each lane's
+registered executable is on `PATH`. A missing executable fails the command, and a refused
+`resume` starts no successor, with a message such as:
 
 ```text
 lane claude/anthropic needs the `claude` executable on PATH
 ```
+
+A `resume` that restores a workspace checkpoint checks after the restore, so an executable that only
+the checkpoint contains is still found. Its message follows
+`controller exited before becoming ready:`.
 
 `zeroshot acp` runs the same check when each session opens, against that session's workspace, and
 the session request fails with the same message. When every `PATH` entry is absolute, it also

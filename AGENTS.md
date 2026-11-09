@@ -49,7 +49,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and canonical skill assets through that release's `SHA256SUMS`, smoke-checks the
   staged executable, and replaces the running executable in place without privilege escalation. It
   installs or refreshes only unchanged managed skill copies and preserves conflicts.
-  Development-placeholder builds refuse self-update.
+  Development-placeholder builds refuse self-update. Update downloads use an idle timeout, never a
+  whole-request limit, and keep their size caps. Failures carry the complete cause chain and GitHub's
+  bounded, control-safe `message`, never request URLs.
 - Release recovery may complete missing outputs only when existing immutable artifacts match the
   exact version and source commit.
 
@@ -264,10 +266,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Reusable profiles verify the authored default `maxIterations`; native-v2 run admission binds a
   present positive safe integer from caller input and re-verifies the concrete graph. An absent
   value retains the default. The generic execution and loop-entry budgets remain authoritative.
-- Targets may advertise supported sizes through the separate `openengine.run-sizes/v1` extension
-  with a unique `sizes` list. Inline run and profile clients check it before access-token acquisition;
-  an absent or different version retains only Small, Medium and Large. XL and T4 GPU require
-  explicit advertisement. Host-owned machine resources and lane costs remain outside runtime plans.
+- Run size identifiers are bounded opaque strings. Targets advertise their catalog through
+  `extensions.run_size_catalog`, kind `openengine.run-sizes/v2`, with unique `{id, description}`
+  entries and an offered default. `target sizes NAME` renders that catalog; `--json` retains its
+  structure. Hosted listing reads authenticated discovery for the current organization. Clients
+  forward requested IDs unchanged and never use discovery as an admission allowlist. An omitted
+  or null requested size remains omitted until the target resolves its default at admission.
+  Accepted definitions and history retain a concrete size. Public direct and hosted targets require
+  an owned catalog; local/direct serve offers `host`, while private capsules preserve their externally admitted size.
+  Request identity stays on the original request so mutable catalog changes cannot invalidate an
+  exact replay. Machine resources and lane costs remain target-owned, outside runtime plans.
 - Runtime selection requires caller-authored `harness`, `provider`, and `model` values.
 - The run-level `harness`/`provider` pair is the default lane. An agent node binding may carry a
   typed `lane` override (`RuntimeLane`); `git_delivery` bindings cannot. Candidates build one
@@ -282,8 +290,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   extension key, because older clients ignore unknown extension keys but reject unknown fields
   inside a marker. `TargetDiscoveryExtensions` must keep ignoring unknown keys. Local `run`/`resume`
   and `zeroshot acp` check every lane's executable on the captured search path before launch,
-  report a missing one as a usage error, and never probe login state. Checkpoint resumes defer
-  lookup to provider startup after the controller restores the selected workspace under its lease. Each `zeroshot acp` session
+  report a missing one as a usage error, and never probe login state. Checkpoint resumes check
+  instead when the controller composes the run after restoring the selected workspace under its
+  lease, before admission; the CLI's controller startup error carries the same lane message and
+  no successor remains. Each `zeroshot acp` session
   checks against its own workspace when it opens and returns the error as ACP invalid params; the
   startup check also runs, but only when every search-path entry is absolute. The lookup is
   `find_executable`: it follows the OS search that spawning relies on, including Rust's Windows
@@ -330,6 +340,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   readiness leaves one bounded, control-safe startup failure report in its run storage, redacted
   before it is written of the bootstrap's credentials and of every captured shell value except
   short or known-public ones; the waiting CLI consumes it and appends it to its startup error.
+  Preparation before readiness, including a checkpoint restore, has one finite deadline: 600 s, or
+  `ZEROSHOT_PREPARATION_TIMEOUT` whole seconds from 1 to 86400. The controller stops a restore
+  that is still extracting there; workspace replacement, once begun, runs to completion so it is
+  never stopped halfway on purpose. The CLI waits a short stop grace longer, then stops the
+  controller's process group (Unix) or process (Windows) and names the deadline. Handoff waits keep
+  their separate short bound.
   A later local CLI startup scavenges orphaned bootstrap files after the bounded controller handoff
   window without removing other run state.
   The in-memory snapshot supplies bounded native-context forwarding and Codex config-referenced
@@ -370,6 +386,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   detached folders are allowed when the graph has no Git delivery. Workspace and active Zeroshot
   state roots must be disjoint, including symlink aliases and missing state suffixes. Recovery
   reuses the stored workspace; local idempotency cannot return a run from a different folder.
+  New local Git-delivery submissions require a clean index and worktree, including unignored
+  untracked files, after idempotent-replay lookup and before controller launch. Use the captured
+  native Git environment so admission and staging share ignore rules. Pending merges and moved
+  or staged gitlinks block admission; non-stageable contents inside registered submodules do not.
+  Delivery workspace-state and trusted-validation checks use the same root-stageable dirt rules.
+  Git's successful staging warnings reach run output after terminal review observation and before
+  reconciliation; unregistered embedded repositories warn
+  without being blocked. Runs without Git delivery and retained-workspace resumes are unchanged.
   Workspace leases hold shared ancestor locks and an exclusive selected-root lock, so overlapping
   folders exclude each other while sibling folders remain concurrent. Lease guards explicitly
   unlock on drop so fork-before-exec children cannot retain released ownership. Git metadata and
@@ -387,6 +411,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   exact committed Git source. Explicit source connections
   authorize only transport fields; these values never enter agent environments or durable source
   records. Source-less local candidates construct no delivery adapter.
+- Resumed Git delivery accepts intentional run-branch commits and reuses an identical complete
+  staged candidate tree without recommitting when no merge is pending. Pending merges retain the
+  existing reconciliation path; different local work still requires review. Review
+  discovery uses the source repository/run branch before target validation, refusing retargeted or
+  ambiguous reviews. GitLab rechecks MR/ref lag twice locally, then reports persistent disagreement
+  as a terminal identity error.
 - `source_code_provider` owns effect-free source and delivery contracts and one provider registry.
   Maintained implementations live in `source_code/adapters/core`; contributed implementations
   live in `source_code/adapters/contributed`. Git is shared transport; forge adapters supply review,
@@ -514,7 +544,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   documents use atomic private-file replacement with descriptor-based ownership; Linux pins the
   private home before publication and never follows a worker-created destination link.
 - Structured-output correction runs in the same provider session under the node's existing
-  execution policy; local response validation remains authoritative.
+  execution policy; local response validation remains authoritative. Correction turns name a
+  detected envelope fault (empty reply, text before the object, unterminated object, or content
+  after it) and restate the expected response as a one-line skeleton whose placeholders are not
+  JSON; parsing stays strict and nothing is repaired or extracted.
 - Provider continuation is bounded: Claude continues once after `system/api_retry`; Codex continues
   once after a terminal execution error. Both send literal `Continue` in the same session when one
   exists. Structured output receives at most two correction turns before `malformed`.
@@ -633,8 +666,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   recursively transfer them to the successor's newly leased writer identity before admission. They
   advertise `openengine.workspace-recovery/v1`. Local resume persists predecessor/successor
   lineage before controller launch, uses a process-held file lock during admission, and reconciles
-  an interrupted launch before permitting another successor. Direct-target retained-workspace
-  handoff records both sides before moving the tree and reconciles incomplete handoffs at startup.
+  an interrupted launch before permitting another successor. A launch whose controller is confirmed
+  stopped is reconciled without a handoff wait. Status reports a claim whose launcher released it
+  and whose controller neither runs nor admitted the run as recoverable, so a crash cannot strand
+  the workspace. Direct-target retained-workspace handoff records both sides before moving the tree
+  and reconciles incomplete handoffs at startup.
   Direct-target status exposes the immutable admitted connection requirements so the CLI resolves
   fresh resume values without consulting changed profiles. Recovery lineage also retains the root
   attempt's delivery identity so every successor reuses the same delivery branch and pull request.
@@ -659,9 +695,19 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   or exit status without private child output; failed backups never replace a published checkpoint.
   Versioned execution seeds live in separate files and are read only for selected continuation.
   Restart restores the latest published snapshot without importing a seed. Restore staging is a
-  private sibling of the workspace so final replacement stays on one filesystem. Successful
-  lineages delete their catalogs and repository only after durable terminal success; failed lineages
-  retain both for resume. Disposable checkpoint staging cleanup is best effort after confirmed
+  private sibling of the workspace so final replacement stays on one filesystem. A restore reads
+  the selected seed and extracts and validates its complete stage before changing the workspace.
+  Restic runs in a contained process tree that is confirmed stopped on failure or at the deadline.
+  Git objects and private Git files such as HEAD and the index are published by rename, so
+  repeating the restore after an interruption at any step installs the complete snapshot; a hard
+  crash during replacement can still leave a partial checkout until then. Local resume pins the
+  selected snapshot and records it with the successor as the attempt in the predecessor's recovery
+  metadata before launch, and clears it once that successor is ready. The local stage is named
+  after its attempt, so the next resume removes only that stage. The same selection must still
+  resolve to the pinned snapshot; another selection that restores a snapshot replaces the record,
+  and a resume that would start without restoring is refused while it remains. Successful lineages
+  delete their catalogs and repository only after durable terminal success; failed lineages retain
+  both for resume. Disposable checkpoint staging cleanup is best effort after confirmed
   runtime cleanup and before observer ledger access. Copied read-only directories are made writable
   only inside private scratch; staging cleanup failure cannot block terminal truth or status.
   Hosted failed runs likewise collect checkpoint staging as best effort after process cleanup;
@@ -680,12 +726,17 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   preserves supplied delivery lineage. Public clients never supply storage paths or execution seeds.
 - Durable observation replay reads bounded ledger pages and retains its scan cursor across pages.
   A finished snapshot closes a subscription only after replay reaches its durable cursor.
+  A retiring local controller closes connection writers and joins their request cleanup before
+  ending its runtime. EOF remains a reconnect signal; durable observation resumes from the last
+  emitted cursor instead of reporting a storage failure caused by runtime shutdown.
 - Bulk replay uses the WebSocket client's opt-in subscription backpressure on a dedicated
   connection; control requests and ordinary observers keep their independent connections.
 - Safe-log timestamps are captured at the producer boundary as positive JavaScript-safe Unix epoch
   milliseconds and remain unchanged across durable replay.
 - Runner start reserves an execution and returns its handle before asynchronous provider startup.
   Pending start waits are cancellable; accepted startup failures settle through the owned handle.
+  Pending remote starts reread connection loss after a close notification so failed closure cannot
+  race into an ordinary cancellation result.
   Cancellation drains output and provider cleanup before execution settlement. Run close reserves
   and tombstones execution activity atomically; no late work may surface after close returns.
 - Node deadlines are optional: omitted `timeoutMs` means completion or explicit cancellation.
@@ -735,6 +786,14 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Hosted source checkout retries only its fresh platform-owned staging workspace, within one
   allocation and one total deadline. Preserve the exact admitted revision before starting any
   graph node; terminal Git details remain redacted and private operator diagnostics.
+- Linux local process-group commands use one private subreaper per command. The supervisor keeps
+  only its lifetime socket and matching workspace lease descriptors above stdio, closes unrelated
+  inherited descriptors, and kills/reaps its kernel-owned descendants after root exit or owner loss.
+  Cleanup evidence and the original root status publish only after every descendant is reaped;
+  abrupt controller death keeps workspace locks held until then. No PID registry, cgroup or root
+  privilege is required; procfs provides owned-child enumeration. Dedicated worker identities and
+  Windows Job Objects keep their existing containment. macOS process groups do not cover descendants
+  that detach themselves; stronger macOS ownership remains deferred.
 - Contained provider sessions clean up surviving descendants immediately after the main process exits,
   before draining inherited output streams. Buffered output still drains under any explicit command
   deadline and a ten-minute ceiling while observing cancellation; cleanup stays scoped to its session.
@@ -845,9 +904,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   cursor; PR observation and queues do not require direct-method discovery. Incomplete rule reads and
   empty method intersections stop merge submission with policy diagnostics. Merge queues choose their
   own method. Queue admission uses explicit `enqueuePullRequest` with the validated PR node ID and
-  exact `expectedHeadOid`; enabling auto-merge alone is not enqueue confirmation. Completed transient
-  submissions retry after fresh exact-head policy checks; retries retain earlier uncertainty so an
-  empty snapshot cannot authorize repair. Before a merge
+  exact `expectedHeadOid`; enabling auto-merge alone is not enqueue confirmation. Confirmed
+  admissions retain their added-event identity until confirmed withdrawal. Polling never resubmits a
+  removed entry: matching removal evidence binds the queued commit and complete required checks/job
+  logs, returning CI feedback through the existing repair loop before another admission is requested.
+  Completed transient submissions retry after fresh exact-head policy checks; retries retain earlier uncertainty so an
+  empty snapshot cannot authorize repair. A complete GraphQL `UNPROCESSABLE` rejection rooted exactly
+  at a null enqueue mutation adds no uncertainty; partial, nested, truncated, or unconfirmed responses
+  remain unknown. Classification uses protocol bytes before credential redaction and never invents
+  an HTTP status. Permanent forge policy failures remain execution errors. Before a merge
   delivery returns repair, refusal, error, or cancellation, trusted authority confirms withdrawal
   of queued/auto-merge effects or the exact already-merged revision. Failed withdrawal never
   authorizes agent repair. Authorities that schedule deferred merges must override
@@ -1025,12 +1090,16 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   ends either command with a process error (exit 1) that carries its latest bounded, control-safe
   error-log records and the `zeroshot logs` command. That read is best effort, deadline- and
   Ctrl-C-bounded, and never replaces the failure. `logs` exits 0 whatever the run's result.
-- Graph verification errors display their first safe diagnostic through the shared verifier error,
-  so local validation and hosted rejection report the same cause.
+- Graph verification errors display their first safe diagnostic, its path and the count of further
+  diagnostics through the shared verifier error, so local validation and hosted rejection report the
+  same cause. Within the 1,024-byte target problem message bound, the count and then the path's
+  innermost tail use only the bytes the message leaves.
 - Do not hand-edit `docs/zeroshot-cli.md` or `docs/zeroshot-cli.html`; regenerate with
   `cargo run -p zeroshot --example generate_cli_docs -- --write` and verify with `--check`.
 - Page descriptions live in Markdown front matter; generated reference descriptions live in
   `scripts/docs_hook.py`. `docs/overrides/main.html` renders social metadata and breadcrumbs.
+  Search titles and social titles share the same template. Sitemap `lastmod` uses the verified
+  content-change date from Git and is omitted when history cannot establish it.
   Fonts are self-hosted in `docs/assets/fonts/` with their licenses.
 - The public documentation site is the root `mkdocs.yml`. Python API pages are generated from the
   curated SDK exports and docstrings. Do not restore a second SDK-only MkDocs site.
@@ -1203,9 +1272,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 - Workspace bootstrap may include `machines` descriptors with size, label, vcpus, memoryMiB,
   diskGiB, laneUnits and optional GPU name/memoryMiB. The shared picker displays the box label and
   lane count, and derives the Boost count from laneUnits; hardware specs stay out of the run UI.
-  An absent collection uses native size identities without
-  resource or billing claims; an explicit empty collection offers none. Unavailable authored sizes
-  stay visible and unchanged. Hosts enforce availability and billing; descriptors are not profile data.
+  The `runSizes` catalog supplies target-owned identifiers, descriptions and its default; machine
+  facts only annotate offered choices. Without catalogs the editor accepts an opaque identifier,
+  without inventing global choices. An explicit empty catalog offers none. Omitted/null sizes use
+  the target default; unavailable authored sizes stay visible and unchanged. Hosts enforce
+  availability and billing; descriptors are not profile data.
 - Runtime schemas/workers come from native contracts in `profile_ui/catalog.rs`, compiled under
   `workspace`. Git delivery keeps its fixed contracts and explicit pull-request/merge modes. Model suggestions are non-authoritative;
   identifiers remain opaque. Missing harness/provider links to runtime settings. JSON stays lossless.
@@ -1332,6 +1403,12 @@ python -m mkdocs build --strict
 
 ## Release convention
 
+- Build-time GitHub Release assets use `scripts/distribution/github-release-asset.js` and the
+  authenticated API when `GH_TOKEN` is supplied. Credentials stay on `api.github.com`, never signed
+  storage redirects. Callers retain their upstream checksum and immutable digest checks. CI supplies
+  read-only tokens only to download steps; Docker uses the `github_token` BuildKit secret, never an
+  image argument or environment layer. `build-restic.sh OUTPUT_ROOT --source-only` stages verified
+  source for Go-only builders, which consume `ZEROSHOT_RESTIC_SOURCE_ARCHIVE` and recheck its pin.
 - CI has native, Python, repository-tooling, npm-package, and strict-documentation lanes plus stable
   aggregate `required`. Pull requests run formatting, lightweight tooling and CI contract checks,
   then wait for authenticated exact-head Greptile completion. Full applicable lanes run only for
@@ -1357,7 +1434,12 @@ python -m mkdocs build --strict
   hosted process and filesystem boundary tests as root against its built test binary.
 - `.github/workflows/coverage.yml` measures the default workspace, UI-feature Rust tests, and hosted
   root boundary tests on native changes, enforces coverage floors, and publishes LCOV to Coveralls.
+  External publication is best effort and runs only with an actual LCOV report; measurement, tests
+  and the local coverage floors remain required.
   It is reusable from the required merge-group CI aggregate and may also run manually.
+  Linux coverage maps LLVM counters continuously with runtime counter relocation so post-fork
+  helpers ending in `_exit` retain coverage without a profile-runtime call in the child. Profile
+  filenames keep both process (`%p`) and binary (`%m`) identities to avoid unrelated writers.
   Keep Rust test implementations in `tests/`, `tests.rs`,
   `*_tests.rs`, or `*-tests.rs`; do not embed test bodies in production-named source files, because
   production coverage totals explicitly exclude those test-source paths.

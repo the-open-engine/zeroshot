@@ -51,7 +51,8 @@ impl Case {
             .await
             .unwrap_or_else(|error| panic!("review impact fixture admission failed: {error:?}"));
         Self {
-            snapshot: RunSnapshot::admitted(RunId::new("impact-test-run"), &admitted),
+            snapshot: RunSnapshot::admitted(RunId::new("impact-test-run"), &admitted)
+                .assert_value(),
             admitted,
             terminal: TerminalResult::Succeeded {
                 output: Value::Null,

@@ -645,8 +645,8 @@ fn apply_template_runtime(
 struct UniformRuntimePlan {
     harness: openengine_cluster_protocol::HarnessId,
     provider: openengine_cluster_protocol::ProviderId,
-    #[serde(default = "medium_size")]
-    size: RunSize,
+    #[serde(default)]
+    size: Option<RunSize>,
     #[serde(default = "default_workspace_checkpoints")]
     workspace_checkpoints: bool,
     model: ModelId,
@@ -670,10 +670,6 @@ struct UniformRuntimePlan {
 
 const fn default_workspace_checkpoints() -> bool {
     true
-}
-
-const fn medium_size() -> RunSize {
-    RunSize::Medium
 }
 
 fn deserialize_context_window<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>

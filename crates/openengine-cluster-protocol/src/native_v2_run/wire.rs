@@ -20,7 +20,9 @@ use super::{
 pub struct RuntimePlan {
     pub harness: HarnessId,
     pub provider: ProviderId,
-    pub size: RunSize,
+    /// Omission asks the selected target to choose its advertised default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<RunSize>,
     /// Local workspace snapshots. Run history remains durable when disabled.
     #[serde(
         default = "default_workspace_checkpoints",
@@ -38,13 +40,13 @@ impl RuntimePlan {
     #[must_use]
     pub fn new(
         lane: RuntimeLane,
-        size: RunSize,
+        size: impl Into<Option<RunSize>>,
         nodes: BTreeMap<NodeName, NodeRuntimeBinding>,
     ) -> Self {
         Self {
             harness: lane.harness,
             provider: lane.provider,
-            size,
+            size: size.into(),
             workspace_checkpoints: true,
             active_memory: ActiveMemoryConfig::default(),
             global_agents: GlobalAgentsConfig::default(),
@@ -71,8 +73,8 @@ impl RuntimePlan {
     }
 
     #[must_use]
-    pub const fn size(&self) -> RunSize {
-        self.size
+    pub const fn size(&self) -> Option<&RunSize> {
+        self.size.as_ref()
     }
 
     #[must_use]

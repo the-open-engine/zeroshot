@@ -23,6 +23,8 @@ pub struct ControllerLease {
     path: PathBuf,
     identity: FileIdentity,
     ancestors: Vec<Self>,
+    #[cfg(target_os = "linux")]
+    process_lease: Option<crate::execution::process::tree_supervisor::WorkspaceLease>,
 }
 
 impl ControllerLease {
@@ -44,6 +46,16 @@ impl ControllerLease {
             )?);
         }
         let mut lease = Self::acquire(path)?;
+        #[cfg(target_os = "linux")]
+        for guard in ancestors.iter_mut().chain(std::iter::once(&mut lease)) {
+            guard.process_lease = Some(
+                crate::execution::process::tree_supervisor::WorkspaceLease::retain(
+                    &guard.file,
+                    workspace,
+                )
+                .map_err(|_| ControllerLeaseError::InvalidPath)?,
+            );
+        }
         lease.ancestors = ancestors;
         Ok(lease)
     }
@@ -72,6 +84,8 @@ impl ControllerLease {
             file,
             path,
             ancestors: Vec::new(),
+            #[cfg(target_os = "linux")]
+            process_lease: None,
         })
     }
 
@@ -148,6 +162,8 @@ fn windows_lock_probe_accepts_only_contention_errors() {
 
 impl Drop for ControllerLease {
     fn drop(&mut self) {
+        #[cfg(target_os = "linux")]
+        self.process_lease.take();
         // A fork-before-exec child can temporarily retain the same open file description.
         let _ = FileExt::unlock(&self.file);
     }

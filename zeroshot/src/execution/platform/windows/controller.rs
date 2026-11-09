@@ -47,6 +47,12 @@ impl ControllerChild {
     }
 }
 
+/// Stops a controller that never became ready and waits for its exit. Restic runs in a
+/// kill-on-close Job whose only handle the terminated controller owned.
+pub(crate) async fn stop_controller(child: &mut ControllerChild) -> io::Result<()> {
+    child.kill().await
+}
+
 /// Keeps console interrupts from terminating the controller. `SetConsoleCtrlHandler(None, TRUE)`
 /// ignores only Ctrl-C, so Ctrl-Break needs a handler routine; registration is not inherited by
 /// children. Close, logoff, and shutdown events keep their default handling.

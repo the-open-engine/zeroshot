@@ -1,14 +1,18 @@
 //! Bounded HTTPS exchange. API paths and credentials never come from returned pagination links.
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 use reqwest::{Client, Method, Url, redirect::Policy};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tokio::sync::OnceCell;
+use url::Position;
 use crate::source_code_provider::{SourceDeliveryCredential, SourceDeliveryError};
 use super::wire::ServerMetadata;
 
 const RESPONSE_LIMIT: usize = 1024 * 1024;
+/// GitLab explains a rejection in a short JSON body; longer bodies keep only their prefix.
+const ERROR_BODY_LIMIT: usize = 4 * 1024;
 pub(super) const PAGE_LIMIT: u32 = 64;
 const PAGE_SIZE: usize = 100;
 
@@ -143,7 +147,7 @@ impl Api {
         request: ApiRequest<'_>,
         credential: SourceDeliveryCredential<'_>,
     ) -> Result<Vec<u8>, SourceDeliveryError> {
-        response_bytes(self.response(request, credential).await?).await
+        response_bytes(self.response(request, credential).await?, credential).await
     }
 
     /// Notes can be filtered after pagination, so item count cannot prove the final page.
@@ -156,11 +160,10 @@ impl Api {
         if page == 0 || page > PAGE_LIMIT {
             return Err(SourceDeliveryError::Rejected);
         }
+        // Error statuses fail first, so a rejection without pagination headers keeps its status.
         let response = self.response(request, credential).await?;
-        // Preserve HTTP authentication/status failures even when error responses lack pagination.
-        let has_more =
-            response.status().is_success() && notes_have_next_page(response.headers(), page)?;
-        let bytes = response_bytes(response).await?;
+        let has_more = notes_have_next_page(response.headers(), page)?;
+        let bytes = response_bytes(response, credential).await?;
         let values: Vec<T> = serde_json::from_slice(&bytes)
             .map_err(|_| SourceDeliveryError::api(None, "GitLab returned invalid JSON"))?;
         if values.len() > PAGE_SIZE {
@@ -172,6 +175,7 @@ impl Api {
         Ok((values, has_more))
     }
 
+    /// Returns only successful responses; a rejection keeps its status and GitLab's reason.
     async fn response(
         &self,
         request: ApiRequest<'_>,
@@ -186,6 +190,7 @@ impl Api {
             url.query_pairs_mut()
                 .extend_pairs(request.query.iter().map(|(k, v)| (*k, v)));
         }
+        let resource = format!("{} {}", request.method, &url[..Position::AfterPath]);
         let mut builder = self
             .client
             .request(request.method, url)
@@ -195,21 +200,107 @@ impl Api {
         if let Some(body) = request.body {
             builder = builder.json(&body);
         }
-        let response = builder.send().await.map_err(|_| {
-            SourceDeliveryError::api(None, "GitLab API transport failed").temporary()
+        let response = builder.send().await.map_err(|error| {
+            transport_failure(
+                format!("GitLab API {resource} transport failed"),
+                error,
+                credential,
+            )
         })?;
+        if !response.status().is_success() {
+            return Err(rejection(&resource, response, credential).await);
+        }
         Ok(response)
     }
 }
 
-async fn response_bytes(mut response: reqwest::Response) -> Result<Vec<u8>, SourceDeliveryError> {
-    let status = response.status();
-    if !status.is_success() {
-        return Err(SourceDeliveryError::api(
-            Some(status.as_u16()),
-            format!("GitLab API returned HTTP {}", status.as_u16()),
-        ));
+/// The status alone classifies the failure; the body only explains it.
+async fn rejection(
+    resource: &str,
+    mut response: reqwest::Response,
+    credential: SourceDeliveryCredential<'_>,
+) -> SourceDeliveryError {
+    let status = response.status().as_u16();
+    let mut body = Vec::new();
+    let truncated = loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) if body.len() + chunk.len() <= ERROR_BODY_LIMIT => {
+                body.extend_from_slice(&chunk);
+            }
+            Ok(Some(chunk)) => {
+                body.extend_from_slice(&chunk[..ERROR_BODY_LIMIT - body.len()]);
+                break true;
+            }
+            Ok(None) => break false,
+            Err(_) => break true,
+        }
+    };
+    let mut diagnostic = format!("GitLab API {resource} returned HTTP {status}").into_bytes();
+    if !body.is_empty() {
+        diagnostic.extend_from_slice(b": ");
+        diagnostic.extend_from_slice(&body);
     }
+    SourceDeliveryError::api(
+        Some(status),
+        display_text(diagnostic, truncated, credential),
+    )
+}
+
+fn transport_failure(
+    context: String,
+    error: reqwest::Error,
+    credential: SourceDeliveryCredential<'_>,
+) -> SourceDeliveryError {
+    let error = error.without_url();
+    let mut detail = context;
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+    while let Some(current) = cause {
+        let _ = write!(detail, ": {current}");
+        // Operating systems localize their messages; the portable kind keeps the cause readable.
+        if let Some(kind) = current
+            .downcast_ref::<std::io::Error>()
+            .filter(|error| error.raw_os_error().is_some())
+            .map(std::io::Error::kind)
+        {
+            let _ = write!(detail, " [{kind}]");
+        }
+        cause = current.source();
+    }
+    SourceDeliveryError::api(None, display_text(detail.into_bytes(), false, credential)).temporary()
+}
+
+/// Forge and transport text is redacted before truncation and kept on one control-free line.
+fn display_text(
+    bytes: Vec<u8>,
+    truncated: bool,
+    credential: SourceDeliveryCredential<'_>,
+) -> String {
+    // Trim raw secret prefixes before UTF8 replacement can change their bytes.
+    let (text, truncated) =
+        crate::native_v2_delivery::command::diagnostic_text(bytes, truncated, credential.expose());
+    let encoded = credential_segment(credential.expose());
+    let (text, truncated) =
+        crate::native_v2_delivery::command::diagnostic_text(text.into_bytes(), truncated, &encoded);
+    let mut text = text.replace(char::is_control, " ");
+    if truncated {
+        text.push_str(" [truncated]");
+    }
+    text
+}
+
+// Match the request encoder, including slash and percent escapes, without changing its URL.
+fn credential_segment(token: &str) -> String {
+    let mut url = Url::parse("https://redacted.invalid/").expect("static hierarchical URL");
+    url.path_segments_mut()
+        .expect("HTTP URL supports path segments")
+        .push(token);
+    url.path()[1..].to_owned()
+}
+
+async fn response_bytes(
+    mut response: reqwest::Response,
+    credential: SourceDeliveryCredential<'_>,
+) -> Result<Vec<u8>, SourceDeliveryError> {
     if response
         .content_length()
         .is_some_and(|length| length > RESPONSE_LIMIT as u64)
@@ -219,9 +310,14 @@ async fn response_bytes(mut response: reqwest::Response) -> Result<Vec<u8>, Sour
             "GitLab response exceeded its byte bound",
         ));
     }
+    let source = response.url()[..Position::AfterPath].to_owned();
     let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| {
-        SourceDeliveryError::api(None, "GitLab response transport failed").temporary()
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        transport_failure(
+            format!("GitLab API response from {source} transport failed"),
+            error,
+            credential,
+        )
     })? {
         if bytes.len().saturating_add(chunk.len()) > RESPONSE_LIMIT {
             return Err(SourceDeliveryError::api(
