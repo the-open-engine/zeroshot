@@ -100,8 +100,8 @@ directly.
 
 Delivery preserves review identity across retries and confirms the integrated revision before
 reporting a merge. Comment retries reuse the original publication; captured MR scopes refuse stale
-base/head revisions. Required GitLab merge trains and synthetic merged-results pipelines remain
-pending.
+base/head revisions. Required GitLab merge trains remain pending; synthetic merged-results
+pipelines do not prove required CI for the captured head.
 
 The GitLab adapter makes slash-leading generated prose literal with a Markdown backslash escape,
 including endpoint descriptions such as `/health returns 200` and quick-action-looking text such as
@@ -118,6 +118,16 @@ to an existing MR, so GitLab's push processing cannot mark it draft from Zerosho
 Creation, refresh, and confirmation use the same canonical metadata, including for custom graphs.
 Refresh replaces only the generated markers' contents and preserves surrounding human text. A draft
 deliberately applied after creation keeps its existing title and draft status during refresh.
+
+GitLab `--pr` readiness, human-review handoff and `--ship` merging use the same required-CI policy.
+When the project's **Pipelines must succeed** setting (`only_allow_merge_if_pipeline_succeeds`) is
+explicitly `false`, CI is `NotRequired`: an absent, pending, running, successful, failed, skipped or
+canceled optional pipeline does not gate delivery. This never reports optional CI as `Passed`, and
+projects without CI gain no new wait. When the setting is `true`, missing or running captured-head
+CI stays pending, successful CI passes, failed CI follows the repair path, and skipped CI passes
+only if the project explicitly allows it. Missing or unknown policy cannot bypass CI. Drafts,
+conflicts, discussion policy, human approval for merging, and other forge gates still apply;
+merge submission remains SHA-guarded and requires authoritative confirmation of the merged revision.
 
 Resuming accepts intentional commits pushed to the run branch. If the complete restored candidate
 already matches its published tree and no merge is pending, delivery reuses that commit without another

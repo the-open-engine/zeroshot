@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "zeroshot": {
+      "type": "http",
+      "url": "https://api.app.zeroshot.sh/mcp"
+    }
+  }
+}

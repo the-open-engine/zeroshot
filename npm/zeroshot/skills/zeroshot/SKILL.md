@@ -9,7 +9,20 @@ Zeroshot executes an explicit graph of software agents. Workers make changes; in
 judge the evidence, and the graph decides when to repair or deliver. A successful run means the
 graph reached its declared outcome; it does not always mean a pull request was created or merged.
 
-Use the installed CLI help as the exact contract when commands differ from this overview.
+Use the connected server's tool schemas for MCP calls and installed CLI help for CLI commands.
+
+## Choose access
+
+Keep execution target and transport separate. An explicit MCP or plugin request uses the connected
+Zeroshot server; if disconnected, help the user connect it rather than switching to CLI or local
+execution. An explicit CLI request, including `--target platform`, keeps native CLI login and needs
+no MCP connection. Otherwise use the available access for the user's chosen target. Never turn a
+Platform request into local execution because remote access is missing.
+
+For MCP, use Shape the task and Platform through MCP below. The remaining command examples apply
+to CLI access. Use the server's logical tool names; discover their client-qualified names instead
+of assuming a prefix such as `mcp__zeroshot__`. If plugin and user-scope copies of this skill both
+exist, follow one workflow and submit once.
 
 ## Shape the task
 
@@ -24,6 +37,11 @@ If an unresolved product choice would materially change the outcome, propose the
 interpretation and ask one focused question. Do not submit while that decision remains unanswered.
 Suggest separate tasks only for independently useful outcomes or real prerequisites.
 
+A browser chat has no implied checkout. Use repository context supplied by the host, attachments,
+or the user, and ask for missing evidence needed to shape the task. Do not claim to have inspected
+unavailable files or invent a source revision. A plan can remain a draft while execution waits for
+the required context.
+
 When the work is vague or large enough to need agreed acceptance criteria, suggest planning it first
 with the separate `zeroshot-plan` skill and let the user choose; do not start planning unasked. When
 a plan file exists (`.zeroshot/plans/<id>.md`), use its Goal, Context, Acceptance criteria,
@@ -36,6 +54,47 @@ together as a stack on Platform (see Submit a stack).
 Never start a Zeroshot run merely because the skill is available. The user must ask to use Zeroshot.
 A worker already executing inside a Zeroshot run should perform its assigned work directly, not start
 another run. A failed Platform run does not authorize silently implementing the task locally.
+
+## Platform through MCP
+
+1. Prefer an existing profile. Use `list_profiles` and `get_profile` in the intended user or org
+   scope; inspect its input schema, runtime, and delivery behavior. `get_authoring_catalog` supplies
+   authoring schemas, templates, and workspace identity. If a graph needs changing, validate the
+   concrete graph/runtime with `validate_profile`; use `save_profile` only when saving is requested.
+2. Obtain the exact repository, branch, and committed revision, plus input matching the selected
+   profile. The remote run receives that revision, not local uncommitted files. Confirm only
+   unresolved source or delivery choices; a request to run an agreed profile already authorizes its
+   agreed delivery. Never push missing source or change delivery merely to make submission work.
+3. Use `list_connections` to check required named connections in the relevant scope. Missing
+   provider credentials lead to [Platform Connections](https://app.zeroshot.sh), not secret values in
+   chat or tool arguments. `start_github_connection` and `start_github_installation` return browser
+   setup URLs when that setup is requested. `check_connection` may refresh stored credentials; it
+   is not a read-only inspection. A saved environment can be inspected with `get_environment`; use
+   the submission schema's concrete `environment` or separate `environmentRef` when needed.
+4. Submit with `submit_profile_run` using `profile: {scope, name}`, title, `initialInput`, source,
+   and a stable nonsecret `submissionKey`. Use `submit_run` for a concrete validated graph/runtime
+   when no saved profile fits. Its schema nests the authored definition under `submission`; do not
+   wrap either tool in a generic `request` or `action`. Run IDs may be omitted. Retain the complete
+   submitted payload and key. If the response is lost, replay those identical values to recover the
+   original run receipt; do not invent a new key or require a client-generated run ID. If replay
+   cannot establish acceptance, report the uncertainty and stop rather than submitting new work.
+5. Keep the returned `runId`. Use `get_run`, `wait_for_run` with its status cursor, and
+   `read_run_logs` with its history cursor. Wait accepts at most 30 seconds; timeout or client
+   disconnect leaves the run running. Read bounded history pages until the required output is
+   available, keeping status, history, and checkpoint cursors separate. Report terminal outcome and
+   observed delivery receipts; admission alone is not completion.
+6. `list_run_checkpoints` inspects recovery choices. Call `resume_run` only for requested recovery,
+   with the chosen `from` selector and a fresh explicit UUIDv7 `successorRunId`; retain both for
+   identical retries. Generate the UUID with host tooling or use one supplied by the user; when
+   neither is available, direct the user to Platform recovery. Never reuse the original run ID as
+   its successor. Use `stop_run` or `discard_run_workspace` only when the user intends that action.
+
+The same server exposes typed environment and Memory operations. Before those writes, capture
+`workspace_id` from `get_authoring_catalog` and supply current revisions where required; do not
+guess them. Native organization and human-only Memory permissions still apply. Use each discovered
+tool schema for its fields, and never send inline provider or Git credentials. MCP does not submit
+stacks, resolve issue/PR URLs into pinned source, initialize local history, or expose ACP. Offer the
+supported CLI path when the user asks for one of those workflows; do not claim remote support.
 
 ## Choose the target
 

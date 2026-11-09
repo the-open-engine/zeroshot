@@ -92,6 +92,49 @@ it('keeps npm-only changes out of native, Python, and docs checks', () => {
   });
 });
 
+it('runs package generation checks for canonical remote skills and both client catalogs', () => {
+  for (const name of ['zeroshot', 'zeroshot-plan', 'zeroshot-graph-design']) {
+    assert.deepEqual(selections(classifyPaths([`npm/zeroshot/skills/${name}/SKILL.md`])), {
+      native: false,
+      python: false,
+      tooling: true,
+      npm: true,
+      docs: false,
+    });
+  }
+  for (const filename of [
+    'plugins/metadata.json',
+    'plugins/zeroshot-openai/.codex-plugin/plugin.json',
+    'plugins/zeroshot-claude/.mcp.json',
+    '.agents/plugins/marketplace.json',
+    '.claude-plugin/marketplace.json',
+  ]) {
+    assert.deepEqual(
+      selections(classifyPaths([filename])),
+      {
+        native: false,
+        python: false,
+        tooling: true,
+        npm: false,
+        docs: false,
+      },
+      filename
+    );
+  }
+  const workflow = yaml.load(
+    fs.readFileSync(path.join(projectRoot, '.github/workflows/ci.yml'), 'utf8')
+  );
+  const quick = workflow.jobs['quick-check'].steps;
+  assert.equal(
+    quick.find((step) => step.uses?.startsWith('actions/checkout@')).with['fetch-depth'],
+    0
+  );
+  const gate = quick.find((step) => step.name === 'Check generated plugins and content versions');
+  assert.equal(gate.env.PLUGIN_BASE_SHA, '${{ github.event.pull_request.base.sha }}');
+  assert.equal(gate.run, 'node scripts/plugins.js check --base "$PLUGIN_BASE_SHA"');
+  assert.ok(quick.some((step) => step.run?.includes('tests/tooling/plugins.test.js')));
+});
+
 it('keeps ordinary documentation changes in the strict docs lane', () => {
   assert.equal(classifyPath('docs/concepts/targets.md'), 'docs');
   assert.deepEqual(selections(classifyPaths(['docs/concepts/targets.md'])), {

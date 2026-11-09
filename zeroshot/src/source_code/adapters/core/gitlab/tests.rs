@@ -4,6 +4,8 @@ use reqwest::{Method, StatusCode};
 use serde_json::{Value, json};
 use super::*;
 
+#[path = "ci_tests.rs"]
+mod ci_tests;
 #[path = "feedback_tests.rs"]
 mod feedback_tests;
 #[path = "http_fixture.rs"]

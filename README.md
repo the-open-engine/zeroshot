@@ -12,6 +12,9 @@
 npm install -g @the-open-engine-company/zeroshot
 ```
 
+Use Zeroshot in ChatGPT, Codex, or Claude with the [plugin and MCP connection](docs/guides/plugins.md);
+the Zeroshot CLI is optional for Platform workflows.
+
 Single agents have a reliability ceiling. As context grows and complexity compounds, requirements
 get buried, assumptions go unchallenged, and shortcuts start to accumulate. The agent will
 optimize for completion and lose track of what correctness requires.

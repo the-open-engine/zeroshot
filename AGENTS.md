@@ -35,6 +35,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `zeroshot update`; only the exact value `1` enables it. Executables still install/update, existing
   skills stay untouched, and updates skip skill downloads. Keep default managed-copy protections
   when the opt-out is unset.
+- The remote OpenAI and Claude plugin packages under `plugins/zeroshot-*` contain unchanged copies
+  of the canonical run, plan, and graph-design skills. `npm run plugins:generate` owns those folders
+  and both marketplace catalogs; never edit generated files. Keep each skill self-contained so npm
+  installation, native self-update, and the four existing skill release assets keep their formats.
+  `plugins/metadata.json` owns one plugin content version for both client packages. Increase it when
+  emitted package content changes; `plugins:check -- --base SHA` verifies the fetched exact PR base
+  and fails on missing history. This client-cache version adds no runtime release tag or workflow.
 - The target image is `ghcr.io/the-open-engine/zeroshot-target`.
 - The Python distribution is `the-open-engine-zeroshot`; its import package remains `zeroshot`.
 - Python SDK tags are `zeroshot-python-vZEROSHOT_SDK` and package versions are
@@ -434,7 +441,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   `GH_HOST`/`GITLAB_HOST`, defaulting only to GitHub.com/GitLab.com when absent. Unknown hosts require native configured
   identity or paired `--source-provider`/`--source-base-url` overrides. Shared Git transport remains
   independent of forge API credentials. GitLab uses bounded HTTP effects and synchronous SHA-guarded
-  merges; required merge trains remain pending. Synthetic pipeline SHAs do not prove captured-head CI.
+  merges; required merge trains remain pending. GitLab readiness, approval handoff and merge share
+  required-CI policy: explicit `only_allow_merge_if_pipeline_succeeds: false` yields `NotRequired`
+  regardless of head-pipeline presence or status, never `Passed`. Required or unknown policy needs
+  captured-head CI evidence; absent/running CI stays pending and failure/skipped rules still apply.
+  Synthetic pipeline SHAs do not prove required captured-head CI. All non-CI gates remain authoritative.
   Empty generated delivery bindings acquire the adapter's default connection only after source or
   comment destination selection. Managed GitHub.com token/file fallback never authorizes another instance.
   Adapters own optional canonical review/commit receipt links and comment permalink validation.

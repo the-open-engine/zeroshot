@@ -50,6 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
@@ -102,6 +103,12 @@ jobs:
           tests/tooling/ci-*.test.js
           tests/tooling/greptile-gate.test.js
           tests/tooling/release-contract.test.js
+          tests/tooling/plugins.test.js
+
+      - name: Check generated plugins and content versions
+        env:
+          PLUGIN_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/plugins.js check --base "$PLUGIN_BASE_SHA"
 
   readme-check:
     name: README

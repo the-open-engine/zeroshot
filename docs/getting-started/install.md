@@ -4,6 +4,9 @@ description: 'Install the zeroshot CLI and its agent skills, connect Cloud, open
 
 # Install Zeroshot
 
+To use Zeroshot from ChatGPT, Codex, or Claude without installing this CLI,
+[install the plugin and connect MCP](../guides/plugins.md).
+
 Install the `zeroshot` command and its agent skills through the npm delivery package, which requires
 Node.js 18 or newer. The installer selects the release target declared for the current system and
 checks the downloaded archive against `SHA256SUMS` before writing the native executable.
