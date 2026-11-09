@@ -131,9 +131,10 @@ where
     async fn review_cache_namespace(
         &self,
         target: Option<&str>,
+        github_token: Option<&str>,
     ) -> Result<Option<String>, NativeV2CliError> {
         self.connector
-            .review_cache_namespace(require_named_target(target)?)
+            .review_cache_namespace(require_named_target(target)?, github_token)
             .await
     }
 
@@ -141,10 +142,10 @@ where
         &self,
         target: Option<&str>,
         request: crate::native_v2_review::ReviewResolutionRequest,
-        runtime: &openengine_cluster_protocol::RuntimePlan,
+        access: crate::native_v2_review::ReviewResolutionAccess<'_>,
     ) -> Result<crate::native_v2_review::PreparedReview, NativeV2CliError> {
         self.connector
-            .resolve_review(require_named_target(target)?, request, runtime)
+            .resolve_review(require_named_target(target)?, request, access)
             .await
     }
 

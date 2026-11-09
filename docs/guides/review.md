@@ -49,7 +49,8 @@ Publication credentials belong to the native node and are not declared on the re
 
 Local metadata resolution accepts `GH_TOKEN`, `GITHUB_TOKEN`, or a native GitHub CLI login.
 Named targets resolve metadata through their task-resolution route. Hosted targets use host-owned
-credentials; direct targets require `GH_TOKEN` or `GITHUB_TOKEN` in the invoking environment.
+credentials; direct targets need the invoking shell's `GH_TOKEN`, which the CLI sends only with
+`--forward-gh-token`.
 Targets must advertise task resolution and comment delivery; an older target refuses before submission.
 
 ## Run the review

@@ -10,13 +10,14 @@ impl TargetHttpControlAuthority {
     pub(in crate::native_v2_target::controller_authority) async fn review_snapshot_namespace(
         &self,
         target: &TargetRecord,
+        github_token: Option<&str>,
     ) -> Result<String, TargetAuthorityError> {
         let credential = match (&target.access, &self.machine) {
             (TargetAccess::Direct, _) => {
                 self.require_no_machine_for_direct()?;
-                std::env::var("GH_TOKEN")
-                    .or_else(|_| std::env::var("GITHUB_TOKEN"))
-                    .map_err(|_| authority_error("direct task resolution requires GH_TOKEN"))?
+                github_token
+                    .ok_or_else(|| authority_error(super::DIRECT_REVIEW_NEEDS_GH_TOKEN))?
+                    .to_owned()
             }
             (TargetAccess::Hosted { .. }, Some(machine)) => {
                 format!("{}:{:?}", machine.api_key, machine.organization)

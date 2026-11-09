@@ -1011,8 +1011,13 @@ Options:
   -d, --detach
           Return after atomic submission instead of polling stack status
 
+      --forward-gh-token
+          Send the GH_TOKEN from this shell with the stack submission.
+
+          Without this flag the target uses its own stored GitHub connection, and a GH_TOKEN in this shell is not sent. Fails when GH_TOKEN is unset.
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 ```
 
 #### `zeroshot stack status`
@@ -1176,6 +1181,11 @@ Options:
           Validate and materialize the run without submitting it or running preparation scripts.
 
           Remote profiles still require target access. This does not check dependency installation or connection availability.
+
+      --forward-gh-token
+          Send the GH_TOKEN from this shell with the submission.
+
+          Without this flag the target uses its own stored GitHub connection, and a GH_TOKEN in this shell is not sent. Fails when GH_TOKEN is unset.
 
       --delivery <MODE>
           Template delivery mode. Defaults to pull_request for software-change, comment for issue-review, pr-review and code-review, otherwise none
@@ -1460,6 +1470,11 @@ Options:
 
       --from-checkpoint <ID>
           Restore this checkpoint and continue from its saved graph boundary
+
+      --forward-gh-token
+          Send the GH_TOKEN from this shell with the resume.
+
+          Without this flag the target uses its own stored GitHub connection, and a GH_TOKEN in this shell is not sent. Fails when GH_TOKEN is unset.
 
   -h, --help
           Print help (see a summary with '-h')

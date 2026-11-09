@@ -240,7 +240,7 @@ impl NativeV2CliBackend for LocalCliBackend {
         &self,
         target: Option<&str>,
         request: crate::native_v2_review::ReviewResolutionRequest,
-        _runtime: &openengine_cluster_protocol::RuntimePlan,
+        _access: crate::native_v2_review::ReviewResolutionAccess<'_>,
     ) -> Result<crate::native_v2_review::PreparedReview, NativeV2CliError> {
         require_local(target)?;
         let token = super::review_token(&self.current_directory).await?;

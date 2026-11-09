@@ -8,19 +8,23 @@ use super::{RequestCapabilities, TargetHttpControlAuthority};
 use super::contract::{authority_error, read_success_json_with_limit};
 use crate::native_v2_target::{TargetAccess, TargetAuthorityError, TargetRecord, TargetSessionPurpose};
 
+/// Direct targets resolve reviews with the client's token, which the CLI sends only on opt-in.
+const DIRECT_REVIEW_NEEDS_GH_TOKEN: &str =
+    "direct task resolution needs GH_TOKEN; pass --forward-gh-token to send it";
+
 impl TargetHttpControlAuthority {
     pub(super) async fn resolve_review_request(
         &self,
         target: &TargetRecord,
         request: ReviewResolutionRequest,
-        runtime: &openengine_cluster_protocol::RuntimePlan,
+        resolution: zeroshot_engine::native_v2_review::ReviewResolutionAccess<'_>,
     ) -> Result<PreparedReview, TargetAuthorityError> {
         let (controller, access) = self
             .controller_access_inner(
                 target,
                 TargetSessionPurpose::General,
                 RequestCapabilities {
-                    runtime: Some(runtime),
+                    runtime: Some(resolution.runtime),
                     task_resolution: true,
                     ..Default::default()
                 },
@@ -30,10 +34,11 @@ impl TargetHttpControlAuthority {
             .task_resolution
             .ok_or_else(|| authority_error("target does not advertise task resolution"))?;
         let body = if matches!(target.access, TargetAccess::Direct) {
-            let token = std::env::var("GH_TOKEN")
-                .or_else(|_| std::env::var("GITHUB_TOKEN"))
-                .map_err(|_| authority_error("direct task resolution requires GH_TOKEN"))?;
-            super::contract::validate_secret(&token, "GitHub credential")?;
+            // The CLI decides whether the shell token may leave it; never read it here.
+            let token = resolution
+                .github_token
+                .ok_or_else(|| authority_error(DIRECT_REVIEW_NEEDS_GH_TOKEN))?;
+            super::contract::validate_secret(token, "GitHub credential")?;
             serde_json::json!({"request":request,"githubToken":token})
         } else {
             serde_json::to_value(request)

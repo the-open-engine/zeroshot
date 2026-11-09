@@ -171,10 +171,14 @@ where
 {
     type Transport = D::Transport;
 
-    async fn review_cache_namespace(&self, name: &str) -> Result<Option<String>, NativeV2CliError> {
+    async fn review_cache_namespace(
+        &self,
+        name: &str,
+        github_token: Option<&str>,
+    ) -> Result<Option<String>, NativeV2CliError> {
         let target = self.target(name)?;
         self.authority
-            .review_cache_namespace(&target)
+            .review_cache_namespace(&target, github_token)
             .await
             .map_err(|error| self.authority.redact_error(error).into_cli(&target))
     }
@@ -183,12 +187,12 @@ where
         &self,
         name: &str,
         request: zeroshot_engine::native_v2_review::ReviewResolutionRequest,
-        runtime: &openengine_cluster_protocol::RuntimePlan,
+        access: zeroshot_engine::native_v2_review::ReviewResolutionAccess<'_>,
     ) -> Result<zeroshot_engine::native_v2_review::PreparedReview, NativeV2CliError> {
         validate_target_name(name).map_err(cli_target_error)?;
         let target = self.registry.get(name).map_err(cli_target_error)?;
         self.authority
-            .resolve_review(&target, request, runtime)
+            .resolve_review(&target, request, access)
             .await
             .map_err(|error| self.authority.redact_error(error).into_cli(&target))
     }

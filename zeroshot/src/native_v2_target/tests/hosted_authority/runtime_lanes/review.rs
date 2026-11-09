@@ -37,7 +37,14 @@ async fn hosted_task_resolution_checks_the_authored_runtime_before_access_tokens
         let (record, authority) = authenticated_authority(&root, &target.origin).await;
         let runtime = run_request(binding).submission.runtime;
         let error = authority
-            .resolve_review(&record, resolution_request(), &runtime)
+            .resolve_review(
+                &record,
+                resolution_request(),
+                zeroshot_engine::native_v2_review::ReviewResolutionAccess {
+                    runtime: &runtime,
+                    github_token: None,
+                },
+            )
             .await
             .assert_error();
         assert_eq!(error.to_string(), expected);
@@ -69,7 +76,10 @@ async fn direct_task_resolution_checks_the_authored_runtime_before_source_creden
             .resolve_review(
                 &direct_target(target.origin.clone()),
                 resolution_request(),
-                &runtime,
+                zeroshot_engine::native_v2_review::ReviewResolutionAccess {
+                    runtime: &runtime,
+                    github_token: Some("direct-fixture-token"),
+                },
             )
             .await
             .assert_error();
@@ -112,7 +122,14 @@ async fn hosted_resolution_uses_target_authority_and_enforces_its_response_bound
             .submission
             .runtime;
         let result = authority
-            .resolve_review(&record, resolution_request(), &runtime)
+            .resolve_review(
+                &record,
+                resolution_request(),
+                zeroshot_engine::native_v2_review::ReviewResolutionAccess {
+                    runtime: &runtime,
+                    github_token: None,
+                },
+            )
             .await;
         if response == "valid" {
             let prepared = result.assert_value();
@@ -133,39 +150,12 @@ async fn hosted_resolution_uses_target_authority_and_enforces_its_response_bound
 }
 
 #[tokio::test]
-async fn direct_resolution_uses_isolated_credentials_and_preserves_target_authority() {
-    const ORIGIN: &str = "ZEROSHOT_TEST_DIRECT_REVIEW_ORIGIN";
-    const MODE: &str = "ZEROSHOT_TEST_DIRECT_REVIEW_MODE";
-    const COMPLETE: &str = "direct review assertions completed";
-    if let Ok(origin) = std::env::var(ORIGIN) {
-        let root = temp_root();
-        let authority = test_http_authority(root.path("refresh-locks"));
-        let record = direct_target(origin);
-        let mode = std::env::var(MODE).assert_value();
-        let namespace = authority.review_cache_namespace(&record).await;
-        if mode == "missing" {
-            assert!(namespace.is_err());
-        } else {
-            assert_eq!(namespace.assert_value().assert_value().len(), 64);
-        }
-        let runtime = run_request(json!({"kind":"comment_delivery"}))
-            .submission
-            .runtime;
-        let resolved = authority
-            .resolve_review(&record, resolution_request(), &runtime)
-            .await;
-        if matches!(mode.as_str(), "missing" | "invalid") {
-            assert!(resolved.is_err());
-        } else {
-            assert_eq!(
-                resolved.assert_value().source.repository.as_str(),
-                "acme/project"
-            );
-        }
-        println!("{COMPLETE}");
-        return;
-    }
-    for mode in ["primary", "fallback", "missing", "invalid"] {
+async fn direct_resolution_sends_only_the_token_the_cli_supplies() {
+    for (token, accepted) in [
+        (Some("direct-fixture-token"), true),
+        (None, false),
+        (Some("invalid\ncredential"), false),
+    ] {
         let target = RecordingTarget::spawn(|request, _, _| match (request.method.as_str(), request.path.as_str()) {
             DISCOVERY => ("200 OK", serde_json::to_string(&TargetDiscoveryDocument::direct(TargetAuthentication::None).with_comment_delivery().with_task_resolution()).assert_value()),
             ("POST", "/native-v2/tasks/resolve") => {
@@ -176,36 +166,41 @@ async fn direct_resolution_uses_isolated_credentials_and_preserves_target_author
             }
             _ => unexpected(),
         }).await;
-        let mut child = tokio::process::Command::new(std::env::current_exe().assert_value());
-        child.args(["--exact", "native_v2_target::tests::hosted_authority::runtime_lanes::review::direct_resolution_uses_isolated_credentials_and_preserves_target_authority", "--nocapture"])
-            .env(ORIGIN, &target.origin).env(MODE, mode).env_remove("GH_TOKEN").env_remove("GITHUB_TOKEN");
-        match mode {
-            "primary" => {
-                child
-                    .env("GH_TOKEN", "direct-fixture-token")
-                    .env("GITHUB_TOKEN", "must-not-win");
+        let root = temp_root();
+        let authority = test_http_authority(root.path("refresh-locks"));
+        let record = direct_target(target.origin.clone());
+        let namespace = authority.review_cache_namespace(&record, token).await;
+        let runtime = run_request(json!({"kind":"comment_delivery"}))
+            .submission
+            .runtime;
+        let resolved = authority
+            .resolve_review(
+                &record,
+                resolution_request(),
+                zeroshot_engine::native_v2_review::ReviewResolutionAccess {
+                    runtime: &runtime,
+                    github_token: token,
+                },
+            )
+            .await;
+        if accepted {
+            assert_eq!(namespace.assert_value().assert_value().len(), 64);
+            assert_eq!(
+                resolved.assert_value().source.repository.as_str(),
+                "acme/project"
+            );
+        } else if token.is_none() {
+            for error in [namespace.assert_error(), resolved.assert_error()] {
+                assert!(error.to_string().contains("--forward-gh-token"), "{error}");
             }
-            "fallback" => {
-                child.env("GITHUB_TOKEN", "direct-fixture-token");
-            }
-            "invalid" => {
-                child.env("GH_TOKEN", "invalid\ncredential");
-            }
-            _ => {}
+        } else {
+            assert!(resolved.is_err());
         }
-        let output = child.output().await.assert_value();
-        assert!(
-            output.status.success(),
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(String::from_utf8_lossy(&output.stdout).contains(COMPLETE));
-        let requests = target.stop();
-        let posts = requests
+        let posts = target
+            .stop()
             .iter()
             .filter(|request| request.path == "/native-v2/tasks/resolve")
             .count();
-        assert_eq!(posts, usize::from(matches!(mode, "primary" | "fallback")));
+        assert_eq!(posts, usize::from(accepted));
     }
 }

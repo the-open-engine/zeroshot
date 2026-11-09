@@ -5,6 +5,10 @@ use super::*;
 
 use crate::native_v2_cli::tests::support::prepared_review_fixture as prepared;
 
+fn no_environment(_: &str) -> Option<OsString> {
+    None
+}
+
 fn identity() -> SnapshotIdentity {
     SnapshotIdentity {
         request: ReviewResolutionRequest {
@@ -318,14 +322,28 @@ async fn cached_preparation_never_refetches_or_silently_replaces_corrupted_state
     let (run, profile) = run_and_profile();
     let backend = crate::native_v2_cli::tests::support::FakeBackend::with_review(prepared());
     let first = cache
-        .prepare(&run, &profile.runtime, &backend)
+        .prepare(
+            &run,
+            &backend,
+            ReviewResolutionAccess {
+                runtime: &profile.runtime,
+                github_token: None,
+            },
+        )
         .await
         .assert_value();
     assert_eq!(backend.calls().len(), 1);
     let unavailable = crate::native_v2_cli::tests::support::FakeBackend::default();
     assert_eq!(
         cache
-            .prepare(&run, &profile.runtime, &unavailable)
+            .prepare(
+                &run,
+                &unavailable,
+                ReviewResolutionAccess {
+                    runtime: &profile.runtime,
+                    github_token: None
+                }
+            )
             .await
             .assert_value(),
         first
@@ -334,7 +352,14 @@ async fn cached_preparation_never_refetches_or_silently_replaces_corrupted_state
     for corrupt in ["{", r#"{"identity":null,"prepared":null}"#] {
         std::fs::write(&cache.destination, corrupt).assert_value();
         let error = cache
-            .prepare(&run, &profile.runtime, &backend)
+            .prepare(
+                &run,
+                &backend,
+                ReviewResolutionAccess {
+                    runtime: &profile.runtime,
+                    github_token: None,
+                },
+            )
             .await
             .unwrap_err();
         assert!(error.to_string().contains("saved review input is invalid"));
@@ -356,14 +381,28 @@ async fn failed_preparation_leaves_the_submission_key_available_for_a_valid_retr
     let unavailable = crate::native_v2_cli::tests::support::FakeBackend::default();
     assert!(
         cache
-            .prepare(&run, &profile.runtime, &unavailable)
+            .prepare(
+                &run,
+                &unavailable,
+                ReviewResolutionAccess {
+                    runtime: &profile.runtime,
+                    github_token: None
+                }
+            )
             .await
             .is_err()
     );
     assert!(cache.read().assert_value().is_none());
     let backend = crate::native_v2_cli::tests::support::FakeBackend::with_review(prepared());
     let snapshot = cache
-        .prepare(&run, &profile.runtime, &backend)
+        .prepare(
+            &run,
+            &backend,
+            ReviewResolutionAccess {
+                runtime: &profile.runtime,
+                github_token: None,
+            },
+        )
         .await
         .assert_value();
     assert_eq!(snapshot, prepared());
@@ -453,7 +492,7 @@ async fn local_submission_reuses_frozen_input_and_refuses_changed_intent_before_
     let key = IdempotencyKey::new(format!("cache-test-{}", uuid::Uuid::now_v7())).assert_value();
     run.submission_key = Some(key.clone());
     let backend = crate::native_v2_cli::tests::support::FakeBackend::with_review(prepared());
-    let original = resolve(&run, &profile, &backend)
+    let original = resolve(&run, &profile, &backend, &no_environment)
         .await
         .assert_value()
         .review
@@ -467,7 +506,7 @@ async fn local_submission_reuses_frozen_input_and_refuses_changed_intent_before_
     changed.initial_input["context"]["body"] = json!("edited after first resolution");
     let backend = crate::native_v2_cli::tests::support::FakeBackend::with_review(changed);
     assert_eq!(
-        resolve(&run, &profile, &backend)
+        resolve(&run, &profile, &backend, &no_environment)
             .await
             .assert_value()
             .review,
@@ -475,7 +514,10 @@ async fn local_submission_reuses_frozen_input_and_refuses_changed_intent_before_
     );
     assert!(backend.calls().is_empty());
     run.title = openengine_cluster_protocol::RunTitle::new("Changed authored title").assert_value();
-    let error = resolve(&run, &profile, &backend).await.err().assert_value();
+    let error = resolve(&run, &profile, &backend, &no_environment)
+        .await
+        .err()
+        .assert_value();
     assert!(
         error
             .to_string()
@@ -497,7 +539,7 @@ async fn ordinary_input_skips_metadata_and_unavailable_cache_authority_is_not_in
     let backend = crate::native_v2_cli::tests::support::FakeBackend::with_review(prepared());
     run.input = RunInput::File("caller-owned-input.json".into());
     assert!(
-        resolve(&run, &profile, &backend)
+        resolve(&run, &profile, &backend, &no_environment)
             .await
             .assert_value()
             .review
@@ -507,7 +549,7 @@ async fn ordinary_input_skips_metadata_and_unavailable_cache_authority_is_not_in
     run.input = RunInput::TaskFrom(identity().request.url);
     run.submission_key = Some(IdempotencyKey::new("no-cache-authority").assert_value());
     assert_eq!(
-        resolve(&run, &profile, &backend)
+        resolve(&run, &profile, &backend, &no_environment)
             .await
             .assert_value()
             .review,
@@ -524,7 +566,11 @@ async fn invalid_workspace_and_blocked_cache_root_fail_before_metadata_resolutio
     run.target = None;
     run.cwd = Some(directory.path().join("absent"));
     run.submission_key = Some(IdempotencyKey::new("invalid-workspace").assert_value());
-    assert!(resolve(&run, &profile, &backend).await.is_err());
+    assert!(
+        resolve(&run, &profile, &backend, &no_environment)
+            .await
+            .is_err()
+    );
     assert!(backend.calls().is_empty());
     let blocked = directory.path().join("blocked-cache");
     std::fs::write(&blocked, "caller-owned").assert_value();

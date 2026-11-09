@@ -172,6 +172,44 @@ def test_exact_request_forwards_folder_and_source_only_connection(fake_native: P
         assert arguments[arguments.index("--repository") + 1] == request.repository
 
 
+@pytest.mark.parametrize("forward", [False, True])
+def test_named_submissions_forward_gh_token_only_on_opt_in(
+    fake_native: Path, forward: bool
+) -> None:
+    request = StackRequest(
+        title="Release",
+        repository="owner/repo",
+        branch="main",
+        profile="org:software-change",
+        delivery="merge",
+        expires_at="2026-09-11T00:00:00Z",
+        runs={"build": StackRun(input={"task": "build"})},
+    )
+
+    async def exercise() -> None:
+        async with Client(
+            target=HostedTarget("platform"), runtime=runtime(), forward_github_token=forward
+        ) as client:
+            await client.submit("ship it", repository="owner/repo", branch="main")
+            await client.submit_stack(request)
+
+    asyncio.run(exercise())
+    submissions = [
+        item["args"]
+        for item in read_invocations(fake_native)
+        if item["args"][0] == "run" or item["args"][:2] == ["stack", "submit"]
+    ]
+    assert len(submissions) == 3
+    for arguments in submissions:
+        assert ("--forward-gh-token" in arguments) is forward
+
+
+def test_forwarding_gh_token_requires_a_named_target() -> None:
+    with pytest.raises(InvalidRequestError) as raised:
+        Client(forward_github_token=True)
+    assert raised.value.code == "target.named_required"
+
+
 def direct_client(fake_native: Path) -> Client:
     return Client(
         target=DirectTarget("http://127.0.0.1:8080"),

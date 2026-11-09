@@ -143,6 +143,8 @@ pub struct RunCommand {
     pub detach: bool,
     pub validate_only: bool,
     pub submission_key: Option<IdempotencyKey>,
+    /// Send the caller's `GH_TOKEN` with a named-target submission.
+    pub forward_github_token: bool,
 }
 
 /// Explicit instance selection for a credential-free Git remote.
@@ -263,6 +265,8 @@ pub struct StackSubmitCommand {
     pub file: PathBuf,
     pub detach: bool,
     pub submission_key: IdempotencyKey,
+    /// Send the caller's `GH_TOKEN` with the stack submission.
+    pub forward_github_token: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -297,6 +301,8 @@ pub struct RunSelector {
 pub struct RunResumeCommand {
     pub run: RunSelector,
     pub from: Option<RunResumeFrom>,
+    /// Send the caller's `GH_TOKEN` with a named-target resume.
+    pub forward_github_token: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -591,6 +597,7 @@ pub trait NativeV2CliBackend: Send + Sync {
     async fn review_cache_namespace(
         &self,
         target: Option<&str>,
+        _github_token: Option<&str>,
     ) -> Result<Option<String>, NativeV2CliError> {
         Ok(target.is_none().then(|| "local".to_owned()))
     }
@@ -599,7 +606,7 @@ pub trait NativeV2CliBackend: Send + Sync {
         &self,
         _target: Option<&str>,
         _request: crate::native_v2_review::ReviewResolutionRequest,
-        _runtime: &openengine_cluster_protocol::RuntimePlan,
+        _access: crate::native_v2_review::ReviewResolutionAccess<'_>,
     ) -> Result<crate::native_v2_review::PreparedReview, NativeV2CliError> {
         Err(NativeV2CliError::Target(
             "target does not advertise task resolution".to_owned(),
