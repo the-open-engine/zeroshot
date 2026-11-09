@@ -1296,6 +1296,15 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   without inventing global choices. An explicit empty catalog offers none. Omitted/null sizes use
   the target default; unavailable authored sizes stay visible and unchanged. Hosts enforce
   availability and billing; descriptors are not profile data.
+- The native template catalog exposes each complete authored default runtime, a concise description,
+  and contained connection requirements derived through the harness registry. Code review preserves
+  its supplied mixed Claude/Codex agent plan and native source-neutral delivery; catalog defaults omit
+  target-owned size and enable checkpoints.
+  `workspace::profile_setup` materializes hosted provider access after caller edits without saving,
+  resolving secrets or replacing custom declarations. `setupLanes` exports the same registry's accepted
+  provider field sets. Host-selected setup validates and materializes through the same registry as
+  bootstrap/admission; local contributions remain unavailable to default and target setup.
+  New graph/runtime definitions need no template-specific host wizard registry.
 - Runtime schemas/workers come from native contracts in `profile_ui/catalog.rs`, compiled under
   `workspace`. Git delivery keeps its fixed contracts and explicit pull-request/merge modes. Model suggestions are non-authoritative;
   identifiers remain opaque. Missing harness/provider links to runtime settings. JSON stays lossless.
@@ -1384,9 +1393,10 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   descriptors inherited by concurrent process spawns.
 - Python test doubles use `openengine_cluster_testkit::fixture::python3_script`, which resolves
   the test PATH's actual interpreter before entering a pinned or cleared child environment.
-- `.opcore.json` owns the full-source Opcore policy. The reusable `.github/workflows/opcore.yml`
-  runs the Fast provider and Cargo with warnings denied in merge-group/manual full CI, except
-  for root-README-only changes identified by the shared CI classifier. Cargo uses the complete checkout
+- `.opcore.json` owns the full-source Opcore policy. PR quick checks run checksum-pinned Opcore Fast
+  before queue admission. The reusable `.github/workflows/opcore.yml` checks the actual merge candidate
+  with Fast and Cargo with warnings denied in merge-group/manual full CI. Both Fast passes skip
+  root-README-only changes identified by the shared CI classifier. Cargo uses the complete checkout
   because Opcore's Rust snapshot omits embedded Python assets. The two exact PowerShell exclusions
   reflect unsupported parsing; the Windows native CI lane still runs those scripts.
 - Preserve bounded values, explicit overflow, cancellation safety, and exact source provenance at

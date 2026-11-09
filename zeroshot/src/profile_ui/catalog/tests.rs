@@ -178,3 +178,48 @@ async fn decision_worker_uses_the_native_contract_and_keeps_the_model_caller_own
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn complete_template_defaults_admit_and_expose_derived_access() {
+    for template in templates().assert_value() {
+        let graph: GraphSpec = serde_json::from_value(template["graph"].clone()).assert_value();
+        let runtime: RuntimePlan =
+            serde_json::from_value(template["runtime"].clone()).assert_value();
+        assert!(runtime.workspace_checkpoints);
+        assert!(!template["description"].as_str().assert_value().is_empty());
+        super::super::validate_profile(&graph, &runtime)
+            .await
+            .assert_value();
+        let setup = super::super::profile_setup(json!({"runtime":runtime})).assert_value();
+        assert_eq!(template["requirements"], setup["requirements"]);
+    }
+}
+
+#[test]
+fn code_review_preserves_the_supplied_agent_plan_and_native_delivery() {
+    let template = templates()
+        .assert_value()
+        .into_iter()
+        .find(|template| template["name"] == "code-review")
+        .assert_value();
+    let supplied: RuntimePlan = serde_json::from_str(include_str!(
+        "../../../../docs/assets/code-review/runtime.json"
+    ))
+    .assert_value();
+    let mut supplied = serde_json::to_value(supplied).assert_value();
+    supplied["nodes"]["deliver"] = json!({"kind":"comment_delivery"});
+    assert_eq!(template["runtime"]["nodes"], supplied["nodes"]);
+    assert_eq!(template["runtime"]["harness"], supplied["harness"]);
+    assert_eq!(template["runtime"]["provider"], supplied["provider"]);
+    assert_eq!(
+        template["requirements"]["openai"],
+        json!(["OPENAI_API_KEY"])
+    );
+    assert_eq!(
+        template["requirements"]["anthropic"],
+        json!(["ANTHROPIC_API_KEY"])
+    );
+    assert!(template["requirements"].get("github").is_none());
+    assert!(template["runtime"].get("size").is_none());
+    assert!(template["runtime"].get("workspaceCheckpoints").is_none());
+}

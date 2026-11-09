@@ -285,6 +285,25 @@ it('makes README checks mandatory and gates heavy Opcore steps with the shared c
   );
   assert.equal(heavy.length, 5);
   for (const step of heavy) assert.equal(step.if, "steps.paths.outputs.readme_only != 'true'");
+
+  const prSteps = ci.jobs['quick-check'].steps;
+  const fullInstall = opcore.jobs.check.steps.find((step) => step.name === 'Install Opcore');
+  const fullFast = opcore.jobs.check.steps.find(
+    (step) => step.name === 'Check all supported source'
+  );
+  const prInstall = prSteps.find((step) => step.name === fullInstall.name);
+  const prFast = prSteps.find((step) => step.run === fullFast.run);
+  const rustSetup = prSteps.find((step) => step.uses?.startsWith('dtolnay/'));
+  assert.ok(prInstall, 'PR checks must install the pinned checker');
+  assert.ok(prFast, 'PR checks must run the same Fast command as full CI');
+  assert.ok(rustSetup, 'Native PR checks must retain Rust setup');
+  const prGuard = fullFast.if.replace('steps.paths.outputs', 'needs.classify.outputs');
+  assert.equal(prInstall.if, prGuard);
+  assert.equal(prFast.if, prGuard);
+  assert.equal(prInstall.run, fullInstall.run);
+  assert.equal(ci.jobs.classify.outputs.readme_only, '${{ steps.paths.outputs.readme_only }}');
+  assert.ok(prSteps.indexOf(prInstall) < prSteps.indexOf(prFast));
+  assert.ok(prSteps.indexOf(prFast) < prSteps.indexOf(rustSetup));
 });
 
 it(

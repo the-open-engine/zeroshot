@@ -263,6 +263,7 @@ describe('CI efficiency contract', () => {
       'npm',
       'docs',
       'readme',
+      'readme_only',
     ]);
   });
 
