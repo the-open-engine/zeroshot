@@ -97,6 +97,11 @@ impl SourceDeliveryError {
         }
     }
 
+    /// Branch protection or push permission refused a Git command; agent repair cannot change it.
+    pub fn policy_rejected(&self) -> bool {
+        matches!(self, Self::Command(failure) if failure.policy_rejected())
+    }
+
     pub fn retryable_operation(&self) -> bool {
         match self {
             Self::Unavailable => true,
