@@ -1037,6 +1037,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#failure-evidence-and-mapped-executions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure evidence and mapped executions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#resume-event-and-log-streams" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2080,6 +2091,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#failure-evidence-and-mapped-executions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failure evidence and mapped executions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#resume-event-and-log-streams" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2173,6 +2195,30 @@ return after submission:</p>
 <p>A run ID belongs to the controller or target that created it. Pass <code>--target NAME</code> when reading one
 from a named target. Finished status separates graph-authored <code>terminalResult.output</code> from optional
 runtime-confirmed <code>metadata.deliveryReceipt</code>; graphs without delivery omit the receipt.</p>
+<h2 id="failure-evidence-and-mapped-executions">Failure evidence and mapped executions<a class="headerlink" href="#failure-evidence-and-mapped-executions" title="Permanent link">&para;</a></h2>
+<p>Failed <code>terminalResult.context</code> separates the known runtime cause (<code>primary</code>) from recent recorded
+execution errors (<code>recorded</code>) and verifier results (<code>verifiers</code>). Each verifier result is the latest
+recorded result for that graph node and map path. Its bounded, credential-redacted <code>message</code> contains
+the graph's actual <code>signals</code> and <code>diagnostic</code>; the runtime assigns no general meaning to their names
+or labels. A later result replaces an earlier result in this summary, while logs retain both.
+Recorded evidence can include recovered attempts or parallel work and does not prove that a result
+caused the terminal failure. An independently known runtime cause remains in <code>primary</code>.</p>
+<p><code>exhaustedLoops</code> identifies completed exhausted loop visits with <code>node</code>, <code>completedIterations</code>, and
+an optional <code>mapIndices</code> path. The count is the actual number of completed loop rounds, including
+all work within each round; execution retries and verifier completion counts do not add rounds.
+Completed exhausted loops in settled branches of an unreachable parallel join are retained.
+Discarded race and map-item paths do not contribute loop entries or consume the summary bound.
+A converged loop does not appear as exhausted. The summary keeps at most five entries in each
+collection. <code>incomplete: true</code> means evidence was omitted or could not be retained. This warning
+persists even if later loop visits converge and remove all retained loop entries. Full details may
+still be available in logs. Failure context freezes with the main outcome, before auxiliary work.</p>
+<p>Each diagnostic can carry an <code>execution</code> object with the node name and stable opaque execution
+selector, and a <code>cursor</code> pointing to its retained log. Missing cursors cannot be used for log
+navigation. Status/watch <code>activeExecutions</code> and execution-associated log notifications also expose
+<code>mapIndices</code>: zero-based indices, outermost map first. For example, <code>[1]</code> is the second item and
+<code>[1, 2]</code> is its third nested item. Outside maps the field is omitted (older data also reads as an
+empty path). Indices supplement execution identity without changing its opaque selector.
+Successful terminal results keep their existing representation.</p>
 <h2 id="resume-event-and-log-streams">Resume event and log streams<a class="headerlink" href="#resume-event-and-log-streams" title="Permanent link">&para;</a></h2>
 <p><code>watch</code> follows status events; <code>logs</code> follows safe provider and controller log records. Both accept
 an opaque cursor and resume strictly after it:</p>

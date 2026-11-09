@@ -1352,6 +1352,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#zeroshot.ExhaustedLoop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;ExhaustedLoop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#zeroshot.FailureContext" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2199,6 +2210,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#zeroshot.ExhaustedLoop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;ExhaustedLoop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#zeroshot.FailureContext" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2437,7 +2459,7 @@
 
 
 <h2 id="zeroshot.ActiveExecution" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">ActiveExecution</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">execution</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">ActiveExecution</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">execution</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">map_indices</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">())</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -2469,6 +2491,96 @@
           –
           <div class="doc-md-description">
             <p>Executable graph node name.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>map_indices</code></b>
+              (<code><span title="tuple">tuple</span>[<span title="int">int</span>, ...]</code>, default:
+                  <code>()</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Zero-based map path, outermost first; empty outside maps.</p>
+          </div>
+        </li>
+    </ul>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h2 id="zeroshot.ExhaustedLoop" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">ExhaustedLoop</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">node</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">completed_iterations</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">map_indices</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">())</span></code>
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#zeroshot.ExhaustedLoop" class="headerlink" title="Permanent link">&para;</a></h2>
+
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>A reducer-confirmed exhausted loop visit.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>node</code></b>
+              (<code><span title="str">str</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Graph loop name.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>completed_iterations</code></b>
+              (<code><span title="int">int</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>Completed rounds, independent of execution retries.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>map_indices</code></b>
+              (<code><span title="tuple">tuple</span>[<span title="int">int</span>, ...]</code>, default:
+                  <code>()</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Zero-based map path, outermost first.</p>
           </div>
         </li>
     </ul>
@@ -2507,7 +2619,7 @@
 
 
 <h2 id="zeroshot.FailureContext" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">FailureContext</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">primary</span><span class="p">:</span> <span class="n">FailureDiagnostic</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">recorded</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">FailureDiagnostic</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">incomplete</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">FailureContext</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">primary</span><span class="p">:</span> <span class="n">FailureDiagnostic</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">recorded</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">FailureDiagnostic</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">verifiers</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">FailureDiagnostic</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">exhausted_loops</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">ExhaustedLoop</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span> <span class="n">incomplete</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -2551,6 +2663,34 @@
           –
           <div class="doc-md-description">
             <p>Recent failure records, which may include recovered or voided attempts.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>verifiers</code></b>
+              (<code><span title="tuple">tuple</span>[<a class="autorefs autorefs-internal" title="              FailureDiagnostic(*, message: str, execution: ActiveExecution | None = None, cursor: str | None = None)
+
+  
+      dataclass
+   (zeroshot.runs.FailureDiagnostic)" href="#zeroshot.FailureDiagnostic">FailureDiagnostic</a>, ...]</code>, default:
+                  <code>()</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Latest recorded graph-defined results per verifier and map path.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>exhausted_loops</code></b>
+              (<code><span title="tuple">tuple</span>[<a class="autorefs autorefs-internal" title="              ExhaustedLoop(*, node: str, completed_iterations: int, map_indices: tuple[int, ...] = ())
+
+  
+      dataclass
+   (zeroshot.runs.ExhaustedLoop)" href="#zeroshot.ExhaustedLoop">ExhaustedLoop</a>, ...]</code>, default:
+                  <code>()</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Reducer-confirmed exhausted loop visits.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
@@ -2627,7 +2767,7 @@
         </li>
         <li class="doc-section-item field-body">
             <b><code>execution</code></b>
-              (<code><a class="autorefs autorefs-internal" title="              ActiveExecution(*, execution: str, node: str)
+              (<code><a class="autorefs autorefs-internal" title="              ActiveExecution(*, execution: str, node: str, map_indices: tuple[int, ...] = ())
 
   
       dataclass
@@ -2685,7 +2825,7 @@
 
 
 <h2 id="zeroshot.LogEvent" class="doc doc-heading">
-<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">LogEvent</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">timestamp</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">execution</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">level</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'debug'</span><span class="p">,</span> <span class="s1">'info'</span><span class="p">,</span> <span class="s1">'error'</span><span class="p">],</span> <span class="n">target</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">message</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span></code>
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>              <code class="highlight language-python"><span class="n">LogEvent</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">run_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">cursor</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">timestamp</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">execution</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">level</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s1">'debug'</span><span class="p">,</span> <span class="s1">'info'</span><span class="p">,</span> <span class="s1">'error'</span><span class="p">],</span> <span class="n">target</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">message</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">map_indices</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">())</span></code>
 
   <span class="doc doc-labels">
       <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
@@ -2741,6 +2881,16 @@
           –
           <div class="doc-md-description">
             <p>Native debug, info, or error level.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>map_indices</code></b>
+              (<code><span title="tuple">tuple</span>[<span title="int">int</span>, ...]</code>, default:
+                  <code>()</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Zero-based map path, outermost first; empty outside maps.</p>
           </div>
         </li>
         <li class="doc-section-item field-body">
@@ -3047,7 +3197,7 @@
         </li>
         <li class="doc-section-item field-body">
             <b><code>context</code></b>
-              (<code><a class="autorefs autorefs-internal" title="              FailureContext(*, primary: FailureDiagnostic | None = None, recorded: tuple[FailureDiagnostic, ...] = (), incomplete: bool = False)
+              (<code><a class="autorefs autorefs-internal" title="              FailureContext(*, primary: FailureDiagnostic | None = None, recorded: tuple[FailureDiagnostic, ...] = (), verifiers: tuple[FailureDiagnostic, ...] = (), exhausted_loops: tuple[ExhaustedLoop, ...] = (), incomplete: bool = False)
 
   
       dataclass
@@ -3185,7 +3335,7 @@
         </li>
         <li class="doc-section-item field-body">
             <b><code>active_executions</code></b>
-              (<code><span title="tuple">tuple</span>[<a class="autorefs autorefs-internal" title="              ActiveExecution(*, execution: str, node: str)
+              (<code><span title="tuple">tuple</span>[<a class="autorefs autorefs-internal" title="              ActiveExecution(*, execution: str, node: str, map_indices: tuple[int, ...] = ())
 
   
       dataclass
