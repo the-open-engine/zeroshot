@@ -978,6 +978,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   session scope and new UI templates use `node_instance` for this worker and `execution` for
   reviewers; exact runtime plans and explicit session scopes remain caller-owned. Saved graphs are
   unchanged. The final rejected round fails without starting an unreviewable extra repair.
+  Every software-change delivery mode, including none, reserves remote publication for delivery;
+  worker guidance forbids pushing branches or weakening forge restrictions, and both reviewers
+  reject repairs that do either.
 - Delivery-enabled software-change templates make the acceptance verifier the sole author of the
   current change title and description after every review pass. Git delivery uses that manifest for
   commits and reviews, refreshes only its marker-delimited body section while preserving surrounding
