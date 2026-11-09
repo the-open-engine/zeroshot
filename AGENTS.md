@@ -1290,6 +1290,13 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   without inventing global choices. An explicit empty catalog offers none. Omitted/null sizes use
   the target default; unavailable authored sizes stay visible and unchanged. Hosts enforce
   availability and billing; descriptors are not profile data.
+- The native template catalog exposes each complete authored default runtime, a concise description,
+  and contained connection requirements derived through the harness registry. Code review preserves
+  its supplied mixed Claude/Codex agent plan and native source-neutral delivery; catalog defaults omit
+  target-owned size and enable checkpoints.
+  `workspace::profile_setup` materializes hosted provider access after caller edits without saving,
+  resolving secrets or replacing custom declarations. `setupLanes` exports the same registry's accepted
+  provider field sets. New graph/runtime definitions need no template-specific host wizard registry.
 - Runtime schemas/workers come from native contracts in `profile_ui/catalog.rs`, compiled under
   `workspace`. Git delivery keeps its fixed contracts and explicit pull-request/merge modes. Model suggestions are non-authoritative;
   identifiers remain opaque. Missing harness/provider links to runtime settings. JSON stays lossless.

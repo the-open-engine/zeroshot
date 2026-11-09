@@ -79,6 +79,7 @@ fn router(state: UiState, target_history: bool) -> Router {
         .route("/ui/api/runs/{id}/history", get(runs::history))
         .route("/ui/api/runs/{id}/events", get(runs::events))
         .route("/ui/api/validate", post(validate))
+        .route("/ui/api/setup", post(setup))
         .route("/ui/api/authoring", post(author))
         .route("/ui/api/data", post(data_author))
         .route("/ui/{*asset}", get(server::asset));
@@ -152,6 +153,11 @@ async fn validate(
     let document: ProfileDocument = decode(bytes)?;
     admit(&state, &document.graph, &document.runtime).await?;
     Ok(Json(json!({"valid":true})))
+}
+async fn setup(
+    bytes: Result<Bytes, axum::extract::rejection::BytesRejection>,
+) -> Result<Json<Value>, ApiError> {
+    Ok(Json(workspace::profile_setup(decode(bytes)?)?))
 }
 async fn author(
     bytes: Result<Bytes, axum::extract::rejection::BytesRejection>,
