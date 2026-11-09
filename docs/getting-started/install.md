@@ -21,6 +21,9 @@ zeroshot update
 ```
 
 The update does not elevate privileges; the current executable must be writable by the caller.
+Updates of one installation replace it one at a time. An update that waited for another one and
+finds the same release already installed reports `"updated":false`. Before installing a newer
+release, an update also removes the files that interrupted updates left next to the executable.
 A download fails with a timeout once the server has sent nothing for 30 seconds; a slow download
 that keeps receiving data is never cut off. Failures name their cause, such as an unreachable or
 refusing proxy, an untrusted certificate, or GitHub's explanation of a rate limit.

@@ -47,8 +47,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Releases are authoritative. Never commit a staged release version to `main`.
 - `zeroshot update` resolves the newest canonical GitHub Release, verifies the declared host archive
   and canonical skill assets through that release's `SHA256SUMS`, smoke-checks the
-  staged executable, and replaces the running executable in place without privilege escalation. It
-  installs or refreshes only unchanged managed skill copies and preserves conflicts.
+  staged executable, and replaces the running executable in place without privilege escalation.
+  Staging and replacement hold an exclusive `.zeroshot-update.lock` beside the executable. Under it,
+  an update removes what interrupted updates left there, restoring a moved-aside Restic sidecar when
+  none is installed, and reports `updated: false` when the executable and sidecar already hold the
+  release's bytes. It installs or refreshes only unchanged managed skill copies and preserves
+  conflicts.
   Development-placeholder builds refuse self-update. Update downloads use an idle timeout, never a
   whole-request limit, and keep their size caps. Failures carry the complete cause chain and GitHub's
   bounded, control-safe `message`, never request URLs.
