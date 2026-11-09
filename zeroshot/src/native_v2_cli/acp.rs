@@ -21,12 +21,14 @@ use thiserror::Error;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
 
-use crate::native_v2_admission::{DeliveryPolicy, NativeV2Admission, NativeV2AdmissionError};
+use crate::native_v2_admission::{
+    DeliveryPolicy, NativeV2Admission, NativeV2AdmissionContext, NativeV2AdmissionError,
+};
 use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
 use crate::native_v2_cli::local::{create_local_run_storage, local_workspace_lease_path};
 use crate::native_v2_cli::{default_local_state_root, LocalRunProfileStore, NativeV2CliError};
 use crate::native_v2_platform::{submission_digest, NativeV2PlatformError};
-use crate::native_v2_contract::NodeRuntimeBinding;
+use crate::native_v2_contract::{AdmittedRun, NodeRuntimeBinding};
 use crate::native_v2_local::{
     build_local_owner_process_candidate, local_resolved_source, LocalCompositionError,
     LocalProcessCandidateRequest,
@@ -538,14 +540,13 @@ impl AcpSession {
             RunConnectionValues::new(),
         )?);
         let seed_run_id = new_run_id();
-        let admitted = NativeV2Admission
-            .admit(submission(
-                &profile,
-                &prepared.source,
-                "",
-                seed_run_id.as_str(),
-            )?)
-            .await?;
+        let admitted = admit_submission(submission(
+            &profile,
+            &prepared.source,
+            "",
+            seed_run_id.as_str(),
+        )?)
+        .await?;
         let runner = build_local_owner_process_candidate(LocalProcessCandidateRequest {
             memory_storage: None,
             admitted: &admitted,
@@ -634,7 +635,7 @@ impl AcpSession {
         let submission = submission(&self.profile, &source, &task, run_id.as_str())?;
         let digest = submission_digest(&submission)?;
         let submission_key = submission.submission_key.clone();
-        let admitted = NativeV2Admission.admit(submission).await?;
+        let admitted = admit_submission(submission).await?;
         let storage = create_local_run_storage(&self.state_root, &run_id)?;
         let paths = PortableControllerPaths::new(storage);
         let leases = Arc::new(TurnLeases::acquire(&paths)?);
@@ -852,22 +853,31 @@ fn new_run_id() -> RunId {
     RunId::new(uuid::Uuid::now_v7().to_string())
 }
 
+async fn admit_submission(
+    submission: RunSubmission,
+) -> Result<AdmittedRun, NativeV2AdmissionError> {
+    let harnesses = crate::harnesses::HarnessRegistry::local();
+    let sizes = crate::native_v2_hosting::host_run_sizes();
+    NativeV2Admission
+        .admit_with_context(
+            submission,
+            NativeV2AdmissionContext::new(&harnesses, DeliveryPolicy::Optional)
+                .with_run_sizes(&sizes),
+        )
+        .await
+}
+
 fn submission(
     profile: &RunProfile,
     source: &Option<openengine_cluster_protocol::ResolvedSource>,
     task: &str,
     identity: &str,
 ) -> Result<RunSubmission, AcpServeError> {
-    let mut runtime = profile.runtime.clone();
-    crate::native_v2_admission::resolve_runtime_size(
-        &mut runtime,
-        &crate::native_v2_hosting::host_run_sizes(),
-    )?;
     Ok(RunSubmission {
         title: RunTitle::new("ACP turn").map_err(|_| AcpServeError::Profile("invalid title"))?,
         graph: profile.graph.clone(),
         initial_input: json!({ "task": task }),
-        runtime,
+        runtime: profile.runtime.clone(),
         environment: None,
         source: source.clone(),
         submission_key: IdempotencyKey::new(format!("acp-{identity}"))
