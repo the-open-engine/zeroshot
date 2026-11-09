@@ -167,18 +167,12 @@ impl fmt::Display for RunFailure {
                 formatter.write_str("\nFailure:")?;
                 write_diagnostic(formatter, primary)?;
             }
-            if !context.recorded.is_empty() {
-                formatter.write_str("\nRecorded failures:")?;
-                for diagnostic in &context.recorded {
-                    write_diagnostic(formatter, diagnostic)?;
-                }
-            }
-            if !context.verifiers.is_empty() {
-                formatter.write_str("\nRecorded verifier results:")?;
-                for diagnostic in &context.verifiers {
-                    write_diagnostic(formatter, diagnostic)?;
-                }
-            }
+            write_diagnostics(formatter, "\nRecorded failures:", &context.recorded)?;
+            write_diagnostics(
+                formatter,
+                "\nRecorded verifier results:",
+                &context.verifiers,
+            )?;
             for visit in &context.exhausted_loops {
                 write!(formatter, "\nLoop {}", visit.node.as_str())?;
                 write_indices(formatter, &visit.map_indices)?;
@@ -217,6 +211,20 @@ impl fmt::Display for RunFailure {
         }
         Ok(())
     }
+}
+
+fn write_diagnostics(
+    formatter: &mut fmt::Formatter<'_>,
+    heading: &str,
+    diagnostics: &[FailureDiagnostic],
+) -> fmt::Result {
+    if !diagnostics.is_empty() {
+        formatter.write_str(heading)?;
+        for diagnostic in diagnostics {
+            write_diagnostic(formatter, diagnostic)?;
+        }
+    }
+    Ok(())
 }
 
 fn write_diagnostic(

@@ -34,6 +34,11 @@ fn foreground_failure_uses_structured_evidence_without_attributing_recorded_erro
             "execution": {"execution": "v2:execution:1", "node": "deliver"},
             "cursor": "v2:4"
         }],
+        "verifiers": [{
+            "message": "readiness=revise; missing boundary test",
+            "execution": {"execution": "v2:execution:2", "node": "assessor", "mapIndices": [1, 2]},
+            "cursor": "v2:5"
+        }],
         "incomplete": true
     }))
     .expect("valid failure context");
@@ -49,6 +54,7 @@ fn foreground_failure_uses_structured_evidence_without_attributing_recorded_erro
         failure.to_string(),
         "run finished unsuccessfully: runtime_failed\nFailure:\n  Runtime cleanup failed\n\
          Recorded failures:\n  deliver: GitHub API request failed: base branch not found (log v2:4)\n\
+         Recorded verifier results:\n  assessor[1][2]: readiness=revise; missing boundary test (log v2:5)\n\
          Additional failure details may be missing; see the full run log.\n\
          Full run log: zeroshot logs run-local --target platform"
     );
@@ -160,10 +166,9 @@ fn failure_report_without_context_names_latest_retained_errors_and_target() {
                 .expect("empty failure context"),
         ),
     );
-    assert!(
-        no_errors
-            .to_string()
-            .contains("run finished unsuccessfully: delivery_failed")
+    assert_eq!(
+        no_errors.to_string(),
+        "run finished unsuccessfully: delivery_failed\nFull run log: zeroshot logs run-local"
     );
 }
 
