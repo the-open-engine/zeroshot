@@ -87,8 +87,7 @@ async fn resume_finds_a_lane_executable_that_only_its_restored_checkpoint_contai
     // The workspace carries its own codex, which a relative PATH entry finds from the workspace.
     let tools = fixture.repository.join("tools");
     fs::create_dir_all(&tools).assert_value_with("create workspace tool directory");
-    fs::copy(fixture.root.path("bin").join("codex"), tools.join("codex"))
-        .assert_value_with("copy fake Codex into the workspace");
+    write_fake_codex(&tools.join("codex"));
     git(&fixture.repository, &["add", "tools/codex"]);
     git(&fixture.repository, &["commit", "-m", "carry codex"]);
     let failed_run_id = failed_run(&fixture).await;
