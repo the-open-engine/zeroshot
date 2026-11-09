@@ -810,8 +810,6 @@ async fn resumed_delivery_checkpoint_preserves_nonstageable_submodule_contents()
 /// branches in its pre-receive hook, so clients receive exactly this `remote:` text with
 /// `[remote rejected] (pre-receive hook declined)`.
 fn decline_run_branch_pushes(remote: &Path, reason: &[&str]) {
-    use std::os::unix::fs::PermissionsExt;
-
     let mut hook = String::from(
         "#!/bin/sh\nwhile read old new ref; do\n  case \"$ref\" in\n    refs/heads/zeroshot/*)\n",
     );
@@ -819,9 +817,7 @@ fn decline_run_branch_pushes(remote: &Path, reason: &[&str]) {
         hook.push_str(&format!("      printf '%s\\n' \"{line}\" >&2\n"));
     }
     hook.push_str("      exit 1 ;;\n  esac\ndone\n");
-    let path = remote.join("hooks/pre-receive");
-    fs::write(&path, hook).assert_value();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).assert_value();
+    write_executable(&remote.join("hooks"), "pre-receive", &hook);
 }
 
 #[tokio::test]
@@ -848,12 +844,11 @@ async fn definitive_protected_branch_push_rejection_is_a_resumable_refusal() {
         let refused = execute(&repo, adapter(&repo, authority.clone()), false).await;
 
         assert_eq!(
-            refused.outcome.error_code(),
-            Some(WorkerErrorCode::Refusal),
+            refused.outcome,
+            WorkerOutcome::policy_refusal(),
             "{evidence}: {:?}",
             refused.outcome
         );
-        assert_ne!(refused.outcome, WorkerOutcome::authentication_refusal());
         assert_eq!(authority.pushes.load(Ordering::SeqCst), 1);
         assert_eq!(server.faults.receive_packs.load(Ordering::SeqCst), 1);
         assert_eq!(reference(&repo.remote, &branch), None);
