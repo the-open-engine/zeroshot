@@ -9,6 +9,6 @@
   "supportURL": "https://github.com/the-open-engine/zeroshot/issues",
   "privacyPolicyURL": "https://app.zeroshot.sh/legal/privacy",
   "termsOfServiceURL": "https://app.zeroshot.sh/legal/terms",
-  "documentationURL": "https://zeroshot.sh/docs/current/guides/plugins/",
+  "documentationURL": "https://the-open-engine.github.io/zeroshot/current/guides/plugins/",
   "icon": "plugins/assets/zeroshot-seal.png"
 }

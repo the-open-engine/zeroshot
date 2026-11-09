@@ -33,7 +33,7 @@ function gitEnvironment() {
 }
 
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-plugin-test-'));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'zeroshot-plugin-test-')));
   temporaries.push(root);
   const sources = [
     'plugins/metadata.json',

@@ -21,7 +21,7 @@ Execution requires your request and an exact repository commit. Configure provid
 credentials in Platform; never paste secrets into a conversation. Local history
 initialization and stacks require the CLI and are outside this package's MCP scope.
 
-See the [installation and upgrade guide](https://zeroshot.sh/docs/current/guides/plugins/) for client setup.
+See the [installation and upgrade guide](https://the-open-engine.github.io/zeroshot/current/guides/plugins/) for client setup.
 The package connects to https://api.app.zeroshot.sh/mcp; Platform processes the task data sent through
 that connection under its [privacy notice](https://app.zeroshot.sh/legal/privacy) and
 [terms](https://app.zeroshot.sh/legal/terms). [Support](https://github.com/the-open-engine/zeroshot/issues).
