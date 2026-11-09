@@ -100,6 +100,49 @@ fn authentication_classification_accepts_only_http_credentials_failures() {
 }
 
 #[test]
+fn policy_classification_accepts_only_definitive_forge_refusals() {
+    for refusal in [
+        "remote: error: GH006: Protected branch update failed for refs/heads/zeroshot/v2-run.",
+        "remote: - Cannot create ref due to creations being restricted.",
+        "remote: - Cannot update this protected ref.",
+        "remote: Write access to repository not granted.",
+        "remote: Permission to acme/project.git denied to delivery-bot.",
+        "remote: GitLab: You are not allowed to push code to protected branches on this project.",
+        "remote: GitLab: You are not allowed to create protected branches on this project.",
+        "remote: GitLab: You can only use an existing protected branch ref as the basis of a new \
+         protected branch.",
+        "remote: GitLab: You can only create protected branches using the web interface and API.",
+        "remote: You are not allowed to push code to this project.",
+        "remote: GitLab: You are not allowed to push code to this project.",
+        "remote: You are not allowed to upload code.",
+        "remote: You are not allowed to upload code for this project.",
+        "remote: This deploy key does not have write access to this project.",
+        "ERROR: Permission to acme/project.git denied to delivery-bot.",
+        "ERROR: Permission to acme/project.git denied to acme/other-project.",
+        "ERROR: The key you are authenticating with has been marked as read only.",
+    ] {
+        let failure = failure(format!(
+            "{refusal}        \nfatal: Could not read from remote repository."
+        ));
+        assert!(failure.policy_rejected(), "{refusal}");
+        assert!(!failure.authentication_failed(), "{refusal}");
+        assert!(!failure.retryable_transport(), "{refusal}");
+    }
+    for stderr in [
+        "remote: pre-receive hook declined: refs/heads/zeroshot/v2-run is protected",
+        "remote: Permission to modify protected files denied to delivery-bot.",
+        "ERROR: Repository not found.",
+        "remote: GitLab: The repository is temporarily read-only. Please try again later.",
+        " ! [remote rejected] zeroshot/v2-run (protected branch hook declined)",
+        "remote: error: GH013: Repository rule violations found for refs/heads/zeroshot/v2-run.",
+        "remote: - Push cannot contain secrets",
+        "fatal: unable to access 'https://github.com/acme/project': The requested URL returned error: 403",
+    ] {
+        assert!(!failure(stderr).policy_rejected(), "{stderr}");
+    }
+}
+
+#[test]
 fn retryable_transport_classification_is_narrow_and_complete() {
     for status in [429, 500, 503, 599] {
         assert!(http_failure(status).retryable_transport(), "HTTP {status}");

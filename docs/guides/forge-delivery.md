@@ -98,6 +98,12 @@ GitHub.com-only features include `--task-from`, Platform repository browsing and
 inbound commands, and hosted [stacks](stacks.md). For GHE or GitLab comments, supply the graph input
 directly.
 
+When the forge refuses the run-branch push because of branch protection or missing push permission,
+delivery stops with a policy refusal naming the run branch and the forge's message, without another
+agent round. Local work is preserved: let delivery push its run branch, then
+[resume the run](observe-and-control.md#restart-or-resume-a-failed-run). Other push rejections,
+including generic pre-receive hook messages, return to the repair loop.
+
 Delivery preserves review identity across retries and confirms the integrated revision before
 reporting a merge. Comment retries reuse the original publication; captured MR scopes refuse stale
 base/head revisions. Required GitLab merge trains remain pending; synthetic merged-results
