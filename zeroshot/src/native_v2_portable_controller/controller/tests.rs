@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use openengine_cluster_testkit::fixture::run_size;
 use openengine_cluster_protocol::{
     ExecutionRef, GetParams, IdempotencyKey, InitializeParams, NOT_FOUND, PROTOCOL_VERSION,

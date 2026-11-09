@@ -89,7 +89,7 @@ function submission(revision, environment, root) {
         root: root || { kind: 'succeed', name: 'done', output: { kind: 'null' }, bindings: [] },
       },
       initialInput: null,
-      runtime: { harness: 'codex', provider: 'openai', size: 'small', nodes: {} },
+      runtime: { harness: 'codex', provider: 'openai', nodes: {} },
       environment,
       source: { repository: 'the-open-engine/zeroshot', branch: 'main', revision },
       submissionKey: `environment-smoke-${runId}`,
@@ -127,6 +127,7 @@ async function terminal(client, runId) {
 async function successful(context, request) {
   await observedSubmit(context, request);
   const result = await terminal(context.client, request.runId);
+  assert.equal(result.size, 'host');
   assert.equal(result.status.terminalResult.status, 'succeeded', JSON.stringify(result));
 }
 
