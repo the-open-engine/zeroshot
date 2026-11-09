@@ -35,7 +35,7 @@ use thiserror::Error;
 
 use crate::execution::process::HostedProcessPool;
 use crate::native_v2_admission::DeliveryPolicy;
-use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access};
+use crate::native_v2_candidate::{ProviderAccessPlacement, materialize_provider_access_with_registry};
 use crate::native_v2_claude::ClaudeProcessEnvironment;
 use crate::native_v2_platform::{NativeV2PlatformController, NativeV2PlatformError};
 use crate::native_v2_pi::PiProcessEnvironment;
@@ -60,8 +60,18 @@ pub(crate) use connections::build_connection_resolver;
 pub fn materialize_contained_provider_access(
     runtime: &mut RuntimePlan,
 ) -> Result<(), crate::harnesses::HarnessError> {
-    crate::harnesses::HarnessRegistry::core().validate_runtime(runtime)?;
-    materialize_provider_access(runtime, ProviderAccessPlacement::Contained)
+    materialize_contained_provider_access_with_registry(
+        runtime,
+        &crate::harnesses::HarnessRegistry::core(),
+    )
+}
+
+pub(crate) fn materialize_contained_provider_access_with_registry(
+    runtime: &mut RuntimePlan,
+    registry: &crate::harnesses::HarnessRegistry,
+) -> Result<(), crate::harnesses::HarnessError> {
+    registry.validate_runtime(runtime)?;
+    materialize_provider_access_with_registry(runtime, ProviderAccessPlacement::Contained, registry)
 }
 
 /// Composes the production target around exact sourceful run requests.

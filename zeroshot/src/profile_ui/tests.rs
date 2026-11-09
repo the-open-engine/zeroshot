@@ -439,3 +439,86 @@ async fn host_selected_catalog_and_validation_keep_contributions_local() {
             .is_err()
     );
 }
+
+#[cfg(feature = "contributed-harnesses")]
+#[tokio::test]
+async fn setup_accepts_bootstrap_lanes_and_keeps_contributions_local() {
+    let root = openengine_cluster_testkit::TemporaryDirectory::for_test("setup-host-registry");
+    let local = state(root.as_path().to_owned(), "https://target.example");
+    let mut target = local.clone();
+    target.workspace.kind = "target";
+    let Json(catalog) = bootstrap(State(local.clone())).await.assert_value();
+    let Json(target_catalog) = bootstrap(State(target.clone())).await.assert_value();
+    let mut contributed = 0;
+    for lane in catalog["setupLanes"].as_array().assert_value() {
+        let request = json!({"runtime": {
+            "harness":lane["harness"], "provider":lane["provider"], "nodes": {
+                "worker":{"kind":"agent", "model":"caller-owned"}
+            }
+        }});
+        let bytes = Bytes::from(serde_json::to_vec(&request).assert_value());
+        let Json(prepared) = setup(State(local.clone()), Ok(bytes.clone()))
+            .await
+            .assert_value();
+        assert!(
+            prepared["requirements"]
+                .get(lane["connectionKey"].as_str().assert_value())
+                .is_some()
+        );
+        let core = crate::workspace::profile_setup(request);
+        let hosted = setup(State(target.clone()), Ok(bytes)).await;
+        let supported = target_catalog["setupLanes"]
+            .as_array()
+            .assert_value()
+            .iter()
+            .any(|entry| {
+                entry["harness"] == lane["harness"] && entry["provider"] == lane["provider"]
+            });
+        if supported {
+            assert!(core.is_ok());
+            assert!(hosted.is_ok());
+        } else {
+            contributed += 1;
+            assert!(core.is_err());
+            assert!(hosted.is_err());
+        }
+    }
+    assert!(contributed > 0);
+}
+
+#[tokio::test]
+async fn setup_discovers_access_without_saving_and_keeps_the_browser_boundary() {
+    let server = server().await;
+    let client = reqwest::Client::new();
+    let url = format!("{}/ui/api/setup", server.url);
+    let request = json!({"runtime":{
+        "harness":"codex", "provider":"openai", "nodes":{
+            "worker":{"kind":"agent", "model":"caller-owned"}
+        }
+    }});
+    let result: Value = client
+        .post(&url)
+        .json(&request)
+        .send()
+        .await
+        .assert_value()
+        .error_for_status()
+        .assert_value()
+        .json()
+        .await
+        .assert_value();
+    assert_eq!(result["requirements"], json!({"openai":["OPENAI_API_KEY"]}));
+    assert_eq!(
+        result["runtime"]["nodes"]["worker"]["model"],
+        "caller-owned"
+    );
+    assert!(!server.root.join("profiles.json").exists());
+    let response = client
+        .post(&url)
+        .header("origin", "https://untrusted.example")
+        .json(&request)
+        .send()
+        .await
+        .assert_value();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}

@@ -297,3 +297,21 @@ async function withRuntimeEditor(check: (RuntimeEditor: any) => void) {
     await server.close();
   }
 }
+
+
+test('new documents preserve complete native template runtimes without flattening lanes', () => {
+  const template = {
+    name: 'mixed-template',
+    graph: { profile: 'full', initialInput: { kind: 'record', fields: {} },
+      policy: {}, root: { kind: 'seq', name: 'run', children: [] } },
+    runtime: { harness: 'claude', provider: 'anthropic', workspaceCheckpoints: true,
+      nodes: { review: { kind: 'agent', model: 'authored-model', effort: 'high',
+        lane: { harness: 'codex', provider: 'openai' }, sessionScope: 'node_instance',
+        connections: { custom: ['CUSTOM_KEY'] } },
+        deliver: { kind: 'comment_delivery', connections: { github: ['GH_TOKEN'] } } } },
+  };
+  const document = newDocument(template);
+  assert.deepEqual(document.runtime, template.runtime);
+  document.runtime.nodes.review.model = 'edited';
+  assert.equal(template.runtime.nodes.review.model, 'authored-model');
+});
