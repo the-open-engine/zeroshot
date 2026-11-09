@@ -54,6 +54,8 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY zeroshot ./zeroshot
+COPY docs/assets/code-review/runtime.json ./docs/assets/code-review/runtime.json
+COPY docs/assets/pr-review/runtime.json ./docs/assets/pr-review/runtime.json
 COPY --from=ui-builder /src/ui/dist ./ui/dist
 
 RUN cargo build --locked --release --package zeroshot --bin zeroshot --no-default-features --features ui
