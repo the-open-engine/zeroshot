@@ -3,6 +3,7 @@ use std::path::Path;
 
 use futures_util::StreamExt;
 use tempfile::{NamedTempFile, TempPath};
+use tokio::io::AsyncWriteExt;
 
 use super::{CliOutcome, DetachSignal, NativeV2CliBackend, NativeV2CliError};
 use crate::execution::platform::{FileAccess, private_file};
@@ -33,14 +34,19 @@ async fn download<B: NativeV2CliBackend>(
     command: &RunExportWorkspaceCommand,
     backend: &B,
 ) -> Result<NamedTempFile, NativeV2CliError> {
-    let mut staged = stage(&command.output)?;
+    let staged = stage(&command.output)?;
+    // Keep the path guard here so cancellation removes it even while background I/O drains.
+    let mut file = tokio::fs::File::from_std(staged.as_file().try_clone()?);
     let mut stream = backend
         .run_export_workspace(&command.target, command.params.clone())
         .await?;
     while let Some(chunk) = stream.next().await {
-        staged.write_all(&chunk?)?;
+        file.write_all(&chunk?).await?;
     }
-    staged.as_file().sync_all()?;
+    // Tokio can acknowledge a buffered write before the OS write finishes. Surface its error
+    // before syncing and publishing; sync_all alone does not propagate a prior write failure.
+    file.flush().await?;
+    file.sync_all().await?;
     Ok(staged)
 }
 

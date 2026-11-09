@@ -1114,6 +1114,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   apply. Export rejects dot-only run path segments before credential access. The CLI requires an
   explicit absent destination representable in its JSON receipt, stages with `platform::private_file`,
   consumes complete framed HTTP tar bytes, and uses `persist_noclobber` for atomic publication.
+  Writes, flush and sync use Tokio file I/O so cancellation can be observed while disk work waits;
+  the private path guard stays in the cancellable future, and flush errors prevent publication.
   HTTP/1 Transfer-Encoding overrides Content-Length; only one case-insensitive chunked coding is
   supported, otherwise a length is required with no Transfer-Encoding.
   Cancellation/body/status failures remove the stage; no local exporter, resume, or extraction exists.

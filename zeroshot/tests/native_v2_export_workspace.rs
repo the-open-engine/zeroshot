@@ -287,6 +287,42 @@ async fn built_cli_refuses_windows_directory_links_without_replacement() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn built_cli_cleans_up_when_the_final_background_disk_write_fails() {
+    let fixture = Fixture::new(Reply::Length, capability()).await;
+    let mut command = fixture.export_command();
+    unsafe {
+        command.pre_exec(|| {
+            libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
+            let limit = libc::rlimit {
+                rlim_cur: 1,
+                rlim_max: 1,
+            };
+            if libc::setrlimit(libc::RLIMIT_FSIZE, &limit) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let output = tokio::time::timeout(Duration::from_secs(10), command.output())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(
+        fixture
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|request| request.path.ends_with("/export-workspace"))
+    );
+    assert!(!fixture.output.exists());
+    fixture.assert_clean();
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn ctrl_c_cancels_before_headers_or_during_transfer_and_removes_temporary_output() {
     for reply in [Reply::StallHeaders, Reply::StallBody] {
         let fixture = Fixture::new(reply, capability()).await;
