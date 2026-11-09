@@ -49,6 +49,12 @@ async fn titles_are_ready_bounded_and_originals_survive_create_update_and_redisc
         ),
         ("a".repeat(255), "a".repeat(255), false),
         ("界".repeat(255), "界".repeat(255), false),
+        (format!("Draft: {}", "a".repeat(300)), "a".repeat(255), true),
+        (
+            format!("[Draft] {}", "界🦀".repeat(150)),
+            "界🦀".repeat(150).chars().take(255).collect(),
+            true,
+        ),
     ];
     for prefix in ["Draft:", "[Draft]", "(Draft)", "dRaFt:"] {
         cases.push((format!("{prefix} Ready title"), "Ready title".into(), false));
@@ -87,6 +93,22 @@ async fn titles_are_ready_bounded_and_originals_survive_create_update_and_redisc
         fixture
             .authority
             .open_or_update_review(&next, credential())
+            .await
+            .unwrap();
+        // A caller may reuse GitLab's already canonical metadata on its next delivery.
+        let canonical = SourceReviewRequest {
+            title: created["title"].as_str().unwrap().to_owned(),
+            description: body
+                .strip_prefix(&format!("{DELIVERY_GENERATED_BODY_START}\n"))
+                .unwrap()
+                .strip_suffix(&format!("\n{DELIVERY_GENERATED_BODY_END}"))
+                .unwrap()
+                .to_owned(),
+            ..next.clone()
+        };
+        fixture
+            .authority
+            .open_or_update_review(&canonical, credential())
             .await
             .unwrap();
         assert_eq!(fixture.writes("/merge_requests"), 1);
