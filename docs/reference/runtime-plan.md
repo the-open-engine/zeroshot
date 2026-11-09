@@ -351,13 +351,17 @@ the profile or its `lane` fields with the newer binary.
 
 ### Local runs
 
-Before the controller starts, a local `zeroshot run` or `zeroshot resume` checks that each lane's
-registered executable is on `PATH`. A missing executable fails the
-command with a message such as:
+Before any agent starts, a local `zeroshot run` or `zeroshot resume` checks that each lane's
+registered executable is on `PATH`. A missing executable fails the command, and a refused
+`resume` starts no successor, with a message such as:
 
 ```text
 lane claude/anthropic needs the `claude` executable on PATH
 ```
+
+A `resume` that restores a workspace checkpoint checks after the restore, so an executable that only
+the checkpoint contains is still found. Its message follows
+`controller exited before becoming ready:`.
 
 `zeroshot acp` runs the same check when each session opens, against that session's workspace, and
 the session request fails with the same message. When every `PATH` entry is absolute, it also

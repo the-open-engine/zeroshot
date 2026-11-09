@@ -728,6 +728,9 @@ mod restic_selector;
 #[path = "slow_checkpoint_restore.rs"]
 mod slow_checkpoint_restore;
 
+#[path = "resume_lane_executable.rs"]
+mod resume_lane_executable;
+
 #[cfg(target_os = "linux")]
 #[path = "agent_tmpdir.rs"]
 mod agent_tmpdir;

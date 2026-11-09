@@ -203,6 +203,9 @@ pub enum PortableControllerError {
     Restore(#[source] io::Error),
     #[error("portable runtime could not be constructed")]
     RuntimeUnavailable,
+    /// The runtime factory's own reason, such as a lane executable missing after a restore.
+    #[error(transparent)]
+    RuntimeComposition(Box<dyn std::error::Error + Send + Sync>),
     #[error("portable controller could not install its console control guard")]
     ConsoleGuard(#[source] io::Error),
     #[error(transparent)]

@@ -412,8 +412,8 @@ impl LocalCliBackend {
         checkpoint: Option<crate::native_v2_supervisor::checkpoints::CheckpointRestore>,
     ) -> Result<RunId, StartFailure> {
         // Checkpoint restoration replaces this workspace under the controller's lease. A relative
-        // executable may exist only in that snapshot, so defer its lookup to the controller, which
-        // composes delivery after the restore and starts providers later.
+        // executable may exist only in that snapshot, so the controller checks lanes and delivery
+        // when it composes the restored run, before admission, and its startup report names them.
         if checkpoint.is_none() {
             crate::native_v2_local::check_lane_executables(
                 &prepared.submission.runtime,
