@@ -34,6 +34,9 @@ export type Template = {
   delivery?: string;
   label?: string;
   runtimeBindings?: Record<string, Binding>;
+  runtime?: Runtime;
+  requirements?: Record<string, string[]>;
+  description?: string;
 };
 export type Point = { x: number; y: number };
 export type Positions = Record<string, Point>;
@@ -89,7 +92,7 @@ export function newDocument(template: Template): Document {
   return {
     name: '',
     graph,
-    runtime: {
+    runtime: template.runtime ? clone(template.runtime) : {
       harness: '',
       provider: '',
       nodes: Object.fromEntries(
@@ -113,7 +116,7 @@ export function blankDocument(template: Template): Document {
     children: [],
     promotedStatePaths: [],
   };
-  doc.runtime.nodes = {};
+  doc.runtime = { harness: '', provider: '', nodes: {} };
   return doc;
 }
 export function uniqueName(root: GraphNode, prefix: string): string {

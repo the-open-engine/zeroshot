@@ -576,7 +576,10 @@ fn template_list_and_show_are_static_and_emit_ordinary_json() {
             "auto-research",
             "issue-review",
             "pr-review",
-            "code-review"
+            "code-review",
+            "documentation-task",
+            "cross-provider-task",
+            "service-task"
         ])
     );
 
@@ -941,4 +944,20 @@ async fn logs_attach_and_force_use_the_run_scoped_methods() {
             },
         ]
     );
+}
+
+#[test]
+fn example_builtins_are_available_through_the_same_cli_template_catalog() {
+    for name in ["documentation-task", "cross-provider-task", "service-task"] {
+        let command = parse_native_v2_args(args(&["template", "show", name])).assert_value();
+        let mut output = Vec::new();
+        try_execute_native_v2_static(&command, &mut output)
+            .assert_value()
+            .assert_value();
+        let graph: Value = serde_json::from_slice(&output).assert_value();
+        assert_eq!(
+            graph["initialInput"]["fields"]["task"]["type"]["kind"],
+            "string"
+        );
+    }
 }

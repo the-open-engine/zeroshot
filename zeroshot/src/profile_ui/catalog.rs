@@ -16,7 +16,10 @@ pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
     let mut result = Vec::new();
     for template in BuiltinGraphTemplate::all() {
         let deliveries = match template {
-            BuiltinGraphTemplate::SingleWorker => &[TemplateDelivery::None][..],
+            BuiltinGraphTemplate::SingleWorker
+            | BuiltinGraphTemplate::DocumentationTask
+            | BuiltinGraphTemplate::CrossProviderTask
+            | BuiltinGraphTemplate::ServiceTask => &[TemplateDelivery::None][..],
             BuiltinGraphTemplate::SoftwareChange => &[
                 TemplateDelivery::PullRequest,
                 TemplateDelivery::None,
@@ -36,6 +39,8 @@ pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
         for delivery in deliveries {
             let graph = materialize(*template, *delivery)?;
             let bindings = template_bindings(*template, *delivery, &graph)?;
+            let runtime = super::template_runtime::for_template(*template, *delivery, &graph)?;
+            let setup = super::profile_setup(json!({"runtime":runtime}))?;
             result.push(json!({
                 "id":format!("{}:{}", template.name(), delivery.name()),
                 "name":template.name(),
@@ -43,6 +48,9 @@ pub(super) fn templates() -> Result<Vec<Value>, ApiError> {
                 "label":template_label(*template, *delivery),
                 "graph":graph,
                 "runtimeBindings":bindings,
+                "description":super::template_runtime::description(*template),
+                "runtime":runtime,
+                "requirements":setup["requirements"],
             }));
         }
     }
@@ -186,6 +194,9 @@ fn named_node<'a>(graph: &'a GraphSpec, name: &str) -> Result<&'a GraphNode, Api
 fn template_label(template: BuiltinGraphTemplate, delivery: TemplateDelivery) -> &'static str {
     match template {
         BuiltinGraphTemplate::SingleWorker => "Single worker",
+        BuiltinGraphTemplate::DocumentationTask => "Documentation task",
+        BuiltinGraphTemplate::CrossProviderTask => "Cross-provider task",
+        BuiltinGraphTemplate::ServiceTask => "Service task",
         BuiltinGraphTemplate::SoftwareChange => software_change_label(delivery),
         BuiltinGraphTemplate::AutoResearch => {
             if delivery == TemplateDelivery::Push {

@@ -443,6 +443,15 @@ enum TemplateName {
 
     /// Review a PR with parallel specialist reviewers, verify their findings, and post one report.
     CodeReview,
+
+    /// Complete a focused documentation task.
+    DocumentationTask,
+
+    /// Implement a task with independent reviewers on another runtime lane.
+    CrossProviderTask,
+
+    /// Complete a task using an explicitly declared service connection.
+    ServiceTask,
 }
 
 #[derive(Debug, Args)]

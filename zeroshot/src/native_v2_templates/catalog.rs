@@ -16,16 +16,22 @@ pub enum BuiltinGraphTemplate {
     IssueReview,
     PrReview,
     CodeReview,
+    DocumentationTask,
+    CrossProviderTask,
+    ServiceTask,
 }
 
 impl BuiltinGraphTemplate {
-    pub(crate) const ALL: [Self; 6] = [
+    pub(crate) const ALL: [Self; 9] = [
         Self::SingleWorker,
         Self::SoftwareChange,
         Self::AutoResearch,
         Self::IssueReview,
         Self::PrReview,
         Self::CodeReview,
+        Self::DocumentationTask,
+        Self::CrossProviderTask,
+        Self::ServiceTask,
     ];
 
     #[must_use]
@@ -42,20 +48,18 @@ impl BuiltinGraphTemplate {
             Self::IssueReview => "issue-review",
             Self::PrReview => "pr-review",
             Self::CodeReview => "code-review",
+            Self::DocumentationTask => "documentation-task",
+            Self::CrossProviderTask => "cross-provider-task",
+            Self::ServiceTask => "service-task",
         }
     }
 
     #[must_use]
     pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value {
-            "single-worker" => Some(Self::SingleWorker),
-            "software-change" => Some(Self::SoftwareChange),
-            "auto-research" => Some(Self::AutoResearch),
-            "issue-review" => Some(Self::IssueReview),
-            "pr-review" => Some(Self::PrReview),
-            "code-review" => Some(Self::CodeReview),
-            _ => None,
-        }
+        Self::all()
+            .iter()
+            .copied()
+            .find(|template| template.name() == value)
     }
 
     pub(crate) const fn default_delivery(self) -> TemplateDelivery {
@@ -68,7 +72,7 @@ impl BuiltinGraphTemplate {
 
     pub(crate) fn default_session_scope(self, node: &str) -> SessionScope {
         match (self, node) {
-            (Self::SoftwareChange, "worker")
+            (Self::SoftwareChange | Self::CrossProviderTask, "worker")
             | (Self::AutoResearch, "explorer" | "synthesizer" | "challenger" | "researcher") => {
                 SessionScope::NodeInstance
             }
@@ -88,6 +92,16 @@ impl BuiltinGraphTemplate {
             Self::IssueReview => super::review::issue_review_graph(delivery),
             Self::PrReview => super::pr_review::pr_review_graph(delivery),
             Self::CodeReview => super::code_review::code_review_graph(delivery),
+            Self::DocumentationTask => super::focused_worker_graph(
+                "Complete the requested documentation task. Check the implementation and existing \
+                 documentation, make focused documentation changes, and verify examples and links.",
+            ),
+            Self::CrossProviderTask => software_change_graph(delivery),
+            Self::ServiceTask => super::focused_worker_graph(
+                "Complete the requested service integration task. PROJECT_SERVICE_ENDPOINT and \
+                 PROJECT_SERVICE_API_KEY are supplied through a named connection. Follow repository \
+                 guidance, keep credentials out of files and output, and verify the requested behavior.",
+            ),
         }
     }
 
@@ -115,6 +129,9 @@ impl BuiltinGraphTemplate {
         let name = match self {
             Self::AutoResearch => "checkpoint_delivery",
             Self::SingleWorker
+            | Self::DocumentationTask
+            | Self::CrossProviderTask
+            | Self::ServiceTask
             | Self::SoftwareChange
             | Self::IssueReview
             | Self::PrReview
@@ -135,7 +152,10 @@ impl BuiltinGraphTemplate {
 
     fn validate_delivery(self, delivery: TemplateDelivery) -> Result<(), BuiltinTemplateError> {
         let supported = match self {
-            Self::SingleWorker => delivery == TemplateDelivery::None,
+            Self::SingleWorker
+            | Self::DocumentationTask
+            | Self::CrossProviderTask
+            | Self::ServiceTask => delivery == TemplateDelivery::None,
             Self::SoftwareChange => delivery != TemplateDelivery::Comment,
             Self::AutoResearch => {
                 matches!(delivery, TemplateDelivery::None | TemplateDelivery::Push)

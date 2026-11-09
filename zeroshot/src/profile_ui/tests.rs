@@ -400,7 +400,7 @@ async fn static_assets_and_bootstrap_are_native_and_self_contained() {
         .json()
         .await
         .assert_value();
-    assert_eq!(bootstrap["templates"].as_array().assert_value().len(), 11);
+    assert_eq!(bootstrap["templates"].as_array().assert_value().len(), 14);
     assert_eq!(bootstrap["workers"].as_array().assert_value().len(), 6);
     assert!(bootstrap["runtimeSchema"]["$defs"].is_object());
 }
@@ -438,4 +438,41 @@ async fn host_selected_catalog_and_validation_keep_contributions_local() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn setup_discovers_access_without_saving_and_keeps_the_browser_boundary() {
+    let server = server().await;
+    let client = reqwest::Client::new();
+    let url = format!("{}/ui/api/setup", server.url);
+    let request = json!({"runtime":{
+        "harness":"codex", "provider":"openai", "nodes":{
+            "worker":{"kind":"agent", "model":"caller-owned"}
+        }
+    }});
+    let result: Value = client
+        .post(&url)
+        .json(&request)
+        .send()
+        .await
+        .assert_value()
+        .error_for_status()
+        .assert_value()
+        .json()
+        .await
+        .assert_value();
+    assert_eq!(result["requirements"], json!({"openai":["OPENAI_API_KEY"]}));
+    assert_eq!(
+        result["runtime"]["nodes"]["worker"]["model"],
+        "caller-owned"
+    );
+    assert!(!server.root.join("profiles.json").exists());
+    let response = client
+        .post(&url)
+        .header("origin", "https://untrusted.example")
+        .json(&request)
+        .send()
+        .await
+        .assert_value();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }

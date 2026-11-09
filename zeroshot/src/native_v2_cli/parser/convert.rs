@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use openengine_cluster_protocol::{
     CheckpointId, RunResumeFrom, ConnectionKey, ConnectionScope, Cursor, EnvironmentVariableName,
     ExecutionRef, IdempotencyKey, RunTitle, SourceBranchId, SourceRepositoryId, SourceRevisionId,
@@ -325,15 +325,10 @@ fn stack_selector(args: StackSelectorArgs) -> Result<StackSelector, NativeV2CliE
 
 impl TemplateName {
     fn into_template(self) -> Result<BuiltinGraphTemplate, NativeV2CliError> {
-        let name = match self {
-            Self::SingleWorker => "single-worker",
-            Self::SoftwareChange => "software-change",
-            Self::AutoResearch => "auto-research",
-            Self::IssueReview => "issue-review",
-            Self::PrReview => "pr-review",
-            Self::CodeReview => "code-review",
-        };
-        BuiltinGraphTemplate::parse(name)
+        let value = self
+            .to_possible_value()
+            .ok_or_else(|| usage("Missing template value"))?;
+        BuiltinGraphTemplate::parse(value.get_name())
             .ok_or_else(|| usage("Clap template value is outside the built-in catalog"))
     }
 }
@@ -706,7 +701,10 @@ fn validate_template_delivery(
         ));
     }
     let supported = match template {
-        BuiltinGraphTemplate::SingleWorker => delivery == TemplateDelivery::None,
+        BuiltinGraphTemplate::SingleWorker
+        | BuiltinGraphTemplate::DocumentationTask
+        | BuiltinGraphTemplate::CrossProviderTask
+        | BuiltinGraphTemplate::ServiceTask => delivery == TemplateDelivery::None,
         BuiltinGraphTemplate::SoftwareChange => delivery != TemplateDelivery::Comment,
         BuiltinGraphTemplate::AutoResearch => {
             matches!(delivery, TemplateDelivery::None | TemplateDelivery::Push)

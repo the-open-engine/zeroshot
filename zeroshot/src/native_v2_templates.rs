@@ -59,12 +59,15 @@ const REJECTED_LABEL: &str = "rejected";
 const DELIVERY_NODE: &str = "deliver";
 
 fn single_worker_graph() -> Result<GraphSpec, BuiltinTemplateError> {
-    let state = task_type()?;
-    let worker = task_worker(
-        "builtin.agent.worker@1",
+    focused_worker_graph(
         "Complete the requested task in the shared workspace. Follow repository guidance, make \
          focused changes, and run the relevant checks.",
-    )?;
+    )
+}
+
+fn focused_worker_graph(prompt: &str) -> Result<GraphSpec, BuiltinTemplateError> {
+    let state = task_type()?;
+    let worker = task_worker("builtin.agent.worker@1", prompt)?;
     let route = choice(
         "worker_result",
         state.clone(),

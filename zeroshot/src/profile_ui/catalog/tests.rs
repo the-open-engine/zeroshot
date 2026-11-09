@@ -57,7 +57,7 @@ fn delivery_choices_use_native_contracts_and_preserve_legacy_identities() {
 #[tokio::test]
 async fn template_variants_keep_exact_factory_graphs_and_admit_with_factory_bindings() {
     let templates = templates().assert_value();
-    assert_eq!(templates.len(), 11);
+    assert_eq!(templates.len(), 14);
     for template in templates {
         let kind =
             BuiltinGraphTemplate::parse(template["name"].as_str().assert_value()).assert_value();
@@ -177,4 +177,71 @@ async fn decision_worker_uses_the_native_contract_and_keeps_the_model_caller_own
     super::super::validate_profile(&graph, &runtime)
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn complete_template_defaults_admit_and_expose_derived_access() {
+    for template in templates().assert_value() {
+        let graph: GraphSpec = serde_json::from_value(template["graph"].clone()).assert_value();
+        let runtime: RuntimePlan =
+            serde_json::from_value(template["runtime"].clone()).assert_value();
+        assert!(runtime.workspace_checkpoints);
+        assert!(!template["description"].as_str().assert_value().is_empty());
+        super::super::validate_profile(&graph, &runtime)
+            .await
+            .assert_value();
+        let setup = super::super::profile_setup(json!({"runtime":runtime})).assert_value();
+        assert_eq!(template["requirements"], setup["requirements"]);
+    }
+}
+
+#[test]
+fn code_review_preserves_the_supplied_agent_plan_and_native_delivery() {
+    let template = templates()
+        .assert_value()
+        .into_iter()
+        .find(|template| template["name"] == "code-review")
+        .assert_value();
+    let supplied: RuntimePlan = serde_json::from_str(include_str!(
+        "../../../../docs/assets/code-review/runtime.json"
+    ))
+    .assert_value();
+    let mut supplied = serde_json::to_value(supplied).assert_value();
+    supplied["nodes"]["deliver"] = json!({"kind":"comment_delivery"});
+    assert_eq!(template["runtime"]["nodes"], supplied["nodes"]);
+    assert_eq!(template["runtime"]["harness"], supplied["harness"]);
+    assert_eq!(template["runtime"]["provider"], supplied["provider"]);
+    assert_eq!(
+        template["requirements"]["openai"],
+        json!(["OPENAI_API_KEY"])
+    );
+    assert_eq!(
+        template["requirements"]["anthropic"],
+        json!(["ANTHROPIC_API_KEY"])
+    );
+    assert!(template["requirements"].get("github").is_none());
+    assert!(template["runtime"].get("size").is_none());
+    assert!(template["runtime"].get("workspaceCheckpoints").is_none());
+}
+
+#[test]
+fn new_builtin_examples_have_native_descriptions_and_generic_requirements() {
+    let templates = templates().assert_value();
+    for name in ["documentation-task", "cross-provider-task", "service-task"] {
+        assert!(templates.iter().any(|template| template["name"] == name));
+    }
+    let service = templates
+        .iter()
+        .find(|template| template["name"] == "service-task")
+        .assert_value();
+    assert_eq!(
+        service["requirements"]["project_service"],
+        json!(["PROJECT_SERVICE_API_KEY", "PROJECT_SERVICE_ENDPOINT"])
+    );
+    let mixed = templates
+        .iter()
+        .find(|template| template["name"] == "cross-provider-task")
+        .assert_value();
+    assert!(mixed["requirements"].get("anthropic").is_some());
+    assert!(mixed["requirements"].get("openai").is_some());
 }

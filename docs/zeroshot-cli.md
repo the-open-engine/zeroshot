@@ -701,12 +701,15 @@ Options:
 
       --template <TEMPLATE>
           Possible values:
-          - single-worker:   A single general-purpose worker
-          - software-change: A review, validation, and optional delivery workflow for code changes
-          - auto-research:   Research with ten iterations by default and independent evidence gates
-          - issue-review:    Inspect an issue proposal and post a review report
-          - pr-review:       Review a PR diff, conditionally reproduce behavior, and post a concise report
-          - code-review:     Review a PR with parallel specialist reviewers, verify their findings, and post one report
+          - single-worker:       A single general-purpose worker
+          - software-change:     A review, validation, and optional delivery workflow for code changes
+          - auto-research:       Research with ten iterations by default and independent evidence gates
+          - issue-review:        Inspect an issue proposal and post a review report
+          - pr-review:           Review a PR diff, conditionally reproduce behavior, and post a concise report
+          - code-review:         Review a PR with parallel specialist reviewers, verify their findings, and post one report
+          - documentation-task:  Complete a focused documentation task
+          - cross-provider-task: Implement a task with independent reviewers on another runtime lane
+          - service-task:        Complete a task using an explicitly declared service connection
 
       --runtime-config <FILE>
 
@@ -873,12 +876,15 @@ Arguments:
           Built-in graph template to render
 
           Possible values:
-          - single-worker:   A single general-purpose worker
-          - software-change: A review, validation, and optional delivery workflow for code changes
-          - auto-research:   Research with ten iterations by default and independent evidence gates
-          - issue-review:    Inspect an issue proposal and post a review report
-          - pr-review:       Review a PR diff, conditionally reproduce behavior, and post a concise report
-          - code-review:     Review a PR with parallel specialist reviewers, verify their findings, and post one report
+          - single-worker:       A single general-purpose worker
+          - software-change:     A review, validation, and optional delivery workflow for code changes
+          - auto-research:       Research with ten iterations by default and independent evidence gates
+          - issue-review:        Inspect an issue proposal and post a review report
+          - pr-review:           Review a PR diff, conditionally reproduce behavior, and post a concise report
+          - code-review:         Review a PR with parallel specialist reviewers, verify their findings, and post one report
+          - documentation-task:  Complete a focused documentation task
+          - cross-provider-task: Implement a task with independent reviewers on another runtime lane
+          - service-task:        Complete a task using an explicitly declared service connection
 
 Options:
       --json
@@ -1110,12 +1116,15 @@ Options:
           Materialize and run this built-in graph template
 
           Possible values:
-          - single-worker:   A single general-purpose worker
-          - software-change: A review, validation, and optional delivery workflow for code changes
-          - auto-research:   Research with ten iterations by default and independent evidence gates
-          - issue-review:    Inspect an issue proposal and post a review report
-          - pr-review:       Review a PR diff, conditionally reproduce behavior, and post a concise report
-          - code-review:     Review a PR with parallel specialist reviewers, verify their findings, and post one report
+          - single-worker:       A single general-purpose worker
+          - software-change:     A review, validation, and optional delivery workflow for code changes
+          - auto-research:       Research with ten iterations by default and independent evidence gates
+          - issue-review:        Inspect an issue proposal and post a review report
+          - pr-review:           Review a PR diff, conditionally reproduce behavior, and post a concise report
+          - code-review:         Review a PR with parallel specialist reviewers, verify their findings, and post one report
+          - documentation-task:  Complete a focused documentation task
+          - cross-provider-task: Implement a task with independent reviewers on another runtime lane
+          - service-task:        Complete a task using an explicitly declared service connection
 
       --input <FILE>
           Load the graph's initial input from this JSON file
