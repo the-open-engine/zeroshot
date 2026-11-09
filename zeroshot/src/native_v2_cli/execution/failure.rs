@@ -167,11 +167,20 @@ impl fmt::Display for RunFailure {
                 formatter.write_str("\nFailure:")?;
                 write_diagnostic(formatter, primary)?;
             }
-            if !context.recorded.is_empty() {
-                formatter.write_str("\nRecorded failures:")?;
-                for diagnostic in &context.recorded {
-                    write_diagnostic(formatter, diagnostic)?;
-                }
+            write_diagnostics(formatter, "\nRecorded failures:", &context.recorded)?;
+            write_diagnostics(
+                formatter,
+                "\nRecorded verifier results:",
+                &context.verifiers,
+            )?;
+            for visit in &context.exhausted_loops {
+                write!(formatter, "\nLoop {}", visit.node.as_str())?;
+                write_indices(formatter, &visit.map_indices)?;
+                write!(
+                    formatter,
+                    " exhausted after {} completed iterations",
+                    visit.completed_iterations.get()
+                )?;
             }
         } else if !self.errors.is_empty() {
             let shown = self.errors.len();
@@ -204,17 +213,40 @@ impl fmt::Display for RunFailure {
     }
 }
 
+fn write_diagnostics(
+    formatter: &mut fmt::Formatter<'_>,
+    heading: &str,
+    diagnostics: &[FailureDiagnostic],
+) -> fmt::Result {
+    if !diagnostics.is_empty() {
+        formatter.write_str(heading)?;
+        for diagnostic in diagnostics {
+            write_diagnostic(formatter, diagnostic)?;
+        }
+    }
+    Ok(())
+}
+
 fn write_diagnostic(
     formatter: &mut fmt::Formatter<'_>,
     diagnostic: &FailureDiagnostic,
 ) -> fmt::Result {
     formatter.write_str("\n  ")?;
     if let Some(execution) = &diagnostic.execution {
-        write!(formatter, "{}: ", execution.node.as_str())?;
+        formatter.write_str(execution.node.as_str())?;
+        write_indices(formatter, &execution.map_indices)?;
+        formatter.write_str(": ")?;
     }
     formatter.write_str(diagnostic.message.as_str())?;
     if let Some(cursor) = &diagnostic.cursor {
         write!(formatter, " (log {})", cursor.as_str())?;
+    }
+    Ok(())
+}
+
+fn write_indices(formatter: &mut fmt::Formatter<'_>, indices: &[u64]) -> fmt::Result {
+    for index in indices {
+        write!(formatter, "[{index}]")?;
     }
     Ok(())
 }

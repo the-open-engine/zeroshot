@@ -142,6 +142,7 @@ impl ClaudeRunState {
         control: &DriverControl,
         response: AgentResponse,
     ) -> Result<Option<WorkerOutcome>, NodeRunnerError> {
+        self.retry.report_response(control, &response).await?;
         self.response.accept("Claude", control, response).await
     }
 

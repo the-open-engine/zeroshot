@@ -55,6 +55,7 @@ enum Behavior {
     },
     Together(Arc<tokio::sync::Barrier>),
     CancelAfterStart(Arc<tokio::sync::Barrier>, NodeRunnerError),
+    VerifierThenHang(WorkerOutcome),
     Hang,
 }
 
@@ -179,6 +180,17 @@ impl NodeDriver for FakeDriver {
                 self.state().cancellations.push(node.clone());
                 Err(NodeRunnerError::Cancelled)
             }
+            Behavior::VerifierThenHang(outcome) => {
+                crate::native_v2_capsule::provider_process::report_verifier_result(
+                    &outcome,
+                    &[],
+                    &control,
+                )
+                .await?;
+                control.cancelled().await;
+                self.state().cancellations.push(node.clone());
+                Err(NodeRunnerError::Cancelled)
+            }
             Behavior::Fail(error) => Err(error),
             Behavior::Reported { message, result } => {
                 control
@@ -190,6 +202,14 @@ impl NodeDriver for FakeDriver {
                 result
             }
         };
+        if let Ok(outcome) = &result {
+            crate::native_v2_capsule::provider_process::report_verifier_result(
+                outcome,
+                &[],
+                &control,
+            )
+            .await?;
+        }
         self.state().active -= 1;
         result
     }
@@ -435,6 +455,9 @@ mod startup;
 
 #[path = "tests/terminalization.rs"]
 mod terminalization;
+
+#[path = "tests/verifier_evidence.rs"]
+mod verifier_evidence;
 
 #[path = "tests/failure_logs.rs"]
 mod failure_logs;

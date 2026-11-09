@@ -146,6 +146,9 @@ pub struct RunMetadata {
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ActiveExecution {
+    /// Zero-based map indices, outermost first; empty outside maps.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub map_indices: Vec<u64>,
     pub execution: ExecutionRef,
     pub node: NodeName,
 }
@@ -311,6 +314,9 @@ pub struct RunLogsResult {
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RunLogEventNotification {
+    /// Zero-based map indices of the associated execution; empty outside maps.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub map_indices: Vec<u64>,
     pub subscription_id: SubscriptionId,
     pub run_id: RunId,
     pub cursor: Cursor,

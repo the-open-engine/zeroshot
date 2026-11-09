@@ -1,11 +1,13 @@
 export type FailureDiagnostic = {
   message: string;
-  execution?: { execution: string; node: string } | null;
+  execution?: { execution: string; node: string; mapIndices?: number[] } | null;
   cursor?: string | null;
 };
 export type FailureContext = {
   primary?: FailureDiagnostic | null;
   recorded?: FailureDiagnostic[];
+  verifiers?: FailureDiagnostic[];
+  exhaustedLoops?: { node: string; completedIterations: number; mapIndices?: number[] }[];
   incomplete?: boolean;
 };
 
@@ -14,6 +16,12 @@ const controls = /[\u0000-\u001f\u007f-\u009f]/;
 function boundedText(value: unknown, maximum: number): value is string {
   return (
     typeof value === 'string' && !controls.test(value) && encoder.encode(value).length <= maximum
+  );
+}
+function validIndices(value: unknown): boolean {
+  return (
+    value === undefined ||
+    (Array.isArray(value) && value.every((index) => Number.isSafeInteger(index) && index >= 0))
   );
 }
 function validDiagnostic(value: unknown): value is FailureDiagnostic {
@@ -27,6 +35,7 @@ function validDiagnostic(value: unknown): value is FailureDiagnostic {
       execution.execution.length > 0 &&
       typeof execution.node === 'string' &&
       execution.node.length <= 128 &&
+      validIndices(execution.mapIndices) &&
       /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(execution.node))
   );
 }
@@ -47,6 +56,20 @@ export function validFailureContext(value: unknown): value is FailureContext {
     !Array.isArray(context) &&
     (context.incomplete === undefined || typeof context.incomplete === 'boolean') &&
     (context.primary == null || validDiagnostic(context.primary)) &&
-    validRecorded(context.recorded)
+    validRecorded(context.recorded) &&
+    validRecorded(context.verifiers) &&
+    (context.exhaustedLoops === undefined ||
+      (Array.isArray(context.exhaustedLoops) &&
+        context.exhaustedLoops.length <= 5 &&
+        context.exhaustedLoops.every(
+          (loop) =>
+            loop &&
+            typeof loop.node === 'string' &&
+            loop.node.length <= 128 &&
+            /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(loop.node) &&
+            Number.isSafeInteger(loop.completedIterations) &&
+            loop.completedIterations > 0 &&
+            validIndices(loop.mapIndices)
+        )))
   );
 }

@@ -77,13 +77,17 @@ async fn review_and_delivery_repairs_share_the_budget_and_worker_instance() {
             }
         }
         let exhausted = reduce(&verified, &input, &history);
-        assert_eq!(
-            exhausted.terminal,
-            Some(TerminalProjection::Failed {
-                context: None,
-                reason: "change_attempts_exhausted".parse().assert_value(),
-            })
-        );
+        let Some(TerminalProjection::Failed { context, reason }) = &exhausted.terminal else {
+            panic!("expected the shared change budget to be exhausted");
+        };
+        assert_eq!(reason.as_str(), "change_attempts_exhausted");
+        let loops = &context
+            .as_ref()
+            .expect("exhausted loop evidence")
+            .exhausted_loops;
+        assert_eq!(loops.len(), 1);
+        assert_eq!(loops[0].node.as_str(), "change_loop");
+        assert_eq!(loops[0].completed_iterations.get(), 10);
         assert_dispatched_together(&exhausted, &[]);
     }
 }

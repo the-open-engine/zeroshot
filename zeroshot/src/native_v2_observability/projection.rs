@@ -24,6 +24,7 @@ pub(super) fn status_from_snapshot(
                 Ok(ActiveExecution {
                     execution: opaque_execution(&node.reference)?,
                     node: node.reference.node.clone(),
+                    map_indices: node.occurrence.map_indices.clone(),
                 })
             })
             .collect::<Result<Vec<_>, NativeV2ObservationError>>()
@@ -92,6 +93,9 @@ pub(super) fn log_notification(
         })
         .transpose()?;
     Ok(Some(RunLogEventNotification {
+        map_indices: execution
+            .and_then(|id| snapshot.executions.get(&id))
+            .map_or_else(Vec::new, |node| node.occurrence.map_indices.clone()),
         subscription_id: subscription_id.clone(),
         run_id: snapshot.run_id.clone(),
         cursor: stored.cursor.clone(),

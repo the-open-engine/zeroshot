@@ -57,10 +57,25 @@ pub(crate) fn prepare_event(snapshot: &RunSnapshot, mut event: RunEvent) -> RunE
         result: TerminalResult::Failed { reason, context },
         ..
     } = &mut event
-        && context.is_none()
+        && (context.is_none()
+            || (snapshot.primary_graph.is_none()
+                && context.as_ref().is_some_and(|evidence| {
+                    evidence.primary.is_none()
+                        && evidence.recorded.is_empty()
+                        && evidence.verifiers.is_empty()
+                })))
         && reason.as_str() != "force_stopped"
     {
-        *context = snapshot.failure_context.clone();
+        let mut evidence = snapshot.failure_context.clone().unwrap_or_default();
+        if let Some(reducer) = context.take() {
+            for visit in reducer.exhausted_loops {
+                evidence.record_exhausted_loop(visit);
+            }
+            evidence.incomplete |= reducer.incomplete;
+        }
+        if *evidence != Default::default() {
+            *context = Some(evidence);
+        }
     }
     event
 }
@@ -300,7 +315,14 @@ fn apply_failure_diagnostic(
     else {
         return Ok(());
     };
-    if *stream != super::SafeLogStream::Error {
+    if match kind {
+        FailureDiagnosticKind::Verifier => {
+            *stream != super::SafeLogStream::System || execution.is_none()
+        }
+        FailureDiagnosticKind::Failure | FailureDiagnosticKind::Incomplete => {
+            *stream != super::SafeLogStream::Error
+        }
+    } {
         return Err(RunLedgerError::InvalidEvent(
             "failure diagnostic must use the error stream",
         ));
@@ -309,7 +331,7 @@ fn apply_failure_diagnostic(
         snapshot.failure_context.get_or_insert_default().incomplete = true;
         return Ok(());
     }
-    let public_execution = diagnostic_execution(snapshot, *execution)?;
+    let public_execution = diagnostic_execution(snapshot, *execution, *kind)?;
     let message = BoundedLogMessage::new(crate::native_v2_runner::bounded_log_text(
         crate::native_v2_contract::visible_text(line.as_str()),
         openengine_cluster_protocol::MAX_LOG_MESSAGE_BYTES,
@@ -321,7 +343,9 @@ fn apply_failure_diagnostic(
         cursor: Some(cursor_for(sequence)),
     };
     let context = snapshot.failure_context.get_or_insert_default();
-    if execution.is_none() && context.primary.is_none() {
+    if *kind == FailureDiagnosticKind::Verifier {
+        context.record_verifier(diagnostic);
+    } else if execution.is_none() && context.primary.is_none() {
         context.primary = Some(diagnostic);
     } else {
         context.record(diagnostic);
@@ -332,6 +356,7 @@ fn apply_failure_diagnostic(
 fn diagnostic_execution(
     snapshot: &mut RunSnapshot,
     execution: Option<ExecutionId>,
+    kind: FailureDiagnosticKind,
 ) -> Result<Option<ActiveExecution>, RunLedgerError> {
     match execution {
         Some(id) => {
@@ -341,13 +366,14 @@ fn diagnostic_execution(
                 .ok_or(RunLedgerError::InvalidEvent(
                     "diagnostic execution was not dispatched",
                 ))?;
-            node.failure_diagnostic = true;
+            node.failure_diagnostic |= kind == FailureDiagnosticKind::Failure;
             Ok(Some(ActiveExecution {
                 execution: node
                     .reference
                     .public_execution()
                     .map_err(|_| RunLedgerError::Corrupt)?,
                 node: node.reference.node.clone(),
+                map_indices: node.occurrence.map_indices.clone(),
             }))
         }
         None => Ok(None),
