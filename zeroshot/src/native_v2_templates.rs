@@ -240,7 +240,8 @@ fn parallel_reviewers(
              Accept only with concrete evidence; otherwise return actionable feedback. Provide \
              an accurate, informative prospective pull request title and description for the \
              complete change under review regardless of the verdict. Follow the repository's pull \
-             request conventions, keep the title concise, and keep the description focused on \
+             request conventions, use a ready (non-draft) title of at most 255 Unicode characters, \
+             and format slash-leading endpoint or command examples as literal Markdown. Keep the description focused on \
              information useful to reviewers. If mentioning validation, use only results stated \
              directly by command output and do not infer counts. Do not add issue-closing \
              references because delivery owns them."

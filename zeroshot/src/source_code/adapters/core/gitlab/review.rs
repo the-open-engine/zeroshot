@@ -152,26 +152,67 @@ fn require_consistent_ref(
     Ok(())
 }
 
-fn generated_description(request: &SourceReviewRequest) -> Result<String, SourceDeliveryError> {
-    let description = super::comment::normalize_body(&request.description);
+pub(super) fn normalized_title(title: &str) -> (String, bool) {
+    let mut title = title.trim();
+    while let Some(prefix) = ["Draft:", "[Draft]", "(Draft)"].into_iter().find(|prefix| {
+        title
+            .get(..prefix.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+    }) {
+        title = title[prefix.len()..].trim_start();
+    }
+    let title = if title.is_empty() {
+        "Zeroshot change"
+    } else {
+        title
+    };
+    let shortened = title.chars().count() > 255;
+    let title: String = title
+        .chars()
+        .take(255)
+        .collect::<String>()
+        .trim_end()
+        .to_owned();
+    (title, shortened)
+}
+
+fn normalized_request(
+    request: &SourceReviewRequest,
+) -> Result<SourceReviewRequest, SourceDeliveryError> {
+    let (title, shortened) = normalized_title(&request.title);
+    let mut description = super::comment::normalize_body(&request.description);
+    if shortened {
+        // Rebuild this section from authored input on every delivery, never from the stored MR.
+        let note = format!("Original generated title: {}", request.title);
+        if !description.ends_with(&note) {
+            description.push_str(&format!("\n\n{note}"));
+        }
+    }
+    let description = super::comment::literal_body(&description);
     if !valid_delivery_description(&description) {
         return Err(SourceDeliveryError::Rejected);
     }
-    super::comment::require_literal_body(&description)?;
+    Ok(SourceReviewRequest {
+        title,
+        description,
+        ..request.clone()
+    })
+}
+
+fn generated_description(request: &SourceReviewRequest) -> String {
     let issue = request
         .source_issue
         .as_ref()
         .map_or(String::new(), |issue| {
             format!("\n\nCloses #{}", issue.number)
         });
-    Ok(format!(
+    format!(
         "{DELIVERY_GENERATED_BODY_START}\n{}{issue}\n{DELIVERY_GENERATED_BODY_END}",
-        description
-    ))
+        request.description
+    )
 }
 
 fn refresh_description(existing: &str, replacement: &str) -> Result<String, SourceDeliveryError> {
-    let existing = super::comment::normalize_body(existing);
     let Some(start) = existing.find(DELIVERY_GENERATED_BODY_START) else {
         return Err(SourceDeliveryError::identity(
             "GitLab review lacks its generated metadata section",
@@ -193,8 +234,6 @@ fn refresh_description(existing: &str, replacement: &str) -> Result<String, Sour
         replacement,
         &existing[suffix..]
     );
-    let body = super::comment::normalize_body(&body);
-    super::comment::require_literal_body(&body)?;
     Ok(body)
 }
 
@@ -206,7 +245,9 @@ pub(super) async fn open_or_update(
     let project = authority
         .project(&request.target.repository, credential)
         .await?;
-    let description = generated_description(request)?;
+    let request = normalized_request(request)?;
+    let request = &request;
+    let description = generated_description(request);
     let found = find(authority, &request.target, &request.head_branch, credential).await?;
     if let Some(found) = found {
         return update(authority, (request, &found, &description), credential).await;
@@ -316,8 +357,17 @@ async fn update(
         ));
     }
     let body = refresh_description(found.description.as_deref().unwrap_or(""), description)?;
-    if found.title.as_deref() == Some(&request.title) && found.description.as_deref() == Some(&body)
-    {
+    // A draft applied after creation belongs to its human author. Metadata refresh must not
+    // mark it ready again, even when the generated description changes.
+    let title = if found.draft {
+        found
+            .title
+            .as_deref()
+            .ok_or(SourceDeliveryError::Rejected)?
+    } else {
+        &request.title
+    };
+    if found.title.as_deref() == Some(title) && found.description.as_deref() == Some(&body) {
         return Ok(receipt);
     }
     let value: MergeRequest = authority
@@ -331,13 +381,13 @@ async fn update(
                     &receipt.review_id,
                 ],
                 Method::PUT,
-                json!({"title":request.title, "description":body}),
+                json!({"title":title, "description":body}),
             ),
             credential,
         )
         .await?;
     value.require_review(&receipt, project.id)?;
-    require_metadata(&value, &request.title, &body)?;
+    require_metadata(&value, title, &body)?;
     Ok(receipt)
 }
 

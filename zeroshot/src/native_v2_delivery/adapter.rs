@@ -654,9 +654,10 @@ impl NativeV2DeliveryAdapter {
         mut preparation: DeliveryPreparation<'_, '_>,
     ) -> Result<SourceReviewReceipt, DeliveryStop> {
         let input = delivery_input(&preparation.invocation.node.input)?;
-        self.preflight(&mut preparation, &input.title).await?;
+        let commit_message = self.authority.prepare_commit_message(&input.title);
+        self.preflight(&mut preparation, &commit_message).await?;
         let head_revision = self
-            .prepare_head(preparation.session, preparation.control, &input.title)
+            .prepare_head(preparation.session, preparation.control, &commit_message)
             .await?;
         let review_request = SourceReviewRequest {
             target: self.config.target.clone(),

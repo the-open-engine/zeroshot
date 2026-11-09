@@ -42,6 +42,8 @@ mod diagnostics;
 pub(super) mod github_fixture;
 #[path = "tests/head_update.rs"]
 mod head_update;
+#[path = "tests/metadata.rs"]
+mod metadata;
 #[path = "tests/review_sync.rs"]
 mod review_sync;
 #[path = "tests/routing.rs"]
