@@ -732,6 +732,8 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   milliseconds and remain unchanged across durable replay.
 - Runner start reserves an execution and returns its handle before asynchronous provider startup.
   Pending start waits are cancellable; accepted startup failures settle through the owned handle.
+  Pending remote starts reread connection loss after a close notification so failed closure cannot
+  race into an ordinary cancellation result.
   Cancellation drains output and provider cleanup before execution settlement. Run close reserves
   and tombstones execution activity atomically; no late work may surface after close returns.
 - Node deadlines are optional: omitted `timeoutMs` means completion or explicit cancellation.
@@ -881,8 +883,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   cursor; PR observation and queues do not require direct-method discovery. Incomplete rule reads and
   empty method intersections stop merge submission with policy diagnostics. Merge queues choose their
   own method. Queue admission uses explicit `enqueuePullRequest` with the validated PR node ID and
-  exact `expectedHeadOid`; enabling auto-merge alone is not enqueue confirmation. Completed transient
-  submissions retry after fresh exact-head policy checks; retries retain earlier uncertainty so an
+  exact `expectedHeadOid`; enabling auto-merge alone is not enqueue confirmation. Confirmed
+  admissions retain their added-event identity until confirmed withdrawal. Polling never resubmits a
+  removed entry: matching removal evidence binds the queued commit and complete required checks/job
+  logs, returning CI feedback through the existing repair loop before another admission is requested.
+  Completed transient submissions retry after fresh exact-head policy checks; retries retain earlier uncertainty so an
   empty snapshot cannot authorize repair. A complete GraphQL `UNPROCESSABLE` rejection rooted exactly
   at a null enqueue mutation adds no uncertainty; partial, nested, truncated, or unconfirmed responses
   remain unknown. Classification uses protocol bytes before credential redaction and never invents
@@ -1406,6 +1411,8 @@ python -m mkdocs build --strict
   hosted process and filesystem boundary tests as root against its built test binary.
 - `.github/workflows/coverage.yml` measures the default workspace, UI-feature Rust tests, and hosted
   root boundary tests on native changes, enforces coverage floors, and publishes LCOV to Coveralls.
+  External publication is best effort and runs only with an actual LCOV report; measurement, tests
+  and the local coverage floors remain required.
   It is reusable from the required merge-group CI aggregate and may also run manually.
   Linux coverage maps LLVM counters continuously with runtime counter relocation so post-fork
   helpers ending in `_exit` retain coverage without a profile-runtime call in the child. Profile

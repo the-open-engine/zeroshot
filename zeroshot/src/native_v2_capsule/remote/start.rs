@@ -92,11 +92,28 @@ async fn pending_start_cancelled(pending: &PendingRemoteStart) -> NodeRunnerErro
     if *pending.registration.closing.borrow() {
         let mut loss = pending.runner.connection_loss.clone();
         let mut closed = pending.registration.closed.clone();
-        tokio::select! {
-            biased;
-            () = wait_for_signal(&mut loss) => return NodeRunnerError::ConnectionLost,
-            () = wait_for_signal(&mut closed) => {}
-        }
+        return pending_close_error(&mut loss, wait_for_signal(&mut closed)).await;
     }
     NodeRunnerError::Cancelled
 }
+
+async fn pending_close_error(
+    loss: &mut watch::Receiver<bool>,
+    closed: impl Future<Output = ()>,
+) -> NodeRunnerError {
+    tokio::select! {
+        biased;
+        () = wait_for_signal(loss) => {},
+        () = closed => {},
+    }
+    // Loss can arrive after its branch was polled and before the close branch settles.
+    if connection_is_lost(loss) {
+        NodeRunnerError::ConnectionLost
+    } else {
+        NodeRunnerError::Cancelled
+    }
+}
+
+#[cfg(test)]
+#[path = "start/tests.rs"]
+mod tests;

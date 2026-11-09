@@ -130,7 +130,8 @@ jobs:
           NODE
 
       - name: Publish coverage
-        if: ${{ always() }}
+        if: ${{ !cancelled() && hashFiles('lcov.info') != '' }}
+        continue-on-error: true
         uses: coverallsapp/github-action@8d6379e14d29928660c4ba802d8e85393440b329 # v2.3.8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
