@@ -2759,11 +2759,14 @@ profiles without lanes:</p>
 <p>To run an older binary beside a newer one, give it its own <code>ZEROSHOT_CONFIG_DIR</code>. To recover, remove
 the profile or its <code>lane</code> fields with the newer binary.</p>
 <h3 id="local-runs">Local runs<a class="headerlink" href="#local-runs" title="Permanent link">&para;</a></h3>
-<p>Before the controller starts, a local <code>zeroshot run</code> or <code>zeroshot resume</code> checks that each lane's
-registered executable is on <code>PATH</code>. A missing executable fails the
-command with a message such as:</p>
+<p>Before any agent starts, a local <code>zeroshot run</code> or <code>zeroshot resume</code> checks that each lane's
+registered executable is on <code>PATH</code>. A missing executable fails the command, and a refused
+<code>resume</code> starts no successor, with a message such as:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>lane claude/anthropic needs the `claude` executable on PATH
 </code></pre></div>
+<p>A <code>resume</code> that restores a workspace checkpoint checks after the restore, so an executable that only
+the checkpoint contains is still found. Its message follows
+<code>controller exited before becoming ready:</code>.</p>
 <p><code>zeroshot acp</code> runs the same check when each session opens, against that session's workspace, and
 the session request fails with the same message. When every <code>PATH</code> entry is absolute, it also
 checks at startup. An empty or relative entry resolves against the directory the harness starts in,
@@ -3064,7 +3067,7 @@ or ignored by the native harness have no effective-configuration acknowledgement
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-08">8 November 2026</time>
+    Last updated <time datetime="2026-11-09">9 November 2026</time>
   </span>
 
     
