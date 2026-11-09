@@ -1,0 +1,23 @@
+{
+  "name": "the-open-engine",
+  "owner": {
+    "name": "The Open Engine"
+  },
+  "interface": {
+    "displayName": "The Open Engine"
+  },
+  "plugins": [
+    {
+      "name": "zeroshot",
+      "source": {
+        "source": "local",
+        "path": "./plugins/zeroshot-openai"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

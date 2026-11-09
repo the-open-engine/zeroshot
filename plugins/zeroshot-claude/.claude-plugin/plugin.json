@@ -1,0 +1,15 @@
+{
+  "name": "zeroshot",
+  "displayName": "Zeroshot",
+  "version": "0.1.0",
+  "description": "Plan software changes, design workflows, and run verified work on Zeroshot Platform.",
+  "author": {
+    "name": "The Open Engine",
+    "url": "https://zeroshot.sh"
+  },
+  "homepage": "https://zeroshot.sh",
+  "repository": "https://github.com/the-open-engine/zeroshot",
+  "license": "MIT",
+  "icon": "./assets/icon.png",
+  "privacyPolicyUrl": "https://app.zeroshot.sh/legal/privacy"
+}
