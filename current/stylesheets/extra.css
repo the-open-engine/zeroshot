@@ -21,7 +21,9 @@
   --oe-code-string: #8a4b08;
   --oe-code-number: #b42318;
   --oe-figure: #faf7f1;
+  --oe-slash: #a39a8c;
   --oe-marker: 'Reenie Beanie', 'Bradley Hand', 'Marker Felt', cursive;
+  --oe-serif: 'Fraunces', georgia, 'Times New Roman', serif;
   --oe-sans: 'Spline Sans', system-ui, sans-serif;
   --oe-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Mono', menlo, monospace;
 }
@@ -105,7 +107,9 @@ input {
   color: var(--oe-ink);
 }
 
-/* Header: the crow and the handwritten wordmark, then plain text. */
+/* Masthead: the crow, then where you are, "zeroshot / docs", in the breadcrumb every site
+   shares (the blog, theopenengine.com): product and section in marker, split by a full-height,
+   light serif slash. */
 .md-header,
 .md-header--shadow {
   border-bottom: 1px solid var(--oe-hairline);
@@ -122,23 +126,43 @@ input {
 }
 
 .md-header__topic:first-child {
-  align-items: baseline;
+  --oe-lockup: 1.5rem;
+
+  align-items: center;
   font-weight: 400;
 }
 
-.md-header__topic:first-child > .md-ellipsis {
+.md-header__topic:first-child > .md-ellipsis,
+.md-header__topic:first-child::after {
   color: var(--oe-marker-ink);
+  flex-shrink: 0;
   font-family: var(--oe-marker);
-  font-size: 1.5rem;
+  font-size: var(--oe-lockup);
+  transform: rotate(-1.5deg);
+}
+
+/* Flex drops the space the template leaves after the name, so the slash's own margin sets the gap. */
+.md-header__topic:first-child > .md-ellipsis {
+  align-items: baseline;
+  display: flex;
   overflow: visible;
   text-transform: lowercase;
 }
 
+/* The slash rides on the name's baseline and leans back upright, as on the blog. */
+.md-header__topic:first-child > .md-ellipsis::after {
+  color: var(--oe-slash);
+  content: '/';
+  display: inline-block;
+  font-family: var(--oe-serif);
+  font-size: calc(var(--oe-lockup) * 0.675);
+  font-weight: 400;
+  margin: 0 0.25em 0 0.33em;
+  transform: rotate(1.5deg) translateY(-0.08em);
+}
+
 .md-header__topic:first-child::after {
-  color: var(--oe-muted);
   content: 'docs';
-  font-size: 0.7rem;
-  margin-left: 0.45rem;
 }
 
 .md-header__topic + .md-header__topic {
@@ -161,6 +185,22 @@ input {
   border: 1px solid var(--oe-hairline);
   border-radius: 0.3rem;
   box-shadow: none;
+}
+
+/* Phones: the menu, theme and search buttons leave the lockup and version picker only the
+   middle of the bar. Scale the lockup into it, as the blog does, instead of running under them. */
+@media screen and (max-width: 44.9375em) {
+  [dir='ltr'] .md-header__title {
+    margin-left: 0.4rem;
+  }
+
+  .md-header__topic:first-child {
+    --oe-lockup: clamp(0.7rem, (100vw - 12.5rem) / 4.8, 1.5rem);
+  }
+
+  [dir='ltr'] .md-version__current {
+    margin-left: 0.6rem;
+  }
 }
 
 .md-source {

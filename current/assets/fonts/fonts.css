@@ -1,4 +1,14 @@
-/* Self-hosted variable Spline Sans, Reenie Beanie and Caveat. See the accompanying SIL Open Font Licenses. */
+/* Self-hosted variable Spline Sans, Reenie Beanie and Caveat, plus Fraunces 400 cut down to the one glyph
+   the masthead uses: the "/" in "zeroshot / docs". See the accompanying SIL Open Font Licenses. */
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(./fraunces-slash.woff2) format('woff2');
+  unicode-range: U+002F;
+}
+
 @font-face {
   font-family: 'Reenie Beanie';
   font-style: normal;
