@@ -3,6 +3,7 @@ use std::path::Path;
 
 use super::{HistoricalRun, Result, Session, files, history, invalid, tasks};
 use crate::active_memory::{ActiveMemoryStore, Lesson, LessonMutation, MemorySnapshot};
+use crate::active_memory::source_guard::SourceGuard;
 
 pub(super) async fn collect(
     session: &Session,
@@ -36,12 +37,13 @@ async fn validate_run(
     directory: &Path,
 ) -> Result<Vec<LessonMutation>> {
     let loaded = history::discovery(session, run).await?;
-    let source =
-        crate::active_memory::source_guard::SourceGuard::capture(&run.workspace, &[]).await;
-    let context = loaded.context(session, run).with_source(&source);
+    let inspected = SourceGuard::capture(&run.workspace, &[]).await;
+    let unknown = SourceGuard::default();
     let mut mutations = Vec::new();
     for task in &run.tasks {
         let (input, output) = tasks::response(directory, task)?;
+        let source = tasks::response_source(&input, &inspected, &unknown)?;
+        let context = loaded.context(session, run).with_source(source);
         mutations.extend(
             context
                 .mutations(task.role, &input, output)

@@ -1005,6 +1005,17 @@ jobs:
           }
           echo "Python SDK: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run_id" \
             | tee -a "$GITHUB_STEP_SUMMARY"
+          # Dispatch receipts can precede read visibility in the Actions API.
+          for attempt in {1..12}; do
+            if gh run view "$run_id" --json status > /dev/null; then
+              break
+            fi
+            if [[ "$attempt" -eq 12 ]]; then
+              echo "::error::Python SDK run $run_id did not become readable after 12 attempts"
+              exit 1
+            fi
+            sleep 5
+          done
           gh run watch "$run_id" --exit-status --interval 15
 
   docs:

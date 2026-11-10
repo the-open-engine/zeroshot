@@ -208,6 +208,10 @@ removed. Source or lesson changes preserve staged findings for fresh maintenance
 task responses prevent stale reuse. Deferred discoveries remain inactive. There is no findings count
 quota.
 
+Each response retains the source basis exported with its task. A known revision must still match
+the verified checkout when importing the answer; restore it or start a new session if it changed.
+Answers exported without a verified basis remain unknown even if the checkout later becomes clean.
+
 Current source includes tracked and nonignored untracked files and executable permissions. Ignored
 artifacts cannot be maintenance authority. Keep code stable during final review and publication;
 the filesystem and database cannot share a transaction. The CLI does not pull or change branches.

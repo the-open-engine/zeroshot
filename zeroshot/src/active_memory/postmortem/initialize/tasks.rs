@@ -89,6 +89,21 @@ pub(super) fn response(directory: &Path, task_ref: &TaskRef) -> Result<(Value, V
     Ok((task.context, response.output))
 }
 
+/// A later checkout cannot give an old digest-bound response new source authority.
+pub(super) fn response_source<'a>(
+    input: &Value,
+    inspected: &'a SourceGuard,
+    unknown: &'a SourceGuard,
+) -> Result<&'a SourceGuard> {
+    match input["source_basis"].as_str() {
+        Some(reference) if inspected.reference() == Some(reference) => Ok(inspected),
+        None => Ok(unknown),
+        Some(_) => Err(invalid(
+            "source changed since task export; restore it or use a new initialization directory",
+        )),
+    }
+}
+
 fn definition_digest(context: &Value) -> Result<Option<String>> {
     let Some(path) = context["evidence"]["authored_definition_file"].as_str() else {
         return Ok(None);

@@ -5,10 +5,13 @@ const { it } = require('node:test');
 const { runWorkflowStep } = require('./workflow-http-fixture');
 
 const commit = 'a'.repeat(40);
+const runPath = '/repos/fixture/repo/actions/runs/42';
 const options = { skip: process.platform === 'win32' };
 
 function runDispatch(t, fixture = {}) {
+  let runReads = 0;
   return runWorkflowStep(t, {
+    prefix: 'sleep() { :; }\n',
     workflow: '.github/workflows/release.yml',
     job: 'python-sdk-release',
     step: 'Dispatch and await standalone Python SDK release',
@@ -25,6 +28,12 @@ function runDispatch(t, fixture = {}) {
         response.writeHead(200);
         response.end(JSON.stringify({ id: 37, name: 'Release Python SDK' }));
       } else {
+        runReads += 1;
+        if (runReads <= (fixture.notFoundReads ?? 0)) {
+          response.writeHead(404);
+          response.end(JSON.stringify({ message: 'Not Found' }));
+          return;
+        }
         response.writeHead(200);
         response.end(
           JSON.stringify({
@@ -68,10 +77,7 @@ it(
         result.requests
           .slice(1)
           .every(({ url }) =>
-            [
-              '/repos/fixture/repo/actions/runs/42',
-              '/repos/fixture/repo/actions/workflows/37',
-            ].includes(new URL(url).pathname)
+            [runPath, '/repos/fixture/repo/actions/workflows/37'].includes(new URL(url).pathname)
           ),
         JSON.stringify(result.requests)
       );
@@ -81,11 +87,40 @@ it(
 );
 
 it(
+  'waits for the exact dispatched run to become readable after transient 404s',
+  options,
+  async (t) => {
+    const result = await runDispatch(t, { notFoundReads: 2 });
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.requests.filter(({ method }) => method === 'POST').length, 1);
+    const reads = result.requests.filter(({ url }) => new URL(url).pathname === runPath);
+    assert.ok(reads.length >= 4, 'must retry readiness before watching the same run');
+    assert.ok(
+      result.requests.every(
+        ({ method, url }) =>
+          method === 'POST' ||
+          [runPath, '/repos/fixture/repo/actions/workflows/37'].includes(new URL(url).pathname)
+      )
+    );
+  }
+);
+
+it('bounds readiness retries without redispatching or watching another run', options, async (t) => {
+  const result = await runDispatch(t, { notFoundReads: Infinity });
+  assert.notEqual(result.code, 0);
+  assert.match(result.stdout, /did not become readable after 12 attempts/);
+  assert.equal(result.requests.filter(({ method }) => method === 'POST').length, 1);
+  const reads = result.requests.filter(({ method }) => method === 'GET');
+  assert.equal(reads.length, 12);
+  assert.ok(reads.every(({ url }) => new URL(url).pathname === runPath));
+});
+
+it(
   'propagates failed or cancelled SDK runs instead of permitting documentation',
   options,
   async (t) => {
     for (const conclusion of ['failure', 'cancelled', 'timed_out']) {
-      const result = await runDispatch(t, { conclusion });
+      const result = await runDispatch(t, { conclusion, notFoundReads: 2 });
       assert.notEqual(result.code, 0, conclusion);
       assert.ok(result.requests.some(({ method }) => method === 'GET'));
     }

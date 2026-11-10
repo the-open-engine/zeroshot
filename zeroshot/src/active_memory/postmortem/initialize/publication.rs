@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use super::{Result, Review, ReviewTask, Session, files, history, invalid, tasks};
 use crate::active_memory::{Lesson, LessonMutation, MemorySnapshot, SuppliedMemoryManifest};
+use crate::active_memory::source_guard::SourceGuard;
 
 pub(super) async fn validate(
     session: &Session,
@@ -74,18 +75,16 @@ async fn validate_task(
             .map(crate::active_memory::Lesson::version)
             .collect(),
     };
-    let source = crate::active_memory::source_guard::SourceGuard::capture(
-        &entry.run.workspace,
-        &snapshot.lessons,
-    )
-    .await;
+    let inspected = SourceGuard::capture(&entry.run.workspace, &snapshot.lessons).await;
+    let unknown = SourceGuard::default();
+    let source = tasks::response_source(&input, &inspected, &unknown)?;
     let context = loaded
         .proposal_context(
             session.lesson_context(&entry.run, &snapshot),
             &evidence,
             Some(manifest),
         )
-        .with_source(&source);
+        .with_source(source);
     let validated = context
         .mutations(entry.task.role, &input, output.clone())
         .map_err(|reason| {
