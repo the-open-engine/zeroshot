@@ -94,9 +94,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   stays outside reducer/checkpoint history. All usage remains part of the run. Never turn incomplete
   supplied-memory evidence into an empty manifest. Graph guidance supplements only private provider
   invocations after plan validation; it never mutates authored instructions or graph hashes. Hooks
-  retrieve complete cards from a frozen resident index with relevance ranking and a cumulative
-  session byte budget. Execution-scoped conversations receive fresh recall budgets; reused
-  node-instance conversations retain theirs. Windows memory storage and initialization use shared
+  retrieve complete cards from a frozen resident index with relevance ranking. Separate per-injection
+  ceilings default to 16000 approximate tokens for node graph guidance and 8000 for repository hooks;
+  each accepts 1..=64000 and converts one token to four UTF-8 bytes, including framing. There is no
+  cumulative conversation/run budget. ID/revision deduplication persists for each provider conversation,
+  including compaction; new conversations receive fresh delivery sets. Windows memory storage and initialization use shared
   private-state helpers, including validation of SQLite sidecars. SQLite-created Windows children
   and externally written initialization responses may inherit the token's default owner only with
   an already private ACL and verified private parent; normalize them to explicit current-user
@@ -105,7 +107,17 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Shared store mutations use expected revisions and retained deletion tombstones.
   Postmortems refresh scoped lessons and pass before/current changes separately from original worker
   exposure. Revision conflicts reinvoke maintenance with retained discoveries under the original
-  deadline; host-owned ActiveMemoryBackend adapters supply authenticated snapshot/publication storage.
+  deadline, defaulting to ten minutes for collection and all roles/retries. Timeout retains only complete,
+  host-validated specialist units; maintenance replacements and retirements remain atomic across all
+  that specialist's batches. Explicit cancellation fences new publication and drains started writes.
+  Maintenance receives the complete original authored graph and nonsecret runtime, inline or through
+  complete private definition files; context trimming never substitutes an incomplete prefix.
+  When clean source is available, the host stamps repository-bound discoveries/adaptations with
+  `source:<actual-clean-HEAD>` evidence. New findings without a verified basis remain unknown; destructive
+  maintenance requires local ancestry from the prior inspected source and unchanged clean source;
+  unknown legacy, dirty/non-Git, unavailable and divergent/squashed history defer rather than invent
+  authority. No fetch, authority ref or extra checkout is involved. Host-owned ActiveMemoryBackend
+  adapters supply authenticated snapshot/publication storage.
   Storage reads and queued writes observe cancellation, while started writes drain with bounded storage
   timeouts. Unchanged conflict snapshots stop reconciliation rather than spending model calls on hidden
   tombstones; deferred unpublished findings remain unpublished.

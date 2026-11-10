@@ -5,19 +5,6 @@ pub(super) async fn source_case(with_remote: bool) -> Case {
     git(
         &case.workspace(),
         &[
-            "-c",
-            "user.name=Fixture",
-            "-c",
-            "user.email=fixture@example.test",
-            "commit",
-            "--quiet",
-            "-m",
-            "fixture",
-        ],
-    );
-    git(
-        &case.workspace(),
-        &[
             "remote",
             "add",
             "origin",

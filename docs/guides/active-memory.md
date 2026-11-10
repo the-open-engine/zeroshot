@@ -21,13 +21,14 @@ Add these optional fields to your runtime JSON alongside `harness`, `provider`, 
   "activeMemory": {
     "repository": true,
     "graph": true,
-    "budgetBytes": 2048
+    "nodeInjectionTokens": 16000,
+    "hookInjectionTokens": 8000
   },
   "globalAgents": {
     "postmortem": {
       "enabled": true,
       "sourceNode": "worker",
-      "timeoutMs": 120000
+      "timeoutMs": 600000
     }
   }
 }
@@ -36,11 +37,17 @@ Add these optional fields to your runtime JSON alongside `harness`, `provider`, 
 - Set `repository` or `graph` to `false` to stop reading and collecting lessons for that scope.
   Set both to `false` to disable Active Memory.
 - Set `postmortem.enabled` to `false` to keep reading saved lessons without updating them.
-- `budgetBytes` limits memory context per provider session, including formatting; the range is
-  1–16384 bytes.
+- `nodeInjectionTokens` limits graph guidance per node invocation; `hookInjectionTokens` limits
+  repository recall per tool callback. They default to 16000 and 8000 approximate tokens and each
+  accepts 1–64000. One approximate token permits four UTF-8 bytes, including formatting. There is
+  no cumulative conversation or run budget.
 - `sourceNode` selects the agent whose model, provider and connections the postmortem uses.
   Omit it to use the first worker, or the first agent verifier if there is no worker.
-- `timeoutMs` limits the postmortem to 1–600000 milliseconds, including startup and investigation.
+- `timeoutMs` defaults to ten minutes and accepts 1–600000 milliseconds. Startup, investigation and
+  all batches and retries share that deadline. Completed specialist work can publish after another
+  specialist times out; an incomplete maintenance specialist publishes none of its decisions.
+
+`budgetBytes` is replaced by the two injection limits; remove it from saved runtime JSON when upgrading.
 
 These settings apply per run, so saved profiles can use different policies. Postmortem model usage
 counts toward the run total. An ordinary postmortem failure appears in the logs and does not change
@@ -53,7 +60,8 @@ to a particular compiled graph and node; changing the graph creates a new scope.
 transfer automatically across graph versions.
 
 Each run reads a snapshot of memory. New lessons become available to future runs. Matching makes
-no model calls. A lesson is supplied once per provider session, within the context budget.
+no model calls. An ID/revision is supplied once per provider conversation; compaction does not reset
+this deduplication. Each matching injection gets its own context limit.
 
 Repository lessons arrive through harness hooks. Disabled hooks can prevent delivery; scripts that
 hide their file paths can miss matches. Advice cannot change a tool call already issued, and receipt

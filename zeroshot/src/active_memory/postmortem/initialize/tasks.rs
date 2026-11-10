@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use super::{HistoricalRun, Result, Review, ReviewTask, Session, files, history, invalid};
 use super::super::plan::{self, Role};
 use crate::active_memory::{MemorySnapshot, SuppliedMemoryManifest};
+use crate::active_memory::source_guard::SourceGuard;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,6 +40,10 @@ pub(super) fn write(
     role: Role,
     input: Value,
 ) -> Result<TaskRef> {
+    let mut input = input;
+    if let Some(digest) = definition_digest(&input)? {
+        input["evidence"]["authored_definition_digest"] = json!(digest);
+    }
     let task = Task {
         instructions: format!(
             "{}\n\n{RETROSPECTIVE_INSTRUCTION}",
@@ -66,6 +71,14 @@ pub(super) fn response(directory: &Path, task_ref: &TaskRef) -> Result<(Value, V
     if files::digest(&task)? != task_ref.digest {
         return Err(invalid("exported task changed"));
     }
+    if let Some(actual) = definition_digest(&task.context)? {
+        if task.context["evidence"]["authored_definition_digest"].as_str() != Some(actual.as_str())
+        {
+            return Err(invalid(
+                "original authored definition changed after task export",
+            ));
+        }
+    }
     let response: Response =
         files::read(&directory.join(format!("{}.response.json", task_ref.path)))?;
     if response.task_digest != task_ref.digest {
@@ -75,6 +88,17 @@ pub(super) fn response(directory: &Path, task_ref: &TaskRef) -> Result<(Value, V
     }
     Ok((task.context, response.output))
 }
+
+fn definition_digest(context: &Value) -> Result<Option<String>> {
+    let Some(path) = context["evidence"]["authored_definition_file"].as_str() else {
+        return Ok(None);
+    };
+    let definition: Value = files::read(Path::new(path))?;
+    files::digest(&definition).map(Some)
+}
+
+#[cfg(test)]
+mod tests;
 
 async fn maintenance(
     session: &Session,
@@ -94,18 +118,22 @@ async fn maintenance(
             .map(crate::active_memory::Lesson::version)
             .collect(),
     };
-    let context = loaded.proposal_context(
-        session.lesson_context(run, &snapshot),
-        &evidence,
-        Some(supplied),
-    );
+    let source = SourceGuard::capture(&run.workspace, &snapshot.lessons).await;
+    let definition_file = loaded.export_definition(directory)?;
+    let context = loaded
+        .proposal_context(
+            session.lesson_context(run, &snapshot),
+            &evidence,
+            Some(supplied),
+        )
+        .with_definition_file(Some(&definition_file))
+        .with_source(&source);
     for mut input in context
         .inputs(role)
         .map_err(|()| invalid("cannot fit a complete maintenance card"))?
     {
         input["initialization_source_digest"] = json!(review.source_digest);
         input["initialization_workspace"] = json!(run.workspace);
-        input["initialization_graph_file"] = json!(loaded.export_graph(directory)?);
         let task = write(directory, run, role, input)?;
         review.tasks.push(ReviewTask {
             run: run.clone(),
@@ -117,7 +145,7 @@ async fn maintenance(
 
 const RETROSPECTIVE_INSTRUCTION: &str = concat!(
     "Retrospective initialization: evidence is the supplied HISTORICAL main run, not a new execution. Main-run citations name that frozen context. ",
-    "Read current source in workspace before source-dependent judgments. The complete exact authored graph is at context.initialization_graph_file if the evidence graph is truncated. ",
+    "Read current source in workspace before source-dependent judgments. The complete exact authored graph and original nonsecret runtime are at evidence.authored_definition_file. ",
     "Graph lessons remain tied to that exact hash; never migrate them to another graph version. The final maintenance pass checks tracked and nonignored source; ",
     "ignored/generated files cannot be current authority. Do not execute git commands. Write only your response file; do not alter source or memory state. ",
     "Native tool receipts are unavailable; use observed historical completions and transcripts.",
@@ -129,7 +157,12 @@ pub(super) async fn discovery(
     directory: &Path,
 ) -> Result<Vec<TaskRef>> {
     let loaded = history::discovery(session, run).await?;
-    let context = loaded.context(session, run);
+    let definition_file = loaded.export_definition(directory)?;
+    let source = SourceGuard::capture(&run.workspace, &[]).await;
+    let context = loaded
+        .context(session, run)
+        .with_source(&source)
+        .with_definition_file(Some(&definition_file));
     let mut exported = Vec::new();
     for role in [Role::Graph, Role::Repository] {
         if !context.role_enabled(role) {
@@ -140,7 +173,6 @@ pub(super) async fn discovery(
             .map_err(|()| invalid("cannot fit discovery context"))?
         {
             input["initialization_workspace"] = json!(run.workspace);
-            input["initialization_graph_file"] = json!(loaded.export_graph(directory)?);
             exported.push(write(directory, run, role, input)?);
         }
     }

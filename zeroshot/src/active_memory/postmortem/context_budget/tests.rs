@@ -78,11 +78,12 @@ fn evidence_truncation_retains_early_and_recent_tool_receipts() {
 }
 
 #[test]
-fn oversized_graph_text_and_structured_input_have_explicit_bounded_fallbacks() {
+fn complete_graph_authority_is_never_truncated_while_other_evidence_is_bounded() {
     let large = "quoted \" graph".repeat(MAX_INPUT_BYTES / 8);
     let graph = base(json!({"evidence":{"records":[],"executions":[],"authored_graph":large}}));
-    assert!(graph["evidence"]["authored_graph"].as_str().unwrap().len() < large.len());
-    assert!(encoded_size(&graph) <= BASE_BYTES);
+    assert_eq!(graph["evidence"]["authored_graph"], large);
+    // The caller must export oversized authority to a complete file, never accept a prefix.
+    assert!(encoded_size(&graph) > MAX_INPUT_BYTES);
     let input = base(
         json!({"evidence":{"records":[],"executions":[],"initial_input":{"payload":large}}, "supplied_lessons":{}}),
     );

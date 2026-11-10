@@ -12,7 +12,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use openengine_cluster_protocol::{NodeInstructions, NodeRuntimeBinding};
+use openengine_cluster_protocol::NodeRuntimeBinding;
 
 use crate::execution::SessionScope;
 use serde_json::Value;
@@ -109,9 +109,9 @@ impl ActiveMemoryHooks {
         if auxiliary_invocation(&invocation) {
             return invocation;
         }
-        let Some(instructions) = invocation.node.instructions.as_ref() else {
+        if invocation.node.instructions.is_none() {
             return invocation;
-        };
+        }
         let session = provider_session_key(&invocation);
         let context = self
             .source
@@ -119,13 +119,10 @@ impl ActiveMemoryHooks {
         if context.is_empty() {
             return invocation;
         }
-        let augmented = format!("{}{}", instructions.as_str(), context,);
-        match NodeInstructions::new(augmented) {
-            Ok(instructions) => invocation.node.instructions = Some(instructions),
-            Err(_) => self
-                .source
-                .unavailable("Active Memory graph guidance exceeded instruction bounds"),
-        }
+        invocation.host_context = Some(match invocation.host_context.take() {
+            Some(host) if !host.is_empty() => format!("{host}\n\n{context}"),
+            _ => context,
+        });
         invocation
     }
 

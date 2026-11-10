@@ -213,7 +213,7 @@ fn render(
     let document = json!({
         "run_id":request.run_id, "title":request.admitted.title,
         "primary_terminal":request.primary_terminal, "initial_input":bounded_json(&request.admitted.initial_input,4096),
-        "authored_graph":bounded_json(&request.admitted.graph,16384),
+        "authored_graph":request.admitted.graph, "authored_runtime":request.admitted.runtime,
         "impact_episodes":impact.episodes,"tool_observations":impact.tools,
         "impact_policy":{"assessment":"specialist","provenance":"observed_main_run"},
         "executions":executions, "records":records.into_iter().map(|(reference,text)|json!({"execution":execution_by_reference.get(&reference),"reference":reference,"event":text})).collect::<Vec<_>>(),

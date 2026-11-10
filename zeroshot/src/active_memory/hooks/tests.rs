@@ -277,26 +277,57 @@ fn harness_configuration_preserves_arguments_and_uses_private_capabilities() {
 }
 
 #[test]
-fn graph_guidance_changes_only_the_private_instruction_copy() {
+fn graph_guidance_supplements_host_context_without_changing_authored_instructions() {
     let hooks = ActiveMemoryHooks::new(Arc::new(Source::default())).assert_value();
-    let original = invocation();
+    let mut original = invocation();
+    original.host_context = Some("Existing host facts".into());
     let supplemented = hooks.invocation(original.clone());
     assert_eq!(original.node.reference, supplemented.node.reference);
     assert_eq!(original.node.binding, supplemented.node.binding);
     assert_eq!(original.response, supplemented.response);
-    let original_instructions = original.node.instructions.assert_value();
-    let instructions = supplemented.node.instructions.assert_value();
-    assert!(
-        instructions
-            .as_str()
-            .starts_with(original_instructions.as_str())
+    assert_eq!(original.node.instructions, supplemented.node.instructions);
+    assert_eq!(
+        supplemented.host_context.as_deref(),
+        Some("Existing host facts\n\nCheck all declared outputs for worker."),
     );
     assert!(
-        instructions
-            .as_str()
+        supplemented
+            .agent_prompt()
+            .assert_value()
             .contains("Check all declared outputs for worker.")
     );
-    assert!(!original_instructions.as_str().contains("Active Memory"));
+    assert!(
+        !original
+            .agent_prompt()
+            .assert_value()
+            .contains("Check all declared outputs for worker.")
+    );
+}
+
+#[test]
+fn supported_large_context_crosses_the_native_callback_without_truncation() {
+    struct LargeSource;
+    impl ActiveMemorySource for LargeSource {
+        fn tool_context(&self, _query: &HookQuery) -> String {
+            "x".repeat(super::native::MAX_CONTEXT_BYTES)
+        }
+        fn graph_context(&self, _node: &str, _session: &str) -> String {
+            String::new()
+        }
+    }
+    let hooks = ActiveMemoryHooks::new(Arc::new(LargeSource)).assert_value();
+    let cap = hooks
+        .broker
+        .capability(&invocation(), Path::new("/workspace"))
+        .assert_value();
+    let context = callback(&cap, &cap.token, json!({"tool_name":"Read"}));
+    assert_eq!(context.len(), super::native::MAX_CONTEXT_BYTES);
+    assert!(context.len() > 32_768);
+    let hermes = include_str!("../../harnesses/adapters/contributed/hermes/native_memory.py");
+    assert!(hermes.contains(&format!(
+        "_MAX_CONTEXT_BYTES = {}",
+        super::native::MAX_CONTEXT_BYTES
+    )));
 }
 
 #[test]
@@ -319,16 +350,16 @@ fn auxiliary_roles_never_recall_even_when_a_main_node_has_the_same_name() {
         main.node.reference.execution = ExecutionId::new(offset).assert_value();
         main.provider_session_slot = NodeInstanceId::new(offset).assert_value();
         assert_ne!(
-            hooks.invocation(main.clone()).node.instructions,
-            main.node.instructions
+            hooks.invocation(main.clone()).host_context,
+            main.host_context
         );
         let mut auxiliary = main;
         auxiliary.node.reference.execution = ExecutionId::new(offset + 1).assert_value();
         auxiliary.node.reference.node_instance = NodeInstanceId::new(offset + 1).assert_value();
         auxiliary.provider_session_slot = NodeInstanceId::new(offset + 1).assert_value();
         assert_eq!(
-            hooks.invocation(auxiliary.clone()).node.instructions,
-            auxiliary.node.instructions
+            hooks.invocation(auxiliary.clone()).host_context,
+            auxiliary.host_context
         );
         assert!(
             hooks
@@ -445,7 +476,14 @@ fn full_authored_instructions_and_failed_hook_setup_preserve_the_primary_invocat
     );
     let supplemented = hooks.invocation(original.clone());
     assert_eq!(supplemented.node.instructions, original.node.instructions);
-    assert!(source.unavailable.lock().unwrap()[0].contains("instruction bounds"));
+    assert!(
+        supplemented
+            .host_context
+            .as_deref()
+            .unwrap()
+            .contains("Check all declared outputs for worker.")
+    );
+    assert!(source.unavailable.lock().unwrap().is_empty());
     let invalid_home = tempfile::NamedTempFile::new().unwrap();
     for install in native_installers() {
         let mut command = command(invalid_home.path().parent().unwrap());
@@ -461,7 +499,7 @@ fn full_authored_instructions_and_failed_hook_setup_preserve_the_primary_invocat
         assert_eq!(command.argv, arguments);
     }
     hooks.execution_failed();
-    assert_eq!(source.unavailable.lock().unwrap().len(), 5);
+    assert_eq!(source.unavailable.lock().unwrap().len(), 4);
 }
 
 #[test]

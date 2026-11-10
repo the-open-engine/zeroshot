@@ -238,7 +238,11 @@ async fn cancelled_queued_publication_does_not_wait_for_or_write_to_the_store() 
         }],
     };
     let (cancel, cancellation) = watch::channel(false);
-    let work = backend.publish(&fixture.run_id, publication, cancellation);
+    let control = crate::active_memory::MemoryPublicationControl::new(
+        cancellation,
+        tokio::time::Instant::now() + std::time::Duration::from_secs(30),
+    );
+    let work = backend.publish(&fixture.run_id, publication, control);
     assert!(matches!(
         cancel_pending(work, cancel).await,
         Err(ActiveMemoryError::Cancelled)
@@ -266,7 +270,7 @@ impl ActiveMemoryBackend for StalledSnapshot {
         &self,
         _: &RunId,
         _: MemoryPublication,
-        _: watch::Receiver<bool>,
+        _: crate::active_memory::MemoryPublicationControl,
     ) -> Result<Vec<crate::active_memory::LessonVersion>, ActiveMemoryError> {
         panic!("a cancelled snapshot must never publish")
     }

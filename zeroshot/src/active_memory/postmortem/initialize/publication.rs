@@ -74,11 +74,18 @@ async fn validate_task(
             .map(crate::active_memory::Lesson::version)
             .collect(),
     };
-    let context = loaded.proposal_context(
-        session.lesson_context(&entry.run, &snapshot),
-        &evidence,
-        Some(manifest),
-    );
+    let source = crate::active_memory::source_guard::SourceGuard::capture(
+        &entry.run.workspace,
+        &snapshot.lessons,
+    )
+    .await;
+    let context = loaded
+        .proposal_context(
+            session.lesson_context(&entry.run, &snapshot),
+            &evidence,
+            Some(manifest),
+        )
+        .with_source(&source);
     let validated = context
         .mutations(entry.task.role, &input, output.clone())
         .map_err(|reason| {

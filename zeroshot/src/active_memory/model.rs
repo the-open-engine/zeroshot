@@ -7,7 +7,10 @@ pub const MAX_LESSONS: usize = 10_000;
 pub const MAX_TOMBSTONES: usize = 100_000;
 pub const MAX_RECORD_BYTES: usize = 8_192;
 pub const MAX_STORE_BYTES: usize = 64 * 1024 * 1024;
-pub const MAX_INJECTION_BYTES: usize = 16_384;
+pub const ESTIMATED_BYTES_PER_TOKEN: usize = 4;
+pub const MAX_INJECTION_BYTES: usize =
+    openengine_cluster_protocol::MAX_ACTIVE_MEMORY_INJECTION_TOKENS as usize
+        * ESTIMATED_BYTES_PER_TOKEN;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ActiveMemoryError {

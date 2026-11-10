@@ -58,7 +58,7 @@ fn uniform_runtime_preserves_authored_memory_controls_for_every_harness() {
             "provider": provider,
             "model": "provider-owned-model",
             "workspaceCheckpoints": false,
-            "activeMemory": {"repository": false, "graph": true, "budgetBytes": 512},
+            "activeMemory": {"repository": false, "graph": true, "nodeInjectionTokens": 512, "hookInjectionTokens": 256},
             "globalAgents": {"postmortem": {"enabled": false, "sourceNode": "worker", "timeoutMs": 1000}}
         });
         let plan: UniformRuntimePlan = serde_json::from_value(authored.clone()).assert_value();

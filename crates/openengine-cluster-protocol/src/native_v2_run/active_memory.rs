@@ -6,15 +6,22 @@ use serde::{Deserialize, Deserializer, Serialize, de};
 use crate::NodeName;
 use super::NativeV2RunValueError;
 
-/// Retrieval controls. Repository cards and procedural graph guidance are independent.
+/// Hard safety bound for either approximate-token injection limit.
+pub const MAX_ACTIVE_MEMORY_INJECTION_TOKENS: u32 = 64_000;
+
+/// Independent per-injection limits; approximate tokens are UTF-8 bytes divided by four.
+/// Repository hook recall and graph node guidance never share cumulative session spend.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct ActiveMemoryConfig {
     pub repository: bool,
     pub graph: bool,
-    #[serde(deserialize_with = "deserialize_budget")]
-    #[schemars(range(min = 1, max = 16384))]
-    pub budget_bytes: u32,
+    #[serde(deserialize_with = "deserialize_injection_tokens")]
+    #[schemars(range(min = 1, max = 64000))]
+    pub node_injection_tokens: u32,
+    #[serde(deserialize_with = "deserialize_injection_tokens")]
+    #[schemars(range(min = 1, max = 64000))]
+    pub hook_injection_tokens: u32,
 }
 
 impl Default for ActiveMemoryConfig {
@@ -22,7 +29,8 @@ impl Default for ActiveMemoryConfig {
         Self {
             repository: true,
             graph: true,
-            budget_bytes: 2048,
+            node_injection_tokens: 16_000,
+            hook_injection_tokens: 8_000,
         }
     }
 }
@@ -39,9 +47,12 @@ impl ActiveMemoryConfig {
     }
 
     pub fn validate(&self) -> Result<(), NativeV2RunValueError> {
-        if !(1..=16_384).contains(&self.budget_bytes) {
+        if [self.node_injection_tokens, self.hook_injection_tokens]
+            .iter()
+            .any(|limit| !(1..=MAX_ACTIVE_MEMORY_INJECTION_TOKENS).contains(limit))
+        {
             return Err(NativeV2RunValueError(
-                "memory budgetBytes must be in 1..=16384",
+                "memory injection token limits must be in 1..=64000",
             ));
         }
         Ok(())
@@ -80,7 +91,7 @@ impl Default for PostmortemConfig {
         Self {
             enabled: true,
             source_node: None,
-            timeout_ms: 120_000,
+            timeout_ms: 600_000,
         }
     }
 }
@@ -96,11 +107,13 @@ impl PostmortemConfig {
     }
 }
 
-fn deserialize_budget<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+fn deserialize_injection_tokens<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<u32, D::Error> {
     bounded_u32(
         deserializer,
-        16_384,
-        "memory budgetBytes must be in 1..=16384",
+        MAX_ACTIVE_MEMORY_INJECTION_TOKENS,
+        "memory injection token limits must be in 1..=64000",
     )
 }
 

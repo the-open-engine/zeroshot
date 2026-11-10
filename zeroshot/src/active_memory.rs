@@ -12,6 +12,7 @@ pub use backend::*;
 
 mod model;
 mod retrieval;
+pub(crate) mod source_guard;
 mod store;
 
 pub use model::*;

@@ -36,7 +36,9 @@ async fn validate_run(
     directory: &Path,
 ) -> Result<Vec<LessonMutation>> {
     let loaded = history::discovery(session, run).await?;
-    let context = loaded.context(session, run);
+    let source =
+        crate::active_memory::source_guard::SourceGuard::capture(&run.workspace, &[]).await;
+    let context = loaded.context(session, run).with_source(&source);
     let mut mutations = Vec::new();
     for task in &run.tasks {
         let (input, output) = tasks::response(directory, task)?;

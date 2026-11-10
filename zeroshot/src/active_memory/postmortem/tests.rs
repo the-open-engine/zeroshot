@@ -12,6 +12,7 @@ use super::*;
 use tokio::sync::Mutex;
 use crate::active_memory::{ActiveMemoryStore, SqliteMemoryBackend};
 
+mod deadline;
 mod diagnostics;
 mod initialization;
 mod reconciliation;
@@ -45,9 +46,19 @@ impl SuppliedLessonSource for Source {
     }
 }
 
+#[derive(Clone, Copy)]
+struct HeldRole {
+    name: &'static str,
+    from_batch: u64,
+    from_attempt: u64,
+}
+
 #[derive(Default)]
 struct Driver {
     outputs: StdMutex<BTreeMap<String, Value>>,
+    hold: StdMutex<Option<HeldRole>>,
+    held: tokio::sync::Notify,
+    source_reference: StdMutex<Option<String>>,
     slots: StdMutex<Vec<(String, u64)>>,
     globals: AtomicUsize,
     closed: Arc<AtomicUsize>,
@@ -102,37 +113,7 @@ impl NodeDriver for Driver {
                 artifacts: Vec::new(),
             });
         }
-        let mut labels = BTreeMap::from([(
-            "ZEROSHOT_NODE_NAME".to_owned(),
-            "prior-primary-node".to_owned(),
-        )]);
-        crate::native_v2_capsule::provider_process::apply_execution_environment(
-            &mut labels,
-            &invocation,
-        )
-        .assert_value();
-        assert!(name.starts_with("active_memory_"));
-        assert_eq!(
-            labels["ZEROSHOT_RUN_ID"],
-            invocation.node.reference.run_id.as_str()
-        );
-        assert_eq!(labels["ZEROSHOT_NODE_NAME"], name);
-        assert_eq!(labels["ZEROSHOT_NODE_KIND"], "verifier");
-        assert_eq!(
-            labels["ZEROSHOT_NODE_INSTANCE_ID"],
-            invocation.node.reference.node_instance.to_string()
-        );
-        assert_eq!(
-            labels["ZEROSHOT_EXECUTION_REF"],
-            invocation
-                .node
-                .reference
-                .public_execution()
-                .assert_value()
-                .as_str()
-        );
-        assert_eq!(labels["ZEROSHOT_NODE_ATTEMPT"], "1");
-        assert_eq!(labels["ZEROSHOT_NODE_ITERATION"], "0");
+        check_dispatch(&invocation);
         self.globals.fetch_add(1, Ordering::SeqCst);
         let concurrent = if name == "active_memory_repository_maintenance" {
             self.concurrent_store.lock().assert_value().take()
@@ -143,6 +124,10 @@ impl NodeDriver for Driver {
             let mut newer = seed_lesson();
             newer.recommendation =
                 "Keep the concurrent provider advice and reconcile the new finding.".to_owned();
+            newer
+                .evidence
+                .references
+                .extend(self.source_reference.lock().assert_value().clone());
             store
                 .lock()
                 .await
@@ -164,6 +149,25 @@ impl NodeDriver for Driver {
             .get(&name)
             .cloned()
             .unwrap_or(fallback);
+        let held = *self.hold.lock().assert_value();
+        let context: Value =
+            serde_json::from_str(invocation.node.input["context"].as_str().assert_value())
+                .assert_value();
+        let batch = context["maintenance_batch"]["index"].as_u64().unwrap_or(1);
+        let attempt = invocation
+            .node
+            .reference
+            .node_instance
+            .get()
+            .saturating_sub(AUXILIARY_PROVIDER_SLOT_OFFSET)
+            / 1_000_000;
+        if held.is_some_and(|held| {
+            held.name == name && batch >= held.from_batch && attempt >= held.from_attempt
+        }) {
+            self.held.notify_one();
+            control.cancellation().cancelled().await;
+            // Deliberately return valid-looking late output: cutoff must reject it.
+        }
         Ok(WorkerOutcome::Verifier {
             output,
             signals: BTreeMap::new(),
@@ -171,6 +175,41 @@ impl NodeDriver for Driver {
             artifacts: Vec::new(),
         })
     }
+}
+
+fn check_dispatch(invocation: &DriverInvocation) {
+    let name = invocation.node.reference.node.as_str();
+    let mut labels = BTreeMap::from([(
+        "ZEROSHOT_NODE_NAME".to_owned(),
+        "prior-primary-node".to_owned(),
+    )]);
+    crate::native_v2_capsule::provider_process::apply_execution_environment(
+        &mut labels,
+        invocation,
+    )
+    .assert_value();
+    assert!(name.starts_with("active_memory_"));
+    assert_eq!(
+        labels["ZEROSHOT_RUN_ID"],
+        invocation.node.reference.run_id.as_str()
+    );
+    assert_eq!(labels["ZEROSHOT_NODE_NAME"], name);
+    assert_eq!(labels["ZEROSHOT_NODE_KIND"], "verifier");
+    assert_eq!(
+        labels["ZEROSHOT_NODE_INSTANCE_ID"],
+        invocation.node.reference.node_instance.to_string()
+    );
+    assert_eq!(
+        labels["ZEROSHOT_EXECUTION_REF"],
+        invocation
+            .node
+            .reference
+            .public_execution()
+            .assert_value()
+            .as_str()
+    );
+    assert_eq!(labels["ZEROSHOT_NODE_ATTEMPT"], "1");
+    assert_eq!(labels["ZEROSHOT_NODE_ITERATION"], "0");
 }
 
 impl Driver {
@@ -194,7 +233,16 @@ impl Driver {
             .iter()
             .filter(|(id, _)| omitted.as_deref() != Some(id.as_str()))
             .map(|(id, lesson)| {
-                let mut output = decision(action);
+                let selected = if action == "consolidate" {
+                    if id.ends_with("0000") {
+                        "adapt"
+                    } else {
+                        "retire"
+                    }
+                } else {
+                    action
+                };
+                let mut output = decision(selected);
                 output["id"] = json!(id);
                 if lesson["scope"]["kind"] == "graph" {
                     output["references"] = json!(["node:worker", "graph:worker"]);
@@ -236,6 +284,22 @@ struct Fixture {
 }
 
 impl Fixture {
+    fn assert_source_change_allowed(&self, expected: bool) {
+        let inputs = self.driver.maintenance_inputs.lock().assert_value();
+        let input = inputs
+            .iter()
+            .find(|input| input["role"] == "active_memory_repository_maintenance")
+            .assert_value();
+        assert_eq!(
+            input["lesson_changes"]["existing-provider-lesson"]["source_change_allowed"],
+            expected
+        );
+    }
+
+    fn concurrent_update(&self) {
+        *self.driver.concurrent_store.lock().assert_value() = Some(self.store.clone());
+    }
+
     fn substantial_exploration(&self) {
         *self.source.observations.lock().assert_value() = [1, 150001, 300001]
             .into_iter()
@@ -346,20 +410,16 @@ async fn fixture_with_lessons(
         })
         .await
         .assert_value();
+    let source_reference = fixture_source(&workspace);
     let driver = Arc::new(Driver::default());
+    *driver.source_reference.lock().assert_value() = Some(source_reference.clone());
     let runner =
         Arc::new(NativeNodeRunner::new(&admitted, driver.clone(), driver.clone()).assert_value());
     let factory = runner.auxiliary_factory();
     let store = Arc::new(Mutex::new(
         ActiveMemoryStore::open(&directory.path().join("memory/lessons.sqlite")).assert_value(),
     ));
-    let mutations = seeds
-        .into_iter()
-        .map(|draft| LessonMutation::Upsert {
-            expected_revision: None,
-            draft: Box::new(draft),
-        })
-        .collect::<Vec<_>>();
+    let mutations = seeded_mutations(seeds, &source_reference);
     store.lock().await.apply_batch(&mutations).assert_value();
     let graph_hash = admitted.graph.identity().assert_value().as_str().to_owned();
     let query = ScopeQuery {
@@ -406,6 +466,49 @@ async fn fixture_with_lessons(
         query,
         source,
     }
+}
+
+fn seeded_mutations(seeds: Vec<LessonDraft>, source_reference: &str) -> Vec<LessonMutation> {
+    seeds
+        .into_iter()
+        .map(|mut draft| {
+            if crate::active_memory::source_guard::source_bound(&draft.scope)
+                && !draft
+                    .evidence
+                    .references
+                    .iter()
+                    .any(|reference| reference.starts_with("source:"))
+            {
+                draft.evidence.references.truncate(7);
+                draft.evidence.references.push(source_reference.to_owned());
+            }
+            LessonMutation::Upsert {
+                expected_revision: None,
+                draft: Box::new(draft),
+            }
+        })
+        .collect::<Vec<_>>()
+}
+
+fn fixture_source(workspace: &std::path::Path) -> String {
+    use crate::native_v2_candidate::test_support::{git, git_output};
+    git(workspace, &["init", "--quiet"]);
+    git(workspace, &["add", "."]);
+    git(
+        workspace,
+        &[
+            "-c",
+            "user.name=Memory fixture",
+            "-c",
+            "user.email=memory@example.invalid",
+            "commit",
+            "--quiet",
+            "--no-gpg-sign",
+            "-m",
+            "Memory source fixture",
+        ],
+    );
+    format!("source:{}", git_output(workspace, &["rev-parse", "HEAD"]))
 }
 
 fn candidate(node: &str) -> Value {
@@ -639,6 +742,7 @@ async fn maintenance_binds_decision_ids_to_the_frozen_revision_and_the_host_incr
     assert_eq!(lessons.len(), 1);
     assert_eq!(lessons[0].revision, 2);
     assert!(lessons[0].recommendation.contains("cached OAuth"));
+    fixture.assert_source_change_allowed(true);
 }
 
 #[tokio::test]
@@ -658,6 +762,14 @@ async fn pre_postmortem_refresh_reconciles_the_new_revision_and_preserves_discov
     fixture.substantial_exploration();
     let mut newer = seed_lesson();
     newer.recommendation = "A concurrent run already corrected the advice.".to_owned();
+    newer.evidence.references.extend(
+        fixture
+            .driver
+            .source_reference
+            .lock()
+            .assert_value()
+            .clone(),
+    );
     fixture
         .store
         .lock()
@@ -1262,7 +1374,7 @@ async fn publication_conflict_reinvokes_maintenance_and_preserves_new_discoverie
     let fixture = fixture(Default::default(), Some(seed_lesson()), true).await;
     fixture.substantial_exploration();
     *fixture.driver.maintenance_action.lock().assert_value() = Some("adapt");
-    *fixture.driver.concurrent_store.lock().assert_value() = Some(fixture.store.clone());
+    fixture.concurrent_update();
     fixture.output("repository", json!({"lessons":[candidate("worker")]}));
     fixture.drive().await;
     let lessons = fixture.lessons().await;

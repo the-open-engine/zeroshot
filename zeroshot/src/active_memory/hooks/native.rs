@@ -3,7 +3,7 @@
 use std::io;
 use std::path::Path;
 
-pub(crate) const MAX_CONTEXT_BYTES: usize = 32 * 1024;
+pub(crate) const MAX_CONTEXT_BYTES: usize = crate::active_memory::MAX_INJECTION_BYTES;
 
 pub(super) fn bounded_context(context: String) -> String {
     if context.len() > MAX_CONTEXT_BYTES || context.contains('\0') {

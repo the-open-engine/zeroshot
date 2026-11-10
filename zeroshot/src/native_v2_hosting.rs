@@ -14,8 +14,8 @@ mod workspaces;
 
 pub use crate::active_memory::{
     ActiveMemoryBackend, ActiveMemoryError, Lesson, LessonDraft, LessonMutation, LessonScope,
-    LessonVersion, MemorySnapshot, MemoryPublication, ScopeQuery, MAX_STORE_BYTES, MAX_LESSONS,
-    MAX_RECORD_BYTES, MAX_TOMBSTONES,
+    LessonVersion, MemorySnapshot, MemoryPublication, MemoryPublicationControl, ScopeQuery,
+    MAX_STORE_BYTES, MAX_LESSONS, MAX_RECORD_BYTES, MAX_TOMBSTONES,
 };
 pub use crate::active_memory::runtime::{repository_key, authored_graph_hash};
 

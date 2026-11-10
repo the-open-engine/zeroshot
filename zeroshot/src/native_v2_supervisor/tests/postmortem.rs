@@ -192,3 +192,25 @@ async fn failed_graph_freezes_diagnostics_before_postmortem_and_preserves_them_a
     assert_eq!(snapshot.terminal, Some(result));
     assert_eq!(postmortem.calls.load(Ordering::SeqCst), 1);
 }
+
+#[tokio::test]
+async fn a_ready_stop_is_seen_without_polling_optional_postmortem_work() {
+    let (stop, _) = watch::channel(false);
+    stop.send_replace(true);
+    let stopping = stop.subscribe();
+    let mut polled = false;
+    let work = async {
+        polled = true;
+        std::future::pending::<()>().await
+    };
+    tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::select! {
+            biased;
+            () = crate::native_v2_supervisor::postmortem::stop_requested(stopping) => {},
+            () = work => panic!("optional work must not run after a ready stop"),
+        }
+    })
+    .await
+    .assert_value();
+    assert!(!polled);
+}

@@ -736,6 +736,8 @@ async fn refreshed_maintenance_can_retire_a_staged_lesson_after_its_source_was_r
         case.workspace().join("src/current.rs"),
     )
     .assert_value();
+    // Retirement compares a clean committed descendant of the discovery source.
+    fixture_source(&case.workspace());
     let refreshed = case.advance().await;
     assert_eq!(refreshed["phase"], "maintenance");
     assert_eq!(refreshed["staged_new_lessons"], 2);
