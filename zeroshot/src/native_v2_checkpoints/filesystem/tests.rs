@@ -645,6 +645,22 @@ fn tolerates_empty_alternates_placeholder() {
     assert!(capture(&fixture.workspace, &fixture.snapshots, &()).is_ok());
 }
 
+#[test]
+fn tolerates_empty_git_file_placeholder() {
+    let fixture = Fixture::new();
+    let nested = fixture.workspace.join("vendor/library");
+    fs::create_dir_all(&nested).assert_value();
+    fs::write(nested.join(".git"), "").assert_value();
+    fs::write(nested.join("tracked"), "vendored").assert_value();
+    let captured = capture(&fixture.workspace, &fixture.snapshots, &());
+    assert!(captured.is_ok(), "capture failed: {captured:?}");
+    let id = captured.assert_value();
+    assert_eq!(
+        fs::read_to_string(fixture.tree(&id).join("vendor/library/tracked")).assert_value(),
+        "vendored"
+    );
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn unsupported_fifo_is_rejected_without_opening_or_publishing_it() {
