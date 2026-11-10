@@ -2156,8 +2156,21 @@ including generic pre-receive hook messages, return to the repair loop.</p>
 <p>Delivery preserves review identity across retries and confirms the integrated revision before
 reporting a merge. Comment retries reuse the original publication; captured MR scopes refuse stale
 base/head revisions. Required GitLab merge trains remain pending; synthetic merged-results
-pipelines do not prove required CI for the captured head. Escape standalone GitLab slash commands
-in comments and MR descriptions.</p>
+pipelines do not prove required CI for the captured head.</p>
+<p>The GitLab adapter makes slash-leading generated prose literal with a Markdown backslash escape,
+including endpoint descriptions such as <code>/health returns 200</code> and quick-action-looking text such as
+<code>/close</code>. Existing escapes remain unchanged. The same conservative escape applies to slash-leading
+lines inside code examples, without parsing Markdown or maintaining a command catalog. This normalization
+also applies to comments before publication hashing and durable intent; retries reuse the same
+write-once publication.</p>
+<p>Generated GitLab MR titles lose leading <code>Draft:</code>, <code>[Draft]</code>, and <code>(Draft)</code> prefixes (case-insensitively,
+including repeated prefixes). Empty results become <code>Zeroshot change</code>. Titles are limited to 255 Unicode
+characters; shortened titles retain the complete original once in the generated description section.
+The same title normalization runs before generated delivery commits, including repair commits pushed
+to an existing MR, so GitLab's push processing cannot mark it draft from Zeroshot's commit message.
+Creation, refresh, and confirmation use the same canonical metadata, including for custom graphs.
+Refresh replaces only the generated markers' contents and preserves surrounding human text. A draft
+deliberately applied after creation keeps its existing title and draft status during refresh.</p>
 <p>GitLab <code>--pr</code> readiness, human-review handoff and <code>--ship</code> merging use the same required-CI policy.
 When the project's <strong>Pipelines must succeed</strong> setting (<code>only_allow_merge_if_pipeline_succeeds</code>) is
 explicitly <code>false</code>, CI is <code>NotRequired</code>: an absent, pending, running, successful, failed, skipped or
@@ -2194,7 +2207,7 @@ stops with both revisions in the diagnostic instead of polling indefinitely.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-11-09">9 November 2026</time>
+    Last updated <time datetime="2026-11-10">10 November 2026</time>
   </span>
 
     
