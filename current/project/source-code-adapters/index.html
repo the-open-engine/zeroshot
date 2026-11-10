@@ -1857,6 +1857,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#target-reconciliation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Target reconciliation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#required-behavior" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2003,6 +2014,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#target-reconciliation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Target reconciliation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#required-behavior" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2082,6 +2104,15 @@ available only through the admitted delivery connection or private source capabi
 <code>SourceCodeProviderRegistry</code> and use registry-aware admission. The contribution acceptance test
 admits an opaque nested repository and review ID, uses its own token field and credential refresh,
 and drives the existing PR and merge nodes through the supervisor and ledger.</p>
+<h2 id="target-reconciliation">Target reconciliation<a class="headerlink" href="#target-reconciliation" title="Permanent link">&para;</a></h2>
+<p><code>SourceDeliveryAuthority::reconcile_delivery_target</code> returns <code>SourceTargetIntegration</code>:</p>
+<ul>
+<li><code>Integrated { target_revision, outcome }</code>: local reconciliation establishes a concrete target
+  revision and outcome.</li>
+<li><code>Deferred</code>: confirmed forge policy owns integration; the adapter establishes no local target revision.</li>
+</ul>
+<p>Consumers must handle both variants. Deferral does not advance <code>reviewBaseRevision</code>. Later delivery
+gates refresh forge policy and require ordinary reconciliation if the forge no longer owns integration.</p>
 <h2 id="required-behavior">Required behavior<a class="headerlink" href="#required-behavior" title="Permanent link">&para;</a></h2>
 <p>An adapter must observe remote identity before effects, preserve the reviewed candidate SHA and
 published ancestry, and reconcile confirmed success after a lost response. It must distinguish
@@ -2100,8 +2131,8 @@ An embedder may provide its own registry to admission and use that registry's de
 when composing a candidate or allocator. Built-in placements use the contributed registration hook.</p>
 <p>The registry's coordinated delivery workflow obtains a scoped adapter through
 SourceCodeProvider.delivery_authority. Its descriptor advertises the operations that adapter
-supports. The older inspect_operation/operate contract remains available for callers of atomic
-operations; maintained adapters currently return an explicit unavailable error through that seam.
+supports. The <code>inspect_operation</code>/<code>operate</code> contract supports atomic operations; maintained adapters
+return an explicit unavailable error through that interface.
 Forge credential fields and default connection requirements belong to the registered adapter.
 Generated delivery bindings remain empty until placement selects the source or comment destination;
 materialization preserves explicit connection keys and fields. Review receipt links come from the
@@ -2134,7 +2165,7 @@ resource permalink; the publisher also checks actor, body hash, and lineage mark
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    Last updated <time datetime="2026-10-30">30 October 2026</time>
+    Last updated <time datetime="2026-11-10">10 November 2026</time>
   </span>
 
     
