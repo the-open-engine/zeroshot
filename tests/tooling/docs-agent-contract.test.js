@@ -9,6 +9,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { it } = require('node:test');
+const jsYaml = require('js-yaml');
+const { runWorkflowStep } = require('./workflow-http-fixture');
 const { renderReleaseNotes } = require('../../scripts/release-notes');
 
 const root = path.resolve(__dirname, '../..');
@@ -422,3 +424,129 @@ it('extracts commands the way a shell reads them', () => {
     'in put.json',
   ]);
 });
+
+// The strict Docs lane runs this file even when only the publication workflow changes.
+const docsPublicationCommit = 'a'.repeat(40);
+const docsPublicationManifest = {
+  docsVersion: 'v15.0',
+  productVersion: '15.0.0',
+  sourceCommit: docsPublicationCommit,
+};
+const docsPublicationOptions = { skip: process.platform === 'win32' };
+const docsPublicationStep = 'Verify live documentation manifest';
+
+function runDocsPublicationVerification(t, replies, current = false) {
+  return runWorkflowStep(t, {
+    workflow: '.github/workflows/docs.yml',
+    job: 'publish',
+    step: docsPublicationStep,
+    prefix: 'export http_proxy="$HTTP_PROXY"\nsleep() { echo "sleep:$1"; }\n',
+    environment: {
+      DOCS_SITE_URL: 'http://pages.localhost/zeroshot/',
+      DOCS_VERSION: current ? 'current' : 'v15.0',
+      ZEROSHOT_PRODUCT_DOCS_VERSION: current ? '' : '15.0.0',
+      SOURCE_COMMIT: docsPublicationCommit,
+    },
+    respond(_request, response, index) {
+      const reply = replies[Math.min(index, replies.length - 1)];
+      response.writeHead(reply.status ?? 200);
+      response.end(typeof reply.body === 'string' ? reply.body : JSON.stringify(reply.body));
+    },
+  });
+}
+
+function assertDocsPublicationExhausted(result) {
+  assert.notEqual(result.code, 0);
+  assert.equal(result.requests.length, 120);
+  assert.equal((result.stdout.match(/sleep:5/g) ?? []).length, 119);
+  assert.match(result.stdout, /did not match after 120 attempts/);
+  assert.doesNotMatch(result.stdout, /Verified public documentation/);
+}
+
+it(
+  'checks the exact released public manifest after the official deployment',
+  docsPublicationOptions,
+  async (t) => {
+    const workflow = jsYaml.load(read('.github/workflows/docs.yml'));
+    const steps = workflow.jobs.publish.steps;
+    const verify = steps.find((step) => step.name === docsPublicationStep);
+    assert.ok(steps.indexOf(verify) > steps.findIndex((step) => step.id === 'deployment'));
+    assert.equal(verify.env.DOCS_SITE_URL, '${{ steps.deployment.outputs.page_url }}');
+    assert.notEqual(verify['continue-on-error'], true);
+    const result = await runDocsPublicationVerification(t, [
+      { body: { ...docsPublicationManifest, publisherCommit: 'b'.repeat(40) } },
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(result.requests, [
+      {
+        method: 'GET',
+        url: 'http://pages.localhost/zeroshot/v15.0/manifest.json',
+        body: '',
+      },
+    ]);
+    assert.match(result.stdout, /Verified public documentation manifest/);
+    assert.doesNotMatch(result.stdout, /sleep:/);
+  }
+);
+
+it('requires an explicit null product version for Current', docsPublicationOptions, async (t) => {
+  const current = { ...docsPublicationManifest, docsVersion: 'current', productVersion: null };
+  const success = await runDocsPublicationVerification(t, [{ body: current }], true);
+  assert.equal(success.code, 0, success.stderr);
+  assert.equal(success.requests[0].url, 'http://pages.localhost/zeroshot/current/manifest.json');
+  delete current.productVersion;
+  assertDocsPublicationExhausted(
+    await runDocsPublicationVerification(t, [{ body: current }], true)
+  );
+});
+
+it(
+  'retries unavailable, stale and malformed responses until the exact manifest is live',
+  docsPublicationOptions,
+  async (t) => {
+    const result = await runDocsPublicationVerification(t, [
+      { status: 404, body: {} },
+      { status: 503, body: {} },
+      { body: { ...docsPublicationManifest, sourceCommit: 'b'.repeat(40) } },
+      { body: '<html>deployment pending</html>' },
+      { body: docsPublicationManifest },
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.requests.length, 5);
+    assert.ok(
+      result.requests.every(
+        ({ method, url }) =>
+          method === 'GET' && url === 'http://pages.localhost/zeroshot/v15.0/manifest.json'
+      )
+    );
+    assert.equal((result.stdout.match(/sleep:5/g) ?? []).length, 4);
+  }
+);
+
+it(
+  'fails bounded polling for wrong identities and malformed HTTP 200 manifests',
+  docsPublicationOptions,
+  async (t) => {
+    for (const body of [
+      { ...docsPublicationManifest, docsVersion: 'v14.0' },
+      { ...docsPublicationManifest, productVersion: '14.0.0' },
+      { ...docsPublicationManifest, sourceCommit: 'b'.repeat(40) },
+      [],
+      'not json',
+    ]) {
+      assertDocsPublicationExhausted(await runDocsPublicationVerification(t, [{ body }]));
+    }
+  }
+);
+
+it(
+  'fails bounded polling when public documentation stays unavailable',
+  docsPublicationOptions,
+  async (t) => {
+    for (const status of [404, 503]) {
+      assertDocsPublicationExhausted(
+        await runDocsPublicationVerification(t, [{ status, body: {} }])
+      );
+    }
+  }
+);

@@ -1568,5 +1568,6 @@ python -m mkdocs build --strict
 - `.github/workflows/docs.yml` publishes `main` as Current and canonical releases into `vX.Y/`
   after Python revision `1`; later SDK-only releases do not rebuild product documentation.
   The root always selects Current. Legacy `dev` and `stable` redirects stay outside the selector.
+  Publication verifies the live manifest matches the validated docs, product and source identity.
 - There is no automatic semantic release, release-promotion branch, `dev -> main` flow, or second
   runtime release train.

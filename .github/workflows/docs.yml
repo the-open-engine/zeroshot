@@ -341,3 +341,49 @@ jobs:
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+
+      - name: Verify live documentation manifest
+        shell: bash
+        timeout-minutes: 10
+        env:
+          DOCS_SITE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          manifest="$(mktemp)"
+          trap 'rm -f "$manifest"' EXIT
+          url="${DOCS_SITE_URL%/}/$DOCS_VERSION/manifest.json"
+          for attempt in {1..120}; do
+            if curl --fail --silent --show-error --location --max-redirs 3 \
+              --connect-timeout 2 --max-time 5 --max-filesize 1048576 \
+              --header 'Cache-Control: no-cache' --output "$manifest" "$url" &&
+              python3 - "$manifest" <<'PYTHON'
+          import json
+          import os
+          import sys
+
+          try:
+              with open(sys.argv[1], encoding="utf-8") as source:
+                  manifest = json.load(source)
+          except (OSError, ValueError):
+              raise SystemExit("Public documentation manifest is unavailable or malformed")
+          expected = {
+              "docsVersion": os.environ["DOCS_VERSION"],
+              "productVersion": os.environ["ZEROSHOT_PRODUCT_DOCS_VERSION"] or None,
+              "sourceCommit": os.environ["SOURCE_COMMIT"],
+          }
+          if not isinstance(manifest, dict):
+              raise SystemExit("Public documentation manifest must be an object")
+          for key, value in expected.items():
+              if key not in manifest or manifest[key] != value:
+                  raise SystemExit(f"Public documentation manifest has the wrong {key}")
+          PYTHON
+            then
+              echo "Verified public documentation manifest: $url"
+              exit 0
+            fi
+            if [[ "$attempt" -eq 120 ]]; then
+              echo "::error::Public documentation manifest did not match after 120 attempts: $url"
+              exit 1
+            fi
+            sleep 5
+          done
