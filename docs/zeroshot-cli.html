@@ -77,6 +77,7 @@ section { margin-block: 2.5rem; }
 <li><a href="#zeroshot-force-stop"><code>zeroshot force-stop</code></a></li>
 <li><a href="#zeroshot-resume"><code>zeroshot resume</code></a></li>
 <li><a href="#zeroshot-checkpoints"><code>zeroshot checkpoints</code></a></li>
+<li><a href="#zeroshot-export-workspace"><code>zeroshot export-workspace</code></a></li>
 <li><a href="#zeroshot-discard-workspace"><code>zeroshot discard-workspace</code></a></li>
 <li><a href="#zeroshot-version"><code>zeroshot version</code></a></li>
 <li><a href="#zeroshot-help"><code>zeroshot help</code></a></li>
@@ -108,6 +109,7 @@ Commands:
   force-stop         Force a run to stop and write the result as JSON
   resume             Start a new attempt from a failed run&#39;s retained workspace or a saved checkpoint
   checkpoints        List one page of a run&#39;s saved workspace checkpoints as JSON
+  export-workspace   Download a retained workspace or selected checkpoint as a tar archive
   discard-workspace  Permanently delete an abandoned retained target workspace
   version            Print the Zeroshot version
   help               Print this message or the help of the given subcommand(s)
@@ -1360,6 +1362,29 @@ Options:
 
   -h, --help
           Print help (see a summary with &#39;-h&#39;)</code></pre></section>
+<section id="zeroshot-export-workspace"><h3><code>zeroshot export-workspace</code></h3>
+<pre><code>Download a retained workspace or selected checkpoint as a tar archive.
+
+Requires an advertised export capability on a named hosted target. The output must not exist, including symlinks. It is published privately only after the entire transfer succeeds. Ctrl-C cancels the download and removes its temporary file. Does not restart the run or extract files.
+
+Usage: zeroshot export-workspace [OPTIONS] --target &lt;NAME&gt; --output &lt;PATH&gt; &lt;RUN_ID&gt;
+
+Arguments:
+  &lt;RUN_ID&gt;
+          Public run ID
+
+Options:
+      --target &lt;NAME&gt;
+          Named hosted target, using its existing login or ZEROSHOT_API_KEY authentication
+
+      --from-checkpoint &lt;CHECKPOINT_ID&gt;
+          Export this entry checkpoint instead of the latest retained workspace
+
+      --output &lt;PATH&gt;
+          Explicit destination path for the raw tar archive; must not exist
+
+  -h, --help
+          Print help (see a summary with &#39;-h&#39;)</code></pre></section>
 <section id="zeroshot-discard-workspace"><h3><code>zeroshot discard-workspace</code></h3>
 <pre><code>Permanently delete an abandoned retained target workspace
 
@@ -1408,6 +1433,7 @@ Commands:
   force-stop         Force a run to stop and write the result as JSON
   resume             Start a new attempt from a failed run&#39;s retained workspace or a saved checkpoint
   checkpoints        List one page of a run&#39;s saved workspace checkpoints as JSON
+  export-workspace   Download a retained workspace or selected checkpoint as a tar archive
   discard-workspace  Permanently delete an abandoned retained target workspace
   version            Print the Zeroshot version
   help               Print this message or the help of the given subcommand(s)</code></pre></section>

@@ -27,6 +27,7 @@ pub(in super::super) struct HostedRunsDescriptor {
     resume: Option<HostedRunRoute>,
     checkpoints: Option<HostedRunRoute>,
     discard_workspace: Option<HostedRunRoute>,
+    export_workspace: Option<HostedRunRoute>,
 }
 
 #[derive(Clone)]
@@ -49,6 +50,27 @@ struct RouteValues<'a> {
 }
 
 impl HostedRunsDescriptor {
+    pub(in super::super) fn export_workspace_url(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Url, TargetAuthorityError> {
+        let route = self.export_workspace.as_ref().ok_or_else(|| {
+            authority_error("target does not advertise openengine.workspace-export/v1")
+        })?;
+        if matches!(run_id.as_str(), "." | "..") {
+            return Err(authority_error(
+                "workspace export run ID cannot be a dot path segment",
+            ));
+        }
+        route.expand(
+            &self.base_url,
+            RouteValues {
+                run_id: Some(run_id),
+                ..RouteValues::default()
+            },
+        )
+    }
+
     pub(in super::super) fn resume_url(&self, run_id: &RunId) -> Result<Url, TargetAuthorityError> {
         self.recovery_url(self.resume.as_ref(), run_id)
     }
@@ -206,6 +228,12 @@ pub(super) fn build_hosted_runs_descriptor(
         }
         compile_recovery_routes(&mut descriptor, &recovery.route_templates)?;
     }
+    if let Some(export) = extensions.workspace_export.as_ref() {
+        if export.kind == openengine_cluster_protocol::WORKSPACE_EXPORT_KIND {
+            descriptor.export_workspace =
+                Some(compile_hosted_run_route(&export.route_template, true, &[])?);
+        }
+    }
     Ok(descriptor)
 }
 
@@ -227,6 +255,7 @@ fn compile_hosted_run_routes(
         resume: None,
         checkpoints: None,
         discard_workspace: None,
+        export_workspace: None,
     })
 }
 

@@ -184,6 +184,13 @@ enum UtilityCommand {
     /// When nextAfter is present, pass it as --after to fetch the next page.
     Checkpoints(RunCheckpointsArgs),
 
+    /// Download a retained workspace or selected checkpoint as a tar archive.
+    ///
+    /// Requires an advertised export capability on a named hosted target. The output must not
+    /// exist, including symlinks. It is published privately only after the entire transfer succeeds.
+    /// Ctrl-C cancels the download and removes its temporary file. Does not restart the run or extract files.
+    ExportWorkspace(RunExportWorkspaceArgs),
+
     /// Permanently delete an abandoned retained target workspace.
     DiscardWorkspace(RunSelectorArgs),
 
@@ -773,6 +780,22 @@ struct RunResumeArgs {
     /// this shell is not sent. Fails when GH_TOKEN is unset.
     #[arg(long, requires = "target")]
     forward_gh_token: bool,
+}
+
+#[derive(Debug, Args)]
+struct RunExportWorkspaceArgs {
+    /// Public run ID.
+    #[arg(value_name = "RUN_ID")]
+    run_id: String,
+    /// Named hosted target, using its existing login or ZEROSHOT_API_KEY authentication.
+    #[arg(long, value_name = "NAME")]
+    target: String,
+    /// Export this entry checkpoint instead of the latest retained workspace.
+    #[arg(long, value_name = "CHECKPOINT_ID")]
+    from_checkpoint: Option<String>,
+    /// Explicit destination path for the raw tar archive; must not exist.
+    #[arg(long, value_name = "PATH")]
+    output: PathBuf,
 }
 
 #[derive(Debug, Args)]

@@ -663,3 +663,32 @@ fn run_size_catalog_rejects_invalid_descriptions_and_cross_field_wire_values() {
     };
     assert!(TargetRunSizesDiscovery::new(Some(descriptor.id.clone()), vec![descriptor]).is_err());
 }
+
+#[test]
+fn workspace_export_is_an_optional_strict_http_contract() {
+    let params = super::RunExportWorkspaceParams {
+        run_id: crate::RunId::new("run-export"),
+        from_checkpoint: None,
+    };
+    assert_eq!(
+        serde_json::to_value(&params).unwrap(),
+        serde_json::json!({"runId":"run-export"})
+    );
+    let selected = serde_json::json!({"runId":"run-export", "fromCheckpoint":"entry-1"});
+    let params: super::RunExportWorkspaceParams = serde_json::from_value(selected.clone()).unwrap();
+    assert_eq!(serde_json::to_value(params).unwrap(), selected);
+    for invalid in [
+        serde_json::json!({"fromCheckpoint":"entry-1"}),
+        serde_json::json!({"runId":"run-export", "path":"/storage"}),
+        serde_json::json!({"runId":"run-export", "fromCheckpoint":""}),
+    ] {
+        assert!(serde_json::from_value::<super::RunExportWorkspaceParams>(invalid).is_err());
+    }
+    let value = serde_json::json!({"workspace_export": {"kind": super::WORKSPACE_EXPORT_KIND, "route_template":"/native-v2/runs/{run_id}/export-workspace"}});
+    let extensions: super::TargetDiscoveryExtensions =
+        serde_json::from_value(value.clone()).unwrap();
+    assert!(!extensions.is_empty());
+    assert_eq!(serde_json::to_value(extensions).unwrap(), value);
+    assert!(serde_json::from_value::<super::TargetDiscoveryExtensions>(serde_json::json!({"workspace_export": {"kind":super::WORKSPACE_EXPORT_KIND,"route_template":"/runs/{run_id}/export", "extra":true}})).is_err());
+    assert!(serde_json::from_value::<super::TargetHostedRunRoutes>(serde_json::json!({"list":"/runs", "status":"/runs/{run_id}", "watch":"/watch", "logs":"/logs", "force":"/force", "export_workspace":"/export"})).is_err());
+}

@@ -4630,6 +4630,29 @@
       ],
       "type": "object"
     },
+    "RunExportWorkspaceParams": {
+      "additionalProperties": false,
+      "description": "Strict HTTP POST body; run identity must also match the advertised route's path.\nA successful response is a raw `application/x-tar` stream, never a JSON-RPC result.",
+      "properties": {
+        "fromCheckpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckpointId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runId"
+      ],
+      "type": "object"
+    },
     "RunForceParams": {
       "additionalProperties": false,
       "description": "Requests the MVP's only stop mode: force. Repeated requests are idempotent at the run ledger.",
@@ -6408,6 +6431,10 @@
     "run_discard_workspace_response": {
       "$ref": "#/$defs/JsonRpcResponse22"
     },
+    "run_export_workspace_request": {
+      "$ref": "#/$defs/RunExportWorkspaceParams",
+      "description": "HTTP export request, outside the JSON-RPC method registry."
+    },
     "run_force_request": {
       "$ref": "#/$defs/JsonRpcRequest19"
     },
@@ -6482,6 +6509,7 @@
     }
   },
   "required": [
+    "run_export_workspace_request",
     "initialize_request",
     "initialize_response",
     "plan_request",

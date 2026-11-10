@@ -23,6 +23,8 @@ use crate::native_v2_target::{TargetAccess, TargetAuthorityError, TargetRecord};
 const NDJSON_MEDIA_TYPE: &str = "application/x-ndjson";
 const MAX_STREAM_FRAME_BYTES: usize = 64 * 1024;
 
+#[path = "hosted_runs/export_http.rs"]
+mod export_http;
 #[path = "hosted_runs/recovery_http.rs"]
 mod recovery_http;
 #[path = "hosted_runs/stacks_http.rs"]

@@ -190,6 +190,15 @@ pub trait TargetControlAuthority: Send + Sync {
             "target does not advertise workspace recovery",
         ))
     }
+    async fn hosted_run_export_workspace(
+        &self,
+        _target: &TargetRecord,
+        _params: openengine_cluster_protocol::RunExportWorkspaceParams,
+    ) -> Result<zeroshot_engine::native_v2_cli::WorkspaceExportStream, TargetAuthorityError> {
+        Err(TargetAuthorityError::new(
+            "target does not advertise workspace export",
+        ))
+    }
     async fn hosted_run_checkpoints(
         &self,
         _target: &TargetRecord,

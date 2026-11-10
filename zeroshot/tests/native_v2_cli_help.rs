@@ -41,6 +41,7 @@ const HELP_PATHS: &[&[&str]] = &[
     &["force-stop"],
     &["resume"],
     &["checkpoints"],
+    &["export-workspace"],
     &["discard-workspace"],
 ];
 

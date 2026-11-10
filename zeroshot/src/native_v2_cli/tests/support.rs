@@ -242,6 +242,7 @@ pub(in crate::native_v2_cli) struct FakeBackend {
     unavailable_machine_identity: bool,
     review: Option<crate::native_v2_review::PreparedReview>,
     review_file_change: Option<(std::path::PathBuf, String)>,
+    workspace_export: Arc<Mutex<Option<WorkspaceExportStream>>>,
 }
 
 #[derive(Clone, Copy)]
@@ -251,6 +252,13 @@ pub(super) enum CursorCallKind {
 }
 
 impl FakeBackend {
+    pub(in crate::native_v2_cli) fn with_workspace_export(stream: WorkspaceExportStream) -> Self {
+        Self {
+            workspace_export: Arc::new(Mutex::new(Some(stream))),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn with_review(review: crate::native_v2_review::PreparedReview) -> Self {
         Self {
             review: Some(review),
@@ -494,6 +502,20 @@ fn terminal_stack(state: StackState) -> Stack {
 
 #[async_trait]
 impl NativeV2CliBackend for FakeBackend {
+    async fn run_export_workspace(
+        &self,
+        _: &str,
+        _: openengine_cluster_protocol::RunExportWorkspaceParams,
+    ) -> Result<WorkspaceExportStream, NativeV2CliError> {
+        self.workspace_export
+            .lock()
+            .assert_value()
+            .take()
+            .ok_or_else(|| {
+                NativeV2CliError::Target("target does not advertise workspace export".to_owned())
+            })
+    }
+
     type Watch = FakeSubscription<CliRunWatchEventNotification>;
     type Logs = FakeSubscription<RunLogEventNotification>;
     type Attach = FakeSubscription<RunAttachEventNotification>;

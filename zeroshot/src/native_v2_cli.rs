@@ -306,6 +306,17 @@ pub struct RunResumeCommand {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunExportWorkspaceCommand {
+    pub target: String,
+    pub params: openengine_cluster_protocol::RunExportWorkspaceParams,
+    pub output: PathBuf,
+}
+
+/// Dropping the stream cancels the HTTP transfer; only EOF proves successful completion.
+pub type WorkspaceExportStream =
+    std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, NativeV2CliError>> + Send>>;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunCheckpointsCommand {
     pub run: RunSelector,
     pub after: Option<CheckpointId>,
@@ -395,6 +406,7 @@ pub enum NativeV2CliCommand {
     ForceStop(RunSelector),
     Resume(RunResumeCommand),
     Checkpoints(RunCheckpointsCommand),
+    ExportWorkspace(RunExportWorkspaceCommand),
     DiscardWorkspace(RunSelector),
 }
 
@@ -802,6 +814,15 @@ pub trait NativeV2CliBackend: Send + Sync {
             ));
         }
         Ok(requirements)
+    }
+    async fn run_export_workspace(
+        &self,
+        _target: &str,
+        _params: openengine_cluster_protocol::RunExportWorkspaceParams,
+    ) -> Result<WorkspaceExportStream, NativeV2CliError> {
+        Err(NativeV2CliError::Target(
+            "target does not advertise workspace export".to_owned(),
+        ))
     }
     async fn run_checkpoints(
         &self,

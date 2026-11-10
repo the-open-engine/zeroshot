@@ -33,6 +33,7 @@ Commands:
   force-stop         Force a run to stop and write the result as JSON
   resume             Start a new attempt from a failed run's retained workspace or a saved checkpoint
   checkpoints        List one page of a run's saved workspace checkpoints as JSON
+  export-workspace   Download a retained workspace or selected checkpoint as a tar archive
   discard-workspace  Permanently delete an abandoned retained target workspace
   version            Print the Zeroshot version
   help               Print this message or the help of the given subcommand(s)
@@ -1507,6 +1508,33 @@ Options:
           Print help (see a summary with '-h')
 ```
 
+### `zeroshot export-workspace`
+
+```text
+Download a retained workspace or selected checkpoint as a tar archive.
+
+Requires an advertised export capability on a named hosted target. The output must not exist, including symlinks. It is published privately only after the entire transfer succeeds. Ctrl-C cancels the download and removes its temporary file. Does not restart the run or extract files.
+
+Usage: zeroshot export-workspace [OPTIONS] --target <NAME> --output <PATH> <RUN_ID>
+
+Arguments:
+  <RUN_ID>
+          Public run ID
+
+Options:
+      --target <NAME>
+          Named hosted target, using its existing login or ZEROSHOT_API_KEY authentication
+
+      --from-checkpoint <CHECKPOINT_ID>
+          Export this entry checkpoint instead of the latest retained workspace
+
+      --output <PATH>
+          Explicit destination path for the raw tar archive; must not exist
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 ### `zeroshot discard-workspace`
 
 ```text
@@ -1565,6 +1593,7 @@ Commands:
   force-stop         Force a run to stop and write the result as JSON
   resume             Start a new attempt from a failed run's retained workspace or a saved checkpoint
   checkpoints        List one page of a run's saved workspace checkpoints as JSON
+  export-workspace   Download a retained workspace or selected checkpoint as a tar archive
   discard-workspace  Permanently delete an abandoned retained target workspace
   version            Print the Zeroshot version
   help               Print this message or the help of the given subcommand(s)
