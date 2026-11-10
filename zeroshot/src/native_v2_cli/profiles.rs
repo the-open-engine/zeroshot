@@ -12,7 +12,7 @@ use openengine_cluster_protocol::{
 use serde::{Deserialize, Serialize};
 use serde_json::value::{RawValue, to_raw_value};
 
-use super::support::{CommitPaths, cleanup_temporary, write_and_commit};
+use super::support::{CommitPaths, cleanup_temporary, remove_abandoned_temporaries, write_and_commit};
 use super::{
     CliProfileListResult, CliProfileProblem, NativeV2CliError, absolute_user_path,
     nonempty_environment,
@@ -63,8 +63,7 @@ impl LocalRunProfileStore {
 
     #[cfg(feature = "ui")]
     pub(crate) fn workspace_id(&self) -> Result<String, NativeV2CliError> {
-        let lock = self.lock()?;
-        lock.lock_exclusive().map_err(local_io)?;
+        let _lock = self.lock_for_update()?;
         let destination = self.root.join("ui-workspace-id");
         if let Some(id) = read_workspace_id(&destination)? {
             return Ok(id);
@@ -150,8 +149,7 @@ impl LocalRunProfileStore {
         workspace: &str,
     ) -> Result<Result<RunProfileMutationResult, ProfileSaveConflict>, NativeV2CliError> {
         require_local_scope(request.scope)?;
-        let lock = self.lock()?;
-        lock.lock_exclusive().map_err(local_io)?;
+        let _lock = self.lock_for_update()?;
         if read_workspace_id(&self.root.join("ui-workspace-id"))?.as_deref() != Some(workspace) {
             return Ok(Err(ProfileSaveConflict::Workspace));
         }
@@ -165,8 +163,7 @@ impl LocalRunProfileStore {
         expected: Option<Option<&str>>,
     ) -> Result<Option<RunProfileMutationResult>, NativeV2CliError> {
         require_local_scope(request.scope)?;
-        let lock = self.lock()?;
-        lock.lock_exclusive().map_err(local_io)?;
+        let _lock = self.lock_for_update()?;
         self.set_locked(request, expected)
     }
 
@@ -206,8 +203,7 @@ impl LocalRunProfileStore {
         selector: RunProfileSelector,
     ) -> Result<RunProfileDeleteResult, NativeV2CliError> {
         require_local_scope(selector.scope)?;
-        let lock = self.lock()?;
-        lock.lock_exclusive().map_err(local_io)?;
+        let _lock = self.lock_for_update()?;
         let mut stored = self.read()?;
         let deleted = stored.profiles.remove(&selector.name).is_some();
         if stored.default.as_ref() == Some(&selector.name) {
@@ -224,8 +220,7 @@ impl LocalRunProfileStore {
         request: RunProfileDefaultRequest,
     ) -> Result<RunProfileDefaultResult, NativeV2CliError> {
         require_local_scope(request.scope)?;
-        let lock = self.lock()?;
-        lock.lock_exclusive().map_err(local_io)?;
+        let _lock = self.lock_for_update()?;
         let mut stored = self.read()?;
         if let Some(name) = &request.name {
             if !stored.profiles.contains_key(name) {
@@ -251,6 +246,14 @@ impl LocalRunProfileStore {
             .truncate(false)
             .open(self.root.join(PROFILES_LOCK_FILE))
             .map_err(local_io)
+    }
+
+    /// Locks the store exclusively, then removes abandoned saves that may hold replaced profiles.
+    fn lock_for_update(&self) -> Result<File, NativeV2CliError> {
+        let lock = self.lock()?;
+        lock.lock_exclusive().map_err(local_io)?;
+        remove_abandoned_temporaries(&self.root, "profiles")?;
+        Ok(lock)
     }
 
     fn read(&self) -> Result<StoredProfiles, NativeV2CliError> {

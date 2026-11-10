@@ -15,7 +15,9 @@ use openengine_cluster_protocol::{
 };
 
 use super::{NativeV2CliError, local_io, local_message, prepare_private_directory};
-use crate::native_v2_cli::support::{CommitPaths, cleanup_temporary, write_and_commit};
+use crate::native_v2_cli::support::{
+    CommitPaths, cleanup_temporary, remove_abandoned_temporaries, write_and_commit,
+};
 use crate::native_v2_supervisor::RunEnvironment;
 
 const CONNECTIONS_FILE: &str = "connections.json";
@@ -53,8 +55,7 @@ impl LocalConnectionStore {
         request: ConnectionSetRequest,
     ) -> Result<ConnectionMutationResult, NativeV2CliError> {
         require_user_scope(request.scope)?;
-        let lock = self.lock()?;
-        lock.lock_exclusive().map_err(local_io)?;
+        let _lock = self.lock_for_update()?;
         let mut connections = self.read()?;
         let result = ConnectionMutationResult {
             connection: summary(request.key.clone(), request.values.field_names()),
@@ -69,8 +70,7 @@ impl LocalConnectionStore {
         request: ConnectionDeleteRequest,
     ) -> Result<ConnectionDeleteResult, NativeV2CliError> {
         require_user_scope(request.scope)?;
-        let lock = self.lock()?;
-        lock.lock_exclusive().map_err(local_io)?;
+        let _lock = self.lock_for_update()?;
         let mut connections = self.read()?;
         let deleted = connections.remove(&request.key).is_some();
         if deleted {
@@ -158,6 +158,14 @@ impl LocalConnectionStore {
         let path = self.root.join(CONNECTIONS_LOCK_FILE);
         let file = private_file(&path, FileAccess::ReadWrite).map_err(local_io)?;
         Ok(file)
+    }
+
+    /// Locks the store exclusively, then removes abandoned saves that may hold deleted secrets.
+    fn lock_for_update(&self) -> Result<File, NativeV2CliError> {
+        let lock = self.lock()?;
+        lock.lock_exclusive().map_err(local_io)?;
+        remove_abandoned_temporaries(&self.root, "connections")?;
+        Ok(lock)
     }
 
     fn read(&self) -> Result<StoredConnections, NativeV2CliError> {

@@ -91,6 +91,7 @@ impl FileTargetRegistry {
         create_private_directory(parent)?;
         let lock = open_lock(&self.path.with_extension("lock"))?;
         lock_registry(&lock, true)?;
+        remove_abandoned_temporaries(&self.path)?;
         let (mut state, initialized) = initialize_registry(&self.path)?;
         let result = operation(&mut state)?;
         if mutate || initialized {
@@ -463,6 +464,38 @@ fn write_registry(path: &Path, state: &RegistryState) -> Result<(), TargetConnec
         return Err(TargetConnectorError::RegistryTooLarge);
     }
     write_private_file(path, &bytes)
+}
+
+/// Removes the `write_private_file` temporaries that registry saves killed before their rename
+/// left beside `path`. They are created, renamed or removed only under the registry lock the caller
+/// holds, so every match is abandoned and may still hold device tokens the registry no longer has.
+fn remove_abandoned_temporaries(path: &Path) -> Result<(), TargetConnectorError> {
+    let prefix = path.with_extension("tmp-");
+    let (Some(parent), Some(prefix)) = (prefix.parent(), prefix.file_name()) else {
+        return Ok(());
+    };
+    for entry in std::fs::read_dir(parent).map_err(TargetConnectorError::RegistryIo)? {
+        let entry = entry.map_err(TargetConnectorError::RegistryIo)?;
+        let abandoned = entry
+            .file_name()
+            .as_encoded_bytes()
+            .strip_prefix(prefix.as_encoded_bytes())
+            .is_some_and(|suffix| {
+                suffix.len() == 16
+                    && suffix
+                        .iter()
+                        .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+            });
+        if abandoned {
+            match std::fs::remove_file(entry.path()) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(TargetConnectorError::RegistryIo(error));
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
 }
 
 fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), TargetConnectorError> {

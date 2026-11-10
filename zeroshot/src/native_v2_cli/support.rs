@@ -32,6 +32,36 @@ pub(super) fn cleanup_temporary<T>(
     result
 }
 
+/// Removes the `{store}.<uuid>.tmp` files that saves killed before their commit left in `root`.
+/// Saves create, commit or remove their temporary only under the store's exclusive lock, so a
+/// caller holding that lock finds only abandoned copies, which may hold deleted or replaced values.
+pub(super) fn remove_abandoned_temporaries(
+    root: &Path,
+    store: &str,
+) -> Result<(), NativeV2CliError> {
+    for entry in std::fs::read_dir(root).map_err(local_io)? {
+        let entry = entry.map_err(local_io)?;
+        let name = entry.file_name();
+        let abandoned = name
+            .to_str()
+            .and_then(|name| {
+                name.strip_prefix(store)?
+                    .strip_prefix('.')?
+                    .strip_suffix(".tmp")
+            })
+            .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok_and(|uuid| uuid.to_string() == id));
+        if abandoned {
+            match std::fs::remove_file(entry.path()) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(local_io(error));
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(super) struct CommitPaths<'a> {
     pub(super) temporary: &'a Path,
     pub(super) destination: &'a Path,
