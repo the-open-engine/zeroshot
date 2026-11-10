@@ -41,3 +41,8 @@
     {% endif %}
   {% endif %}
 {% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script type="module" src="https://zeroshot.sh/journey-entry.js"></script>
+{% endblock %}
