@@ -804,3 +804,96 @@ async fn resumed_delivery_checkpoint_preserves_nonstageable_submodule_contents()
         "pre-existing child scratch\n"
     );
 }
+
+/// Declines only managed run-branch updates, printing `reason` on stderr as a forge's
+/// server-side check does; `$ref` expands to the declined ref. GitLab enforces protected
+/// branches in its pre-receive hook, so clients receive exactly this `remote:` text with
+/// `[remote rejected] (pre-receive hook declined)`.
+fn decline_run_branch_pushes(remote: &Path, reason: &[&str]) {
+    let mut hook = String::from(
+        "#!/bin/sh\nwhile read old new ref; do\n  case \"$ref\" in\n    refs/heads/zeroshot/*)\n",
+    );
+    for line in reason {
+        hook.push_str(&format!("      printf '%s\\n' \"{line}\" >&2\n"));
+    }
+    hook.push_str("      exit 1 ;;\n  esac\ndone\n");
+    write_executable(&remote.join("hooks"), "pre-receive", &hook);
+}
+
+#[tokio::test]
+async fn definitive_protected_branch_push_rejection_is_a_resumable_refusal() {
+    for (reason, evidence) in [
+        (
+            &["GitLab: You are not allowed to push code to protected branches on this project."][..],
+            "You are not allowed to push code to protected branches on this project.",
+        ),
+        (
+            &[
+                "error: GH006: Protected branch update failed for $ref.",
+                "error: Changes must be made through a pull request.",
+            ][..],
+            "GH006: Protected branch update failed",
+        ),
+    ] {
+        let repo = TempRepo::delivery();
+        let server = HttpGit::start(&repo.remote);
+        let authority = Arc::new(TransportAuthority::new(&repo, &server, Update::None));
+        let branch = delivery_head_branch(&RunId::new(RUN));
+        decline_run_branch_pushes(&repo.remote, reason);
+
+        let refused = execute(&repo, adapter(&repo, authority.clone()), false).await;
+
+        assert_eq!(
+            refused.outcome,
+            WorkerOutcome::policy_refusal(),
+            "{evidence}: {:?}",
+            refused.outcome
+        );
+        assert_eq!(authority.pushes.load(Ordering::SeqCst), 1);
+        assert_eq!(server.faults.receive_packs.load(Ordering::SeqCst), 1);
+        assert_eq!(reference(&repo.remote, &branch), None);
+        assert!(
+            refused
+                .output
+                .iter()
+                .any(|output| output.text.contains(&branch) && output.text.contains(evidence)),
+            "refusal must name {branch} and the server reason"
+        );
+        assert!(
+            refused
+                .output
+                .iter()
+                .all(|output| !output.text.contains("test-token"))
+        );
+
+        fs::remove_file(repo.remote.join("hooks/pre-receive")).assert_value();
+        let resumed = execute(&repo, adopting_adapter(&repo, authority.clone()), false).await;
+
+        assert_delivery_signal(&resumed.outcome, DELIVERY_MERGED_LABEL);
+        assert_eq!(
+            git_output(&repo.remote, &["show", &format!("{branch}:result.txt")]),
+            "delivered"
+        );
+    }
+}
+
+#[tokio::test]
+async fn generic_pre_receive_rejection_still_reaches_the_repair_loop() {
+    let repo = TempRepo::delivery();
+    let server = HttpGit::start(&repo.remote);
+    let authority = Arc::new(TransportAuthority::new(&repo, &server, Update::None));
+    decline_run_branch_pushes(
+        &repo.remote,
+        &["pre-receive hook declined: $ref is protected"],
+    );
+
+    let execution = execute(&repo, adapter(&repo, authority.clone()), false).await;
+
+    assert_delivery_signal(&execution.outcome, DELIVERY_REPAIR_REQUIRED_LABEL);
+    assert!(outcome_diagnostic(&execution.outcome).contains("is protected"));
+    assert_eq!(authority.pushes.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        reference(&repo.remote, &delivery_head_branch(&RunId::new(RUN))),
+        None
+    );
+}

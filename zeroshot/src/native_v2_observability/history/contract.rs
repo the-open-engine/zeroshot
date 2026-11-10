@@ -184,7 +184,12 @@ fn validate_failure_context(
     context: &FailureContext,
     head: u64,
 ) -> Result<(), RunHistoryContractError> {
-    for diagnostic in context.primary.iter().chain(&context.recorded) {
+    for diagnostic in context
+        .primary
+        .iter()
+        .chain(&context.recorded)
+        .chain(&context.verifiers)
+    {
         if let Some(cursor) = &diagnostic.cursor
             && canonical_sequence(cursor)? > head
         {

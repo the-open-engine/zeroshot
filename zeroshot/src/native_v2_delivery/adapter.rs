@@ -1,6 +1,8 @@
 use futures_util::FutureExt;
 
-use crate::native_v2_capsule::provider_process::{report_cleanup_failure, report_provider_error};
+use crate::native_v2_capsule::provider_process::{
+    report_cleanup_failure, report_provider_error, report_verifier_result,
+};
 
 use super::*;
 
@@ -263,6 +265,14 @@ impl NativeV2DeliveryAdapter {
         let outcome = self
             .finish_merge_handoff((mode, &invocation.response), &mut credentials, outcome)
             .await;
+        let outcome = match outcome {
+            Ok(outcome) => {
+                report_verifier_result(&outcome, &self.feedback_secrets(&credentials), &control)
+                    .await
+                    .map(|()| outcome)
+            }
+            Err(error) => Err(error),
+        };
         if outcome.is_err() {
             self.state
                 .lock()
@@ -655,9 +665,10 @@ impl NativeV2DeliveryAdapter {
         mut preparation: DeliveryPreparation<'_, '_>,
     ) -> Result<SourceReviewReceipt, DeliveryStop> {
         let input = delivery_input(&preparation.invocation.node.input)?;
-        self.preflight(&mut preparation, &input.title).await?;
+        let commit_message = self.authority.prepare_commit_message(&input.title);
+        self.preflight(&mut preparation, &commit_message).await?;
         let head_revision = self
-            .prepare_head(preparation.session, preparation.control, &input.title)
+            .prepare_head(preparation.session, preparation.control, &commit_message)
             .await?;
         let review_request = SourceReviewRequest {
             target: self.config.target.clone(),

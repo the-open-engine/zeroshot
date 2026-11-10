@@ -390,7 +390,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Shared inspection owns bounded JSONL exchange and process cleanup. Each harness owns native
   permission handling and any parser it needs; `PermissionPolicy` distinguishes unset,
   configured, and unavailable inspection results. Codex browser/computer access controls and explicit
-  approval-review features count as authored policy.
+  approval-review features count as authored policy. Unavailable inspection carries a cause; the
+  harness that withholds its bypass reports it once through `report_unavailable_inspection` as a
+  redacted, bounded error-stream record without a failure diagnostic, never as a debug line or
+  outcome change. Never publish configuration responses; overrides, configured policy,
+  cancellation and unconfirmed cleanup are not fallbacks.
 - The local target registry initializes `platform` at `https://api.app.zeroshot.sh` with a persistent hosted device identity.
 - Local runs select an optional `--cwd` workspace, defaulting to the invoking folder. File arguments
   stay relative to the invoking folder. A Git checkout uses its canonical root; plain, unborn, and
@@ -451,6 +455,12 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   Adapters own optional canonical review/commit receipt links and comment permalink validation.
   Provider-owned comment normalization runs before the publisher hashes and records its durable
   intent; canonicalized text must retain one exact publication marker.
+  GitLab owns idempotent literalization of slash-leading generated prose and ready, nonempty MR
+  titles bounded to 255 Unicode characters. Its same title normalizer supplies generated delivery
+  commit messages before preflight reconciliation or commit creation, preventing push-triggered drafts.
+  Shortened titles retain the original once inside the
+  generated description section. Metadata refresh preserves surrounding human text and later
+  human-applied draft status; comment literalization precedes hashing and durable publication intent.
   Capability admission rejects unsupported operations before credential resolution or workspace
   mutation. Pure remote identification uses each registered
   provider's `repository_from_remote` hook; CLI source selection has no separate forge catalog and
@@ -779,7 +789,18 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   and attaches it to failed terminal results in the same append transaction. Status, watch, SDK,
   shared UI and archived history carry that result directly. Known runtime causes remain distinct
   from recorded node failures; recovered/voided evidence never establishes terminal causality.
-  Diagnostic overflow marks context incomplete independently of token usage. Producer and capsule
+  Verifier adapters, including Git delivery, publish bounded graph-defined signals and diagnostics
+  through the existing output/log bridge using their complete effective credential redactions (including
+  captured native authentication), before truncation and SafeLog persistence. Failure context retains latest verifier
+  results per node and map path separately from runtime causes and recorded execution errors.
+  Only actual failure diagnostics suppress duplicate settlement errors; verifier results never do.
+  The reducer supplies bounded exhausted-loop visits and completed round counts; retries never count
+  as rounds. Settled unreachable parallel joins replay canonical branches without scheduling
+  decisions; speculative probes and race/map losers never contribute loop evidence or consume its bound.
+  Public execution and log projections expose zero-based outermost-first map indices,
+  omitted outside maps, without changing opaque execution selectors.
+  Diagnostic overflow marks context incomplete independently of token usage, even after retained
+  exhausted-loop entries are removed by later convergence. Producer and capsule
   records retain their existing execution/cursor identity; no separate diagnostics API or store exists.
   When history is unavailable, the viewer separates current failure status from recorded playback
   and offers log navigation only for loaded evidence.
@@ -921,7 +942,11 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   diagnostics, including when native credentials collide with object IDs or Git-directory paths;
   parsing and failure classification must preserve raw evidence before credential redaction. Final delivery feedback
   also redacts the invocation's source credentials and its current refreshed issuance;
-  unfamiliar failures use the existing optional `repair_required` signal. Only successful receipts
+  unfamiliar failures use the existing optional `repair_required` signal. After exact-ref
+  confirmation, only the exact forge-authored branch-protection and push-permission texts in
+  `git_diagnostic.rs` (relayed `remote:` lines or GitHub's SSH `ERROR:` lines) become
+  `policy_refusal`, never repair; generic hook declines, `[remote rejected]` and bare HTTP 403 stay
+  on their existing paths. Only successful receipts
   require complete remote identity. Live output splits large UTF-8 diagnostics into bounded records.
   Delivery checks unresolved index entries before `git add --all` and completes resolved merges even
   when their tree has no staged difference. Other unfinished Git operations return raw status for
@@ -980,6 +1005,9 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
   session scope and new UI templates use `node_instance` for this worker and `execution` for
   reviewers; exact runtime plans and explicit session scopes remain caller-owned. Saved graphs are
   unchanged. The final rejected round fails without starting an unreviewable extra repair.
+  Every software-change delivery mode, including none, reserves remote publication for delivery;
+  worker guidance forbids pushing branches or weakening forge restrictions, and both reviewers
+  reject repairs that do either.
 - Delivery-enabled software-change templates make the acceptance verifier the sole author of the
   current change title and description after every review pass. Git delivery uses that manifest for
   commits and reviews, refreshes only its marker-delimited body section while preserving surrounding
@@ -1105,6 +1133,19 @@ with `npm i -g @the-open-engine-company/zeroshot` or build `zeroshot` with Cargo
 ## CLI and target contracts
 
 - CLI grammar/help comes from the derived Clap `Cli` tree and Rust doc comments.
+- `export-workspace` downloads only from named hosted targets advertising the separate
+  `openengine.workspace-export/v1` extension. Its one strict `route_template` is relative to
+  `hosted_runs.base_url`; existing hosted run/recovery route objects stay unchanged. The HTTP-only
+  `RunExportWorkspaceParams` contains run identity and an optional entry checkpoint, never storage
+  authority. Shared target authentication/organization selection and same-origin, no-redirect rules
+  apply. Export rejects dot-only run path segments before credential access. The CLI requires an
+  explicit absent destination representable in its JSON receipt, stages with `platform::private_file`,
+  consumes complete framed HTTP tar bytes, and uses `persist_noclobber` for atomic publication.
+  Writes, flush and sync use Tokio file I/O so cancellation can be observed while disk work waits;
+  the private path guard stays in the cancellable future, and flush errors prevent publication.
+  HTTP/1 Transfer-Encoding overrides Content-Length; only one case-insensitive chunked coding is
+  supported, otherwise a length is required with no Transfer-Encoding.
+  Cancellation/body/status failures remove the stage; no local exporter, resume, or extraction exists.
 - `template show` renders the materialized graph as a tree only on terminal stdout; piped or
   redirected stdout and explicit `--json` retain the complete, single-line `GraphSpec` JSON.
   The CLI graph renderer preserves authored structure and marks every step/verifier RuntimePlan
@@ -1464,7 +1505,8 @@ python -m mkdocs build --strict
   head to complete; findings remain review input for the worker rather than automatic CI failures.
   Merge groups use the completed PR gate because Greptile does not review merge-group commits.
   Native changes also require macOS product and test compilation with the UI
-  feature, focused Unix controller socket regression tests, and APFS workspace clone tests that
+  feature, workspace export integration and private publication regressions, focused Unix controller
+  socket regression tests, and APFS workspace clone tests that
   `ZEROSHOT_REQUIRE_APFS_CLONE` keeps from skipping. `.github/ci-path-classifier.js` owns
   fail-closed path routing and cross-lane
   producer/consumer dependencies. The native lane runs on Linux and Windows, including real local
@@ -1480,6 +1522,8 @@ python -m mkdocs build --strict
   Linux coverage maps LLVM counters continuously with runtime counter relocation so post-fork
   helpers ending in `_exit` retain coverage without a profile-runtime call in the child. Profile
   filenames keep both process (`%p`) and binary (`%m`) identities to avoid unrelated writers.
+  Tests limiting a child's file size direct only that child's `LLVM_PROFILE_FILE` to `/dev/null`
+  so the intentional write failure cannot corrupt collected profiles.
   Keep Rust test implementations in `tests/`, `tests.rs`,
   `*_tests.rs`, or `*-tests.rs`; do not embed test bodies in production-named source files, because
   production coverage totals explicitly exclude those test-source paths.

@@ -24,24 +24,23 @@ pub(super) fn normalize_body(body: &str) -> String {
     body.replace('\r', "").trim_end().to_owned()
 }
 
-/// GitLab executes slash commands in notes and descriptions; never publish one as report text.
-pub(super) fn require_literal_body(body: &str) -> Result<(), SourceDeliveryError> {
-    let command = body.lines().any(|line| {
-        let Some(rest) = line.trim_start().strip_prefix('/') else {
-            return false;
-        };
-        let word = rest.split_whitespace().next().unwrap_or("");
-        !word.is_empty()
-            && word
-                .bytes()
-                .all(|byte| byte.is_ascii_alphabetic() || byte == b'_')
-    });
-    if command {
-        return Err(SourceDeliveryError::identity(
-            "GitLab report text contains a slash command; escape the slash before publishing",
-        ));
-    }
-    Ok(())
+/// Make slash-leading report lines literal without a catalog of GitLab quick actions.
+/// Apply the same conservative escape in code examples, without parsing Markdown.
+/// Existing escapes are unchanged, so applying this twice is harmless.
+pub(super) fn literal_body(body: &str) -> String {
+    normalize_body(body)
+        .split('\n')
+        .map(|line| {
+            let text = line.trim_start();
+            let indent = line.len() - text.len();
+            if text.starts_with('/') {
+                format!("{}\\{text}", &line[..indent])
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn note_scope_error() -> SourceDeliveryError {
@@ -153,9 +152,7 @@ fn as_comment(note: Note, destination: &SourceCommentDestination) -> SourceComme
 #[async_trait]
 impl SourceCommentAuthority for GitLabDeliveryAuthority {
     fn prepare_comment_body(&self, body: &str) -> Result<String, SourceDeliveryError> {
-        let body = normalize_body(body);
-        require_literal_body(&body)?;
-        Ok(body)
+        Ok(literal_body(body))
     }
 
     fn resolve_destination(

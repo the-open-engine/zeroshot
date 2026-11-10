@@ -460,6 +460,16 @@ where
         )
     }
 
+    async fn run_export_workspace(
+        &self,
+        target: &str,
+        params: openengine_cluster_protocol::RunExportWorkspaceParams,
+    ) -> Result<super::WorkspaceExportStream, NativeV2CliError> {
+        self.connector
+            .hosted_run_export_workspace(target, params)
+            .await
+    }
+
     async fn run_checkpoints(
         &self,
         target: Option<&str>,

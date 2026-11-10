@@ -486,6 +486,27 @@ pub struct TargetHostedRunsDiscovery {
     pub route_templates: TargetHostedRunRoutes,
 }
 
+/// Authenticated tar streaming, independent of resume/checkpoint RPCs.
+pub const WORKSPACE_EXPORT_KIND: &str = "openengine.workspace-export/v1";
+
+/// Route relative to the same-origin `hosted_runs.base_url`, with exactly one `{run_id}`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetWorkspaceExportDiscovery {
+    pub kind: String,
+    pub route_template: String,
+}
+
+/// Strict HTTP POST body; run identity must also match the advertised route's path.
+/// A successful response is a raw `application/x-tar` stream, never a JSON-RPC result.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RunExportWorkspaceParams {
+    pub run_id: crate::RunId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_checkpoint: Option<crate::CheckpointId>,
+}
+
 pub const HOSTED_WORKSPACE_RECOVERY_KIND: &str = "openengine.hosted-workspace-recovery/v1";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -675,6 +696,8 @@ pub struct TargetDiscoveryExtensions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hosted_workspace_recovery: Option<TargetHostedWorkspaceRecoveryDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_export: Option<TargetWorkspaceExportDiscovery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub node_runtime_lanes: Option<TargetNodeRuntimeLanesDiscovery>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_harnesses: Option<TargetRuntimeHarnessesDiscovery>,
@@ -730,6 +753,7 @@ impl TargetDiscoveryExtensions {
         self.workspace_recovery.is_none()
             && self.workspace_checkpoints.is_none()
             && self.hosted_workspace_recovery.is_none()
+            && self.workspace_export.is_none()
             && self.node_runtime_lanes.is_none()
             && self.runtime_harnesses.is_none()
             && self.run_size_catalog.is_none()

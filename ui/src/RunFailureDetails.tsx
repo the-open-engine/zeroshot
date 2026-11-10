@@ -13,7 +13,12 @@ export function RunFailureDetails({
   const recorded = context.recorded ?? [];
   const diagnostic = (entry: FailureDiagnostic, key: string) => (
     <div className="failure-diagnostic" key={key}>
-      {entry.execution && <strong>{entry.execution.node}</strong>}
+      {entry.execution && (
+        <strong>
+          {entry.execution.node}
+          {entry.execution.mapIndices?.map((index) => `[${index}]`).join('')}
+        </strong>
+      )}
       <p>{entry.message}</p>
       {entry.cursor &&
         (hasLog(entry.cursor) ? (
@@ -39,6 +44,22 @@ export function RunFailureDetails({
           {recorded.map((entry, index) => diagnostic(entry, `recorded-${index}`))}
         </>
       )}
+      {(context.verifiers?.length ?? 0) > 0 && (
+        <>
+          <h3>Recorded verifier results</h3>
+          {context.verifiers!.map((entry, index) => diagnostic(entry, `verifier-${index}`))}
+        </>
+      )}
+      {context.exhaustedLoops?.map((loop, index) => (
+        <p key={`loop-${index}`}>
+          Loop{' '}
+          <strong>
+            {loop.node}
+            {loop.mapIndices?.map((item) => `[${item}]`).join('')}
+          </strong>{' '}
+          exhausted after {loop.completedIterations} completed iterations.
+        </p>
+      ))}
       {context.incomplete && (
         <p className="history-muted">Additional failure details may be missing. See the run log.</p>
       )}

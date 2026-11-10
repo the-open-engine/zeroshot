@@ -15,6 +15,8 @@ mod final_result;
 mod limits;
 #[path = "tests/local_identity.rs"]
 mod local_identity;
+#[path = "tests/permission_inspection.rs"]
+mod permission_inspection;
 #[path = "tests/redaction.rs"]
 mod redaction;
 
@@ -821,3 +823,6 @@ async fn dispatch_metadata_reaches_claude_corrections() {
         );
     }
 }
+
+#[path = "tests/verifier_evidence.rs"]
+mod verifier_evidence;

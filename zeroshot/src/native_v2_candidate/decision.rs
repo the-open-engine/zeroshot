@@ -363,6 +363,15 @@ impl NodeDriver for DecisionAdapter {
         };
         control.record_token_usage(observed.usage).await?;
         let outcome = decision_outcome(result?, &control).await?;
+        let redactions = crate::native_v2_capsule::provider_process::redaction_values(
+            invocation.environment.iter().map(|(_, value)| value),
+        );
+        crate::native_v2_capsule::provider_process::report_verifier_result(
+            &outcome,
+            &redactions,
+            &control,
+        )
+        .await?;
         if let Some(timing) = observed.http {
             super::timing::publish(&control, timing).await?;
         }

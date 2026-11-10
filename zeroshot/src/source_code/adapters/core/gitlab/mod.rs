@@ -138,6 +138,10 @@ impl GitLabDeliveryAuthority {
 
 #[async_trait]
 impl SourceDeliveryAuthority for GitLabDeliveryAuthority {
+    fn prepare_commit_message(&self, title: &str) -> String {
+        review::normalized_title(title).0
+    }
+
     fn forge_credential_field(&self) -> Option<&'static str> {
         Some(TOKEN_FIELD)
     }

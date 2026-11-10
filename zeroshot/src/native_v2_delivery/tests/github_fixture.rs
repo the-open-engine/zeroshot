@@ -72,6 +72,7 @@ pub(in crate::native_v2_delivery) enum Script {
 }
 
 pub(in crate::native_v2_delivery) struct FakeGitHub {
+    pub(super) commit_message_authority: Option<Arc<dyn SourceDeliveryAuthority>>,
     pub(super) feedback_authority: Option<(GhCliDeliveryAuthority, PathBuf)>,
     remote: PathBuf,
     script: Script,
@@ -96,6 +97,7 @@ pub(in crate::native_v2_delivery) struct FakeGitHub {
 impl FakeGitHub {
     pub(in crate::native_v2_delivery) fn new(remote: PathBuf, script: Script) -> Self {
         Self {
+            commit_message_authority: None,
             feedback_authority: None,
             remote,
             script,
@@ -369,6 +371,13 @@ fn failed_checks() -> SourceChecks {
 
 #[async_trait]
 impl SourceDeliveryAuthority for FakeGitHub {
+    fn prepare_commit_message(&self, title: &str) -> String {
+        self.commit_message_authority.as_ref().map_or_else(
+            || title.to_owned(),
+            |authority| authority.prepare_commit_message(title),
+        )
+    }
+
     fn forge_credential_field(&self) -> Option<&'static str> {
         Some(GITHUB_TOKEN_ENV)
     }

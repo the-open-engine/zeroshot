@@ -1,6 +1,132 @@
 use super::*;
 
 #[tokio::test]
+async fn exhausted_delivery_loops_retain_latest_verifier_evidence() {
+    use crate::v2_run_ledger::RunEvent;
+
+    for repair in [false, true] {
+        let repo = TempRepo::delivery();
+        if repair {
+            git(
+                &repo.workspace,
+                &[
+                    "config",
+                    "filter.failure.clean",
+                    "printf 'repair test-token\\n' >&2; exit 1",
+                ],
+            );
+            git(
+                &repo.workspace,
+                &["config", "filter.failure.required", "true"],
+            );
+            fs::write(
+                repo.workspace.join(".gitattributes"),
+                "*.guard filter=failure\n",
+            )
+            .assert_value();
+            fs::write(repo.workspace.join("candidate.guard"), "candidate work\n").assert_value();
+        }
+        let mode = DeliveryMode::Merge;
+        let runtime = admitted(&repo, mode).await.runtime;
+        let graph = full_graph(vec![
+            json!({
+                "kind":"loop","name":"publication","state":{"kind":"null"},
+                "maxIterations":2,"promotedStatePaths":[],"body":delivery_node(mode),
+                "until":{"kind":"in","value":{"name":"deliver","source":"signal","field":"delivery"},"labels":["merged"]}
+            }),
+            json!({"kind":"fail","name":"halt","reason":"publication_incomplete"}),
+        ]);
+        let admitted = NativeV2Admission
+            .admit(RunSubmission {
+                environment: None,
+                title: RunTitle::new("Delivery evidence").assert_value(),
+                graph,
+                initial_input: Value::Null,
+                runtime,
+                source: source_for_revision(&repo.base),
+                submission_key: IdempotencyKey::new("delivery-evidence").assert_value(),
+            })
+            .await
+            .assert_value();
+        let adapter = retained_adapter(
+            &repo,
+            Arc::new(FakeGitHub::new(repo.remote.clone(), Script::CiFailed)),
+            DeliveryPollPolicy::new(2, Duration::ZERO).assert_value(),
+            DeliveryLineage::original("delivery-evidence"),
+        );
+        let runner =
+            Arc::new(NativeNodeRunner::new(&admitted, adapter.clone(), adapter).assert_value());
+        let (run_id, ledger, environments) = routing::create_delivery_run(admitted).await;
+        let terminal =
+            NativeV2Supervisor::new(run_id.clone(), ledger.clone(), runner, environments)
+                .drive()
+                .await
+                .assert_value();
+        let TerminalResult::Failed {
+            context: Some(context),
+            ..
+        } = &terminal
+        else {
+            panic!("missing delivery evidence")
+        };
+        assert!(context.primary.is_none());
+        assert_eq!(context.exhausted_loops.len(), 1);
+        assert_eq!(context.exhausted_loops[0].node.as_str(), "publication");
+        assert_eq!(context.exhausted_loops[0].completed_iterations.get(), 2);
+        assert_eq!(context.verifiers.len(), 1);
+        let latest = &context.verifiers[0];
+        let label = if repair {
+            DELIVERY_REPAIR_REQUIRED_LABEL
+        } else {
+            DELIVERY_CI_FAILED_LABEL
+        };
+        assert!(latest.message.as_str().contains(label));
+        assert!(!latest.message.as_str().contains("test-token"));
+        if repair {
+            assert!(latest.message.as_str().contains("[REDACTED]"));
+        }
+        let stored = ledger.get(&run_id).await.assert_value().assert_value();
+        assert_eq!(stored.snapshot.terminal.as_ref(), Some(&terminal));
+        let tail = ledger.snapshot_and_tail(&run_id, None).await.assert_value();
+        let evidence = tail
+            .events
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.event,
+                    RunEvent::SafeLog {
+                        diagnostic: Some(FailureDiagnosticKind::Verifier),
+                        ..
+                    }
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(evidence.len(), 2);
+        let last = evidence.last().assert_value();
+        assert_eq!(Some(&last.cursor), latest.cursor.as_ref());
+        let RunEvent::SafeLog {
+            execution, line, ..
+        } = &last.event
+        else {
+            panic!("missing verifier log")
+        };
+        assert_eq!(line.as_str(), latest.message.as_str());
+        let execution = stored
+            .snapshot
+            .executions
+            .get(execution.as_ref().assert_value())
+            .assert_value();
+        assert_eq!(
+            latest.execution.as_ref().assert_value().execution,
+            execution.reference.public_execution().assert_value()
+        );
+        assert!(
+            matches!(&tail.events.last().assert_value().event, RunEvent::Terminal { result } if result == &terminal)
+        );
+    }
+}
+
+#[tokio::test]
 async fn terminal_delivery_diagnostics_keep_real_causes_and_typed_outcomes() {
     for (script, expected, detail) in [
         (

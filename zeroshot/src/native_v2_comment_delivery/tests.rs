@@ -165,22 +165,22 @@ struct Forge {
 #[async_trait]
 impl SourceCommentAuthority for Forge {
     fn prepare_comment_body(&self, body: &str) -> Result<String, SourceDeliveryError> {
-        Ok(
-            if self
-                .destination
-                .lock()
-                .unwrap()
-                .as_ref()
-                .is_some_and(|destination| {
-                    destination.provider.id().as_str()
-                        == crate::source_code_provider::adapters::core::GITLAB_PROVIDER_ID
-                })
-            {
-                body.replace('\r', "").trim_end().to_owned()
-            } else {
-                body.to_owned()
-            },
-        )
+        let destination = self.destination.lock().unwrap();
+        if let Some(destination) = destination.as_ref().filter(|destination| {
+            destination.provider.id().as_str()
+                == crate::source_code_provider::adapters::core::GITLAB_PROVIDER_ID
+        }) {
+            let authority = crate::source_code_provider::adapters::core::comment_authority_for(
+                crate::source_code_provider::adapters::core::GhCliAuthorityConfig::hosted(
+                    std::path::PathBuf::from("/unused"),
+                ),
+                destination,
+            )
+            .unwrap();
+            authority.prepare_comment_body(body)
+        } else {
+            Ok(body.to_owned())
+        }
     }
 
     fn resolve_destination(
@@ -1398,7 +1398,8 @@ fn custom_gitlab_roots_and_explicit_prefixes_use_the_same_registered_factory() {
 async fn normalized_gitlab_comment_hash_survives_lost_response_and_equivalent_line_endings() {
     let ((_temp, forge, adapter), destination) = gitlab_fixture();
     forge.lose_response.store(true, Ordering::SeqCst);
-    let mut input = json!({"url":destination.url,"body":"First finding.\r\nSecond finding.  \r\n"});
+    let mut input =
+        json!({"url":destination.url,"body":"First finding.\r\n/health returns 200\r\n/close\r\n"});
     let result = run(&adapter, input.clone()).await.unwrap();
     let WorkerOutcome::Verifier { output, .. } = &result else {
         panic!("expected receipt");
@@ -1406,13 +1407,17 @@ async fn normalized_gitlab_comment_hash_survives_lost_response_and_equivalent_li
     let stored = adapter.store.load().await.unwrap().unwrap();
     let posted = forge.comments.lock().unwrap()[0].clone();
     assert!(!posted.body.contains('\r'));
-    assert!(posted.body.contains("First finding.\nSecond finding."));
+    assert!(
+        posted
+            .body
+            .contains("First finding.\n\\/health returns 200\n\\/close")
+    );
     assert_eq!(stored.body_hash, hash(&posted.body));
     assert_eq!(output["receipt"]["bodyHash"], stored.body_hash);
     assert!(matches!(stored.status, PublicationStatus::Confirmed { .. }));
     assert!(is_matching_success_receipt_for(output, &destination, None));
     assert_eq!(run(&adapter, input.clone()).await.unwrap(), result);
-    input["body"] = json!("First finding.\nSecond finding.  \n");
+    input["body"] = json!("First finding.\n\\/health returns 200\n\\/close\n");
     assert_eq!(run(&adapter, input).await.unwrap(), result);
     assert_eq!(forge.creates.load(Ordering::SeqCst), 1);
 }

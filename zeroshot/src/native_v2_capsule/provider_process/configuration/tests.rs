@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use openengine_cluster_protocol::WorkerOutcome;
-use openengine_cluster_testkit::assertions::{AssertAt, AssertValue};
+use openengine_cluster_testkit::assertions::{AssertAt, AssertError, AssertValue};
 use serde_json::json;
 use tokio::time::{advance, pause, resume, timeout};
 
@@ -22,8 +22,8 @@ use crate::native_v2_capsule::provider_process::{
 };
 use crate::native_v2_contract::NodeInvocation;
 use crate::native_v2_runner::{
-    DriverInvocation, DurableOutput, NativeNodeRunner, NodeDriver, NodeHandle, NodeRole,
-    NodeRunner, NodeSession, ResolvedEnvironment, SessionFactory,
+    DriverInvocation, NativeNodeRunner, NodeDriver, NodeHandle, NodeRole, NodeRunner, NodeSession,
+    ResolvedEnvironment, SessionFactory,
 };
 use crate::native_v2_runner::test_support::{admitted, request};
 
@@ -44,7 +44,7 @@ struct InspectionDriver {
     script: String,
     runners: ProviderProcessRunners,
     rounds: usize,
-    results: Mutex<Vec<Option<Vec<Value>>>>,
+    results: Mutex<Vec<Result<Vec<Value>, String>>>,
     idle_after_inspection: AtomicBool,
 }
 
@@ -195,7 +195,7 @@ async fn sequential_requests_keep_stdin_open_and_reuse_files_after_cleanup() {
         .await
         .assert_value();
     let results = fixture.driver.results.lock().assert_value();
-    let expected = Some(vec![
+    let expected = Ok(vec![
         json!({"id":1,"result":{"policy":null}}),
         json!({"id":2,"result":{"requirements":null}}),
     ]);
@@ -205,9 +205,15 @@ async fn sequential_requests_keep_stdin_open_and_reuse_files_after_cleanup() {
 
 #[tokio::test]
 async fn malformed_and_oversized_configuration_is_private_and_does_not_block_reuse() {
-    for script in [
-        "printf '%s\\n' 'private-credential malformed-json'; printf '%s\\n' 'private-stderr' >&2; cat >/dev/null",
-        "head -c 4194305 /dev/zero; cat >/dev/null",
+    for (script, cause) in [
+        (
+            "printf '%s\\n' 'private-credential malformed-json'; printf '%s\\n' 'private-stderr' >&2; cat >/dev/null",
+            "the configuration response was not valid JSON Lines",
+        ),
+        (
+            "head -c 4194305 /dev/zero; cat >/dev/null",
+            "the configuration response exceeded the 4 MiB inspection limit",
+        ),
     ] {
         let fixture = Fixture::new(script);
         let mut handle = fixture.start("worker").await;
@@ -217,9 +223,42 @@ async fn malformed_and_oversized_configuration_is_private_and_does_not_block_reu
             output.recv().await.is_err(),
             "configuration escaped through durable output"
         );
-        assert_eq!(*fixture.driver.results.lock().assert_value(), [None]);
+        assert_eq!(
+            *fixture.driver.results.lock().assert_value(),
+            [Err(cause.to_owned())]
+        );
         fixture.assert_cleaned();
     }
+}
+
+#[tokio::test]
+async fn failed_configuration_process_reports_its_status_and_stderr() {
+    let fixture =
+        Fixture::new("printf '%s\\n' \"error: unknown option '--safe-mode'\" >&2; exit 3");
+    fixture
+        .start("worker")
+        .await
+        .completion()
+        .await
+        .assert_value();
+    let cause = fixture
+        .driver
+        .results
+        .lock()
+        .assert_value()
+        .assert_at(0)
+        .clone()
+        .assert_error();
+    for expected in [
+        "provider process exited with status 3",
+        "stderr: error: unknown option '--safe-mode'",
+    ] {
+        assert!(
+            cause.contains(expected),
+            "{expected:?} missing from {cause:?}"
+        );
+    }
+    fixture.assert_cleaned();
 }
 
 const HANGING: &str = concat!(
@@ -252,10 +291,18 @@ async fn hung_configuration_query_expires_and_reaps_its_descendants() {
         .await
         .assert_value()
         .assert_value();
-    assert_timeout_diagnostic(&mut output).await;
-    assert_eq!(*fixture.driver.results.lock().assert_value(), [None]);
+    assert!(
+        output.recv().await.is_err(),
+        "timeout escaped through durable output"
+    );
+    assert_eq!(
+        *fixture.driver.results.lock().assert_value(),
+        [Err(TIMED_OUT.to_owned())]
+    );
     fixture.assert_cleaned();
 }
+
+const TIMED_OUT: &str = "the inspection did not finish within 60s";
 
 fn probe_completion() -> ProcessSessionOutput {
     ProcessSessionOutput {
@@ -273,7 +320,7 @@ fn probe_completion() -> ProcessSessionOutput {
 }
 
 #[tokio::test]
-async fn either_timeout_observer_reports_one_private_fallback_diagnostic() {
+async fn either_timeout_observer_reports_the_budget_without_probe_output() {
     for exchange_expired in [false, true] {
         let (_cancel, control, mut output) = crate::native_v2_runner::test_support::control();
         let mut completion = probe_completion();
@@ -281,25 +328,16 @@ async fn either_timeout_observer_reports_one_private_fallback_diagnostic() {
         let result = if exchange_expired {
             timeout(Duration::ZERO, std::future::pending()).await
         } else {
-            Ok(None)
+            Ok(Err(""))
         };
+        // The cause omits the killed probe's stderr; adapters publish it with their harness name.
         assert_eq!(
-            resolve_configuration(result, &Ok(completion), &control).await,
-            Ok(None)
+            resolve_configuration(result, &Ok(completion), &control),
+            Ok(Err(TIMED_OUT.to_owned()))
         );
         drop(control);
-        assert_timeout_diagnostic(&mut output).await;
+        assert!(output.recv().await.is_err());
     }
-}
-
-async fn assert_timeout_diagnostic(output: &mut DurableOutput) {
-    let diagnostic = output.recv_output().await.assert_value();
-    assert_eq!(diagnostic.stream, LiveOutputStream::System);
-    assert_eq!(
-        diagnostic.text,
-        "Native configuration inspection timed out after 60s. Continuing without Zeroshot's automatic permission bypass."
-    );
-    assert!(output.recv().await.is_err());
 }
 
 #[tokio::test]
@@ -312,13 +350,13 @@ async fn cleanup_failure_and_cancellation_never_report_continuation() {
         completion.cancelled = cancelled;
         completion.cleanup = crate::execution::process::ProcessCleanupEvidence::TimedOut;
         assert_eq!(
-            resolve_configuration(Ok(None), &Ok(completion.clone()), &control).await,
+            resolve_configuration(Ok(Err("")), &Ok(completion.clone()), &control),
             Err(NodeRunnerError::CleanupUnconfirmed)
         );
         if cancelled {
             completion.cleanup = crate::execution::process::ProcessCleanupEvidence::Reaped;
             assert_eq!(
-                resolve_configuration(Ok(None), &Ok(completion), &control).await,
+                resolve_configuration(Ok(Err("")), &Ok(completion), &control),
                 Err(NodeRunnerError::Cancelled)
             );
         }
@@ -391,7 +429,7 @@ printf inspected > probe-write
             .lock()
             .assert_value()
             .assert_at(0)
-            .is_some()
+            .is_ok()
     );
     assert!(fixture.driver.workspace.join("probe-write").exists());
     assert!(fixture.driver.workspace.join("shared-write").exists());

@@ -52,6 +52,15 @@ impl From<SourceDeliveryError> for DeliveryStop {
             )
         } else if error.authentication_failed() {
             Self::failure(WorkerOutcome::authentication_refusal(), diagnostic)
+        } else if error.policy_rejected() {
+            Self::failure(
+                WorkerOutcome::policy_refusal(),
+                format!(
+                    "forge branch protection or permissions refused the push; local work was \
+                     preserved. Allow delivery to publish its managed branch, then resume the \
+                     run.\n{diagnostic}"
+                ),
+            )
         } else if error.retryable_operation() {
             Self::Retry(error)
         } else if matches!(
@@ -146,6 +155,10 @@ impl NativeV2DeliveryAdapter {
         credentials: &DeliveryCredentials<'_>,
         diagnostic: impl AsRef<str>,
     ) -> String {
+        super::super::command::redact(diagnostic.as_ref(), &self.feedback_secrets(credentials))
+    }
+
+    pub(super) fn feedback_secrets(&self, credentials: &DeliveryCredentials<'_>) -> Vec<String> {
         let mut secrets = credentials.feedback_secrets();
         for token in [self.trusted_github_token.as_deref()].into_iter().flatten() {
             secrets.extend([token.to_owned(), git_auth::encode_basic_credential(token)]);
@@ -156,7 +169,7 @@ impl NativeV2DeliveryAdapter {
         {
             source_secrets(credentials, &mut secrets);
         }
-        super::super::command::redact(diagnostic.as_ref(), &secrets)
+        secrets
     }
 }
 

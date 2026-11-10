@@ -433,6 +433,10 @@ impl NativeV2CodexAdapter {
                 crate::harnesses::native_config::PermissionInput {
                     files: files.clone(),
                     config: turn.invocation.node.binding.harness_config(),
+                    redactions: &provider_redactions(
+                        &turn.invocation.environment,
+                        &self.local_environment,
+                    ),
                 },
                 &mut command,
                 turn.control,
@@ -503,6 +507,7 @@ impl CodexRunState {
         turn: &CodexTurn<'_>,
         response: AgentResponse,
     ) -> Result<Option<WorkerOutcome>, NodeRunnerError> {
+        self.retry.report_response(turn.control, &response).await?;
         self.response.accept("Codex", turn.control, response).await
     }
 

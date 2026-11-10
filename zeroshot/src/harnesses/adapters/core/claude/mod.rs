@@ -346,6 +346,10 @@ impl ClaudeAdapter {
             crate::harnesses::native_config::PermissionInput {
                 files: files.clone(),
                 config: turn.invocation.node.binding.harness_config(),
+                redactions: &provider_redactions(
+                    &turn.invocation.environment,
+                    &self.local_environment,
+                ),
             },
             &mut command,
             turn.control,

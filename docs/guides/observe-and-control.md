@@ -1,5 +1,5 @@
 ---
-description: "Observe durable run state in the browser or CLI, inspect node transcripts, reconnect to a run and stop work without changing its history."
+description: 'Observe durable run state in the browser or CLI, inspect node transcripts, reconnect to a run and stop work without changing its history.'
 ---
 
 # Observe and control runs
@@ -47,6 +47,34 @@ A run ID belongs to the controller or target that created it. Pass `--target NAM
 from a named target. Finished status separates graph-authored `terminalResult.output` from optional
 runtime-confirmed `metadata.deliveryReceipt`; graphs without delivery omit the receipt.
 
+## Failure evidence and mapped executions
+
+Failed `terminalResult.context` separates the known runtime cause (`primary`) from recent recorded
+execution errors (`recorded`) and verifier results (`verifiers`). Each verifier result is the latest
+recorded result for that graph node and map path. Its bounded, credential-redacted `message` contains
+the graph's actual `signals` and `diagnostic`; the runtime assigns no general meaning to their names
+or labels. A later result replaces an earlier result in this summary, while logs retain both.
+Recorded evidence can include recovered attempts or parallel work and does not prove that a result
+caused the terminal failure. An independently known runtime cause remains in `primary`.
+
+`exhaustedLoops` identifies completed exhausted loop visits with `node`, `completedIterations`, and
+an optional `mapIndices` path. The count is the actual number of completed loop rounds, including
+all work within each round; execution retries and verifier completion counts do not add rounds.
+Completed exhausted loops in settled branches of an unreachable parallel join are retained.
+Discarded race and map-item paths do not contribute loop entries or consume the summary bound.
+A converged loop does not appear as exhausted. The summary keeps at most five entries in each
+collection. `incomplete: true` means evidence was omitted or could not be retained. This warning
+persists even if later loop visits converge and remove all retained loop entries. Full details may
+still be available in logs. Failure context freezes with the main outcome, before auxiliary work.
+
+Each diagnostic can carry an `execution` object with the node name and stable opaque execution
+selector, and a `cursor` pointing to its retained log. Missing cursors cannot be used for log
+navigation. Status/watch `activeExecutions` and execution-associated log notifications also expose
+`mapIndices`: zero-based indices, outermost map first. For example, `[1]` is the second item and
+`[1, 2]` is its third nested item. Outside maps the field is omitted (older data also reads as an
+empty path). Indices supplement execution identity without changing its opaque selector.
+Successful terminal results keep their existing representation.
+
 ## Resume event and log streams
 
 `watch` follows status events; `logs` follows safe provider and controller log records. Both accept
@@ -78,6 +106,30 @@ zeroshot attach RUN_ID EXECUTION_REF
 ```
 
 Closing the attachment stream does not cancel the execution.
+
+## Download a retained workspace
+
+Download the latest retained files without starting another run:
+
+```console
+zeroshot export-workspace RUN_ID --target platform --output workspace.tar
+zeroshot export-workspace RUN_ID --target platform --from-checkpoint CHECKPOINT_ID --output checkpoint.tar
+```
+
+Use `zeroshot checkpoints RUN_ID --target platform` to find an entry checkpoint ID. Omit
+`--from-checkpoint` to export the latest retained workspace. The target authorizes access and
+checks whether the retained state is still available. Other named hosted targets work the same way,
+using their existing device login or `ZEROSHOT_API_KEY` and organization selection.
+
+The target must advertise [workspace export](../concepts/targets.md#workspace-export-protocol).
+An older target without this capability returns a clear unsupported error. Local and direct-target
+exports are unavailable.
+
+`--output` is required and must name a UTF-8 path that does not exist, including directories and dangling
+symlinks. The CLI streams the raw tar into a private temporary file beside that path and publishes it
+atomically without overwriting a competing file. It waits for the entire HTTP transfer, including
+its framing, even after a complete tar has arrived. Transfer failures and Ctrl-C remove temporary
+output and fail the command. The archive is never extracted and its contents are never executed.
 
 ## Restart or resume a failed run
 

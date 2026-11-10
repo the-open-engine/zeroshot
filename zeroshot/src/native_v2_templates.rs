@@ -101,7 +101,8 @@ fn software_worker(delivery: TemplateDelivery) -> Result<GraphNode, BuiltinTempl
              is historical. Resolve Git/CI issues without weakening the task; preserve integrated \
              upstream changes. sourceRevision is original provenance, reviewBaseRevision the \
              captured target. Do not restore files merely to match sourceRevision. Run relevant \
-             checks after repairs.",
+             checks after repairs. Delivery owns remote publication; do not push branches or weaken \
+             forge restrictions.",
         )?),
         input: software_worker_input_type(delivery)?,
         output: PayloadType::Null,
@@ -236,17 +237,20 @@ fn parallel_reviewers(
         authored_instructions: if delivery_metadata {
             "Verify the change independently against the user's request and observable behavior. \
              Try to run the repository's pre-commit checks and report the results. \
+             Reject repairs that publish outside delivery or weaken forge restrictions. \
              When delivery feedback is present, verify that the repair addresses it. \
              Accept only with concrete evidence; otherwise return actionable feedback. Provide \
              an accurate, informative prospective pull request title and description for the \
              complete change under review regardless of the verdict. Follow the repository's pull \
-             request conventions, keep the title concise, and keep the description focused on \
+             request conventions, use a ready (non-draft) title of at most 255 Unicode characters, \
+             and format slash-leading endpoint or command examples as literal Markdown. Keep the description focused on \
              information useful to reviewers. If mentioning validation, use only results stated \
              directly by command output and do not infer counts. Do not add issue-closing \
              references because delivery owns them."
         } else {
             "Verify the change independently against the user's request and observable behavior. \
              Try to run the repository's pre-commit checks and report the results. \
+             Reject repairs that publish outside delivery or weaken forge restrictions. \
              When delivery feedback is present, verify that the repair addresses it. \
              Accept only with concrete evidence; otherwise return actionable feedback."
         },
@@ -262,7 +266,9 @@ fn parallel_reviewers(
         name: "code",
         worker: "builtin.agent.code-verifier@1",
         authored_instructions: "Review the change independently for correctness, safety, \
-             integration, and substantive maintainability. Do not reject for style-only preferences. \
+             integration, and substantive maintainability. \
+             Reject repairs that publish outside delivery or weaken forge restrictions. \
+             Do not reject for style-only preferences. \
              When delivery feedback is present, verify that the repair \
              addresses it. Return actionable feedback when rejecting.",
         feedback_target: CODE_FEEDBACK_FIELD,

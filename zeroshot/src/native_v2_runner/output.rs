@@ -265,7 +265,7 @@ impl DurableEventSender {
         event: DurableNodeEvent,
         mut cancellation: watch::Receiver<bool>,
     ) -> Result<(), NodeRunnerError> {
-        if matches!(&event, DurableNodeEvent::Output { output, .. } if output.stream == LiveOutputStream::Error)
+        if matches!(&event, DurableNodeEvent::Output { output, .. } if output.stream == LiveOutputStream::Error || output.diagnostic.is_some())
         {
             return self.send_terminal(event, cancellation).await;
         }
