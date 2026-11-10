@@ -337,21 +337,7 @@ async fn export_reply(socket: &mut TcpStream, reply: Reply, archive: &[u8]) -> i
         | Reply::TruncatedChunks(encoding)
         | Reply::ExporterFailure(encoding) => {
             socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\nTransfer-Encoding: {encoding}\r\nConnection: close\r\n\r\n").as_bytes()).await?;
-            let length = if matches!(reply, Reply::TruncatedChunks(_)) {
-                archive.len() + 100
-            } else {
-                archive.len()
-            };
-            socket
-                .write_all(format!("{length:x}\r\n").as_bytes())
-                .await?;
-            socket.write_all(archive).await?;
-            if !matches!(reply, Reply::TruncatedChunks(_)) {
-                socket.write_all(b"\r\n").await?;
-            }
-            if matches!(reply, Reply::Chunked(_) | Reply::RejectedChunked(_)) {
-                socket.write_all(b"0\r\n\r\n").await?;
-            }
+            write_chunked_body(socket, reply, archive).await?;
         }
         Reply::CloseDelimited => {
             socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\nConnection: close\r\n\r\n").await?;
@@ -362,12 +348,31 @@ async fn export_reply(socket: &mut TcpStream, reply: Reply, archive: &[u8]) -> i
         #[cfg(unix)]
         Reply::StallBody => {
             socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\nTransfer-Encoding: chunked\r\n\r\n").await?;
-            socket
-                .write_all(format!("{:x}\r\n", archive.len()).as_bytes())
-                .await?;
-            socket.write_all(archive).await?;
-            socket.write_all(b"\r\n").await?;
+            write_chunked_body(socket, reply, archive).await?;
         }
+    }
+    Ok(())
+}
+
+async fn write_chunked_body(
+    socket: &mut TcpStream,
+    reply: Reply,
+    archive: &[u8],
+) -> io::Result<()> {
+    let length = if matches!(reply, Reply::TruncatedChunks(_)) {
+        archive.len() + 100
+    } else {
+        archive.len()
+    };
+    socket
+        .write_all(format!("{length:x}\r\n").as_bytes())
+        .await?;
+    socket.write_all(archive).await?;
+    if !matches!(reply, Reply::TruncatedChunks(_)) {
+        socket.write_all(b"\r\n").await?;
+    }
+    if matches!(reply, Reply::Chunked(_) | Reply::RejectedChunked(_)) {
+        socket.write_all(b"0\r\n\r\n").await?;
     }
     Ok(())
 }
