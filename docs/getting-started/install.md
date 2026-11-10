@@ -127,7 +127,7 @@ zeroshot run --title "My task" --profile local:my-profile --input input.json
 
 Open **Runs** for [live monitoring and replay](../guides/observe-and-control.md#browser).
 The [Docker target](../concepts/targets.md#direct-target) serves its own profiles and runs at `/ui/`.
-Platform embedding remains tracked in [zero-cloud #301](https://github.com/the-open-engine/zero-cloud/issues/301).
+Embedding hosts use the [workspace bridge contract](https://github.com/the-open-engine/zeroshot/blob/main/ui/README.md#platform-integration).
 
 Release executables embed the UI. To build it from source:
 

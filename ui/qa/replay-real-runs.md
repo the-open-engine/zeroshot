@@ -41,9 +41,7 @@ node has a 180-second deadline; the review loop has at most three iterations.
 ## Local evidence
 
 - Durable histories: `~/.local/state/zeroshot/runs/<run-id>/runs.sqlite3`.
-- Graphs, runtime, and inputs: `/tmp/zeroshot-replay-specs-20260917/`.
-- Launch files: `/tmp/zeroshot-replay-matrix-20260917/replay/launch/`.
-- Handoff file: `/tmp/zeroshot-replay-review-20260917/replay/review/incident-handoff.md`.
+- Graphs, runtime, inputs and generated files remain with the original acceptance records.
 
 Work happened in a disposable clone and its isolated worktree. No product
 checkout, saved profile, remote branch, pull request, or merge delivery was changed.

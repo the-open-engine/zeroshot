@@ -101,8 +101,6 @@ The Mac's Rust 1.96 full native suite encounters unchanged Linux-specific fixtur
 assumptions. Final native verification therefore used the pinned Linux toolchain;
 local macOS behavior was checked with the real providers and browser above.
 
-Two independent implementation reviews checked the standalone boundaries against
-[zero-cloud #301](https://github.com/the-open-engine/zero-cloud/issues/301).
-Injected services and the selected-run viewer are implemented. Platform menus, the
-shell-less editor entry point/bridge, authenticated adapters and archive expansion
-remain the work described in that issue.
+Two independent implementation reviews checked the standalone boundaries. Injected services
+and the selected-run viewer are implemented; embedding hosts use the
+[workspace bridge contract](../README.md#platform-integration).

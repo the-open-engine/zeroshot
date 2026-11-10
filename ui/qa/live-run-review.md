@@ -2,8 +2,7 @@
 
 Verified on 2026-09-18 against the test-matrix repository
 `the-open-engine/zeroshot-matrix-demo-20260812-3ebd`, revision
-`8011f656b77ea69b0c1ea7c21d54edf636ea7dfe`, in the isolated worktree
-`/tmp/zeroshot-live-matrix-20260918` on `codex/live-quota-batch`.
+`8011f656b77ea69b0c1ea7c21d54edf636ea7dfe`, in an isolated worktree.
 
 ## Process and real provider runs
 
@@ -25,7 +24,7 @@ version `0.155.0-alpha.9`. No global provider configuration changed.
 
 These are native provider histories, not simulated events. The first failure remains
 visible. The final two audits do not rewrite it. Graphs, inputs, runtime and validation
-output are retained in `/tmp/zeroshot-live-specs-20260918/`; native ledgers remain in
+output remain with the acceptance records; native ledgers remain in
 the standard local run store. No remote branch, PR or delivery was created.
 
 ## Browser observations
@@ -96,7 +95,7 @@ first rendered entry, scroll position, selected transcript and Live state. Botto
 pagination, filtering, expansion, backward seeks and Go live all passed. No native ledgers
 were modified and no additional provider run was started.
 
-Evidence is under `~/.codex/artifacts/zeroshot/`: `control-history-ui-qa.json`,
+Acceptance records include `control-history-ui-qa.json`,
 `transcript-sticky-scroll-qa.json`, `live-transcript-parallel-integration-qa.json` and
 their adjacent screenshots. Temporary test pages and servers were removed.
 

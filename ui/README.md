@@ -125,10 +125,10 @@ Platform origin independently of run containers. The shell-less entry is `embed.
 `index.html` retains the standalone toolbar. Both entries use the same editor and viewer.
 Platform must permit its same-origin frame and the workspace's bundled assets/ELK worker in CSP.
 
-The API-gateway can call `zeroshot_engine::workspace::{catalog, author, data, profile_setup, validate_profile}`
+Embedding hosts can call `zeroshot_engine::workspace::{catalog, author, data, profile_setup, validate_profile}`
 with Cargo's `workspace` feature; this does not embed UI assets. Authenticated private targets
 export native definition/history pages separately from the standalone UI. See the
-[approved implementation plan](../planning/plans/cloud-workspace-ui-301.md).
+[public workspace overview](../planning/plans/cloud-workspace-ui-301.md).
 
 ### Bridge version 1
 
@@ -143,9 +143,9 @@ same origin and expected parent/iframe window. The iframe first sends
   "requestId": "ready-request-id",
   "workspaceId": "opaque-user-org-scope-workspace-id",
   "authority": { "userId": "user-id", "organizationId": "org-id", "scope": "user" },
-  "apiBase": "/_bff/orgs/org-id/workspace/user/",
+  "apiBase": "/workspace-api/",
   "theme": "light",
-  "csrf": { "cookieName": "__Host-zsc-csrf", "headerName": "X-Zeroshot-CSRF" }
+  "csrf": { "cookieName": "__Host-workspace-csrf", "headerName": "X-Zeroshot-CSRF" }
 }
 ```
 
